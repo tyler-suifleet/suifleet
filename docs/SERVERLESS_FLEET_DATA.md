@@ -166,8 +166,10 @@ chain/object response; it is not a new fullnode proof verifier.
 
 `dapp/src/lib/fleet-bulk.ts` now provides a bounded chain-index reader and
 `fetchVerifiedArchive`. It checks fleet/device/type bindings, anchor sequence,
-current registry revocation, the fleet key epoch and the current **Walrus** epoch
-before and after a download/decryption. It verifies SHA-256 of ciphertext before
+current registry revocation, the fleet key epoch and the current **Walrus** epoch and live fleet-owned storage record
+before and after a download/decryption. The original anchor epoch is a historical
+purchase bound; owner extensions update the live SF-083 record. Released or
+shortened records are unavailable even if the anchor has not expired. It verifies SHA-256 of ciphertext before
 requesting keys, requires the fleet-data original Seal namespace, fleet ID,
 key epoch and exact AAD, and verifies the personal-message signature against the
 signer recorded by the authorized anchor transaction. Key rotation therefore

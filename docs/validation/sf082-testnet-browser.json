@@ -1,5 +1,5 @@
 {
-  "started": "2026-10-22T23:19:27Z",
+  "started": "2026-10-23T00:21:55Z",
   "network": "testnet",
   "transactions": [],
   "checks": [
@@ -35,19 +35,18 @@
   "chain": "4c78adac",
   "rpc": "https://fullnode.testnet.sui.io:443",
   "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
-  "start_balance_mist": 998387417,
-  "max_spend_mist": 20000000,
+  "start_balance_mist": 1338023597,
+  "max_spend_mist": 800000000,
   "sui": {
     "build": "sui 1.81.1-e04cf9aa915c",
     "network": "sui 1.82.1-987123842623"
   },
-  "head": "53d53d4e7bad0b24ee60785a6b26c54c5364ffda",
-  "source_native_receipt": "/runtime/evidence-complete-data.json",
+  "head": "493ab5cdb155af146c94f9d724cca727d0c12e81",
   "browser": {
     "verified": true,
     "chain": "4c78adac",
-    "health": "degraded",
-    "healthSeq": "11",
+    "health": "offline",
+    "healthSeq": "12",
     "archives": [
       {
         "seq": 1,
@@ -71,8 +70,12 @@
     "indexed": true,
     "keyEpoch": "0"
   },
-  "end_balance_mist": 998387417,
+  "end_balance_mist": 1338023597,
   "spent_mist": 0,
   "allowance_used_mist": 0,
-  "finished": "2026-10-22T23:19:37Z"
+  "finished": "2026-10-23T00:22:03Z",
+  "limits": [
+    "Dedicated Testnet only; final production provider/domain/manual wallet/mainnet/physical acceptance remains #32/#159",
+    "Isolated Site publisher identity and journals retained privately for owned updates; no raw keys/journals in evidence"
+  ]
 }
