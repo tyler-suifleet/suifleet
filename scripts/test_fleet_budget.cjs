@@ -27,7 +27,15 @@ const { bcs } = appRequire("@mysten/sui/bcs");
 
 // ── The estimate's inputs are the SF-054 measurements ──
 const receipt = quotes.historical_testnet_transactions.find((t) => t.label === "device receipt").effects.gasEffects.gasSummary;
-assert.equal(costs.MEASURED.receiptNetMist, BigInt(receipt.computationCost + receipt.storageCost - receipt.storageRebate));
+// The measured effects, at the Testnet reference gas price they were paid at (SF-054 quotes it), reproduce each net fee.
+assert.equal(costs.MEASURED.referenceGasPrice, BigInt(quotes.testnet.epoch.referenceGasPrice));
+const net = (effects) => costs.netMist(effects, costs.MEASURED.referenceGasPrice);
+const receiptNetMist = net(costs.MEASURED.receipt), drawNetMist = net(costs.MEASURED.draw);
+assert.deepEqual(costs.MEASURED.receipt, { computation: BigInt(receipt.computationCost), storage: BigInt(receipt.storageCost), rebate: BigInt(receipt.storageRebate) });
+assert.equal(receiptNetMist, BigInt(receipt.computationCost + receipt.storageCost - receipt.storageRebate));
+// The SF-054 rates: gas at the measured Testnet price, Walrus at the SF-054 Mainnet snapshot.
+const SF054 = { ...costs.MAINNET_QUOTE, referenceGasPrice: costs.MEASURED.referenceGasPrice,
+  walrusStoragePrice: costs.MEASURED.walrus.storagePricePerUnit, walrusWritePrice: costs.MEASURED.walrus.writePricePerUnit };
 const sf083 = JSON.parse(fs.readFileSync(path.join(root, "docs/validation/sf083-testnet.json"), "utf8"));
 // The latest finished run that measured a draw; that draw must have succeeded and its net must follow from its effects.
 const drawRun = sf083.runs.filter((run) => run.finished && run.measured?.draw_gas).at(-1);
@@ -37,7 +45,8 @@ const drawTx = drawRun.transactions.find((t) => t.digest === drawGas.digest);
 assert.equal(drawTx?.status, "success", "the measured draw succeeded");
 assert.equal(BigInt(drawGas.net_mist), BigInt(drawGas.computationCost) + BigInt(drawGas.storageCost) - BigInt(drawGas.storageRebate));
 assert.equal(BigInt(drawTx.gas_mist), BigInt(drawGas.net_mist));
-assert.equal(costs.MEASURED.drawNetMist, BigInt(drawGas.net_mist), "draw cost measured on testnet");
+assert.deepEqual(costs.MEASURED.draw, { computation: BigInt(drawGas.computationCost), storage: BigInt(drawGas.storageCost), rebate: BigInt(drawGas.storageRebate) });
+assert.equal(drawNetMist, BigInt(drawGas.net_mist), "draw cost measured on testnet");
 assert.equal(costs.MEASURED.minComputationMist, BigInt(receipt.computationCost));
 assert.equal(costs.MEASURED.walrus.nShards, quotes.walrus.n_shards);
 assert.equal(costs.MEASURED.walrus.storagePricePerUnit, BigInt(quotes.walrus.storage_price_per_unit_size));
@@ -59,24 +68,24 @@ console.log("PASS: estimate inputs equal the SF-054 measured receipt, Walrus rat
 const base = { devices: 1000, months: 1, receiptsPerDeviceMonth: 4, anchorsPerDeviceMonth: 0, releasesPerMonth: 4,
   artifactBytes: rates[0].ciphertext_bytes, dataBytesPerDeviceMonth: 0, storageEpochs: 2, floatMist: BigInt(60_000_000),
   drawMist: BigInt(50_000_000), marginPercent: 0 };
-const sf054 = costs.estimate(base);
+const sf054 = costs.estimate(base, SF054);
 assert.equal(sf054.artifactFrost.toString(), evidence("scenario-result.json").subtotals["mainnet:estimated:FROST"]);
 assert.equal(sf054.deviceTransactions, 4000);
-assert.equal(sf054.gasMist, BigInt(4000) * costs.MEASURED.receiptNetMist, "the float covers four receipts: no draws");
+assert.equal(sf054.gasMist, BigInt(4000) * receiptNetMist, "the float covers four receipts: no draws");
 assert.equal(sf054.floatsMist, BigInt(1000) * base.floatMist);
 assert.equal(sf054.suiDepositMist, sf054.gasMist + sf054.floatsMist);
 // Spend beyond the float needs draws, each paying its own gas; headroom applies to spend, not floats.
-const busy = costs.estimate({ ...base, devices: 2, receiptsPerDeviceMonth: 200, marginPercent: 10 });
-const perDevice = BigInt(200) * costs.MEASURED.receiptNetMist;
+const busy = costs.estimate({ ...base, devices: 2, receiptsPerDeviceMonth: 200, marginPercent: 10 }, SF054);
+const perDevice = BigInt(200) * receiptNetMist;
 const draws = Number((perDevice - base.floatMist + base.drawMist - BigInt(1)) / base.drawMist);
 assert.equal(busy.draws, 2 * draws);
-const gas = BigInt(400) * costs.MEASURED.receiptNetMist + BigInt(2 * draws) * costs.MEASURED.drawNetMist;
+const gas = BigInt(400) * receiptNetMist + BigInt(2 * draws) * drawNetMist;
 assert.equal(busy.gasMist, gas);
 assert.equal(busy.suiDepositMist, gas + gas / BigInt(10) + BigInt(2) * base.floatMist);
-const withData = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20 });
+const withData = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20 }, SF054);
 const one = costs.blobCostFrost(1 << 20, 2);
 assert.equal(withData.dataFrost, BigInt(1000) * (one.storage + one.write));
-const daily = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20, dataUploadsPerDeviceMonth: 30 });
+const daily = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20, dataUploadsPerDeviceMonth: 30 }, SF054);
 const batch = costs.blobCostFrost(Math.ceil((1 << 20)/30), 2);
 assert.equal(daily.dataFrost, BigInt(30000) * (batch.storage + batch.write));
 assert(daily.dataFrost > withData.dataFrost, "daily uploads each pay their own fixed overhead");
@@ -344,19 +353,31 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
   (error) => { console.error(error); process.exit(1); });
 
 {
-  const { MEASURED, estimate } = costs;
+  const { MEASURED, netMist } = costs;
+  const SF054 = { ...costs.MAINNET_QUOTE, referenceGasPrice: MEASURED.referenceGasPrice };
+  const estimate = (input) => costs.estimate(input, SF054);
+  const at = (effects) => netMist(effects, MEASURED.referenceGasPrice);
+  const fleetData = { initialHealthNetMist: at(MEASURED.fleetData.initialHealth), recurringHealthNetMist: at(MEASURED.fleetData.recurringHealth), archiveNetMist: at(MEASURED.fleetData.archive) };
   const records = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-device-effects.json'), 'utf8')).transactions;
   const health = records.filter(r => r.health_seq);
-  assert.equal(MEASURED.fleetData.initialHealthNetMist, BigInt(health.find(r => r.health_seq === 1).net_gas_mist));
-  assert.equal(MEASURED.fleetData.recurringHealthNetMist, BigInt(Math.max(...health.filter(r => r.health_seq > 1).map(r => r.net_gas_mist))));
+  assert.equal(fleetData.initialHealthNetMist, BigInt(health.find(r => r.health_seq === 1).net_gas_mist));
+  // Recurring: the upper median of every recorded recurring report (the maximum includes one-time object growth).
+  const recurringNets = health.filter(r => r.health_seq > 1).map(r => r.net_gas_mist).sort((x, y) => x - y);
+  assert.equal(fleetData.recurringHealthNetMist, BigInt(recurringNets[Math.floor(recurringNets.length / 2)]));
+  // Each recorded transaction's effects, not only its net, match the measured breakdowns.
+  const effects = (r) => ({ computation: BigInt(r.gas.computationCost), storage: BigInt(r.gas.storageCost), rebate: BigInt(r.gas.storageRebate) });
+  assert.deepEqual(MEASURED.fleetData.initialHealth, effects(health.find(r => r.health_seq === 1)));
+  const recurring = health.filter(r => r.health_seq > 1);
+  assert.deepEqual(MEASURED.fleetData.recurringHealth, effects(recurring.find(r => r.net_gas_mist === recurringNets[Math.floor(recurringNets.length / 2)])));
   const native = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-testnet-native.json'), 'utf8'));
-  assert.equal(MEASURED.fleetData.archiveNetMist, native.native_transactions.filter(r => r.label.startsWith('periodic-')).reduce((sum, r) => sum + BigInt(r.net_gas_mist), 0n));
+  assert.equal(fleetData.archiveNetMist, native.native_transactions.filter(r => r.label.startsWith('periodic-')).reduce((sum, r) => sum + BigInt(r.net_gas_mist), 0n));
+  assert.deepEqual(MEASURED.fleetData.archive, native.native_transactions.filter(r => r.label.startsWith('periodic-')).map(effects));
   const base = { devices: 1, months: 1, receiptsPerDeviceMonth: 0, anchorsPerDeviceMonth: 0, releasesPerMonth: 0, artifactBytes: 0, dataBytesPerDeviceMonth: 0, storageEpochs: 3, floatMist: 100000000000n, drawMist: 50000000n, marginPercent: 0 };
   const first = estimate({ ...base, healthSummariesPerDeviceMonth: 1 });
-  assert.equal(first.gasMist, MEASURED.fleetData.initialHealthNetMist);
-  assert.equal(estimate({ ...base, healthSummariesPerDeviceMonth: 2 }).gasMist, MEASURED.fleetData.initialHealthNetMist + MEASURED.fleetData.recurringHealthNetMist);
+  assert.equal(first.gasMist, fleetData.initialHealthNetMist);
+  assert.equal(estimate({ ...base, healthSummariesPerDeviceMonth: 2 }).gasMist, fleetData.initialHealthNetMist + fleetData.recurringHealthNetMist);
   const daily = estimate({ ...base, serverlessData: true, dataBytesPerDeviceMonth: 64 * 1024 * 1024, dataUploadsPerDeviceMonth: 30 });
-  assert.equal(daily.deviceTransactions, 90); assert.equal(daily.gasMist, 30n * MEASURED.fleetData.archiveNetMist);
+  assert.equal(daily.deviceTransactions, 90); assert.equal(daily.gasMist, 30n * fleetData.archiveNetMist);
   assert.equal(estimate({ ...base, serverlessData: true, dataUploadsPerDeviceMonth: 30 }).deviceTransactions, 0, 'empty periodic logs need no blob');
   console.log('SF082 estimate reproduces measured first/recurring health and all three archive transaction costs');
 }

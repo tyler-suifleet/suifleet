@@ -14,7 +14,11 @@ import {
   buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
-import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, rescaled, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { DEFAULT_PRICE_TABLE } from "@/lib/fleet-pricing";
+import { DEFAULT_WORKLOAD, defaultValues, depositInput, toSettings } from "@/lib/fleet-settings";
+import { quoteDate } from "@/lib/cost-quote";
+import { useCostQuote } from "@/hooks/useCostQuote";
 import {
   FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
 } from "@/lib/onramp";
@@ -26,12 +30,10 @@ import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionT
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
-export const DEFAULT_ESTIMATE: EstimateInput = {
-  devices: 1, months: 12, receiptsPerDeviceMonth: 30, anchorsPerDeviceMonth: 0, releasesPerMonth: 1,
-  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: DATA_CONFIG ? 64 * 1024 * 1024 : 0, dataUploadsPerDeviceMonth: 30, storageEpochs: DATA_CONFIG ? 3 : 2,
-  healthSummariesPerDeviceMonth: DATA_CONFIG ? 720 : 0, serverlessData: !!DATA_CONFIG,
-  floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
-};
+// The default fleet settings (SF-131: daily health, weekly archives kept six weeks) for one device over a year.
+const SETTINGS_ESTIMATE = depositInput(toSettings(defaultValues(DEFAULT_PRICE_TABLE), NETWORK), { ...DEFAULT_WORKLOAD, devices: 1, releasesPerMonth: 1, artifactBytes: 1024 * 1024 }, 12);
+export const DEFAULT_ESTIMATE: EstimateInput = DATA_CONFIG ? SETTINGS_ESTIMATE
+  : { ...SETTINGS_ESTIMATE, healthSummariesPerDeviceMonth: 0, serverlessData: false, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 0, storageEpochs: 2 };
 
 function NumberField({ label, value, onChange, step }: { label: string; value: number; onChange: (value: number) => void; step?: number }) {
   return <label className="block text-xs">{label}
@@ -43,7 +45,8 @@ function NumberField({ label, value, onChange, step }: { label: string; value: n
 export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate | undefined) => void }) {
   const [input, setInput] = useState<EstimateInput>(DEFAULT_ESTIMATE);
   const set = (key: keyof EstimateInput) => (value: number) => setInput({ ...input, [key]: key === "artifactBytes" || key === "dataBytesPerDeviceMonth" ? Math.round(value * 1024 * 1024) : value });
-  const result = useMemo(() => { try { return { estimate: estimate(input) }; } catch (error) { return { error: (error as Error).message }; } }, [input]);
+  const { quote } = useCostQuote();
+  const result = useMemo(() => { try { return { estimate: estimate(input, quote) }; } catch (error) { return { error: (error as Error).message }; } }, [input, quote]);
   useEffect(() => onEstimate?.(result.estimate), [result, onEstimate]);
   const route = swapRoute();
   const storage = storageConfig();
@@ -55,14 +58,14 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Months" value={input.months} onChange={set("months")} />
       <NumberField label="Receipts per device per month" value={input.receiptsPerDeviceMonth} onChange={set("receiptsPerDeviceMonth")} />
       <NumberField label="Other device transactions per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
-      <NumberField label="Health summaries per device per month (hourly = 720)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
+      <NumberField label="Health summaries per device per month (daily = 31, hourly = 731)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
       <NumberField label="Releases per month" value={input.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
-      <NumberField label="Archive uploads per device per month (daily = 30; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
+      <NumberField label="Archive uploads per device per month (weekly = 5, daily = 31; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
+    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health, weekly archives kept six weeks); the Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
     {result.estimate?.protectedCapacity && <p role="status">If protected retention is enabled: {result.estimate.protectedCapacity.planned} planned archives; {result.estimate.protectedCapacity.remaining} of {PROTECTED_BLOB_LIMIT} fleet-wide slots remain from the entered count. {result.estimate.protectedCapacity.daysToCapacity === null ? "No archive uploads are planned." : `At this rate the index fills in ${result.estimate.protectedCapacity.daysToCapacity.toFixed(1)} days without owner releases.`} Additional releases/diagnostics/crashes consume more slots. {result.estimate.protectedCapacity.exceedsCapacity ? "Planned archives exceed capacity: this deposit cannot make that retention plan feasible." : "Capacity does not guarantee admission."} All new device archives share one absolute target epoch; any expired protected blob halts new registrations until owner maintenance. Reconcile the live retention panel before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">
@@ -75,10 +78,10 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
         <tr><td className="p-1">Card or on-ramp fees</td><td className="p-1">{FEE_NOTES.onramp}</td></tr>
         <tr><td className="p-1">Regional availability</td><td className="p-1">{FEE_NOTES.regions}</td></tr>
         <tr><td className="p-1">SuiFleet service fee</td><td className="p-1">{FEE_NOTES.service}</td></tr>
-        <tr><td className="p-1">Indicative value (spot quotes, {new Date(MEASURED.usd.observedAt * 1000).toISOString().slice(0, 10)})</td><td className="p-1 text-right">≈ ${result.estimate.usd.total.toFixed(2)}</td></tr>
+        <tr><td className="p-1">Indicative value ({quote.usdSource}, {quoteDate(quote.usdObservedAt)})</td><td className="p-1 text-right">≈ ${result.estimate.usd.total.toFixed(2)}</td></tr>
       </tbody>
     </table>}
-    <p className="text-xs text-gray-600">From SF-054 measurements: a status receipt costs about {sui(MEASURED.receiptNetMist)} net; Walrus Mainnet rates {MEASURED.walrus.storagePricePerUnit.toString()} FROST per MiB-epoch and {MEASURED.walrus.writePricePerUnit.toString()} FROST per MiB written. An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p>
+    <p className="text-xs text-gray-600">From SF-054 Testnet measurements rescaled to {quote.referenceGasPrice.toString()} MIST gas ({quote.gasSource}, {quoteDate(quote.gasObservedAt)}): a status receipt costs about {sui(rescaled(quote).receiptNetMist)} net. Walrus {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} FROST per MiB written ({quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}). An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p>
   </div>;
 }
 
