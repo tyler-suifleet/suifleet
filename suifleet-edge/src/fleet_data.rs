@@ -57,8 +57,14 @@ impl Config {
         let device = Address::from_str(device_id)?;
         let key: TypeTag = format!("{}::fleet_data::DeviceKey", self.type_origin).parse()?;
         let index_id = fleet.id.derive_dynamic_child_id(&key, device.inner());
+        sui.watch_child(&index_id.to_string(), &self.fleet_id);
         let index = sui.object(&index_id.to_string()).await?;
-        anyhow::ensure!(index.fields["value"].as_str().is_some_and(|v| crate::sui_client::same_id(v, &self.writer_id)), "writer is not fleet indexed");
+        anyhow::ensure!(
+            index.fields["value"]
+                .as_str()
+                .is_some_and(|v| crate::sui_client::same_id(v, &self.writer_id)),
+            "writer is not fleet indexed"
+        );
         let (kind, owner, bytes) = sui.move_object(&self.writer_id).await?;
         anyhow::ensure!(same_type(&kind, &format!("{}::fleet_data::DeviceData", self.type_origin))
             && matches!(owner, Owner::Shared { .. }), "unexpected writer type/ownership");
@@ -140,41 +146,112 @@ pub struct Task {
     pub poll_seconds: u64,
     pub overlay_dir: PathBuf,
     pub log_settings: Option<crate::config::LogsConfig>,
+    pub budget: Option<crate::funding::BudgetConfig>,
 }
 impl Task {
-    async fn beat(&self, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<()> {
+    pub async fn before_write(&self) -> anyhow::Result<()> {
+        if let Some(budget) = &self.budget {
+            let dir = self.state_dir.join("fleet-data");
+            std::fs::create_dir_all(&dir)?;
+            let path = dir.join("funding.json");
+            let mut funding: crate::funding::Funding = match std::fs::read(&path) {
+                Ok(bytes) => serde_json::from_slice(&bytes)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
+                Err(e) => return Err(e.into()),
+            };
+            crate::funding::top_up(
+                budget,
+                &self.sui,
+                &self.device_id,
+                &self.cap,
+                &mut funding,
+                telemetry::now_ms(),
+            )
+            .await?;
+            crate::fleet_archive::atomic(&path, &serde_json::to_vec(&funding)?)?;
+        }
+        Ok(())
+    }
+    async fn beat(&self, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<Duration> {
+        self.sui.validate_deployment().await?;
         self.sui.validate_cap(&self.cap, &self.device_id).await?;
         let (fleet, writer) = self.config.read(&self.sui, &self.device_id).await?;
         // Cadence uses chain time, never the device's possibly fast clock.
         let clock = self.sui.object("0x6").await?;
-        let now = clock.fields["timestamp_ms"].as_str().and_then(|s| s.parse::<u64>().ok())
-            .or_else(|| clock.fields["timestamp_ms"].as_u64()).ok_or_else(|| anyhow::anyhow!("invalid chain clock"))?;
-        if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms) { return Ok(()); }
-        let seq = writer.health_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("health sequence exhausted"))?;
-        let binding = telemetry::Binding { chain_identifier: fleet.chain_identifier,
-            registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: 60,
-            poll_seconds: self.poll_seconds, started_ms: self.started_ms, boot_id: telemetry::boot_id() };
+        let now = clock.fields["timestamp_ms"]
+            .as_str()
+            .and_then(|s| s.parse::<u64>().ok())
+            .or_else(|| clock.fields["timestamp_ms"].as_u64())
+            .ok_or_else(|| anyhow::anyhow!("invalid chain clock"))?;
+        if writer.health_seq != 0
+            && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms)
+        {
+            return Ok(Duration::from_millis(
+                writer.health_at_ms.saturating_add(fleet.health_interval_ms) - now,
+            ));
+        }
+        let seq = writer
+            .health_seq
+            .checked_add(1)
+            .filter(|n| *n <= 9_007_199_254_740_991)
+            .ok_or_else(|| anyhow::anyhow!("health sequence exhausted"))?;
+        let binding = telemetry::Binding {
+            chain_identifier: fleet.chain_identifier,
+            registry: fleet.registry_id.to_string(),
+            device_id: self.device_id.clone(),
+            interval_seconds: 60,
+            poll_seconds: self.poll_seconds,
+            started_ms: self.started_ms,
+            boot_id: telemetry::boot_id(),
+        };
         let mut inventory = telemetry::inventory(&self.state_dir);
         let sources = self.services.lock().unwrap().health_sources();
         inventory.services = crate::service_health::collect(&sources, tracker, self.started_ms, telemetry::now_ms());
         let snapshot = telemetry::snapshot_limit(&binding, &self.signer.address(), seq, 0,
             self.sync.lock().unwrap().clone(), inventory, telemetry::now_ms(), MAX_HEALTH);
         let message = serde_json::to_vec(&snapshot)?;
-        anyhow::ensure!(message.len() <= MAX_HEALTH, "health summary exceeds chain limit");
+        anyhow::ensure!(
+            message.len() <= MAX_HEALTH,
+            "health summary exceeds chain limit"
+        );
         let signature = self.signer.sign_personal_message(&message)?;
-        let digest=self.sui.report_health(&self.config, &self.cap, seq, message, signature).await?;
+        self.before_write().await?;
+        let digest = self
+            .sui
+            .report_health(&self.config, &self.cap, seq, message, signature)
+            .await?;
         crate::fleet_archive::health_receipt(&self.state_dir, seq, &digest)?;
-        Ok(())
+        Ok(Duration::from_millis(fleet.health_interval_ms))
     }
     pub async fn run(self) {
         let mut tracker = crate::service_health::Tracker::default();
+        let mut next_health = tokio::time::Instant::now();
+        let mut archive = crate::fleet_archive::Schedule::default();
+        let mut generation = self.sui.watch_generation();
         loop {
-            if let Err(error) = self.beat(&mut tracker).await {
-                tracing::warn!(%error, "Direct-chain health pending; will re-read authority/cadence before retry");
+            let current = self.sui.watch_generation();
+            if generation != current {
+                generation = current;
+                next_health = tokio::time::Instant::now();
+                archive.wake();
+            }
+            if tokio::time::Instant::now() >= next_health {
+                let delay = match self.beat(&mut tracker).await {
+                    Ok(delay) => delay,
+                    Err(error) => {
+                        tracing::warn!(%error, "Direct-chain health pending; will re-read authority/cadence before retry");
+                        Duration::from_secs(self.poll_seconds.clamp(1, 60))
+                    }
+                };
+                next_health = tokio::time::Instant::now() + delay;
             }
             if self.config.archives.is_some() {
-                let result = crate::fleet_archive::tick(&self).await;
-                if let Err(error) = &result { tracing::warn!(%error, "Encrypted fleet archive pending; retained for retry"); }
+                let result = crate::fleet_archive::tick(&self, &mut archive).await;
+                if let Err(error) = &result {
+                    archive.next_due = tokio::time::Instant::now()
+                        + Duration::from_secs(self.poll_seconds.clamp(1, 60));
+                    tracing::warn!(%error, "Encrypted fleet archive pending; retained for retry");
+                }
                 if let Err(error) = crate::fleet_archive::status(&self.state_dir, result.is_err()) {
                     tracing::warn!(%error, "Archive publication status could not be persisted");
                 }

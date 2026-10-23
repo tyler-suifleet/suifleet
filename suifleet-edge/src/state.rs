@@ -23,6 +23,12 @@ pub struct State {
     #[serde(default)]
     pub deferred: BTreeMap<String, crate::control::Deferred>,
     pub cursor: Option<Value>,
+    /// Combined discovery starts only after both legacy streams reach the
+    /// persisted exclusive checkpoint fence. Crash-safe one-time migration.
+    #[serde(default)]
+    pub discovery_cursor: Option<Value>,
+    #[serde(default)]
+    pub discovery_merge_checkpoint: Option<u64>,
     #[serde(default)]
     pub initialized: bool,
     pub deployments: BTreeMap<String, Outcome>,

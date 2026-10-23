@@ -841,7 +841,9 @@ impl Config {
             "[device] needs keypair_path or a [device.signer]"
         );
         anyhow::ensure!(
-            cfg.runtime.poll_seconds > 0,
+            cfg.runtime.poll_seconds > 0
+                && cfg.runtime.full_revalidation_seconds > 0
+                && cfg.runtime.event_discovery_seconds > 0,
             "runtime.poll_seconds must be positive"
         );
         anyhow::ensure!(
@@ -968,6 +970,9 @@ impl TelemetryConfig {
 pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
+    /// Maximum time between full authority checks and discovery scans.
+    pub full_revalidation_seconds: u64,
+    pub event_discovery_seconds: u64,
     pub replay_history: bool,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
@@ -988,6 +993,8 @@ impl Default for RuntimeConfig {
         Self {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 10,
+            full_revalidation_seconds: 86_400,
+            event_discovery_seconds: 60,
             replay_history: false,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,

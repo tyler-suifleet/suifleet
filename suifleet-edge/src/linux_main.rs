@@ -344,12 +344,26 @@ async fn main() -> anyhow::Result<()> {
     sd_notify::notify(false, &[sd_notify::NotifyState::Ready]).ok();
     // Telemetry runs beside the poll loop, so a long apply or bootstrap does
     // not silence the heartbeat; it reads only the state files on disk.
-    let fleet_reporter = cfg.fleet_data.clone().map(|config| tokio::spawn(crate::fleet_data::Task {
-        config, sui: sui.clone(), signer: signer.clone(), cap: cfg.device.device_cap_id.clone(),
-        device_id: cfg.device.device_object_id.clone(), state_dir: cfg.runtime.state_dir.clone(),
-        overlay_dir: cfg.components.configuration_overlay_dir.clone(), log_settings: cfg.logs.clone(),
-        sync: sync.clone(), services: service_runtime.clone(), started_ms, poll_seconds: cfg.runtime.poll_seconds,
-    }.run()));
+    let fleet_reporter = cfg.fleet_data.clone().map(|config| {
+        tokio::spawn(
+            crate::fleet_data::Task {
+                config,
+                sui: sui.clone(),
+                signer: signer.clone(),
+                cap: cfg.device.device_cap_id.clone(),
+                device_id: cfg.device.device_object_id.clone(),
+                state_dir: cfg.runtime.state_dir.clone(),
+                overlay_dir: cfg.components.configuration_overlay_dir.clone(),
+                log_settings: cfg.logs.clone(),
+                budget: cfg.budget.clone(),
+                sync: sync.clone(),
+                services: service_runtime.clone(),
+                started_ms,
+                poll_seconds: cfg.runtime.poll_seconds,
+            }
+            .run(),
+        )
+    });
     let _ = &fleet_reporter;
     let reporter = match &cfg.telemetry {
         Some(settings) => Some(tokio::spawn(
@@ -454,7 +468,17 @@ async fn main() -> anyhow::Result<()> {
             "Daemon started with durable deployment polling"
         );
         loop {
-            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
+            let reads_before = sui.read_stats();
+            let cycle = poll(
+                &cfg,
+                &sui,
+                &walrus,
+                &runner,
+                store.as_ref(),
+                &configs,
+                &mut supervisor,
+                &mut journal,
+            );
             tokio::select! {
                 result = cycle => match result {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
@@ -468,6 +492,8 @@ async fn main() -> anyhow::Result<()> {
                         break;
                     }
                     result => {
+                        let reads_after = sui.read_stats();
+                        info!(read_requests = reads_after.0 - reads_before.0, response_bytes = reads_after.1 - reads_before.1, "Chain reads this poll (protobuf payload bytes)");
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
@@ -740,6 +766,56 @@ async fn poll(
         services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
     journal.save()?;
+    let mut watch_roots = vec![
+        sui.manifest().upgrade_cap_id.clone(),
+        sui.manifest().shared_objects.registry.id.clone(),
+        cfg.device.device_cap_id.clone(),
+        cfg.device.device_object_id.clone(),
+    ];
+    watch_roots.extend(journal.state.groups.iter().cloned());
+    watch_roots.extend(journal.state.deferred.keys().cloned());
+    let sleeping_roots = cfg
+        .fleet_data
+        .as_ref()
+        .map(|data| {
+            vec![
+                data.fleet_id.clone(),
+                data.writer_id.clone(),
+                data.account_id.clone(),
+                data.budget_id.clone(),
+            ]
+        })
+        .unwrap_or_default();
+    watch_roots.extend(sleeping_roots.iter().cloned());
+    let changed = sui
+        .poll_changed(
+            &watch_roots,
+            &sleeping_roots,
+            cfg.runtime.full_revalidation_seconds,
+            cfg.runtime.event_discovery_seconds,
+        )
+        .await?;
+    let pending_work = !journal.state.initialized
+        || journal.state.deployments.values().any(|o| !o.reported)
+        || journal.state.deferred.values().any(|d| {
+            if d.terminal {
+                return false;
+            }
+            match d.control.reason(telemetry::now_ms(), d.notified_ms) {
+                Ok(Some(reason)) => reason != d.reason,
+                // Rollout waits wake from their watched grant/policy field.
+                Ok(None) => {
+                    !d.reason.starts_with("rollout ")
+                        && d.reason != "waiting for rollout eligibility"
+                        && d.reason != "outside rollout cohort snapshot"
+                }
+                Err(_) => true,
+            }
+        });
+    if !changed && !pending_work {
+        return Ok(());
+    }
+    sui.begin_full_poll();
     sui.validate_deployment().await?;
     sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
         .await?;
@@ -750,15 +826,45 @@ async fn poll(
         journal.state.initialized = true;
         journal.save()?;
     }
+    if journal.state.discovery_cursor.is_none()
+        && journal.state.discovery_merge_checkpoint.is_none()
+    {
+        let baseline = sui
+            .latest_cursor()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("missing discovery fence"))?;
+        journal.state.discovery_merge_checkpoint = baseline["checkpoint"].as_u64();
+        journal.save()?;
+    }
+    sui.set_event_limit(if journal.state.discovery_cursor.is_none() {
+        journal.state.discovery_merge_checkpoint
+    } else {
+        None
+    });
     if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
         collect_firmware_results(cfg, journal)?;
     }
     settle_configuration(configs, journal, supervisor)?;
     // Top up gas from the fleet budget before reporting (SF-083). A failure
     // only delays reports, which stay queued.
-    if let Some(budget) = &cfg.budget {
+    if let Some(budget) = cfg.budget.as_ref().filter(|_| {
+        journal
+            .state
+            .deployments
+            .values()
+            .any(|o| !o.reported && o.status.is_some())
+    }) {
         let mut funding = journal.state.funding.clone().unwrap_or_default();
-        match funding::top_up(budget, sui, &cfg.device.device_object_id, &cfg.device.device_cap_id, &mut funding, telemetry::now_ms()).await {
+        match funding::top_up(
+            budget,
+            sui,
+            &cfg.device.device_object_id,
+            &cfg.device.device_cap_id,
+            &mut funding,
+            telemetry::now_ms(),
+        )
+        .await
+        {
             Ok(changed) => {
                 if changed || journal.state.funding.is_none() {
                     journal.state.funding = Some(funding);
@@ -789,7 +895,30 @@ async fn poll(
         }
     }
     loop {
-        let page = sui.deployments(&journal.state.cursor).await?;
+        let combined = journal.state.discovery_cursor.is_some();
+        let page_start = if combined {
+            journal.state.discovery_cursor.clone()
+        } else {
+            journal.state.cursor.clone()
+        };
+        let page = if combined {
+            let operator = sui.operator(&cfg.device.device_object_id).await?;
+            let page = sui
+                .discovery(
+                    &journal.state.discovery_cursor,
+                    &cfg.device.device_object_id,
+                    &operator,
+                )
+                .await?;
+            journal.state.groups.extend(page.groups);
+            sui_client::EventPage {
+                events: page.deployments,
+                end: page.end,
+                has_more: page.has_more,
+            }
+        } else {
+            sui.deployments(&journal.state.cursor).await?
+        };
         for (event, cursor) in page.events {
             if !journal.state.deployments.contains_key(&event.deployment_id)
                 && sui
@@ -811,18 +940,29 @@ async fn poll(
                 }
             }
             journal.state.cursor = Some(cursor);
+            if combined {
+                journal.state.discovery_cursor = journal.state.cursor.clone();
+            }
             journal.save()?;
         }
         // Resume after everything this page scanned, events or not.
-        let progressed = journal.state.cursor.as_ref() != Some(&page.end);
+        let progressed = page_start.as_ref() != Some(&page.end);
         if progressed {
             journal.state.cursor = Some(page.end);
+            journal.save()?;
+        }
+        if combined {
+            journal.state.discovery_cursor = journal.state.cursor.clone();
+            journal.state.membership_cursor = journal.state.cursor.clone();
             journal.save()?;
         }
         if !page.has_more {
             break;
         }
-        anyhow::ensure!(progressed, "event stream claims more data without advancing");
+        anyhow::ensure!(
+            progressed,
+            "event stream claims more data without advancing"
+        );
     }
     // Deferred one-shot events survive cursor advancement and restarts.
     for id in journal.state.deferred.keys().cloned().collect::<Vec<_>>() {
@@ -843,7 +983,19 @@ async fn poll(
             execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await
+    reconcile(
+        cfg, sui, walrus, runner, store, configs, supervisor, journal,
+    )
+    .await?;
+    if journal.state.discovery_cursor.is_none() {
+        journal.state.discovery_cursor = Some(
+            serde_json::json!({"checkpoint": journal.state.discovery_merge_checkpoint.take().ok_or_else(|| anyhow::anyhow!("missing discovery merge fence"))?}),
+        );
+        journal.save()?;
+        sui.set_event_limit(None);
+    }
+    sui.finish_full_poll();
+    Ok(())
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
@@ -1064,7 +1216,7 @@ async fn reconcile(
     let device = &cfg.device.device_object_id;
     // Groups that ever added this device, scanned from genesis: membership
     // can predate enrollment. Each group object is the authority below.
-    loop {
+    while journal.state.discovery_cursor.is_none() {
         let page = sui.memberships(&journal.state.membership_cursor).await?;
         for (group, member) in page.events {
             if sui_client::same_id(&member, device) && journal.state.groups.insert(group.clone()) {

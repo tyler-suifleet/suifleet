@@ -105,6 +105,13 @@ enum Start {
     Checkpoint(u64),
 }
 
+pub struct DiscoveryPage {
+    pub deployments: Vec<(DeploymentCreatedEvent, Value)>,
+    pub groups: Vec<String>,
+    pub end: Value,
+    pub has_more: bool,
+}
+
 struct RawPage {
     events: Vec<(proto::Event, Value)>,
     end: Value,
@@ -163,6 +170,41 @@ pub struct SuiClient {
     signer: std::sync::Arc<dyn identity::TxSigner>,
     rpc: sui_rpc::Client,
     mutations: std::sync::Arc<tokio::sync::Mutex<()>>,
+    stats: std::sync::Arc<std::sync::Mutex<(u64, u64)>>,
+    poll: std::sync::Arc<std::sync::Mutex<PollWatch>>,
+    packages: std::sync::Arc<
+        tokio::sync::Mutex<std::collections::BTreeMap<String, sui_sdk_types::MovePackage>>,
+    >,
+}
+
+trait ReadResponse<T> {
+    fn read_into_inner(self, stats: &std::sync::Mutex<(u64, u64)>) -> T;
+}
+impl<T: prost::Message> ReadResponse<T> for tonic::Response<T> {
+    fn read_into_inner(self, stats: &std::sync::Mutex<(u64, u64)>) -> T {
+        let value = self.into_inner();
+        let mut stats = stats.lock().unwrap();
+        stats.0 += 1;
+        stats.1 += value.encoded_len() as u64;
+        value
+    }
+}
+
+/// Only successful full polls authorize the idle fast path. Object values are
+/// never cached: execution/admission and reconcile double reads stay fresh.
+#[derive(Default)]
+struct PollWatch {
+    versions: std::collections::BTreeMap<String, Option<u64>>,
+    spellings: std::collections::BTreeMap<String, String>,
+    roots: std::collections::BTreeMap<String, String>,
+    observed: std::collections::BTreeSet<String>,
+    sleeping_roots: std::collections::BTreeSet<String>,
+    valid: bool,
+    full_at: Option<std::time::Instant>,
+    discovery_at: Option<std::time::Instant>,
+    generation: u64,
+    event_limit: Option<u64>,
+    registry_metadata: Option<Object>,
 }
 
 /// Objects created by a successful enrollment (SF-021).
@@ -271,6 +313,9 @@ impl SuiClient {
             signer,
             rpc,
             mutations: Default::default(),
+            stats: Default::default(),
+            poll: Default::default(),
+            packages: Default::default(),
         })
     }
     pub fn address(&self) -> String {
@@ -286,6 +331,167 @@ impl SuiClient {
         &self.manifest().type_origins["device_registry::Device"]
     }
 
+    fn watch_id(id: &str) -> String {
+        Address::from_str(id)
+            .map(|a| a.to_string())
+            .unwrap_or_else(|_| id.to_owned())
+    }
+
+    pub fn watch_child(&self, id: &str, parent: &str) {
+        self.poll
+            .lock()
+            .unwrap()
+            .roots
+            .insert(Self::watch_id(id), Self::watch_id(parent));
+    }
+
+    fn observe(&self, id: &str, version: Option<u64>) {
+        let spelling = id.to_owned();
+        let id = Self::watch_id(id);
+        if same_id(&id, CLOCK) {
+            return;
+        }
+        let mut watch = self.poll.lock().unwrap();
+        // Keep the first version seen during a slow pass. A later read must
+        // not hide a concurrent change from the following poll.
+        watch.spellings.insert(id.clone(), spelling);
+        if watch.observed.insert(id.clone()) {
+            watch.versions.insert(id, version);
+        }
+    }
+
+    pub fn read_stats(&self) -> (u64, u64) {
+        *self.stats.lock().unwrap()
+    }
+
+    pub fn watch_generation(&self) -> u64 {
+        self.poll.lock().unwrap().generation
+    }
+
+    /// One version-only request. Per-object errors other than NotFound, missing
+    /// versions, and incomplete batches fail closed; no successful idle poll.
+    pub async fn poll_changed(
+        &self,
+        roots: &[String],
+        sleeping_roots: &[String],
+        full_seconds: u64,
+        discovery_seconds: u64,
+    ) -> anyhow::Result<bool> {
+        let (ids, spellings, valid, full_due, discovery_due) = {
+            let mut w = self.poll.lock().unwrap();
+            w.sleeping_roots = sleeping_roots.iter().map(|id| Self::watch_id(id)).collect();
+            let roots: std::collections::BTreeSet<_> =
+                roots.iter().map(|id| Self::watch_id(id)).collect();
+            let children = w.roots.clone();
+            w.versions.retain(|id, _| {
+                roots.contains(id)
+                    || children
+                        .get(id)
+                        .is_some_and(|parent| roots.contains(parent))
+            });
+            w.roots.retain(|_, parent| roots.contains(parent));
+            (
+                w.versions.clone(),
+                w.spellings.clone(),
+                w.valid,
+                w.full_at
+                    .is_none_or(|at| at.elapsed() >= Duration::from_secs(full_seconds)),
+                w.discovery_at
+                    .is_none_or(|at| at.elapsed() >= Duration::from_secs(discovery_seconds)),
+            )
+        };
+        if !valid || ids.is_empty() {
+            return Ok(true);
+        }
+        let mut request = proto::BatchGetObjectsRequest::default();
+        request.read_mask = Some(mask(&["version"]));
+        request.requests = ids
+            .keys()
+            .map(|id| {
+                let mut r = proto::GetObjectRequest::default();
+                r.object_id = Some(spellings.get(id).unwrap_or(id).clone());
+                r.read_mask = Some(mask(&["version"]));
+                r
+            })
+            .collect();
+        let response = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .batch_get_objects(request)
+            .await
+            .map_err(status)?
+            .read_into_inner(&self.stats);
+        anyhow::ensure!(
+            response.objects.len() == ids.len(),
+            "incomplete watch batch"
+        );
+        let mut versions_changed = false;
+        for ((id, previous), result) in ids.iter().zip(response.objects) {
+            let version = match result.result {
+                Some(proto::get_object_result::Result::Object(object)) => Some(
+                    object
+                        .version
+                        .ok_or_else(|| anyhow::anyhow!("watch object {id} has no version"))?,
+                ),
+                Some(proto::get_object_result::Result::Error(error)) if error.code == 5 => None,
+                other => anyhow::bail!("watch read failed for {id}: {other:?}"),
+            };
+            versions_changed |= &version != previous;
+            if same_id(id, &self.manifest().shared_objects.registry.id) {
+                let mut w = self.poll.lock().unwrap();
+                if version.is_none() {
+                    w.registry_metadata = None;
+                }
+                // Registry contents may grow; its type and initial shared
+                // version cannot change. Keep its existence/version sentinel
+                // current without downloading the registry again.
+                w.versions.insert(id.clone(), version);
+            }
+        }
+        let changed = versions_changed || full_due || discovery_due;
+        if versions_changed || full_due {
+            let mut w = self.poll.lock().unwrap();
+            w.generation = w.generation.wrapping_add(1);
+        }
+        tracing::info!(objects = ids.len(), changed, "Chain poll version batch");
+        Ok(changed)
+    }
+
+    pub fn set_event_limit(&self, checkpoint: Option<u64>) {
+        self.poll.lock().unwrap().event_limit = checkpoint;
+    }
+
+    pub fn begin_full_poll(&self) {
+        let mut w = self.poll.lock().unwrap();
+        w.valid = false;
+        w.observed.clear();
+    }
+    pub fn finish_full_poll(&self) {
+        let mut w = self.poll.lock().unwrap();
+        let observed = w.observed.clone();
+        let sleeping = w.sleeping_roots.clone();
+        let children = w.roots.clone();
+        let registry = Self::watch_id(&self.manifest().shared_objects.registry.id);
+        // Stop watching fields that successful reconciliation no longer uses
+        // (e.g. DesiredKey after membership removal). Sleeping fleet producers
+        // retain their validated snapshots until their next due attempt.
+        w.versions.retain(|id, _| {
+            observed.contains(id)
+                || id == &registry
+                || sleeping.contains(id)
+                || children
+                    .get(id)
+                    .is_some_and(|parent| sleeping.contains(parent))
+        });
+        let retained: std::collections::BTreeSet<_> = w.versions.keys().cloned().collect();
+        w.spellings.retain(|id, _| retained.contains(id));
+        w.roots.retain(|id, _| retained.contains(id));
+        w.valid = true;
+        w.full_at = Some(std::time::Instant::now());
+        w.discovery_at = w.full_at;
+    }
+
     pub async fn validate_deployment(&self) -> anyhow::Result<()> {
         let manifest = self.manifest();
         let info = self
@@ -295,7 +501,7 @@ impl SuiClient {
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
             .map_err(status)?
-            .into_inner();
+            .read_into_inner(&self.stats);
         anyhow::ensure!(
             chain_identifier(info.chain_id.as_deref().unwrap_or_default())?
                 == manifest.chain_identifier,
@@ -332,7 +538,11 @@ impl SuiClient {
             "UpgradeCap does not identify latest call package/version"
         );
         let registry = &manifest.shared_objects.registry;
-        let object = self.object(&registry.id).await?;
+        let cached = self.poll.lock().unwrap().registry_metadata.clone();
+        let object = match cached {
+            Some(object) => object,
+            None => self.object(&registry.id).await?,
+        };
         anyhow::ensure!(
             same_type(
                 &object.object_type,
@@ -341,12 +551,17 @@ impl SuiClient {
                 if initial_version.to_string() == registry.initial_shared_version),
             "registry type/shared version mismatch"
         );
+        self.poll.lock().unwrap().registry_metadata = Some(object);
         Ok(())
     }
 
     /// A package's on-chain contents, decoded from its BCS: the type origin
     /// table is authoritative, not a rendering by the node.
     async fn package(&self, id: &str) -> anyhow::Result<sui_sdk_types::MovePackage> {
+        let mut packages = self.packages.lock().await;
+        if let Some(package) = packages.get(id) {
+            return Ok(package.clone());
+        }
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["bcs"]));
@@ -357,7 +572,7 @@ impl SuiClient {
             .get_object(request)
             .await
             .map_err(status)?
-            .into_inner()
+            .read_into_inner(&self.stats)
             .object
             .and_then(|o| o.bcs)
             .and_then(|b| b.value)
@@ -365,7 +580,10 @@ impl SuiClient {
         let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
             .map_err(|e| anyhow::anyhow!("undecodable package {id}: {e}"))?;
         match object.data() {
-            sui_sdk_types::ObjectData::Package(package) => Ok(package.clone()),
+            sui_sdk_types::ObjectData::Package(package) => {
+                packages.insert(id.to_owned(), package.clone());
+                Ok(package.clone())
+            }
             _ => anyhow::bail!("{id} is not a package"),
         }
     }
@@ -375,17 +593,28 @@ impl SuiClient {
     pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
-        request.read_mask = Some(mask(&["bcs"]));
-        let bytes = self
+        request.read_mask = Some(mask(&["bcs", "version"]));
+        let response = self
             .rpc
             .clone()
             .ledger_client()
             .get_object(request)
             .await
             .map_err(|e| status(e).context(format!("object {id}")))?
-            .into_inner()
+            .read_into_inner(&self.stats);
+        let object = response
             .object
-            .and_then(|o| o.bcs)
+            .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
+        self.observe(
+            id,
+            Some(
+                object
+                    .version
+                    .ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?,
+            ),
+        );
+        let bytes = object
+            .bcs
             .and_then(|b| b.value)
             .ok_or_else(|| anyhow::anyhow!("object {id} has no contents"))?;
         let object: sui_sdk_types::Object = bcs::from_bytes(&bytes)
@@ -411,14 +640,29 @@ impl SuiClient {
     pub async fn optional_object(&self, id: &str) -> anyhow::Result<Option<Object>> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
-        request.read_mask = Some(mask(&["owner", "object_type", "json"]));
+        request.read_mask = Some(mask(&["owner", "object_type", "json", "version"]));
         let object = match self.rpc.clone().ledger_client().get_object(request).await {
-            Ok(response) => response.into_inner().object,
+            Ok(response) => response.read_into_inner(&self.stats).object,
             // Deleted, wrapped or never created.
-            Err(e) if e.code() == tonic::Code::NotFound => return Ok(None),
-            Err(e) => return Err(status(e).context(format!("object {id}"))),
+            Err(e) if e.code() == tonic::Code::NotFound => {
+                self.stats.lock().unwrap().0 += 1;
+                self.observe(id, None);
+                return Ok(None);
+            }
+            Err(e) => {
+                self.stats.lock().unwrap().0 += 1;
+                return Err(status(e).context(format!("object {id}")));
+            }
         }
         .ok_or_else(|| anyhow::anyhow!("object {id} has no data"))?;
+        self.observe(
+            id,
+            Some(
+                object
+                    .version
+                    .ok_or_else(|| anyhow::anyhow!("object {id} has no version"))?,
+            ),
+        );
         let owner = match object.owner.as_ref() {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
@@ -458,6 +702,7 @@ impl SuiClient {
         let parent = Address::from_str(parent)
             .map_err(|e| anyhow::anyhow!("invalid object ID {parent}: {e}"))?;
         let id = parent.derive_dynamic_child_id(&key, key_bcs);
+        self.watch_child(&id.to_string(), &parent.to_string());
         Ok(self
             .optional_object(&id.to_string())
             .await?
@@ -473,7 +718,7 @@ impl SuiClient {
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
             .map_err(status)?
-            .into_inner();
+            .read_into_inner(&self.stats);
         let tip = info
             .checkpoint_height
             .ok_or_else(|| anyhow::anyhow!("node reported no checkpoint height"))?;
@@ -504,6 +749,56 @@ impl SuiClient {
         Ok(EventPage { events, end: page.end, has_more: page.has_more })
     }
 
+    /// One DNF query, with a local creator/target prefilter before any object
+    /// reads. Authority is still re-read by authorized_target and reconcile.
+    pub async fn discovery(
+        &self,
+        cursor: &Option<Value>,
+        device: &str,
+        operator: &str,
+    ) -> anyhow::Result<DiscoveryPage> {
+        let (start, position) = match Cursor::parse(cursor)? {
+            Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
+            Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
+            _ => anyhow::bail!("combined discovery requires a migrated cursor"),
+        };
+        self.ensure_retained(position).await?;
+        let page = self.event_page(start, "*").await?;
+        let mut deployments = Vec::new();
+        let mut groups = Vec::new();
+        for (event, watermark) in page.events {
+            let fields = event.json.as_deref().map(to_json).unwrap_or(Value::Null);
+            if same_type(
+                event.event_type.as_deref().unwrap_or(""),
+                &self.move_type(DEPLOYMENT_CREATED),
+            ) {
+                let parsed: DeploymentCreatedEvent = serde_json::from_value(fields)?;
+                if same_id(&parsed.creator, operator)
+                    && (parsed.target_devices.iter().any(|id| same_id(id, device))
+                        || !parsed.target_groups.is_empty())
+                {
+                    deployments.push((parsed, watermark));
+                }
+            } else {
+                let group = fields["group_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid membership group"))?;
+                let member = fields["device_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid membership device"))?;
+                if same_id(member, device) {
+                    groups.push(group.to_owned());
+                }
+            }
+        }
+        Ok(DiscoveryPage {
+            deployments,
+            groups,
+            end: page.end,
+            has_more: page.has_more,
+        })
+    }
+
     async fn ensure_retained(&self, position: Option<u64>) -> anyhow::Result<()> {
         if position.is_none() {
             return Ok(());
@@ -515,7 +810,7 @@ impl SuiClient {
             .get_service_info(proto::GetServiceInfoRequest::default())
             .await
             .map_err(status)?
-            .into_inner();
+            .read_into_inner(&self.stats);
         ensure_retained(position, info.lowest_available_checkpoint)
     }
 
@@ -559,14 +854,25 @@ impl SuiClient {
             "transaction_digest",
             "event_index",
         ]));
-        let mut literal = proto::EventLiteral::default();
-        let mut by_type = proto::EventTypeFilter::default();
-        by_type.event_type = Some(self.move_type(event_type));
-        literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
-        let mut term = proto::EventTerm::default();
-        term.literals = vec![literal];
+        let types = if event_type == "*" {
+            vec![DEPLOYMENT_CREATED, DEVICE_ADDED_TO_GROUP]
+        } else {
+            vec![event_type]
+        };
         let mut filter = proto::EventFilter::default();
-        filter.terms = vec![term];
+        filter.terms = types
+            .iter()
+            .map(|name| {
+                let mut literal = proto::EventLiteral::default();
+                let mut by_type = proto::EventTypeFilter::default();
+                by_type.event_type = Some(self.move_type(name));
+                literal.predicate = Some(proto::event_literal::Predicate::EventType(by_type));
+                let mut term = proto::EventTerm::default();
+                term.literals = vec![literal];
+                term
+            })
+            .collect();
+        request.end_checkpoint = self.poll.lock().unwrap().event_limit;
         request.filter = Some(filter);
         let mut options = proto::QueryOptions::default();
         options.limit = Some(PAGE_SIZE);
@@ -575,6 +881,7 @@ impl SuiClient {
             Start::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
         }
         request.options = Some(options);
+        self.stats.lock().unwrap().0 += 1;
         let mut stream = self
             .rpc
             .clone()
@@ -583,10 +890,11 @@ impl SuiClient {
             .await
             .map_err(status)?
             .into_inner();
-        let expected = self.move_type(event_type);
+        let expected: Vec<_> = types.iter().map(|name| self.move_type(name)).collect();
         let mut events = Vec::new();
         while let Some(frame) = stream.next().await {
             let frame = frame.map_err(status)?;
+            self.stats.lock().unwrap().1 += prost::Message::encoded_len(&frame) as u64;
             let watermark = after(
                 frame
                     .watermark
@@ -595,19 +903,40 @@ impl SuiClient {
             )?;
             if let Some(event) = frame.event {
                 anyhow::ensure!(
-                    same_type(event.event_type.as_deref().unwrap_or(""), &expected),
+                    expected
+                        .iter()
+                        .any(|kind| same_type(event.event_type.as_deref().unwrap_or(""), kind)),
                     "node returned an event outside the requested type"
                 );
                 events.push((event, watermark.clone()));
             }
             if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
+                anyhow::ensure!(
+                    matches!(
+                        proto::QueryEndReason::try_from(reason),
+                        Ok(proto::QueryEndReason::ItemLimit
+                            | proto::QueryEndReason::ScanLimit
+                            | proto::QueryEndReason::CheckpointBound
+                            | proto::QueryEndReason::CursorBound
+                            | proto::QueryEndReason::LedgerTip)
+                    ),
+                    "unknown event query completion reason"
+                );
                 // Item or scan limits mean more may follow; ledger tip or end
                 // of range means this scan is complete for now.
                 let has_more = matches!(
                     proto::QueryEndReason::try_from(reason),
                     Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
                 );
-                return Ok(RawPage { events, end: watermark, has_more });
+                if !has_more && self.poll.lock().unwrap().event_limit.is_some() {
+                    anyhow::ensure!(reason == proto::QueryEndReason::CheckpointBound as i32,
+                        "event index has not reached the cursor-merge checkpoint fence; retry without skipping history");
+                }
+                return Ok(RawPage {
+                    events,
+                    end: watermark,
+                    has_more,
+                });
             }
         }
         anyhow::bail!("event stream ended without completion")
@@ -623,7 +952,7 @@ impl SuiClient {
             .get_transaction(request)
             .await
             .map_err(status)?
-            .into_inner()
+            .read_into_inner(&self.stats)
             .transaction
             .and_then(|t| t.checkpoint)
             .ok_or_else(|| {
@@ -666,6 +995,7 @@ impl SuiClient {
             .identity(device)
             .await?
             .ok_or_else(|| anyhow::anyhow!("device has no registry identity"))?;
+        self.watch_child(identity["owner_cap"].as_str().unwrap_or(""), device);
         let owner_cap = self
             .object(identity["owner_cap"].as_str().unwrap_or(""))
             .await?;
@@ -941,7 +1271,7 @@ impl SuiClient {
             .get_balance(request)
             .await
             .map_err(status)?
-            .into_inner()
+            .read_into_inner(&self.stats)
             .balance
             .ok_or_else(|| anyhow::anyhow!("node returned no balance"))?;
         Ok(balance.balance.unwrap_or_default())
@@ -972,8 +1302,11 @@ impl SuiClient {
         let account_id = account_id
             .as_str()
             .filter(|id| same_id(id, id))
-            .ok_or_else(|| anyhow::anyhow!("the budget's device index is not an object ID: {account_id}"))?
+            .ok_or_else(|| {
+                anyhow::anyhow!("the budget's device index is not an object ID: {account_id}")
+            })?
             .to_owned();
+        self.watch_child(&account_id, budget_id);
         let object = self.object(&account_id).await?;
         anyhow::ensure!(
             same_type(&object.object_type, &self.move_type("fleet_budget::GasAccount")),
@@ -1037,12 +1370,25 @@ impl SuiClient {
             let old: Transaction = bcs::from_bytes(&bytes)?;
             check_transaction(&old,call,Address::from_str(package)?,Address::from_str(&self.address())?)?;
             let digest = old.digest().to_string();
-            let mut request = proto::GetTransactionRequest::default(); request.digest=Some(digest.clone());
-            request.read_mask=Some(mask(&["digest","effects.status"]));
-            match self.rpc.clone().ledger_client().get_transaction(request).await {
+            let mut request = proto::GetTransactionRequest::default();
+            request.digest = Some(digest.clone());
+            request.read_mask = Some(mask(&["digest", "effects.status"]));
+            match self
+                .rpc
+                .clone()
+                .ledger_client()
+                .get_transaction(request)
+                .await
+            {
                 Ok(response) => {
-                    let executed=response.into_inner().transaction.ok_or_else(||anyhow::anyhow!("missing durable transaction effects"))?;
-                    anyhow::ensure!(executed.digest.as_deref()==Some(digest.as_str()),"durable transaction digest mismatch");
+                    let executed = response
+                        .read_into_inner(&self.stats)
+                        .transaction
+                        .ok_or_else(|| anyhow::anyhow!("missing durable transaction effects"))?;
+                    anyhow::ensure!(
+                        executed.digest.as_deref() == Some(digest.as_str()),
+                        "durable transaction digest mismatch"
+                    );
                     match execution_digest(&executed) {
                         Err(error) if error.downcast_ref::<FailedExecution>().is_some()=>{
                             std::fs::remove_file(path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
@@ -1050,15 +1396,41 @@ impl SuiClient {
                         result=>return result,
                     }
                 }
-                Err(error) if error.code()==tonic::Code::NotFound=>{
-                    let checkpoint:u64=std::fs::read_to_string(path.with_extension("checkpoint"))?.parse()?;
-                    let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
-                    anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest|lowest<=checkpoint),"durable transaction history unavailable; owner reconciliation required");
-                    let mut stale=false;
+                Err(error) if error.code() == tonic::Code::NotFound => {
+                    let checkpoint: u64 =
+                        std::fs::read_to_string(path.with_extension("checkpoint"))?.parse()?;
+                    let info = self
+                        .rpc
+                        .clone()
+                        .ledger_client()
+                        .get_service_info(proto::GetServiceInfoRequest::default())
+                        .await?
+                        .read_into_inner(&self.stats);
+                    anyhow::ensure!(
+                        info.lowest_available_checkpoint
+                            .is_some_and(|lowest| lowest <= checkpoint),
+                        "durable transaction history unavailable; owner reconciliation required"
+                    );
+                    let mut stale = false;
                     for coin in &old.gas_payment.objects {
-                        let mut request=proto::GetObjectRequest::default();request.object_id=Some(coin.object_id().to_string());request.read_mask=Some(mask(&["version"]));
-                        let version=self.rpc.clone().ledger_client().get_object(request).await?.into_inner().object.and_then(|o|o.version).ok_or_else(||anyhow::anyhow!("gas object version unavailable"))?;
-                        anyhow::ensure!(version>=coin.version(),"fullnode is behind the persisted transaction");stale|=version>coin.version();
+                        let mut request = proto::GetObjectRequest::default();
+                        request.object_id = Some(coin.object_id().to_string());
+                        request.read_mask = Some(mask(&["version"]));
+                        let version = self
+                            .rpc
+                            .clone()
+                            .ledger_client()
+                            .get_object(request)
+                            .await?
+                            .read_into_inner(&self.stats)
+                            .object
+                            .and_then(|o| o.version)
+                            .ok_or_else(|| anyhow::anyhow!("gas object version unavailable"))?;
+                        anyhow::ensure!(
+                            version >= coin.version(),
+                            "fullnode is behind the persisted transaction"
+                        );
+                        stale |= version > coin.version();
                     }
                     if stale {
                         // The old transaction could have committed between the
@@ -1066,18 +1438,41 @@ impl SuiClient {
                         // stale it cannot execute anew: resolve effects again,
                         // then recheck retention before concluding it is absent.
                         let mut request = proto::GetTransactionRequest::default();
-                        request.digest = Some(digest.clone()); request.read_mask = Some(mask(&["digest", "effects.status"]));
-                        match self.rpc.clone().ledger_client().get_transaction(request).await {
+                        request.digest = Some(digest.clone());
+                        request.read_mask = Some(mask(&["digest", "effects.status"]));
+                        match self
+                            .rpc
+                            .clone()
+                            .ledger_client()
+                            .get_transaction(request)
+                            .await
+                        {
                             Ok(response) => {
-                                let executed = response.into_inner().transaction.ok_or_else(|| anyhow::anyhow!("missing durable effects after gas reconciliation"))?;
-                                anyhow::ensure!(executed.digest.as_deref() == Some(digest.as_str()), "durable transaction digest mismatch");
+                                let executed = response
+                                    .read_into_inner(&self.stats)
+                                    .transaction
+                                    .ok_or_else(|| {
+                                        anyhow::anyhow!(
+                                            "missing durable effects after gas reconciliation"
+                                        )
+                                    })?;
+                                anyhow::ensure!(
+                                    executed.digest.as_deref() == Some(digest.as_str()),
+                                    "durable transaction digest mismatch"
+                                );
                                 match execution_digest(&executed) {
                                     Err(error) if error.downcast_ref::<FailedExecution>().is_some() => (),
                                     result => return result,
                                 }
                             }
                             Err(error) if error.code() == tonic::Code::NotFound => {
-                                let info = self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
+                                let info = self
+                                    .rpc
+                                    .clone()
+                                    .ledger_client()
+                                    .get_service_info(proto::GetServiceInfoRequest::default())
+                                    .await?
+                                    .read_into_inner(&self.stats);
                                 anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest| lowest <= checkpoint), "durable transaction history became unavailable; owner reconciliation required");
                             }
                             Err(error) => return Err(error.into()),
@@ -1091,8 +1486,16 @@ impl SuiClient {
         let transaction = match std::fs::read(path) {
             Ok(bytes) => bcs::from_bytes(&bytes)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
-                let checkpoint=info.checkpoint_height.ok_or_else(||anyhow::anyhow!("durable creation checkpoint unavailable"))?;
+                let info = self
+                    .rpc
+                    .clone()
+                    .ledger_client()
+                    .get_service_info(proto::GetServiceInfoRequest::default())
+                    .await?
+                    .read_into_inner(&self.stats);
+                let checkpoint = info
+                    .checkpoint_height
+                    .ok_or_else(|| anyhow::anyhow!("durable creation checkpoint unavailable"))?;
                 let transaction = self.build_package(package, call).await?;
                 let marker=path.with_extension("checkpoint");let temporary=marker.with_extension("tmp");
                 let mut f=std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
@@ -1149,13 +1552,25 @@ impl SuiClient {
         // DiagnosticKey was added after the original data objects. Resolve
         // its own introduction package, never reuse FleetData's origin.
         let package = self.package(&data.package_id).await?;
-        let entries: Vec<_> = package.type_origin_table.iter().filter(|o|
-            o.module_name.as_str() == "fleet_data" && o.struct_name.as_str() == "DiagnosticKey").collect();
-        anyhow::ensure!(entries.len() == 1, "call package has no unique DiagnosticKey origin");
-        let key: TypeTag = format!("{}::fleet_data::DiagnosticKey",entries[0].package).parse()?;
-        let id = Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key,&[0]);
-        let Some(field) = self.optional_object(&id.to_string()).await? else { return Ok(0); };
-        number(&field.fields["value"]["seq"]).ok_or_else(|| anyhow::anyhow!("invalid diagnostic request"))
+        let entries: Vec<_> = package
+            .type_origin_table
+            .iter()
+            .filter(|o| {
+                o.module_name.as_str() == "fleet_data" && o.struct_name.as_str() == "DiagnosticKey"
+            })
+            .collect();
+        anyhow::ensure!(
+            entries.len() == 1,
+            "call package has no unique DiagnosticKey origin"
+        );
+        let key: TypeTag = format!("{}::fleet_data::DiagnosticKey", entries[0].package).parse()?;
+        let id = Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key, &[0]);
+        self.watch_child(&id.to_string(), &data.writer_id);
+        let Some(field) = self.optional_object(&id.to_string()).await? else {
+            return Ok(0);
+        };
+        number(&field.fields["value"]["seq"])
+            .ok_or_else(|| anyhow::anyhow!("invalid diagnostic request"))
     }
     pub async fn verify_archive_anchor(&self, data: &crate::fleet_data::Config, index: u64, seq: u64, sha256: &[u8]) -> anyhow::Result<()> {
         let key: TypeTag = format!("{}::fleet_data::AnchorKey",data.type_origin).parse()?;
@@ -1729,3 +2144,7 @@ mod tests {
         assert!(error.to_string().contains("writes shared argument 0"), "{error}");
     }
 }
+
+#[cfg(test)]
+#[path = "poll_tests.rs"]
+mod poll_tests;
