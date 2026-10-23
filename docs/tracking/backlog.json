@@ -2402,6 +2402,83 @@
         "Actual mainnet spending, publication or UpgradeCap transfer happens only after explicit user authorization for that run; record exact IDs, digests, effects and costs."
       ],
       "validation": "Script tests and dry runs; rehearsal evidence with effects checked; mainnet evidence only under explicit authorization."
+    },
+    {
+      "key": "SF-121",
+      "title": "Reduce serverless fleet telemetry and log costs; validate subscription economics",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-082",
+        "SF-084",
+        "SF-083"
+      ],
+      "paths": [
+        "contracts",
+        "interfaces",
+        "suifleet-edge",
+        "dapp",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement serverless, device-local Walrus quilting for existing signed Seal-encrypted log archives and evaluate health batching honestly. USER CONSTRAINT: no additional server. Quilting runs inside the existing edge client. Do not require a fleet collector, gateway server, browser left open, Nautilus enclave or always-on managed service. Cross-device pooling is not assumed possible without an explicit data rendezvous and is outside the required implementation. Preserve the existing standalone edge-to-Sui/Walrus operation. Platform subscription/device tiers with bounded pooled log allowance is agreed; $100/month for1000devices remains an example, not an approved price or proven margin.",
+      "evidence": "SF082 fleet_archive.rs currently registers, certifies and anchors separate per-device archives; health summaries are separate transactions. Existing acceptance evaluated quilts but did not require their use. User now explicitly requests quilting. Official Quilt docs: batch up to666items forQuiltV1, patch IDs depend on whole quilt, retention/deletion/extension apply to whole quilt. Per-device daily health gas can dominate storage, so log savings must not be misrepresented as removing health transactions.",
+      "acceptance": [
+        "Inspect the actual merged archive/health/retention implementation and pinned Walrus SDK Quilt support. Document current versus proposed transaction counts, source revisions, ciphertext sizes and measurable savings; no unsupported blanket cost claims.",
+        "Implement bounded Quilt formation and per-item retrieval for encrypted device log/diagnostic archives. Group only compatible fleet/access policy and retention lifecycle; respect actual SDK item/size limits. Keep signed chain/registry/device/sequence/content-digest bindings and authenticate each patch independently; QuiltPatchId is not a content digest.",
+        "Implement quilting locally in the existing edge client, batching multiple pending records/streams over a bounded time/byte window; no additional server, collector, always-on browser, Nautilus or mandatory gateway. Do not wrap a lone regular blob in a quilt and claim a saving. Measure useful record granularity versus already-batched archive. Cross-device aggregation is not required and must not be claimed without an explicit approved rendezvous mechanism.",
+        "Adapt actual fleet-owned storage, device write authorization, certification and archive references/indexes/readers to quilts with compatible additive schemas. Reject forged/replayed/misattributed records and revoked writers; preserve quotas and retention. Preserve old regular-blob reads and type origins. No new collector authority.",
+        "Persist spool/queue state across offline/restart/timeout, bound disk/memory/bytes/items/age/retries and use idempotent publish recovery. Do not acknowledge/drop source records until certified storage and required anchors are independently verified. Handle partial batches, missing/wrong patches, withholding and collector outage with explicit unavailable/pending results.",
+        "Update daemon/dApp/codec and packaging as required, log discovery/decryption, retention renewal and budget estimates. Keep separate health-summary and deployment-receipt costs visible; quilting alone must not be claimed to reduce those. Do not silently remove on-chain health authentication or change receipt trust.",
+        "Produce representative1000device comparisons for current per-device archives versus serverless per-device quilts: exact report/anchor transaction counts, health cadence, compressed/encrypted/encoded bytes, retention and retries. Explicitly show which savings require cross-device aggregation and are unavailable in this design. Quilt does not merge separate devices automatically or remove existing health writes. Use actual effects/quotes and distinguish testnet from mainnet; model $100/month only as illustration.",
+        "Verify actual pinned SDK Quilt write/read roundtrip and confidential owner/support access with unauthorized/tamper/revocation/replay and restart controls; meaningful Rust/Move/UI and simulator tests, production build, authorized bounded public-testnet validation and independent review. Preserve live Pi/mainnet acceptance in existing tickets; no physical programming or mainnet spending.",
+        "Restore only this published ticket and remote mapping as a contained Tyler-authored tracking commit; update business docs to record agreed platform subscription/device tiers with bounded pooled logs, without inventing final price/margin. Implementation PR uses Closes for the published issue. Codex explicitly authorizes restoring missing already-published SF-082 seed/mapping (and any already-published transitive seed references needed for offline validation) from canonical catalog/history as a separate tracking repair, preserving live ownership and remote IDs; no new issue creation is needed for this metadata repair.",
+        "USER COST REJECTION: the measured per-archive path extrapolates to about812 testSUI/month for1000devices with daily archives, excluding health; this is unacceptable for the illustrative $100/month subscription. Treat actual end-to-end cost reduction as the goal, not Quilt adoption. Benchmark computation versus retained object deposits and realistic cleanup, locate per-upload registration/certification/anchor growth, evaluate fewer/batched transactions and additive bounded/reusable references without weakening device authority or authentication. Do not claim a fixed subsidy, rebate, batching count or hypothetical architecture establishes mainnet viability. Preserve no-additional-server constraint. Report a measured feasible operating envelope and explicit remaining limits; do not declare success merely because Quilt works."
+      ],
+      "validation": "Actual pinned SDK Quilt roundtrip in existing edge runtime; negative authority/patch/replay and restart/offline/certification recovery; compatibility tests, scoped UI/build/package checks; measured device-local economics; bounded authorized testnet evidence and independent review. No additional server and no claimed cross-device aggregation."
+    },
+    {
+      "key": "SF-082",
+      "title": "Host the dApp and fleet backend on Sui and Walrus instead of a server",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-020",
+        "SF-022",
+        "SF-024"
+      ],
+      "paths": [
+        "dapp",
+        "suifleet-edge/src",
+        "suifleet-indexer",
+        "contracts",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Use Sui infrastructure as the backend: publish the static dApp as a Walrus Site, and replace the server-hosted fleet indexer for health, logs, diagnostics and alerts with Sui/Walrus-native data that the dApp reads and verifies directly. A self-hosted indexer may remain an optional accelerator, never a requirement. Implementation may proceed against the published SF-083/#218 interface v1 at exact commit 57cd3bc1aec364d302b7192c8c19eb550c10aa23, documented in docs/FLEET_BUDGET.md. This changes implementation scheduling only. SF-083/#161 remains a mandatory merge/integration prerequisite. Keep the consumer PR DRAFT while SF-083 is not Done; if implementation finishes first, retain the claim with an explicit integration blocker and handoff evidence. Never mark Ready or claim acceptance_complete until SF-083 is merged, current main is integrated and funding/storage compatibility and end-to-end tests pass. Independent review and all normal CI/testnet gates remain mandatory. Do not guess unpublished APIs or silently repin. Proposed shared-interface changes must be recorded in both consumer issues before implementation. Consume fleet_storage::register_blob/certify_blob, fleet_budget::assert_may_draw, GasAccount and fleet-owned non-deletable blobs. Telemetry cadence, encrypted log batches, authenticated anchors, index and verified browser reads are SF082 implementation scope. Preserve existing budget public signatures/layouts. ",
+      "evidence": "The indexer (SF-019/SF-020/SF-024) runs as a local HTTP service; docs/LOGS.md lists a hosted indexer with TLS/rate limiting as not covered, and OPERATIONS.md notes Walrus Sites is intended but unverified. User direction 2026-10-19: the backend should be hosted on Walrus using Sui infrastructure.",
+      "acceptance": [
+        "Publish the production dApp build as a Walrus Site with a pinned, verified site-builder version, deployment manifest binding and a documented update/rollback procedure; no off-chain server is needed to use the app.",
+        "Devices write signed telemetry snapshots and redacted log batches as Walrus blobs, logs and diagnostics Seal-encrypted to the fleet owner and authorized support roles, and anchor them on Sui (per-device object or events) with bounded frequency and cost.",
+        "Fleet data blobs are written with SF-083 owner-prepaid storage and stay fleet-owned (a device cannot delete or shorten history); a per-fleet on-chain index lists them for the dApp; the Seal read policy is Move code: the owner and authorized support roles decrypt, devices write but cannot read other devices' data, and revocation removes a device's write right.",
+        "The dApp discovers, fetches, verifies (device signature, registry identity, chain binding) and decrypts this data client-side, and derives health and alerts in the browser with the same rules as SF-020; unverifiable data is shown as unavailable, never trusted.",
+        "Data cadence is a cost requirement: small health snapshots go on-chain directly (events on transactions devices already send, or periodic summaries), not as per-snapshot Walrus blobs; bulk data such as logs is batched into at most one Walrus upload per device per configurable period (default daily), plus immediate uploads for diagnostics requests and crashes.",
+        "Before relying on it, validate Walrus's fixed per-blob overhead (recorded as an approximately 64 MB encoding-metadata figure in docs/business/network-costs-2026-10-16.json) with a real quote, and evaluate Walrus quilts or other batching to reduce per-upload cost; document the measured cost per upload and per device per month for the chosen cadence.",
+        "Define retention and deletion (Walrus storage epochs, expiry and rebates) and the per-device write cadence; costs feed the SF-083 prepaid budget.",
+        "Document what has no serverless equivalent (for example push webhooks/notifications) and provide an optional, owner-run relay or indexer that consumes the same on-chain/Walrus data without becoming a trust root.",
+        "Record the pinned SF083 commit, consumed functions/layouts and extension boundary in the issue. Keep PR draft until SF083 is verified Done/merged; integrate its actual merged implementation and rerun relevant compatibility, adversarial and end-to-end tests before Ready/Review acceptance. Mocked success or an unmerged pinned dependency is not integrated acceptance."
+      ],
+      "validation": "Localnet/simulated-Walrus end-to-end: device writes, anchors and the dApp verifies/decrypts; tampered, replayed, foreign-chain and revoked-device data rejected; Walrus Site build reproducibility; authorized testnet publication and dApp acceptance recorded separately with exact costs.",
+      "merge_depends_on": [
+        "SF-083"
+      ]
     }
   ]
 }
