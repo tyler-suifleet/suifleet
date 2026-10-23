@@ -82,7 +82,8 @@ Monthly totals for the whole fleet:
 
 Notes on the comparison:
 
-- **Heavy is dominated by hourly on-chain health.** That setting costs about $0.072 per device and is priced at $0.20. A heavy fleet that keeps daily health pays $0.14 per device, about 82% below Greengrass heavy, at a cost of about $0.038.
+- **Heavy is dominated by hourly on-chain health.** Hourly health costs SuiFleet about $0.072 per device and is priced at $0.20. If a heavy fleet keeps daily health instead, it pays SuiFleet $0.14 per device, 82% less than Greengrass heavy's $0.77. SuiFleet's cost for that fleet falls to about $0.04–0.05 per device: $0.038 in network fees plus about $0.009 of RPC on a paid plan.
+- **Gross margin** means (revenue − cost to serve) ÷ revenue. For example, typical at 1,000 devices is ($50 − $9) ÷ $50 = 82%, which is a markup of about 456% on cost.
 - **The equivalents are not feature-identical.** SuiFleet replaces Greengrass's live telemetry with signed on-chain health at the chosen cadence, and its rows include no cost for secure tunnels or Device Defender.
 - **Greengrass totals use list prices,** including IoT Core's lower messaging tiers above 1 billion messages and S3's lower egress tiers. Greengrass's own $0.16 per device has no published volume discount.
 - **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes, and one to several SuiFleet Walrus aggregators.
