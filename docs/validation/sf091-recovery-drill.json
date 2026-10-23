@@ -2,7 +2,7 @@
   "schema": 1,
   "ticket": "SF-091",
   "kind": "isolated-recovery-drill",
-  "recorded_at": "2026-10-23T04:10:12Z",
+  "recorded_at": "2026-10-23T08:11:13Z",
   "host": {
     "python": "3.10.12",
     "system": "Linux"
@@ -13,21 +13,21 @@
       "name": "clean-operator restore and frontend rollback",
       "command": "/usr/bin/python3 -m unittest discover -s scripts/tests -p test_fleet_recovery.py",
       "passed": true,
-      "seconds": 0.105
+      "seconds": 0.112
     },
     {
       "name": "browser discovery, outages, loss and export",
-      "command": "node scripts/test_fleet_recovery.cjs /tmp/suifleet-drill-euesg15c/browser.json",
+      "command": "node scripts/test_fleet_recovery.cjs /tmp/suifleet-drill-rob2pqzp/browser.json",
       "passed": true,
-      "seconds": 1.151,
+      "seconds": 1.281,
       "observed": {
         "scenarios": [
           {
             "name": "clean restore and discovery",
             "devices": 3,
             "pages": 2,
-            "restoreMs": 588.193073,
-            "discoveryMs": 1.4328899999999294,
+            "restoreMs": 675.568896,
+            "discoveryMs": 1.7897040000000288,
             "health": {
               "0x00000000000000000000000000000000000000000000000000000000000000d1": "degraded",
               "0x00000000000000000000000000000000000000000000000000000000000000db": "unreported",
@@ -65,7 +65,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 3.4682840000000397,
+            "recoveryReadMs": 3.46817400000009,
             "archivesLost": 0
           },
           {
@@ -76,7 +76,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 3.855041999999912,
+            "recoveryReadMs": 3.2246779999998125,
             "archivesLost": 0
           },
           {
@@ -87,7 +87,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 4.824302000000216,
+            "recoveryReadMs": 2.8177270000001045,
             "archivesLost": 0
           },
           {
@@ -98,7 +98,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 2.940706999999975,
+            "recoveryReadMs": 3.789241999999831,
             "archivesLost": 0
           },
           {
@@ -109,7 +109,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 3.2193609999999353,
+            "recoveryReadMs": 3.402507000000014,
             "archivesLost": 0
           },
           {
@@ -120,7 +120,7 @@
               "recovery": "retry"
             },
             "after": "available",
-            "recoveryReadMs": 3.1189339999998538,
+            "recoveryReadMs": 3.5742820000000393,
             "archivesLost": 0
           },
           {
@@ -131,7 +131,7 @@
               "recovery": "new_session"
             },
             "after": "available",
-            "recoveryReadMs": 2.8599790000000667,
+            "recoveryReadMs": 2.7138780000000224,
             "archivesLost": 0
           },
           {
@@ -173,7 +173,7 @@
             "name": "customer public export",
             "devices": 3,
             "anchors": 4,
-            "exportMs": 3.523398000000043
+            "exportMs": 3.101265000000012
           },
           {
             "name": "resume without duplicate deployments",
@@ -188,20 +188,20 @@
     },
     {
       "name": "device recovery with the real daemon",
-      "command": "/usr/bin/python3 scripts/test_recovery_ota.py --receipt /tmp/suifleet-drill-euesg15c/device.json",
+      "command": "/usr/bin/python3 scripts/test_recovery_ota.py --receipt /tmp/suifleet-drill-rob2pqzp/device.json",
       "passed": true,
-      "seconds": 45.907,
+      "seconds": 44.483,
       "observed": {
-        "payment_recovery_seconds": 2.708,
-        "rpc_recovery_seconds": 2.03,
+        "payment_recovery_seconds": 2.684,
+        "rpc_recovery_seconds": 2.027,
         "aggregator_outage_outcome": "pending",
         "aggregator_outage_requires_redeploy": false,
-        "aggregator_recovery_seconds": 3.091,
-        "restart_recovery_seconds": 1.16,
+        "aggregator_recovery_seconds": 3.087,
+        "restart_recovery_seconds": 1.162,
         "replaced_key_daemon_exit": 1,
         "replaced_key_refusal": "Error: state belongs to another network/package/device; use a separate state_dir",
         "replaced_key_fresh_state_exit": null,
-        "replaced_key_fresh_state_refusal": "2026-10-23T04:09:43.938626Z  WARN suifleet: Sync failed; retrying without advancing cursor error=DeviceCap is not owned by device key",
+        "replaced_key_fresh_state_refusal": "2026-10-23T08:10:45.212657Z  WARN suifleet: Sync failed; retrying without advancing cursor error=DeviceCap is not owned by device key",
         "replaced_key_signatures_rejected": 0,
         "boundary": "Real daemon with local chain/Walrus simulators; no Walrus/Seal/provider, public-network or physical-device acceptance"
       }
@@ -210,49 +210,49 @@
       "name": "SF-092 expired bytes, verified customer copy and new reference",
       "command": "/usr/bin/python3 scripts/test_budget_ota.py",
       "passed": true,
-      "seconds": 27.652
+      "seconds": 27.659
     },
     {
       "name": "SF-092 failed funding purchase credits nothing; top-up resumes",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_purchase_decline_has_no_credit_and_topup_resumes",
       "passed": true,
-      "seconds": 0.086
+      "seconds": 0.084
     },
     {
       "name": "SF-092 unavailable executor: long submit outage resumes the original intent",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_long_submit_outage_recovers_original_intent_after_restart",
       "passed": true,
-      "seconds": 0.171
+      "seconds": 0.176
     },
     {
       "name": "SF-092 unavailable notifier: bounded retries and notifications",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_retries_and_notifications_are_bounded",
       "passed": true,
-      "seconds": 0.26
+      "seconds": 0.303
     },
     {
       "name": "SF-092 alert queue backpressure, export and acknowledgment",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_full_alert_queue_export_acknowledgment_and_restart",
       "passed": true,
-      "seconds": 0.064
+      "seconds": 0.061
     },
     {
       "name": "SF-092 expired blob never renews or installs",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_expired_blob_never_renews_or_installs",
       "passed": true,
-      "seconds": 0.057
+      "seconds": 0.065
     },
     {
       "name": "SF-092 expiry without effects is not success",
       "command": "/usr/bin/python3 -m unittest test_retention_worker.RetentionTests.test_expiry_without_successful_effects_is_not_success",
       "passed": true,
-      "seconds": 0.078
+      "seconds": 0.068
     }
   ],
   "boundary": "Isolated local simulators and fixtures only; no public network, wallet, production provider, Pi or Mainnet acceptance.",
   "model": "Claude claude-opus-5-5",
-  "source_head": "5eea72f41a65c895b9f1c4db90d8df0b6a5432bb",
-  "producer_pin": "81a4d2e6e8b94a62b7e1b682ba9bdf115367e634",
+  "source_head": "eb767c116edfa8b01325f18359b495e692125b12",
+  "integrated_main": "39ea150a19a469c0edbb1b61ad822a80287a6f47",
   "environment": "suifleet-dev:sf037 (31f727258ccd), docker --network none, uid 1001, debug daemon built with cargo build --locked --bins --examples",
-  "integration_gate": "SF-082/#160 is unmerged; rerun on the actual merged main before Review"
+  "integration_gate": "SF-082/#160 merged (39ea150); drill rerun on the merged main"
 }

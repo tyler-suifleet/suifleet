@@ -3,8 +3,7 @@
   "ticket": "SF-091",
   "kind": "read-only-testnet-recovery-confirmation",
   "model": "Claude claude-opus-5-5",
-  "source_head": "5eea72f41a65c895b9f1c4db90d8df0b6a5432bb",
-  "producer_pin": "81a4d2e6e8b94a62b7e1b682ba9bdf115367e634",
+  "source_head": "eb767c116edfa8b01325f18359b495e692125b12",
   "command": "python3 scripts/live_fleet_recovery.py --wallet ~/.config/suifleet/testnet/agent/client-host.yaml --evidence PATH (fresh suifleet-dev:sf037 container, HOME=/tmp, only client-host.yaml and its keystore mounted read-only)",
   "transactions": [],
   "gas_spent_mist": 0,
@@ -17,9 +16,9 @@
     "chainIdentifier": "4c78adac",
     "fleetId": "0xffd47b80859847b037e82806c49c3850763e4ba9f7bb755020de98af3dd0f722",
     "walrusEpoch": 559,
-    "checkedAt": "2026-10-23T04:08:51.942Z",
-    "discoveredMs": 335,
-    "totalMs": 6470,
+    "checkedAt": "2026-10-23T08:12:09.634Z",
+    "discoveredMs": 714,
+    "totalMs": 7722,
     "devices": [
       {
         "device": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
@@ -51,7 +50,7 @@
     "publicExport": {
       "schema": 1,
       "kind": "suifleet-public-records",
-      "exportedAtMs": 1792728537251,
+      "exportedAtMs": 1792743136206,
       "chainIdentifier": "4c78adac",
       "fleetId": "0xffd47b80859847b037e82806c49c3850763e4ba9f7bb755020de98af3dd0f722",
       "budgetId": "0xc68cbb2d0f071466bc7b8c0a80dc8b49c64068ab7530f7bce66b27a6953da237",
@@ -101,5 +100,6 @@
       "threshold": 2
     },
     "boundary": "Read-only chain/Walrus reads plus owner-policy key release with a signed session; no transaction or plaintext recorded."
-  }
+  },
+  "integrated_main": "39ea150a19a469c0edbb1b61ad822a80287a6f47"
 }
