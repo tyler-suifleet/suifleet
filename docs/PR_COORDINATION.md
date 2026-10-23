@@ -675,3 +675,47 @@ one ordinary worker. Other observed failures appear as `ci-failed` with their
 actual repair responsibility. Tests use offline Git repositories, real worker
 and fake model processes and a fake lock engine with the real lease semantics;
 no tests install or restart services.
+
+
+### Provider model-capacity recovery (SF-117)
+
+The dispatcher automatically retries a managed implementation only after its CLI
+has durably exited nonzero with an explicit terminal provider model-capacity error.
+It recognizes the anchored Codex `ERROR: Selected model is at capacity. Please try
+a different model.` line (including the known terminal rollout-recording diagnostic)
+and matching CLI terminal error envelopes. It reads at most 32 KiB from the output
+tail. Usage/authentication failures, signals/timeouts, malformed receipts, user
+handoffs, quoted assistant/tool content and unknown trailing errors do not qualify.
+Those exits retain the existing quarantine behavior; models are never switched.
+
+Recovery preserves the same atomic claim, configured family/model/command,
+branch/worktree, staged changes, unstaged changes and untracked files. It performs
+no reset, clean, checkout or automatic merge. The original receipts remain intact.
+Before replacement, it verifies the original PID/start identity and entire session
+are stopped, finds detached same-claim processes, asserts the unchanged published
+In Progress claim, rejects owner-held resource leases and unfinished git operations,
+and yields to existing CI redirects/dependency resumes/review repairs. It never
+stops or signals a process. Unavailable or unreadable verification defers recovery;
+Review/Done/Blocked or changed ownership cancels the pending recovery.
+
+`capacity_retries` in the private dispatch database persists the source receipt,
+claim-token digest, attempts, deadline and launch state. Three replacements per
+claim use 60/120/240-second exponential delays, shared across all replacement run
+names and daemon restarts. Retained valid claims are heartbeated during waits.
+Configured implementation capacity still applies; due recoveries precede successor
+claims and bypass their idle/quarantine backoff. A persistent 60-second family/project
+stagger prevents simultaneous capacity failures from launching a replacement storm.
+An atomic launch intent reserves a single replacement before spawning. An uncertain
+or interrupted launch is never replayed automatically. Existing pre-upgrade
+quarantined/operator-held runs are not retroactively unquarantined; the mechanism
+applies to newly reconciled managed exits. Exhaustion retains the claim
+for explicit recovery and does not reset the budget.
+
+`fleet-status` displays capacity backoff, attempt/deadline, refusal reason and
+exhaustion, without reading output logs or displaying tokens. A stopped backoff
+receipt is a retained claim, not a running worker; the actual replacement counts
+once against implementation capacity. Runtime installation follows reviewed merge
+and the normal activation mechanism. Validation uses offline classifier/fence tests,
+real fake-CLI exits, surviving descendants, repeated replacement exhaustion and
+read-only matching against the preserved SF-082 incident output; no provider outage
+or shared-wallet/hardware mutation is induced for this test.
