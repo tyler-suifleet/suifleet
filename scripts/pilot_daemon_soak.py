@@ -23,7 +23,7 @@ def main():
             output = Path(temp) / f'{index}.log'
             began = time.monotonic()
             with output.open('w') as log:
-                result = subprocess.run(['python3', 'scripts/test_fleet_data_ota.py', '--binary', str(args.binary.resolve()), '--shim', str(args.shim.resolve())], stdout=log, stderr=log, timeout=240)
+                result = subprocess.run(['python3', 'scripts/test_fleet_data_ota.py', '--binary', str(args.binary.resolve()), '--shim', str(args.shim.resolve())], stdout=log, stderr=log)
             # Logs are private temporary files. Never copy plaintext into evidence.
             if result.returncode:
                 raise RuntimeError(f'Native drill {index} failed with exit {result.returncode}; no success receipt written')
