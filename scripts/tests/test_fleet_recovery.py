@@ -128,12 +128,13 @@ class RollbackTests(unittest.TestCase):
         self.directory.cleanup()
 
     def retained(self, files, **changes):
-        path = self.tmp / 'retained.json'
+        # One file per receipt: cases are built before any of them runs.
+        path = self.tmp / f'retained-{len(list(self.tmp.iterdir()))}.json'
         path.write_text(json.dumps(self.current | {'files': files} | changes))
         return path
 
-    def rollback(self, retained):
-        return run(['rollback', '--build-receipt', str(PUBLIC['build_receipt']), '--retained-build-receipt', str(retained),
+    def rollback(self, retained, current=PUBLIC['build_receipt']):
+        return run(['rollback', '--build-receipt', str(current), '--retained-build-receipt', str(retained),
                     '--publication-receipt', str(PUBLIC['publication_receipt'])])
 
     def test_rollback_only_to_a_verified_earlier_release_of_the_same_deployment(self):
@@ -146,11 +147,26 @@ class RollbackTests(unittest.TestCase):
             'never published': self.retained({'/index.html': {'sha256': '0' * 64, 'bytes': 1}}),
             'current release': self.retained(self.current['files']),
             'other deployment': self.retained(self.publication['phases'][1]['files'], deployment_manifest_sha256='0' * 64),
+            'other storage bindings': self.retained(self.publication['phases'][1]['files'], fleet_storage_sha256='0' * 64),
+            'storage binding removed': self.retained(self.publication['phases'][1]['files'], fleet_storage_sha256=None),
+            'other call package': self.retained(self.publication['phases'][1]['files'], call_package_id='0x99'),
         }.items():
             with self.subTest(name):
                 code, _, err = self.rollback(retained)
                 self.assertEqual(code, 1, name)
                 self.assertTrue(err.startswith('refused:'))
+
+    def test_current_receipt_must_be_the_published_latest_release(self):
+        retained = self.retained(self.publication['phases'][1]['files'])
+        unpublished = self.tmp / 'unpublished-current.json'
+        unpublished.write_text(json.dumps(self.current | {'files': {'/index.html': {'sha256': '1' * 64, 'bytes': 1}}}))
+        earlier = self.tmp / 'earlier-current.json'
+        earlier.write_text(json.dumps(self.current | {'files': self.publication['phases'][2]['files']}))
+        for name, current in {'unpublished current file map': unpublished, 'earlier phase presented as current': earlier}.items():
+            with self.subTest(name):
+                code, _, err = self.rollback(retained, current)
+                self.assertEqual(code, 1, name)
+                self.assertTrue(err.startswith('refused:'), err)
 
 
 if __name__ == '__main__':

@@ -107,9 +107,11 @@ action:
 **Bad frontend release.** If a served export differs from its build receipt,
 the release is bad. If a reviewed release misbehaves, run
 `fleet_recovery.py rollback --build-receipt CURRENT --retained-build-receipt
-PREVIOUS --publication-receipt RECEIPT`. It accepts only an earlier phase that
-was verified on the same Site and binds the same deployment, fleet and Seal
-settings. A different binding is a deployment change, not a rollback. Then run
+PREVIOUS --publication-receipt RECEIPT`. CURRENT must be the receipt the
+publication names and its latest verified phase serves. It accepts only an
+earlier phase that was verified on the same Site and binds the same chain, call
+package, deployment, fleet, Seal and storage settings. A different, added or
+removed binding is a deployment change, not a rollback. Then run
 `live_walrus_site.py --operation rollback` under its usual authorization and
 preflight. Verify every resource and route before any domain change. Rollback
 costs new transactions and storage.

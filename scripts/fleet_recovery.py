@@ -60,6 +60,22 @@ def releases(publication, site_id=None):
     return result
 
 
+def current_release(publication, receipt_text, receipt):
+    """The receipt the publication names, served by its latest verified phase."""
+    if publication.get('build_receipt_sha256') != digest(receipt_text.encode()):
+        raise RecoveryError('publication receipt does not name this build receipt')
+    published = releases(publication, publication.get('site_id'))
+    if published[-1]['files_sha256'] != files_digest(receipt['files']):
+        raise RecoveryError('the latest verified Site phase does not serve this build; select the published receipt')
+    return published
+
+
+# Every binding a frontend build pins; a change in any of them (including one
+# appearing or disappearing) is a deployment change, not a frontend rollback.
+BINDINGS = ('chain_identifier', 'call_package_id', 'deployment_manifest_sha256', 'fleet_data_sha256',
+            'seal_settings_sha256', 'fleet_storage_sha256')
+
+
 def restore(args):
     manifest = json.loads(public(args.manifest))
     validate(manifest)
@@ -94,11 +110,7 @@ def restore(args):
         raise RecoveryError('build receipt is for another chain or call package')
     if publication.get('chain') not in (None, manifest['chain_identifier']):
         raise RecoveryError('publication receipt is for another chain')
-    if publication.get('build_receipt_sha256') != digest(receipt_text.encode()):
-        raise RecoveryError('publication receipt does not name this build receipt')
-    published = releases(publication, publication.get('site_id'))
-    if published[-1]['files_sha256'] != files_digest(receipt['files']):
-        raise RecoveryError('the latest verified Site phase does not serve this build; select the published receipt')
+    published = current_release(publication, receipt_text, receipt)
     exported = None
     if args.export:
         export = Path(args.export)
@@ -125,16 +137,19 @@ def restore(args):
 
 def rollback(args):
     retained = json.loads(public(args.retained_build_receipt))
-    current = json.loads(public(args.build_receipt))
+    current_text = public(args.build_receipt)
+    current = json.loads(current_text)
     publication = json.loads(public(args.publication_receipt))
-    published = releases(publication, publication.get('site_id'))
+    if publication.get('chain') not in (None, current.get('chain_identifier')):
+        raise RecoveryError('publication receipt is for another chain')
+    published = current_release(publication, current_text, current)
     target = files_digest(retained['files'])
     if target == files_digest(current['files']):
         raise RecoveryError('the retained receipt is the current release; nothing to roll back')
     matches = [release for release in published[:-1] if release['files_sha256'] == target]
     if not matches:
         raise RecoveryError('the retained receipt was never verified as published to this Site; do not roll back to it')
-    for field in ('chain_identifier', 'deployment_manifest_sha256', 'fleet_data_sha256', 'seal_settings_sha256'):
+    for field in BINDINGS:
         if retained.get(field) != current.get(field):
             raise RecoveryError(f'rollback would change {field}; a deployment change is not a frontend rollback')
     return {'schema': 1, 'kind': 'suifleet-frontend-rollback-plan', 'site_id': publication.get('site_id'),
