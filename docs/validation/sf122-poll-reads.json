@@ -39,8 +39,25 @@
       "head_total_response_bytes": 645,
       "assertions": [
         "No successful idle poll performs validation/event reads",
-        "Revocation, rotation, stale UpgradeCap, simulated chain reset and missing DeviceCap force fail-closed revalidation within the next poll"
-      ]
+        "Revocation, rotation, stale UpgradeCap, simulated chain reset and missing DeviceCap force fail-closed revalidation within the next poll",
+        "Already reported rejection history does not drive admission timers or remain in the live deferred watch set"
+      ],
+      "post_rejection_regression": {
+        "before_fix_revision": "4a2f0a9ee14a74926f95ac1c5b0e77575a4cb320",
+        "polls": 3,
+        "before_requests": {
+          "GetServiceInfo": 3,
+          "GetObject": 45,
+          "ListEvents": 3,
+          "BatchGetObjects": 3
+        },
+        "after_requests": {
+          "GetServiceInfo": 0,
+          "GetObject": 0,
+          "ListEvents": 0,
+          "BatchGetObjects": 3
+        }
+      }
     },
     {
       "fixture": "Fleet simulator; health and archives enabled, not due",

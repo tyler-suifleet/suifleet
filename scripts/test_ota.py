@@ -426,6 +426,25 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                         batches = sim.reads["BatchGetObjects"]
                         wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 2, f"{label} did not return to batch polling", process, timeout=5)
                         print(f"PASS: {label} revalidated within one poll; no apply or download")
+                    # Failed schema resolution leaves a historical notice;
+                    # an already reported outcome must not keep admission due.
+                    sim.schema_fields["0x200"] = {"schema_version": "99"}
+                    sim.allow_reports = True
+                    sim.fail_execution = False
+                    sim.add("0x200")
+                    sim.groups[GROUP]["device_ids"].append("0xbad")  # Wake discovery.
+                    wait_for(lambda: state().get("deployments", {}).get("0x200", {}).get("reported"),
+                             "rejected recipe did not report", process)
+                    assert state()["deployments"]["0x200"]["status"] == 2 and count() == 0
+                    batches = sim.reads["BatchGetObjects"]
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 2,
+                             "rejection did not settle", process)
+                    before = dict(sim.reads)
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= before["BatchGetObjects"] + 3,
+                             "idle polls after rejection missing", process)
+                    delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    print(f"PASS: reported rejection history returns to one batch per idle poll: {delta}")
                     stop(process)
                     assert not sim.errors, sim.errors
                     return

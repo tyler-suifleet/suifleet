@@ -775,7 +775,9 @@ async fn poll(
         cfg.device.device_object_id.clone(),
     ];
     watch_roots.extend(journal.state.groups.iter().cloned());
-    watch_roots.extend(journal.state.deferred.keys().cloned());
+    watch_roots.extend(journal.state.deferred.iter().filter_map(|(id, notice)| {
+        (!notice.terminal && !journal.state.deployments.contains_key(id)).then(|| id.clone())
+    }));
     let sleeping_roots = cfg
         .fleet_data
         .as_ref()
@@ -799,8 +801,8 @@ async fn poll(
         .await?;
     let pending_work = !journal.state.initialized
         || journal.state.deployments.values().any(|o| !o.reported)
-        || journal.state.deferred.values().any(|d| {
-            if d.terminal {
+        || journal.state.deferred.iter().any(|(id, d)| {
+            if d.terminal || journal.state.deployments.contains_key(id) {
                 return false;
             }
             match d.control.reason(telemetry::now_ms(), d.notified_ms) {
