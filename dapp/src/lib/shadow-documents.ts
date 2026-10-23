@@ -61,7 +61,7 @@ export function jsonEqual(a: JsonValue, b: JsonValue): boolean {
   return a === b;
 }
 
-/** The desired keys that differ from reported (suifleet-edge `shadows::delta`). */
+/** The desired keys that differ from reported (the daemon shadow store's `delta`). */
 export function shadowDelta(desired: JsonObject | null, reported: JsonObject | null): JsonObject {
   const out: JsonObject = Object.create(null);
   for (const [key, value] of Object.entries(desired ?? {})) {

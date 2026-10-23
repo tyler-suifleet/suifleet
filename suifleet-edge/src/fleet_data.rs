@@ -86,7 +86,7 @@ pub struct ShadowDocument {
     pub name: String, pub version: u64, pub updated_ms: u64,
     pub desired: Option<serde_json::Map<String, serde_json::Value>>,
     pub reported: Option<serde_json::Map<String, serde_json::Value>>,
-    /// The desired keys that differ from reported (`shadows::delta`).
+    /// The desired keys that differ from reported (the shadow store's `delta` function).
     pub delta: serde_json::Map<String, serde_json::Value>,
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
