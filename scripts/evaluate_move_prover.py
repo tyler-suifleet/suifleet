@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--prover-source", type=Path, required=True)
     parser.add_argument("--framework-packages", type=Path, required=True)
     parser.add_argument("--prover-binary", type=Path, required=True)
+    parser.add_argument("--artifacts", type=Path, help="Copy proof-only generated solver artifacts to a new private directory")
     parser.add_argument("--include-pending-enrollment", action="store_true", help="Run the unverified full enrollment obligation")
     parser.add_argument("--include-name-absence", action="store_true", help="Reproduce stronger untyped name-absence obligations (not verified)")
     parser.add_argument("--timeout", type=int, default=30, help="Per-obligation hard solver timeout in seconds")
@@ -72,6 +73,8 @@ def main():
     parser.add_argument("--functions", nargs="+", help="Exact prover target filter; does not change implementation sources")
     parser.add_argument("--mutation", choices=MUTATIONS, help="Negative control in temporary implementation copy; expect solver failure")
     args = parser.parse_args()
+    if args.artifacts and args.artifacts.exists():
+        raise SystemExit("Artifact destination must not already exist")
     source = args.prover_source.resolve()
     framework = args.framework_packages.resolve()
     revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
@@ -154,7 +157,14 @@ def main():
         env = dict(os.environ, SUI_PROVER_FRAMEWORK_PATH=str(libraries))
         result = subprocess.run([str(args.prover_binary.resolve()), "--path", str(package / "security-specs"),
                                  "--timeout", str(args.timeout), "--force-timeout",
+                                 *(["--keep-temp"] if args.artifacts else []),
                                  *[part for function in (args.functions or []) for part in ("--functions", function)]], env=env, cwd=temporary, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if args.artifacts:
+            args.artifacts.mkdir(mode=0o700, parents=True)
+            for artifact in temporary.rglob("*.bpl"):
+                destination = args.artifacts / artifact.relative_to(temporary)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(artifact, destination)
         print(result.stdout, end="", flush=True)
         if "Nothing to verify" in result.stdout:
             raise SystemExit("No matching proof targets: refusing an empty verification run")

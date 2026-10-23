@@ -27,6 +27,21 @@ index 8b38a9fe7181035d0a1adf90aea28f86932cd341..a87b3bee67c4b4a53f42e928e7482804
  
      // dynamic_field function names
      const DYNAMIC_FIELD_ADD_FUNCTION_NAME: &'static str = "add";
+diff --git a/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs b/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
+index f5f833bb9a14ed0caa379edbe05a7c4eec2ff626..b9c32f706d9fe618c007673756edfbbbd2d6cc1e 100644
+--- a/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
++++ b/crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
+@@ -422,6 +422,10 @@ fn collect_dynamic_field_info(
+                         srcs[0] = builder.emit_let_read_ref(srcs[0]);
+                     }
+                     type_inst.push(obj_type.clone());
++                } else if let Some(ref uid_ty) = uid_type {
++                    // Match the collector's unresolved-parent UID fallback.
++                    // Keep the original UID source, as in the use_uid branch.
++                    type_inst.push(uid_ty.clone());
+                 }
+                 builder.emit(Bytecode::Call(
+                     attr_id,
 diff --git a/packages/sui-specs/sources/sui-framework/funds_accumulator.move b/packages/sui-specs/sources/sui-framework/funds_accumulator.move
 index 0189420ebcbe9ac86fd0e8ae208cbddf72708d7c..49562748fa32a07c7f51f74f73cc89b76d35de69 100644
 --- a/packages/sui-specs/sources/sui-framework/funds_accumulator.move

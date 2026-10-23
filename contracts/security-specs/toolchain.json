@@ -33,7 +33,7 @@
   "rust": "1.94.0",
   "status": "enrollment close/set_limits verified with solver negatives; identity and complete critical proof scope remain unmet",
   "compatibility": {
-    "release-model.patch": "47594401e0716a13bcede029efe0d08adffce3582292b9e294dca49cc320d82c",
+    "release-model.patch": "655b0e1c0602d640618ff115c7df41166fede6690e37531f4b9c0a4768a55fa1",
     "integer.move": "6c629571d86aa27280b7bc023405e600ddc0a3e15f855f8810f2a23f2ee433a1",
     "registry-spec-helpers.move": "356c74b4159ee19989b51512a483cfdf9e08552359227df10e2ce6dd057bd979",
     "dof-spec-helpers.move": "4dba6fc701a14c4d72b27deac7e29cac682e51dc1326004e7df6e7c64ff13999",
