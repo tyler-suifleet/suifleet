@@ -58,6 +58,16 @@ for (const [n, device] of devices.entries()) {
   const bad = {getObjects: async ({objectIds}) => ({objects:objectIds.map(objectId => ({...objects.get(objectId), type:'0x2::object::ID'}))})};
   await assert.rejects(budget.fetchAccounts(bad,budgetId,[devices[0]]), /index type/);
   assert.deepEqual(await budget.fetchAccounts({getObjects:async ({objectIds})=>({objects:objectIds.map(i=>new ObjectError(i,'missing',{reason:'notFound'}))})},budgetId,[devices[0]]),[undefined]);
+  const firstAccount = [...objects.values()].find(o=>o.type===origin('fleet_budget::GasAccount'));
+  const accountValue = protocol.fleet_budget_GasAccountBcs.parse(firstAccount.content);
+  objects.set(firstAccount.objectId,{...firstAccount,content:protocol.fleet_budget_GasAccountBcs.serialize({...accountValue,budget_id:id('0x999')}).toBytes()});
+  await assert.rejects(budget.fetchAccounts(client,budgetId,[devices[0]]),/another budget or device/);
+  objects.set(firstAccount.objectId,firstAccount);
+  const firstWriter = [...objects.values()].find(o=>o.type===`${config.typeOrigin}::fleet_data::DeviceData`);
+  const writerValue = data.DeviceDataBcs.parse(firstWriter.content);
+  objects.set(firstWriter.objectId,{...firstWriter,content:data.DeviceDataBcs.serialize({...writerValue,device_id:id('0x999')}).toBytes()});
+  assert.equal((await data.fetchChainHealth(client,config,[devices[0]]))[devices[0]].status,'unavailable','cross-device writer cannot become health');
+  objects.set(firstWriter.objectId,firstWriter);
   const { budgetedFetch } = load('lib/rpc-budget.ts');
   let clock = 0; const starts = [];
   const fetcher = budgetedFetch(async () => { starts.push(clock); return new Response('ok'); }, () => clock, async ms => {clock+=ms;});

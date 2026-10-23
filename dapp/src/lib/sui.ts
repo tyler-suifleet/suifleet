@@ -263,7 +263,8 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
 
 export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise<DeviceGroup[]> {
   await verifyDeployment(client);
-  const events = await allEvents(client, moveType("device_group::GroupCreated"), owner);
+  // Creation sender is not the current admin after recipient-confirmed handover.
+  const events = await allEvents(client, moveType("device_group::GroupCreated"));
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
     .map((event) => event.group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
@@ -304,7 +305,8 @@ function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
 
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
-  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT, owner)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
+  // Delegated creation and handover can make creator differ from event sender.
+  const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
   const liveEvents = events.filter((event) => {

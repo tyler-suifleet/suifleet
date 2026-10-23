@@ -22,9 +22,11 @@ Inventory uses `listOwnedObjects` and batches custodied Device objects. Groups,
 policies, catalogs and deployments discover IDs through typed gRPC `ListEvents`
 with a durable ascending watermark. The cursor and decoded event bytes are saved
 atomically in browser local storage, scoped by chain, endpoint, call package, type
-and sender. Owner-created streams combine type and sender predicates. Cross-sender
-streams (device gas draws/enrollments and fleet-wide alert deployments) retain a
-type filter: filtering those by the operator would discard legitimate events.
+and sender. Immutable publisher/operator streams (catalogs and enrollment policies) combine
+type and sender predicates. Cross-sender streams (gas draws/enrollments, groups
+and deployments) retain type filters: group admins and deployment creators can
+change during handover, and delegated deployments are sent by another address.
+Filtering their creation events by the current operator would hide valid state.
 Concurrent scans of the same stream share one request. Empty scan pages advance
 the watermark; missing/repeated cursors and incomplete streams fail visibly.
 A failed scan does not commit its partial results. Storage/quota failures and

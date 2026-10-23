@@ -27,6 +27,7 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.deepEqual(devices.map((d) => [d.objectId, d.ownerCapId, d.registeredAt]), [[custodied, ownerCap, 124], [device, undefined, 123]]);
   assert.deepEqual(ownedCursors, [undefined, "owned-next"]);
   c.listEvents = async (args) => {
+    assert.equal(args.filter.sender, undefined, "mutable admin/creator discovery must include other senders");
     eventCursors.push(args.before);
     if (!args.before) return { events: [], hasNextPage: true, endCursor: "scanned-next" };
     const bytes = args.filter.eventType.endsWith("GroupCreated") ? schema.GroupCreatedBcs.serialize({ group_id: group, name: "Lab", admin: owner }).toBytes() : schema.DeploymentCreatedBcs.serialize(event).toBytes();
@@ -44,6 +45,16 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.equal(deployments[0].timestampMs, 456); assert.equal(deployments[0].receiptsVerified, true);
   assert.deepEqual(deployments[0].resolvedDeviceIds, [device]);
   assert.deepEqual(deployments[0].statuses, { [device]: 1 });
+  // A handed-over group/deployment is still discovered from its original
+  // creation event, even though its current admin/creator is another owner.
+  const readObjects = c.getObjects, recipient = id("0xb");
+  c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId=>({objectId,
+    type:`${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content:objectId===group
+      ? schema.GroupBcs.serialize({...schema.GroupBcs.parse(groupBytes),admin:recipient}).toBytes()
+      : schema.DeploymentBcs.serialize({...schema.DeploymentBcs.parse(deploymentBytes),creator:recipient}).toBytes()}))});
+  assert.equal((await sui.fetchGroups(c,recipient))[0].admin,recipient);
+  assert.equal((await sui.fetchDeploymentEvents(c,recipient))[0].creator,recipient);
+  c.getObjects = readObjects;
   // Empty recipe bytes are valid in legacy records; only the authenticated schema
   // selects catalog cleanup. Exercise both queries and actual generated Move calls.
   for (const schemaVersion of ["1", "2", "3"]) {
