@@ -325,6 +325,7 @@ test-manifest:
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
+	$(RUN) node scripts/test_fleet_recovery.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
 	$(RUN) node scripts/test_fleet_relay.cjs
