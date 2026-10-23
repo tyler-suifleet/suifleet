@@ -1,0 +1,292 @@
+{
+  "ticket": "SF-128",
+  "model": "gpt-6.1-sol",
+  "source_commit": "207b072",
+  "source_sha256": "d5d9bf95028a68bc1879fb5b34370a6deef7ba75625c606d6e992f5b7ddafc45",
+  "environment": {
+    "container": "suifleet-dev:sf035",
+    "sui": "1.81.1-e04cf9aa915c",
+    "node": "22.22.2",
+    "network": "none; disposable loopback chain; no host ports",
+    "walrus": "real upstream layouts and storage/registration code, deterministic committee/prices/epoch fixture; no node certification"
+  },
+  "scale": {
+    "check": "SF128 real protected registration gas from 10 through 10000",
+    "measurements": [
+      {
+        "protected_blobs": 10,
+        "digest": "E1EHHhTEhU5ShzMASWBDQBLsqajkuadAUqrk79nFgYbd",
+        "gas": {
+          "computationCost": "1670000",
+          "storageCost": "46747600",
+          "storageRebate": "31360032",
+          "nonRefundableStorageFee": "316768"
+        }
+      },
+      {
+        "protected_blobs": 100,
+        "digest": "ASEUJExapt2KCuJCMNbc8Bg27u7FcHoyx3zzZJSTAw4W",
+        "gas": {
+          "computationCost": "1670000",
+          "storageCost": "46747600",
+          "storageRebate": "31360032",
+          "nonRefundableStorageFee": "316768"
+        }
+      },
+      {
+        "protected_blobs": 1000,
+        "digest": "74ZQJhikAFtcV9U5hSfYquVsJo4JSkRHH5kpMvzGFDfZ",
+        "gas": {
+          "computationCost": "1670000",
+          "storageCost": "46747600",
+          "storageRebate": "31360032",
+          "nonRefundableStorageFee": "316768"
+        }
+      },
+      {
+        "protected_blobs": 10000,
+        "digest": "CYTx5MSbjCPG25ixZitaVGGANurzTrmHym2ZPfE5aT7G",
+        "gas": {
+          "computationCost": "1670000",
+          "storageCost": "46747600",
+          "storageRebate": "31360032",
+          "nonRefundableStorageFee": "316768"
+        }
+      }
+    ]
+  },
+  "scale_command": "python3 scripts/test_protocol_localnet.py --retention-scale-upgrade",
+  "scale_phase_result": "passed: 10001 real registrations with renewal storage; 10/100/1000/10000 single-call gas identical",
+  "combined_invocation_result": "Scale, populated migration, expiry and old-call checks completed; later device-target negative initially hit immutable shared Clock input validation. Fixed explicit input mutability and reran relevant populated upgrade/expiry/device path with --retention-keyed-upgrade. Full combined invocation is not reported as passed.",
+  "tests": {
+    "move": "61/61",
+    "python_retention": "14/14",
+    "node_retention": "pass: SDK/BCS, origins, 100-page/10000 records",
+    "fleet_budget": "pass",
+    "interfaces": "pass: 11 modules",
+    "frontend_typecheck_and_build": "pass under pinned Node22"
+  },
+  "keyed_upgrade": {
+    "check": "populated-object compatible storage upgrade and old-package retirement",
+    "receipts": [
+      {
+        "label": "publish wal",
+        "digest": "FVVVU8ZY2Zof2Y6uNALX2MHswBMBqFVDdhyCuDWvGaDP",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "24289600",
+          "storageRebate": "4890600",
+          "nonRefundableStorageFee": "49400"
+        }
+      },
+      {
+        "label": "publish walrus",
+        "digest": "G47kx4mEkuLyeD5GwW6P8zb82bbWcV88LigpvzJMmkcj",
+        "gas": {
+          "computationCost": "6700000",
+          "storageCost": "678801600",
+          "storageRebate": "978120",
+          "nonRefundableStorageFee": "9880"
+        }
+      },
+      {
+        "label": "initialize isolated Walrus fixture",
+        "digest": "4QNAbtR3YxeYQvvGVK6i9MEyDfnbxPCKxvx3RiDfPMsB",
+        "gas": {
+          "computationCost": "1360000",
+          "storageCost": "24791200",
+          "storageRebate": "978120",
+          "nonRefundableStorageFee": "9880"
+        }
+      },
+      {
+        "label": "publish contracts",
+        "digest": "9DCoNviLSQN6DYwRr5GG3Yzs9b5gssCV3E3UnCUg2LYU",
+        "gas": {
+          "computationCost": "2980000",
+          "storageCost": "325226800",
+          "storageRebate": "978120",
+          "nonRefundableStorageFee": "9880"
+        }
+      },
+      {
+        "label": "publish fleet_storage",
+        "digest": "PbbcMVz7VZspkbm1GAhKKwVMDjp8AAnCxz4SM46s2t6",
+        "gas": {
+          "computationCost": "2650000",
+          "storageCost": "76874000",
+          "storageRebate": "978120",
+          "nonRefundableStorageFee": "9880"
+        }
+      },
+      {
+        "label": "create budget",
+        "digest": "DeocXvChz5f6E5HzefhH6H2r34MaA3593mtA3KH42y6V",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "5335200",
+          "storageRebate": "978120",
+          "nonRefundableStorageFee": "9880"
+        }
+      },
+      {
+        "label": "create v1 storage",
+        "digest": "Cc15pqiKwfH8iCdmLyYiAKDesXYt25TTT4YF7YkhiEgV",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4864000",
+          "storageRebate": "2595780",
+          "nonRefundableStorageFee": "26220"
+        }
+      },
+      {
+        "label": "populate v1 pool and wrapped blob with real registration",
+        "digest": "3EXTxYqArpVPVYbFedwx78368gUCm2VnXMH4geNhfZEY",
+        "gas": {
+          "computationCost": "1710000",
+          "storageCost": "35834000",
+          "storageRebate": "27236880",
+          "nonRefundableStorageFee": "275120"
+        }
+      },
+      {
+        "label": "compatible storage upgrade",
+        "digest": "6w5w76gPUAHPocqk6ajxdjt8JcBy11qZph2dShCAbuHD",
+        "gas": {
+          "computationCost": "3200000",
+          "storageCost": "121296000",
+          "storageRebate": "2595780",
+          "nonRefundableStorageFee": "26220"
+        }
+      },
+      {
+        "label": "migrate existing storage",
+        "digest": "6vsvpFE3QhmZJNQJpkWAA7HmnP4ZgrPYuDBV5CsDcXW3",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "5228800",
+          "storageRebate": "5176512",
+          "nonRefundableStorageFee": "52288"
+        }
+      },
+      {
+        "label": "v2 registration on migrated pool with v1-origin event",
+        "digest": "ETnfbH86wptCAA2zyXUGNV7rykRiyJDTWqSnRaptXeQS",
+        "gas": {
+          "computationCost": "1630000",
+          "storageCost": "34526800",
+          "storageRebate": "26303904",
+          "nonRefundableStorageFee": "265696"
+        }
+      },
+      {
+        "label": "configure on existing object",
+        "digest": "ERHRDvNmieGyrQwGssnJznz7fQaUU2psMbeg2goNuT97",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "12524800",
+          "storageRebate": "5176512",
+          "nonRefundableStorageFee": "52288"
+        }
+      },
+      {
+        "label": "old-package withdrawal rejected after migration",
+        "digest": "6VpyD5vChqeQaLqRZ8HQ8LCH7cHz56J8VKjP1zPhRurB"
+      },
+      {
+        "label": "populate v2 protected vector and real prepaid resources",
+        "digest": "6ZrTtsEwQ16GzAA5gZxwJJPq3A7Ed7iA7fpP8uyxMVuE",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "49886400",
+          "storageRebate": "34821072",
+          "nonRefundableStorageFee": "351728"
+        }
+      },
+      {
+        "label": "compatible populated v2 to v3 upgrade",
+        "digest": "AvMXY35GBLvFniEZRgW2nx3hQ6PPDxM7N7oFmnknJKLq",
+        "gas": {
+          "computationCost": "3280000",
+          "storageCost": "120536000",
+          "storageRebate": "2595780",
+          "nonRefundableStorageFee": "26220"
+        }
+      },
+      {
+        "label": "owner migration removes only legacy vector",
+        "digest": "92nn8jP84JACZrUHz7Rr55jZBA6fqEbe2StYsPkwGYNU",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "5228800",
+          "storageRebate": "7824960",
+          "nonRefundableStorageFee": "79040"
+        }
+      },
+      {
+        "label": "expired v2 protected blobs do not block new v3 retained registration",
+        "digest": "tvjhTLLSuktWkiTEeLWXwEFkUfcgMQ4qwKFLn5FpGqs",
+        "gas": {
+          "computationCost": "1690000",
+          "storageCost": "46747600",
+          "storageRebate": "31360032",
+          "nonRefundableStorageFee": "316768"
+        }
+      },
+      {
+        "label": "expired selected blob renewal still fails closed",
+        "digest": "GCU8SxNhyWXP2m7DPYJCSZaiDtHeTYLzYU6Fc61yTDau"
+      },
+      {
+        "label": "v2 mutation rejects migrated v3 storage",
+        "digest": "33TtTkQ98ydiM3ngrm9CqmoTRgpUC3NMwAwtH9uMPgoC"
+      },
+      {
+        "label": "enroll actual device for finite fully-paid admission regression",
+        "digest": "HdPRsqpQ9XhFqk2ZzuAerGU5VdE4MrU4nZfrFMFVyCRg",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "25733600",
+          "storageRebate": "7042464",
+          "nonRefundableStorageFee": "71136"
+        }
+      },
+      {
+        "label": "configure already-passed absolute device target at epoch six",
+        "digest": "EVUMwgai58fiTkRj9woQZ6Cyj4rXmLGFATqbTArpLBdj",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "10868000",
+          "storageRebate": "8359164",
+          "nonRefundableStorageFee": "84436"
+        }
+      },
+      {
+        "label": "expired absolute admission target rejects fully-paid archive",
+        "digest": "2PqfEbcB2Ws9UTUKQ4EhbBSdKXjYUffSc4SXgnL9VQrP"
+      },
+      {
+        "label": "approve live target already covered by initial pool purchase",
+        "digest": "6w2fQkC65yZDW9WSjhBqXt5np14oNgbrXgguxCQDdiED",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "10868000",
+          "storageRebate": "10759320",
+          "nonRefundableStorageFee": "108680"
+        }
+      },
+      {
+        "label": "actual device fully-paid archive admission without renewal",
+        "digest": "9S4F5Mm6NytH66ys4pHMkb1vpznF3aw8zZoKJHpjQ51A",
+        "gas": {
+          "computationCost": "1660000",
+          "storageCost": "43122400",
+          "storageRebate": "29433888",
+          "nonRefundableStorageFee": "297312"
+        }
+      }
+    ]
+  },
+  "keyed_upgrade_command": "python3 scripts/test_protocol_localnet.py --retention-keyed-upgrade",
+  "keyed_upgrade_result": "passed; exit 0"
+}

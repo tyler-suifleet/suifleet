@@ -7,10 +7,10 @@ required exact-head CI and independent review remain separate gates.
 
 ## Authority and finite reserves
 
-The core budget remains SF-083 interface v1. Storage mutations use version 2.
+The core budget remains SF-083 interface v1. Storage mutations use version 3 (SF-128).
 `FleetStorage`, `BlobRecord`, existing public signatures and existing type origins
-remain unchanged. An owner explicitly calls `migrate` on v1 storage; previous
-version-1 mutation functions then reject it. New `RetentionKey`, `Retention`,
+remain unchanged. An owner explicitly calls `migrate` on v1/v2 storage; previous
+version-1 and version-2 mutation functions then reject it. New `RetentionKey`, `Retention`,
 `RenewalKey`, `Renewal`, `PrepaidKey`, `PrepaidCountKey`, `ProtectedBlobsKey` and events have their own introduction-package origin.
 Configure `NEXT_PUBLIC_FLEET_STORAGE_ORIGIN` to the original storage package,
 `NEXT_PUBLIC_FLEET_STORAGE_PACKAGE` to the current call package and
@@ -39,14 +39,15 @@ lists every fleet record and unprotected entries. Owner-selected targets are not
 an automatic dependency resolver for references outside this storage.
 
 Discretionary purchases require complete fleet coverage, actual purchased renewal
-capacity for every pending target and balances covering execution rewards. A bounded
-on-chain index checks that no protected blob has expired; expired records require
-owner restoration/replacement or explicit release before new admission. Legacy registrations stop
+capacity for every pending target and balances covering execution rewards. Expiry is
+checked only when renewing the selected blob; expired records require owner
+restoration/reference review without halting unrelated admission. Legacy registrations stop
 while retention is configured. Owner uploads use `register_retained_fleet_blob`
 to register and reserve a new target atomically; insufficient reserves abort the
 whole transaction. SF-082 adds owner `configure_device_retention` admission for
 native daemon archives: `register_blob` atomically prepays their owner-selected
-finite target and maximum WAL quote. Without that explicit approval device
+finite target and maximum WAL quote, or records fully purchased coverage when the
+initial purchase reaches that target. Without that explicit approval device
 registrations pause. `clear_device_retention` pauses new archives without deleting
 history. Device receipts remain Sui transactions governed by their gas accounts.
 
@@ -123,7 +124,7 @@ Restart reuses its original bytes/signature/digest and reconciles successful
 effects plus the authoritative new expiry. Submission alone is never success.
 
 The worker allows three attempts per authorized target with exponential backoff,
-at most 1024 blob records and 4 MiB of state. It reserves each new transaction's
+at most 100,000 renewal records and 128 MiB of private state (64 MiB transport response). These are local executor safety bounds, not chain admission limits. It reserves each new transaction's
 whole gas budget against its non-replenishing spend ceiling. Refunds and top-ups
 do not reset that ceiling. Inspection and an explicit owner-managed new allowance
 are needed after exhaustion; preserve uncertain signed transactions and the old
@@ -289,47 +290,50 @@ cycle can defer bookkeeping reconciliation, while installed applications persist
 
 ## Archive capacity and expiry maintenance
 
-Protected storage admits at most **1,024 protected blobs fleet-wide**, shared by
-archives, releases, recipes and other owner data. Only owner `release_blob` frees
-an entry; renewals and expiry do not. Ten devices at daily cadence consume 300
-slots per 30-day month, filling an otherwise empty index in 102.4 days; diagnostic,
-crash and owner uploads reduce that horizon. At capacity new registration aborts
-with `EOverQuota`. Every registration reads all protected blobs; gas grows linearly
-with history. Protocol gas/object limits may stop admission before 1,024. The small
-fixture's 27,075,739 MIST archive cost is an observation, never a fleet-scale ceiling.
-No measured worst-case gas is available. The budget estimator projects slot usage,
-not that unknown gas growth; simulate against current state and review actual costs.
+Version 3 protection is indexed by the existing `RenewalKey { blob_object_id }`
+dynamic fields. Registration and owner release touch only the selected blob's
+policy and aggregate counters. There is no fleet-wide 1,024-blob cap or expiry
+scan. The dApp paginates records (100 per page) with a 100,000-record display safety
+bound; the executor has separate bounded local state. Neither limits on-chain
+registration. Larger fleets need separate storage objects or a future
+paged executor; a full/unavailable view must never be treated as empty.
 
-The device admission target is an absolute epoch shared by new archives. It is
-not a rolling retention window. Any expired protected blob halts registration
-fleet-wide with `EInvalidEpochs`; funding alone cannot repair expiry. The daemon
-retains queued data within its disk bounds, not an infinite offline backlog.
+Upgrade the package compatibly and call owner-authorized `migrate` on each
+existing FleetStorage before using v3. Migration preserves layouts, type origins,
+renewal policies, prepaid resources, reserves and counters; it removes only the
+bounded legacy `ProtectedBlobsKey` vector and updates the version. V1/v2 entry
+points reject migrated objects. Old unmigrated objects retain old behavior.
 
-1. Monitor the live protected count, each actual exclusive expiry, prepaid targets,
-   executor journal and disk backlog. Allow slots for all fleet uses and emergency
-   traffic. Do not treat an unavailable query as zero usage.
-2. Before expiry, ensure the separate executor applies paid capacity successfully;
-   verify actual effects and new blob expiry. Then explicitly authorize/prepay a
-   later target for existing blobs if needed, within Walrus's horizon. Changing
-   `configure_device_retention` affects new admissions only. Do not use owner
-   `extend_blob` while prepaid capacity remains attached.
-3. Before capacity is exhausted, export and authenticate history and review active
-   application/recovery references. Only the owner may retire obsolete blobs:
-   construct `fleet_storage::release_blob(storage, budget, cap, blob_id)` and transfer
-   its returned Blob to the verified owner (or burn an expired Blob using the pinned
-   Walrus API). Verify effects, reduced protected count and remaining references.
-   Release discards attached paid capacity without WAL refund and makes historical
-   archive reads unavailable; preserve required ciphertext and decryption material
-   privately. Anchor metadata is not deleted. Never release a required rollback,
-   recipe or recovery reference just to free a slot.
-4. If expiry already halted admission, explicitly release **every expired protected
-   record**, after the same backup/reference review. Expired bytes need restoration,
-   authorized re-upload/certification and new references; a target change alone
-   cannot restore them. Reconcile remaining coverage/reserves and verify an actual
-   new admission before resuming uploads. Clearing device admission does not clear
-   expired protected records or enlarge the index.
+Device admission still requires an owner-approved absolute target epoch. When the
+initial pool purchase already reaches that still-future target, the new archive receives a
+keyed `FullyPaidArchiveKey` marker and counts toward aggregate coverage without
+creating a renewal policy or consuming renewal WAL/gas. The marker has its own
+introduction-package origin. Owner releases remove that marker in constant work;
+later explicit owner renewal authorization replaces it with a renewal policy.
+Artifacts and recipes keep the retained-owner registration/prepayment path.
 
-This is a finite owner-maintained policy. Continuous unattended growth requires a
-separately reviewed scaling design; no automatic deletion or rolling window is
-implemented. The write cadence and owner quotas bound upload frequency/spend, not
-the lifetime of a growing protected fleet.
+An expired blob is unavailable and cannot be renewed after exclusive expiry.
+The executor reports its failure and continues handling other blobs. Expiry alone
+does not halt unrelated registration; incomplete coverage, missing prepayments or
+insufficient reserves still pause discretionary work. No automatic deletion or
+claim of restored bytes is made.
+
+Monitor each actual expiry, executor journal, reserve coverage and device backlog.
+Before expiry, verify the executor applied prepaid capacity using successful
+effects and actual new expiry. After expiry, restore authenticated customer bytes,
+re-upload/certify and update references as appropriate. Only the owner may release
+obsolete blobs after backup/reference review; attached capacity is discarded
+without WAL refund. Never release a required recipe/recovery reference merely to
+recover storage rebates. Absolute targets are finite, not rolling windows.
+
+SF-128 validation commands: Move tests, `make test-retention`,
+`python3 scripts/test_protocol_localnet.py --retention-scale-upgrade` in a disposable
+network-none container, frontend typecheck/build and normal CI/testnet. The scale
+harness creates real wrapped Walrus blobs and prepaid resources, upgrades populated
+v1/v2 objects, and checks effects-derived registration computation/storage gas at
+10, 100, 1,000 and 10,000 protected records. Physical/mainnet/provider/manual-wallet
+acceptance remains unrun in #32/#159.
+
+Current software evidence: [SF-128 validation](validation/SF128_RETENTION.md).
+These checks do not establish production Walrus certification, provider operation
+or hardware acceptance.
