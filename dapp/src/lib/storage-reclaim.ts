@@ -45,10 +45,17 @@ export function netReclaim(gas: { computationCost: string; storageCost: string; 
   return { rebateMist, storageCostMist, computationMist, netMist: rebateMist - storageCostMist - computationMist };
 }
 
-/** Simulate with the sender's own gas so the shown amount is what signing would do. */
-export async function previewReclaim(client: Pick<SuiGrpcClient, "simulateTransaction">, transaction: Transaction, sender: string): Promise<ReclaimPreview> {
+/** Build with the sender's real gas coins, then simulate those exact bytes:
+ * an unbuilt simulation uses a mocked gas coin and misstates the rebate. */
+export async function previewReclaim(client: SuiGrpcClient, transaction: Transaction, sender: string): Promise<ReclaimPreview> {
   transaction.setSenderIfNotSet(sender);
-  const result = await client.simulateTransaction({ transaction, include: { effects: true } });
+  const zero = BigInt(0), refused = (error: unknown): ReclaimPreview => ({ ok: false, rebateMist: zero, storageCostMist: zero, computationMist: zero, netMist: zero,
+    error: (error instanceof Error ? error.message : String(error)).slice(0, 300) });
+  let bytes: Uint8Array;
+  // Gas estimation runs the transaction; an abort (for example an archive
+  // that is not expired yet) is a refusal before anything is signed.
+  try { bytes = await transaction.build({ client }); } catch (error) { return refused(error); }
+  const result = await client.simulateTransaction({ transaction: bytes, include: { effects: true } });
   const executed = result.$kind === "Transaction" ? result.Transaction : result.FailedTransaction;
   if (!executed?.effects) throw new Error("Simulation returned no effects");
   const preview = netReclaim(executed.effects.gasUsed);

@@ -120,10 +120,19 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
 
   // Previews report what signing would return, and failures before signing.
   const gas = { computationCost: '1000000', storageCost: '988000', storageRebate: '21000000', nonRefundableStorageFee: '0' };
-  const ok = await reclaim.previewReclaim({ async simulateTransaction() { return { $kind: 'Transaction', Transaction: { effects: { status: { success: true }, gasUsed: gas } } }; } }, built.tx, id('0xa0'));
+  // Previews simulate the built bytes (real gas coins); the build itself is stubbed here.
+  const builtBytes = new Uint8Array([7]), simulated = [];
+  built.tx.build = async () => builtBytes;
+  const ok = await reclaim.previewReclaim({ async simulateTransaction({ transaction }) { simulated.push(transaction); return { $kind: 'Transaction', Transaction: { effects: { status: { success: true }, gasUsed: gas } } }; } }, built.tx, id('0xa0'));
+  assert.equal(simulated[0], builtBytes, 'simulate the exact built bytes');
   assert.deepEqual([ok.ok, ok.netMist, ok.rebateMist], [true, BigInt(19012000), BigInt(21000000)]);
   const refused = await reclaim.previewReclaim({ async simulateTransaction() { return { $kind: 'FailedTransaction', FailedTransaction: { effects: { status: { success: false, error: { message: 'EUnexpired' } }, gasUsed: gas } } }; } }, built.tx, id('0xa0'));
   assert.equal(refused.ok, false); assert.match(refused.error, /EUnexpired/);
+  // An abort during gas estimation is a refusal, not a thrown error.
+  const aborted = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, plan).tx;
+  aborted.build = async () => { throw Error('Transaction resolution failed: MoveAbort ... abort code: 8'); };
+  const estimate = await reclaim.previewReclaim({ async simulateTransaction() { throw Error('not reached'); } }, aborted, id('0xa0'));
+  assert.deepEqual([estimate.ok, estimate.netMist], [false, BigInt(0)]); assert.match(estimate.error, /abort code: 8/);
   assert.equal(reclaim.formatReclaim(BigInt(19012000)), '0.019012000 SUI');
   assert.equal(reclaim.formatReclaim(BigInt(-5)), '-0.000000005 SUI');
 
