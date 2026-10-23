@@ -5,7 +5,7 @@ IMAGE_LINGUAS = " "
 inherit core-image
 COMPATIBLE_MACHINE = "^raspberrypi3-64$"
 IMAGE_FEATURES += "ssh-server-openssh"
-IMAGE_INSTALL:append = " kernel-modules udev-rules-rpi suifleet suifleet-test-component suifleet-pi-access ca-certificates systemd iproute2 ethtool sudo"
+IMAGE_INSTALL:append = " kernel-modules udev-rules-rpi suifleet suifleet-walrus-codec suifleet-test-component suifleet-pi-access ca-certificates systemd iproute2 ethtool sudo"
 IMAGE_FSTYPES = "wic.bz2 wic.bmap ext4"
 # Writable state is deliberately retained on the root filesystem.
 IMAGE_ROOTFS_EXTRA_SPACE = "524288"
