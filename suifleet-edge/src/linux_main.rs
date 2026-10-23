@@ -490,6 +490,7 @@ async fn main() -> anyhow::Result<()> {
                 &cfg.runtime,
                 journal.state.deferred.values(),
                 telemetry::now_ms(),
+                journal.state.check_window,
             ));
             tokio::pin!(delay);
             let mut stopped = false;
@@ -526,7 +527,7 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms())
+                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
@@ -1079,7 +1080,9 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -
     let notified = journal.state.deferred.get(id)
         .filter(|d| d.control == control && d.notified_ms <= now)
         .map(|d| d.notified_ms).unwrap_or(now);
-    let reason = match control.reason(now, notified)? {
+    let policy_reason = control.reason(now, notified)?;
+    cadence::Window::remember(&mut journal.state.check_window, &control, now);
+    let reason = match policy_reason {
         Some(reason) => Some(reason),
         None => sui.rollout_admission(id, device).await?,
     };
