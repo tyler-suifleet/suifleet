@@ -15,7 +15,8 @@
   "boogie": {
     "repository": "https://github.com/asymptotic-code/boogie.git",
     "commit": "b104805d9070f99a0b494b7760f82a274926c171",
-    "version": "3.5.6.0"
+    "version": "3.5.6.0",
+    "nuget_locks_sha256": "738a73ecb2fa972709f497e778b83d2779512fdb411ccbd518695723e93341c3"
   },
   "z3": {
     "url": "https://github.com/Z3Prover/z3/releases/download/z3-4.13.4/z3-4.13.4-x64-glibc-2.35.zip",
@@ -30,5 +31,9 @@
     "hash": "8141d01bdc53f604aed3bb661b604707a64209f8a947cd81bf95b4f518951593d77864069191f54ea5e84362a409da6b0f69074bf893b283d7e0cf93e2bf20a8"
   },
   "rust": "1.94.0",
-  "status": "blocked: release framework incompatible with prover models; no verified properties"
+  "status": "enrollment close/set_limits verified with solver negatives; identity and complete critical proof scope remain unmet",
+  "compatibility": {
+    "release-model.patch": "47594401e0716a13bcede029efe0d08adffce3582292b9e294dca49cc320d82c",
+    "integer.move": "6c629571d86aa27280b7bc023405e600ddc0a3e15f855f8810f2a23f2ee433a1"
+  }
 }

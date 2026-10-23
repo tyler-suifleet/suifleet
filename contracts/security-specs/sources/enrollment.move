@@ -17,11 +17,11 @@ fun close_spec(policy: &mut EnrollmentPolicy, ctx: &TxContext) {
 }
 
 #[mode(spec), ext(spec(prove, target = sui_edge::enrollment::set_limits))]
-fun set_limits_spec(policy: &mut EnrollmentPolicy, quota: u64, expires: u64, ctx: &TxContext) {
+fun set_limits_spec(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, ctx: &TxContext) {
     asserts(ctx.sender() == enrollment::operator(policy));
     let open = enrollment::is_open(policy);
     let enrolled = enrollment::enrolled(policy);
-    enrollment::set_limits(policy, quota, expires, ctx);
+    enrollment::set_limits(policy, quota, expires_at_ms, ctx);
     ensures(enrollment::remaining(policy) == quota);
     ensures(enrollment::is_open(policy) == open);
     ensures(enrollment::enrolled(policy) == enrolled);

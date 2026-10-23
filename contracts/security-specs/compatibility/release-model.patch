@@ -1,0 +1,74 @@
+diff --git a/crates/move-model/src/model.rs b/crates/move-model/src/model.rs
+index 8b38a9fe7181035d0a1adf90aea28f86932cd341..a87b3bee67c4b4a53f42e928e74828042abd5fc8 100644
+--- a/crates/move-model/src/model.rs
++++ b/crates/move-model/src/model.rs
+@@ -1485,12 +1485,9 @@ impl GlobalEnv {
+     }
+ 
+     fn get_fun_qid_opt(&self, module_name: &str, fun_name: &str) -> Option<QualifiedId<FunId>> {
+-        self.find_module_by_name(self.symbol_pool().make(module_name))
+-            .map(|module_env| {
+-                module_env
+-                    .get_id()
+-                    .qualified(FunId::new(self.symbol_pool().make(fun_name)))
+-            })
++        // Release frameworks need not define every optional fork helper. Never
++        // manufacture a function id for a declaration absent from the model.
++        self.get_existing_fun_qid_opt(module_name, fun_name)
+     }
+ 
+     /// Like `get_fun_qid_opt`, but only returns the id if the module actually
+@@ -1749,7 +1746,7 @@ impl GlobalEnv {
+     // object function names
+     const OBJECT_BORROW_UID_FUNCTION_NAME: &'static str = "borrow_uid";
+     const OBJECT_DELETE_FUNCTION_NAME: &'static str = "delete_impl";
+-    const OBJECT_RECORD_NEW_UID_FUNCTION_NAME: &'static str = "record_new_uid_from_hash";
++    const OBJECT_RECORD_NEW_UID_FUNCTION_NAME: &'static str = "record_new_uid";
+ 
+     // dynamic_field function names
+     const DYNAMIC_FIELD_ADD_FUNCTION_NAME: &'static str = "add";
+diff --git a/packages/sui-specs/sources/sui-framework/funds_accumulator.move b/packages/sui-specs/sources/sui-framework/funds_accumulator.move
+index 0189420ebcbe9ac86fd0e8ae208cbddf72708d7c..49562748fa32a07c7f51f74f73cc89b76d35de69 100644
+--- a/packages/sui-specs/sources/sui-framework/funds_accumulator.move
++++ b/packages/sui-specs/sources/sui-framework/funds_accumulator.move
+@@ -2,8 +2,7 @@ module specs::funds_accumulator_spec;
+ 
+ use sui::funds_accumulator::{
+     add_to_accumulator_address,
+-    withdraw_from_accumulator_address,
+-    reserve_object_funds_for_withdrawal
++    withdraw_from_accumulator_address
+ };
+ 
+ 
+@@ -25,7 +24,3 @@ public fun withdraw_from_accumulator_address_spec<T: store>(
+     withdraw_from_accumulator_address(accumulator, owner, value)
+ }
+ 
+-#[mode(spec), ext(spec(target = sui::funds_accumulator::reserve_object_funds_for_withdrawal))]
+-public fun reserve_object_funds_for_withdrawal_spec<T: store>(owner: address, limit: u256) {
+-    reserve_object_funds_for_withdrawal<T>(owner, limit)
+-}
+diff --git a/packages/sui-specs/sources/sui-framework/object.move b/packages/sui-specs/sources/sui-framework/object.move
+index 0ecb48f460f0e6e098fb4713bc2b5eb065eca12d..06bc8d6940a503caf696092cd08211aa222c1fe9 100644
+--- a/packages/sui-specs/sources/sui-framework/object.move
++++ b/packages/sui-specs/sources/sui-framework/object.move
+@@ -1,13 +1,13 @@
+ module specs::object_spec;
+ 
+-use sui::object::{delete_impl, record_new_uid_from_hash};
++use sui::object::{delete_impl, record_new_uid};
+ 
+ #[mode(spec), ext(spec(target = sui::object::delete_impl))]
+ fun delete_impl_spec(id: address) {
+     delete_impl(id)
+ }
+ 
+-#[mode(spec), ext(spec(target = sui::object::record_new_uid_from_hash))]
+-fun record_new_uid_from_hash_spec(parent: address, bytes: address) {
+-    record_new_uid_from_hash(parent, bytes)
++#[mode(spec), ext(spec(target = sui::object::record_new_uid))]
++fun record_new_uid_spec(bytes: address) {
++    record_new_uid(bytes)
+ }
+\ No newline at end of file
