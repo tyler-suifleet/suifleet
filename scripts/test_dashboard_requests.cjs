@@ -34,6 +34,8 @@ for (const [n, device] of devices.entries()) {
 (async () => {
   let calls = 0;
   const client = manifestClient(m), get = client.getObject;
+  const serviceInfo = client.ledgerService.getServiceInfo;
+  client.ledgerService.getServiceInfo = async (...args) => { calls++; return serviceInfo(...args); };
   client.getObject = async request => {
     calls++;
     if (request.objectId === config.fleetId) return {object:{type:`${config.typeOrigin}::fleet_data::FleetData`,owner:{$kind:'Shared'}, content:data.FleetDataBcs.serialize({id:config.fleetId,version:1,budget_id:budgetId,storage_id:config.storageId,registry_id:config.registryId,chain_identifier:config.chainIdentifier,key_epoch:0,support:[],health_interval_ms:3600000,batch_interval_ms:86400000,emergency_interval_ms:300000,device_count:1000}).toBytes()}};
@@ -53,7 +55,7 @@ for (const [n, device] of devices.entries()) {
   assert.equal(Object.keys(result).length,1000);
   assert.ok(Object.values(result).every(h => h.status === 'unreported'));
   const chainHealth = calls-before;
-  assert.equal(chainHealth,61,'20 identity + 20 index + 20 writer batches + fleet object');
+  assert.equal(chainHealth,62,'20 identity + 20 index + 20 writer batches + fleet object + service info');
   // Batch mismatch and missing-index behavior remain explicit.
   const bad = {getObjects: async ({objectIds}) => ({objects:objectIds.map(objectId => ({...objects.get(objectId), type:'0x2::object::ID'}))})};
   await assert.rejects(budget.fetchAccounts(bad,budgetId,[devices[0]]), /index type/);

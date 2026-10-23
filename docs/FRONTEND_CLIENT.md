@@ -63,10 +63,10 @@ public testing endpoints a production service. See the official
 [public endpoint guidance](https://docs.sui.io/operators/data-management/indexer-stack-setup).
 
 `node scripts/test_dashboard_requests.cjs` measures real query calls for 1,000
-fixture devices: 44 inventory reads/proofs, 40 budget-account batches and 61
-chain-health object reads. Its conservative combined load (two inventory/health
-consumers, budget accounts and 30 additional calls) is 280 requests; the actual
-queue drains it in 97,650 ms of virtual time, with a peak of 86 starts in any
+fixture devices: 45 inventory calls/proofs, 40 budget-account batches and 62
+chain-health calls, including fresh service-info checks. Its conservative combined load (two inventory/health
+consumers, budget accounts and 30 additional calls) is 284 requests; the actual
+queue drains it in 99,050 ms of virtual time, with a peak of 86 starts in any
 30-second window. This is offline query/request-scheduler evidence, not a live
 endpoint throughput or production capacity measurement. The existing browser
 fixtures separately exercise actual browser/wallet/health flows.
