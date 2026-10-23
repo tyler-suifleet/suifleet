@@ -138,6 +138,10 @@ const view = async (w, options) => views.deviceServicesView(await read(w, option
   assert.deepEqual(views.deviceAlerts({ status: 'unavailable', reason: 'Chain alerts could not be verified' }, deviceId),
     { state: 'unavailable', reason: 'Chain alerts could not be verified' });
   assert.equal(views.utc(8.64e15 + 1), 'UTC milliseconds 8640000000000001 (out of range)');
+  assert.equal(views.utc(Number.MAX_SAFE_INTEGER), 'UTC milliseconds 9007199254740991 (out of range)');
+  assert.equal(views.utc(BigInt('18446744073709551615')), 'UTC milliseconds 18446744073709551615 (out of range)');
+  assert.equal(views.utc(BigInt(8.64e15)), '+275760-09-13T00:00:00.000Z');
+  assert.equal(views.utc(BigInt(100)), '1970-01-01T00:00:00.100Z');
 
   // Rollout progress from exact on-chain BCS.
   const m = n => id(`0x${(0xe0 + n).toString(16)}`);

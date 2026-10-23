@@ -119,8 +119,10 @@ export function deviceAlerts(result: AlertsResult, deviceId: string): DeviceAler
 }
 
 /** A UTC time for display; values outside the Date range are shown raw. */
-export function utc(ms: number | null): string {
+export function utc(ms: number | bigint | null): string {
   if (ms === null) return "never";
-  const time = new Date(ms);
+  // A u64 beyond the Date range is shown exactly, never rounded through Number.
+  if (typeof ms === "bigint" && ms > BigInt(8.64e15)) return `UTC milliseconds ${ms} (out of range)`;
+  const time = new Date(Number(ms));
   return Number.isNaN(time.getTime()) ? `UTC milliseconds ${ms} (out of range)` : time.toISOString();
 }

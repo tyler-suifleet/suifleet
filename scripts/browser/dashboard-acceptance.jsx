@@ -45,7 +45,10 @@ const fleet = { id: config.fleetId, version: "1", budget_id: config.budgetId, st
   chain_identifier: config.chainIdentifier, key_epoch: "0", support: [], health_interval_ms: "3600000", batch_interval_ms: "86400000",
   emergency_interval_ms: "300000", device_count: String(f.devices.length) };
 const writers = Object.fromEntries(f.devices.map((d) => [id(d.writer), d]));
-const rollout = f.rollout;
+// #far-future: u64 grant and decision times beyond the Date range are shown raw.
+const farFuture = location.hash === "#far-future", u64max = "18446744073709551615";
+const rollout = farFuture ? { ...f.rollout, record: { ...f.rollout.record, admitted_at: [u64max, ...f.rollout.record.admitted_at.slice(1)] },
+  decisions: f.rollout.decisions.map((d) => d.revision === "3" ? { ...d, at_ms: u64max } : d) } : f.rollout;
 const deployment = { id: rollout.id, creator: f.operator, component_name: "app", version: "2.0.0", recipe_blob_id: "blob", artifact_sha256: "a".repeat(64), created_at: "1", schema_version: "3" };
 
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });

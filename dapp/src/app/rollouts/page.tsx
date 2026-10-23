@@ -8,6 +8,7 @@ import { useTelemetryToken } from "@/hooks/useFleetHealth";
 import { buildRolloutTx, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
 import { PageHeader } from "@/components/ui";
 import { bpsLabel, fetchRolloutDecisions, rolloutProgress, type RolloutProgress } from "@/lib/rollout-progress";
+import { utc } from "@/lib/device-services";
 import type { DeploymentEvent } from "@/lib/sui";
 import type { Transaction } from "@mysten/sui/transactions";
 
@@ -99,10 +100,10 @@ function RolloutDetail({ id, rollout }: { id: string; rollout: Rollout }) {
     <p>Outcomes: {p.samples} settled, {p.failures} failed{p.samples ? ` (${bpsLabel(BigInt(p.failures) * BigInt(10000) / BigInt(p.samples))})` : ""}{p.thresholdReached ? "; failure threshold reached" : ""}.{p.bake ? ` Baking cohort ${p.currentCohort + 1}: ${p.bake.remainingMs.toString()}ms remaining.` : ""}</p>
     <table className="text-sm text-left" data-testid="rollout-stages"><thead><tr><th className="pr-3">Cohort</th><th className="pr-3">Stage</th><th className="pr-3">Members</th><th className="pr-3">Granted</th><th className="pr-3">In flight</th><th className="pr-3">Applied</th><th className="pr-3">Failed</th><th className="pr-3">Skipped</th><th>Waiting</th></tr></thead>
       <tbody>{p.stages.map(s => <tr key={s.cohort}><td>{s.cohort + 1}</td><td>{STAGE[s.status]}</td><td>{s.members}</td><td>{s.granted}</td><td>{s.inflight}</td><td>{s.applied}</td><td>{s.failed}</td><td>{s.skipped}</td><td>{s.waiting}</td></tr>)}</tbody></table>
-    <details><summary>Members</summary><ul>{p.members.map(m => <li className="font-mono text-xs" key={m.device}>Cohort {m.cohort + 1} · {m.device} · {{ waiting: "Waiting", granted: "Granted; awaiting receipt", applied: "Applied", failed: "Failed", skipped: "Skipped" }[m.status]}{m.grantedAtMs !== null ? ` · granted ${new Date(Number(m.grantedAtMs)).toISOString()}` : ""}</li>)}</ul></details>
+    <details><summary>Members</summary><ul>{p.members.map(m => <li className="font-mono text-xs" key={m.device}>Cohort {m.cohort + 1} · {m.device} · {{ waiting: "Waiting", granted: "Granted; awaiting receipt", applied: "Applied", failed: "Failed", skipped: "Skipped" }[m.status]}{m.grantedAtMs !== null ? ` · granted ${utc(m.grantedAtMs)}` : ""}</li>)}</ul></details>
     <details><summary>Decision audit</summary>
       {error ? <p role="status">Decision history unavailable: {error.message}</p> : !history ? <p>Loading…</p> : <>
-        <ul>{history.decisions.map(d => <li key={d.revision.toString()} className="text-xs">#{d.revision.toString()} · {new Date(Number(d.atMs)).toISOString()} · {d.state} · cohort {(d.cohort + BigInt(1)).toString()} · {d.reason}{d.admitted.length ? ` · granted ${d.admitted.length}` : ""}</li>)}</ul>
+        <ul>{history.decisions.map(d => <li key={d.revision.toString()} className="text-xs">#{d.revision.toString()} · {utc(d.atMs)} · {d.state} · cohort {(d.cohort + BigInt(1)).toString()} · {d.reason}{d.admitted.length ? ` · granted ${d.admitted.length}` : ""}</li>)}</ul>
         {!history.complete && <p className="text-xs">Older decisions were not read.</p>}</>}
     </details>
   </div>;

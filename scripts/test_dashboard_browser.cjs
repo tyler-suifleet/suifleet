@@ -128,6 +128,13 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     for (const expected of ["#3", "#2", "#1", "granted 2", "2 settled, 1 failed (50%); failure threshold reached"]) assert.ok(detail.includes(expected), `detail lacks ${expected}: ${detail}`);
     await page.close();
 
+    // Grant and decision times beyond the Date range render raw instead of crashing the page.
+    page = await open("/rollouts#far-future");
+    await page.getByRole("button", { name: "app 2.0.0" }).click();
+    await waitText(page, "#3 · UTC milliseconds 18446744073709551615 (out of range)");
+    await waitText(page, "granted UTC milliseconds 18446744073709551615 (out of range)");
+    await page.close();
+
     // Logs page: an account that is neither the budget owner nor a granted support account gets no archive controls.
     page = await open(`/data?device=${d1}`);
     await waitText(page, "not authorized to decrypt fleet archives");
@@ -173,7 +180,7 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await page.close();
     assert.deepEqual(errors, []);
     console.log("PASS: real browser SF-084 dashboard: verified shadows/streams/messaging/bridge views with stream sequence ranges and export checkpoints, "
-      + "signed encrypted-archive shadow documents (current/history/imprecise/tampered, text-only), alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit, archive role gating, literal search, access record and discard");
+      + "signed encrypted-archive shadow documents (current/history/imprecise/tampered, text-only), alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit (out-of-range times shown raw), archive role gating, literal search, access record and discard");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));
