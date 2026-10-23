@@ -180,11 +180,7 @@ class RecipeTests(unittest.TestCase):
         self.assertRegex(var(DAEMON, 'SUIFLEET_CRATE_VERSION'), r'^\d+\.\d+\.\d+$')
         self.assertIn("'${SUIFLEET_CRATE_VERSION}' > ${D}${datadir}/suifleet/build-info", DAEMON)
 
-    # SF-120 prepares the codec against published SF-082 ca002d3 while the
-    # daemon still pins d616fa16. Remove this decorator in the final pin commit
-    # that moves SRCREV to the merged SF-082/SF-084 source; an unexpected pass
-    # fails the suite, so the two pins cannot silently stay apart.
-    @unittest.expectedFailure
+    # The codec bundle must come from the daemon's exact source revision.
     def test_codec_and_daemon_share_source_revision(self):
         self.assertEqual(var(CODEC, 'SUIFLEET_CODEC_SOURCE_REV'), var(DAEMON, 'SRCREV'))
 
