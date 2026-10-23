@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from testnet_budget import Budget, Spent
 from testnet_ci import trusted_pr, plan
@@ -93,10 +93,14 @@ class TrustTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root/'source.move').write_text('same contracts')
-            before = live.contracts_digest(root)
+            built={'digest':[1]*32}
+            before = live.contracts_digest(root,compiled=built)
             (root/'build').mkdir()
             (root/'build'/'junk').write_text('changed build output')
-            self.assertEqual(before, live.contracts_digest(root))
+            self.assertEqual(before, live.contracts_digest(root,compiled=built))
+            (root/'fleet_data').mkdir();(root/'fleet_data/source.move').write_text('separate package changed')
+            self.assertEqual(before,live.contracts_digest(root,compiled=built))
+            self.assertNotEqual(before,live.contracts_digest(root,compiled={'digest':[2]*32}))
 
     def test_exact_sha_actor_and_main_binding(self):
         pr = self.fixture()
@@ -294,12 +298,119 @@ class PublicEnvironmentTests(unittest.TestCase):
         path = 'repos/a/b/environments/live-package-upgrade/deployment-branch-policies'
         for error in (HTTPError('https://api.github.com/', 403, 'denied', {}, None), URLError('offline')):
             with self.subTest(error=type(error).__name__), self.assertRaises(RuntimeError):
-                public_api(path, Mock(side_effect=error))
+                public_api(path, Mock(side_effect=error), sleep=lambda seconds: None, log=lambda line: None)
         for branches in ({'total_count':2,'branch_policies':self.branches()['branch_policies']},
                          {'total_count':1,'branch_policies':[{'id':7,'name':'*','type':'branch'}]},
                          {'total_count':1,'branch_policies':[{'id':7,'name':'main','type':'tag'}]}):
             with self.subTest(branches=branches), self.assertRaises(RuntimeError):
                 verify_environment('a/b', Mock(return_value=self.environment()), Mock(return_value=branches))
+
+    def http_error(self, code, headers=None, body=b''):
+        import io
+        from email.message import Message
+        from urllib.error import HTTPError
+        message = Message()
+        for name, value in (headers or {}).items():
+            message[name] = value
+        return HTTPError('https://api.github.com/', code, 'error', message, io.BytesIO(body))
+
+    def retrying_read(self, outcomes, **options):
+        """Drive public_api with a scripted opener and a fake clock; no real waits."""
+        import io
+        from testnet_ci import public_api
+        now = [0.0]
+        sleeps, logs, calls = [], [], []
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            self.assertFalse(request.has_header('Authorization'))
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return io.BytesIO(json.dumps(outcome).encode())
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+        options.setdefault('wall', lambda: 1_000_000 + now[0])
+        result = public_api('repos/a/b/environments/live-package-upgrade/deployment-branch-policies',
+                            opener, sleep=sleep, clock=lambda: now[0], log=logs.append, **options)
+        return result, sleeps, logs, calls
+
+    def test_confirmed_rate_limits_and_transient_failures_are_retried_freshly(self):
+        from urllib.error import URLError
+        from http.client import RemoteDisconnected
+        cases = {
+            'anonymous quota 403 body': self.http_error(403, {'X-RateLimit-Limit': '60'}, b'{"message":"API rate limit exceeded for 1.2.3.4."}'),
+            'secondary 403 retry-after': self.http_error(403, {'Retry-After': '7'}),
+            '429': self.http_error(429, {'Retry-After': '3'}),
+            '503': self.http_error(503),
+            'transport': URLError('connection reset'),
+            'disconnect': RemoteDisconnected('closed'),
+        }
+        for name, error in cases.items():
+            with self.subTest(name):
+                result, sleeps, logs, calls = self.retrying_read([error, self.branches()])
+                self.assertEqual(result, self.branches())
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(sleeps), 1)
+                self.assertLessEqual(sleeps[0], 30)
+                self.assertIn('retrying', logs[0])
+        _, sleeps, _, _ = self.retrying_read([cases['secondary 403 retry-after'], self.branches()])
+        self.assertEqual(sleeps, [7.0])
+        quota = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 40)})
+        _, sleeps, logs, _ = self.retrying_read([quota, self.branches()])
+        self.assertEqual(sleeps, [41.0])
+        self.assertIn('"x-ratelimit-remaining": "0"', logs[0])
+
+    def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
+        limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})
+        with self.assertRaisesRegex(RuntimeError, r'unavailable after 4 attempt\(s\).*budget 150s.*HTTP 429.*core') as error:
+            self.retrying_read([limited() for _ in range(10)])
+        self.assertNotIn('Authorization', str(error.exception))
+        # A quota that resets beyond the budget fails at once instead of sleeping past the job timeout.
+        far = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 3000)})
+        outcomes = [far, self.branches()]
+        with self.assertRaisesRegex(RuntimeError, r'after 1 attempt\(s\).*next wait 3001s'):
+            self.retrying_read(outcomes)
+        self.assertEqual(outcomes, [self.branches()])
+        # The attempt cap applies even when every individual wait is short.
+        outcomes = [self.http_error(502) for _ in range(10)]
+        with self.assertRaisesRegex(RuntimeError, r'after 3 attempt\(s\)'):
+            self.retrying_read(outcomes, attempts=3)
+        self.assertEqual(len(outcomes), 7)
+
+    def test_ordinary_denials_are_not_retried(self):
+        for error in (self.http_error(403, {'X-RateLimit-Remaining': '42'}, b'{"message":"Resource not accessible by integration"}'),
+                      self.http_error(404, {}, b'{"message":"Not Found"}'),
+                      self.http_error(401)):
+            outcomes = [error, self.branches()]
+            with self.subTest(code=error.code), self.assertRaisesRegex(RuntimeError, rf'HTTP {error.code}'):
+                self.retrying_read(outcomes)
+            self.assertEqual(outcomes, [self.branches()])
+
+    def test_untrusted_header_values_are_not_echoed(self):
+        error = self.http_error(429, {'Retry-After': '1', 'X-RateLimit-Resource': 'core token=ghs_secret\nInjected'})
+        with self.assertRaises(RuntimeError) as raised:
+            self.retrying_read([error] * 10, attempts=2)
+        self.assertNotIn('ghs_secret', str(raised.exception))
+        self.assertNotIn('x-ratelimit-resource', str(raised.exception))
+
+    def test_retried_reads_still_reject_misconfigured_environments(self):
+        from testnet_ci import verify_environment
+        retry = lambda: self.http_error(429, {'Retry-After': '1'})
+        for branches in ({'total_count':2,'branch_policies':self.branches()['branch_policies']},
+                         {'total_count':1,'branch_policies':[{'id':7,'name':'*','type':'branch'}]}):
+            with self.subTest(branches=branches):
+                read = lambda path, b=branches: self.retrying_read([retry(), b])[0]
+                with self.assertRaisesRegex(RuntimeError, 'main-only'):
+                    verify_environment('a/b', Mock(return_value=self.environment()), read)
+        for environment in (dict(self.environment(), can_admins_bypass=True),
+                            dict(self.environment(), protection_rules=[{'type': 'required_reviewers'}])):
+            with self.subTest(environment=environment):
+                read = lambda path: self.retrying_read([retry(), self.branches()])[0]
+                with self.assertRaisesRegex(RuntimeError, 'main-only'):
+                    verify_environment('a/b', Mock(return_value=environment), read)
+        read = lambda path: self.retrying_read([retry(), self.branches()])[0]
+        self.assertEqual(verify_environment('a/b', Mock(return_value=self.environment()), read)['policy_id'], 7)
 
     def test_authenticated_failures_have_sanitized_useful_errors(self):
         from unittest.mock import patch
@@ -319,3 +430,150 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('secrets.', probe)
         self.assertNotIn('environment:', probe)
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
+
+class BytecodeFixtureTests(unittest.TestCase):
+    def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
+        import copy, live_package_upgrade as live
+        tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}
+        framework={'base':'framework-a','head':'framework-a'}
+        proof=dict(build_cli='pinned compiler',network_cli_sha256='pinned network',framework=framework,
+                   verified_transactions={'base':{'digest':'aa'},'upgrade':{'digest':'bb'}})
+        good={'provenance':proof,'public_marker':'existing'}
+        self.assertIs(live.matching_fixture({'fixtures':{'old source hash':good}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework),good)
+        for edit in [lambda p:p.update(build_cli='other'),lambda p:p.update(network_cli_sha256='other'),lambda p:p.update(framework={}),lambda p:p['verified_transactions']['upgrade'].update(digest='cc')]:
+            bad=copy.deepcopy(good);edit(bad['provenance'])
+            self.assertIsNone(live.matching_fixture({'fixtures':{'old':bad}},'bytecode-v1:aa','bytecode-v1:bb',tools,framework))
+        self.assertIsNone(live.matching_fixture({'fixtures':{'old':good}},'bytecode-v1:bb','bytecode-v1:aa',tools,framework))
+    def test_unknown_setup_is_never_retried_and_refusals_do_not_hide_publication(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            ledger=SimpleNamespace(evidence=[])
+            def interrupted():raise RuntimeError('transport outcome unknown')
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish base',interrupted,ledger)
+            self.assertEqual(json.loads(path.read_text())['publications']['pair']['pending_operation'],'publish base')
+            refused=Mock()
+            with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish again',refused,ledger)
+            refused.assert_not_called()
+            p.clear()
+            def not_sent():raise live.toolchain.NotSubmitted('refused before sign')
+            with self.assertRaises(live.toolchain.NotSubmitted):live.checkpoint_setup(path,state,p,'publish base',not_sent,ledger)
+            self.assertNotIn('pending_operation',json.loads(path.read_text())['publications']['pair'])
+            self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda:{'id':'known'},ledger),{'id':'known'})
+            self.assertNotIn('pending_operation',p)
+            self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
+        import tempfile, live_package_upgrade as live
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';path.write_text('malformed')
+            with self.assertRaisesRegex(RuntimeError,'reconcile'):live.load_state(path,'chain','owner')
+
+
+class FreshFixtureFlowTests(unittest.TestCase):
+    def test_new_and_resumed_publications_reach_verified_submitter_with_saved_proof(self):
+        # Exercise run(), not just checkpoint helpers: the original NameError
+        # happened between compilation and the first pre-sign verification.
+        import io, tarfile, tempfile, subprocess
+        from types import SimpleNamespace
+        import live_package_upgrade as live
+        address = "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"
+        tools = {"build": {"path": "/compiler", "version": live.toolchain.BUILD["version"]},
+                 "network": {"path": "/network", "version": live.toolchain.NETWORK["version"], "sha256": "pinned"}}
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            info = tarfile.TarInfo("contracts/Move.lock"); data = b"offline fixture"
+            info.size = len(data); archive.addfile(info, io.BytesIO(data))
+        real_run = subprocess.run
+        def command(argv, **kwargs):
+            if argv[0] == "tar":
+                return real_run(argv, **kwargs)
+            if argv[0] == "git":
+                return SimpleNamespace(stdout=buffer.getvalue(), returncode=0)
+            self.assertEqual(argv[0], "/network")
+            if "envs" in argv:
+                output = json.dumps([[{"alias": "testnet", "rpc": "https://offline.invalid"}], "testnet"])
+            elif "active-address" in argv:
+                output = address
+            else:
+                self.assertIn("gas", argv)
+                output = json.dumps({"addressMistBalance": "1000000000", "gasCoins": []})
+            return SimpleNamespace(stdout=output, stderr="", returncode=0)
+        for resumed in (False, True):
+            with self.subTest(resumed=resumed), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); state_path = root/"state.json"
+                digest = "bytecode-v1:" + bytes(range(32)).hex()
+                key = live.fixture_key(digest, digest)
+                proof = {"base": {"digest": "saved-proof"}} if resumed else {}
+                state = {"chain": "4c78adac", "operator": address, "fixtures": {}, "publications": {}}
+                if resumed:
+                    state["publications"][key] = {"source_pair": [digest, digest],
+                        "compiler": tools["build"]["version"], "built": proof}
+                live.save_state(state_path, state)
+                observed = []
+                def submitter(*args, **kwargs):
+                    observed.append(dict(kwargs["record"]))
+                    def refuse(_budget):
+                        raise live.toolchain.NotSubmitted("offline pre-sign boundary reached")
+                    return refuse
+                args = SimpleNamespace(wallet=str(root/"client.yaml"), network="testnet",
+                    evidence=str(root/"evidence.json"), max_spend_mist=800000000,
+                    build_sui="/compiler", network_sui="/network", faucet_tool=None,
+                    base_ref="b"*40, walrus="simulated", state=str(state_path), fresh=False)
+                walrus = SimpleNamespace(aggregator="http://offline.invalid", mode="simulated", close=Mock())
+                with patch.object(live.subprocess, "run", side_effect=command), \
+                     patch.object(live.subprocess, "check_output", return_value="b"*40), \
+                     patch.object(live.toolchain, "check_tools", return_value=tools), \
+                     patch.object(live.toolchain, "preflight", return_value={"protocol_version":139}), \
+                     patch.object(live.toolchain, "compile_package", return_value={"digest":list(range(32))}), \
+                     patch.object(live.toolchain, "framework_pins", return_value={}), \
+                     patch.object(live.toolchain, "package_submitter", side_effect=submitter), \
+                     patch.object(live.dm, "chain_facts", return_value={"chain_identifier":"4c78adac"}), \
+                     patch.object(live.live_common, "Walrus", return_value=walrus), \
+                     patch.dict("os.environ", {"SUIFLEET_TESTNET_LOCK_TOKEN":""}):
+                    with self.assertRaisesRegex(live.toolchain.NotSubmitted, "offline pre-sign boundary"):
+                        live.run(args)
+                self.assertEqual(observed, [proof.get("base", {})])
+                saved = json.loads(state_path.read_text())["publications"][key]
+                self.assertEqual(saved["built"], {"base": proof.get("base", {})})
+                self.assertNotIn("pending_operation", saved)
+                evidence = json.loads((root/"evidence.json").read_text())
+                self.assertFalse(evidence["success"])
+                self.assertEqual(evidence["allowance_used_mist"], 0)
+                walrus.close.assert_called_once()
+
+
+class PublicationAuthorityTests(unittest.TestCase):
+    def test_checkpoint_recovery_requires_latest_cap_package_version_and_owners(self):
+        import live_package_upgrade as live
+        operator = live.dm.object_id("0xa")
+        publication = dict(base_package="0x1", registry="0x2", upgrade_cap="0x3")
+        owners = {"0x3": {"AddressOwner": operator}, "0x2": {"Shared": {}}}
+        def reader(command, object_id):
+            self.assertEqual(command, "object")  # Recovery is read-only.
+            return {"owner": owners[object_id]}
+        for upgraded in (False, True):
+            with self.subTest(upgraded=upgraded):
+                current = dict(publication)
+                if upgraded:
+                    current["head_package"] = "0x4"
+                package = current.get("head_package", current["base_package"])
+                cap = dict(kind="object", type="0x2::package::UpgradeCap",
+                           upgrade_cap={"package": package, "version": 2 if upgraded else 1},
+                           owner={"address": operator})
+                facts = {"objects": {live.dm.object_id("0x3"): cap}}
+                with patch.object(live.dm, "chain_facts", return_value=facts):
+                    live.verify_publication(current, "offline", operator, reader)
+                    for field, bad in (("package", "0x9"), ("version", 3)):
+                        previous = cap["upgrade_cap"][field]; cap["upgrade_cap"][field] = bad
+                        with self.assertRaises(AssertionError):
+                            live.verify_publication(current, "offline", operator, reader)
+                        cap["upgrade_cap"][field] = previous
+                    owners["0x3"] = {"AddressOwner": live.dm.object_id("0xb")}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x3"] = {"AddressOwner": operator}
+                    owners["0x2"] = {"AddressOwner": operator}
+                    with self.assertRaises(AssertionError):
+                        live.verify_publication(current, "offline", operator, reader)
+                    owners["0x2"] = {"Shared": {}}

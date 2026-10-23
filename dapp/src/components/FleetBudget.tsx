@@ -14,20 +14,22 @@ import {
   buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
-import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
 import {
   FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
 } from "@/lib/onramp";
 
+import { DATA_CONFIG } from "@/lib/fleet-data";
 import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
-  buildWithdrawRetentionTx, fetchRetention, retentionFacts, retentionOrigin } from '@/lib/retention';
+  buildWithdrawRetentionTx, fetchRetention, retentionFacts, retentionOrigin, buildConfigureDeviceRetentionTx, buildClearDeviceRetentionTx, fetchDeviceRetention } from '@/lib/retention';
 
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
 export const DEFAULT_ESTIMATE: EstimateInput = {
   devices: 1, months: 12, receiptsPerDeviceMonth: 30, anchorsPerDeviceMonth: 0, releasesPerMonth: 1,
-  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: 0, storageEpochs: 2,
+  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: DATA_CONFIG ? 64 * 1024 * 1024 : 0, dataUploadsPerDeviceMonth: 30, storageEpochs: DATA_CONFIG ? 3 : 2,
+  healthSummariesPerDeviceMonth: DATA_CONFIG ? 720 : 0, serverlessData: !!DATA_CONFIG,
   floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
 };
 
@@ -49,14 +51,19 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
   return <div className="space-y-3 text-sm">
     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
       <NumberField label="Devices" value={input.devices} onChange={set("devices")} />
+      <NumberField label="Existing protected blobs (all fleet uses)" value={input.existingProtectedBlobs ?? 0} onChange={set("existingProtectedBlobs")} />
       <NumberField label="Months" value={input.months} onChange={set("months")} />
       <NumberField label="Receipts per device per month" value={input.receiptsPerDeviceMonth} onChange={set("receiptsPerDeviceMonth")} />
-      <NumberField label="Data anchors per device per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
+      <NumberField label="Other device transactions per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
+      <NumberField label="Health summaries per device per month (hourly = 720)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
       <NumberField label="Releases per month" value={input.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
+      <NumberField label="Archive uploads per device per month (daily = 30; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
+    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
+    {result.estimate?.protectedCapacity && <p role="status">If protected retention is enabled: {result.estimate.protectedCapacity.planned} planned archives; {result.estimate.protectedCapacity.remaining} of {PROTECTED_BLOB_LIMIT} fleet-wide slots remain from the entered count. {result.estimate.protectedCapacity.daysToCapacity === null ? "No archive uploads are planned." : `At this rate the index fills in ${result.estimate.protectedCapacity.daysToCapacity.toFixed(1)} days without owner releases.`} Additional releases/diagnostics/crashes consume more slots. {result.estimate.protectedCapacity.exceedsCapacity ? "Planned archives exceed capacity: this deposit cannot make that retention plan feasible." : "Capacity does not guarantee admission."} All new device archives share one absolute target epoch; any expired protected blob halts new registrations until owner maintenance. Reconcile the live retention panel before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">
       <tbody>
@@ -361,10 +368,14 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
   const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
+  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+    queryFn: () => fetchDeviceRetention(client, config, storage) });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
     <legend>Protected retention</legend>
+    <p role="status">{view.isSuccess ? `${blobs.filter((item) => item.policy).length}/${PROTECTED_BLOB_LIMIT} protected slots used across the entire fleet.` : "Protected slot usage unavailable; do not assume empty storage."} Only owner release frees slots; renewal does not. Every registration scans retained blobs, so gas grows with history and chain limits can halt admission earlier. New archives share one absolute target epoch. Any expired protected blob blocks all new registrations. Apply prepaid renewals before expiry or deliberately release obsolete references with verified backups; changing the new-archive target does not renew old blobs.</p>
+    <p>Renewal executor rewards and gas use these separate protected reserves. They are additional to device health/archive transaction estimates; match the estimate storage horizon to the finite target.</p>
     {version < BigInt(2) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v2 (retires old mutation calls)</button> : <>
       {retentionFacts(policy, blobs, epoch).map((fact) => <p key={fact} role="status">{fact}</p>)}
       <p>Run the owner-configured renewal worker separately from this browser. Check its private status file for persistent failures and notifier delivery acknowledgments. No running notifier means no alert guarantee.</p>
@@ -385,6 +396,11 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
       <label>Finite target epoch <input className="border w-16" type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} /></label>
       <label>Maximum WAL quote <input className="border w-20" value={maxFee} onChange={(e) => setMaxFee(e.target.value)} /></label>
       <button type="button" onClick={() => void submit(() => buildAuthorizeRenewalTx(config, storage, budget, cap, blob, target, parseToken(maxFee)))}>Authorize this renewal</button>
+      <p>Device archives require explicit owner approval while protected retention is enabled. Their initial purchase and finite renewal are paid atomically; quotas and isolated reserve limits still apply. The owner-run worker must apply purchased renewals before expiry.</p>
+      <p>{deviceView.data ? `New archive target: epoch ${deviceView.data.target}; maximum WAL per renewal ${wal(BigInt(deviceView.data.max_fee))}.` : 'No device archive approval is verified.'}</p>
+      <button type="button" disabled={!policy || !deviceView.isSuccess} onClick={() => void submit(() => buildConfigureDeviceRetentionTx(config, storage, budget, cap, target, parseToken(maxFee)))}>Approve new archives to this finite target</button>
+      <button type="button" disabled={!deviceView.data} onClick={() => void submit(() => buildClearDeviceRetentionTx(config, storage, budget, cap))}>Pause new archive admission</button>
+      {deviceView.error && <p role="alert">Archive policy API unavailable in the configured storage package.</p>}
       <div><label>Reserve WAL <input className="border w-20" value={walFunds} onChange={(e) => setWalFunds(e.target.value)} /></label>
         <label>Reserve SUI <input className="border w-20" value={gasFunds} onChange={(e) => setGasFunds(e.target.value)} /></label>
         <button type="button" disabled={!policy} onClick={() => void submit(() => buildFundRetentionTx(config, storage, parseToken(walFunds), parseToken(gasFunds)))}>Deposit protected reserves</button>

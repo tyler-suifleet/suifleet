@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "observed_at": "2026-10-22T21:46:17.350Z",
+  "chain": "4c78adac",
+  "sdk": {
+    "sui": "2.36.0",
+    "walrus": "1.2.35"
+  },
+  "system_id": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+  "walrus_package": "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611",
+  "walrus_epoch": 558,
+  "n_shards": 1000,
+  "storage_price_frost_per_encoded_MiB_epoch": "2611",
+  "write_price_frost_per_encoded_MiB": "5220",
+  "encoding_metadata_bytes": 64032000,
+  "actual_sdk_encoding": {
+    "input_bytes": 2048,
+    "blob_id": "StlxEVyOe-yPhgK2fq6F6HRvYj66OUIhzLLn2AH2Evw",
+    "root_hash_hex": "e3fb10a9d88c9e7157c5e112dd6916e44011f5a9d6460bced51ebacf9308e1da"
+  },
+  "quotes": [
+    {
+      "plaintext_or_ciphertext_bytes": 1,
+      "epochs": 3,
+      "encoded_bytes": 66034000,
+      "storageCost": "493479",
+      "writeCost": "328860",
+      "totalCost": "822339"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 1,
+      "epochs": 30,
+      "encoded_bytes": 66034000,
+      "storageCost": "4934790",
+      "writeCost": "328860",
+      "totalCost": "5263650"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 2048,
+      "epochs": 3,
+      "encoded_bytes": 66034000,
+      "storageCost": "493479",
+      "writeCost": "328860",
+      "totalCost": "822339"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 2048,
+      "epochs": 30,
+      "encoded_bytes": 66034000,
+      "storageCost": "4934790",
+      "writeCost": "328860",
+      "totalCost": "5263650"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 65536,
+      "epochs": 3,
+      "encoded_bytes": 66034000,
+      "storageCost": "493479",
+      "writeCost": "328860",
+      "totalCost": "822339"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 65536,
+      "epochs": 30,
+      "encoded_bytes": 66034000,
+      "storageCost": "4934790",
+      "writeCost": "328860",
+      "totalCost": "5263650"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 1048576,
+      "epochs": 3,
+      "encoded_bytes": 70038000,
+      "storageCost": "524811",
+      "writeCost": "349740",
+      "totalCost": "874551"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 1048576,
+      "epochs": 30,
+      "encoded_bytes": 70038000,
+      "storageCost": "5248110",
+      "writeCost": "349740",
+      "totalCost": "5597850"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 2097152,
+      "epochs": 3,
+      "encoded_bytes": 74042000,
+      "storageCost": "556143",
+      "writeCost": "370620",
+      "totalCost": "926763"
+    },
+    {
+      "plaintext_or_ciphertext_bytes": 2097152,
+      "epochs": 30,
+      "encoded_bytes": 74042000,
+      "storageCost": "5561430",
+      "writeCost": "370620",
+      "totalCost": "5932050"
+    }
+  ],
+  "batching": {
+    "records": 24,
+    "record_bytes": 2048,
+    "separate_upload_frost": "19736136",
+    "packed_bytes": 49152,
+    "packed_upload_frost": "822339",
+    "quilt_bytes": 445556,
+    "quilt_upload_frost": "822339",
+    "chosen": "one signed, Seal-encrypted batch per period; quilts add no fixed-overhead saving over one packed archive"
+  },
+  "daily_monthly_testnet_frost": {
+    "uploads": 30,
+    "epochs_per_upload": 3,
+    "storage_and_write": "24670170"
+  },
+  "limits": [
+    "Read-only live quotes and real SDK encoding; no paid storage/publication transaction.",
+    "Testnet prices and one-day epochs; not a Mainnet quote or token exchange quote.",
+    "Sui object/transaction gas, emergency uploads, encryption envelope size and retention must be added. Per-upload quote input is ciphertext bytes."
+  ]
+}

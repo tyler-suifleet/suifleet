@@ -513,7 +513,7 @@ export function buildSwapAndDepositWalTx(config: StorageConfig, exchangeId: stri
 const StorageBcs = bcs.struct("Storage", { id: bcs.Address, start_epoch: bcs.u32(), end_epoch: bcs.u32(), storage_size: bcs.u64() });
 const QuotaBcs = bcs.struct("Quota", { period_ms: bcs.u64(), encoded_bytes_per_period: bcs.u64(), uploads_per_period: bcs.u64(),
   max_blob_size: bcs.u64(), write_fees_per_period: bcs.u64() });
-const FleetStorageBcs = bcs.struct("FleetStorage", { id: bcs.Address, version: bcs.u64(), budget_id: bcs.Address, pool: bcs.option(StorageBcs),
+export const FleetStorageBcs = bcs.struct("FleetStorage", { id: bcs.Address, version: bcs.u64(), budget_id: bcs.Address, pool: bcs.option(StorageBcs),
   wal: bcs.struct("Balance", { value: bcs.u64() }), default_quota: QuotaBcs, blob_count: bcs.u64(), total_encoded_bytes: bcs.u64(), total_write_fees: bcs.u64() });
 const StorageCreatedBcs = bcs.struct("StorageCreated", { storage_id: bcs.Address, budget_id: bcs.Address });
 

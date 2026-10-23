@@ -68,33 +68,78 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
 
 
-def contracts_digest(path):
-    """Content hash of a contracts tree (sources, tests, manifest, lock)."""
-    digest = hashlib.sha256()
-    for file in sorted(p for p in Path(path).rglob("*") if p.is_file() and "build" not in p.parts
-                       and p.name != "Published.toml"):
-        digest.update(str(file.relative_to(path)).encode() + b"\0" + file.read_bytes() + b"\0")
-    return digest.hexdigest()[:24]
+def contracts_digest(path, *, compiled=None, build_tool="sui"):
+    """Exact root-package bytecode identity, not separate packages or tests."""
+    built = compiled if compiled is not None else toolchain.compile_package(build_tool, path)
+    digest = bytes(built["digest"])
+    if len(digest) != 32:
+        raise ValueError("invalid compiled package digest")
+    return "bytecode-v1:" + digest.hex()
+
+
+def matching_fixture(state, base_digest, head_digest, tools, framework):
+    """Only authenticated, compiler-verified equivalent package pairs migrate."""
+    expected = (base_digest.removeprefix("bytecode-v1:"), head_digest.removeprefix("bytecode-v1:"))
+    for fixture in state["fixtures"].values():
+        proof = fixture.get("provenance") or {}
+        verified = proof.get("verified_transactions") or {}
+        base = verified.get("base") or {}
+        head = verified.get("upgrade") or base
+        if ((base.get("digest"), head.get("digest")) == expected
+                and proof.get("build_cli") == tools["build"]["version"]
+                and proof.get("network_cli_sha256") == tools["network"]["sha256"]
+                and proof.get("framework") == framework):
+            return fixture
+    return None
+
+
+def checkpoint_setup(state_path, state, publication, label, action, ledger):
+    """Persist uncertainty before a mutation; never repeat an unknown outcome."""
+    if publication.get("pending_operation"):
+        raise RuntimeError("pending fixture operation requires on-chain reconciliation before reuse")
+    publication["pending_operation"] = label
+    save_state(state_path, state)
+    try:
+        result = action()
+    except Exception as error:
+        known = isinstance(error, toolchain.NotSubmitted) or (
+            ledger.evidence and ledger.evidence[-1].get("label") == label
+            and ledger.evidence[-1].get("status") in ("failure", "not_submitted"))
+        if known:
+            publication.pop("pending_operation", None)
+        save_state(state_path, state)
+        raise
+    # Caller atomically saves the returned IDs together with this cleared mark.
+    # A crash before that save leaves uncertainty on disk, never a republish.
+    publication.pop("pending_operation")
+    return result
 
 
 def load_state(path, chain, operator):
     try:
         state = json.loads(Path(path).read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
         state = {}
+    except ValueError as error:
+        raise RuntimeError("invalid private fixture state; reconcile before publication") from error
     if state.get("chain") != chain or state.get("operator") != operator:
         state = {"chain": chain, "operator": operator, "fixtures": {}}  # New wallet or a reset network.
     state.setdefault("fixtures", {})
+    state.setdefault("publications", {})
     return state
 
 
 def save_state(path, state):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(state, indent=2) + "\n")
-    temporary.chmod(0o600)  # Holds the throwaway test device's key.
+    # Create the key-bearing temporary file privately from the first byte.
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=".fixture-", delete=False) as output:
+        temporary = Path(output.name)
+        output.write(json.dumps(state, indent=2) + "\n"); output.flush(); os.fsync(output.fileno())
     os.replace(temporary, path)
+    directory = os.open(path.parent, os.O_RDONLY)
+    try: os.fsync(directory)
+    finally: os.close(directory)
 
 
 def fixture_key(base_tree, head_tree):
@@ -135,6 +180,17 @@ def fixture_alive(fixture, operator, client):
     except RuntimeError:
         return False
     return True
+
+
+
+def verify_publication(publication, rpc_url, operator, client):
+    # Reconcile checkpointed authority with the last completed upgrade.
+    old, registry, cap = (publication[k] for k in ("base_package", "registry", "upgrade_cap"))
+    head = publication.get("head_package", old)
+    facts = dm.chain_facts(rpc_url, old, cap, registry)
+    expected_version = "2" if head != old else "1"
+    assert dm.upgrade_cap(facts["objects"][dm.object_id(cap)])[:2] == (dm.object_id(head), expected_version)
+    assert owner_of(client, cap) == operator and owner_of(client, registry) == "shared"
 
 
 def balance_of(client, address):
@@ -279,7 +335,9 @@ def run(args):
             staging = root / "base"; staging.mkdir()
             archive = subprocess.run(["git", "-C", str(ROOT), "archive", base, "contracts"], check=True, capture_output=True).stdout
             subprocess.run(["tar", "-x", "-C", str(staging)], input=archive, check=True)
-            base_tree, head_tree = contracts_digest(staging / "contracts"), contracts_digest(ROOT / "contracts")
+            base_built = toolchain.compile_package(tools["build"]["path"], staging / "contracts")
+            head_built = toolchain.compile_package(tools["build"]["path"], ROOT / "contracts")
+            base_tree, head_tree = contracts_digest(staging / "contracts", compiled=base_built), contracts_digest(ROOT / "contracts", compiled=head_built)
             key_name = fixture_key(base_tree, head_tree)
             evidence["toolchain"]["framework"] = {
                 "base": toolchain.framework_pins(staging / "contracts/Move.lock"),
@@ -288,11 +346,15 @@ def run(args):
             state = load_state(state_path, chain, operator)
             common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--silence-warnings"]
             key = root / "device.key"
-            fixture = None if args.fresh else state["fixtures"].get(key_name)
+            fixture = state["fixtures"].get(key_name) or matching_fixture(
+                state, base_tree, head_tree, tools, evidence["toolchain"]["framework"])
+            if fixture and args.fresh:
+                raise RuntimeError("verified bytecode already exists; fresh package republication is refused")
             if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client)):
-                print("Cached fixture is no longer intact on chain; publishing a new one")
-                fixture = None
+                raise RuntimeError("cached fixture needs object reconciliation; immutable code is not republished")
             if fixture:
+                state["fixtures"][key_name] = fixture
+                save_state(state_path, state)
                 evidence["fixture_provenance"] = fixture.get("provenance")
                 key.write_text(fixture["device_key"] + "\n"); key.chmod(0o600)
                 derived = subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()
@@ -300,55 +362,74 @@ def run(args):
                 check(f"reused fixture {key_name[:12]}…: base {fixture['base_package'][:12]}…, head {fixture['head_package'][:12]}… "
                       "(re-verified on chain; no package storage spent)")
             else:
-                # 1. Base package and live state.
+                publication = state["publications"].setdefault(key_name, {
+                    "source_pair": [base_tree, head_tree], "compiler": tools["build"]["version"], "built": {}})
+                if publication.get("pending_operation"):
+                    raise RuntimeError("uncertain fixture setup retained; reconcile on chain before another publication")
+                assert publication["source_pair"] == [base_tree, head_tree] and publication["compiler"] == tools["build"]["version"]
+                built = publication["built"]
+                def step(label, action):
+                    return checkpoint_setup(state_path, state, publication, label, action, ledger)
+                def save_publication(**values):
+                    publication.update(values)
+                    publication["built"] = built
+                    save_state(state_path, state)
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
-                built = {}
-                first = mutate("publish base", toolchain.package_submitter(
-                    client, tools["build"]["path"], package_dir, common, sender=operator,
-                    record=built.setdefault("publish", {})),
-                    gas=400_000_000)
-                old = published(first)
-                registry = created(first, "::device_registry::DeviceRegistry")[0]
-                upgrade_cap = created(first, "::package::UpgradeCap")[0]
-                toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
-                check(f"base bytecode compiled by {tools['build']['version']}, verified in the unsigned transaction "
-                      f"and submitted by {tools['network']['version']}")
-                device_address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
-                registered = transaction("register device + issue cap (base)",
-                    "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"live-pi"',
-                    f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
-                    "--move-call", f"{old}::device_cap::issue_cap", "device",
-                    "--transfer-objects", "[device]", f"@{operator}",
-                    "--move-call", f"{old}::device_group::create_group", '"live"', '"package-upgrade gate"', CLOCK)
-                device = created(registered, "::device_registry::Device")[0]
-                device_cap = created(registered, "::device_cap::DeviceCap")[0]
-                group = created(registered, "::device_group::DeviceGroup")[0]
-                transaction("add device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
-                check(f"base package {old} published; device, cap and group created with it")
-                new = old
-                if head_tree != base_tree:
-                    # 2. Upgrade in place.
-                    shutil.rmtree(package_dir)
-                    shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
-                    upgraded = mutate("upgrade to head", toolchain.package_submitter(
+                if "base_package" not in publication:
+                    first = step("publish base", lambda: mutate("publish base", toolchain.package_submitter(
                         client, tools["build"]["path"], package_dir, common, sender=operator,
-                        upgrade={"cap": upgrade_cap, "package": old}, record=built.setdefault("upgrade", {})),
-                        gas=400_000_000)
-                    new = published(upgraded)
-                    check(f"head upgrade bytecode and digest from the release compiler passed "
-                          f"{tools['network']['version']}'s compatibility check on protocol {compatibility['protocol_version']}")
-                else:
-                    check("head contracts equal the base contracts; no upgrade to test")
-                activated = transaction("activate identity in registry custody",
-                    "--move-call", f"{new}::device_registry::activate_device", f"@{registry}", f"@{device}",
-                    "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
-                owner_cap = created(activated, "::device_registry::DeviceOwnerCap")[0]
-                fixture = dict(owner_cap=owner_cap, base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
+                        record=built.setdefault("base", {})), gas=400_000_000))
+                    save_publication(base_package=published(first), registry=created(first, "::device_registry::DeviceRegistry")[0],
+                                     upgrade_cap=created(first, "::package::UpgradeCap")[0])
+                old, registry, upgrade_cap = (publication[k] for k in ("base_package", "registry", "upgrade_cap"))
+                verify_publication(publication, rpc_url, operator, client)
+                toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
+                check(f"verified/reused base package {old}; no identical package is republished")
+                if "device_key" not in publication:
+                    address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
+                    save_publication(device_key=key.read_text().strip(), device_address=address)
+                key.write_text(publication["device_key"] + "\n"); key.chmod(0o600)
+                device_address = publication["device_address"]
+                assert dm.object_id(subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()) == dm.object_id(device_address)
+                if "device" not in publication:
+                    registered = step("register device + issue cap (base)", lambda: transaction("register device + issue cap (base)",
+                        "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"live-pi"',
+                        f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
+                        "--move-call", f"{old}::device_cap::issue_cap", "device",
+                        "--transfer-objects", "[device]", f"@{operator}",
+                        "--move-call", f"{old}::device_group::create_group", '"live"', '"package-upgrade gate"', CLOCK))
+                    save_publication(device=created(registered, "::device_registry::Device")[0],
+                                     device_cap=created(registered, "::device_cap::DeviceCap")[0],
+                                     group=created(registered, "::device_group::DeviceGroup")[0])
+                device, device_cap, group = (publication[k] for k in ("device", "device_cap", "group"))
+                if not publication.get("member_added"):
+                    step("add device to group (base)", lambda: transaction("add device to group (base)",
+                         "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}"))
+                    save_publication(member_added=True)
+                new = publication.get("head_package")
+                if not new:
+                    new = old
+                    if head_tree != base_tree:
+                        shutil.rmtree(package_dir)
+                        shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
+                        upgraded = step("upgrade to head", lambda: mutate("upgrade to head", toolchain.package_submitter(
+                            client, tools["build"]["path"], package_dir, common, sender=operator,
+                            upgrade={"cap": upgrade_cap, "package": old}, record=built.setdefault("upgrade", {})), gas=400_000_000))
+                        new = published(upgraded)
+                    else:
+                        check("exact root bytecode equals base; separate packages do not trigger a pointless core upgrade")
+                    save_publication(head_package=new)
+                if "owner_cap" not in publication:
+                    activated = step("activate identity in registry custody", lambda: transaction("activate identity in registry custody",
+                        "--move-call", f"{new}::device_registry::activate_device", f"@{registry}", f"@{device}",
+                        "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}"))
+                    save_publication(owner_cap=created(activated, "::device_registry::DeviceOwnerCap")[0])
+                fixture = dict(owner_cap=publication["owner_cap"], base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                device=device, device_cap=device_cap, group=group, device_address=device_address,
-                               device_key=key.read_text().strip(), created=evidence["started"],
-                               provenance=provenance(tools, compatibility, evidence["toolchain"]["framework"], built,
-                                                     base, head))
+                               device_key=publication["device_key"], created=evidence["started"],
+                               provenance=provenance(tools, compatibility, evidence["toolchain"]["framework"], built, base, head))
                 state["fixtures"][key_name] = fixture
+                state["publications"].pop(key_name)
                 save_state(state_path, state)
             old, new, registry, upgrade_cap = (fixture[k] for k in ("base_package", "head_package", "registry", "upgrade_cap"))
             device, cap, group, device_address = (fixture[k] for k in ("device", "device_cap", "group", "device_address"))
@@ -494,7 +575,7 @@ if __name__ == "__main__":
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
-    parser.add_argument("--fresh", action="store_true", help="ignore the cache and publish a new fixture")
+    parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
     parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
                         help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()

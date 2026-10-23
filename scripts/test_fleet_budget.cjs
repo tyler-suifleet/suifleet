@@ -76,6 +76,11 @@ assert.equal(busy.suiDepositMist, gas + gas / BigInt(10) + BigInt(2) * base.floa
 const withData = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20 });
 const one = costs.blobCostFrost(1 << 20, 2);
 assert.equal(withData.dataFrost, BigInt(1000) * (one.storage + one.write));
+const daily = costs.estimate({ ...base, dataBytesPerDeviceMonth: 1 << 20, dataUploadsPerDeviceMonth: 30 });
+const batch = costs.blobCostFrost(Math.ceil((1 << 20)/30), 2);
+assert.equal(daily.dataFrost, BigInt(30000) * (batch.storage + batch.write));
+assert(daily.dataFrost > withData.dataFrost, "daily uploads each pay their own fixed overhead");
+assert.throws(() => costs.estimate({ ...base, dataBytesPerDeviceMonth: 1, dataUploadsPerDeviceMonth: 0 }), /archive upload/);
 assert.throws(() => costs.estimate({ ...base, devices: -1 }), /devices/);
 assert.throws(() => costs.estimate({ ...base, storageEpochs: 54 }), /storage epochs/);
 assert.throws(() => costs.estimate({ ...base, drawMist: BigInt(0) }), /draw/);
@@ -285,10 +290,10 @@ async function uploads() {
     const calls = [];
     const walrusClient = {
       systemObject: async () => ({ id: storage.walrus.system, package_id: packageId }),
-      systemState: async () => ({ committee: { members: Array.from({ length: 10 }, () => ({})), epoch: 7 } }),
+      systemState: async () => ({ committee: { n_shards: 1000, members: Array.from({ length: 10 }, () => ({weight:100})), epoch: 7 } }),
       encodeBlob: async (bytes) => { calls.push(["encode", bytes.length]); return encoded; },
       writeEncodedBlobToNodes: async (options) => { calls.push(["write", options.objectId, options.deletable]); return ["c1", "c2"]; },
-      certificateFromConfirmations: async (options) => { calls.push(["certificate", options.blobObjectId]); return { signature: new Uint8Array([1]), signers: [0, 9], serializedMessage: new Uint8Array([2]) }; },
+      certificateFromConfirmations: async (options) => { calls.push(["certificate", options.blobObjectId]); return { signature: new Uint8Array([1]), signers: Array.from({length:7},(_,i)=>i), serializedMessage: new Uint8Array([2]) }; },
     };
     const client = { $extend: () => ({ walrus: walrusClient }) };
     const execute = async (tx) => { const names = fns(tx); calls.push(["execute", ...names]); return { digest: "d", events: names.includes("fleet_storage::register_fleet_blob") ? events : [] }; };
@@ -313,6 +318,11 @@ async function uploads() {
     assert.deepEqual(missing.calls.map((c) => c[0]), ["encode", "execute"]);
   }
   // A failed sliver write or certification stops before success is reported.
+  const underweight = stub();
+  const originalWalrus=underweight.client.$extend().walrus;
+  underweight.client.$extend=()=>({walrus:{...originalWalrus,certificateFromConfirmations:async()=>({signature:new Uint8Array([1]),signers:[0,1],serializedMessage:new Uint8Array([2])})}});
+  await assert.rejects(upload.uploadToFleetStorage(underweight.client,target,new Uint8Array(5),underweight.execute),/shard-weight/);
+  assert(!underweight.calls.some(c=>c.includes('fleet_storage::certify_blob')),'underweight certificate must fail before asking wallet to certify');
   const failing = stub();
   const write = failing.client.$extend().walrus;
   failing.client.$extend = () => ({ walrus: { ...write, writeEncodedBlobToNodes: async () => { throw new Error("NotEnoughBlobConfirmationsError"); } } });
@@ -332,3 +342,39 @@ async function uploads() {
 reads().then(() => console.log("PASS: account reads follow the budget index and verify the account's type, budget and device; reserve, at-limit, anomalous, low, empty, paused, runway and storage alerts"))
   .then(uploads).then(() => console.log("PASS: fleet-paid uploads check the pinned Walrus package, need the registration event, write slivers to the registered blob and certify it; failures stop without success"),
   (error) => { console.error(error); process.exit(1); });
+
+{
+  const { MEASURED, estimate } = costs;
+  const records = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-device-effects.json'), 'utf8')).transactions;
+  const health = records.filter(r => r.health_seq);
+  assert.equal(MEASURED.fleetData.initialHealthNetMist, BigInt(health.find(r => r.health_seq === 1).net_gas_mist));
+  assert.equal(MEASURED.fleetData.recurringHealthNetMist, BigInt(Math.max(...health.filter(r => r.health_seq > 1).map(r => r.net_gas_mist))));
+  const native = JSON.parse(fs.readFileSync(path.join(root, 'docs/validation/sf082-testnet-native.json'), 'utf8'));
+  assert.equal(MEASURED.fleetData.archiveNetMist, native.native_transactions.filter(r => r.label.startsWith('periodic-')).reduce((sum, r) => sum + BigInt(r.net_gas_mist), 0n));
+  const base = { devices: 1, months: 1, receiptsPerDeviceMonth: 0, anchorsPerDeviceMonth: 0, releasesPerMonth: 0, artifactBytes: 0, dataBytesPerDeviceMonth: 0, storageEpochs: 3, floatMist: 100000000000n, drawMist: 50000000n, marginPercent: 0 };
+  const first = estimate({ ...base, healthSummariesPerDeviceMonth: 1 });
+  assert.equal(first.gasMist, MEASURED.fleetData.initialHealthNetMist);
+  assert.equal(estimate({ ...base, healthSummariesPerDeviceMonth: 2 }).gasMist, MEASURED.fleetData.initialHealthNetMist + MEASURED.fleetData.recurringHealthNetMist);
+  const daily = estimate({ ...base, serverlessData: true, dataBytesPerDeviceMonth: 64 * 1024 * 1024, dataUploadsPerDeviceMonth: 30 });
+  assert.equal(daily.deviceTransactions, 90); assert.equal(daily.gasMist, 30n * MEASURED.fleetData.archiveNetMist);
+  assert.equal(estimate({ ...base, serverlessData: true, dataUploadsPerDeviceMonth: 30 }).deviceTransactions, 0, 'empty periodic logs need no blob');
+  console.log('SF082 estimate reproduces measured first/recurring health and all three archive transaction costs');
+}
+
+// Protected capacity is fleet-wide, finite and independent of deposit headroom.
+{
+  const capacity = costs.protectedArchiveCapacity;
+  assert.deepEqual(capacity(0, 10, 30, 4), { remaining: 1024, planned: 1200, exceedsCapacity: true, daysToCapacity: 102.4 });
+  assert.equal(capacity(124, 10, 30, 3).exceedsCapacity, false); // exact fit
+  assert.equal(capacity(125, 10, 30, 3).exceedsCapacity, true);
+  assert.equal(capacity(1024, 1, 30, 1).daysToCapacity, 0);
+  assert.equal(capacity(1024, 0, 30, 1).daysToCapacity, null);
+  assert.equal(capacity(100, 10, 60, 1).daysToCapacity, 46.2); // emergency headroom
+  assert.throws(() => capacity(1025, 1, 30, 1), /existing protected/);
+  const plan = costs.estimate({ ...base, devices: 10, months: 4, serverlessData: true,
+    dataBytesPerDeviceMonth: 1024, dataUploadsPerDeviceMonth: 30, existingProtectedBlobs: 100, marginPercent: 1000 });
+  assert.equal(plan.protectedCapacity.remaining, 924);
+  assert.equal(plan.protectedCapacity.exceedsCapacity, true); // funding cannot fix capacity
+  assert.equal(costs.estimate(base).protectedCapacity, undefined);
+  console.log('PASS: fleet-wide retained archive capacity, exact fit, exhaustion, diagnostics and deposit independence');
+}

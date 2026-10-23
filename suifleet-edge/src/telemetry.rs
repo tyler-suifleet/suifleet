@@ -181,6 +181,14 @@ pub fn inventory(state_dir: &Path) -> Inventory {
         inventory.reasons.push("daemon journal unreadable".into());
         return inventory;
     };
+    match std::fs::read(state_dir.join("fleet-data/status.json")) {
+        Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(status) if status["blocked"].as_bool() == Some(false) => (),
+            _ => inventory.reasons.push("fleet archive publication pending: storage, quota, authority or network unavailable".into()),
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(_) => inventory.reasons.push("fleet archive publication status unreadable".into()),
+    }
     // Absent files are a device that never supervised anything; any other
     // failure leaves the supervisor's view unknown, which is never healthy.
     let supervised = state_dir.join("supervised");
@@ -323,6 +331,11 @@ pub struct Binding {
 /// Build a bounded snapshot. Everything a device can make arbitrarily long
 /// is truncated, and components beyond the limits are left out (and said so).
 pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64) -> Snapshot {
+    snapshot_limit(binding, signer, seq, dropped, sync, inventory, now, MAX_MESSAGE_BYTES)
+}
+
+/// Same schema and health judgement, bounded to the on-chain summary limit.
+pub fn snapshot_limit(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64, max_bytes: usize) -> Snapshot {
     let mut reasons = sync_reasons(&sync, binding.poll_seconds, now);
     reasons.extend(inventory.reasons);
     let mut services = inventory.services;
@@ -378,7 +391,7 @@ pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: S
         };
         // JSON escaping can still outgrow the byte limit: list fewer
         // components, then fewer service entries (each list counts them).
-        if serde_json::to_vec(&snapshot).map(|b| b.len()).unwrap_or(usize::MAX) <= MAX_MESSAGE_BYTES {
+        if serde_json::to_vec(&snapshot).map(|b| b.len()).unwrap_or(usize::MAX) <= max_bytes {
             return snapshot;
         }
         if components.pop().is_some() {
@@ -909,9 +922,12 @@ mod tests {
     fn signs_the_shared_vector_exactly() {
         // interfaces/telemetry-cases.json: signed independently with Mysten's
         // TypeScript SDK; the indexer and the dApp verify the same envelope.
-        // `signed_services` (schema 2) fixes the services section's field order.
+        // `signed_services_v2` (schema 2) fixes the services section's field
+        // order; `signed_services` is its version-1 predecessor, which this
+        // daemon no longer emits.
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
-        for case in ["signed", "signed_services"] {
+        assert_eq!(cases["signed_services_v2"]["snapshot"]["services"]["version"], crate::service_health::VERSION);
+        for case in ["signed", "signed_services_v2"] {
             let snapshot: Snapshot = serde_json::from_value(cases[case]["snapshot"].clone()).unwrap();
             assert_eq!(snapshot.schema, Snapshot::schema_for(snapshot.services.is_some()), "{case}");
             let expected: Envelope = serde_json::from_value(cases[case]["envelope"].clone()).unwrap();

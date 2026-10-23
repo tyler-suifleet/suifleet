@@ -140,3 +140,17 @@ Unlike device health, the dApp cannot re-derive alerts from the chain alone, so 
 - log search in the dApp;
 - physical Pi logs and power loss (#32);
 - public-network operation (#11).
+
+## Direct Sui/Walrus archives (SF-082)
+
+A configured `[fleet_data]` producer sends bounded signed health directly to Sui;
+`[fleet_data.archives]` batches redacted logs and owner/support diagnostics into
+native Seal-encrypted fleet-prepaid Walrus blobs. The dApp's `/data/` page verifies
+the chain index, identities, signatures, ciphertext and read policy before showing
+plaintext. The HTTP indexer and its legacy log page remain optional. See
+[serverless fleet data](SERVERLESS_FLEET_DATA.md) for explicit object configuration,
+retention, costs, keyless codec deployment and honest validation limits.
+
+Push notifications need an optional owner-run relay; an open browser can derive
+alerts directly. Neither a relay nor an indexer is a trust root. Unavailable
+chain/provider data is never treated as a healthy device or a resolved incident.

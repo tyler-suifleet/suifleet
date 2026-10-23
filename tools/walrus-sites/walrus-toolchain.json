@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "release": "testnet-v1.59.0",
+  "version_output": "walrus 1.59.0-c68b530e0b1e",
+  "platform": "ubuntu-x86_64",
+  "archive_url": "https://github.com/MystenLabs/walrus/releases/download/testnet-v1.59.0/walrus-testnet-v1.59.0-ubuntu-x86_64.tgz",
+  "archive_sha256": "2a940f535db5bdac5c7543bef070df8c18fe5e7baed34aa932373d9962a4fed8",
+  "binary_sha256": "32c7a246efa2eaafe25d45051c897b1f96da19cda66d4d7e95c03ec34e794ce0",
+  "client_config": {
+    "path": "testnet-client.yaml",
+    "source_commit": "c68b530e0b1e522b4a3896190d883e4312a1cf0e",
+    "source_path": "setup/client_config_testnet.yaml",
+    "sha256": "0ae74e070c0174c17b3b29522172d6e65fedf9d47c34e797907a47775866e7b1"
+  }
+}

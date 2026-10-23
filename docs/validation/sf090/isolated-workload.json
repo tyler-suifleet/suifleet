@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "devices": 16,
+  "concurrency": 4,
+  "rounds": 1,
+  "thresholds": {
+    "stage_p95_ms": 30000,
+    "unexpected_failures": 0,
+    "peak_rss_bytes": 1073741824
+  },
+  "network": "network-none disposable loopback Sui 1.82.1, compiler 1.81.1",
+  "scope": "Integrated synthetic devices: real chain enrollment/budget/signatures/health/receipts, shipped Seal encryption, official signed-session decryption against local policy-verifying test providers, authenticated file application; separate from native updater and public provider capacity",
+  "not_measured": [
+    "real Walrus storage-node capacity",
+    "real Seal provider throttling",
+    "physical targets",
+    "production availability"
+  ],
+  "artifact_bytes": 1048576,
+  "retry": {
+    "attempts": 3,
+    "base_delay_ms": 10,
+    "max_delay_ms": 40
+  }
+}

@@ -131,7 +131,7 @@ def compile_package(build_tool, package_dir, environment='testnet', run=subproce
     lock = Path(package_dir) / 'Move.lock'
     before = lock.read_bytes() if lock.exists() else None
     result = run([str(build_tool), 'move', 'build', '--path', str(package_dir), '--dump-bytecode-as-base64',
-                  '--build-env', environment, '--silence-warnings'], capture_output=True, text=True, timeout=900)
+                  '--build-env', environment, '--silence-warnings', '--no-tree-shaking'], capture_output=True, text=True, timeout=900)
     if result.returncode:
         raise RuntimeError(f'release compilation failed:\n{result.stderr[-3000:]}')
     if (lock.read_bytes() if lock.exists() else None) != before:

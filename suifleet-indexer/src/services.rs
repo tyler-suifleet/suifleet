@@ -5,9 +5,16 @@
 //! The section holds counters and states only: never payloads, topics,
 //! export or sync URLs, credentials or shadow contents.
 use crate::telemetry::{Snapshot, MAX_INTERVAL_SECONDS, MAX_NAME, MIN_INTERVAL_SECONDS};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
-pub const VERSION: u64 = 1;
+/// A field only some versions carry: `None` when absent, `Some(None)` when null.
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+/// Versions accepted: 1, and 2 (SF-084), which adds each stream's retained
+/// sequence range and export checkpoint.
+pub const VERSIONS: [u64; 2] = [1, 2];
 pub const MAX_ENTRIES: usize = 32;
 /// A queue or stream at least this full (percent) is near its limit.
 pub const FULL_PERCENT: u8 = 90;
@@ -87,6 +94,11 @@ pub struct StreamHealth {
     pub max_size: u64,
     pub fill_percent: u8,
     pub messages: u64,
+    /// Version 2: first and last retained sequence numbers.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub newest: Option<Option<u64>>,
     pub overwrite: bool,
     pub rejected: u64,
     pub rejected_recent: u64,
@@ -96,6 +108,9 @@ pub struct StreamHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExportHealth {
+    /// Version 2: the acknowledged export checkpoint.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<Option<u64>>,
     pub lag: u64,
     pub lost: u64,
     pub lost_recent: u64,
@@ -128,9 +143,28 @@ pub struct ShadowSyncHealth {
     pub last_error: Option<String>,
 }
 
-/// Bounds of a version-1 services section.
+/// Whether a stream's version-2 positions are present exactly in version 2
+/// and consistent: both ends set exactly when it holds messages, in order,
+/// with room for its messages (crash-skipped sequences leave gaps).
+fn positions(version: u64, s: &StreamHealth) -> bool {
+    let checkpoint = s.export.as_ref().map(|e| e.checkpoint);
+    if version == 1 {
+        return s.oldest.is_none() && s.newest.is_none() && checkpoint.is_none_or(|c| c.is_none());
+    }
+    let (Some(oldest), Some(newest)) = (s.oldest, s.newest) else { return false };
+    if checkpoint.is_some_and(|c| c.is_none()) {
+        return false;
+    }
+    match (oldest, newest) {
+        (None, None) => s.messages == 0,
+        (Some(o), Some(n)) => o <= n && s.messages >= 1 && s.messages - 1 <= n - o,
+        _ => false,
+    }
+}
+
+/// Bounds of a version-1 or version-2 services section.
 pub fn validate(services: &Services) -> Result<(), String> {
-    if services.version != VERSION {
+    if !VERSIONS.contains(&services.version) {
         return Err(format!("unsupported services section version {}", services.version));
     }
     let short = |text: &str, limit| text.len() <= limit;
@@ -148,7 +182,8 @@ pub fn validate(services: &Services) -> Result<(), String> {
     }
     if let Some(s) = &services.streams {
         let ok = s.streams.len() <= MAX_ENTRIES
-            && s.streams.iter().all(|s| short(&s.name, MAX_NAME) && percent(s.fill_percent) && s.export.as_ref().is_none_or(|e| error(&e.last_error)));
+            && s.streams.iter().all(|s| short(&s.name, MAX_NAME) && percent(s.fill_percent) && s.export.as_ref().is_none_or(|e| error(&e.last_error))
+                && positions(services.version, s));
         if !ok {
             return Err("services.streams exceeds its bounds".into());
         }
@@ -331,10 +366,10 @@ pub(crate) mod tests {
             streams: Some(StreamsHealth {
                 omitted: 0,
                 streams: vec![StreamHealth {
-                    name: "metrics".into(), bytes: 950, max_size: 1000, fill_percent: 95, messages: 9, overwrite: true,
-                    rejected: 0, rejected_recent: 0,
+                    name: "metrics".into(), bytes: 950, max_size: 1000, fill_percent: 95, messages: 9, oldest: None, newest: None,
+                    overwrite: true, rejected: 0, rejected_recent: 0,
                     export: Some(ExportHealth {
-                        lag: 9, lost: 2, lost_recent: 2, batches: 0, failures: 5, consecutive_failures: 5, last_success_ms: None,
+                        checkpoint: None, lag: 9, lost: 2, lost_recent: 2, batches: 0, failures: 5, consecutive_failures: 5, last_success_ms: None,
                         last_error: Some("http-server-error".into()),
                     }),
                 }],
@@ -397,12 +432,14 @@ pub(crate) mod tests {
     #[test]
     fn shared_vector_alerts() {
         let cases: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/telemetry-cases.json")).unwrap();
-        let snapshot: Snapshot = serde_json::from_value(cases["signed_services"]["snapshot"].clone()).unwrap();
-        assert!(validate(snapshot.services.as_ref().unwrap()).is_ok());
-        let kinds: Vec<_> = conditions(&snapshot).into_iter().map(|c| (c.kind, c.subject)).collect();
-        assert_eq!(kinds, [("messaging-backpressure", "svc".into()), ("messaging-loss", "svc".into()), ("bridge-disconnected", String::new()),
-                           ("stream-near-limit", "metrics".into()), ("stream-data-lost", "metrics".into()), ("export-failing", "metrics".into()),
-                           ("shadow-conflict", String::new())]);
+        for case in ["signed_services", "signed_services_v2"] {
+            let snapshot: Snapshot = serde_json::from_value(cases[case]["snapshot"].clone()).unwrap();
+            assert!(validate(snapshot.services.as_ref().unwrap()).is_ok(), "{case}");
+            let kinds: Vec<_> = conditions(&snapshot).into_iter().map(|c| (c.kind, c.subject)).collect();
+            assert_eq!(kinds, [("messaging-backpressure", "svc".into()), ("messaging-loss", "svc".into()), ("bridge-disconnected", String::new()),
+                               ("stream-near-limit", "metrics".into()), ("stream-data-lost", "metrics".into()), ("export-failing", "metrics".into()),
+                               ("shadow-conflict", String::new())], "{case}");
+        }
     }
 
     #[test]
@@ -411,11 +448,64 @@ pub(crate) mod tests {
         assert_eq!(cases["service_error_categories"], serde_json::json!(ERROR_CATEGORIES));
     }
 
+    /// The test section in version 2: nine messages 11..=20 (one crash-skipped).
+    fn services_v2() -> Services {
+        let mut s = services();
+        s.version = 2;
+        let stream = &mut s.streams.as_mut().unwrap().streams[0];
+        (stream.oldest, stream.newest) = (Some(Some(11)), Some(Some(20)));
+        stream.export.as_mut().unwrap().checkpoint = Some(Some(10));
+        s
+    }
+
+    #[test]
+    fn version_two_stream_positions() {
+        let v2 = services_v2();
+        assert!(validate(&v2).is_ok());
+        // Null stays null and absent stays absent through the API.
+        let value = serde_json::to_value(&v2).unwrap();
+        assert_eq!(value["streams"]["streams"][0]["oldest"], 11);
+        assert_eq!(value["streams"]["streams"][0]["export"]["checkpoint"], 10);
+        assert_eq!(serde_json::from_value::<Services>(value).unwrap(), v2);
+        let v1 = serde_json::to_value(services()).unwrap();
+        assert!(v1["streams"]["streams"][0].get("oldest").is_none() && v1["streams"]["streams"][0]["export"].get("checkpoint").is_none());
+        // An empty stream: no positions, and a checkpoint that outlived discarded messages.
+        let mut empty = v2.clone();
+        let stream = &mut empty.streams.as_mut().unwrap().streams[0];
+        (stream.messages, stream.oldest, stream.newest) = (0, Some(None), Some(None));
+        let value = serde_json::to_value(&empty).unwrap();
+        assert!(value["streams"]["streams"][0]["oldest"].is_null() && value["streams"]["streams"][0].get("oldest").is_some());
+        assert_eq!(serde_json::from_value::<Services>(value).unwrap(), empty);
+        assert!(validate(&empty).is_ok());
+        // Nothing exported yet.
+        let mut fresh = v2.clone();
+        fresh.streams.as_mut().unwrap().streams[0].export.as_mut().unwrap().checkpoint = Some(None);
+        assert!(validate(&fresh).is_ok());
+        for change in [
+            |s: &mut StreamHealth| s.oldest = None,
+            |s: &mut StreamHealth| s.export.as_mut().unwrap().checkpoint = None,
+            |s: &mut StreamHealth| s.newest = Some(None),
+            |s: &mut StreamHealth| (s.oldest, s.newest) = (Some(Some(21)), Some(Some(20))),
+            |s: &mut StreamHealth| s.messages = 11,
+            |s: &mut StreamHealth| (s.oldest, s.newest) = (Some(None), Some(None)),
+            |s: &mut StreamHealth| s.messages = 0,
+        ] {
+            let mut s = v2.clone();
+            change(&mut s.streams.as_mut().unwrap().streams[0]);
+            assert!(validate(&s).is_err(), "{s:?}");
+        }
+    }
+
     #[test]
     fn bounds() {
         assert!(validate(&services()).is_ok());
         for change in [
+            // Version 2 needs the positions; version 3 is unknown.
             |s: &mut Services| s.version = 2,
+            |s: &mut Services| s.version = 3,
+            // Version 1 never carries them.
+            |s: &mut Services| s.streams.as_mut().unwrap().streams[0].oldest = Some(Some(1)),
+            |s: &mut Services| s.streams.as_mut().unwrap().streams[0].export.as_mut().unwrap().checkpoint = Some(None),
             |s: &mut Services| s.messaging.as_mut().unwrap().queues[0].principal = "p".repeat(MAX_NAME + 1),
             |s: &mut Services| s.messaging.as_mut().unwrap().queues = vec![s.messaging.as_ref().unwrap().queues[0].clone(); MAX_ENTRIES + 1],
             |s: &mut Services| s.messaging.as_mut().unwrap().queues[0].fill_percent = 101,

@@ -212,6 +212,40 @@ module fleet_storage::fleet_storage {
         pending_count: u64,
         covered_count: u64,
     }
+    /// Owner approval for new device archives, finite across the whole fleet.
+    /// This later type has its own introduction-package origin.
+    public struct DeviceRetentionKey has copy, drop, store {}
+    public struct DeviceRetention has copy, drop, store { target: u32, max_fee: u64 }
+    public struct DeviceRetentionConfigured has copy, drop {
+        storage_id: ID, target: u32, max_fee: u64, enabled: bool,
+    }
+
+    public fun configure_device_retention(
+        fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        target: u32, max_fee: u64,
+    ) {
+        assert_owner(fs, budget, cap);
+        assert!(df::exists(&fs.id, RetentionKey {}), EInsufficientWal);
+        assert!(target > 0 && max_fee > 0, EInvalidEpochs);
+        if (df::exists(&fs.id, DeviceRetentionKey {})) {
+            let _: DeviceRetention = df::remove(&mut fs.id, DeviceRetentionKey {});
+        };
+        df::add(&mut fs.id, DeviceRetentionKey {}, DeviceRetention { target, max_fee });
+        let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
+        r.revision = r.revision + 1;
+        event::emit(DeviceRetentionConfigured { storage_id: object::id(fs), target, max_fee, enabled: true });
+    }
+
+    public fun clear_device_retention(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap) {
+        assert_owner(fs, budget, cap);
+        if (df::exists(&fs.id, DeviceRetentionKey {})) {
+            let _: DeviceRetention = df::remove(&mut fs.id, DeviceRetentionKey {});
+            let r: &mut Retention = df::borrow_mut(&mut fs.id, RetentionKey {});
+            r.revision = r.revision + 1;
+            event::emit(DeviceRetentionConfigured { storage_id: object::id(fs), target: 0, max_fee: 0, enabled: false });
+        };
+    }
+
     public struct ProtectedBlobsKey has copy, drop, store {}
     public struct PrepaidKey has copy, drop, store { blob_object_id: ID }
     public struct PrepaidCountKey has copy, drop, store {}
@@ -288,6 +322,10 @@ module fleet_storage::fleet_storage {
         blob_object_id: ID, target: u32, max_fee: u64,
     ) {
         assert_owner(fs, budget, cap);
+        authorize_renewal_impl(fs, blob_object_id, target, max_fee)
+    }
+
+    fun authorize_renewal_impl(fs: &mut FleetStorage, blob_object_id: ID, target: u32, max_fee: u64) {
         assert!(has_blob(fs, blob_object_id), EUnknownBlob);
         assert!(target > blob(fs, blob_object_id).end_epoch() && max_fee > 0, EInvalidEpochs);
         discard_prepaid(fs, blob_object_id);
@@ -320,6 +358,10 @@ module fleet_storage::fleet_storage {
         system: &mut System, blob_object_id: ID, ctx: &mut TxContext,
     ) {
         assert_owner(fs, budget, cap);
+        prepay_renewal_impl(fs, system, blob_object_id, ctx)
+    }
+
+    fun prepay_renewal_impl(fs: &mut FleetStorage, system: &mut System, blob_object_id: ID, ctx: &mut TxContext) {
         assert!(!dof::exists(&fs.id, PrepaidKey { blob_object_id }), EInvalidEpochs);
         let p: Renewal = *df::borrow(&fs.id, RenewalKey { blob_object_id });
         let b = blob(fs, blob_object_id);
@@ -648,7 +690,9 @@ module fleet_storage::fleet_storage {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
-        assert!(!df::exists(&fs.id, RetentionKey {}), EInsufficientWal);
+        let retained = df::exists(&fs.id, RetentionKey {});
+        assert!(!retained || df::exists(&fs.id, DeviceRetentionKey {}), EInsufficientWal);
+        assert_retention_live(fs, system.epoch());
         assert!(fs.version == VERSION, EWrongVersion);
         assert!(object::id(budget) == fs.budget_id, EWrongBudget);
         fleet_budget::assert_may_draw(budget, account, registry, cap, ctx);
@@ -702,6 +746,13 @@ module fleet_storage::fleet_storage {
             wal_balance: fs.wal.value(),
             at_limit,
         });
+        if (retained) {
+            let policy: DeviceRetention = *df::borrow(&fs.id, DeviceRetentionKey {});
+            assert!(policy.target > end_epoch, EInvalidEpochs);
+            authorize_renewal_impl(fs, blob_object_id, policy.target, policy.max_fee);
+            prepay_renewal_impl(fs, system, blob_object_id, ctx);
+            assert_retention_funded(fs);
+        };
         blob_object_id
     }
 

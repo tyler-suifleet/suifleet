@@ -1018,7 +1018,8 @@ impl Store {
         Ok(if messages.is_empty() { None } else { Some((lost, messages)) })
     }
 
-    /// Facts for telemetry (SF-085): usage, rejections, export lag and loss.
+    /// Facts for telemetry (SF-085): usage, rejections, export lag and loss,
+    /// and (SF-084) the retained sequence range and export checkpoint.
     /// Never data, export URLs or credentials. Read-only: telemetry may run
     /// while a reconfiguration awaits its journal commit (or against a staged
     /// store), so retention is only projected here, never applied. Usage and
@@ -1034,6 +1035,9 @@ impl Store {
                     bytes: live.iter().map(|e| e.cost()).sum(),
                     max_size: stream.def.max_size,
                     messages: live.len() as u64,
+                    oldest: live.first().map(|e| e.sequence),
+                    newest: live.last().map(|e| e.sequence),
+                    checkpoint: u64::try_from(stream.exported).ok(),
                     overwrite: stream.def.strategy_on_full == Strategy::OverwriteOldestData,
                     rejected: stream.rejected,
                     lost: stream.lost,
@@ -1462,6 +1466,49 @@ mod tests {
         store.append("ring", &[9; 250], 0).unwrap();
         let ring = store.health(0).remove(1);
         assert_eq!((ring.lost, ring.export.unwrap().0), (1, 2));
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn health_reports_retained_range_and_export_checkpoint() {
+        let path = dir("health-positions");
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        let mut exported = def("e", 4096, Strategy::RejectNewData);
+        exported.export = Some(ExportConfig { url: "http://127.0.0.1:9/x".into(), bearer_token_file: None,
+            batch_max_messages: 2, batch_max_bytes: 1024, batch_interval_seconds: 1, max_backoff_seconds: 5 });
+        exported.discard_exported = true;
+        store.create(exported).unwrap();
+        store.create(def("plain", 4096, Strategy::RejectNewData)).unwrap();
+        // Empty: no range, and the internal -1 sentinel is "nothing exported".
+        let facts = store.health(0);
+        assert_eq!((facts[0].oldest, facts[0].newest, facts[0].checkpoint, facts[0].messages), (None, None, None, 0));
+        assert_eq!((facts[1].oldest, facts[1].newest, facts[1].checkpoint), (None, None, None));
+        for i in 0..4u8 {
+            store.append("e", &[i; 8], 0).unwrap();
+            store.append("plain", &[i; 8], 0).unwrap();
+        }
+        let facts = store.health(0);
+        assert_eq!((facts[0].oldest, facts[0].newest, facts[0].checkpoint), (Some(0), Some(3), None));
+        // The checkpoint is the acknowledged sequence, not the lag; exported
+        // messages are discarded, moving the oldest retained one.
+        store.export_ack("e", 1, 0).unwrap();
+        let e = store.health(0).remove(0);
+        assert_eq!((e.oldest, e.newest, e.checkpoint, e.messages, e.export.unwrap().0), (Some(2), Some(3), Some(1), 2, 2));
+        // Everything exported and discarded: an empty range keeps its checkpoint.
+        store.export_ack("e", 3, 0).unwrap();
+        let e = store.health(0).remove(0);
+        assert_eq!((e.oldest, e.newest, e.checkpoint, e.messages), (None, None, Some(3), 0));
+        // A crash skips the unpersisted reservation: the range has a gap.
+        std::mem::forget(store);
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        let next = store.append("plain", b"after", 0).unwrap();
+        assert!(next > 4, "numbering skipped ahead ({next})");
+        let plain = store.health(0).remove(1);
+        assert_eq!((plain.oldest, plain.newest, plain.messages), (Some(0), Some(next), 5));
+        assert!(plain.messages < next + 1, "messages fit the range with a gap");
+        let e = store.health(0).remove(0);
+        assert_eq!((e.oldest, e.newest, e.checkpoint), (None, None, Some(3)), "checkpoint survives restart");
+        drop(store);
         std::fs::remove_dir_all(path).unwrap();
     }
 

@@ -11,6 +11,8 @@ export const MEASURED = {
   minComputationMist: BigInt(1_000_000),
   /** One fleet_budget::draw_gas, net MIST, measured on testnet (docs/validation/sf083-testnet.json). */
   drawNetMist: BigInt(1_988_540),
+  /** Observed Testnet SF-082 effects; fixture observations, not fleet-size gas ceilings or a production quote. */
+  fleetData: { initialHealthNetMist: BigInt(7_255_298), recurringHealthNetMist: BigInt(4_459_123), archiveNetMist: BigInt(27_075_739) },
   walrus: {
     nShards: 1000,
     /** FROST per encoded MiB per epoch (Mainnet epoch 42). */
@@ -23,6 +25,21 @@ export const MEASURED = {
   /** Indicative CoinGecko spot quotes; exclude spread, slippage, taxes and acquisition fees. */
   usd: { SUI: 1.048, WAL: 0.04023726, observedAt: 1792604183 },
 } as const;
+
+/** Fleet-wide protected index; shared by releases and device archives. */
+export const PROTECTED_BLOB_LIMIT = 1024;
+
+export function protectedArchiveCapacity(existing: number, devices: number, uploadsPerDeviceMonth: number, months: number) {
+  checked("existing protected blobs", existing, PROTECTED_BLOB_LIMIT);
+  checked("devices", devices, 1_000_000);
+  checked("device archive uploads", uploadsPerDeviceMonth, 100_000);
+  checked("months", months, 120);
+  const monthlyUploads = devices * uploadsPerDeviceMonth;
+  const remaining = PROTECTED_BLOB_LIMIT - existing;
+  const planned = monthlyUploads * months;
+  return { remaining, planned, exceedsCapacity: planned > remaining,
+    daysToCapacity: monthlyUploads ? remaining * 30 / monthlyUploads : null };
+}
 
 const MIB = BigInt(1024 * 1024);
 export const MIST_PER_SUI = BigInt(1_000_000_000);
@@ -59,10 +76,18 @@ export interface EstimateInput {
   receiptsPerDeviceMonth: number;
   /** Other device transactions (data anchors) per device per month. */
   anchorsPerDeviceMonth: number;
+  /** Signed on-chain health summaries; zero for legacy HTTP telemetry. */
+  healthSummariesPerDeviceMonth?: number;
+  /** Include registration/certification/anchor gas for each encrypted archive. */
+  serverlessData?: boolean;
+  /** Existing protected records, including non-device blobs; zero assumes empty storage. */
+  existingProtectedBlobs?: number;
   /** Releases uploaded per month; each is one artifact plus its recipe. */
   releasesPerMonth: number;
   artifactBytes: number;
-  /** Device data stored on Walrus per device per month (one blob each). */
+  /** Archive uploads per device per month. Legacy callers default to one. */
+  dataUploadsPerDeviceMonth?: number;
+  /** Total device data stored on Walrus per device per month, across those uploads. */
   dataBytesPerDeviceMonth: number;
   /** Walrus epochs each blob is kept. */
   storageEpochs: number;
@@ -75,6 +100,7 @@ export interface EstimateInput {
 }
 
 export interface Estimate {
+  protectedCapacity?: ReturnType<typeof protectedArchiveCapacity>;
   deviceTransactions: number;
   draws: number;
   /** Device gas for receipts/anchors, plus the gas of the draws themselves. */
@@ -108,11 +134,19 @@ export function estimate(input: EstimateInput): Estimate {
   checked("releases", input.releasesPerMonth, 10_000);
   checked("artifact bytes", input.artifactBytes, 1 << 30);
   checked("data bytes", input.dataBytesPerDeviceMonth, 1 << 30);
+  const uploads = checked("device archive uploads", input.dataUploadsPerDeviceMonth ?? 1, 100_000);
+  if (input.dataBytesPerDeviceMonth > 0 && uploads === 0) throw new Error("Device data needs at least one archive upload");
   checked("storage epochs", input.storageEpochs, 53);
   checked("margin", input.marginPercent, 1000);
   if (input.drawMist <= BigInt(0) || input.floatMist < BigInt(0)) throw new Error("draw must be positive and float non-negative");
-  const deviceTransactions = devices * months * perDevice;
-  const spend = BigInt(deviceTransactions) * MEASURED.receiptNetMist;
+  const health = checked("health summaries", input.healthSummariesPerDeviceMonth ?? 0, 100_000);
+  const archiveUploads = input.serverlessData && input.dataBytesPerDeviceMonth > 0 ? uploads : 0;
+  const protectedCapacity = input.serverlessData ? protectedArchiveCapacity(input.existingProtectedBlobs ?? 0, devices, archiveUploads, months) : undefined;
+  const deviceTransactions = devices * months * (perDevice + health + 3 * archiveUploads);
+  const spend = BigInt(devices * months * perDevice) * MEASURED.receiptNetMist
+    + BigInt(devices * months * health) * MEASURED.fleetData.recurringHealthNetMist
+    + (months > 0 && health > 0 ? BigInt(devices) * (MEASURED.fleetData.initialHealthNetMist - MEASURED.fleetData.recurringHealthNetMist) : BigInt(0))
+    + BigInt(devices * months * archiveUploads) * MEASURED.fleetData.archiveNetMist;
   // The float covers the first spend; later spend is drawn in draw-sized steps.
   const perDeviceSpend = devices ? spend / BigInt(devices) : BigInt(0);
   const drawsPerDevice = perDeviceSpend > input.floatMist ? Number((perDeviceSpend - input.floatMist + input.drawMist - BigInt(1)) / input.drawMist) : 0;
@@ -122,13 +156,13 @@ export function estimate(input: EstimateInput): Estimate {
   const releases = input.releasesPerMonth * months;
   const artifact = blobCostFrost(input.artifactBytes, input.storageEpochs), recipe = blobCostFrost(RECIPE_ENVELOPE_BYTES, input.storageEpochs);
   const artifactFrost = BigInt(releases) * (artifact.storage + artifact.write + recipe.storage + recipe.write);
-  const data = input.dataBytesPerDeviceMonth ? blobCostFrost(input.dataBytesPerDeviceMonth, input.storageEpochs) : undefined;
-  const dataFrost = data ? BigInt(devices * months) * (data.storage + data.write) : BigInt(0);
+  const data = input.dataBytesPerDeviceMonth ? blobCostFrost(Math.ceil(input.dataBytesPerDeviceMonth / Math.max(1, uploads)), input.storageEpochs) : undefined;
+  const dataFrost = data ? BigInt(devices * months * uploads) * (data.storage + data.write) : BigInt(0);
   // The floats are paid from the deposit, so they are part of it (not extra spend).
   const suiDepositMist = margin(gasMist, input.marginPercent) + floatsMist;
   const walDepositFrost = margin(artifactFrost + dataFrost, input.marginPercent);
   const sui = Number(suiDepositMist) / 1e9 * MEASURED.usd.SUI, wal = Number(walDepositFrost) / 1e9 * MEASURED.usd.WAL;
-  return { deviceTransactions, draws, gasMist, floatsMist, suiDepositMist, artifactFrost, dataFrost, walDepositFrost,
+  return { protectedCapacity, deviceTransactions, draws, gasMist, floatsMist, suiDepositMist, artifactFrost, dataFrost, walDepositFrost,
     usd: { sui, wal, total: sui + wal } };
 }
 

@@ -1,0 +1,906 @@
+{
+  "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+  "types": {
+    "site::Site": {
+      "abilities": [
+        3,
+        4
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "id",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000002::object::UID"
+          }
+        },
+        {
+          "name": "name",
+          "position": 1,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+          }
+        },
+        {
+          "name": "link",
+          "position": 2,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "image_url",
+          "position": 3,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "description",
+          "position": 4,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "project_url",
+          "position": 5,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "creator",
+          "position": 6,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::site::Site",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "site",
+      "name": "Site",
+      "kind": 1
+    },
+    "site::Resource": {
+      "abilities": [
+        2,
+        3
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "path",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+          }
+        },
+        {
+          "name": "headers",
+          "position": 1,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              },
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000002::vec_map::VecMap"
+          }
+        },
+        {
+          "name": "blob_id",
+          "position": 2,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 8
+          }
+        },
+        {
+          "name": "blob_hash",
+          "position": 3,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 8
+          }
+        },
+        {
+          "name": "range",
+          "position": 4,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Range"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::site::Resource",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "site",
+      "name": "Resource",
+      "kind": 1
+    },
+    "site::ResourcePath": {
+      "abilities": [
+        1,
+        2,
+        3
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "path",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::site::ResourcePath",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "site",
+      "name": "ResourcePath",
+      "kind": 1
+    },
+    "site::Range": {
+      "abilities": [
+        2,
+        3
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "start",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 6
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "end",
+          "position": 1,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 6
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::site::Range",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "site",
+      "name": "Range",
+      "kind": 1
+    },
+    "site::Routes": {
+      "abilities": [
+        2,
+        3
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "route_list",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              },
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000002::vec_map::VecMap"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::site::Routes",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "site",
+      "name": "Routes",
+      "kind": 1
+    },
+    "metadata::Metadata": {
+      "abilities": [
+        1,
+        2,
+        3
+      ],
+      "typeParameters": [],
+      "fields": [
+        {
+          "name": "link",
+          "position": 0,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "image_url",
+          "position": 1,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "description",
+          "position": 2,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "project_url",
+          "position": 3,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        },
+        {
+          "name": "creator",
+          "position": 4,
+          "type": {
+            "typeParameterInstantiation": [
+              {
+                "typeParameterInstantiation": [],
+                "type": 10,
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String"
+              }
+            ],
+            "type": 10,
+            "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option"
+          }
+        }
+      ],
+      "variants": [],
+      "typeName": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb::metadata::Metadata",
+      "definingId": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799",
+      "module": "metadata",
+      "name": "Metadata",
+      "kind": 1
+    }
+  },
+  "functions": {
+    "site::new_site": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "new_site",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::metadata::Metadata",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000002::tx_context::TxContext",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        }
+      ]
+    },
+    "site::new_resource": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "new_resource",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "u256"
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "u256"
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Range",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Resource",
+              "typeParameters": []
+            }
+          }
+        }
+      ]
+    },
+    "site::new_range_option": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "new_range_option",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "u64"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "u64"
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Range",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "site::add_header": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "add_header",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Resource",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": []
+    },
+    "site::add_resource": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "add_resource",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Resource",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": []
+    },
+    "site::remove_resource_if_exists": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "remove_resource_if_exists",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Resource",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "site::create_routes": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "create_routes",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": []
+    },
+    "site::fill_routes": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "fill_routes",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "vector",
+            "vector": {
+              "$kind": "datatype",
+              "datatype": {
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                "typeParameters": []
+              }
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "vector",
+            "vector": {
+              "$kind": "datatype",
+              "datatype": {
+                "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                "typeParameters": []
+              }
+            }
+          }
+        }
+      ],
+      "returns": []
+    },
+    "metadata::new_metadata": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "metadata",
+      "name": "new_metadata",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::string::String",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::metadata::Metadata",
+              "typeParameters": []
+            }
+          }
+        }
+      ]
+    },
+    "site::remove_all_routes_if_exist": {
+      "packageId": "0x22b8c1496650eb45fbcca0f8f37fae77ed33b7d4eaab4da5f0bb9b62a8708dcb",
+      "moduleName": "site",
+      "name": "remove_all_routes_if_exist",
+      "visibility": "public",
+      "isEntry": false,
+      "typeParameters": [],
+      "parameters": [
+        {
+          "reference": "mutable",
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Site",
+              "typeParameters": []
+            }
+          }
+        }
+      ],
+      "returns": [
+        {
+          "reference": null,
+          "body": {
+            "$kind": "datatype",
+            "datatype": {
+              "typeName": "0x0000000000000000000000000000000000000000000000000000000000000001::option::Option",
+              "typeParameters": [
+                {
+                  "$kind": "datatype",
+                  "datatype": {
+                    "typeName": "0xf99aee9f21493e1590e7e5a9aea6f343a1f381031a04a732724871fc294be799::site::Routes",
+                    "typeParameters": []
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "source": {
+    "release": "mainnet-v2.12.2",
+    "commit": "7c5dfaf4ed2a0b490459495e610221dc968289ae",
+    "paths": [
+      "move/walrus_site/sources/site.move",
+      "move/walrus_site/sources/metadata.move"
+    ]
+  }
+}
