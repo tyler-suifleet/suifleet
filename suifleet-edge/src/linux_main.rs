@@ -517,12 +517,17 @@ async fn main() -> anyhow::Result<()> {
                             break;
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
+                        let needs_report = pending.request.operation == "install" && result.is_ok()
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && !o.reported);
                         let _ = pending.reply.send(ipc::response(result));
                         // A local request can discover a scheduled record while
                         // the normal check sleeps. Only shorten the wakeup;
                         // unrelated IPC traffic must never postpone a check.
-                        let next = tokio::time::Instant::now() + cadence.delay(
-                            &cfg.runtime, journal.state.deferred.values(), telemetry::now_ms());
+                        let next = tokio::time::Instant::now() + if needs_report {
+                            Duration::ZERO
+                        } else {
+                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms())
+                        };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
                     Some(control) = async {
@@ -859,6 +864,7 @@ async fn poll(
         .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
         .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
         .collect();
+    let mut report_error = None;
     for (id, status) in pending {
         match sui
             .report_status(&id, &cfg.device.device_cap_id, status)
@@ -868,10 +874,16 @@ async fn poll(
                 journal.state.deployments.get_mut(&id).unwrap().reported = true;
                 journal.save()?;
             }
-            Err(error) => return Err(error.context("Status report remains queued")),
+            Err(error) => {
+                warn!(%id, %error, "Status report remains queued");
+                report_error = Some(error);
+            }
         }
     }
-    Ok(())
+    match report_error {
+        Some(error) => Err(error.context("Status report remains queued")),
+        None => Ok(()),
+    }
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
