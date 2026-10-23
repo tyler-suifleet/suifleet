@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useTelemetryToken } from "@/hooks/useFleetHealth";
-import { buildRolloutTx, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
+import { buildRolloutTx, rolloutAnnouncements, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
 import { PageHeader } from "@/components/ui";
 import { bpsLabel, fetchRolloutDecisions, rolloutProgress, type RolloutProgress } from "@/lib/rollout-progress";
 import { utc } from "@/lib/device-services";
@@ -37,8 +37,10 @@ export default function RolloutsPage() {
     <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Health is sampled when you advance, with a fresh signed report of this deployment installed.</p>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
-      <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(() => buildRolloutTx({ ...input,
-        cohorts: cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean)) })); }}>
+      <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
+        const parsed = cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean));
+        return buildRolloutTx({ ...input, cohorts: parsed }, await rolloutAnnouncements(client, account!.address, parsed.flat()));
+      }); }}>
         <p>Use a recipe and its exact digests from the firmware upload. One cohort per line, with device IDs separated by spaces. Cohorts are an immutable snapshot of direct targets; adding group members never expands it.</p>
         {(["component", "version", "recipe", "artifactSha256", "recipeSha256"] as const).map(key => <label className="block" key={key}>{key}<input required className="border ml-2 p-1" value={input[key]} onChange={e => setInput({ ...input, [key]: e.target.value })} /></label>)}
         <label className="block">Cohorts<textarea required className="border block w-full" value={cohorts} onChange={e => setCohorts(e.target.value)} /></label>

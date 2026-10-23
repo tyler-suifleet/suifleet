@@ -1,7 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { buildIndexGroupTx, existingInboxes, inboxSupported } from "@/lib/fleet-inbox";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
@@ -234,6 +235,7 @@ function DevicesTab() {
 
 function GroupsTab() {
   const account = useCurrentAccount();
+  const client = useCurrentClient();
   const { data: groups = [], isLoading, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
@@ -270,9 +272,16 @@ function GroupsTab() {
     );
   }
 
-  function handleAddDevice(groupId: string, device: DeviceRef) {
+  /** Whether each device's inbox exists, when this deployment has inboxes. */
+  async function inboxes(deviceIds: string[]) {
+    return inboxSupported() ? await existingInboxes(client, deviceIds) : undefined;
+  }
+
+  async function handleAddDevice(groupId: string, device: DeviceRef) {
+    let known;
+    try { known = await inboxes([device.objectId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
     signAndExecute(
-      { transaction: buildAddDeviceToGroupTx(groupId, device) },
+      { transaction: buildAddDeviceToGroupTx(groupId, device, known?.has(device.objectId)) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -280,9 +289,26 @@ function GroupsTab() {
     );
   }
 
-  function handleRemoveDevice(groupId: string, deviceId: string) {
+  async function handleRemoveDevice(groupId: string, deviceId: string) {
+    let known;
+    try { known = await inboxes([deviceId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
     signAndExecute(
-      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId) },
+      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId, known?.has(deviceId)) },
+      {
+        onSuccess: () => { setTimeout(() => refetch(), 3000); },
+        onError: (err) => alert(`Failed: ${err.message}`),
+      }
+    );
+  }
+
+  /** One batch of the member-index migration; also lists the group in operated members' inboxes. */
+  async function handleIndex(groupId: string, members: string[]) {
+    let known;
+    try { known = await inboxes(members); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
+    const operated = devices.filter((d) => d.ownerCapId && members.includes(d.objectId)).slice(0, 100)
+      .map((d) => ({ deviceId: d.objectId, ownerCapId: d.ownerCapId!, exists: !!known?.has(d.objectId) }));
+    signAndExecute(
+      { transaction: buildIndexGroupTx(groupId, operated) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -408,6 +434,16 @@ function GroupsTab() {
                 </div>
               )}
             </div>
+
+            {inboxSupported() && managedGroup.unindexed > 0 && (
+              <div className="text-sm bg-gray-50 border border-gray-200 rounded px-3 py-2 space-y-1">
+                <p>{managedGroup.unindexed} member(s) are not yet in the group&apos;s member index. Indexing removes the
+                  group&apos;s size limit and lets devices find it without event history, but older daemons and tools
+                  then no longer see indexed members.</p>
+                <button disabled={isPending} onClick={() => void handleIndex(managedGroup.objectId, managedGroup.deviceIds)}
+                  className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40">Index members</button>
+              </div>
+            )}
 
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">Members</p>

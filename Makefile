@@ -147,6 +147,7 @@ check-interfaces:
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
 	$(RUN) node scripts/test_rollout.cjs
+	$(RUN) node scripts/test_inbox.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
