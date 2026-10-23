@@ -80,8 +80,8 @@ async function run({ config: c, action, value }) {
   check(Buffer.from(fromBase58(chain)).subarray(0, 4).toString('hex') === c.chain);
   const storage = (await client.getObject({ objectId: c.storage, include: { content: true } })).object;
   check(tag(storage.type) === tag(`${c.storage_origin}::fleet_storage::FleetStorage`) && storage.owner.$kind === 'Shared');
-  // Existing layout starts UID, version. Require explicitly migrated version 2.
-  check(bcs.u64().parse(storage.content.slice(32, 40)) === '2');
+  // Existing layout starts UID, version. Require explicitly migrated version 3.
+  check(bcs.u64().parse(storage.content.slice(32, 40)) === '3');
   async function field(name, key, layout, origin = c.retention_origin) {
     const result = await client.getDynamicField({ parentId: c.storage,
       name: { type: `${origin}::fleet_storage::${name}`, bcs: key } });
@@ -103,7 +103,7 @@ async function run({ config: c, action, value }) {
       const page = await client.listDynamicFields({ parentId: c.storage, cursor, limit: 100, include: { value: true } });
       for (const entry of page.dynamicFields) {
         if (tag(entry.name.type) !== tag(`${c.retention_origin}::fleet_storage::RenewalKey`)) continue;
-        check(blobs.length < 1024);
+        check(blobs.length < 100_000);
         const blob = bcs.Address.parse(entry.name.bcs);
         check(tag(entry.valueType) === tag(`${c.retention_origin}::fleet_storage::Renewal`));
         const p = Renewal.parse(entry.value.bcs);
@@ -145,7 +145,7 @@ async function run({ config: c, action, value }) {
         const page = await client.listDynamicFields({ parentId: fleet.budget, cursor: accountCursor, limit: 100, include: { value: true } });
         for (const entry of page.dynamicFields) {
           if (tag(entry.name.type) !== tag(`${c.budget_origin}::fleet_budget::DeviceKey`)) continue;
-          check(++count <= 1024 && tag(entry.valueType) === tag('0x2::object::ID'));
+          check(++count <= 100_000 && tag(entry.valueType) === tag('0x2::object::ID'));
           const accountId = bcs.Address.parse(entry.value.bcs);
           const accountObject = (await client.getObject({ objectId: accountId, include: { content: true } })).object;
           check(tag(accountObject.type) === tag(`${c.budget_origin}::fleet_budget::GasAccount`) && accountObject.owner.$kind === 'Shared');

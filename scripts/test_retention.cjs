@@ -106,3 +106,21 @@ console.log('PASS: retention SDK builders, cross-runtime BCS, independent fundin
  for(const [target,fee] of [[0,1n],[-1,1n],[0x100000000,1n],[8,0n]])assert.throws(()=>r.buildConfigureDeviceRetentionTx(config,'0x1','0x2','0x3',target,fee));
  console.log('PASS: owner finite device policy builders and independent later introduction origins');
 })().catch(e=>{console.error(e);process.exitCode=1});
+
+assert.ok(!r.retentionFacts(policy, [{ id: 'paid', end: 7, encodedSize: 50n }], 1).some(x => x.includes('closure is incomplete')),
+  'fully purchased archives count as covered without a renewal policy');
+(async () => {
+  const { bcs } = appRequire('@mysten/sui/bcs');
+  let page = 0;
+  const client = { async listDynamicFields() {
+    const start = page++ * 100;
+    return { dynamicFields: Array.from({length: 100}, (_, offset) => ({
+      name: { type: config.storageOrigin + '::fleet_storage::RecordKey',
+        bcs: bcs.Address.serialize(id('0x' + (start + offset + 1).toString(16))).toBytes() },
+      value: { bcs: r.RecordBcs.serialize(record).toBytes() }
+    })), hasNextPage: page < 100, cursor: String(page) };
+  }};
+  assert.equal((await r.fetchRetention(client, '0x1', config.packageId, config.storageOrigin)).blobs.length, 10000);
+  assert.equal(page, 100);
+  console.log('PASS: 100-page/10000-blob retention view and fully-paid archive coverage');
+})().catch(e => { console.error(e); process.exitCode = 1; });
