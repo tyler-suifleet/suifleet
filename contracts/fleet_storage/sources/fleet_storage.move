@@ -756,6 +756,7 @@ module fleet_storage::fleet_storage {
         });
         if (retained) {
             let policy: DeviceRetention = *df::borrow(&fs.id, DeviceRetentionKey {});
+            assert!(policy.target > system.epoch(), EInvalidEpochs);
             if (policy.target > end_epoch) {
                 authorize_renewal_impl(fs, blob_object_id, policy.target, policy.max_fee);
                 prepay_renewal_impl(fs, system, blob_object_id, ctx);

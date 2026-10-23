@@ -314,6 +314,35 @@ public fun sf128_set_epoch(system: &mut System, epoch: u32) {
       const [w]=tx.moveCall({target:`${head}::fleet_storage::withdraw_wal`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u64(0)]});
       tx.transferObjects([w],signer.toSuiAddress());
       await abort('v2 mutation rejects migrated v3 storage',tx,0);
+      // An owner-approved absolute deadline remains finite even when the
+      // archive purchase itself would need no renewal.
+      tx=new Transaction();
+      const [device]=tx.moveCall({target:`${corePub.pkg}::device_registry::register_device`,arguments:[tx.object(registry),tx.pure.string('sf128'),tx.pure.address(signer.toSuiAddress()),tx.pure.string('x86_64'),tx.object('0x6')]});
+      const [deviceCap]=tx.moveCall({target:`${corePub.pkg}::device_cap::issue`,arguments:[device]});
+      const [deviceOwner]=tx.moveCall({target:`${corePub.pkg}::device_registry::activate_device`,arguments:[tx.object(registry),device]});
+      tx.moveCall({target:`${corePub.pkg}::fleet_budget::enroll_device`,arguments:[tx.object(budget),tx.object(ownerCap),tx.object(registry),deviceOwner,tx.pure.u64(0),tx.pure.u64(0),tx.object('0x6')]});
+      tx.transferObjects([deviceCap,deviceOwner],signer.toSuiAddress());
+      const enrollment=await execute('enroll actual device for finite fully-paid admission regression',tx);
+      const account=created(enrollment,'::fleet_budget::GasAccount'),cap=created(enrollment,'::device_cap::DeviceCap');
+      tx=new Transaction();
+      const [quota]=tx.moveCall({target:`${current}::fleet_storage::new_quota`,arguments:[tx.pure.u64(1000),tx.pure.u64(10000000),tx.pure.u64(10),tx.pure.u64(100),tx.pure.u64(1000)]});
+      tx.moveCall({target:`${current}::fleet_storage::set_default_quota`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),quota]});
+      tx.moveCall({target:`${current}::fleet_storage::configure_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u32(5),tx.pure.u64(100)]});
+      await execute('configure already-passed absolute device target at epoch six',tx);
+      function deviceUpload(root) {
+        const [id]=tx.moveCall({target:`${walrusPub.pkg}::blob::derive_blob_id`,arguments:[tx.pure.u256(root),tx.pure.u8(1),tx.pure.u64(10)]});
+        tx.moveCall({target:`${current}::fleet_storage::register_blob`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(account),tx.object(registry),tx.object(cap),tx.object(system),id,tx.pure.u256(root),tx.pure.u64(10),tx.pure.u8(1),tx.object('0x6')]});
+      }
+      tx=new Transaction();deviceUpload(99002);
+      await abort('expired absolute admission target rejects fully-paid archive',tx,13);
+      tx=new Transaction();
+      tx.moveCall({target:`${current}::fleet_storage::configure_device_retention`,arguments:[tx.object(oldStorage),tx.object(budget),tx.object(ownerCap),tx.pure.u32(8),tx.pure.u64(100)]});
+      await execute('approve live target already covered by initial pool purchase',tx);
+      tx=new Transaction();deviceUpload(99003);
+      await execute('actual device fully-paid archive admission without renewal',tx);
+      const paidFields=(await client.listDynamicFields({parentId:oldStorage,include:{value:true}})).dynamicFields;
+      assert.ok(paidFields.some(f=>f.name.type===current+'::fleet_storage::FullyPaidArchiveKey'));
+
 
     }
     console.log(JSON.stringify({ check: 'populated-object compatible storage upgrade and old-package retirement', receipts }));

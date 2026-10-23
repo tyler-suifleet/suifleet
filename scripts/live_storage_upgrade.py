@@ -130,7 +130,7 @@ def run(args):
                         sender=live.operator, budget=budget,
                         upgrade={'cap': fixture['cap'], 'package': fixture['base']}))
                     return live.executor()('serialized-tx', data)
-                result = live.execute('compatible v2 to v3 storage upgrade', submit, gas=400_000_000)
+                result = live.execute('compatible v2 to v3 storage upgrade', submit, gas=200_000_000)
                 fixture['head'] = live.published(result)
                 save()
             assert same_modules(fixture['head'], head_build, fixture['base'])
