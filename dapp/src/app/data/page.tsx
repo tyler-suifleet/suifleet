@@ -19,6 +19,8 @@ import { AccessRecord, ArchiveView } from '@/components/ArchiveSearch';
 import { ShadowDocuments } from '@/components/ShadowDocuments';
 import { shadowDocumentsView } from '@/lib/shadow-documents';
 
+const noQuery:LogQuery={text:'',source:'',caseSensitive:false};
+
 export default function FleetDataPage() {
   const client=useCurrentClient(), wallet=useDAppKit(), account=useCurrentAccount();
   const {data:devices=[]}=useDevices(); const {mutateAsync:execute,isPending}=useFleetTransaction();
@@ -26,17 +28,21 @@ export default function FleetDataPage() {
   const [archive,setArchive]=useState<Archive>(),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [fleetDevices,setFleetDevices]=useState<string[]>([]),[cursor,setCursor]=useState<string|null>(null),[more,setMore]=useState(false);
   const [role,setRole]=useState<'owner'|'support'|'none'|'unknown'>('unknown'),[access,setAccess]=useState<AccessEntry[]>([]);
-  const [query,setQuery]=useState<LogQuery>({text:'',source:'',caseSensitive:false}),[opened,setOpened]=useState<number>(),[anchorCount,setAnchorCount]=useState(0);
+  const [query,setQuery]=useState<LogQuery>(noQuery),[opened,setOpened]=useState<number>(),[anchorCount,setAnchorCount]=useState(0);
   const session=useRef<SessionKey | undefined>(undefined), generation=useRef(0);
+  // Discard the session with every plaintext derived from it, including a
+  // search query that may hold copied log text. A pending read decrypted
+  // under the discarded session no longer matches session.current.
+  function expire(){session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setMessage('Seal session expired; decrypted records were discarded.');}
   useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
-  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
+  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
   // The access record and the signed session belong to one account.
   useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
   // Plaintext lives only as long as the signed five-minute Seal session.
   useEffect(()=>{
-    const timer=setInterval(()=>{if(session.current?.isExpired()){session.current=undefined;setArchive(undefined);setOpened(undefined);setMessage('Seal session expired; decrypted records were discarded.');}},5_000);
+    const timer=setInterval(()=>{if(session.current?.isExpired())expire();},5_000);
     return ()=>clearInterval(timer);
-  },[]);
+  },[]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
     let live=true;
     if(DATA_CONFIG && account)void authority().then(a=>{if(live)setRole(a.kind);}).catch(()=>{if(live)setRole('none');});
@@ -78,7 +84,7 @@ export default function FleetDataPage() {
     if(!account || !authority)return;
     setAccess(log=>recordAccess(log,{atMs:Date.now(),account:account.address,authority,device,index,kind:(['logs','diagnostics','crash'] as const)[kind] ?? 'logs',outcome}));
   }
-  function close(){setArchive(undefined);setOpened(undefined);setQuery({text:'',source:'',caseSensitive:false});}
+  function close(){setArchive(undefined);setOpened(undefined);setQuery(noQuery);}
   async function open(index:number,kind:number) {
     if(!DATA_CONFIG || !SEAL_SETTINGS || !account)return;
     const current=generation.current;setBusy(true);close();setMessage('');
@@ -95,12 +101,16 @@ export default function FleetDataPage() {
         if(current!==generation.current || (wallet.stores.$connection.get().account?.address!==account.address || wallet.stores.$currentNetwork.get()!==manifest.network)) throw Error('Account or network changed');
         session.current=key;
       }
-      const decrypt=await archiveDecryptor(client,DATA_CONFIG,SEAL_SETTINGS,session.current,allowed);
+      // Plaintext is published only under the same unexpired session that decrypted it.
+      const reading=session.current;
+      const decrypt=await archiveDecryptor(client,DATA_CONFIG,SEAL_SETTINGS,reading,allowed);
       const {walrus,TESTNET_WALRUS_PACKAGE_CONFIG}=await import('@mysten/walrus');
       const storage=client.$extend(walrus({packageConfig:TESTNET_WALRUS_PACKAGE_CONFIG})).walrus;
       const opened=await fetchVerifiedArchive(client,storage,DATA_CONFIG,device,index,WALRUS_AGGREGATOR,decrypt);
       await authority();
-      if(current===generation.current && wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');}
+      if(current!==generation.current)return;
+      if(session.current!==reading || reading.isExpired()) {if(session.current===reading)expire();note(index,kind,allowed.kind,'refused');return;}
+      if(wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');}
     } catch {if(current===generation.current){note(index,kind,allowed?.kind,'refused');setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}}
     finally{if(current===generation.current)setBusy(false);}
   }
