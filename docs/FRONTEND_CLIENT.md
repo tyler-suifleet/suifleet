@@ -29,13 +29,17 @@ change during handover, and delegated deployments are sent by another address.
 Filtering their creation events by the current operator would hide valid state.
 Concurrent scans of the same stream share one request. Empty scan pages advance
 the watermark; missing/repeated cursors and incomplete streams fail visibly.
-A failed scan does not commit its partial results. Storage/quota failures and
-backpressure (200 pages or a 4 MiB stream cache) remain visible failures.
+Each successfully terminated page commits its watermark and discovery atomically.
+At 200 pages the view shows “still loading” and resumes on the next refresh.
+Discovery is bounded to 256 KiB per stream and 2 MiB across this origin’s history
+keys (UTF-16 size estimate). Capacity eviction explicitly marks discovery partial;
+storage/quota failures warn and continue in memory instead of wedging the view.
 
 The endpoint's `lowestAvailableCheckpoint` is checked on every scan. First reads
 on a pruned endpoint show **History unavailable** with the retained boundary;
 available results remain explicitly partial. A saved cursor that fell behind
-retention fails instead of silently crossing a gap. Missing retention metadata
+retention restarts from the retained boundary, keeps known events and explicitly
+warns about the gap. Invalid saved caches rescan with a partial-history warning. Missing retention metadata
 also fails. Use an archival endpoint to recover complete discovery; changing the
 endpoint intentionally selects a separate cache. Current group/record objects,
 deployment target fields, receipts and controls are freshly read: cached events
@@ -65,8 +69,12 @@ public testing endpoints a production service. See the official
 `node scripts/test_dashboard_requests.cjs` measures real query calls for 1,000
 fixture devices: 45 inventory calls/proofs, 40 budget-account batches and 62
 chain-health calls, including fresh service-info checks. Its conservative combined load (two inventory/health
-consumers, budget accounts and 30 additional calls) is 284 requests; the actual
-queue drains it in 99,050 ms of virtual time, with a peak of 86 starts in any
+consumers plus two network-wide 100-deployment reads, budget accounts and 30
+additional calls) is 708 requests. Each deployment read costs 212 calls, including
+4 target-field batches rather than 200 individual target calls; authoritative
+receipts and controls still require individual reads. Cross-sender discovery
+remains necessary for delegated deployments, handover and receipt history. The
+queue drains the combined load in 247,450 ms of virtual time, with a peak of 86 starts in any
 30-second window. This is offline query/request-scheduler evidence, not a live
 endpoint throughput or production capacity measurement. The existing browser
 fixtures separately exercise actual browser/wallet/health flows.
