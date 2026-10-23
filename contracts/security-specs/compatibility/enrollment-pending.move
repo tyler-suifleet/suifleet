@@ -1,4 +1,4 @@
-    #[mode(spec), ext(spec(prove, target = enroll))]
+    #[mode(spec), ext(spec(prove, target = enroll, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
     fun enroll_security_spec(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
                             name: String, arch: String, clock: &Clock, ctx: &mut TxContext) {
         prover::ghost::declare_global_mut<specs::transfer_spec::SpecTransferAddressExists, bool>();

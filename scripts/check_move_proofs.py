@@ -34,6 +34,8 @@ NEGATIVES = [
     ("claim-authority", "enrollment", "revoke_claim_security_spec", "Assume", "prover::prover::asserts(ctx.sender() == policy.operator);"),
     ("claim-remove", "enrollment", "revoke_claim_security_spec", "Check", "prover::prover::ensures(!policy.claims.contains(claim));"),
     ("binding-artifact", "deployment_manager", "make_deployment_security_spec", "Check", "prover::prover::ensures(record.artifact_sha256 == artifact);"),
+    ("binding-recipe", "deployment_manager", "new_deployment_verified_security_spec", "Check", "prover::prover::ensures(typed);"),
+    ("binding-recipe-value", "deployment_manager", "new_deployment_verified_security_spec", "Check", "prover::prover::ensures(*df::borrow<RecipeDigestKey, String>(&record.id, RecipeDigestKey {}) == recipe);"),
     ("recipe-length", "deployment_manager", "assert_recipe_hash_security_spec", "Assume", "prover::prover::asserts(bytes.length() == 64);"),
     ("close-authority", "enrollment", "close_spec", "Assume", "asserts(ctx.sender() == enrollment::operator(policy));"),
     ("close-state", "enrollment", "close_spec", "Check", "ensures(!enrollment::is_open(policy));"),

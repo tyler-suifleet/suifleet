@@ -36,7 +36,7 @@
         assert_recipe_hash(recipe_sha256);
     }
 
-    #[mode(spec), ext(spec(prove, target = new_deployment_verified))]
+    #[mode(spec), ext(spec(prove, target = new_deployment_verified, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
     fun new_deployment_verified_security_spec(
         component_name: String, version: String, recipe_blob_id: String,
         artifact_sha256: String, recipe_sha256: String, target_groups: vector<ID>,
