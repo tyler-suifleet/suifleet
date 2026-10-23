@@ -29,7 +29,8 @@ const { Ed25519Keypair } = appRequire('@mysten/sui/keypairs/ed25519');
 const { normalizeSuiAddress: id, toBase58 } = appRequire('@mysten/sui/utils');
 const { bcs } = appRequire('@mysten/sui/bcs');
 const { ObjectError } = appRequire('@mysten/sui/client');
-const { EncryptedObject, SealClient, DemType, NoAccessError, ExpiredSessionKeyError, TooManyFailedFetchKeyRequestsError } = appRequire('@mysten/seal');
+const { EncryptedObject, SealClient, DemType, NoAccessError, ExpiredSessionKeyError, TooManyFailedFetchKeyRequestsError, InvalidPTBError,
+  InconsistentKeyServersError, InternalError } = appRequire('@mysten/seal');
 const vectors = require('../interfaces/seal-vectors.json');
 const load = loader();
 const data = load('lib/fleet-data.ts');
@@ -238,6 +239,30 @@ const assess = (device, index) => recovery.assessArchive(client, walrus, config,
   assert.deepEqual([denied.state, denied.recovery], ['access_denied', 'grant_access']);
   world.faults.delete('denied');
   record('key server access denied', { state: denied.state, recovery: denied.recovery });
+
+  // The real SF-082 decryptor: a restored session that expires between
+  // creation and use needs a new session, and a provider set that differs from
+  // the pinned settings is an incident, never a key-server outage.
+  const settings = { keyServers: vectors.servers.map(s => ({ objectId: s.object_id, weight: 1 })), threshold: 2 };
+  let sessionExpired = false;
+  const sessionKey = { isExpired: () => sessionExpired, getPackageId: () => config.typeOrigin, getAddress: () => id('0x5e') };
+  const realDecrypt = await bulk.archiveDecryptor(client, config, settings, sessionKey, { kind: 'support' });
+  sessionExpired = true;
+  const expiredSession = await recovery.assessArchive(client, walrus, config, deviceA, 0, aggregator, realDecrypt, fetcher);
+  assert.deepEqual([expiredSession.state, expiredSession.dependency, expiredSession.recovery], ['outage', 'session', 'new_session'], JSON.stringify(expiredSession));
+  sessionExpired = false;
+  const foreignProviders = await bulk.archiveDecryptor(client, config, { ...settings, threshold: 1 }, sessionKey, { kind: 'support' });
+  const mismatch = await recovery.assessArchive(client, walrus, config, deviceA, 0, aggregator, foreignProviders, fetcher);
+  assert.deepEqual([mismatch.state, mismatch.recovery, mismatch.dependency], ['invalid', 'incident', undefined], JSON.stringify(mismatch));
+  assert.match(mismatch.reason, /ArchiveSealBindingError/);
+  // Seal request/client refusals are incidents; only unavailability is retried.
+  for (const [error, state] of [[new InvalidPTBError(), 'invalid'], [new InconsistentKeyServersError('inconsistent shares'), 'invalid'],
+    [new InternalError(), 'outage'], [TypeError('fetch failed'), 'outage']]) {
+    const thrown = await recovery.assessArchive(client, walrus, config, deviceA, 0, aggregator, async () => { throw error; }, fetcher);
+    assert.equal(thrown.state, state, `${error.name}: ${JSON.stringify(thrown)}`);
+  }
+  record('real decryptor session expiry and provider binding', { expiredSession: { state: expiredSession.state, recovery: expiredSession.recovery },
+    providerMismatch: { state: mismatch.state, recovery: mismatch.recovery } });
 
   // Tampered ciphertext is an incident and never requests keys.
   world.tamper = true;

@@ -7,9 +7,9 @@ import type { WalrusClient } from '@mysten/walrus';
 import { ObjectError } from '@mysten/sui/client';
 import { bcs } from '@mysten/sui/bcs';
 import { normalizeStructTag, normalizeSuiAddress as id, toHex } from '@mysten/sui/utils';
-import { ExpiredSessionKeyError, NoAccessError } from '@mysten/seal';
+import { ExpiredSessionKeyError, GeneralError, InternalError, NoAccessError, SealError, TooManyFailedFetchKeyRequestsError } from '@mysten/seal';
 import { fetchChainHealth, listFleetDeviceIds, readDeviceData, readFleetData, type FleetDataConfig } from './fleet-data';
-import { BlobRecordBcs, fetchVerifiedArchive, readAnchors, type Anchor, type Archive } from './fleet-bulk';
+import { ArchiveSealBindingError, BlobRecordBcs, fetchVerifiedArchive, readAnchors, type Anchor, type Archive } from './fleet-bulk';
 import { readIdentity } from './telemetry';
 import type { DeploymentEvent } from './sui';
 
@@ -42,6 +42,12 @@ const text = (error: unknown) => (error instanceof Error ? `${error.name}: ${err
 const chainAnswer = (error: unknown) => error instanceof ObjectError && (error.reason === 'notFound' || error.reason === 'deleted');
 const hasError = (error: unknown, type: abstract new (...args: never[]) => Error): boolean =>
   error instanceof type || (error instanceof Error && error.cause !== undefined && hasError(error.cause, type));
+/** Only key-server unavailability is resumable by retrying the same decryptor.
+ * Local provider/identity binding refusals and other Seal client or request
+ * errors (invalid PTB, package, signature, ciphertext, threshold, inconsistent
+ * servers) are incidents, never outages. Non-Seal errors are transport. */
+const keyServerOutage = (error: unknown) => !hasError(error, ArchiveSealBindingError)
+  && (!(error instanceof SealError) || [InternalError, GeneralError, TooManyFailedFetchKeyRequestsError].some(type => error instanceof type));
 
 type Reads = Pick<SuiGrpcClient, 'getObject' | 'getDynamicField' | 'listDynamicFields' | 'ledgerService'>;
 /** Record transport failures of the fullnode separately from its answers. A
@@ -150,7 +156,7 @@ export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusCl
     return outcome(index, 'invalid', text(error));
   }
   if (aggregatorError) return outcome(index, 'outage', text(aggregatorError), 'aggregator');
-  if (keyError) return outcome(index, 'outage', text(keyError), 'keyserver');
+  if (keyError) return keyServerOutage(keyError) ? outcome(index, 'outage', text(keyError), 'keyserver') : outcome(index, 'invalid', text(keyError));
   return outcome(index, 'invalid', text(refusal));
 }
 
