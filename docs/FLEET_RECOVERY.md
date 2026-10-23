@@ -12,9 +12,8 @@ private key can be recovered.** Sui holds authority, references and accounting,
 not recoverable binaries. Walrus retention is finite. Seal releases keys only
 under the current on-chain policy.
 
-SF-082 (#160) is consumed at pinned commit `81a4d2e`. It is still a merge gate:
-this work stays draft until SF-082 merges and the drills are rerun on the merged
-main.
+This runbook targets SF-082 (#160) as merged to main (`39ea150`). The drills and
+the read-only Testnet check were rerun on that merged main.
 
 ## 1. Recoverable state and its source of truth
 
