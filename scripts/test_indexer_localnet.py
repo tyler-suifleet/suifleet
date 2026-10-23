@@ -275,7 +275,7 @@ def run(rpc_url, faucet_url):
                     f'[sui]\nmanifest_path = {json.dumps(str(root / "deployment.json"))}\n'
                     f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
                     '[apply]\ncommand = "/bin/false"\n'
-                    f'[runtime]\nstate_dir = {json.dumps(str(directory / "state"))}\npoll_seconds = 2\n'
+                    f'[runtime]\nstate_dir = {json.dumps(str(directory / "state"))}\npoll_seconds = 2\nevent_scan_seconds = 0\n'
                     f'[telemetry]\nurl = "{API}"\ninterval_seconds = 10\n'
                     '[logs]\ninterval_seconds = 10\n')
                 process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(directory / "config.toml")},

@@ -219,7 +219,7 @@ def run(args):
             template.write_text(
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\ntimeout_seconds = 60\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\nevent_scan_seconds = 0\n'
                 f'[seal]\nmode = "required"\nkey_server_package = "{seal_package}"\nkey_servers = [{servers_toml}]\n'
                 f'min_threshold = 2\nrequest_timeout_seconds = 20\n')
             dm.generate(manifest, root / "release", template)

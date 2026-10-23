@@ -107,7 +107,7 @@ def run():
             artifact_hash=json.dumps(hashlib.sha256(ARTIFACT).hexdigest());recipe_hash=json.dumps(hashlib.sha256(json.dumps(recipe).encode()).hexdigest())
             live=created(tx('--move-call',f'{new}::deployment_manager::rollout_policy','1','1','100','0','1','10000','5000','--assign','policy','--move-call',f'{new}::deployment_manager::new_rollout_verified','"live-app"','"1.0.0"','"rollout-recipe"',artifact_hash,recipe_hash,'vector[]',f'vector[@{device}]','vector[0u64]','policy','@0x6','--assign','rollout','--move-call',f'{new}::deployment_manager::share_deployment','rollout'),'::deployment_manager::DeploymentRecord')
             applied=root/'applied';updater=root/'apply.py';updater.write_text(f"from pathlib import Path\nPath({str(applied)!r}).touch()\n")
-            cfg=root/'config.toml';cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{device_cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\npoll_seconds=1\nreplay_history=true\n')
+            cfg=root/'config.toml';cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{device_cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\npoll_seconds=1\nevent_scan_seconds=0\nreplay_history=true\n')
             def state():
                 path=root/'state/state.json';return json.loads(path.read_text()) if path.exists() else {}
             with (root/'daemon.log').open('w') as log:

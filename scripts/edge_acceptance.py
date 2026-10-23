@@ -611,7 +611,9 @@ def device_template(device, ids, apply_command, state_dir, poll, signer=None, ke
         lines += ["", "[device.signer]", 'kind = "service"', f"socket = {json.dumps(signer)}"]
     lines += ["", "[apply]", f"command = {json.dumps(apply_command)}", 'mode = "direct"',
               "allow_recipe_commands = false", "timeout_seconds = 120",
-              "", "[runtime]", f"state_dir = {json.dumps(str(state_dir))}", f"poll_seconds = {poll}", ""]
+              "", "[runtime]", f"state_dir = {json.dumps(str(state_dir))}", f"poll_seconds = {poll}",
+              # Its deployments are unannounced (SF-125): scan events every poll.
+              "event_scan_seconds = 0", ""]
     return "\n".join(lines)
 
 

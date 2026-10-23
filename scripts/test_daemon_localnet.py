@@ -261,7 +261,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 f'device_cap_id = "{cap}"\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\n'
                 f'timeout_seconds = 30\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_scan_seconds = 0\n')
             bundle = root / "release"
             dm.generate(manifest, bundle, template)
             config = bundle / "config.toml"
