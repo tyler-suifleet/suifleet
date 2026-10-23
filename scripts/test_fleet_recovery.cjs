@@ -170,6 +170,11 @@ const fetcher = async url => {
   if (!known || world.faults.has('aggregator-404')) return new Response('not found', { status: 404 });
   const bytes = Buffer.from(world.ciphertexts[known]);
   if (world.tamper) bytes[bytes.length - 1] ^= 1;
+  // Headers arrive and part of the body streams before the connection fails.
+  const broken = { 'aggregator-reset': () => new TypeError('terminated: aggregator connection reset during body'),
+    'aggregator-timeout': () => new DOMException('The operation was aborted due to timeout', 'TimeoutError') };
+  const fault = Object.keys(broken).find(f => world.faults.has(f));
+  if (fault) return new Response(new ReadableStream({ start(controller) { controller.enqueue(bytes.subarray(0, 16)); controller.error(broken[fault]()); } }));
   return new Response(bytes);
 };
 // Independent AES-GCM opening stands in for threshold key release.
@@ -216,7 +221,8 @@ const assess = (device, index) => recovery.assessArchive(client, walrus, config,
   // Resumable dependency outages: refusal attributed to the dependency, no
   // trusted result while down, verified read after it returns.
   for (const [fault, dependency, recoveryAction] of [['rpc', 'rpc', 'retry'], ['walrus', 'walrus', 'retry'], ['aggregator-503', 'aggregator', 'retry'],
-    ['aggregator-network', 'aggregator', 'retry'], ['aggregator-404', 'aggregator', 'retry'], ['keyserver', 'keyserver', 'retry'], ['session', 'session', 'new_session']]) {
+    ['aggregator-network', 'aggregator', 'retry'], ['aggregator-404', 'aggregator', 'retry'],
+    ['aggregator-reset', 'aggregator', 'retry'], ['aggregator-timeout', 'aggregator', 'retry'], ['keyserver', 'keyserver', 'retry'], ['session', 'session', 'new_session']]) {
     world.faults.add(fault);
     const down = await assess(deviceA, 0);
     assert.deepEqual([down.state, down.dependency, down.recovery, down.archive], ['outage', dependency, recoveryAction, undefined], `${fault}: ${JSON.stringify(down)}`);
@@ -274,6 +280,13 @@ const assess = (device, index) => recovery.assessArchive(client, walrus, config,
   assert.equal(tamperedCiphertext.state, 'invalid', 'ciphertext-only availability also detects tampering');
   world.tamper = false;
   record('tampered aggregator bytes', { state: tampered.state, recovery: tampered.recovery, keyRequests: 0 });
+  // The reader's own size bound is not an outage, even when it fires mid-stream.
+  const oversize = async () => new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(new Uint8Array(bulk.MAX_ARCHIVE_BYTES)); controller.enqueue(new Uint8Array(1)); } }));
+  const tooLarge = await recovery.assessArchive(client, walrus, config, deviceA, 0, aggregator, decrypt, oversize);
+  assert.deepEqual([tooLarge.state, tooLarge.recovery, tooLarge.dependency], ['invalid', 'incident', undefined], JSON.stringify(tooLarge));
+  assert.match(tooLarge.reason, /size limit/);
+  record('oversize aggregator body', { state: tooLarge.state, recovery: tooLarge.recovery });
   // Availability without a Seal session: everything before key release.
   const ciphertextOnly = await recovery.assessArchive(client, walrus, config, deviceA, 0, aggregator, undefined, fetcher);
   assert.deepEqual([ciphertextOnly.state, ciphertextOnly.verified, ciphertextOnly.archive], ['available', 'ciphertext', undefined]);

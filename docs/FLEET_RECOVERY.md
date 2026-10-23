@@ -95,14 +95,14 @@ action:
 |---|---|---|
 | Fullnode RPC errors (`dependency: rpc`) | Resumable outage. Health shows `unavailable`, never `offline` or resolved. | Retry, or switch to another fullnode for the **same** chain (the chain ID is rechecked). Devices queue receipts and defer new work. Installed components keep running. |
 | Walrus committee read fails (`walrus`) | Resumable | Retry. No expiry is inferred. |
-| Aggregator 5xx, network error, or 404 on a live record (`aggregator`) | Resumable | Use another aggregator. The chain record, not the aggregator, decides expiry. Devices retry the download later without failing the deployment. |
+| Aggregator 5xx, network error, connection reset or timeout while the body streams, or 404 on a live record (`aggregator`) | Resumable | Use another aggregator. The chain record, not the aggregator, decides expiry. Devices retry the download later without failing the deployment. |
 | Key server unreachable (`keyserver`) or expired session (`session`) | Resumable | Retry, or sign a new session. A provider set or threshold that differs from the pinned Seal settings, or a Seal request/ciphertext refusal, is `invalid` (an incident), not an outage. Installed components keep running offline. A **new or reinstalled** confidential version needs reachable key servers ([offline policy](CONFIDENTIAL_DELIVERY.md#lifetimes-caching-offline-use-and-revocation)). |
 | Key server `NoAccess` (`access_denied`) | Authority. Not an outage. | The owner grants support access explicitly, or the owner reads. |
 | Live record ended (`expired`) or released (`released`) | **Not recoverable** for device archives | Device archives are permanently lost. Artifacts and recipes are restored from the customer's authenticated copies: re-upload, verify certification and expiry, then publish an authorized new reference. |
 | Registration aborts with `EInvalidEpochs` (any protected blob expired) or `EOverQuota` (1,024 protected blobs fleet-wide) | Resumable only by owner maintenance; funding alone does not repair it | Back up and review references, then the owner releases **every expired** protected record, or obsolete ones at capacity ([maintenance runbook](RETENTION_RENEWAL.md#archive-capacity-and-expiry-maintenance)). Verify one actual new admission before resuming uploads. Daemon backlog beyond its disk bounds is lost. |
 | Anchor key epoch older than the fleet's (`key_epoch_rotated`) | **Not recoverable** through policy | Rotation refuses new key requests for older epochs, including the owner's. Export first. |
 | Device revoked or missing (`device_revoked`) | **Not recoverable** through the verified reader | Export a device's history **before** revoking it. See the findings below. |
-| Digest, signature or binding mismatch (`invalid`), or missing index (`missing`) | Incident | Never trust the bytes. Preserve evidence and escalate. Tampered bytes are refused before any key request. |
+| Digest, signature or binding mismatch or an oversize body (`invalid`), or missing index (`missing`) | Incident | Never trust the bytes. Preserve evidence and escalate. Tampered bytes are refused before any key request. |
 
 **Bad frontend release.** If a served export differs from its build receipt,
 the release is bad. If a reviewed release misbehaves, run

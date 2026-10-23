@@ -120,8 +120,21 @@ export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusCl
     try { response = await fetcher(input, init); } catch (error) { aggregatorError = error; throw error; }
     // A certified, unexpired blob that one aggregator cannot serve is still an
     // outage of that aggregator; chain records decide expiry below.
-    if (!response.ok) aggregatorError = `aggregator HTTP ${response.status}`;
-    return response;
+    if (!response.ok) { aggregatorError = `aggregator HTTP ${response.status}`; return response; }
+    if (!response.body) return response;
+    // Fetch resolves at the headers: a reset or timeout while the body streams
+    // is still the aggregator's. Only read rejections are recorded; the size
+    // bound and digest/binding checks are the reader's own refusals.
+    const reader = response.body.getReader();
+    const body = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try { chunk = await reader.read(); } catch (error) { aggregatorError = error; throw error; }
+        if (chunk.done) controller.close(); else controller.enqueue(chunk.value);
+      },
+      cancel(reason) { return reader.cancel(reason); },
+    });
+    return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
   const keys = async (encrypted: Uint8Array) => {
     if (!decrypt) throw new CiphertextVerified();
