@@ -3,8 +3,175 @@
 Status: **partially verified; blocked, not Review-ready**. Codex running model
 **gpt-6.1-sol**, session `codex-move-security-20261015`, retains SF-050/#82 and
 PR #83. The current root package contains eleven modules; the separate
-`contracts/fleet_storage` analysis remains incomplete. This audit and the
+`contracts/fleet_storage` now has a separate source audit and compiler/lint/test gate. This audit and the
 verified enrollment subset are not a complete security proof.
+
+## Current continuation: 2026-10-22
+
+Codex **gpt-6.1-sol**, same reserved session/branch, continued the actual software
+scope rather than deferring proofs to external acceptance. The results below
+supersede the earlier identity-spec failure and incomplete storage/manifest tail.
+The ticket remains blocked on the explicitly identified essential proof gaps;
+passing the normal subset gate does not establish full SF-050 acceptance.
+
+### Identity correction and extended actual-implementation proofs
+
+`is_active_signer_spec` now uses the non-aborting typed identity predicate,
+`asserts(!custodied || typed_identity)`, and reads Identity only inside the custody
+branch. It has no `requires` storage invariant or sender/operator precondition.
+All three obligations pass. Removing the custody early return, revocation check
+or signer equality produces the intended solver counterexample, including a
+non-custodied state. An absent/wrong-typed identity aborts only on the custody
+branch, as the implementation does.
+
+Proof-only observations/obligations are staged from SHA-256-pinned
+`compatibility/*-spec-helpers.move`; every helper uses `mode(spec)` with
+`ext(spec_only)` or targets the actual implementation. The evaluator copies
+implementation modules into the root proof package because upstream skips
+prove-annotations in dependencies. It changes no runtime body. There are no
+trusted replacement bodies, authorization `requires`, ignored aborts, extra axioms,
+or disabled UID-cycle checks. Pending custody specifications are opt-in and are
+not used as modular summaries by the normal subset.
+
+The positive solver scope now covers 21 targets / 63 obligations:
+
+- Identity signer abort/return boundary; identity installation, revoke/reinstate,
+  rotation preserving revocation; borrowing the actual stored Device, loan ID,
+  typed custody removal and unchanged typed identity presence. The borrowed
+  Device ID is compared to the stored Device ID: arbitrary storage need not bind
+  that ID to its custody key, so no reachable invariant is smuggled in.
+- Signer-bound device-cap authorization; role active-state abort/return predicate
+  and operator-authorized removal of the **typed** role entry.
+- Enrollment close/limits and claim revocation, including operator authority and
+  claim removal. Full enrollment is a separate pending obligation below.
+- Group/deployment handover authority, new creator/admin and preserved payload;
+  receipt construction/current version, rejection of future authority versions
+  and discarding previous-generation statuses; both superseded current-package
+  reporting functions always abort.
+- Lowercase 64-byte recipe-hash validation with a proved loop invariant; stored
+  artifact digest/blob/creator, typed recipe digest and exact recipe value in
+  verified construction; fresh receipt presence in base construction. This is
+  digest **binding**, not a proof about Walrus bytes or updater execution.
+
+`make_deployment_security_spec` uses `no_opaque`: callers retain the real body,
+not an incomplete freshness summary. The positive target set includes every
+project-specific modular summary used by another verified target.
+
+### Remaining essential software proof scope (not deferred)
+
+Reproduce with the pinned tools/environment used by `check_move_proofs.py`:
+
+```bash
+python3 scripts/evaluate_move_prover.py --prover-source /tools/sui-prover \
+  --framework-packages /tools/framework \
+  --prover-binary /tools/sui-prover/target/release/sui-prover \
+  --include-pending-custody --functions activate_device_security_spec
+# Independently: --include-pending-custody --functions return_device_security_spec
+# Independently: --include-name-absence --functions revoke_security_spec
+# Independently: --include-pending-enrollment --functions enroll_security_spec --timeout 120
+```
+
+- Activation and return were implemented as separate actual-function obligations
+  with exact typed identity reads and the underlying custody **name**-absence
+  predicate. Both reproduce a backend compilation error: undeclared
+  `$2_dynamic_field_exists'$2_dynamic_object_field_Wrapper'$0_device_registry_CustodyKey''`.
+  The helper observes the real release `field::exists(object, Wrapper { name })`;
+  it does not return an assumed invariant. No positive construction/return proof
+  or activation-removal negative is claimed. Init construction and complete
+  inductive custody/key/value preservation across every UID writer remain unmet.
+- Stronger untyped role-name absence after removal fails with a solver
+  counterexample. Upstream `native.bpl` implements removal by updating the typed
+  table, but constrains untyped existence only by `typed presence ==> name
+  presence`. Absence is not implied, even after removal or fresh construction.
+  The same limitation prevents a theorem that fresh records lack a legacy
+  `StatusesKey`. The verified typed-entry removal/receipt migration statements
+  are narrower; they do not silently substitute for those stronger theorems.
+- Full enrollment abort equivalence and spec safety pass, but its implementation
+  check times out at both 30 and 120 seconds. A separate attempt adds real Boogie
+  split points before/after the call also times out at 120 seconds, without
+  replacing its body. A timeout is
+  neither a source counterexample nor a verified theorem.
+
+These are reproduced limitations/failures, not evidence of an exploitable
+current contract defect. A sound extension must model untyped occupancy and its
+mutation/freshness relation, retain UID well-foundedness checks, then discharge
+construction and every preservation obligation. A successful activation
+`set_identity`-removal counterexample remains mandatory before claiming that
+reachable-state theorem. No datatype invariant automatically assumes it on inputs.
+
+- Recipe-field omission and wrong-value implementation negatives also time out
+  at 30 seconds; the omission still times out at 120 seconds after narrowing the
+  search to a concrete valid digest and isolating the typed-binding assertion.
+  These do **not** count as rejected negatives. Normal CI gates the 63 successful
+  obligations and 22 actual solver-rejected controls; the pending binding
+  mutations remain available through `--mutation binding-recipe` and
+  `--mutation binding-recipe-value`. That unmet targeted negative scope remains
+  an acceptance gap, not a waived or falsely passing gate. `--functions` selecting
+  no proof now fails instead of accepting upstream's empty success.
+
+### L-01 reachability and separate storage audit
+
+The cross-registry counter example requires **two same-origin registries**.
+A complete constructor search finds only private `device_registry::init`;
+`init_for_testing` is test-only. A different package publication has a different
+nominal registry type, and compatible upgrade does not rerun the initializer.
+Thus the previously described example is an arbitrary/test-state accounting
+limitation, not an established reachable production defect. The new
+`test_two_test_only_registries_do_not_confer_identity_authority` deliberately
+constructs that state, reproduces the counter mismatch and proves it confers no
+active identity. Production source/clients do not use the registry count as
+quota/authority. Do not infer a general origin binding or safety if a future
+upgrade adds a second same-type registry constructor. Old-package code remains
+callable; adding a new-function assertion alone would not change it.
+
+The separate `fleet_storage` package is now explicitly compiled/linted/tested by
+`check_move_security.py`, including its pinned Walrus dependency graph. Its one
+unsuppressed lint is the intentional executor reward in `execute_renewal`:
+changing the published return signature would break compatibility. The exception
+is function-local and the gate independently requires the exact unsuppressed
+baseline. Removing owner authorization is rejected by a genuine failing
+`a_device_cannot_release_fleet_blobs` test. This is separate from the 11-module
+main-package gate and is **not** a formal verification of Walrus/native behavior.
+
+Source audit of `fleet_storage.move` found no confirmed new security defect:
+
+| Functions | Checked boundary / limit |
+|---|---|
+| `assert_owner`, `create`, `migrate`, owner mutators | Budget ID and current bearer owner cap; normal writes enforce package version, migration only advances versions. Cap transfer delegates authority. |
+| `register_blob`, `register_owner_impl`, `register_retained_fleet_blob` | Active signer/current account/budget checks; Walrus computes encoded size, pool split and actual fee. Period, size, rate and fee quotas abort atomically. Owner-approved retained uploads prepay their finite renewal resource. |
+| `configure_retention`, `authorize_renewal`, `prepay_renewal`, `execute_renewal` | Owner-selected executor/revision, exact expected end epoch, finite target, live expiry/margin, prepaid resource and bounded gas reward; duplicates fail before a second payout. No arbitrary withdrawal/provider credential authority for executor. |
+| `assert_retention_funded`, `assert_retention_live`, `withdraw_retention`, `release_blob` | Conservative fleet-blob closure, prepaid count/reserves and actual expiry checks; explicit owner withdrawal/release may reduce protection and emits risk evidence. They are owner powers, not a perpetual-availability guarantee. |
+| `certify_blob`, `extend_blob`, storage resource operations | Delegate certificate/epoch/storage semantics to pinned Walrus contracts. Unit tests do not prove real Walrus certification, native correctness or production availability. |
+
+### Current verification and historical-tail repair
+
+- `python3 scripts/check_move_proofs.py --tools /tools`: **PASS**, all 63
+  positive obligations and 22 precise solver-negative controls. Pending proof
+  attempts described above remain failures and are excluded from that count.
+- Network-none compiler gate: **169/169 main tests and 53/53 storage tests**,
+  strict linters, both independently checked baselines, compiler/linter negatives
+  and all three actual authority-removal regressions pass.
+- Root release bytecode: all **11** arrays equal integrated main `7e899f3`,
+  SHA-256 `1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
+  Storage plus its unpublished root dependency: all **12** arrays equal,
+  SHA-256 `61d6a792faab43f0d75a3093cd597af3efb12e5302e788e67a5f256f00526cf7`.
+  Runtime layouts, bodies and introduction origins are unchanged.
+- `scripts/test_move_security_localnet.py` runs each suite on its own fresh
+  network-none chain/wallet; readiness checks wait for indexed gRPC and faucet.
+  Node logs/bootstrap output stay private and are deleted after the suite.
+  Historical fixtures: `eb8a43b`, `8728d61`, identity prior `d3acb1e`.
+  Historical receipt/old-package effects: **35/35 PASS**. Current identity/upgrade
+  effects: **47/47 PASS**. The historical harness now performs a genuine fourth
+  upgrade to current source before resolving today's manifest. It checks the
+  original receipt introduction origin and correctly treats version-1 receipts
+  as unverified; no missing type origin is invented.
+- Current real filesystem Trivy scan: **10 findings, zero blocking**, no ignores
+  or suppressions; raw output remains private. Python parser/localnet safety
+  regressions: **4/4 PASS**. Hosted CI and testnet remain exact-head gates; their
+  current URLs/results belong in the issue/PR handoff, not this historical file.
+
+No mainnet, physical programming, production provider or real-wallet acceptance
+was performed. Those remain #32/#159; the software proof gaps above remain here.
 
 ## Concrete compatibility implementation on 2026-10-22
 
@@ -301,7 +468,7 @@ and current limitations are distinguished below.
 | `deployment_manager.move`: `make_deployment`, `receipts_mut`, `record_status`, `migrate`, `receipt_status*` | New records omit `StatusesKey`. Authoritative `ReceiptsKey` has its own introduction origin. Version 2 writers reject future generations and discard prior-generation statuses. Readers reject prior generations; legacy events are notifications, not evidence. Old packages remain callable. A sweep does not prevent old code creating fresh version-1 records, so every reader must check generation. | Historical High receipt forgery mitigated; adversarial unit/effects tests retained. No proof of all future upgrades. |
 | `device_cap.move`: `issue`, `assert_signer`, `assert_active` | Public issuance does not grant impersonation: the cap's private UID holds its registered signer binding. Unbound legacy caps fail. Active reporting additionally needs live custody, unrevoked identity and current signer. Transferring a cap does not change its signer. | Checked by current tests, including operator impersonation, revocation and rotation failures. |
 | `device_registry.move`: `activate_device`, `borrow_device`, `return_device`, `rotate_device_key`, `revoke_device`, `reinstate_device`, `deregister_activated_device` | `DeviceOwnerCap` is bearer authority. Custody plus a linear, non-droppable `DeviceLoan` prevents passing a Device by value to old deregistration code and committing without returning it. Return checks ID and signer. Rotation preserves revocation. Deregistration leaves a tombstone. The owner-cap holder can issue a new bound device cap through a temporary loan. | Current unit coverage; custody representation and cross-version linkage remain outside formal coverage. Transferring/wrapping a bearer cap delegates its authority. |
-| `device_registry.move`: `register_device`, `deregister_device` | **Finding L-01:** the registry counter is incremented/decremented through the supplied registry, but the legacy Device has no originating-registry binding. A holder of an unactivated Device can supply another registry with a nonzero counter and corrupt its accounting. With zero count the subtraction aborts atomically. This does not forge active custody or receipts. Do not use this count as an authorization/quota source. | **Low, open**; source finding, no fresh exploit transaction claimed. Repair must retain legacy layouts and test old/new registry behavior. Reported in #82; no new issue created. |
+| `device_registry.move`: `register_device`, `deregister_device` | **Finding L-01:** the registry counter is incremented/decremented through the supplied registry, but the legacy Device has no originating-registry binding. A holder of an unactivated Device can supply another registry with a nonzero counter and corrupt its accounting. With zero count the subtraction aborts atomically. This does not forge active custody or receipts. Do not use this count as an authorization/quota source. | **Informational/arbitrary-state limitation** after constructor reachability review above. Reproduced through the test-only repeated initializer; no reachable production exploit established. No new origin binding is claimed. Tracked in #82. |
 | `enrollment.move`: `create_policy`, `add_claims`, `revoke_claim`, `set_limits`, `close`, `enroll` | Shared policy mutations check its operator. Enrollment binds registry, open flag, Clock expiry and quota; consumes a claim identified by gas sponsor, requires sponsorship and a distinct device sender, then atomically activates custody and transfers caps. Runtime signature validation, not a Move address comparison alone, establishes sponsor/device key possession. Aborts roll back claim/quota changes. | Existing positive/negative tests retained. Operator can deliberately re-add an already consumed claim address; “single use” means consumed until operator reauthorizes it. Provisioning must not recycle claim keys unintentionally. |
 | `roles.move`: `allow_group`, `grant`, `revoke`, `is_active`, `create_deployment_as`; `deployment_manager.move`: `create_delegated` | Builder has no abilities and must be completed. Groups are checked against the immutable operator/admin. Shared registry activation is required on every delegated deployment; revocation checks recorded operator. Every target must be in scope; empty targets fail. Attributed creation is package-private. Delegate cannot use this API for direct devices or creator-only deletion. | Revocation/scope/unauthorized revoker/delete tests retained. Role is transferable bearer authority, not bound to the address logged in `RoleGranted`. A holder may further delegate via transfer/wrapping; do not interpret that event as a permanent signer ACL. |
 | `device_group.move`: `add_device`, `remove_device`, `delete_group`; `deployment_manager.move`: `report_verified_status_for_group` | Shared group writes require admin. Group reporting requires targeted group ID, current membership and group admin equal to deployment creator. Enrollment/device custody does not make a group admin the device operator. Public `custodied_device` permits reading another operator's Device, so group membership alone is not operator consent. | Current targeting checks retained. Device operator authorization before apply remains a client/daemon boundary. |
