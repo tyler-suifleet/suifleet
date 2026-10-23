@@ -2,11 +2,6 @@
   "schema_version": 1,
   "ticket": "SF-122",
   "date_utc": "2026-10-23",
-  "implementation_agent": {
-    "family": "Codex",
-    "actual_model": "gpt-6.1-sol",
-    "branch": "work/suifleet/sf-122-70feba54"
-  },
   "baseline": {
     "revision": "e19970e045c42aad2452d5a67294fe1b770133f9",
     "patch": "sf122-baseline-metrics.patch",
@@ -111,6 +106,10 @@
     {
       "command": "python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim",
       "result": "Signed health and encrypted logs/diagnostics/shadows, real SDK threshold decryption/browser verification, cadence/restart/outage/authority regressions passed"
+    },
+    {
+      "command": "cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11",
+      "result": "397 passed, 0 failed, 4 existing engine-dependent tests ignored"
     }
   ],
   "ci_and_testnet": "Normal exact-head ordinary CI and bounded automatic testnet/package-upgrade are required before Review; their remote run/effects/spend evidence belongs on the implementation PR. This local performance receipt does not claim a public-network run.",
@@ -124,5 +123,6 @@
       "Actual Mainnet writes/end-to-end acceptance",
       "Production-provider/account/credential and manual real-wallet acceptance"
     ]
-  }
+  },
+  "implementation_branch": "work/suifleet/sf-122-70feba54"
 }
