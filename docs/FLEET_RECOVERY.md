@@ -188,8 +188,9 @@ Use only existing APIs:
   swept only with each device key.
 - **Storage obligations.** Walrus storage is a consumed purchase, not a deposit.
   Prepaid renewal capacity is not refunded. `release_blob` plus `burn` after
-  expiry returns only the Sui object-storage rebate. Fleet-data anchors and
-  public deployment metadata stay on chain: there is no pruning API.
+  expiry returns only the Sui object-storage rebate. Expired fleet-data anchors
+  and finished deployment records can be reclaimed by the owner
+  ([storage reclaim](STORAGE_RECLAIM.md)); unexpired anchors stay on chain.
 
 ## 6. Payment failure (SF-092 scenarios)
 
@@ -223,8 +224,9 @@ These are reported on #178 for Codex to triage. No tickets were created.
 3. There is no consolidated statement of balances and obligations: budget,
    reserves, device floats, storage WAL, retention reserves and prepaid
    capacity. Each must be read separately.
-4. Fleet-data anchors are permanent, with no pruning API. Exit leaves that Sui
-   metadata, and its storage cost, on chain.
+4. Fleet-data anchors stay on chain until their archives expire and the owner
+   prunes them ([storage reclaim](STORAGE_RECLAIM.md)). Exit before then leaves
+   that Sui metadata, and its storage deposit, on chain.
 
 ## Validation and limits
 

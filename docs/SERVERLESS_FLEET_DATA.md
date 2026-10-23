@@ -106,9 +106,11 @@ SF-083 stores blobs until the prepaid pool's end epoch and lets only the owner
 extend/release them. A device cannot delete or shorten them. Expired data must
 be shown unavailable. Walrus purchases are consumed, not refundable; releasing
 and burning an expired blob can return its Sui object-storage rebate to the
-owner. This extension currently keeps anchor metadata permanently; it exposes
-no pruning or device deletion API. Metadata consumes Sui storage and must be
-included in the completed cost estimate. Health values are replaced, not a
+owner. SF-129 adds owner-only `prune_expired_anchors` and `burn_expired_blobs`:
+once an archive's storage has ended, the owner deletes its anchor and burns its
+blob, recovering their Sui deposits. Devices still cannot delete history. Live
+archives' metadata consumes Sui storage until reclaimed and must be included in
+the completed cost estimate; see [storage reclaim](STORAGE_RECLAIM.md). Health values are replaced, not a
 permanent health history.
 
 The [live Testnet quote](validation/sf082-walrus-quote.json) uses the pinned SDK
