@@ -14,23 +14,23 @@ These are measured software boundaries, with public-provider and native-fleet li
 | chain: receipt_finalization | 16 | 761.12 | 1687.20 |
 | chain: index_page | 1 | 6.78 | 6.78 |
 | chain: storage_contention | 4 | 1663.16 | 1664.88 |
-| fixtures: index_page | 2 | 0.61 | 3.46 |
-| fixtures: health_page | 2 | 40.74 | 155.52 |
-| fixtures: sign_encrypt | 384 | 290.83 | 791.00 |
-| fixtures: verified_fetch | 384 | 84.45 | 603.87 |
-| browser: initial | 5 | 72.39 | 245.36 |
-| browser: page_recovery | 5 | 51.44 | 57.21 |
-| Testnet effects reads | 8 | 81.56 | 115.34 |
+| fixtures: index_page | 2 | 0.61 | 3.47 |
+| fixtures: health_page | 2 | 41.24 | 159.27 |
+| fixtures: sign_encrypt | 384 | 269.18 | 755.86 |
+| fixtures: verified_fetch | 384 | 81.79 | 575.55 |
+| browser: initial | 5 | 67.32 | 183.74 |
+| browser: page_recovery | 5 | 51.54 | 62.95 |
+| Testnet effects reads | 8 | 82.16 | 306.17 |
 
 | Receipt | Executed revision |
 |---|---|
 | [merged-chain](merged-chain.json) | `ce6096b2e129d97b877b56f07b6f13c4b76c4a80` |
-| [merged-fixtures](merged-fixtures.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
-| [merged-browser](merged-browser.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
+| [merged-fixtures](merged-fixtures.json) | `a30a00606b317329c2134c39881eb0bcdc653e28` |
+| [merged-browser](merged-browser.json) | `a30a00606b317329c2134c39881eb0bcdc653e28` |
 | [merged-daemon](merged-daemon.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
-| [merged-public-read](merged-public-read.json) | `ffb1c630e5f69f4003855d79729f6e75f3747cbc` |
+| [merged-public-read](merged-public-read.json) | `a30a00606b317329c2134c39881eb0bcdc653e28` |
 
-Integrated-chain Node peak RSS: 331,874,304 bytes (excludes child node/compiler/keyservers). Crypto-fixture Node peak RSS: 446,615,552 bytes. Chromium renderer JS-heap peak: 23,176,384 bytes (not browser RSS).
+Integrated-chain Node peak RSS: 331,874,304 bytes (excludes child node/compiler/keyservers). Crypto-fixture Node peak RSS: 454,287,360 bytes. Chromium renderer JS-heap peak: 23,044,180 bytes (not browser RSS).
 
 Four independent native restart drills: 111.31 seconds at concurrency two; not one shared-chain fleet.
 

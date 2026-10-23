@@ -2,53 +2,53 @@
   "schema": 1,
   "result": "PASS",
   "mode": "real-chromium-fixture-transport",
-  "revision": "ffb1c630e5f69f4003855d79729f6e75f3747cbc",
+  "revision": "a30a00606b317329c2134c39881eb0bcdc653e28",
   "browser": "156.0.8078.4",
   "devices": 128,
   "rounds": 5,
   "measurements": {
     "initial": {
       "n": 5,
-      "p50_ms": 72.39461500000016,
-      "p95_ms": 245.3576190000001,
-      "max_ms": 245.3576190000001
+      "p50_ms": 67.321551,
+      "p95_ms": 183.737254,
+      "max_ms": 183.737254
     },
     "page_recovery": {
       "n": 5,
-      "p50_ms": 51.44494299999997,
-      "p95_ms": 57.21282199999996,
-      "max_ms": 57.21282199999996
+      "p50_ms": 51.54446699999994,
+      "p95_ms": 62.94616999999994,
+      "max_ms": 62.94616999999994
     }
   },
   "timings": [
     {
-      "initial_ms": 245.3576190000001,
-      "page_recovery_ms": 47.503917999999885,
-      "js_heap_used_bytes": 6858392,
+      "initial_ms": 183.737254,
+      "page_recovery_ms": 51.54446699999994,
+      "js_heap_used_bytes": 6847604,
       "dom_nodes": 825
     },
     {
-      "initial_ms": 69.45488799999998,
-      "page_recovery_ms": 48.172164000000066,
-      "js_heap_used_bytes": 11287844,
+      "initial_ms": 74.65707799999996,
+      "page_recovery_ms": 49.50266899999997,
+      "js_heap_used_bytes": 11270512,
       "dom_nodes": 1642
     },
     {
-      "initial_ms": 79.50801100000012,
-      "page_recovery_ms": 57.21282199999996,
-      "js_heap_used_bytes": 14025876,
+      "initial_ms": 67.321551,
+      "page_recovery_ms": 54.3431700000001,
+      "js_heap_used_bytes": 13881420,
       "dom_nodes": 2459
     },
     {
-      "initial_ms": 72.39461500000016,
-      "page_recovery_ms": 51.44494299999997,
-      "js_heap_used_bytes": 21290792,
+      "initial_ms": 62.676782,
+      "page_recovery_ms": 51.18607399999996,
+      "js_heap_used_bytes": 21151644,
       "dom_nodes": 3276
     },
     {
-      "initial_ms": 65.84757900000022,
-      "page_recovery_ms": 52.61722499999996,
-      "js_heap_used_bytes": 23176384,
+      "initial_ms": 66.74347499999999,
+      "page_recovery_ms": 62.94616999999994,
+      "js_heap_used_bytes": 23044180,
       "dom_nodes": 4093
     }
   ],

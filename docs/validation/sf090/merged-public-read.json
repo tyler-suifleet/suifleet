@@ -2,16 +2,16 @@
   "schema": 1,
   "result": "PASS",
   "mode": "fresh-public-testnet-historical-effects-readback",
-  "revision": "ffb1c630e5f69f4003855d79729f6e75f3747cbc",
-  "observed_at": "2026-10-23T08:10:45.522Z",
+  "revision": "a30a00606b317329c2134c39881eb0bcdc653e28",
+  "observed_at": "2026-10-23T08:26:52.479Z",
   "chain": "4c78adac",
   "rpc": "https://fullnode.testnet.sui.io:443",
   "peak_concurrency": 2,
   "measurements": {
     "n": 8,
-    "p50_ms": 81.55582700000014,
-    "p95_ms": 115.33741399999997,
-    "max_ms": 115.33741399999997
+    "p50_ms": 82.1617490000001,
+    "p95_ms": 306.165937,
+    "max_ms": 306.165937
   },
   "results": [
     {
@@ -21,25 +21,7 @@
       ],
       "status": "success",
       "historical_net_gas_mist": "993869",
-      "read_ms": 109.83830599999999
-    },
-    {
-      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
-      "targets": [
-        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::certify_blob"
-      ],
-      "status": "success",
-      "historical_net_gas_mist": "1030957",
-      "read_ms": 115.33741399999997
-    },
-    {
-      "digest": "6gLjJ4ZXb44QPpwbbpKQka5HdxvGgKDtxuagNwphnfXd",
-      "targets": [
-        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
-      ],
-      "status": "success",
-      "historical_net_gas_mist": "3797989",
-      "read_ms": 76.61443600000007
+      "read_ms": 116.87371599999983
     },
     {
       "digest": "CQkw4fTXUXNZiFdvcPNc4jvZCtZGt3z76WhR5DiFDwfK",
@@ -48,16 +30,25 @@
       ],
       "status": "success",
       "historical_net_gas_mist": "1009068",
-      "read_ms": 83.48413699999992
+      "read_ms": 79.11336800000004
     },
     {
-      "digest": "7v2f9LCxS7tS1wju6CGvGR9n1cw63DSy6DjUpW8cSJ5t",
+      "digest": "6gLjJ4ZXb44QPpwbbpKQka5HdxvGgKDtxuagNwphnfXd",
       "targets": [
         "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
       ],
       "status": "success",
-      "historical_net_gas_mist": "-1802931",
-      "read_ms": 76.57657999999992
+      "historical_net_gas_mist": "3797989",
+      "read_ms": 83.74713799999995
+    },
+    {
+      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
+      "targets": [
+        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::certify_blob"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "1030957",
+      "read_ms": 306.165937
     },
     {
       "digest": "6zw8xuyLC19Me9vhEHVz7mC9uqn6mZNQULPdMd7M1Amw",
@@ -66,7 +57,16 @@
       ],
       "status": "success",
       "historical_net_gas_mist": "12297664",
-      "read_ms": 84.45833799999991
+      "read_ms": 82.1617490000001
+    },
+    {
+      "digest": "7v2f9LCxS7tS1wju6CGvGR9n1cw63DSy6DjUpW8cSJ5t",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "-1802931",
+      "read_ms": 83.01489199999992
     },
     {
       "digest": "A99gJoseg9erT1sPPQpNyaPWKAYa3VEgSWG2tBveisVm",
@@ -75,7 +75,7 @@
       ],
       "status": "success",
       "historical_net_gas_mist": "4459123",
-      "read_ms": 80.29517600000008
+      "read_ms": 79.41317100000015
     },
     {
       "digest": "4RwY1sd8xAdQdxD3D2mph7mmDuhbo8sMgervvFsdo8GQ",
@@ -84,7 +84,7 @@
       ],
       "status": "success",
       "historical_net_gas_mist": "7255298",
-      "read_ms": 81.55582700000014
+      "read_ms": 79.54970300000014
     }
   ],
   "new_spend_mist": "0",

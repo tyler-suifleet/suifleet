@@ -114,7 +114,12 @@ rerun. Neither failure is counted as passing acceptance or public spending.
 The first final-head JavaScript CodeQL run also blocked three predictable receipt
 writes. Receipt publication now uses exclusive mode-0600 creation, refusing
 intervening symlinks or existing files. Regression checks preserve the symlink
-target and existing receipt; no scanner finding was suppressed.
+target and existing receipt; no scanner finding was suppressed. Browser, public-read and crypto receipts were
+rerun after hardening. The integrated-chain workload logic is unchanged from its
+recorded `ce6096b` run; subsequent changes only replace receipt output with the
+adversarially tested publisher. A repeat chain attempt did not start because
+SF-050 held the shared build lease; no lock was bypassed and no new chain run
+is claimed after this output-only change.
 
 Tracking tests pass 10/10 and the offline bootstrap dry run passes after preserving
 both branches' published catalog entries during merge. The merged manifest suite
