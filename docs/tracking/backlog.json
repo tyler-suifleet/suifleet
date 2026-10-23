@@ -2113,6 +2113,30 @@
       "validation": "Offline coordinator/tracking tests and real fake-CLI process tests, fresh exact-head CI/review, then merged-only automatic runtime activation and live service/dashboard checks; no induced real wallet/hardware writes."
     },
     {
+      "key": "SF-118",
+      "title": "Port PR150 repair ownership accounting onto the current dispatcher",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Adopt existing untracked PR150 https://github.com/tyler-suifleet/suifleet/pull/150 into the overnight software queue. Its change is still absent: an unmanaged InProgress implementation claim temporarily controlled by a verified PR feedback repair is counted again against implementation capacity. Port the behavior onto current main rather than merging the stale branch.",
+      "evidence": "Independent read-only audit of main7e899f3 confirms Dispatcher.available still counts unmanaged InProgress owners with no repairing exclusion; legacy headceef969 is not an ancestor. SF116 CI repair-first retains one implementation slot deliberately and must remain distinct.",
+      "acceptance": [
+        "Port the minimal repair ownership accounting fix onto current main with exact authenticated jobs.repair_claim token-digest/key/branch/worktree proof, current matching owner generation and verified live repair process/receipt; do not trust ticket-key-only snapshots.",
+        "Exclude only claims truly owned by the review/feedback repair category from duplicate manual implementation accounting. Preserve SF116 CI-repair implementation-slot counting, uncertain/blocked/other-project/wrong-generation reservations and fail-closed capacity behavior.",
+        "Meaningful regressions cover true repair exclusion, stale/wrong claim/branch/worktree/process proof, separate namespaces, ambiguity and coexistence with SF117 capacity retries. Full coordinator regression tests pass.",
+        "Document original PR150/head and scoped replacement in handoff; use Tyler author/committer and normal fresh CI/testnet/independent review. Operational runtime verification occurs after reviewed merge through the merged-only updater."
+      ],
+      "validation": "Offline coordinator/real process accounting regressions and full suite; exact-head CI/testnet and independent source review, then merged-only runtime activation/installed checks.",
+      "legacy_pr": 150,
+      "legacy_head": "ceef969e94f7624a32052b9b4763497977c04d8d"
+    },
+    {
       "key": "SF-119",
       "title": "Port PR53 cross-transaction same-checkpoint cursor regression to current registry custody",
       "priority": "P1",
