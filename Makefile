@@ -489,6 +489,14 @@ test-aws-iot:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	python3 scripts/test_aws_iot.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(AWS_IOT_EVIDENCE)
 
+# SF-125 device inboxes, group heads and member index on a disposable localnet
+# (start it first; network-none): main's contracts upgraded in place, the real
+# daemon through a pruning gRPC proxy, judged by on-chain receipts.
+.PHONY: test-inbox-localnet
+test-inbox-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example grpc_prune_proxy
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_inbox_localnet.py
+
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet
 test-rollout-localnet:
