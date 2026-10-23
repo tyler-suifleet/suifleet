@@ -2111,6 +2111,31 @@
         "Add meaningful classifier, restart/idempotency, live-descendant/resource/ownership refusal, retry-budget/capacity and real-process exit-to-replacement regressions. Document behavior and exact operational rollout evidence."
       ],
       "validation": "Offline coordinator/tracking tests and real fake-CLI process tests, fresh exact-head CI/review, then merged-only automatic runtime activation and live service/dashboard checks; no induced real wallet/hardware writes."
+    },
+    {
+      "key": "SF-119",
+      "title": "Port PR53 cross-transaction same-checkpoint cursor regression to current registry custody",
+      "priority": "P1",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/scripts/test_daemon_localnet.py",
+        "repositories/suifleet/scripts/tests"
+      ],
+      "resources": [],
+      "description": "Adopt existing untracked PR53 https://github.com/tyler-suifleet/suifleet/pull/53 into the overnight software queue. Preserve its missing real-chain legacy cursor regression for separate transactions within one checkpoint while updating its obsolete device-group call to current custody rules.",
+      "evidence": "Independent audit of main7e899f3 finds existing same-transaction cursor boundary regression but missing different-transactions/same-checkpoint case. Original09bcdc9 calls device_group::add_device with @device; current helper add_to_group correctly borrows/returns registry custody.",
+      "acceptance": [
+        "Port the minimal original PR53 cross-transaction/same-checkpoint scenario onto current main using current add_to_group/custody helpers and actual current chain adapter. Preserve the existing same-transaction regression.",
+        "Use a real disposable local Sui chain and real daemon/cursor receipt observations; demonstrate the regression distinguishes a deliberately incomplete cursor handling fix or equivalent meaningful negative control. Do not claim mocked success as real chain acceptance.",
+        "Record exact test commands/results, transaction/checkpoint/cursor behavior and current-head CI/testnet/independent review. No public wallet/hardware mutation required for local regression.",
+        "Reference original PR53/head; keep scope confined to the current transport regression and necessary test adapter, no unrelated code or proof waiver."
+      ],
+      "validation": "Run the relevant disposable localnet daemon suite and meaningful failure control plus scoped offline harness checks; normal exact-head CI/testnet and independent review.",
+      "legacy_pr": 53,
+      "legacy_head": "09bcdc9f0873d96c64f14dac5d5af4efd8b7fa19"
     }
   ]
 }
