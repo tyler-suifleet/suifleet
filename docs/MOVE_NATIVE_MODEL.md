@@ -138,7 +138,7 @@ Primary comparison:
   condition generation rather than receiving empty tables.
 - `new_uid_from_hash` is no longer exempt when UID itself carries projections.
   The dedicated fixture creates a child, deletes the UID and reconstructs the
-  **same hash-derived UID address**; the actual hashed constructor Pack is
+  **same UID address through the hashed constructor**; the actual hashed constructor Pack is
   rejected. This is a compatibility rejection, not a proved reconstruction.
   No release public hashed-constructor API is added.
 - Raw/DOF use of the same Name type is explicitly rejected before code generation

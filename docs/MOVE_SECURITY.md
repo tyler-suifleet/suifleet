@@ -103,6 +103,29 @@ unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159). No software proof,
 CI, security review or normal automatic testnet gate is deferred by that split.
 
+## Current-main extension: SF-082
+
+Main `39ea150a19a469c0edbb1b61ad822a80287a6f47` adds the separate
+`contracts/fleet_data` package and owner-approved device archive retention.
+The root implementation/proof sources and four prover gate inputs are unchanged
+from `ac4417e`; the existing proofs retain that exact supported scope.
+`check_move_security.py` now independently builds/lints/tests fleet_data too,
+using its own committed framework/Walrus lock graph. This is not an assertion
+that all three packages use the formal model's release framework revision.
+Three function-local `prefer_mut_tx_context` allowances preserve already-published
+fleet_data APIs. The independently stripped diagnostic baseline must match all
+three exact warnings. No runtime signature/body/layout is changed by these
+annotations. Real source mutations must make `revoked_health` and
+`device_cannot_read` fail their expected-abort tests; a compilation failure is
+not accepted as an authorization counterexample.
+
+| File/functions | Reviewed boundary and coverage limit | Severity/status |
+|---|---|---|
+| `fleet_data.move`: `create`, `enroll`, `replace_account`, `owner`, `device` | Budget owner cap and budget/storage/registry/account/writer/device IDs are bound. Device writes require the active signer and live account via `assert_may_draw`; enrollment is owner-controlled, indexed once, and account replacement preserves sequences/cadence/history. | Source review and compiler/authority/adversarial tests; no complete formal proof of this separate Walrus-dependent package. |
+| `report_health`, `anchor`, `request*` | Strictly increasing sequences, bounded payload/signature/hash sizes, per-stream cadence and shared emergency rate; certified non-deletable blobs must belong to this fleet/device and cannot be re-anchored. Device-provided health JSON/signatures and ciphertext digests still need client verification. | Intentional client authenticity/integrity boundary, not an on-chain plaintext or signature verification claim. |
+| `set_support`, `rotate_key_epoch`, `seal_approve_*`, `identity_matches` | Current bearer owner cap controls policy; owner approval rechecks that cap. Support access is an explicit current account grant, with version/policy-ID/epoch/nonce binding. Devices/groups have no implicit decrypt grant. Support requests diagnostics within cadence but cannot spend through an inactive device. | Source review, epoch/support/revoked-key tests and an actual support-check omission control. Production Seal provider/credential acceptance remains #159. |
+| `fleet_storage.move`: `configure_device_retention`, `clear_device_retention`, protected `register_blob` | Owner approves finite target/fee policy and revision; active device admission preserves quotas, checks live retention, authorizes/prepays its blob and checks global protected funding/capacity. Owner maintenance may reclaim expired protected slots. Failure rolls back object/resource changes; gas is still charged. | Source review and storage regression tests. No promise of indefinite history, perpetual availability or physical/provider recovery. |
+
 ## L-01 reachability and separate storage audit
 
 The cross-registry counter example requires **two same-origin registries**.
