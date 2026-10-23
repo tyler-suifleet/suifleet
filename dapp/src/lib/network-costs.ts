@@ -11,7 +11,7 @@ export const MEASURED = {
   minComputationMist: BigInt(1_000_000),
   /** One fleet_budget::draw_gas, net MIST, measured on testnet (docs/validation/sf083-testnet.json). */
   drawNetMist: BigInt(1_988_540),
-  /** Observed Testnet SF-082 effects; conservative maxima, not a production quote. */
+  /** Observed Testnet SF-082 effects; fixture observations, not fleet-size gas ceilings or a production quote. */
   fleetData: { initialHealthNetMist: BigInt(7_255_298), recurringHealthNetMist: BigInt(4_459_123), archiveNetMist: BigInt(27_075_739) },
   walrus: {
     nShards: 1000,
@@ -25,6 +25,21 @@ export const MEASURED = {
   /** Indicative CoinGecko spot quotes; exclude spread, slippage, taxes and acquisition fees. */
   usd: { SUI: 1.048, WAL: 0.04023726, observedAt: 1792604183 },
 } as const;
+
+/** Fleet-wide protected index; shared by releases and device archives. */
+export const PROTECTED_BLOB_LIMIT = 1024;
+
+export function protectedArchiveCapacity(existing: number, devices: number, uploadsPerDeviceMonth: number, months: number) {
+  checked("existing protected blobs", existing, PROTECTED_BLOB_LIMIT);
+  checked("devices", devices, 1_000_000);
+  checked("device archive uploads", uploadsPerDeviceMonth, 100_000);
+  checked("months", months, 120);
+  const monthlyUploads = devices * uploadsPerDeviceMonth;
+  const remaining = PROTECTED_BLOB_LIMIT - existing;
+  const planned = monthlyUploads * months;
+  return { remaining, planned, exceedsCapacity: planned > remaining,
+    daysToCapacity: monthlyUploads ? remaining * 30 / monthlyUploads : null };
+}
 
 const MIB = BigInt(1024 * 1024);
 export const MIST_PER_SUI = BigInt(1_000_000_000);
@@ -65,6 +80,8 @@ export interface EstimateInput {
   healthSummariesPerDeviceMonth?: number;
   /** Include registration/certification/anchor gas for each encrypted archive. */
   serverlessData?: boolean;
+  /** Existing protected records, including non-device blobs; zero assumes empty storage. */
+  existingProtectedBlobs?: number;
   /** Releases uploaded per month; each is one artifact plus its recipe. */
   releasesPerMonth: number;
   artifactBytes: number;
@@ -83,6 +100,7 @@ export interface EstimateInput {
 }
 
 export interface Estimate {
+  protectedCapacity?: ReturnType<typeof protectedArchiveCapacity>;
   deviceTransactions: number;
   draws: number;
   /** Device gas for receipts/anchors, plus the gas of the draws themselves. */
@@ -123,6 +141,7 @@ export function estimate(input: EstimateInput): Estimate {
   if (input.drawMist <= BigInt(0) || input.floatMist < BigInt(0)) throw new Error("draw must be positive and float non-negative");
   const health = checked("health summaries", input.healthSummariesPerDeviceMonth ?? 0, 100_000);
   const archiveUploads = input.serverlessData && input.dataBytesPerDeviceMonth > 0 ? uploads : 0;
+  const protectedCapacity = input.serverlessData ? protectedArchiveCapacity(input.existingProtectedBlobs ?? 0, devices, archiveUploads, months) : undefined;
   const deviceTransactions = devices * months * (perDevice + health + 3 * archiveUploads);
   const spend = BigInt(devices * months * perDevice) * MEASURED.receiptNetMist
     + BigInt(devices * months * health) * MEASURED.fleetData.recurringHealthNetMist
@@ -143,7 +162,7 @@ export function estimate(input: EstimateInput): Estimate {
   const suiDepositMist = margin(gasMist, input.marginPercent) + floatsMist;
   const walDepositFrost = margin(artifactFrost + dataFrost, input.marginPercent);
   const sui = Number(suiDepositMist) / 1e9 * MEASURED.usd.SUI, wal = Number(walDepositFrost) / 1e9 * MEASURED.usd.WAL;
-  return { deviceTransactions, draws, gasMist, floatsMist, suiDepositMist, artifactFrost, dataFrost, walDepositFrost,
+  return { protectedCapacity, deviceTransactions, draws, gasMist, floatsMist, suiDepositMist, artifactFrost, dataFrost, walDepositFrost,
     usd: { sui, wal, total: sui + wal } };
 }
 
