@@ -5,6 +5,7 @@ import { buildDeploymentControlTx, controlReason, type DeploymentControl } from 
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
+import { DeploymentReclaimPanel } from "@/components/StorageReclaim";
 import type { DeviceObject, DeviceGroup } from "@/lib/sui";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
@@ -45,6 +46,7 @@ export default function DeploymentsPage() {
           loading={isLoading || devices.isLoading || groups.isLoading} error={error?.message ?? devices.error?.message} />
       </>}
       {view === "deployments" && <>
+      {deployments.length > 0 && <DeploymentReclaimPanel deployments={deployments} />}
       {error && <p role="alert" className="text-sm text-red-600">Failed to load deployments: {error.message}</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
