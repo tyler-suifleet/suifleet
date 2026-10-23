@@ -2089,6 +2089,37 @@
       "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
     },
     {
+      "key": "SF-091",
+      "title": "Rehearse customer fleet recovery and service dependency outages",
+      "priority": "P1",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "area": "infra",
+      "resources": [],
+      "depends_on": [
+        "SF-022"
+      ],
+      "paths": [
+        "docs",
+        "scripts",
+        "dapp",
+        "suifleet-edge/src"
+      ],
+      "description": "Provide an executable paid-pilot recovery and incident runbook across the dApp, deployment manifest, customer custody, Walrus content and device journals. Recovery must preserve confidentiality and must not assume deleted plaintext or a lost private key is recoverable.\n\nPayment-failure recovery drill \u2014 user requirement: https://github.com/tyler-suifleet/suifleet/issues/179\n\nParallel implementation: develop against SF-082 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634; SF-082 remains a mandatory integration/merge gate, not a claim-blocking prerequisite. Keep the PR draft until the real dependency merges and integrated validation passes.",
+      "evidence": "OPERATIONS.md preserves journals/keys and describes deployment troubleshooting; SF-022 covers keyserver failures, SF-023 retention, SF-024 index recovery and SF-087 release rehearsal. No ticket rehearses recovery of the integrated serverless customer product from a fresh operator machine or documents customer-facing recovery objectives and response ownership.",
+      "acceptance": [
+        "Inventory recoverable state and its source of truth: manifest/type origins, site revision, customer authority, provider configuration, encrypted artifact/recipe references, retention, budget balances and device journal/signing state. Specify backup owners and secure restore requirements without exporting secrets to git or public evidence.",
+        "From a clean operator environment restore the verified dApp/configuration, discover an existing fleet and resume management without duplicating deployments or weakening authority; verify ciphertext availability and policy access.",
+        "Exercise unavailable/expired blobs, RPC/keyserver/gateway outages, bad frontend release rollback and compromised/revoked device response. Distinguish resumable outages from irrecoverable key loss or expired content; reference authority handover in SF-089.",
+        "Define pilot recovery-time/data-loss objectives as measured targets, monitoring and support escalation ownership, and evidence required before declaring recovery. Do not imply a production SLA from public provider endpoints.",
+        "Document customer exit/export of public records and authorized decrypted data, outstanding prepaid balances and storage obligations using the existing APIs; record any missing export function as an implementation finding.",
+        "Include SF-092 scenarios in the integrated recovery drill: failed funding purchase, unavailable renewal executor/notifier, protected reserve depletion, top-up before expiry and verified re-upload/reference repair after expiry. Record observed data loss and which artifacts cannot be reconstructed.",
+        "Confirm installed applications are not uninstalled or rebooted because of payment failure, and distinguish unavailable fresh decryption/provider access from already installed software under its explicit offline policy.",
+        "Parallel implementation is authorized against SF-082 commit 81a4d2e6e8b94a62b7e1b682ba9bdf115367e634. Keep PR DRAFT until SF-082/#160 is verified merged/Done; integrate actual merged main, rerun relevant compatibility, adversarial and end-to-end tests, and only then allow Ready/Review. Coordinate producer ABI changes in #160. Never claim unmerged pinned fixtures as final integrated acceptance."
+      ],
+      "validation": "Automated clean-environment restore and outage/recovery drills on isolated infrastructure with encrypted fixtures; bounded testnet confirmation where relevant. Record observed recovery duration and loss; Pi and production credential provisioning are not prerequisites."
+    },
+    {
       "key": "SF-117",
       "title": "Automatically retry stopped implementation workers after transient model-capacity errors",
       "priority": "P0",

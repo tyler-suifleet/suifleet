@@ -83,6 +83,7 @@ test-ota:
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
 	$(RUN) python3 scripts/test_budget_ota.py
+	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
 
 # Fleet service configuration, root only in a disposable network-none container
@@ -325,6 +326,8 @@ test-manifest:
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
+	$(RUN) node scripts/test_fleet_recovery.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
 	$(RUN) node scripts/test_pilot_load.cjs
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
@@ -638,6 +641,23 @@ test-prospects:
 .PHONY: test-fleet-data-upgrade-localnet
 test-fleet-data-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
+
+# SF-091 integrated recovery drill on isolated infrastructure: restore/rollback,
+# browser outage/loss/export, real-daemon recovery and SF-092 payment failure
+# scenarios, recorded with durations (docs/FLEET_RECOVERY.md). Offline.
+.PHONY: test-fleet-recovery-drill
+test-fleet-recovery-drill:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) python3 scripts/fleet_recovery_drill.py --receipt "$${SUIFLEET_RECOVERY_RECEIPT:-/tmp/sf091-recovery-drill.json}"
+
+# Read-only public-Testnet confirmation from a clean operator state: restore,
+# discovery, health and ciphertext availability; with SUIFLEET_WALLET, owner
+# policy decryption by a signed Seal session. No transaction or gas.
+.PHONY: live-fleet-recovery
+live-fleet-recovery:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example sign_seal_session
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_fleet_recovery.py $(if $(SUIFLEET_WALLET),--wallet "$(SUIFLEET_WALLET)") --evidence "$${SUIFLEET_RECOVERY_EVIDENCE:-/tmp/sf091-testnet-recovery.json}"
+
 .PHONY: test-retention
 test-retention:
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
