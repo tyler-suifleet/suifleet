@@ -1,0 +1,67 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "mode": "real-chromium-fixture-transport",
+  "revision": "a30a00606b317329c2134c39881eb0bcdc653e28",
+  "browser": "156.0.8078.4",
+  "devices": 128,
+  "rounds": 5,
+  "measurements": {
+    "initial": {
+      "n": 5,
+      "p50_ms": 67.321551,
+      "p95_ms": 183.737254,
+      "max_ms": 183.737254
+    },
+    "page_recovery": {
+      "n": 5,
+      "p50_ms": 51.54446699999994,
+      "p95_ms": 62.94616999999994,
+      "max_ms": 62.94616999999994
+    }
+  },
+  "timings": [
+    {
+      "initial_ms": 183.737254,
+      "page_recovery_ms": 51.54446699999994,
+      "js_heap_used_bytes": 6847604,
+      "dom_nodes": 825
+    },
+    {
+      "initial_ms": 74.65707799999996,
+      "page_recovery_ms": 49.50266899999997,
+      "js_heap_used_bytes": 11270512,
+      "dom_nodes": 1642
+    },
+    {
+      "initial_ms": 67.321551,
+      "page_recovery_ms": 54.3431700000001,
+      "js_heap_used_bytes": 13881420,
+      "dom_nodes": 2459
+    },
+    {
+      "initial_ms": 62.676782,
+      "page_recovery_ms": 51.18607399999996,
+      "js_heap_used_bytes": 21151644,
+      "dom_nodes": 3276
+    },
+    {
+      "initial_ms": 66.74347499999999,
+      "page_recovery_ms": 62.94616999999994,
+      "js_heap_used_bytes": 23044180,
+      "dom_nodes": 4093
+    }
+  ],
+  "checks": [
+    "real FleetDataPage + BCS index verification",
+    "100 to 128 devices without duplicates",
+    "RPC outage does not fabricate devices",
+    "page recovery after throttling"
+  ],
+  "limits": [
+    "fixture chain and wallet hooks",
+    "no real extension/session/provider authorization",
+    "pagination only; no encrypted archive rendering load",
+    "renderer JS heap, not complete browser/host RSS"
+  ]
+}

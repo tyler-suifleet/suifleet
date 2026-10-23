@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "chain": "4c78adac",
+  "max_digests": 8,
+  "concurrency": 2,
+  "read_p95_ms": 10000,
+  "writes": 0,
+  "new_spend_ceiling_mist": 0,
+  "scope": "Fresh independent readback of historical producer health/storage/anchor effects; not a new native upload or provider-capacity run"
+}
