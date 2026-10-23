@@ -9,7 +9,7 @@ import { useDevices } from "@/hooks/useDevices";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import { DATA_CONFIG, listFleetDeviceIds } from "@/lib/fleet-data";
-import { deviceAlerts, deviceServicesView, utc, type ServicesView, type Unavailable } from "@/lib/device-services";
+import { deviceAlerts, deviceHref, deviceServicesView, linkedDevice, utc, type ServicesView, type Unavailable } from "@/lib/device-services";
 import type { ShadowSyncHealth } from "@/lib/telemetry";
 import { HealthBadge, PageHeader, Section } from "@/components/ui";
 
@@ -19,7 +19,7 @@ export default function DeviceServicesPage() {
   const [devices, setDevices] = useState<string[]>([]), [cursor, setCursor] = useState<string | null>(null), [more, setMore] = useState(false);
   const [device, setDevice] = useState(""), [indexError, setIndexError] = useState("");
   useEffect(() => {
-    const select = () => { const linked = new URLSearchParams(window.location.search).get("device"); if (linked) setDevice(id(linked)); };
+    const select = () => { const linked = linkedDevice(new URLSearchParams(window.location.search).get("device")); if (linked) setDevice(linked); };
     select(); window.addEventListener("popstate", select);
     return () => window.removeEventListener("popstate", select);
   }, []);
@@ -42,7 +42,7 @@ export default function DeviceServicesPage() {
     <PageHeader title="Device services" subtitle="Shadows, streams, messaging, bridge and alerts from each device's signed, chain-anchored report" />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment; device service views need the verified Sui path.</p>
       : !account ? <p>Connect a wallet to read this fleet.</p> : <>
-      <label>Device <select className="border rounded p-2" value={device} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?device=${e.target.value}` : "?"); }}>
+      <label>Device <select className="border rounded p-2" value={device} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?${new URLSearchParams({ device: e.target.value })}` : "?"); }}>
         <option value="">Choose a device</option>
         {[...new Set([...(device ? [device] : []), ...devices])].map((d) => <option key={d} value={d}>{name(d)}</option>)}
       </select></label>
@@ -59,7 +59,7 @@ function DeviceDetail({ device, name, indexed }: { device: string; name: string;
   const view = deviceServicesView(health[device]);
   return <div className="space-y-4" data-testid="device-services">
     <p className="flex items-center gap-3"><span className="font-medium">{name}</span><span className="font-mono text-xs">{device}</span><HealthBadge health={health[device]} />
-      <Link className="text-[#4DA2FF] text-sm hover:underline" href={`/data/?device=${device}`}>Logs and diagnostics</Link></p>
+      <Link className="text-[#4DA2FF] text-sm hover:underline" href={deviceHref("/data/", device)}>Logs and diagnostics</Link></p>
     {!indexed && <p className="text-sm">This device is not in the loaded part of the fleet index.</p>}
     {view.state === "unavailable" ? <Missing what="Service health" value={view} /> : <Services view={view} />}
     <Section title="Recent alerts">

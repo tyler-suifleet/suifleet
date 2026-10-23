@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount, useCurrentClient, useDAppKit } from '@mysten/dapp-kit-react';
 import { SessionKey } from '@mysten/seal';
 import { normalizeSuiAddress as id } from '@mysten/sui/utils';
+import { linkedDevice } from '@/lib/device-services';
 import { Transaction } from '@mysten/sui/transactions';
 import { useDevices } from '@/hooks/useDevices';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
@@ -25,7 +26,7 @@ export default function FleetDataPage() {
   const [role,setRole]=useState<'owner'|'support'|'none'|'unknown'>('unknown'),[access,setAccess]=useState<AccessEntry[]>([]);
   const [query,setQuery]=useState<LogQuery>({text:'',source:'',caseSensitive:false}),[opened,setOpened]=useState<number>();
   const session=useRef<SessionKey | undefined>(undefined), generation=useRef(0);
-  useEffect(()=>{const linked=new URLSearchParams(window.location.search).get('device');if(linked)setDevice(id(linked));},[]);
+  useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
   useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setEntries([]);setMessage('');setBusy(false);},[account?.address,device,client]);
   // The access record and the signed session belong to one account.
   useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
