@@ -581,6 +581,24 @@
       "retained_gates": [
         "No actionable software/security findings; meaningful local tests, applicable normal public-testnet CI and fresh independent exact-head/base/policy review."
       ]
+    },
+    "SF-082": {
+      "authorization": "User explicitly authorizes continuous software development and reviewed implementation merges before physical-hardware and actual-mainnet acceptance, which wait until development is complete. This is not mainnet or physical programming authorization. User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks.",
+      "deferred_checks": [
+        "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
+        "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes.",
+        "Final external acceptance requiring production Seal/key-provider accounts, actual IdP/prover/Slush/extension-wallet sessions, paid provider services or manually provisioned production credentials; track in SF-031/#32 and SF-087/#159. Retain implemented authentication/security behavior and automated fixtures/testnet evidence."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "retained_gates": [
+        "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
+        "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
+        "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
+        "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
+      ]
     }
   },
   "development_defaults": {
