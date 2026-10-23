@@ -19,8 +19,10 @@ const workload = require('../docs/validation/sf090/workload.json');
  try {
   const target=path.join(temp,'original'),output=path.join(temp,'receipt');await fs.writeFile(target,'preserve');await fs.symlink(target,output);
   await assert.rejects(writeReceipt(output,{result:'PASS'}),{code:'EEXIST'});assert.equal(await fs.readFile(target,'utf8'),'preserve');
-  await fs.unlink(output);await writeReceipt(output,{result:'PASS'});assert.equal((await fs.stat(output)).mode&0o777,0o600);
-  await assert.rejects(writeReceipt(output,{result:'FAIL'}),{code:'EEXIST'});assert.equal(JSON.parse(await fs.readFile(output,'utf8')).result,'PASS');
+  await fs.unlink(output);await writeReceipt(output,{result:'PASS'});
+  await assert.rejects(writeReceipt(output,{result:'FAIL'}),{code:'EEXIST'});
+  const handle=await fs.open(output,'r');
+  try {assert.equal((await handle.stat()).mode&0o777,0o600);assert.equal(JSON.parse(await handle.readFile('utf8')).result,'PASS');}finally{await handle.close();}
  }finally{await fs.rm(temp,{recursive:true,force:true});}
  console.log('PASS receipt symlink/overwrite refusal, target preservation and private mode');
  console.log('PASS workload rejection, nearest-rank percentiles, bounded concurrency and retry exhaustion/recovery/nonretryable failures');
