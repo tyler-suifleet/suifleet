@@ -93,12 +93,20 @@ def seal_binding(raw):
     return {"keyServers": normalized, "threshold": threshold}
 
 
+def storage_binding(raw, manifest):
+    value = json.loads(raw)
+    if manifest['network'] != 'testnet' or not isinstance(value, dict) or set(value) != {'packageId', 'storageOrigin', 'retentionOrigin'}:
+        raise ValueError('public storage settings require pinned Testnet call and introduction-package IDs')
+    return {key: object_id(value[key]) for key in value}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--builder', type=Path, required=True)
     parser.add_argument('--receipt', type=Path, required=True)
     parser.add_argument('--fleet-data', type=Path, help='public fleet-data object/type binding for this deployment')
+    parser.add_argument('--fleet-storage', type=Path, help='public storage call and original storage/retention package IDs')
     parser.add_argument('--seal-settings', type=Path, help='public key-server IDs/weights and threshold; never provider credentials')
     args = parser.parse_args()
     pin = verified_builder(args.builder)
@@ -108,6 +116,7 @@ def main():
     raw_data = args.fleet_data.read_text() if args.fleet_data else os.environ.get('NEXT_PUBLIC_FLEET_DATA')
     data = fleet_binding(raw_data, manifest) if raw_data else None
     seal = seal_binding(args.seal_settings.read_text()) if args.seal_settings else None
+    storage = storage_binding(args.fleet_storage.read_text(), manifest) if args.fleet_storage else None
     output = ROOT / 'dapp/out'
     if args.receipt.resolve().is_relative_to(output.resolve()):
         raise ValueError('the evidence receipt must be outside the published export')
@@ -117,12 +126,18 @@ def main():
     if seal:
         environment['NEXT_PUBLIC_SEAL_KEY_SERVERS'] = json.dumps(seal['keyServers'], separators=(',', ':'))
         environment['NEXT_PUBLIC_SEAL_THRESHOLD'] = str(seal['threshold'])
+    if storage:
+        environment['NEXT_PUBLIC_FLEET_STORAGE_PACKAGE'] = storage['packageId']
+        environment['NEXT_PUBLIC_FLEET_STORAGE_ORIGIN'] = storage['storageOrigin']
+        environment['NEXT_PUBLIC_FLEET_RETENTION_ORIGIN'] = storage['retentionOrigin']
     subprocess.run(['pnpm', 'build'], cwd=ROOT / 'dapp', env=environment, check=True)
     (output / 'deployment-manifest.json').write_bytes(encoded)
     if data:
         (output / 'fleet-data-config.json').write_bytes(canonical(data))
     if seal:
         (output / 'seal-settings.json').write_bytes(canonical(seal))
+    if storage:
+        (output / 'fleet-storage-config.json').write_bytes(canonical(storage))
     routes = {'/': '/index.html'}
     for path in sorted(output.rglob('index.html')):
         relative = '/' + path.relative_to(output).as_posix()
@@ -143,6 +158,8 @@ def main():
         receipt['fleet_data_sha256'] = digest(canonical(data))
     if seal:
         receipt['seal_settings_sha256'] = digest(canonical(seal))
+    if storage:
+        receipt['fleet_storage_sha256'] = digest(canonical(storage))
     args.receipt.parent.mkdir(parents=True, exist_ok=True)
     args.receipt.write_bytes(canonical(receipt))
     print(f'Static site prepared: {len(receipt["files"])} resources; no transaction submitted')

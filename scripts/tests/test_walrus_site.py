@@ -16,6 +16,13 @@ class SiteBindingTests(unittest.TestCase):
         self.assertEqual(checked['packageId'],site.object_id('0xa1'))
         for key,value in [('chainIdentifier','ffffffff'),('registryId','0xff'),('secret','never publish')]:
             with self.assertRaises(ValueError):site.fleet_binding(json.dumps({**data,key:value}),manifest)
+    def test_storage_binding_keeps_all_public_origins_separate(self):
+        value = dict(packageId='0x3',storageOrigin='0x1',retentionOrigin='0x2')
+        checked = site.storage_binding(json.dumps(value), {'network':'testnet'})
+        self.assertEqual(checked['storageOrigin'],site.object_id('0x1'))
+        self.assertEqual(checked['retentionOrigin'],site.object_id('0x2'))
+        for network, data in [('mainnet',value),('testnet',dict(value,secret='forbidden')),('testnet',dict(value,packageId='not an id'))]:
+            with self.assertRaises(ValueError):site.storage_binding(json.dumps(data), {'network':network})
     def test_only_public_seal_binding_and_valid_threshold(self):
         good = dict(keyServers=[dict(objectId='0x1',weight=1),dict(objectId='0x2',weight=1)], threshold=2)
         self.assertEqual(site.seal_binding(json.dumps(good))['keyServers'][0]['objectId'],site.object_id('0x1'))
