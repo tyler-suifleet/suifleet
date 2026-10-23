@@ -137,29 +137,9 @@ impl WalrusClient {
         format!("{}/v1/blobs/{}", self.aggregator_url, blob_id)
     }
 
-    /// Raw recipe bytes; callers authenticate them against a SHA-256 digest.
+    /// Raw recipe bytes from one mirror; the component layer authenticates
+    /// them inside its mirror loop before parsing, caching or applying.
     pub async fn recipe_bytes(&self, blob_id: &str) -> anyhow::Result<Vec<u8>> {
-        tokio::time::timeout(self.deadline, async {
-            let mut error = anyhow::anyhow!("no Walrus mirrors configured");
-            for mirror in self.mirrors() {
-                match tokio::time::timeout(
-                    self.mirror_deadline(),
-                    mirror.recipe_from_mirror(blob_id),
-                )
-                .await
-                {
-                    Ok(Ok(bytes)) => return Ok(bytes),
-                    Ok(Err(e)) => error = e,
-                    Err(_) => error = anyhow::anyhow!("recipe mirror deadline exceeded"),
-                }
-            }
-            Err(error)
-        })
-        .await
-        .map_err(|_| anyhow::anyhow!("recipe mirror deadline exceeded"))?
-    }
-
-    async fn recipe_from_mirror(&self, blob_id: &str) -> anyhow::Result<Vec<u8>> {
         let bytes = self
             .retry(blob_id, || async {
                 let response = self.get(blob_id, None).await?;
@@ -699,6 +679,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
+    }
+
+    #[tokio::test]
+    async fn recipe_integrity_failure_falls_back_before_parsing() {
+        let recipe = serde_json::json!({
+            "schemaVersion": "1.0", "componentName": "app", "componentVersion": "1.0.0",
+            "artifactBlobId": "blob", "artifactSha256": expected(), "lifecycle": {}, "configuration": {}
+        })
+        .to_string()
+        .into_bytes();
+        let sha = hex::encode(Sha256::digest(&recipe));
+        let (bad, _) = server(|_, _| ok(b"{")).await;
+        let (good, seen) = server(move |_, _| ok(&recipe)).await;
+        let mut client = client(bad.clone(), 1 << 20, 0);
+        client.aggregator_urls = vec![bad, good];
+        let loaded = crate::components::recipe(&client, None, "recipe", &sha)
+            .await
+            .unwrap();
+        assert!(!loaded.confidential);
+        assert_eq!(loaded.recipe.component_name, "app");
+        assert_eq!(*seen.lock().unwrap(), vec![None]);
     }
 
     #[tokio::test]

@@ -53,8 +53,8 @@ The first attempt after a daemon restart can resume persisted bytes; all bytes
 still require the final digest. Mirrors each receive an equal share of the
 overall timeout so a stalled first endpoint cannot consume every mirror's time.
 A single-mirror deployment keeps its full timeout. Recipes, limited to 1 MiB,
-also fall back on transport errors; their existing caller-side digest check is
-unchanged.
+also fall back on transport, digest and decryption errors before parsing or
+caching. Their digest/decryption checks keep the same authority and algorithms.
 
 The SHA-256 authority remains the signed recipe. Artifact integrity checks run
 inside the mirror loop before the updater or artifact cache sees success.

@@ -255,28 +255,78 @@ pub async fn recipe(
     blob_id: &str,
     sha256: &str,
 ) -> anyhow::Result<Authentic> {
-    let plain = |bytes: &[u8]| Ok(Authentic { recipe: serde_json::from_slice(bytes)?, confidential: false });
+    let plain = |bytes: &[u8]| {
+        Ok(Authentic {
+            recipe: serde_json::from_slice(bytes)?,
+            confidential: false,
+        })
+    };
     let store = store.filter(|_| !walrus.confidential_only());
     if let Some(bytes) = store.and_then(|s| s.recipe(sha256)) {
         return plain(&bytes);
     }
+    tokio::time::timeout(walrus.deadline(), async {
+        let mut error = anyhow::anyhow!("no Walrus mirrors configured");
+        for mirror in walrus.mirrors() {
+            match tokio::time::timeout(
+                walrus.mirror_deadline(),
+                recipe_from_mirror(&mirror, store, blob_id, sha256),
+            )
+            .await
+            {
+                Ok(Ok(recipe)) => return Ok(recipe),
+                Ok(Err(e)) => error = e,
+                Err(_) => error = anyhow::anyhow!("recipe mirror deadline exceeded"),
+            }
+        }
+        Err(error)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("recipe mirror deadline exceeded"))?
+}
+
+async fn recipe_from_mirror(
+    walrus: &WalrusClient,
+    store: Option<&Store>,
+    blob_id: &str,
+    sha256: &str,
+) -> anyhow::Result<Authentic> {
     let bytes = walrus.recipe_bytes(blob_id).await?;
     if crate::seal::is_envelope(&bytes) {
-        let plaintext = walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?;
+        let plaintext = walrus
+            .open(bytes, crate::seal::Kind::Recipe, sha256)
+            .await?;
         let recipe = serde_json::from_slice(&plaintext).map_err(|error| {
             // Its category and position are content-free; its message is not.
-            withheld(&format!("parsing ({:?} error at line {} column {})", error.classify(), error.line(), error.column()))
+            withheld(&format!(
+                "parsing ({:?} error at line {} column {})",
+                error.classify(),
+                error.line(),
+                error.column()
+            ))
         })?;
-        return Ok(Authentic { recipe, confidential: true });
+        return Ok(Authentic {
+            recipe,
+            confidential: true,
+        });
     }
-    anyhow::ensure!(!walrus.confidential_only(), "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery");
-    anyhow::ensure!(hex::encode(Sha256::digest(&bytes)) == sha256, "recipe SHA-256 mismatch");
+    anyhow::ensure!(
+        !walrus.confidential_only(),
+        "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery"
+    );
+    anyhow::ensure!(
+        hex::encode(Sha256::digest(&bytes)) == sha256,
+        "recipe SHA-256 mismatch"
+    );
     if let Some(store) = store {
         if let Err(error) = store.save_recipe(sha256, &bytes) {
             warn!(%error, "Cannot cache recipe");
         }
     }
-    plain(&bytes)
+    Ok(Authentic {
+        recipe: serde_json::from_slice(&bytes)?,
+        confidential: false,
+    })
 }
 
 /// Write decrypted plaintext beside `dest` (owner-only) and move it into place.
