@@ -23,6 +23,7 @@ This verifies daemon integration, not the contract (Move tests) or a public
 network (scripts/live_fleet_budget.py).
 """
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -125,7 +126,7 @@ class BudgetSimulator(ota.Simulator):
             self.built.append(("draw", amount))
             return {"txBytes": "AQIDBA=="}
         if method == "unsafe_moveCall":
-            if self.gas < REPORT_COST:
+            if not self.allow_reports or self.gas < REPORT_COST:
                 raise InsufficientGas("insufficient gas for the report")
             return super().rpc(method, params)
         if method == "sui_executeTransactionBlock":
@@ -148,6 +149,7 @@ class BudgetSimulator(ota.Simulator):
 
 def run(binary):
     sim = BudgetSimulator()
+    restored = {}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -173,6 +175,8 @@ def run(binary):
             blob = self.path.removeprefix("/v1/blobs/")
             if blob == "artifact":
                 self.respond(ota.ARTIFACT)
+            elif blob in restored:
+                self.respond(restored[blob])
             elif blob in sim.recipes:
                 self.respond(json.dumps(sim.recipes[blob]).encode())
             else:
@@ -237,14 +241,18 @@ def run(binary):
                     ota.wait_for(lambda: reported("0x201"), "funded device did not report", process)
                     print("PASS: low balance drew once within the float cap, then the receipt was reported")
 
+                    # Persist an outcome before funding fails, without delivering it.
+                    sim.allow_reports = False
+                    sim.add("0x202")
+                    ota.wait_for(lambda: "0x202" in state().get("deployments", {}), "deployment not applied", process)
                     # Allowance used up, too little gas to report: queue and explain.
                     sim.account["drawn_in_period"] = sim.account["limits"]["period_allowance"]
                     sim.gas = REPORT_COST - 1
-                    sim.add("0x202")
-                    ota.wait_for(lambda: "0x202" in state().get("deployments", {}), "deployment not applied", process)
+                    sim.add("0x203")
                     ota.wait_for(lambda: "used up" in (funding().get("blocked") or ""), "exhaustion not recorded", process)
                     time.sleep(2.5)
                     assert reported("0x202") is False and sim.draws == [DRAW], (state()["deployments"]["0x202"], sim.draws)
+                    assert "0x203" not in state().get("deployments", {}), "unfunded deployment must pause"
                     stop(process)
                     process = None
                     # Durable across a restart: still queued, still explained.
@@ -252,11 +260,14 @@ def run(binary):
                     process = start()
                     time.sleep(2.5)
                     assert reported("0x202") is False and len(sim.draws) == 1
-                    print("PASS: exhausted allowance drew nothing, kept the receipt queued and recorded why, across a restart")
+                    assert "0x203" not in state().get("deployments", {})
+                    print("PASS: exhausted allowance paused new work, drew nothing, kept the receipt queued and recorded why, across a restart")
 
                     # A new period: draw again and flush the queue.
+                    sim.allow_reports = True
                     sim.account["period_start_ms"] = str(now_ms() - PERIOD_MS)
                     ota.wait_for(lambda: reported("0x202"), "queued receipt was not reported after recovery", process)
+                    ota.wait_for(lambda: reported("0x203"), "paused deployment did not resume", process)
                     assert sim.draws == [DRAW, DRAW] and funding().get("blocked") is None and funding()["draws"] == 2, funding()
                     print("PASS: a new period restored the allowance; the daemon drew and the queued receipt went out")
 
@@ -276,6 +287,25 @@ def run(binary):
                     ota.wait_for(lambda: funding().get("draws") == 3, "daemon did not draw after the refill", process)
                     assert sim.draws == [DRAW] * 3 and funding().get("blocked") is None, funding()
                     print("PASS: an empty reserve stopped draws until the owner refilled it")
+                    # Finite retention: chain metadata alone cannot restore missing bytes.
+                    before = applied.read_text().splitlines()
+                    sim.add("0x204", expired=True)
+                    ota.wait_for(lambda: reported("0x204"), "expired blob outcome not reported", process)
+                    assert "unavailable or expired" in state()["deployments"]["0x204"]["error"]
+                    assert applied.read_text().splitlines() == before
+                    backup = root / "customer-backup.bin"
+                    backup.write_bytes(ota.ARTIFACT)
+                    assert hashlib.sha256(backup.read_bytes()).hexdigest() == ota.HASH
+                    restored["verified-restored-blob"] = backup.read_bytes()
+                    sim.add("0x205", recipe={"artifactBlobId": "verified-restored-blob"})
+                    ota.wait_for(lambda: reported("0x205"), "authorized restored reference did not apply", process)
+                    assert len(applied.read_text().splitlines()) == len(before) + 1
+                    stop(process)
+                    process = start()
+                    ota.wait_for(lambda: funding().get("blocked") is None, "restored device did not restart", process)
+                    time.sleep(2)
+                    assert len(applied.read_text().splitlines()) == len(before) + 1, "restored deployment applied twice"
+                    print("PASS: expired bytes never applied; verified customer copy and authorized new reference restored once across restart")
                     stop(process)
                     process = None
             except BaseException:

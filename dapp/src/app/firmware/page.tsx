@@ -267,7 +267,7 @@ export default function FirmwarePage() {
           <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact" || uploading} />
         </div>
         <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact" || uploading} />
-        <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} disabled={step !== "artifact" || uploading} />
+        <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={step !== "artifact" || uploading} />
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}

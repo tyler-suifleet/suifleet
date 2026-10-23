@@ -371,6 +371,8 @@ export const PINNED_WALRUS = {
 export interface StorageConfig {
   /** The fleet_storage package built against the pinned Walrus contracts. */
   packageId: string;
+  /** Original FleetStorage/RecordKey introduction package after upgrades. */
+  storageOrigin?: string;
   walrus: (typeof PINNED_WALRUS)["testnet"];
 }
 
@@ -379,7 +381,7 @@ export function storageConfig(network = MANIFEST?.network, packageId = process.e
   if (!packageId) return { reason: "Prepaid Walrus storage is not configured for this build (no fleet_storage package)." };
   if (!/^0x[0-9a-fA-F]{1,64}$/.test(packageId)) return { reason: "The configured fleet_storage package ID is invalid." };
   if (network !== "testnet") return { reason: `Prepaid Walrus storage is built only against the pinned Walrus Testnet contracts; none is verified for ${network ?? "this network"}.` };
-  return { config: { packageId: normalizeSuiAddress(packageId), walrus: PINNED_WALRUS.testnet } };
+  return { config: { packageId: normalizeSuiAddress(packageId), storageOrigin: process.env.NEXT_PUBLIC_FLEET_STORAGE_ORIGIN || normalizeSuiAddress(packageId), walrus: PINNED_WALRUS.testnet } };
 }
 
 /** Why the deposit cannot swap SUI for WAL on this network, if it cannot. */
@@ -532,14 +534,14 @@ export interface StorageView {
 
 /** The fleet storage created for `budgetId` (the newest, if several), checked against its type and budget. */
 export async function fetchStorage(client: SuiGrpcClient, config: StorageConfig, budgetId: string): Promise<StorageView | undefined> {
-  const created = (await allEvents(client, `${config.packageId}::fleet_storage::StorageCreated`))
+  const created = (await allEvents(client, `${config.storageOrigin ?? config.packageId}::fleet_storage::StorageCreated`))
     .map((event) => StorageCreatedBcs.parse(event.bcs))
     .filter((event) => normalizeSuiAddress(event.budget_id) === normalizeSuiAddress(budgetId));
   for (const { storage_id } of created) {
     let object;
     try { ({ object } = await client.getObject({ objectId: storage_id, include: { content: true } })); }
     catch (error) { if (error instanceof ObjectError && (error.reason === "notFound" || error.reason === "deleted")) continue; throw error; }
-    if (normalizeStructTag(object.type) !== normalizeStructTag(`${config.packageId}::fleet_storage::FleetStorage`)) throw new Error("Unexpected FleetStorage type");
+    if (normalizeStructTag(object.type) !== normalizeStructTag(`${config.storageOrigin ?? config.packageId}::fleet_storage::FleetStorage`)) throw new Error("Unexpected FleetStorage type");
     const fields = FleetStorageBcs.parse(object.content);
     if (normalizeSuiAddress(fields.budget_id) !== normalizeSuiAddress(budgetId)) throw new Error("The fleet storage belongs to another budget");
     const q = fields.default_quota;
