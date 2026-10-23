@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "devices": 16,
+  "concurrency": 4,
+  "rounds": 1,
+  "thresholds": {"stage_p95_ms": 30000, "unexpected_failures": 0, "peak_rss_bytes": 1073741824},
+  "network": "network-none disposable loopback Sui 1.82.1, compiler 1.81.1",
+  "scope": "real enrollment, prepaid gas draw/contention, signed health anchoring and authoritative receipt verification; encrypted fetch covered separately by crypto-consumer fixtures",
+  "not_measured": ["real Walrus storage-node capacity", "real Seal provider throttling", "physical targets", "production availability"]
+}
