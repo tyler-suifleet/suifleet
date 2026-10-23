@@ -158,6 +158,31 @@ class DashboardTests(unittest.TestCase):
     def states(self, model):
         return {(a.get('ticket'), a['role'], a['state']) for a in model['attention']}
 
+    def test_capacity_backoff_exhaustion_and_resumed_capacity_are_visible(self):
+        f=self.f
+        f.ticket('SF-001');f.run('sess-impl','SF-001',status='capacity_wait',pid=101)
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute('CREATE TABLE capacity_retries (source TEXT,claim TEXT,state TEXT,attempt INTEGER,retry_after REAL,reason TEXT,replacement TEXT,updated REAL)')
+            db.execute('INSERT INTO capacity_retries VALUES(?,?,?,?,?,?,?,?)',
+                       ('sess-impl',TOKEN,'waiting',2,NOW+120,'explicit capacity failure',None,NOW-5))
+        model=f.collect()
+        alert=next(a for a in model['attention'] if a['state']=='capacity-backoff')
+        self.assertEqual(alert['retry_after'],NOW+120)
+        self.assertIn('2/3',alert['summary'])
+        self.assertEqual(model['workers'],[])
+        self.assertNotIn(TOKEN,json.dumps(model))
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("UPDATE capacity_retries SET state='exhausted',reason='budget exhausted'")
+            db.execute("UPDATE runs SET status='quarantined',message='budget exhausted'")
+        self.assertIn(('SF-001','implementation','capacity-exhausted'),self.states(f.collect()))
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute("UPDATE runs SET status='finished'")
+            db.execute("UPDATE capacity_retries SET state='launched',replacement='replacement'")
+        f.run('replacement','SF-001',pid=202);f.process(202)
+        model=f.collect()
+        self.assertEqual(len(model['workers']),1)
+        self.assertFalse(any(a['state']=='capacity-backoff' for a in model['attention']))
+
     def test_only_pid_and_start_time_verified_processes_are_active(self):
         f = self.f
         f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101, start=500); f.process(101, start=500)
