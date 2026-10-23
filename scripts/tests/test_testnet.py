@@ -294,12 +294,119 @@ class PublicEnvironmentTests(unittest.TestCase):
         path = 'repos/a/b/environments/live-package-upgrade/deployment-branch-policies'
         for error in (HTTPError('https://api.github.com/', 403, 'denied', {}, None), URLError('offline')):
             with self.subTest(error=type(error).__name__), self.assertRaises(RuntimeError):
-                public_api(path, Mock(side_effect=error))
+                public_api(path, Mock(side_effect=error), sleep=lambda seconds: None, log=lambda line: None)
         for branches in ({'total_count':2,'branch_policies':self.branches()['branch_policies']},
                          {'total_count':1,'branch_policies':[{'id':7,'name':'*','type':'branch'}]},
                          {'total_count':1,'branch_policies':[{'id':7,'name':'main','type':'tag'}]}):
             with self.subTest(branches=branches), self.assertRaises(RuntimeError):
                 verify_environment('a/b', Mock(return_value=self.environment()), Mock(return_value=branches))
+
+    def http_error(self, code, headers=None, body=b''):
+        import io
+        from email.message import Message
+        from urllib.error import HTTPError
+        message = Message()
+        for name, value in (headers or {}).items():
+            message[name] = value
+        return HTTPError('https://api.github.com/', code, 'error', message, io.BytesIO(body))
+
+    def retrying_read(self, outcomes, **options):
+        """Drive public_api with a scripted opener and a fake clock; no real waits."""
+        import io
+        from testnet_ci import public_api
+        now = [0.0]
+        sleeps, logs, calls = [], [], []
+        def opener(request, timeout):
+            calls.append(request.full_url)
+            self.assertFalse(request.has_header('Authorization'))
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return io.BytesIO(json.dumps(outcome).encode())
+        def sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+        options.setdefault('wall', lambda: 1_000_000 + now[0])
+        result = public_api('repos/a/b/environments/live-package-upgrade/deployment-branch-policies',
+                            opener, sleep=sleep, clock=lambda: now[0], log=logs.append, **options)
+        return result, sleeps, logs, calls
+
+    def test_confirmed_rate_limits_and_transient_failures_are_retried_freshly(self):
+        from urllib.error import URLError
+        from http.client import RemoteDisconnected
+        cases = {
+            'anonymous quota 403 body': self.http_error(403, {'X-RateLimit-Limit': '60'}, b'{"message":"API rate limit exceeded for 1.2.3.4."}'),
+            'secondary 403 retry-after': self.http_error(403, {'Retry-After': '7'}),
+            '429': self.http_error(429, {'Retry-After': '3'}),
+            '503': self.http_error(503),
+            'transport': URLError('connection reset'),
+            'disconnect': RemoteDisconnected('closed'),
+        }
+        for name, error in cases.items():
+            with self.subTest(name):
+                result, sleeps, logs, calls = self.retrying_read([error, self.branches()])
+                self.assertEqual(result, self.branches())
+                self.assertEqual(len(calls), 2)
+                self.assertEqual(len(sleeps), 1)
+                self.assertLessEqual(sleeps[0], 30)
+                self.assertIn('retrying', logs[0])
+        _, sleeps, _, _ = self.retrying_read([cases['secondary 403 retry-after'], self.branches()])
+        self.assertEqual(sleeps, [7.0])
+        quota = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 40)})
+        _, sleeps, logs, _ = self.retrying_read([quota, self.branches()])
+        self.assertEqual(sleeps, [41.0])
+        self.assertIn('"x-ratelimit-remaining": "0"', logs[0])
+
+    def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
+        limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})
+        with self.assertRaisesRegex(RuntimeError, r'unavailable after 4 attempt\(s\).*budget 150s.*HTTP 429.*core') as error:
+            self.retrying_read([limited() for _ in range(10)])
+        self.assertNotIn('Authorization', str(error.exception))
+        # A quota that resets beyond the budget fails at once instead of sleeping past the job timeout.
+        far = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 3000)})
+        outcomes = [far, self.branches()]
+        with self.assertRaisesRegex(RuntimeError, r'after 1 attempt\(s\).*next wait 3001s'):
+            self.retrying_read(outcomes)
+        self.assertEqual(outcomes, [self.branches()])
+        # The attempt cap applies even when every individual wait is short.
+        outcomes = [self.http_error(502) for _ in range(10)]
+        with self.assertRaisesRegex(RuntimeError, r'after 3 attempt\(s\)'):
+            self.retrying_read(outcomes, attempts=3)
+        self.assertEqual(len(outcomes), 7)
+
+    def test_ordinary_denials_are_not_retried(self):
+        for error in (self.http_error(403, {'X-RateLimit-Remaining': '42'}, b'{"message":"Resource not accessible by integration"}'),
+                      self.http_error(404, {}, b'{"message":"Not Found"}'),
+                      self.http_error(401)):
+            outcomes = [error, self.branches()]
+            with self.subTest(code=error.code), self.assertRaisesRegex(RuntimeError, rf'HTTP {error.code}'):
+                self.retrying_read(outcomes)
+            self.assertEqual(outcomes, [self.branches()])
+
+    def test_untrusted_header_values_are_not_echoed(self):
+        error = self.http_error(429, {'Retry-After': '1', 'X-RateLimit-Resource': 'core token=ghs_secret\nInjected'})
+        with self.assertRaises(RuntimeError) as raised:
+            self.retrying_read([error] * 10, attempts=2)
+        self.assertNotIn('ghs_secret', str(raised.exception))
+        self.assertNotIn('x-ratelimit-resource', str(raised.exception))
+
+    def test_retried_reads_still_reject_misconfigured_environments(self):
+        from testnet_ci import verify_environment
+        retry = lambda: self.http_error(429, {'Retry-After': '1'})
+        for branches in ({'total_count':2,'branch_policies':self.branches()['branch_policies']},
+                         {'total_count':1,'branch_policies':[{'id':7,'name':'*','type':'branch'}]}):
+            with self.subTest(branches=branches):
+                read = lambda path, b=branches: self.retrying_read([retry(), b])[0]
+                with self.assertRaisesRegex(RuntimeError, 'main-only'):
+                    verify_environment('a/b', Mock(return_value=self.environment()), read)
+        for environment in (dict(self.environment(), can_admins_bypass=True),
+                            dict(self.environment(), protection_rules=[{'type': 'required_reviewers'}])):
+            with self.subTest(environment=environment):
+                read = lambda path: self.retrying_read([retry(), self.branches()])[0]
+                with self.assertRaisesRegex(RuntimeError, 'main-only'):
+                    verify_environment('a/b', Mock(return_value=environment), read)
+        read = lambda path: self.retrying_read([retry(), self.branches()])[0]
+        self.assertEqual(verify_environment('a/b', Mock(return_value=self.environment()), read)['policy_id'], 7)
 
     def test_authenticated_failures_have_sanitized_useful_errors(self):
         from unittest.mock import patch
