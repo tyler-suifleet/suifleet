@@ -8,7 +8,116 @@ branch `work/suifleet/sf-050-533dfe05`. Scope is the seven modules under
 This is a source audit plus executable checks, not a complete security proof.
 Remaining work is retained in [SF-050/#82](https://github.com/tyler-suifleet/suifleet/issues/82).
 
-## Recovery validation on current main
+## Recovery on 2026-10-22: software proof blocker retained
+
+Codex running **gpt-6.1-sol** resumed the same reservation/session and integrated
+main `7e899f32270337aee6ed113a499fcf1b5201d63e`. This is a software blocker,
+not deferred Pi/mainnet/provider acceptance. PR #83 remains draft; issue #82
+remains open. No successful formal verification is claimed.
+
+The network-none pinned gate passed on the merged source: **168/168 Move
+tests**, strict compiler/extra linters, exact unsuppressed diagnostic baseline,
+both lint negatives, linear-capability negative and both real authority-removal
+mutations. The initial merged-source run correctly failed the baseline check
+on 15 new diagnostics. Those were reviewed individually: 13 existing immutable
+`TxContext` signatures, the intentional authenticated-sender gas transfer in
+`fleet_budget::draw_gas`, and the compatibility `fleet_budget::reserved` getter
+(which returns zero because reserves live in `GasAccount`). The baseline records
+the reasons. No new suppression or executable contract change was introduced. Both release
+builds produced identical arrays for all **11 modules**, compared against main
+`7e899f3` with the pinned compiler/framework; serialized-array SHA-256
+`1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
+This establishes unchanged release bytecode, not formal security.
+
+The original seven-module source audit and earlier eight-module evidence below
+are historical. The compiler/test gate now covers the eleven modules of the
+root package. Additional boundary review for this recovery:
+
+- `deployment_manager::{advance_rollout,control_rollout,delete_rollout}` checks
+  the creator. Health and online lists are operator attestations; they are not
+  chain verification of off-chain telemetry. The rollout state machine and all
+  new adversarial tests pass, but have no formal proof here.
+- `fleet_handover::{confirm,step,finish}` checks recipient confirmation, source
+  execution, inventory/kind, expiration and completion. Owned cap transfer uses
+  transaction input authorization; group/deployment transfers and role/policy
+  operations retain their own authority checks. Cancellation does not undo an
+  already completed transfer. No exhaustive PTB-composition proof is claimed.
+- `fleet_budget::{draw_gas,assert_may_draw}` binds the budget, registry, current
+  gas account, active signer and enrolled owner cap, then enforces the reserve,
+  period, amount and rate limits. `seal_policy::grant_group` requires both the
+  policy admin cap and the current group admin sender. These are inspected
+  source boundaries and regression evidence, not formal verification.
+- The separate `contracts/fleet_storage` package is **not** covered by this
+  root-package compiler/lint runner or the original audit. Complete its analysis
+  and gate coverage before claiming an audit of all current contracts complete.
+
+### Upstream compatibility investigation (source evidence, not a proof run)
+
+Fetched the full upstream prover history on this date. `main` still resolves to
+`949d14419515038d341d440e9c01c0737adf2ff0`; the releases API returns no releases.
+The unchanged failing evaluation was deliberately **not rerun**. A different
+framework/model combination must be established first.
+
+1. At the pinned release framework, `sui::object::new_uid_from_hash(bytes)` calls
+   `record_new_uid(bytes)` (`object.move:270-281`). The prover's commit
+   `c710bd57d13cec3e9c81776ac11c7ff006e9a8a4` changed both the object spec and
+   the Rust model lookup to `record_new_uid_from_hash(parent, bytes)`. Merely
+   renaming the spec leaves the Rust intrinsic lookup incorrect.
+2. Checked predecessor `82b1f464d4f1b2c414c5cd4d9e08560d34295222`: its object
+   spec and Rust lookup still target `record_new_uid`, and its accumulator spec
+   does not require the newer reservation native. However, its prover vector
+   package still imports missing `std::integer::Integer`; its compiler fork is
+   `512c3ff9a14608d281f4b1095508f59cf7ad6cce`, not the release framework. This
+   candidate is **not a verified compatible toolchain**, and was not built or
+   run as a passing verifier.
+3. Examined `integer.move` at the current pinned compiler fork. It is a spec-only
+   native arithmetic type, but its extension methods depend on `real`, `q32`,
+   `q64`, `q128`, `q_wad` and `q_ray`, which are absent from release stdlib.
+   Copying just this file is not a complete compatibility port. Replacing all
+   release framework bodies with the fork would change the verification subject.
+4. Current upstream `dynamic_field_analysis.rs:790-830` explicitly rejects
+   datatype well-foundedness cycles; its
+   `dynamic_field/well_foundedness_cycle.fail.move` fixture exercises this.
+   This is a source-confirmed model limitation, **not a newly reproduced failure
+   of SuiFleet custody**: SuiFleet model construction has not yet reached that
+   phase. Establish whether typed parent resolution handles the real custody
+   functions after fixing the earlier errors; do not assume it does.
+
+Reproduce the source comparison without executing a solver (in a checkout of
+`https://github.com/asymptotic-code/sui-prover.git`):
+
+```bash
+git show c710bd57d1 -- packages/sui-specs/sources/sui-framework/object.move crates/move-model/src/model.rs
+git show 82b1f464d4:packages/prover/sources/vector.move
+git show 82b1f464d4:packages/sui-specs/sources/sui-framework/object.move
+git show 82b1f464d4:packages/sui-specs/sources/sui-framework/funds_accumulator.move
+git show 949d144195:crates/move-stackless-bytecode/src/dynamic_field_analysis.rs
+```
+
+**Minimal next step:** produce and independently review a release-compatible
+model port: spec-only arithmetic support with its complete dependencies, the
+release `record_new_uid` signature **and Rust intrinsic mapping**, and accumulator
+models matching release natives. Preserve and compare all executable release
+framework bodies. Run `evaluate_move_prover.py` against that pinned port with
+real Boogie/Z3; require model/type checking and non-vacuous successful proofs,
+then deliberate solver-rejected invariant mutations. Resolve any actual custody
+model limitation rather than erasing custody or assuming its invariant. Only
+then wire the verified subset into normal CI. No local unsupported-native stub,
+`ignore_abort`, trusted replacement body or vacuous precondition was added.
+
+Remaining source/acceptance work stays in #82: Low L-01 legacy cross-registry
+accounting (old packages remain callable, so an in-place new-function assertion
+alone cannot eliminate the old-entry attack); the historical receipt harness's
+manifest tail still requires a truthful historical/current client test strategy;
+and complete critical receipt/capability/revocation/enrollment/binding proof
+coverage. Prior 47-check identity and 33-check partial historical receipt results
+below were **not rerun or relabeled** as current-head acceptance. Physical,
+mainnet and final provider/wallet acceptance remain separately tracked in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159); this does not
+defer software proof, source-correctness, compatibility or CI gates.
+
+## Historical recovery validation on 2026-10-15
 
 On 2026-10-15 the reserved SF-050 worker was safely resumed after verifying
 its prior service/PID had stopped. Main at
@@ -108,7 +217,7 @@ to its authenticated sender. One inferred `u64` is now explicit. No other
 runtime behavior changes.
 
 The runner also strips **all** `allow` annotations from a separate copy and
-requires exactly the 28 reviewed diagnostics in
+requires exactly the 46 reviewed diagnostics in
 `contracts/security-lint-baseline.json`, keyed by file, enclosing symbol and
 diagnostic code (including multiplicity). This expected diagnostic build exits
 1; any unexpected diagnostic/status fails the gate. This additional pass matters:
@@ -204,7 +313,7 @@ must first be supplied; then run real successful proofs and deliberately broken
 specifications/implementation mutations with counterexamples. Wire that verified
 subset into CI and finish the remaining essential proofs before Review. The
 current workflow intentionally advertises compiler/lints/regressions only, not
-successful formal verification. SF-050 has no integration-deferral exception.
+successful formal verification. SF-050 software/formal acceptance is not deferred by the physical/mainnet/provider acceptance split.
 
 ## Current validation
 
