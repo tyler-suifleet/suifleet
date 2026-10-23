@@ -496,11 +496,14 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
                 assert not sim.errors, sim.errors
                 # A revoked device stops: nothing new is applied or reported.
-                # Identity is checked once per poll: let a poll start after the
-                # revocation so one already in flight cannot see the new event.
+                # Service-info calls also occur during event discovery. Wait
+                # for an actual failed identity validation, so a poll already
+                # in flight before revocation cannot see the new event.
+                diagnostic = "device identity is revoked"
+                failures = (root / "daemon.log").read_text().count(diagnostic)
                 sim.identity = dict(sim.identity, revoked=True)
-                checks = sim.chain_checks
-                wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
+                         "daemon did not reject the revoked identity", process)
                 sim.add("0x10e")
                 checks = sim.chain_checks
                 wait_for(lambda: sim.chain_checks >= checks + 4, "daemon stopped polling after revocation", process)
