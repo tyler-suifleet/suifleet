@@ -70,3 +70,13 @@ without handover to keep working. Manifest resolution records the new type's own
 introduction package; the dApp verifies that origin before reading a handover.
 Existing DeviceGroup/DeploymentRecord/DeviceOwnerCap origins and layouts remain
 unchanged. See [fleet authority migration](FLEET_HANDOVER.md).
+
+The additive SF-125 `fleet_inbox` module (device inboxes and group heads) and the
+`device_group` member index (`MemberKey`, `IndexKey`, `GroupIndex`, `GroupIndexed`)
+are in the same reviewed ABI, with an all-or-none optional origin group
+`fleet_inbox` (`INBOX_TYPES` in both generated clients). All of these types
+originate in the introducing upgrade, so older packages cannot touch them;
+`DeviceGroup` keeps its layout and origin. The generators now map `Option<T>`
+(`Head.latest`). Inbox addresses are `sui::derived_object` IDs under the registry,
+derived identically by Move, the dApp, the daemon and the indexer. See
+[DEVICE_INBOX.md](DEVICE_INBOX.md).

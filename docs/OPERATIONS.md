@@ -205,6 +205,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - Objects are read with `GetObject`. Dynamic fields are read by their derived object ID; empty key structs serialize as one `false` byte.
 
 **Discovery:**
+- With `fleet_inbox` origins in the manifest (SF-125), each poll reads the device's inbox and its groups' heads and applies newly announced deployments from objects; the event scan below runs every `runtime.event_scan_seconds` (default 3600) as a safety net for unannounced deployments. See [DEVICE_INBOX.md](DEVICE_INBOX.md).
 - `ListEvents` is filtered by the manifest's `DeploymentCreated` type.
 - The journal stores the opaque resume cursor, with its checkpoint, after every event and after every scanned page. Enrollment starts after the current checkpoint.
 
@@ -212,6 +213,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 - Full nodes prune history; `GetServiceInfo.lowest_available_checkpoint` reports the oldest retained checkpoint.
 - If a device's resume position is older than that, polling stops with an explicit error and nothing is skipped. Point `rpc_url` at a node that retains the history (an archival or indexed provider), or re-enroll deliberately; re-enrollment skips everything before it.
 - Plan node retention to exceed the longest expected device downtime.
+- With `fleet_inbox` origins, a pruned position (or an `OUT_OF_RANGE` answer, as Mysten's public nodes give for ranges older than about 14 days) instead moves the cursors to the tip with a warning, and the device resynchronizes from its inbox and group heads alone. Unannounced deployments in the pruned range (catalog or delegated deployments, older clients) are then not applied.
 
 **Cursor migration:** a journal written by the JSON-RPC daemon (`{txDigest, eventSeq}`) resumes strictly after that exact event. The daemon reads the transaction's checkpoint and walks the filtered event stream in ledger order (transaction, then event index) to the event itself, so earlier events in the checkpoint, even in the same transaction, are never redelivered. This matters because the journal only remembers deployments that were acted on: one skipped earlier could otherwise run if its targeting changed since. If the node no longer holds that transaction, or the event cannot be found in its checkpoint, polling stops with an explicit error instead of guessing.
 
@@ -223,6 +225,7 @@ The daemon talks to the manifest's `rpc_url` over the Sui gRPC v2 API only (Myst
 
 **Tests:**
 - `make test-ota` and `make test-component` run the daemon against the Python simulator through `suifleet-edge/examples/grpc_sim_shim.rs`, which verifies signatures with Mysten's `sui-crypto`.
+- `make test-inbox-localnet` runs inbox, group-head and pruned-history resync against a real disposable localnet across an upgrade of main's contracts, through `examples/grpc_prune_proxy.rs` ([DEVICE_INBOX.md](DEVICE_INBOX.md#tests)).
 - `make test-daemon-localnet` runs it against a real disposable localnet (start `sui start --with-faucet --force-regenesis` first): direct, group, failure, offline catch-up and cursor-migration paths, judged from on-chain receipts.
 - `make test-seal-localnet` runs confidential delivery against a disposable localnet (start it first; add `--upgrade-from REF` for the upgrade path): dapp encryption, three test Seal key servers, signing-service sessions and the daemon in `[seal] mode = "required"`, judged by on-chain receipts. `make live-seal-delivery SUIFLEET_WALLET=…` does the same on testnet with Mysten's key servers after `make live-gate-package-upgrade`. See [CONFIDENTIAL_DELIVERY.md](CONFIDENTIAL_DELIVERY.md).
 
@@ -251,7 +254,7 @@ A group can carry a **desired state**: a revisioned map from component name to t
 
 **Limits:**
 - There is no device-level desired state yet. It waits for SF-008's device custody; use a one-device group meanwhile.
-- Membership discovery needs the node to retain `DeviceAddedToGroup` history. Pruned history stops reconciliation with an explicit error, as for deployment events.
+- Membership discovery needs the node to retain `DeviceAddedToGroup` history. Pruned history stops reconciliation with an explicit error, as for deployment events. With `fleet_inbox` origins the inbox lists the device's groups instead and pruned membership history moves that cursor to the tip ([DEVICE_INBOX.md](DEVICE_INBOX.md)).
 - No public-network or hardware acceptance has been run.
 
 **Tests:**

@@ -186,6 +186,7 @@ and current limitations are distinguished below.
 | `fleet_handover.move`: `propose`, `confirm`, `step`, transfer steps, `finish` | Bounded unique inventory; independent recipient confirmation; source, expiry, kind and progress checks; group/deployment/role/enrollment operations retain underlying authority checks. Aborts roll back progress. Cancellation does not undo completed transfers. | Source review and unit regressions; no key recovery or atomic all-object transfer guarantee. |
 | `fleet_budget.move`: owner/account guards, `draw_gas`, migration | Bound budget/cap/account IDs, current version, active signer/identity, owner-cap generation, pause/suspension and finite account reserve/period/draw limits. A compromised active key can spend its permitted allowance; funds already transferred cannot be recalled. | Source review and unit regressions; no formal SUI conservation/rate/Clock or future-upgrade proof. |
 | `seal_policy.move`: `check_admin`, `identity_matches`, `*_allowed`, approvals | Bound bearer admin cap, code version, policy ID/epoch prefix and nonce bounds; device/group approvals require current signer and membership; group grants also require group admin. | Source review and unit regressions; external provider authentication/availability and cryptographic encryption are outside Move proofs. |
+| `fleet_inbox.move`: `new_inbox`/`create_inbox`, `announce_group`, `announce_device`, `add_member`, `remove_member`, `follow_group`, `forget_group`; `device_group.move`: `index_members`, `add_device`, `remove_device`, `contains_device` (SF-125) | Inbox creation and device announcements need the DeviceOwnerCap the registry identity names, with the device in custody; announcements need sender = record creator, group admin = creator, and a record target. Inboxes sit at a `derived_object` address claimed once under the registry. Index migration is admin-only; membership is the index or the vector; removal clears both; older packages cannot touch the new types, see only the vector and fail closed on indexed members. Announcements and inbox group lists are hints: devices re-verify records and membership. | Source review, unit regressions and three implementation mutations (group admin, device target, index lookup); real-chain base→head regression in `scripts/test_inbox_localnet.py`. No formal proof; heads are bounded (64 components, 64 groups). |
 
 Upgrade compatibility depends on the deployment manifest's per-type origins,
 the UpgradeCap holder and the actual package version used for each transaction.
@@ -236,7 +237,8 @@ warning in `roles.move`. Baseline changes require review, never automatic captur
 
 Other genuine negative controls are a separate Sui package rejected by the
 public-entry linter, destruction of a struct without `drop` rejected by the
-compiler, and actual implementation mutations removing the active-role and
-active-identity checks. The last two must reach the targeted Move test and fail
+compiler, and actual implementation mutations removing the active-role,
+active-identity, group-head admin and device-announcement target checks and
+weakening the member-index lookup (SF-125). The mutations must reach the targeted Move test and fail
 with `Test did not error as expected`; a compilation failure is not accepted.
 These are finite regression checks, not exhaustive authorization proofs.
