@@ -26,6 +26,7 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
+from pathlib import Path
 import urllib.request
 from urllib.parse import urlparse
 
@@ -182,6 +183,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--v1", required=True, help="prior contracts package directory")
     ap.add_argument("--v2", required=True, help="upgraded contracts package directory")
+    ap.add_argument("--head", default=str(Path(__file__).resolve().parents[1] / "contracts"),
+                    help="current compatible package for the modern manifest/client tail")
     args = ap.parse_args()
 
     global RPC_URL
@@ -350,10 +353,18 @@ def main():
           len(legacy_events["data"]) == 4 and all(e["sender"] != dev for e in legacy_events["data"]),
           str(len(legacy_events["data"])))
 
+    # The historical receipt packages intentionally predate identity/enrollment
+    # types. Upgrade to actual current source before exercising today's manifest
+    # and reader; never invent origins for types absent from a historical release.
+    stage(args.head, package)
+    tx = publish(package, pubfile, upgrade_cap)
+    pkg4 = published_package(tx)
+    print(f"current package={pkg4}")
+
     # ── Frontend reader on these records, via per-type manifest origins ─────
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import deployment_manifest as dm
-    manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=RPC_URL, package=pkg3, upgrade_cap=upgrade_cap,
+    manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=RPC_URL, package=pkg4, upgrade_cap=upgrade_cap,
                                           registry=registry, network="localnet", publisher="http://127.0.0.1:31415",
                                           aggregator="http://127.0.0.1:31416"))
     origin = manifest["type_origins"]["deployment_manager::ReceiptsKey"]
@@ -361,7 +372,7 @@ def main():
           int(origin, 16) == int(pkg2, 16) and int(origin, 16) not in (int(pkg1, 16), int(pkg3, 16)), origin)
     expected = {
         r2: {"verified": True, "statuses": {d_new: FAILED}},
-        r1: {"verified": True, "statuses": {d_legacy: FAILED}},  # forged legacy entries ignored
+        r1: {"verified": False, "statuses": {}},  # pre-identity authority version is untrusted
         r3: {"verified": False, "statuses": {}},  # only forged legacy statuses: unverified
     }
     manifest_file, expected_file = os.path.join(work, "manifest.json"), os.path.join(work, "expected.json")
