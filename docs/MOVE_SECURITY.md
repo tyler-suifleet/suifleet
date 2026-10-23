@@ -214,4 +214,3 @@ compiler, and actual implementation mutations removing the active-role and
 active-identity checks. The last two must reach the targeted Move test and fail
 with `Test did not error as expected`; a compilation failure is not accepted.
 These are finite regression checks, not exhaustive authorization proofs.
-
