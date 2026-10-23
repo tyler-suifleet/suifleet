@@ -283,7 +283,8 @@ class Dispatcher:
             receipt = Path(job['directory'])/'process.json'
             if json.loads(receipt.read_text()) != dict(pid=job['pid'], started=job['started']):
                 return False
-            if process_identity(job['pid']) != job['started']:
+            # An unreaped zombie keeps its start identity but is not a live repair.
+            if runnable_identity(job['pid']) != job['started']:
                 return False
             current = self.ticket(project, 'show', owner['key'])
             if (current.get('status') != 'in_progress' or current.get('expired') or current.get('publish_pending')

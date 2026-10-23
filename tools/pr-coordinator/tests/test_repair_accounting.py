@@ -151,6 +151,23 @@ class RepairAccounting(unittest.TestCase):
         child.wait()
         self.assertFalse(self.worker.available(self.slot, [self.repaired]), 'exited repair worker')
 
+    def test_unreaped_zombie_repair_is_not_live(self):
+        job, child = self.fix_job(self.repaired)
+        self.assertTrue(self.worker.repair_owned(self.slot, self.repaired))
+        child.terminate()
+        stat = Path(f'/proc/{child.pid}/stat')
+        deadline = time.monotonic() + 10
+        # Deliberately do not wait()/poll(): the exited child stays an unreaped zombie.
+        while stat.read_text().rsplit(')', 1)[1].split()[0] != 'Z':
+            self.assertLess(time.monotonic(), deadline, 'child did not become a zombie')
+            time.sleep(0.01)
+        self.assertEqual(d.process_identity(child.pid), json.loads((self.state/'job-0'/'process.json').read_text())['started'],
+                         'zombie keeps its PID/start receipt')
+        self.assertFalse(self.worker.repair_owned(self.slot, self.repaired), 'zombie repair worker')
+        self.assertFalse(self.worker.available(self.slot, [self.repaired]), 'zombie keeps the reservation')
+        child.wait()  # Deterministic reaping; the cleanup kill/wait is then a no-op.
+        self.assertFalse(self.worker.available(self.slot, [self.repaired]), 'reaped repair worker')
+
     def test_current_owner_generation_must_match(self):
         self.fix_job(self.repaired)
         current = self.owners[('suifleet', 'SF-101')]
