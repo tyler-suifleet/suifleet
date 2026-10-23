@@ -15,6 +15,9 @@ import ServicesPage from "@/app/services/page";
 import RolloutsPage from "@/app/rollouts/page";
 import DataPage from "@/app/data/page";
 import { ArchiveView, AccessRecord } from "@/components/ArchiveSearch";
+import { ShadowDocuments } from "@/components/ShadowDocuments";
+import { verifyArchive } from "@/lib/fleet-bulk";
+import { shadowDocumentsView } from "@/lib/shadow-documents";
 import { DeviceBcs, DeviceOwnerCapBcs, DeploymentBcs, DeploymentCreatedBcs, ReceiptsBcs } from "@/lib/move-bcs";
 import { device_registry_IdentityBcs as IdentityBcs, deployment_manager_RolloutBcs as RolloutBcs,
   deployment_manager_RolloutDecisionBcs as DecisionBcs } from "@/lib/fleet-protocol";
@@ -109,9 +112,23 @@ function ArchiveFixture() {
     <AccessRecord entries={f.access} /></>;
 }
 
+// Shadow documents from a signed archive, through the real verifier. Decryption
+// itself is covered by scripts/test_shadow_documents.cjs (real Seal SDK).
+function ShadowFixture() {
+  const [state, setState] = useState({});
+  React.useEffect(() => {
+    const envelope = location.hash === "#tampered" ? f.tamperedEnvelope : f.shadowEnvelope;
+    verifyArchive(new TextEncoder().encode(envelope), config, f.devices[0].id, f.shadowAnchor)
+      .then((archive) => setState({ archive }), (error) => setState({ error: error.message }));
+  }, []);
+  const index = location.hash === "#history" ? 2 : 4;
+  return state.error ? <p role="status">Archive unavailable: {state.error}</p>
+    : state.archive ? <ShadowDocuments view={shadowDocumentsView(state.archive, index, 5)} index={index} /> : <p>Verifying…</p>;
+}
+
 const kit = createDAppKit({ networks: [m.network], createClient: () => client, autoConnect: false, slushWalletConfig: null, storage: null });
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
-const Page = { "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture }[location.pathname];
+const Page = { "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture, "/shadows": ShadowFixture }[location.pathname];
 createRoot(document.getElementById("root")).render(
   <QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><ConnectButton /><Page /></DAppKitProvider></QueryClientProvider>);

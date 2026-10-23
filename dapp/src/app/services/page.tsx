@@ -61,7 +61,7 @@ function DeviceDetail({ device, name, indexed }: { device: string; name: string;
     <p className="flex items-center gap-3"><span className="font-medium">{name}</span><span className="font-mono text-xs">{device}</span><HealthBadge health={health[device]} />
       <Link className="text-[#4DA2FF] text-sm hover:underline" href={deviceHref("/data/", device)}>Logs and diagnostics</Link></p>
     {!indexed && <p className="text-sm">This device is not in the loaded part of the fleet index.</p>}
-    {view.state === "unavailable" ? <Missing what="Service health" value={view} /> : <Services view={view} />}
+    {view.state === "unavailable" ? <Missing what="Service health" value={view} /> : <Services view={view} device={device} />}
     <Section title="Recent alerts">
       {alerts.state === "unavailable" ? <Missing what="Alerts" value={alerts} />
         : alerts.items.length === 0 ? <p className="text-sm">No active alerts for this device.</p>
@@ -79,7 +79,7 @@ function Missing({ what, value }: { what: string; value: Unavailable }) {
   return <p role="status" className="text-sm text-gray-600"><span className="font-medium">{what} unavailable.</span> {value.reason}</p>;
 }
 
-function Services({ view }: { view: ServicesView }) {
+function Services({ view, device }: { view: ServicesView; device: string }) {
   const { messaging, bridge, streams, shadows } = view;
   const off = <p className="text-sm text-gray-500">Not enabled on this device.</p>;
   const more = (omitted: number) => omitted > 0 && <p className="text-xs text-gray-500">{omitted} more not listed (snapshot size limit).</p>;
@@ -88,7 +88,7 @@ function Services({ view }: { view: ServicesView }) {
     <Section title="Shadows">
       {shadows.state === "disabled" ? off : <div className="space-y-2 text-sm" data-testid="shadows">
         <p>{shadows.shadows} shadows; {shadows.notificationsRefused} delta notifications refused ({shadows.notificationsRefusedRecent} since the previous report).</p>
-        <Missing what="Desired / reported / delta documents" value={shadows.documents} />
+        <p className="text-gray-600" data-testid="shadow-documents-link">{shadows.documents.reason} <Link className="text-[#4DA2FF] hover:underline" href={deviceHref("/data/", device)}>Open shadow documents</Link></p>
         {shadows.sync.length > 0 && <table className="text-left"><thead><tr><th className="pr-4">Synchronized shadow</th><th className="pr-4">Conflicts (recent)</th><th className="pr-4">Consecutive failures</th><th className="pr-4">Last success</th><th>Last error</th></tr></thead>
           <tbody>{shadowRows(shadows.sync)}</tbody></table>}
         {more(shadows.omitted)}
@@ -100,9 +100,11 @@ function Services({ view }: { view: ServicesView }) {
         {streams.streams.map((s) => <div key={s.name} className="border-b pb-2">
           <p className="font-medium">{s.name}</p>
           <p>{s.bytes} of {s.max_size} bytes ({s.fill_percent}%), {s.messages} messages, {s.overwrite ? "overwrites oldest when full" : "refuses appends when full"}; {s.rejected} appends rejected ({s.rejected_recent} recent).</p>
-          <p className="text-gray-600">Oldest/newest message: unavailable. {s.timestamps.reason}</p>
+          {s.positions.state === "unavailable" ? <p className="text-gray-600">Oldest/newest sequence: unavailable. {s.positions.reason}</p>
+            : <p data-testid="stream-positions">{s.positions.oldest === null ? "No messages retained." : `Oldest sequence ${s.positions.oldest}, newest ${s.positions.newest}.`}</p>}
           {s.exportState.state === "no-export" ? <p>No export configured.</p> : <p>
-            Export checkpoint: {s.exportState.health.lag} messages behind; {s.exportState.health.batches} batches exported; {s.exportState.health.lost} lost before export ({s.exportState.health.lost_recent} recent);
+            Export checkpoint: {s.exportState.checkpoint.state === "unavailable" ? "unavailable (services version 1)" : s.exportState.checkpoint.checkpoint === null ? "nothing exported yet" : `sequence ${s.exportState.checkpoint.checkpoint}`};
+            {" "}{s.exportState.health.lag} messages behind; {s.exportState.health.batches} batches exported; {s.exportState.health.lost} lost before export ({s.exportState.health.lost_recent} recent);
             {" "}{s.exportState.health.failures} failures, {s.exportState.health.consecutive_failures} consecutive; last success {utc(s.exportState.health.last_success_ms)}{s.exportState.health.last_error ? `; last error ${s.exportState.health.last_error}` : ""}.</p>}
         </div>)}
         {more(streams.omitted)}

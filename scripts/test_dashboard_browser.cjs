@@ -20,12 +20,12 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     const key = Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(7)), signer = key.toSuiAddress();
     const other = Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(8));
     const now = Date.now(), operator = id("0x0a");
-    const services = (consecutive) => ({ version: 1,
+    const services = (consecutive) => ({ version: 2,
       messaging: { subscriptions: 2, queued: 5, refused: 0, dropped: 0, omitted: 0, queues: [
         { principal: "sink", subscriptions: 1, queued: 5, fill_percent: 50, full_since_ms: null, refused: 0, refused_recent: 0, dropped: 0, dropped_recent: 0 }] },
       bridge: { connected: true, since_ms: now - 600_000, connects: 3, refused: 0, refused_recent: 0, rejected: 0, rejected_recent: 0, last_error: null },
-      streams: { omitted: 0, streams: [{ name: "events", bytes: 400, max_size: 1000, fill_percent: 40, messages: 12, overwrite: false, rejected: 0, rejected_recent: 0,
-        export: { lag: 4, lost: 0, lost_recent: 0, batches: 7, failures: consecutive, consecutive_failures: consecutive, last_success_ms: now - 600_000, last_error: consecutive ? "http-server-error" : null } }] },
+      streams: { omitted: 0, streams: [{ name: "events", bytes: 400, max_size: 1000, fill_percent: 40, messages: 12, oldest: 30, newest: 41, overwrite: false, rejected: 0, rejected_recent: 0,
+        export: { checkpoint: 37, lag: 4, lost: 0, lost_recent: 0, batches: 7, failures: consecutive, consecutive_failures: consecutive, last_success_ms: now - 600_000, last_error: consecutive ? "http-server-error" : null } }] },
       shadows: { shadows: 3, notifications_refused: 0, notifications_refused_recent: 0, omitted: 0,
         sync: [{ name: "config", conflicts: 1, conflicts_recent: 0, failures: 0, consecutive_failures: 0, last_success_ms: now - 30_000, last_error: null }] } });
     async function report(device, svc, by = key) {
@@ -50,6 +50,17 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
         { revision: "3", cohort: "0", state: 2, reason: "failure threshold reached; permanently aborted", at_ms: "300", admitted: [] }] };
     const archive = { records: [{ source: "daemon", line: "boot ok" }, { source: "component:app", line: "ERROR disk full" },
       { source: "component:app", line: "error retry" }, { source: "daemon", line: "shutdown" }], reason: "diagnostics", seq: 9, dropped_lines: 0 };
+    // A device-signed schema-2 archive with shadow documents; the page runs the real verifier on it.
+    const shadowArchive = { schema: 2, kind: "fleet-data", chain_identifier: m.chain_identifier, registry: m.shared_objects.registry.id, fleet_id: data.fleetId,
+      device_id: d1, signer, seq: 9, observed_ms: now - 60_000, reason: "logs", dropped_lines: 0, records: [{ source: "daemon", line: "Shadow state snapshot" }],
+      shadows: { omitted: 1, documents: [
+        { name: "", version: 4, updated_ms: now - 120_000, desired: { mode: "eco", fan: { speed: 2 } }, reported: { mode: "eco", fan: { speed: 1 } }, delta: { fan: { speed: 2 } } },
+        { name: "big", version: 1, updated_ms: now - 120_000, desired: null, reported: { count: 18446744073709551615n }, delta: {} },
+        { name: "config", version: 7, updated_ms: now - 90_000, desired: null, reported: { firmware: "<b>3.1</b>" }, delta: {} }] } };
+    const shadowMessage = new TextEncoder().encode(JSON.stringify(shadowArchive, (k, v) => typeof v === "bigint" ? `__BIG${v}__` : v).replace(/"__BIG(\d+)__"/g, "$1"));
+    const shadowEnvelope = JSON.stringify({ message: Buffer.from(shadowMessage).toString("base64"), signature: (await key.signPersonalMessage(shadowMessage)).signature });
+    const tamperedEnvelope = JSON.stringify({ ...JSON.parse(shadowEnvelope), message: Buffer.from(new TextDecoder().decode(shadowMessage).replace('"speed":1', '"speed":2')).toString("base64") });
+    const shadowAnchor = { seq: "9", kind: 0, blob_object_id: id("0x77"), blob_id: "1", ciphertext_sha256: [], signer, at_ms: String(now - 30_000), end_epoch: 100, key_epoch: "0" };
     const access = [{ atMs: now, account: operator, authority: "support", device: d1, index: 3, kind: "diagnostics", outcome: "opened" }];
     const bundle = path.join(dir, "app.js");
     await build({ entryPoints: [path.resolve(__dirname, "browser/dashboard-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle,
@@ -57,7 +68,7 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
       define: { "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(m)),
         "process.env.NEXT_PUBLIC_FLEET_DATA": JSON.stringify(JSON.stringify(data)), "process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL": '""',
         "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": "undefined", "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined",
-        ACCEPTANCE_MANIFEST: JSON.stringify(m), DASHBOARD_FIXTURE: JSON.stringify({ operator, signer, devices, rollout, archive, access }) }, logLevel: "warning" });
+        ACCEPTANCE_MANIFEST: JSON.stringify(m), DASHBOARD_FIXTURE: JSON.stringify({ operator, signer, devices, rollout, archive, access, shadowEnvelope, tamperedEnvelope, shadowAnchor }) }, logLevel: "warning" });
     server = http.createServer(async (req, res) => {
       const js = req.url === "/app.js";
       res.setHeader("Content-Type", js ? "text/javascript" : "text/html");
@@ -81,16 +92,17 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
 
     // Verified services and the device's alert drill-down.
     let page = await open(`/services?device=${d1}`);
-    await waitText(page, "Export checkpoint: 4 messages behind");
+    await waitText(page, "Export checkpoint: sequence 37; 4 messages behind");
     const view = await text(page, "device-services");
-    for (const expected of ["pi-services", "Healthy", "3 shadows", "config", "Desired / reported / delta documents unavailable.", "not published to Sui or Walrus",
-      "400 of 1000 bytes (40%), 12 messages", "Oldest/newest message: unavailable", "3 failures, 3 consecutive", "http-server-error",
+    for (const expected of ["pi-services", "Healthy", "3 shadows", "config", "in the device's encrypted fleet archive", "Open shadow documents",
+      "400 of 1000 bytes (40%), 12 messages", "Oldest sequence 30, newest 41.", "3 failures, 3 consecutive", "http-server-error",
       "Pub/sub: 2 subscriptions, 5 queued", "sink: 5 queued (50% full)", "MQTT bridge: connected"]) assert.ok(view.includes(expected), `services view lacks ${expected}: ${view}`);
     await waitText(page, "export-failing");
     const alerts = await text(page, "device-alerts");
     assert.ok(alerts.includes("critical") && alerts.includes("events export failed 3 times: http-server-error"), alerts);
     assert.ok(!alerts.includes("pi-forgeable"));
     await page.getByRole("link", { name: "Logs and diagnostics" }).first().getAttribute("href").then((href) => assert.match(href, new RegExp(`^/data/?\\?device=${d1}$`)));
+    await page.getByRole("link", { name: "Open shadow documents" }).getAttribute("href").then((href) => assert.match(href, new RegExp(`^/data/?\\?device=${d1}$`)));
     await page.close();
 
     // A forged report for another device: no values, and fleet alerts are unavailable rather than partial.
@@ -140,9 +152,28 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await waitText(page, "Archive closed.");
     assert.ok(!(await page.textContent("body")).includes("ERROR disk full"));
     await page.close();
+
+    // Decrypted shadow documents: the real archive verifier runs in the page;
+    // values render as text, a rounded integer is never shown, history is labeled.
+    page = await open("/shadows");
+    await waitText(page, "Classic shadow · version 4");
+    const docs = await text(page, "shadow-documents");
+    for (const expected of ["Current: the device's newest archive (#4, sequence 9)", '"speed": 2', '"speed": 1', "Shadow config · version 7", "<b>3.1</b>",
+      "Shadow big", "integers beyond the exact range", "1 more shadows did not fit"]) assert.ok(docs.includes(expected), `shadow documents lack ${expected}: ${docs}`);
+    assert.ok(!docs.includes("18446744073709552000"), "a rounded integer must not be shown");
+    assert.equal(await page.locator('[data-testid="shadow-documents"] b').count(), 0, "document strings render as text, never markup");
+    assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    await page.close();
+    page = await open("/shadows#history");
+    await waitText(page, "History: archive #2 (sequence 9)");
+    await page.close();
+    page = await open("/shadows#tampered");
+    await waitText(page, "Archive unavailable: Archive signature mismatch");
+    assert.ok(!(await page.textContent("body")).includes("Classic shadow"));
+    await page.close();
     assert.deepEqual(errors, []);
-    console.log("PASS: real browser SF-084 dashboard: verified shadows/streams/messaging/bridge views with honest unavailable shadow documents and stream times, "
-      + "alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit, archive role gating, literal search, access record and discard");
+    console.log("PASS: real browser SF-084 dashboard: verified shadows/streams/messaging/bridge views with stream sequence ranges and export checkpoints, "
+      + "signed encrypted-archive shadow documents (current/history/imprecise/tampered, text-only), alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit, archive role gating, literal search, access record and discard");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

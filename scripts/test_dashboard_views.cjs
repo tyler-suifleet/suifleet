@@ -27,14 +27,14 @@ const key = Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(9)), signer = k
 const deviceId = id('0xd1'), writerId = id('0xf2');
 const now = 1_800_000_000_000;
 const services = {
-  version: 1,
+  version: 2,
   messaging: { subscriptions: 2, queued: 5, refused: 1, dropped: 0, omitted: 0, queues: [
     { principal: 'sink', subscriptions: 1, queued: 5, fill_percent: 50, full_since_ms: null, refused: 1, refused_recent: 0, dropped: 0, dropped_recent: 0 }] },
   bridge: { connected: true, since_ms: now - 600_000, connects: 3, refused: 0, refused_recent: 0, rejected: 1, rejected_recent: 0, last_error: 'timeout' },
   streams: { omitted: 1, streams: [
-    { name: 'events', bytes: 900, max_size: 1000, fill_percent: 90, messages: 12, overwrite: false, rejected: 2, rejected_recent: 1,
-      export: { lag: 4, lost: 0, lost_recent: 0, batches: 7, failures: 3, consecutive_failures: 1, last_success_ms: now - 60_000, last_error: 'http-server-error' } },
-    { name: 'local', bytes: 10, max_size: 1000, fill_percent: 1, messages: 1, overwrite: true, rejected: 0, rejected_recent: 0, export: null }] },
+    { name: 'events', bytes: 900, max_size: 1000, fill_percent: 90, messages: 12, oldest: 30, newest: 41, overwrite: false, rejected: 2, rejected_recent: 1,
+      export: { checkpoint: 37, lag: 4, lost: 0, lost_recent: 0, batches: 7, failures: 3, consecutive_failures: 1, last_success_ms: now - 60_000, last_error: 'http-server-error' } },
+    { name: 'local', bytes: 10, max_size: 1000, fill_percent: 1, messages: 1, oldest: 5, newest: 5, overwrite: true, rejected: 0, rejected_recent: 0, export: null }] },
   shadows: { shadows: 3, notifications_refused: 2, notifications_refused_recent: 1, omitted: 0,
     sync: [{ name: 'config', conflicts: 4, conflicts_recent: 1, failures: 0, consecutive_failures: 0, last_success_ms: now - 30_000, last_error: null }] },
 };
@@ -78,12 +78,32 @@ const view = async (w, options) => views.deviceServicesView(await read(w, option
   assert.equal(v.messaging.state, 'verified'); assert.equal(v.messaging.queues[0].principal, 'sink');
   assert.equal(v.bridge.state, 'verified'); assert.equal(v.bridge.last_error, 'timeout');
   assert.equal(v.streams.streams.length, 2); assert.equal(v.streams.omitted, 1);
-  assert.deepEqual(v.streams.streams[0].exportState, { state: 'exported', health: services.streams.streams[0].export });
+  assert.deepEqual(v.streams.streams[0].exportState, { state: 'exported', health: services.streams.streams[0].export,
+    checkpoint: { state: 'verified', checkpoint: 37 } });
   assert.deepEqual(v.streams.streams[1].exportState, { state: 'no-export' });
-  for (const s of v.streams.streams) assert.equal(s.timestamps.state, 'unavailable');
+  assert.deepEqual(v.streams.streams.map(s => s.positions), [{ state: 'verified', oldest: 30, newest: 41 }, { state: 'verified', oldest: 5, newest: 5 }]);
   assert.equal(v.shadows.shadows, 3); assert.equal(v.shadows.sync[0].conflicts_recent, 1);
-  assert.equal(v.shadows.documents.state, 'unavailable');
-  assert.match(v.shadows.documents.reason, /not published to Sui or Walrus/);
+  // Documents are never in public health: they are in the encrypted archive.
+  assert.equal(v.shadows.documents.state, 'encrypted');
+  assert.match(v.shadows.documents.reason, /encrypted fleet archive/);
+  // Services version 1 (an older daemon): the same values, positions unavailable.
+  const v1services = JSON.parse(JSON.stringify(services)); v1services.version = 1;
+  for (const st of v1services.streams.streams) { delete st.oldest; delete st.newest; if (st.export) delete st.export.checkpoint; }
+  const old = await view(await writer(snapshot({ services: v1services })));
+  assert.equal(old.state, 'verified');
+  assert.match(old.streams.streams[0].positions.reason, /services version 1/);
+  assert.equal(old.streams.streams[0].exportState.checkpoint.state, 'unavailable');
+  assert.equal(old.streams.streams[0].exportState.health.lag, 4);
+  // An empty stream reports no range; a checkpoint may outlive discarded messages.
+  const emptied = JSON.parse(JSON.stringify(services));
+  Object.assign(emptied.streams.streams[0], { messages: 0, bytes: 0, fill_percent: 0, oldest: null, newest: null });
+  emptied.streams.streams[0].export.lag = 0;
+  const empty = await view(await writer(snapshot({ services: emptied })));
+  assert.deepEqual([empty.streams.streams[0].positions, empty.streams.streams[0].exportState.checkpoint],
+    [{ state: 'verified', oldest: null, newest: null }, { state: 'verified', checkpoint: 37 }]);
+  // A range inconsistent with the message count is refused as a whole.
+  const reversed = JSON.parse(JSON.stringify(services)); reversed.streams.streams[0].oldest = 42;
+  assert.equal((await view(await writer(snapshot({ services: reversed })))).state, 'unavailable');
   const disabled = await view(await writer(snapshot({ services: { version: 1, messaging: null, bridge: null, streams: null, shadows: null } })));
   for (const name of ['messaging', 'bridge', 'streams', 'shadows']) assert.equal(disabled[name].state, 'disabled', name);
 
@@ -107,7 +127,8 @@ const view = async (w, options) => views.deviceServicesView(await read(w, option
   assert.equal(views.deviceServicesView(undefined).state, 'unavailable');
   // A value that bypassed the verifier is refused too.
   const healthy = await read(await writer(snapshot()));
-  assert.equal(views.deviceServicesView({ ...healthy, services: { ...services, version: 2 } }).state, 'unavailable');
+  assert.equal(views.deviceServicesView({ ...healthy, services: { ...services, version: 3 } }).state, 'unavailable');
+  assert.equal(views.deviceServicesView({ ...healthy, services: { ...services, version: 1 } }).state, 'unavailable');
   assert.equal(views.deviceServicesView({ ...healthy, status: 'degraded', codes: ['device-degraded'] }).state, 'verified');
 
   // Alert drill-down: one device's items; an unavailable fleet result stays unavailable.

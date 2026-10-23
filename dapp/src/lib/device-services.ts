@@ -27,20 +27,25 @@ export type Unavailable = { state: "unavailable"; reason: string };
 export type Disabled = { state: "disabled" };
 
 /**
- * Shadow documents are confidential and deliberately never leave the device
- * (docs/SHADOWS.md, docs/TELEMETRY.md): the verified path carries only shadow
- * counts and synchronization counters.
+ * Shadow documents are confidential: public health carries only counts and
+ * sync counters. The documents themselves travel in the device-signed,
+ * Seal-encrypted fleet archive (schema 2), which only the fleet owner and
+ * support accounts can open (lib/shadow-documents.ts, the archives page).
  */
-export const SHADOW_DOCUMENTS_UNAVAILABLE: Unavailable = { state: "unavailable",
-  reason: "Desired, reported and delta documents are kept on the device and are not published to Sui or Walrus; only counts and sync health are signed." };
-/** The signed stream summary has no message timestamps. */
-export const STREAM_TIMESTAMPS_UNAVAILABLE: Unavailable = { state: "unavailable",
-  reason: "The device's signed stream summary does not include oldest/newest message times." };
+export const SHADOW_DOCUMENTS_ENCRYPTED = { state: "encrypted" as const,
+  reason: "Desired, reported and delta documents are in the device's encrypted fleet archive; the fleet owner and support accounts open them under Logs and diagnostics." };
+/** A services-version-1 report (an older daemon) has no sequence positions. */
+export const STREAM_POSITIONS_UNAVAILABLE: Unavailable = { state: "unavailable",
+  reason: "This device's daemon reports services version 1, which has no stream sequence positions or export checkpoint." };
+
+/** Retained sequence range and export checkpoint from a version-2 report. */
+export type StreamPositions = { state: "verified"; oldest: number | null; newest: number | null } | Unavailable;
+export type ExportCheckpoint = { state: "verified"; checkpoint: number | null } | Unavailable;
 
 export interface StreamView extends StreamHealth {
-  /** Export checkpoint: messages appended but not yet exported, and its failures. */
-  exportState: { state: "exported"; health: NonNullable<StreamHealth["export"]> } | { state: "no-export" };
-  timestamps: Unavailable;
+  /** Export health: messages appended but not yet exported, and its failures. */
+  exportState: { state: "exported"; health: NonNullable<StreamHealth["export"]>; checkpoint: ExportCheckpoint } | { state: "no-export" };
+  positions: StreamPositions;
 }
 
 export interface ServicesView {
@@ -53,13 +58,13 @@ export interface ServicesView {
   bridge: ({ state: "verified" } & BridgeHealth) | Disabled;
   streams: { state: "verified"; streams: StreamView[]; omitted: number } | Disabled;
   shadows: { state: "verified"; shadows: number; notificationsRefused: number; notificationsRefusedRecent: number;
-    sync: ShadowSyncHealth[]; omitted: number; documents: Unavailable } | Disabled;
+    sync: ShadowSyncHealth[]; omitted: number; documents: typeof SHADOW_DOCUMENTS_ENCRYPTED } | Disabled;
 }
 
 /**
  * The service view of one device, or why there is none. Only `healthy` and
  * `degraded` reports that are current (not offline, not delayed) and carry a
- * services section of exactly the version-1 shape yield values.
+ * services section of exactly the version-1 or version-2 shape yield values.
  */
 export function deviceServicesView(health: DeviceHealth | undefined): ServicesView | Unavailable {
   if (!health) return { state: "unavailable", reason: "Device health has not been read yet." };
@@ -94,12 +99,13 @@ function servicesView(s: ServicesHealth, observedMs: number, receivedMs: number)
     bridge: s.bridge ? { state: "verified", ...s.bridge } : { state: "disabled" },
     streams: s.streams ? { state: "verified", omitted: s.streams.omitted, streams: s.streams.streams.map((stream) => ({
       ...stream,
-      exportState: stream.export ? { state: "exported", health: stream.export } : { state: "no-export" },
-      timestamps: STREAM_TIMESTAMPS_UNAVAILABLE,
+      exportState: stream.export ? { state: "exported", health: stream.export,
+        checkpoint: s.version === 2 ? { state: "verified", checkpoint: stream.export.checkpoint! } : STREAM_POSITIONS_UNAVAILABLE } : { state: "no-export" },
+      positions: s.version === 2 ? { state: "verified", oldest: stream.oldest!, newest: stream.newest! } : STREAM_POSITIONS_UNAVAILABLE,
     })) } : { state: "disabled" },
     shadows: s.shadows ? { state: "verified", shadows: s.shadows.shadows, notificationsRefused: s.shadows.notifications_refused,
       notificationsRefusedRecent: s.shadows.notifications_refused_recent, sync: s.shadows.sync, omitted: s.shadows.omitted,
-      documents: SHADOW_DOCUMENTS_UNAVAILABLE } : { state: "disabled" },
+      documents: SHADOW_DOCUMENTS_ENCRYPTED } : { state: "disabled" },
   };
 }
 

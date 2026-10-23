@@ -16,6 +16,8 @@ import { WALRUS_AGGREGATOR } from '@/lib/constants';
 import { PageHeader } from '@/components/ui';
 import { recordAccess, type AccessEntry, type LogQuery } from '@/lib/archive-search';
 import { AccessRecord, ArchiveView } from '@/components/ArchiveSearch';
+import { ShadowDocuments } from '@/components/ShadowDocuments';
+import { shadowDocumentsView } from '@/lib/shadow-documents';
 
 export default function FleetDataPage() {
   const client=useCurrentClient(), wallet=useDAppKit(), account=useCurrentAccount();
@@ -24,10 +26,10 @@ export default function FleetDataPage() {
   const [archive,setArchive]=useState<Archive>(),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [fleetDevices,setFleetDevices]=useState<string[]>([]),[cursor,setCursor]=useState<string|null>(null),[more,setMore]=useState(false);
   const [role,setRole]=useState<'owner'|'support'|'none'|'unknown'>('unknown'),[access,setAccess]=useState<AccessEntry[]>([]);
-  const [query,setQuery]=useState<LogQuery>({text:'',source:'',caseSensitive:false}),[opened,setOpened]=useState<number>();
+  const [query,setQuery]=useState<LogQuery>({text:'',source:'',caseSensitive:false}),[opened,setOpened]=useState<number>(),[anchorCount,setAnchorCount]=useState(0);
   const session=useRef<SessionKey | undefined>(undefined), generation=useRef(0);
   useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
-  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setEntries([]);setMessage('');setBusy(false);},[account?.address,device,client]);
+  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
   // The access record and the signed session belong to one account.
   useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
   // Plaintext lives only as long as the signed five-minute Seal session.
@@ -68,8 +70,8 @@ export default function FleetDataPage() {
       const count=Number(writer?.anchor_count ?? 0);
       if(!Number.isSafeInteger(count)) throw Error('Archive index exceeds browser limits');
       const start=Math.max(0,count-32),anchors=await readAnchors(client,DATA_CONFIG,device,start,32);
-      if(current===generation.current) setEntries(anchors.map((anchor,i)=>({index:start+i,anchor})).reverse());
-    } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setMessage('Archive index unavailable or permission revoked.');}}
+      if(current===generation.current){setEntries(anchors.map((anchor,i)=>({index:start+i,anchor})).reverse());setAnchorCount(count);}
+    } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),30_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
   function note(index:number,kind:number,authority:'owner'|'support'|undefined,outcome:'opened'|'refused') {
@@ -120,7 +122,7 @@ export default function FleetDataPage() {
       await execute({transaction:tx});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
-  return <div className="max-w-5xl space-y-4"><PageHeader title="Fleet archives" subtitle="Signed logs and diagnostics, verified from Sui and decrypted in this browser" />
+  return <div className="max-w-5xl space-y-4"><PageHeader title="Fleet archives" subtitle="Signed logs, diagnostics and shadow documents, verified from Sui and decrypted in this browser" />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
@@ -128,7 +130,9 @@ export default function FleetDataPage() {
       {!SEAL_SETTINGS && <p>Configure this deployment’s Seal providers to read archives.</p>}
       <p data-testid="archive-role">{role==='owner'?'This account holds the fleet budget owner capability and may decrypt archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
       {message && <p role="status">{message}</p>}
+      {entries.length>0 && (role==='owner' || role==='support') && <button className="border rounded p-2" disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(entries[0].index,entries[0].anchor.kind)}>Open current shadow documents</button>}
       <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Originally purchased through Walrus epoch {anchor.end_epoch}; live retention is checked on open</span></li>)}</ul>
+      {archive && opened!==undefined && <ShadowDocuments view={shadowDocumentsView(archive,opened,anchorCount)} index={opened} />}
       {archive && <ArchiveView archive={archive} index={opened} query={query} setQuery={setQuery} close={close} />}
       {(role==='owner' || role==='support') && <AccessRecord entries={access} />}
     </>}
