@@ -2,7 +2,7 @@
 
 `suifleet-indexer` keeps a queryable copy of the fleet: devices, groups, members, deployments, targets and authoritative receipts. It serves that copy over a versioned HTTP API, and its `ctl` subcommand is the operations CLI.
 
-Without it, the dApp scans the whole event history in the browser on every view.
+The dApp keeps its own incremental discovery cache; the indexer supplies a durable queryable fleet history.
 
 The indexer is a separate Rust crate with its own `Cargo.lock`. It uses the same Sui gRPC SDK as the daemon (`sui-rpc` 0.4). It never holds an operator key.
 
@@ -21,7 +21,7 @@ make test-indexer-localnet               # real localnet (start a node first, as
   - the DeploymentRecord, plus its target, recipe-digest and receipt fields. A component-catalog deployment (SF-011, `schema_version` 2) has no blob or digests of its own; `catalog_version` names the immutable `ComponentVersion` that holds them per platform. Legacy deployments have `catalog_version: null`.
   Legacy `StatusesKey` statuses are never used, because old package versions can forge them. Receipts written under an authority version below 2 are not used either, just as the dApp's `readReceipts` ignores them: older packages accepted those reports from revoked or rotated-out keys.
 - **Operators.** An activated device sits in registry custody, so the Device object has no address owner. Its `owner` (the operator) is whoever owns the `DeviceOwnerCap` its identity names. That is the daemon's rule for whose deployments it applies. A device that was never activated is address-owned; `owner` is that address, `activated` is false, and it takes no deployments. Devices also carry `activated`, `revoked`, `signer` and `owner_cap`.
-- **Device reconciliation sweep.** A Device and a `DeviceOwnerCap` both have `store`, so an unactivated device's owner, or an activated device's operator, can change through a plain transfer (or wrapping) without any fleet event, and `set_meta` edits a device silently. The indexer therefore also re-reads indexed devices, with their identities and owner caps, in ID order, `--reconcile-batch` (default 500) per pass, from a durable position, wrapping around. Tombstones are included, because a wrapped object can return. A device whose event names an object that is already absent on first read (for example wrapped in the registering transaction) is kept as a placeholder tombstone, without a change-feed entry, so the sweep finds it once it is unwrapped. `index` and `serve` startup run a full sweep first, so a restart never serves owners from before it. While running, an event-less change is reflected within one full sweep: about `devices / batch × interval` (for example 45k devices at 500 per 2 s pass is about 3 minutes). `GET /v1/status` reports `devices_reconciled_at` for the last completed sweep. Groups and deployments are shared, `key`-only objects that only the fleet modules change, and every such change emits a watched event.
+- **Device reconciliation sweep.** A Device and a `DeviceOwnerCap` both have `store`, so an unactivated device's owner, or an activated device's operator, can change through a plain transfer (or wrapping) without any fleet event, and `set_meta` edits a device silently. The indexer therefore also re-reads indexed devices, with their identities and owner caps, in ID order in batches of `--reconcile-batch` (default 500), from a durable position. A full sweep runs every ten minutes after the preceding sweep completes (`--reconcile-interval-seconds`, default 600), independently of event polling. Tombstones are included, because a wrapped object can return. A device whose event names an object that is already absent on first read (for example wrapped in the registering transaction) is kept as a placeholder tombstone, without a change-feed entry, so the sweep finds it once it is unwrapped. `index` and `serve` startup run a full sweep first, so a restart never serves owners from before it. While running, an event-less change is reflected within one full sweep: the ten-minute wait plus the time to read all device batches. Slow or unavailable nodes increase that delay; failed batches retain their position and retry on the next poll. `GET /v1/status` reports `devices_reconciled_at` for the last completed sweep. Groups and deployments are shared, `key`-only objects that only the fleet modules change, and every such change emits a watched event.
 - **Tombstones.** An object that disappears (deleted or wrapped) becomes a tombstone (`deleted: true`). Lists hide tombstones unless asked with `include_deleted`.
 - **Atomic pages.** A page's rows, change-feed entries and stream cursor commit in one SQLite transaction. A crash at any point resumes without loss or duplication.
 - **Type origins.** Origins come from the call package's own type origin table, and are checked against the manifest. Fields introduced by later upgrades are read only once the package defines them.
@@ -31,13 +31,13 @@ make test-indexer-localnet               # real localnet (start a node first, as
 ```bash
 suifleet-indexer serve --manifest deployment.json --db /var/lib/suifleet-indexer/fleet.db \
   --tokens /etc/suifleet-indexer/tokens [--listen 127.0.0.1:8650] [--interval-seconds 2] \
-  [--reconcile-batch 500]
+  [--reconcile-batch 500] [--reconcile-interval-seconds 600]
 ```
 
 **Startup.**
 - The indexer reads the same deployment manifest as the dApp and the daemon ([DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md)), and verifies it against the chain first: chain identity, package version and origins, UpgradeCap, and registry.
 - It catches up, including a full device sweep, before serving, so the API never answers from an empty or pre-restart index.
-- It then indexes every `--interval-seconds`, and advances the device sweep by one batch. A failed stream or batch is retried without advancing its position.
+- It then indexes every `--interval-seconds`, and runs a full device sweep when its independent reconciliation timer is due. A failed stream or batch is retried without advancing its position.
 
 **Network.**
 - Run one instance per network and database.
