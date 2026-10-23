@@ -316,6 +316,19 @@ impl Indexer {
             "{id} is not a DeviceGroup"
         );
         let f = &object.fields;
+        let mut devices = chain::id_list(&f["device_ids"]);
+        // Indexed members (SF-125) are MemberKey fields, not vector entries.
+        if let Some(member_key) = self.types.get("device_group::MemberKey") {
+            for (key_type, key) in self.chain.field_names(id).await? {
+                if chain::same_type(&key_type, member_key) {
+                    let member: [u8; 32] = key.as_slice().try_into()
+                        .map_err(|_| anyhow::anyhow!("undecodable member key of group {id}"))?;
+                    devices.push(sui_sdk_types::Address::new(member).to_string());
+                }
+            }
+            devices.sort();
+            devices.dedup();
+        }
         Ok(Some(Group {
             id: id.to_owned(),
             name: text(&f["name"]),
@@ -323,7 +336,7 @@ impl Indexer {
             admin: chain::normalize(&text(&f["admin"])).unwrap_or_default(),
             created_at: chain::number(&f["created_at"]).unwrap_or_default(),
             deleted: false,
-            devices: chain::id_list(&f["device_ids"]),
+            devices,
         }))
     }
 

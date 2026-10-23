@@ -16,8 +16,19 @@ use std::str::FromStr;
 use sui_sdk_types::Address;
 use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
 
-/// Most devices in one bulk transaction (up to three calls each).
+/// Most devices in one bulk transaction (up to five calls each).
 pub const MAX_CALLS: usize = 200;
+
+/// A device's inbox (SF-125): its derived ID and whether it exists yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Inbox {
+    pub id: String,
+    pub exists: bool,
+}
+
+/// Device → inbox, for the devices a request names; None when the package
+/// has no inboxes, and every operation keeps its previous calls.
+pub type Inboxes = Option<BTreeMap<String, Inbox>>;
 
 /// A request the indexed state rejects (HTTP 400), not a server failure.
 #[derive(Debug)]
@@ -145,12 +156,20 @@ fn admin_group(
 /// device, read from chain) alone: the API builds these after validating them
 /// against the index, and `ctl` rebuilds them from the operator's own request
 /// and its own chain reads to check what the API returned before signing it.
+///
+/// With inboxes, deployments are announced to every target group (plan
+/// checks the sender administers them) and every activated target device
+/// (by its owner cap), and membership changes list the group in the
+/// device's inbox; an inbox that does not exist yet is created and shared
+/// in the same transaction.
 pub fn calls(
     operation: &str,
     request: &Request,
     registry: &str,
     owner_caps: &BTreeMap<String, String>,
+    inboxes: &Inboxes,
 ) -> anyhow::Result<Vec<Call>> {
+    let inbox_of = |device: &str| inboxes.as_ref().and_then(|all| all.get(device));
     if !OPERATIONS.contains(&operation) {
         return Err(invalid(format!("unknown operation {operation}")));
     }
@@ -175,11 +194,18 @@ pub fn calls(
             let mut calls: Vec<Call> = Vec::new();
             for device in devices {
                 if operation == "remove-devices" {
-                    calls.push((
-                        "device_group",
-                        "remove_device",
-                        vec![Argument::Object(group.clone()), Argument::Id(device)],
-                    ));
+                    match inbox_of(&device) {
+                        Some(inbox) if inbox.exists => calls.push((
+                            "fleet_inbox",
+                            "remove_member",
+                            vec![Argument::Object(group.clone()), Argument::Object(inbox.id.clone())],
+                        )),
+                        _ => calls.push((
+                            "device_group",
+                            "remove_device",
+                            vec![Argument::Object(group.clone()), Argument::Id(device)],
+                        )),
+                    }
                     continue;
                 }
                 let Some(cap) = owner_caps.get(&device) else {
@@ -197,11 +223,18 @@ pub fn calls(
                     "borrow_device",
                     vec![Argument::Object(registry.clone()), Argument::Object(cap.clone())],
                 ));
-                calls.push((
-                    "device_group",
-                    "add_device",
-                    vec![Argument::Object(group.clone()), Argument::Result(borrow, 0)],
-                ));
+                match inbox_of(&device) {
+                    Some(inbox) => with_inbox(&mut calls, inbox, &registry, cap, |inbox| (
+                        "fleet_inbox",
+                        "add_member",
+                        vec![Argument::Object(group.clone()), inbox, Argument::Result(borrow, 0)],
+                    )),
+                    None => calls.push((
+                        "device_group",
+                        "add_device",
+                        vec![Argument::Object(group.clone()), Argument::Result(borrow, 0)],
+                    )),
+                }
                 calls.push((
                     "device_registry",
                     "return_device",
@@ -220,24 +253,66 @@ pub fn calls(
             if groups.is_empty() && devices.is_empty() {
                 return Err(invalid("a deployment needs at least one target"));
             }
-            vec![(
+            let function = if inboxes.is_some() { "new_deployment_verified" } else { "create_deployment_verified" };
+            let mut calls: Vec<Call> = vec![(
                 "deployment_manager",
-                "create_deployment_verified",
+                function,
                 vec![
                     Argument::Text(text(&request.component_name, "component_name")?),
                     Argument::Text(text(&request.version, "version")?),
                     Argument::Text(text(&request.recipe_blob_id, "recipe_blob_id")?),
                     Argument::Text(hex64(&request.artifact_sha256, "artifact_sha256")?),
                     Argument::Text(hex64(&request.recipe_sha256, "recipe_sha256")?),
-                    Argument::Ids(groups),
-                    Argument::Ids(devices),
+                    Argument::Ids(groups.clone()),
+                    Argument::Ids(devices.clone()),
                     Argument::Clock,
                 ],
-            )]
+            )];
+            if inboxes.is_some() {
+                // Announce the unshared record (command 0), then share it.
+                for group in groups {
+                    calls.push(("fleet_inbox", "announce_group",
+                        vec![Argument::Object(group), Argument::Result(0, 0), Argument::Clock]));
+                }
+                let registry = id(registry, "registry")?;
+                for device in devices {
+                    let (Some(inbox), Some(cap)) = (inbox_of(&device), owner_caps.get(&device)) else { continue };
+                    with_inbox(&mut calls, inbox, &registry, cap, |inbox| ("fleet_inbox", "announce_device", vec![
+                        inbox, Argument::Object(registry.clone()), Argument::Object(cap.clone()),
+                        Argument::Result(0, 0), Argument::Clock]));
+                }
+                calls.push(("deployment_manager", "share_deployment", vec![Argument::Result(0, 0)]));
+            }
+            calls
         }
         _ => unreachable!(),
     };
     Ok(calls)
+}
+
+/// Push `call` with the device's inbox, first creating it (and sharing it
+/// after) when it does not exist yet.
+fn with_inbox(calls: &mut Vec<Call>, inbox: &Inbox, registry: &str, cap: &str,
+    call: impl FnOnce(Argument) -> Call) {
+    if inbox.exists {
+        calls.push(call(Argument::Object(inbox.id.clone())));
+        return;
+    }
+    let created = calls.len() as u16;
+    calls.push(("fleet_inbox", "new_inbox",
+        vec![Argument::Object(registry.to_owned()), Argument::Object(cap.to_owned())]));
+    calls.push(call(Argument::Result(created, 0)));
+    calls.push(("fleet_inbox", "share_inbox", vec![Argument::Result(created, 0)]));
+}
+
+/// The device IDs whose inboxes a request needs.
+pub fn inbox_devices(operation: &str, request: &Request) -> Vec<String> {
+    let named = match operation {
+        "add-devices" | "remove-devices" => &request.devices,
+        "create-deployment" => &request.target_devices,
+        _ => return Vec::new(),
+    };
+    ids(named, "device").unwrap_or_default()
 }
 
 /// The device `id` as read from chain for this request (`live`), provided
@@ -267,8 +342,9 @@ pub fn plan(
     operation: &str,
     request: &Request,
     live: &BTreeMap<String, Option<Device>>,
+    inboxes: &Inboxes,
 ) -> anyhow::Result<Planned> {
-    let calls = calls(operation, request, registry, &crate::devices::owner_caps(live))?;
+    let calls = calls(operation, request, registry, &crate::devices::owner_caps(live), inboxes)?;
     let sender = id(&request.sender, "sender")?;
     let package = id(package, "package")?;
     let summary = match operation {
@@ -467,7 +543,7 @@ mod tests {
         request: Request,
     ) -> anyhow::Result<Planned> {
         let live = live(db, operation, &request);
-        plan(db, &hex(7), &hex(REGISTRY), operation, &request, &live)
+        plan(db, &hex(7), &hex(REGISTRY), operation, &request, &live, &None)
     }
 
     fn rejected(result: anyhow::Result<Planned>, needle: &str) {
@@ -480,6 +556,56 @@ mod tests {
             error.to_string().contains(needle),
             "{error} does not mention {needle}"
         );
+    }
+
+    #[test]
+    fn inboxes_announce_deployments_and_list_groups() {
+        let (registry, group, cap) = (hex(REGISTRY), hex(50), hex(801));
+        let caps = BTreeMap::from([(hex(1), cap.clone()), (hex(4), hex(804))]);
+        let inboxes: Inboxes = Some(BTreeMap::from([
+            (hex(1), Inbox { id: hex(901), exists: true }),
+            (hex(4), Inbox { id: hex(904), exists: false }),
+        ]));
+        let deploy = Request {
+            sender: hex(100), component_name: Some("app".into()), version: Some("1".into()),
+            recipe_blob_id: Some("blob".into()), artifact_sha256: Some("a".repeat(64)),
+            recipe_sha256: Some("b".repeat(64)), target_groups: vec![group.clone()],
+            target_devices: vec![hex(1), hex(4), hex(9)], ..Default::default()
+        };
+        let planned = calls("create-deployment", &deploy, &registry, &caps, &inboxes).unwrap();
+        let names: Vec<_> = planned.iter().map(|(m, f, _)| format!("{m}::{f}")).collect();
+        assert_eq!(names, [
+            "deployment_manager::new_deployment_verified", "fleet_inbox::announce_group",
+            "fleet_inbox::announce_device", "fleet_inbox::new_inbox", "fleet_inbox::announce_device",
+            "fleet_inbox::share_inbox", "deployment_manager::share_deployment",
+        ]);
+        assert_eq!(planned[1].2, vec![Argument::Object(group.clone()), Argument::Result(0, 0), Argument::Clock]);
+        assert_eq!(planned[2].2, vec![Argument::Object(hex(901)), Argument::Object(registry.clone()),
+            Argument::Object(cap.clone()), Argument::Result(0, 0), Argument::Clock]);
+        assert_eq!(planned[3].2, vec![Argument::Object(registry.clone()), Argument::Object(hex(804))]);
+        assert_eq!(planned[4].2[0], Argument::Result(3, 0));
+        assert_eq!(planned[5].2, vec![Argument::Result(3, 0)]);
+        // Without inboxes the deployment stays one call.
+        let plain = calls("create-deployment", &deploy, &registry, &caps, &None).unwrap();
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].1, "create_deployment_verified");
+
+        let add = Request { sender: hex(100), group: Some(group.clone()), devices: vec![hex(1), hex(4)], ..Default::default() };
+        let planned = calls("add-devices", &add, &registry, &caps, &inboxes).unwrap();
+        let names: Vec<_> = planned.iter().map(|(m, f, _)| format!("{m}::{f}")).collect();
+        assert_eq!(names, [
+            "device_registry::borrow_device", "fleet_inbox::add_member", "device_registry::return_device",
+            "device_registry::borrow_device", "fleet_inbox::new_inbox", "fleet_inbox::add_member",
+            "fleet_inbox::share_inbox", "device_registry::return_device",
+        ]);
+        assert_eq!(planned[1].2, vec![Argument::Object(group.clone()), Argument::Object(hex(901)), Argument::Result(0, 0)]);
+        assert_eq!(planned[5].2, vec![Argument::Object(group.clone()), Argument::Result(4, 0), Argument::Result(3, 0)]);
+        let remove = Request { devices: vec![hex(1), hex(4)], ..add };
+        let planned = calls("remove-devices", &remove, &registry, &caps, &inboxes).unwrap();
+        assert_eq!(planned, vec![
+            ("fleet_inbox", "remove_member", vec![Argument::Object(group.clone()), Argument::Object(hex(901))]),
+            ("device_group", "remove_device", vec![Argument::Object(group), Argument::Id(hex(4))]),
+        ]);
     }
 
     #[test]
@@ -774,7 +900,7 @@ mod tests {
                     None => *found = None,
                 }
             }
-            plan(&db, &hex(7), &hex(REGISTRY), "add-devices", &request, &live)
+            plan(&db, &hex(7), &hex(REGISTRY), "add-devices", &request, &live, &None)
         };
         // Indexed as 999's, but its owner cap moved to the sender without a fleet event.
         assert!(add(3, Some(100)).is_ok());
