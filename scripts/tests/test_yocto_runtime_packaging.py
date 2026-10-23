@@ -66,20 +66,118 @@ class BundledLicenseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'declares no license'):
             codec.bundled_packages(bundle, self.modules)
 
-    def test_reviewed_undeclared_package_is_named_not_guessed(self):
-        bundle = fake_package(self.modules, '@mysten+walrus-wasm@0.3.1', '@mysten/walrus-wasm', '0.3.1')
-        [package] = codec.bundled_packages(bundle, self.modules)
-        self.assertEqual(package['license'], codec.UNDECLARED_LICENSE)
-        self.assertIn('UNDECLARED', codec.license_text([package]))
-
-    def test_stale_undeclared_override_is_refused(self):
-        bundle = fake_package(self.modules, '@mysten+walrus-wasm@0.3.1', '@mysten/walrus-wasm', '0.3.1', 'Apache-2.0')
-        with self.assertRaisesRegex(ValueError, 'remove its undeclared override'):
-            codec.bundled_packages(bundle, self.modules)
-
     def test_empty_bundle_is_refused(self):
         with self.assertRaises(ValueError):
             codec.bundled_packages('console.log(1)\n', self.modules)
+
+
+class LicenseInventoryTests(unittest.TestCase):
+    """A package without a license field ships only with a verified reviewed inventory."""
+    NAME, VERSION, INTEGRITY = '@mysten/walrus-wasm', '0.3.1', 'sha512-fixture=='
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        base = Path(self.directory.name)
+        self.modules, self.inventories = base/'node_modules', base/'inventories'
+        self.inventories.mkdir()
+        self.bundle = fake_package(self.modules, '@mysten+walrus-wasm@0.3.1', self.NAME, self.VERSION)
+        self.root = self.modules/'.pnpm/@mysten+walrus-wasm@0.3.1/node_modules'/self.NAME
+        (self.root/'index.js').write_text('// Copyright (c) Mysten Labs, Inc.\n// SPDX-License-Identifier: Apache-2.0\n')
+        (self.root/'Cargo.lock').write_text('# lock\n')
+        mit, apache = 'MIT text\n', 'Apache text\n'
+        self.data = dict(schema=1, package=self.NAME, version=self.VERSION, npm_integrity=self.INTEGRITY,
+                         cargo_lock_sha256=codec.sha256(self.root/'Cargo.lock'), wasm_sha256='0'*64,
+                         package_license='Apache-2.0', package_license_evidence=['index.js'], target='wasm32-unknown-unknown',
+                         crates=[dict(name='walrus-wasm', version='0.1.0', source=None, license='Apache-2.0',
+                                      texts=[dict(file='LICENSE', sha256=hashlib.sha256(apache.encode()).hexdigest())]),
+                                 dict(name='unicode-ident', version='1.0.22', source='registry+https://github.com/rust-lang/crates.io-index',
+                                      license='(MIT OR Apache-2.0) AND Unicode-3.0', authors=['A <a@example.invalid>'],
+                                      texts=[dict(file='LICENSE-MIT', sha256=hashlib.sha256(mit.encode()).hexdigest())])],
+                         texts={hashlib.sha256(apache.encode()).hexdigest(): apache, hashlib.sha256(mit.encode()).hexdigest(): mit})
+        self.lock = f"  '{self.NAME}@{self.VERSION}':\n    resolution: {{integrity: {self.INTEGRITY}}}\n"
+        self.saved = codec.INVENTORIES
+        codec.INVENTORIES = {self.NAME: self.inventories}
+
+    def tearDown(self):
+        codec.INVENTORIES = self.saved
+        self.directory.cleanup()
+
+    def packages(self, lock=None):
+        (self.inventories/f'{self.VERSION}.json').write_text(json.dumps(self.data))
+        return codec.bundled_packages(self.bundle, self.modules, self.lock if lock is None else lock)
+
+    def test_verified_inventory_supplies_publisher_license_and_crates(self):
+        [package] = self.packages()
+        self.assertEqual(package['license'], 'Apache-2.0')
+        self.assertEqual(codec.licenses([package]), ['Apache-2.0', 'Unicode-3.0'])
+        text = codec.license_text([package])
+        self.assertIn('SPDX-License-Identifier headers of index.js', text)
+        self.assertIn('unicode-ident 1.0.22 (registry+https://github.com/rust-lang/crates.io-index): (MIT OR Apache-2.0) AND Unicode-3.0', text)
+        self.assertIn('authors A <a@example.invalid>', text)
+        self.assertIn('MIT text', text)
+        self.assertNotIn('No license file is shipped', text)
+
+    def test_missing_inventory_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'declares no license'):
+            codec.bundled_packages(self.bundle, self.modules, self.lock)
+
+    def test_changed_cargo_lock_is_refused(self):
+        (self.root/'Cargo.lock').write_text('# another lock\n')
+        with self.assertRaisesRegex(ValueError, 'Cargo.lock differs'):
+            self.packages()
+
+    def test_other_locked_tarball_is_refused(self):
+        with self.assertRaisesRegex(ValueError, 'not locked to the tarball'):
+            self.packages(self.lock.replace('fixture', 'other'))
+
+    def test_changed_publisher_header_is_refused(self):
+        (self.root/'index.mjs').write_text('// SPDX-License-Identifier: MIT\n')
+        with self.assertRaisesRegex(ValueError, 'SPDX headers'):
+            self.packages()
+
+    def test_corrupt_text_is_refused(self):
+        digest = next(iter(self.data['texts']))
+        self.data['texts'][digest] = 'edited\n'
+        with self.assertRaisesRegex(ValueError, 'corrupt'):
+            self.packages()
+
+    def test_crate_without_text_is_refused(self):
+        self.data['crates'][1]['texts'] = []
+        with self.assertRaisesRegex(ValueError, 'lacks license data'):
+            self.packages()
+
+    def test_inventory_for_a_now_declared_package_is_refused(self):
+        (self.root/'package.json').write_text(json.dumps(dict(name=self.NAME, version=self.VERSION, license='Apache-2.0')))
+        with self.assertRaisesRegex(ValueError, 'remove its license inventory'):
+            self.packages()
+
+    def test_elected_licenses_follow_spdx_precedence(self):
+        self.assertEqual(codec.elected('MIT OR Apache-2.0'), {'Apache-2.0'})
+        self.assertEqual(codec.elected('MIT/Apache-2.0'), {'Apache-2.0'})
+        self.assertEqual(codec.elected('Unlicense OR MIT'), {'MIT'})
+        self.assertEqual(codec.elected('(Apache-2.0 AND BSD-3-Clause)'), {'Apache-2.0', 'BSD-3-Clause'})
+        self.assertEqual(codec.elected('MIT AND BSD-3-Clause'), {'MIT', 'BSD-3-Clause'})
+        self.assertEqual(codec.elected('MIT OR Apache-2.0 AND Unicode-3.0'), {'MIT'})
+        self.assertEqual(codec.elected('CC0-1.0'), {'CC0-1.0'})
+        for invalid in ['MIT OR', '(MIT', 'MIT)', 'AND MIT', '']:
+            with self.assertRaises(ValueError, msg=invalid):
+                codec.elected(invalid)
+
+    def test_committed_inventory_is_complete_and_matches_the_recipe(self):
+        [path] = sorted((ROOT/'scripts/walrus_wasm_licenses').glob('*.json'))
+        data = json.loads(path.read_text())
+        self.assertEqual((data['package'], data['target'], data['package_license']), (self.NAME, 'wasm32-unknown-unknown', 'Apache-2.0'))
+        lock = (ROOT/'dapp/pnpm-lock.yaml').read_text()
+        self.assertIn(f"'{data['package']}@{data['version']}':\n    resolution: {{integrity: {data['npm_integrity']}}}", lock)
+        recipe = set(var(CODEC, 'LICENSE').split(' & '))
+        for digest, text in data['texts'].items():
+            self.assertEqual(hashlib.sha256(text.encode()).hexdigest(), digest)
+        for crate in data['crates']:
+            self.assertTrue(crate['texts'] and all(t['sha256'] in data['texts'] for t in crate['texts']), crate['name'])
+            self.assertLessEqual(codec.elected(crate['license']), recipe, crate['name'])
+        self.assertNotIn('NO_GENERIC_LICENSE', CODEC)
+        self.assertEqual(codec.recipe_license(CODEC), sorted(recipe))
+        self.assertIn("' & '.join(provenance.get('licenses') or []) != d.getVar('LICENSE')", CODEC)
 
 
 class ArtifactPinTests(unittest.TestCase):
