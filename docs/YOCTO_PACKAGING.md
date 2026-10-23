@@ -175,21 +175,67 @@ The packager runs the reviewed, unmodified `build_walrus_codec.cjs` from that
 checkout and refuses tracked modifications or another revision. It copies
 the license file of every npm package that esbuild compiled into the bundle
 into `THIRD_PARTY_LICENSES.txt`. It refuses any package without license
-metadata unless that package has a reviewed undeclared entry. Two
-builds of the pinned revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`
-produced byte-identical artifacts. Its bundle, WASM, manifest and license
-texts are byte-identical to those built from the earlier published SF-082
-revision `ca002d39`; only `provenance.json` differs. The bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and 0.4.2),
-`walrus`, `walrus-wasm`, `@noble/hashes`, `@scure/base`, three
-`@protobuf-ts` packages, `dataloader` and `valibot`, with the Apache-2.0, MIT
-and BSD-3-Clause licenses.
+metadata unless a reviewed license inventory covers it (below). Two builds of
+the pinned revision `2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f` produced
+byte-identical artifacts. Their bundle, WASM and manifest are byte-identical
+to those built from the earlier published SF-082 revision `ca002d39`. The
+bundle contains 13 package versions: `@mysten/sui`, `bcs`, `utils` (0.4.1 and
+0.4.2), `walrus`, `walrus-wasm`, `@noble/hashes`, `@scure/base`, three
+`@protobuf-ts` packages, `dataloader` and `valibot`.
 
-**Licensing gap:** `@mysten/walrus-wasm` 0.3.1 publishes no license field or
-file, and its repository has no LICENSE. The recipe declares it as
-`SuiFleet-walrus-wasm-undeclared` (text in `THIRD_PARTY_LICENSES.txt`) rather
-than guessing Apache-2.0. The Rust crates compiled into the WASM, listed in
-that package's `Cargo.lock`, are not license-resolved. Resolve both with the
-publisher before a production release.
+**WASM licensing.** `@mysten/walrus-wasm` 0.3.1 has no `license` field in
+`package.json`, and its repository (MystenLabs/ts-sdks, release commit
+`03fe26bf` from the npm SLSA provenance) has no LICENSE file. Its published
+files (`index.js`, `index.mjs`, `index.d.mts` and others) carry the
+publisher's `Copyright (c) Mysten Labs, Inc.` and
+`SPDX-License-Identifier: Apache-2.0` headers, and its sibling packages declare
+Apache-2.0. Its WASM module compiles Rust crates from the `Cargo.lock` shipped
+in the package. `scripts/resolve_walrus_wasm_licenses.py` resolved them once
+from those sources into the reviewed inventory
+`scripts/walrus_wasm_licenses/0.3.1.json`:
+
+- The package license comes from the publisher headers; all must agree.
+- `cargo metadata --locked --filter-platform wasm32-unknown-unknown` gives the
+  normal-dependency closure of 165 crates. That set includes 22 build-time
+  proc-macro crates, listed for completeness. Every crate declares an SPDX
+  expression.
+- 153 crates ship their own license texts. For the rest, the inventory uses
+  the license file of the crate's repository at the commit in its
+  `.cargo_vcs_info.json` or git checkout (fastcrypto, walrus-core, blst, the
+  rust-bitcoin crates, and walrus-wasm itself with the Mysten walrus
+  repository's Apache-2.0 text); bech32's MIT notice in its source header; or the
+  canonical SPDX text with the declared authors (`convert_case`,
+  `ed25519-consensus`, whose crate and repository ship no text).
+- The inventory is bound to the npm tarball integrity in `pnpm-lock.yaml`, the
+  package's `Cargo.lock` SHA-256 and the SHA-256 of its `nodejs` WASM, which
+  equals the shipped `walrus_wasm_bg.wasm`.
+
+The packager verifies all of these bindings, the publisher headers and every
+text digest offline, and refuses a stale or incomplete inventory. It also
+refuses an inventory for a package that has since added a `license` field.
+`THIRD_PARTY_LICENSES.txt` lists every crate with its expression, source and
+texts. Where a crate offers a choice, SuiFleet elects Apache-2.0, then MIT.
+The union of elected licenses, `Apache-2.0 & BSD-3-Clause & CC0-1.0 & MIT &
+Unicode-3.0`, is recorded in `provenance.json` and must equal the recipe
+`LICENSE`. `Unicode-3.0` is a common license in Wrynose OE-Core and, for
+Scarthgap, in the required meta-lts-mixins Rust layer. This is packaging metadata from the published
+sources, not a legal opinion. Regenerate the inventory whenever
+`@mysten/walrus-wasm` changes:
+
+```sh
+curl -fsSLO https://registry.npmjs.org/@mysten/walrus-wasm/-/walrus-wasm-<V>.tgz
+mkdir pkg && tar -xzf walrus-wasm-<V>.tgz -C pkg   # compare with the lock integrity
+rm pkg/package/rust-toolchain.toml                   # metadata only; any cargo >= 1.85
+git config --global url."https://github.com/".insteadOf ssh://git@github.com/
+CARGO_NET_GIT_FETCH_WITH_CLI=true cargo metadata --locked --format-version 1 \
+  --filter-platform wasm32-unknown-unknown --manifest-path pkg/package/Cargo.toml > metadata.json
+python3 scripts/resolve_walrus_wasm_licenses.py --package pkg/package --tarball walrus-wasm-<V>.tgz \
+  --metadata metadata.json --spdx-dir <poky>/meta/files/common-licenses \
+  --output scripts/walrus_wasm_licenses/<V>.json
+```
+
+The 0.3.1 inventory was generated with cargo 1.87 in the `sui-dev` image and
+read GitHub for the upstream texts. Review the diff before committing it.
 
 The recipe's `do_verify_codec` runs before license population and install. It
 requires exactly the five pinned files, their SHA-256 values, a schema-1
@@ -211,12 +257,12 @@ The current pin is merged main after SF-082 and SF-084. To move it:
    `suifleet-crates.inc` with `SUIFLEET_LOCK_SHA256` from that revision's
    `Cargo.lock`.
 3. Rebuild the codec artifact at the same revision and update
-   `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values and the license
-   `md5`. If `@mysten/walrus-wasm` or the SDK versions changed, review the
-   packager's undeclared entry.
+   `SUIFLEET_CODEC_SOURCE_REV`, the five SHA-256 values, `LICENSE` (printed
+   by the packager) and the license `md5`. If `@mysten/walrus-wasm` changed,
+   regenerate and review its license inventory first.
 4. Build the image in a build directory whose `bblayers.conf` names this
    reviewed checkout's `meta-suifleet`. Then run `inspect_pi_image.py`,
-   `test_pi_binary.py` and `test_pi_codec.py`.
+   `test_pi_binary.py`, `test_pi_codec.py` and `test_pi_archive.py`.
 
 ### Target codec smoke
 
@@ -230,6 +276,57 @@ Walrus system reads and no transaction. With `--host-node` (official x86-64
 22.22.2) it also requires an identical blob ID and root hash. It does not boot
 the Pi, run systemd, write to storage nodes or exercise the daemon's codec
 checksum refusal.
+
+### Target archive round trip
+
+`scripts/test_pi_archive.py` runs the image's AArch64 daemon with the image's
+Node and codec as its archive helper:
+
+```sh
+python3 scripts/test_pi_archive.py --qemu …/qemu-aarch64 --rootfs …/rootfs \
+  --shim suifleet-edge/target/debug/examples/grpc_sim_shim \
+  --rpc-url https://fullnode.testnet.sui.io:443 --host-node …/node-v22.22.2-linux-x64/bin/node \
+  --output archive-test.json
+```
+
+The daemon runs against the SF-082 fleet-data gRPC simulator with the fixture
+Seal key servers in `interfaces/seal-vectors.json`. It collects and redacts a
+component log, then signs the archive and Seal-encrypts it natively (2 of 3).
+The image's codec, at its rootfs path and with its pinned SHA-256, encodes that
+ciphertext through a read-only Testnet `prepare`. The blob ID and root hash
+must equal those from official x86-64 Node 22.22.2. After simulated
+registration, certification and anchoring, `verify_native_fleet.cjs` decrypts
+the uploaded ciphertext with the fixture keys. It then verifies the device
+signature, chain binding, redaction and tamper refusal. That is the owner-side
+decryption path.
+
+The same daemon first runs six negative controls. Each must leave the archive
+blocked, with no registration and no anchor:
+
+- a tampered bundle, refused by checksum before any execution;
+- a missing codec;
+- a missing Node runtime;
+- a sysroot without `libstdc++`, where Node fails to load;
+- a missing WASM module;
+- a corrupt WASM module.
+
+It needs QEMU user mode 9.0 or later, because the daemon's supervisor sets
+`PR_SET_CHILD_SUBREAPER`. Scarthgap's `qemu-native` is 8.2.7 and returns
+`EINVAL`, so the daemon exits at startup. The recorded run used the static
+`qemu-aarch64` 10.2.1 from Ubuntu's `qemu-user_10.2.1+ds-1ubuntu3_amd64.deb`
+(SHA-256 `e6bdaac0…f55bd8`, from the GPG-verified `resolute` index). That QEMU
+is a test tool only; it is not part of the image.
+
+There is no binfmt handler here, so the configured `node` is a host launcher
+that runs the rootfs `node` under `qemu-aarch64 -L`; on a Pi it is the binary
+itself. The codec serves only Testnet, so the launcher swaps in Testnet's
+chain, RPC and Walrus IDs for `prepare`. `registered` and `write` come from
+the simulator's stand-in, as in `test_fleet_data_ota.py`.
+
+Not covered: storage-node writes and certificates, Pi boot, systemd in the
+guest and memory under `MemoryMax`. The daemon does not check the Node
+version at run time. The exact release is enforced by `RDEPENDS`,
+`do_verify_codec`, image inspection and `test_pi_codec.py`.
 
 ## First boot and enrollment
 

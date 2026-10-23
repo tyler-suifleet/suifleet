@@ -81,7 +81,7 @@ reflashing. No build command opens a removable device.
 
 Use the delivered `.wic.bz2` and SHA-256 file recorded with the build evidence.
 Windows can access the WSL Linux artifact directory through
-`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf066\artifacts\`;
+`\\wsl.localhost\<your-distribution>\home\tyler\dev\codex\yocto-sf120\artifacts\`;
 `wsl.exe -l -q` gives the distribution name. You can also open the directory
 with `explorer.exe .` from WSL. Verify `sha256sum -c SHA256SUMS` in the artifact
 directory. Decompress with `bzip2 -dk IMAGE.wic.bz2` if the flashing application
