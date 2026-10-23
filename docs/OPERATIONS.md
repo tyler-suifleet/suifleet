@@ -566,7 +566,10 @@ does not establish live Site deployment, certification or production acceptance.
 1..=86400 seconds, including 3600 for hourly checks. `rollout_poll_seconds`
 defaults to 60, accepts the same bounds, and is capped at `poll_seconds`.
 Known active maintenance windows and deployments waiting for rollout eligibility
-use the faster cadence. This is a local fallback until SF-130 supplies fleet settings.
+use the faster cadence. An observed active calendar window remains in bounded
+journal metadata until its recorded end/expiry, even after an update completes
+and across daemon restarts. Overlapping observed periods coalesce; this clock
+metadata never grants admission authority. This is a local fallback until SF-130 supplies fleet settings.
 An undiscovered deployment or remotely changed control is observed at the next
 check; local timers cannot anticipate unpublished changes.
 

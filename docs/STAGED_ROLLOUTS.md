@@ -9,7 +9,8 @@ known active rollout, set `offline_timeout_ms` above 1,800,000 ms **plus the
 worst-case download/apply/report time**, with additional outage/backoff margin.
 A newly created rollout may take a normal check to discover. Both cadences are
 customer-configurable; see [check cadence](OPERATIONS.md#check-cadence-and-endpoint-fallback-sf-123).
-Existing fast-poll test configurations remain supported.
+Observed active calendar windows retain fast checks through their recorded end/expiry,
+including after completion and restart. Existing fast-poll test configurations remain supported.
 
 Cohorts are immutable, disjoint snapshots of at most 512 direct device targets.
 Each cohort must initially contain at least the minimum sample count.
