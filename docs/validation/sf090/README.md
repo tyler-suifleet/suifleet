@@ -1,150 +1,126 @@
-# SF-090 candidate pilot experiment
+# SF-090 bounded encrypted fleet software envelope
 
-Status: **draft validation, no supported paid-pilot capacity established**.
-Codex configured/running model identifier: `gpt-6.1-sol`; no finer provider build
-identifier is exposed. Producer pin:
-`81a4d2e6e8b94a62b7e1b682ba9bdf115367e634` (SF-082/#160).
-The pin is unmerged. These results must not be presented as final integrated
-acceptance or as an availability/SLA claim.
+The SF-082 prerequisite is merged as `39ea150a19a469c0edbb1b61ad822a80287a6f47`.
+This branch integrated actual `origin/main` with merge `ffb1c630e5f69f4003855d79729f6e75f3747cbc`.
+The `merged-*.json` receipts identify their executed revisions. Codex actual model
+identifier: `gpt-6.1-sol`; no finer runtime build identifier is exposed.
 
-The workloads were declared before their measurements in `workload.json`,
-`isolated-workload.json` and `public-read-workload.json`. The candidate comprises
-128 synthetic readers/signing identities, four concurrent consumers, three rounds
-with 16 KiB / 256 KiB / 1 MiB log payloads; hourly health and daily archives;
-three purchased retention epochs; a 100-device browser index page bound. JSON,
-base64 and Seal overhead are additional to payload bytes. Archive record counts
-are payload/1024, up to 1024. The isolated-chain sample has 16 enrolled devices,
-four concurrent writers and a 30-second stage p95 guard. The public sample is
-**eight read-only effects requests**, concurrency two, 10-second read p95 guard,
-zero new spend and zero writes. Provider quotas remain explicitly unquoted/null.
+The supported **isolated software regression envelope** is 16 enrolled synthetic
+devices, four concurrent device operations, one 1 MiB encrypted artifact per device,
+three local Seal test providers with a two-share threshold, one signed health report
+and one authoritative application receipt per device. A separate consumer workload
+uses 128 real signing identities, concurrency four, three payload sizes (16 KiB,
+256 KiB, 1 MiB), and 384 signed/encrypted archives. A real Chromium fixture tests
+128-device pagination in five rounds with a 100-device page bound.
 
-The process RSS ceiling is 1 GiB. Crypto/fetch/health guards are 5 seconds p95;
-index/browser-page recovery is 1 second p95. Five browser rounds also have a
-5-second initial-render guard. Nearest-rank p50/p95 values are regression guards
-on this machine, not population estimates or provider promises. There is no
-customer agreement or production quota inferred from this candidate profile.
+These are bounded pilot-sized software experiments, **not authorization to admit a
+paid production fleet**. Public provider throughput/quotas, certified storage at fleet
+scale, long retention and availability are unestablished. No paid-pilot SLA, public
+fleet capacity, invoice or production endpoint promise follows from these numbers.
+Final provider/manual-wallet/Mainnet acceptance remains in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159),
+and physical/manual-wallet acceptance in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
 
-## Measured boundaries
+The workloads and guards are versioned in `workload.json`, `isolated-workload.json`
+and `public-read-workload.json`: 30-second isolated-stage p95, 5-second consumer
+crypto/fetch/health p95, 1-second index/page-recovery p95, 5-second initial browser
+render, zero unexpected failures, 1 GiB Node-process peak RSS, and at most three
+explicit transient driver attempts. The public sample is eight Testnet effects reads,
+concurrency two, 10-second p95, zero writes and zero new gas. RPC, gateway and Seal
+paid quotas remain unquoted/null. Candidate operational cadence is hourly health,
+daily log archives and three purchased retention epochs; the short tests do not
+establish elapsed-hour/day/epoch retention availability. Browser size and Node RSS
+are separate from device/kernel/full-browser resource use.
 
-| Experiment | What actually runs | What it cannot establish |
-|---|---|---|
-| `fixture-run.json` | 128 different Ed25519 signing keys, 384 actual SDK Seal encryptions, shipped verified health/archive/index readers, independent AES-GCM opening, real signatures/digests/bindings | Chain consensus, real provider authorization, certification or fleet availability |
-| `isolated-run.json` | Fresh published sources, 16 activated/enrolled devices, concurrent prepaid gas draws, signed health anchoring, direct browser-reader visibility, verified authoritative receipts, one successful/three refused concurrent storage registrations | Device updater application, certified storage-node throughput or public pricing |
-| `browser-run.json` | Shipped FleetDataPage in real Chromium; real BCS/type/binding verification; 100-to-128-device pagination; throttling error and recovery | Extension wallets, real signed Seal sessions, archive-rendering scale |
-| `daemon-run.json` | Four native archive/restart drills, concurrency two; real native signatures/ciphertext and browser verification; exhausted storage, ambiguous/pruned history, restart, diagnostics/crash cadence | A shared-chain four-device fleet or a long-running soak |
-| `public-read-run.json` | Fresh independent Testnet reads of eight historical health/storage/anchor effects; gas totals matched against producer evidence | A new native upload, new measured enrollment/finalization latency or provider load |
+## Integrated and separate evidence
 
-The chain experiment publishes instrumented **test-only** upstream Walrus
-initialization (one deterministic committee, synthetic WAL/rates) into a disposable
-network-none chain. Its mutation/accounting code remains upstream. It uses the
-on-chain encoding formula to buy exactly one small blob's storage. Failed
-registrations must abort in `fleet_storage::take_storage`; the independently read
-storage count must be one. Budget tests submit fully resolved transactions so the
-second draw's quota refusal is a real failed effect, not a dry-run exception.
-All successful and refused transaction digests and gas summaries are retained.
-No contract source, production API, ABI or deployment manifest was changed.
+`merged-chain.json` connects real enrollment and gas floats, on-chain device policy,
+shipped browser Seal encryption, official SDK signed sessions, verified test-server
+identity, encrypted artifact/recipe fetch, authenticated synthetic file application,
+signed health anchoring, verified browser-reader visibility and authoritative
+receipts on **one disposable chain**. Application digests are independently read
+from the deployment and its recipe-digest dynamic field. Repeat selection must not
+create the application file again. Applied receipts are submitted only after apply.
+The recipe/file oracle is a synthetic-device implementation, not the native updater.
 
-The crypto experiment's injected RPC, gateway, keyserver and delayed-index outages
-must exhaust exactly three **driver** attempts, then recover after fault removal.
-The reconnect experiment schedules 128 consumers through a four-operation driver
-pool. This measures the experiment scheduler, not a daemon/browser retry policy.
-RPC failure must yield unavailable health; foreign fleet/digest substitutions must
-fail before requesting keys. Integrity/authorization/exhaustion failures are never
-blindly retried. Failed worker pools drain existing work and stop scheduling.
-Native recovery drills separately check pending-purchase preservation and no
-duplicate registration. No test equates a synthetic receipt with updater success.
+Three local test keyservers simulate the actual Move device approval as the signed
+session user before releasing shares. An ungranted key cannot decrypt another
+device's release. Two keyserver processes are stopped: threshold failure cannot
+apply anything; restarting the same servers must recover. The loopback encrypted
+gateway injects HTTP 429 until three driver attempts are exhausted, then recovers.
+This tests actual local protocol/authorization, not production keyserver quotas.
 
-## Reproduction
+The same chain races four independent gas accounts against the one-draw allowance,
+and four storage registrations against a pool sized for exactly one blob. Failed
+effects must identify the quota/storage check; storage count must remain one.
+Upstream Walrus is initialized with a **test-only deterministic one-member committee,
+synthetic WAL and rates**. Storage registration/accounting is real upstream code;
+certified storage-node throughput is not measured. All transaction gas, including
+expected failed effects, is retained; synthetic local gas is not a public price.
 
-Use the locked dependencies from this checkout (`pnpm install --frozen-lockfile`
-in `dapp/`) and pinned dev toolchain. Inside the dev environment:
+`merged-fixtures.json` separately exercises 128 signers and actual SDK encryption,
+shipped archive verification and bounded reconnect scheduling; injected RPC,
+gateway, keyserver and delayed-index failures exhaust and recover. Foreign-fleet
+and digest substitutions fail before keys are requested. Driver concurrency/retry
+is not represented as daemon/browser scheduling. `merged-browser.json` exercises
+the shipped FleetDataPage in Chromium with fixture chain and wallet hooks, including
+page failure/recovery without fabricated or duplicate devices.
+
+`merged-daemon.json` runs four independent native archive/restart drills at concurrency
+two: real native signatures/ciphertext, official SDK threshold decrypt and browser
+verification, storage exhaustion, certification ambiguity/pruned history, restart,
+cadence, diagnostics/crash archives and no duplicate registration. They use separate
+simulators and a hashed prebuilt binary; this is not a shared-chain native fleet or
+a fresh Rust build. A separate direct `test_fleet_data_ota.py` run also passed.
+`merged-public-read.json` freshly verifies eight historical Testnet effects and gas;
+zero writes/new spend. It measures neither new enrollment nor provider load.
+
+## Reproduction and scope
+
+Use the pinned dev toolchain and frozen frontend dependencies. Mount this worktree,
+its linked Git common directory, frontend dependencies, pinned Move cache, and built
+`chain_facts`, `seal_key_server`, `grpc_sim_shim` and `suifleet` binaries. Use disposable
+Docker `--network none` for all tests except the explicitly read-only public sample:
 
 ```bash
-node scripts/test_pilot_load.cjs
-node scripts/test_fleet_data.cjs
-node scripts/test_fleet_bulk.cjs
+make INSIDE_DEV_CONTAINER=1 test-manifest
+make test-tracking
+python3 scripts/bootstrap_tracking.py  # offline dry run
 make INSIDE_DEV_CONTAINER=1 pilot-fixtures
 CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell \
   make INSIDE_DEV_CONTAINER=1 pilot-browser
-# Only in a disposable Docker --network none container, with empty private
-# wallet state, pinned Move cache and the built chain_facts readiness example:
 make INSIDE_DEV_CONTAINER=1 pilot-localnet
-# Networked, read-only; mounts/loads no wallet and spends no gas:
-make INSIDE_DEV_CONTAINER=1 pilot-public-read
 python3 scripts/pilot_daemon_soak.py \
   --binary suifleet-edge/target/debug/suifleet \
   --shim suifleet-edge/target/debug/examples/grpc_sim_shim \
   --receipt /tmp/suifleet-pilot/daemon.json
+make INSIDE_DEV_CONTAINER=1 pilot-public-read
 ```
 
-Make receipts default to `/tmp/suifleet-pilot`; override `PILOT_EVIDENCE_DIR`.
-The local chain runner verifies compiler/network CLI checksums/versions, rejects
-non-loopback network interfaces and existing loopback chain ports, starts fresh
-private node state and terminates the node on success/failure. It never loads a
-public wallet. Run current-source build prerequisites using the normal locked
-`cargo build --bins --examples` before independent reproduction. The recorded
-native runs reused already-built producer binaries; their exact hashes are in
-the receipt, and no fresh Rust build is claimed. Runtime logs/keys remain private
-temporary files and are removed, not copied to evidence.
+Receipts default to `/tmp/suifleet-pilot`; set `PILOT_EVIDENCE_DIR` for Make targets.
+The local runner checks pinned tools, refuses non-loopback interfaces/existing node
+ports, creates private temporary chain/wallet state and terminates the node on exit.
+The parent holds `build:suifleet` only during actual compilation and renews/releases
+it. No shared/public wallet is mounted. Temporary keys/plaintexts are never evidence.
+No service installation, production credential, hardware programming or Mainnet
+operation occurred. No application ABI, layout or deployment manifest changed.
 
-Actual environment: Linux `6.6.87.2-microsoft-standard-WSL2`, Node `22.22.2`;
-Sui compiler `1.81.1-e04cf9aa915c`, network-none node `1.82.1-987123842623`;
-Chromium version is recorded in its receipt. Container image IDs:
+Exact resumed commands used `suifleet-dev:sf037` (Node 22.22.2, compiler 1.81.1,
+network-none node 1.82.1) and `suifleet-dev:sf010-chrome`; image IDs are unchanged
+from the original runs recorded below. The linked Git metadata mount was initially
+missing: that fixture attempt failed before measurement, then passed with the mount.
+The first new integrated setup failed with an arity mismatch (missing registry in
+the harness grant call); the harness was corrected to the actual merged ABI and
+rerun. Neither failure is counted as passing acceptance or public spending.
 
-- `suifleet-dev:sf037`: `sha256:31f727258ccd2eb7d00039c26bca6cf045d6d71e4d19fe51ac899f4f239e5b5b`.
-- `suifleet-dev:sf010-chrome`: `sha256:2d0efd8a78b35eda30ef940c64c5e387dd15663a84a824ccc4f420342a030568`.
+Tracking tests pass 10/10 and the offline bootstrap dry run passes after preserving
+both branches' published catalog entries during merge. The merged manifest suite
+passes its Python/frontend/claim regressions. Current-head ordinary/security and
+automatic Testnet CI and fresh independent review remain mandatory. Production,
+manual real-wallet, hardware, multi-day soak, full fleet certified-storage/native
+throughput, paid quotas and unsupported scale remain explicitly unrun/unestablished.
 
-The execution commands used Docker `--network none` for all fixture, browser,
-chain and native drills; only the eight-request public readback had networking.
-Frontend dependencies and existing native binaries were mounted read-only from
-the producer worktree/cache. The shared `build:suifleet` lease covered actual
-Move compilation and was renewed/released by the attached parent process.
-No service installation, network mutation lock, wallet write or hardware action
-was needed. Receipt revisions identify the actual source snapshots; later
-report/documentation commits do not relabel old runs as new measurements.
-
-## Failures and remaining gates
-
-Early experiment attempts failed and were repaired: missing frontend dependency
-mount, inaccessible worktree Git metadata at report time, SDK effects using
-`gasUsed` rather than transport `gasSummary`, and a nominal storage pool that
-actually fit four small blobs. The final pool uses the chain's exact encoding
-formula, with unchanged pass criterion (one success). Those failed local attempts
-are not Testnet spending or passing evidence. Their logs remain under private
-`/tmp/sf090-*`; no raw daemon/chain logs are published.
-
-The initial `make test-tracking` run had 1 failure and 1 error of 10;
-the bootstrap dry run rejected the missing SF-083 dependency. On 2026-10-22,
-under explicit restoration authorization, only existing published SF-083/#161
-and its prerequisite SF-088/#171 were restored from the audited canonical entries.
-Their issue IDs, node IDs, closed titles and Project-item issue identities were
-verified against GitHub before restoration. No issue was created and no
-acceptance or ownership rule changed. `make test-tracking` now passes all
-10 tests; `python3 scripts/bootstrap_tracking.py` completes its offline dry run.
-The catalog blocker is resolved; this does not establish integrated acceptance.
-
-`make test-manifest` passed in the network-none container (14 manifest Python
-tests, all frontend assertions including the new pilot regressions, and the final
-3 claim tests). Scoped health/archive regressions, Python AST, JSON parsing,
-Make target dry runs and `git diff --check` passed. Receipt-specific source paths
-were compared with their recorded revisions and match; no full Rust build,
-full application suite, physical test or final integrated acceptance is implied.
-
-Before Ready/Review: verify SF-082/#160 is actually merged/Done; integrate actual merged
-main; rerun compatibility, adversarial, native and end-to-end experiments; require
-current-head CI and automatic Testnet validation and independent review. Actual
-whole-product multi-device certified encrypted operation/soak at a supported pilot
-limit is still unestablished: the separated facet measurements above must not be
-combined into an invented integrated throughput or availability claim.
-
-Production provider selection/authentication/fees/quotas/availability/recovery,
-manual real-wallet and actual Mainnet acceptance stay unrun in
-[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
-Physical/manual-wallet target acceptance stays in
-[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
-These deferrals do not waive source/security, meaningful local/chain regression,
-automatic Testnet or independent review gates. Unsupported: production paid-pilot
-capacity/SLA, more than measured reader/device/concurrency bounds, long retention
-or multi-day soak, provider fleet-scale throttling/recovery, hardware resource use
-and firmware safety. No production purchase, credential provisioning or Mainnet
-write was performed.
+The earlier `fixture-run.json`, `isolated-run.json`, `browser-run.json`, `daemon-run.json`
+and `public-read-run.json` remain historical premerge facets, not relabeled reruns.
+Their original source revisions and numbers remain in `measurements.md` below the
+new merged-source table. The old `producer_pin` in the original fixture input identifies
+that input's provenance only; the receipt revision identifies executed code.
