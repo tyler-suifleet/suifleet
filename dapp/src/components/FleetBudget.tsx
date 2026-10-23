@@ -21,7 +21,7 @@ import {
 
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
-  buildWithdrawRetentionTx, fetchRetention, retentionFacts, retentionOrigin } from '@/lib/retention';
+  buildWithdrawRetentionTx, fetchRetention, retentionFacts, retentionOrigin, buildConfigureDeviceRetentionTx, buildClearDeviceRetentionTx, fetchDeviceRetention } from '@/lib/retention';
 
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
@@ -366,6 +366,8 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
   const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
+  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+    queryFn: () => fetchDeviceRetention(client, config, storage) });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
@@ -390,6 +392,11 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
       <label>Finite target epoch <input className="border w-16" type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} /></label>
       <label>Maximum WAL quote <input className="border w-20" value={maxFee} onChange={(e) => setMaxFee(e.target.value)} /></label>
       <button type="button" onClick={() => void submit(() => buildAuthorizeRenewalTx(config, storage, budget, cap, blob, target, parseToken(maxFee)))}>Authorize this renewal</button>
+      <p>Device archives require explicit owner approval while protected retention is enabled. Their initial purchase and finite renewal are paid atomically; quotas and isolated reserve limits still apply. The owner-run worker must apply purchased renewals before expiry.</p>
+      <p>{deviceView.data ? `New archive target: epoch ${deviceView.data.target}; maximum WAL per renewal ${wal(BigInt(deviceView.data.max_fee))}.` : 'No device archive approval is verified.'}</p>
+      <button type="button" disabled={!policy || !deviceView.isSuccess} onClick={() => void submit(() => buildConfigureDeviceRetentionTx(config, storage, budget, cap, target, parseToken(maxFee)))}>Approve new archives to this finite target</button>
+      <button type="button" disabled={!deviceView.data} onClick={() => void submit(() => buildClearDeviceRetentionTx(config, storage, budget, cap))}>Pause new archive admission</button>
+      {deviceView.error && <p role="alert">Archive policy API unavailable in the configured storage package.</p>}
       <div><label>Reserve WAL <input className="border w-20" value={walFunds} onChange={(e) => setWalFunds(e.target.value)} /></label>
         <label>Reserve SUI <input className="border w-20" value={gasFunds} onChange={(e) => setGasFunds(e.target.value)} /></label>
         <button type="button" disabled={!policy} onClick={() => void submit(() => buildFundRetentionTx(config, storage, parseToken(walFunds), parseToken(gasFunds)))}>Deposit protected reserves</button>
