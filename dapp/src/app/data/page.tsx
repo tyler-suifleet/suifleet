@@ -13,6 +13,8 @@ import { requireManifest, verifyDeployment } from '@/lib/deployment-manifest';
 import { SEAL_SETTINGS } from '@/lib/seal';
 import { WALRUS_AGGREGATOR } from '@/lib/constants';
 import { PageHeader } from '@/components/ui';
+import { recordAccess, type AccessEntry, type LogQuery } from '@/lib/archive-search';
+import { AccessRecord, ArchiveView } from '@/components/ArchiveSearch';
 
 export default function FleetDataPage() {
   const client=useCurrentClient(), wallet=useDAppKit(), account=useCurrentAccount();
@@ -20,8 +22,23 @@ export default function FleetDataPage() {
   const [device,setDevice]=useState(''),[entries,setEntries]=useState<{index:number;anchor:Anchor}[]>([]);
   const [archive,setArchive]=useState<Archive>(),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const [fleetDevices,setFleetDevices]=useState<string[]>([]),[cursor,setCursor]=useState<string|null>(null),[more,setMore]=useState(false);
+  const [role,setRole]=useState<'owner'|'support'|'none'|'unknown'>('unknown'),[access,setAccess]=useState<AccessEntry[]>([]);
+  const [query,setQuery]=useState<LogQuery>({text:'',source:'',caseSensitive:false}),[opened,setOpened]=useState<number>();
   const session=useRef<SessionKey | undefined>(undefined), generation=useRef(0);
-  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setEntries([]);setMessage('');setBusy(false);},[account?.address,device,client]);
+  useEffect(()=>{const linked=new URLSearchParams(window.location.search).get('device');if(linked)setDevice(id(linked));},[]);
+  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setEntries([]);setMessage('');setBusy(false);},[account?.address,device,client]);
+  // The access record and the signed session belong to one account.
+  useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
+  // Plaintext lives only as long as the signed five-minute Seal session.
+  useEffect(()=>{
+    const timer=setInterval(()=>{if(session.current?.isExpired()){session.current=undefined;setArchive(undefined);setOpened(undefined);setMessage('Seal session expired; decrypted records were discarded.');}},5_000);
+    return ()=>clearInterval(timer);
+  },[]);
+  useEffect(()=>{
+    let live=true;
+    if(DATA_CONFIG && account)void authority().then(a=>{if(live)setRole(a.kind);}).catch(()=>{if(live)setRole('none');});
+    return()=>{live=false;};
+  },[account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
     let live=true;setFleetDevices([]);setCursor(null);setMore(false);
     if(DATA_CONFIG && account)void listFleetDeviceIds(client,DATA_CONFIG).then(page=>{if(live){setFleetDevices(page.devices);setCursor(page.cursor);setMore(page.hasNextPage);}}).catch(()=>{if(live)setMessage('Fleet index unavailable.');});
@@ -54,14 +71,20 @@ export default function FleetDataPage() {
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setMessage('Archive index unavailable or permission revoked.');}}
   }
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),30_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
-  async function open(index:number) {
+  function note(index:number,kind:number,authority:'owner'|'support'|undefined,outcome:'opened'|'refused') {
+    if(!account || !authority)return;
+    setAccess(log=>recordAccess(log,{atMs:Date.now(),account:account.address,authority,device,index,kind:(['logs','diagnostics','crash'] as const)[kind] ?? 'logs',outcome}));
+  }
+  function close(){setArchive(undefined);setOpened(undefined);setQuery({text:'',source:'',caseSensitive:false});}
+  async function open(index:number,kind:number) {
     if(!DATA_CONFIG || !SEAL_SETTINGS || !account)return;
-    const current=generation.current;setBusy(true);setArchive(undefined);setMessage('');
+    const current=generation.current;setBusy(true);close();setMessage('');
+    let allowed: Awaited<ReturnType<typeof authority>> | undefined;
     try {
       const manifest=requireManifest();await verifyDeployment(client);
       const connected=wallet.stores.$connection.get().account;
       if(connected?.address!==account.address || !connected.chains.includes(`sui:${manifest.network}`) || wallet.stores.$currentNetwork.get()!==manifest.network) throw Error('Wallet network/account mismatch');
-      const allowed=await authority();
+      allowed=await authority();
       if(!session.current || session.current.isExpired()) {
         const key=await SessionKey.create({address:account.address,packageId:DATA_CONFIG.typeOrigin,ttlMin:5,suiClient:client});
         const signed=await wallet.signPersonalMessage({message:key.getPersonalMessage(),account:connected,network:manifest.network});
@@ -74,8 +97,8 @@ export default function FleetDataPage() {
       const storage=client.$extend(walrus({packageConfig:TESTNET_WALRUS_PACKAGE_CONFIG})).walrus;
       const opened=await fetchVerifiedArchive(client,storage,DATA_CONFIG,device,index,WALRUS_AGGREGATOR,decrypt);
       await authority();
-      if(current===generation.current && wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) setArchive(opened);
-    } catch {if(current===generation.current)setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}
+      if(current===generation.current && wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');}
+    } catch {if(current===generation.current){note(index,kind,allowed?.kind,'refused');setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}}
     finally{if(current===generation.current)setBusy(false);}
   }
   async function diagnostics() {
@@ -100,11 +123,13 @@ export default function FleetDataPage() {
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
-      <button className="border rounded p-2 ml-3" disabled={!device || isPending} onClick={()=>void diagnostics()}>Request diagnostics</button>
+      <button className="border rounded p-2 ml-3" disabled={!device || isPending || (role!=='owner' && role!=='support')} onClick={()=>void diagnostics()}>Request diagnostics</button>
       {!SEAL_SETTINGS && <p>Configure this deployment’s Seal providers to read archives.</p>}
+      <p data-testid="archive-role">{role==='owner'?'This account holds the fleet budget owner capability and may decrypt archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
       {message && <p role="status">{message}</p>}
-      <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Expires at Walrus epoch {anchor.end_epoch}</span></li>)}</ul>
-      {archive && <section><p>{archive.records.length} verified records; {archive.dropped_lines} dropped lines reported by device.</p><pre className="p-3 bg-gray-100 overflow-auto max-h-[36rem] whitespace-pre-wrap">{archive.records.map(r=>`[${r.source}] ${r.line}`).join('\n')}</pre></section>}
+      <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Originally purchased through Walrus epoch {anchor.end_epoch}; live retention is checked on open</span></li>)}</ul>
+      {archive && <ArchiveView archive={archive} index={opened} query={query} setQuery={setQuery} close={close} />}
+      {(role==='owner' || role==='support') && <AccessRecord entries={access} />}
     </>}
   </div>;
 }
