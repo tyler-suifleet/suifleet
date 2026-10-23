@@ -2,7 +2,7 @@
 
 Fleet deployments can supply service configuration and component grants through [recipe services](DEPLOYMENT_SERVICES.md); device-local sections remain explicit overrides.
 
-A shadow is a named JSON document holding the **desired** state of a device or application and the state it **reported**, with a version. Components read and write shadows through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shadows survive crashes and restarts. An optional adapter synchronizes selected shadows with a cloud shadow service, settling conflicting edits by an explicit policy. The document semantics follow AWS IoT Device Shadow and the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#shadows-sf-033)). Shadow documents never go on chain or to Walrus.
+A shadow is a named JSON document holding the **desired** state of a device or application and the state it **reported**, with a version. Components read and write shadows through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Shadows survive crashes and restarts. An optional adapter synchronizes selected shadows with a cloud shadow service, settling conflicting edits by an explicit policy. The document semantics follow AWS IoT Device Shadow and the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#shadows-sf-033)). Shadow documents never go on chain or into public telemetry. With [serverless fleet data archives](SERVERLESS_FLEET_DATA.md) enabled, each archive also carries the current documents. Archives are device-signed and Seal-encrypted, so only the fleet owner and support accounts can read them (SF-084; see the [dashboard](DASHBOARD_VIEWS.md#shadow-documents)). Walrus stores only that ciphertext.
 
 ## Configuration
 
@@ -134,7 +134,7 @@ If the merge differs from the cloud document, the adapter puts it with `expected
 - **Sync.** Three-way merge with per-section owners, against the SuiFleet HTTP(S) service or AWS IoT Device Shadow ([AWS_IOT.md](AWS_IOT.md)).
 - **Rate limits.** No per-shadow request rate limit; the IPC socket's own bounds apply.
 
-**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each synchronized shadow's settled conflicts and sync failures, never documents or conflicting key paths, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each synchronized shadow's settled conflicts and sync failures, never documents or conflicting key paths. The documents reach authorized readers only through the encrypted fleet archive, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
 
 ## Evidence
 
