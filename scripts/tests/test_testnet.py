@@ -361,3 +361,76 @@ class BytecodeFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'private-state';path.write_text('malformed')
             with self.assertRaisesRegex(RuntimeError,'reconcile'):live.load_state(path,'chain','owner')
+
+
+class FreshFixtureFlowTests(unittest.TestCase):
+    def test_new_and_resumed_publications_reach_verified_submitter_with_saved_proof(self):
+        # Exercise run(), not just checkpoint helpers: the original NameError
+        # happened between compilation and the first pre-sign verification.
+        import io, tarfile, tempfile, subprocess
+        from types import SimpleNamespace
+        import live_package_upgrade as live
+        address = "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"
+        tools = {"build": {"path": "/compiler", "version": live.toolchain.BUILD["version"]},
+                 "network": {"path": "/network", "version": live.toolchain.NETWORK["version"], "sha256": "pinned"}}
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode="w") as archive:
+            info = tarfile.TarInfo("contracts/Move.lock"); data = b"offline fixture"
+            info.size = len(data); archive.addfile(info, io.BytesIO(data))
+        real_run = subprocess.run
+        def command(argv, **kwargs):
+            if argv[0] == "tar":
+                return real_run(argv, **kwargs)
+            if argv[0] == "git":
+                return SimpleNamespace(stdout=buffer.getvalue(), returncode=0)
+            self.assertEqual(argv[0], "/network")
+            if "envs" in argv:
+                output = json.dumps([[{"alias": "testnet", "rpc": "https://offline.invalid"}], "testnet"])
+            elif "active-address" in argv:
+                output = address
+            else:
+                self.assertIn("gas", argv)
+                output = json.dumps({"addressMistBalance": "1000000000", "gasCoins": []})
+            return SimpleNamespace(stdout=output, stderr="", returncode=0)
+        for resumed in (False, True):
+            with self.subTest(resumed=resumed), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary); state_path = root/"state.json"
+                digest = "bytecode-v1:" + bytes(range(32)).hex()
+                key = live.fixture_key(digest, digest)
+                proof = {"base": {"digest": "saved-proof"}} if resumed else {}
+                state = {"chain": "4c78adac", "operator": address, "fixtures": {}, "publications": {}}
+                if resumed:
+                    state["publications"][key] = {"source_pair": [digest, digest],
+                        "compiler": tools["build"]["version"], "built": proof}
+                live.save_state(state_path, state)
+                observed = []
+                def submitter(*args, **kwargs):
+                    observed.append(dict(kwargs["record"]))
+                    def refuse(_budget):
+                        raise live.toolchain.NotSubmitted("offline pre-sign boundary reached")
+                    return refuse
+                args = SimpleNamespace(wallet=str(root/"client.yaml"), network="testnet",
+                    evidence=str(root/"evidence.json"), max_spend_mist=800000000,
+                    build_sui="/compiler", network_sui="/network", faucet_tool=None,
+                    base_ref="b"*40, walrus="simulated", state=str(state_path), fresh=False)
+                walrus = SimpleNamespace(aggregator="http://offline.invalid", mode="simulated", close=Mock())
+                with patch.object(live.subprocess, "run", side_effect=command), \
+                     patch.object(live.subprocess, "check_output", return_value="b"*40), \
+                     patch.object(live.toolchain, "check_tools", return_value=tools), \
+                     patch.object(live.toolchain, "preflight", return_value={"protocol_version":139}), \
+                     patch.object(live.toolchain, "compile_package", return_value={"digest":list(range(32))}), \
+                     patch.object(live.toolchain, "framework_pins", return_value={}), \
+                     patch.object(live.toolchain, "package_submitter", side_effect=submitter), \
+                     patch.object(live.dm, "chain_facts", return_value={"chain_identifier":"4c78adac"}), \
+                     patch.object(live.live_common, "Walrus", return_value=walrus), \
+                     patch.dict("os.environ", {"SUIFLEET_TESTNET_LOCK_TOKEN":""}):
+                    with self.assertRaisesRegex(live.toolchain.NotSubmitted, "offline pre-sign boundary"):
+                        live.run(args)
+                self.assertEqual(observed, [proof.get("base", {})])
+                saved = json.loads(state_path.read_text())["publications"][key]
+                self.assertEqual(saved["built"], {"base": proof.get("base", {})})
+                self.assertNotIn("pending_operation", saved)
+                evidence = json.loads((root/"evidence.json").read_text())
+                self.assertFalse(evidence["success"])
+                self.assertEqual(evidence["allowance_used_mist"], 0)
+                walrus.close.assert_called_once()

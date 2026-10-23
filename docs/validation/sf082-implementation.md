@@ -61,3 +61,11 @@ Recovery validation (actual model `gpt-6.1-sol`, same reserved session):
   bytes/ranges/headers and 27 Sui routes read back, independent effects checked.
   Publisher lifetime used 485,105,631 of 700,000,000 MIST, with no new funding.
   The latest Site receipt supersedes earlier export/cost counts above.
+
+- Automatic Testnet run 39894046078 at `9fbfd16` failed before any write (zero
+  MIST) because fresh fixture setup referenced uninitialized `built` provenance.
+  Fixed the setup to use its durable publication proof map directly. Added a
+  regression driving actual `run()` through fresh and resumed setup to the
+  pre-sign refusal boundary; both variants reject the original source and pass
+  with the fix. All 73 offline testnet/toolchain tests passed. Final-head CI and
+  automatic Testnet must pass anew; the failed run is not relabeled successful.

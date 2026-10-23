@@ -356,7 +356,7 @@ def run(args):
                 if publication.get("pending_operation"):
                     raise RuntimeError("uncertain fixture setup retained; reconcile on chain before another publication")
                 assert publication["source_pair"] == [base_tree, head_tree] and publication["compiler"] == tools["build"]["version"]
-                built.update(publication["built"])
+                built = publication["built"]
                 def step(label, action):
                     return checkpoint_setup(state_path, state, publication, label, action, ledger)
                 def save_publication(**values):
