@@ -22,6 +22,9 @@ fully compromised device key can spend, write or destroy.
 | `BudgetOwnerCap` (owned by the owner) | authority over that one budget |
 | `GasAccount` (shared, one per enrolled device) | the device's own reserve (`Balance<SUI>`) it draws from, its limits, suspension, a `closed` flag, current period usage, last draw and totals, and the budget, device and owner cap it is bound to |
 
+The budget also holds the fleet's cost settings record (`fleet_settings`,
+SF-130) in a dynamic field; see [FLEET_SETTINGS.md](FLEET_SETTINGS.md).
+
 `Limits` has these fields:
 - `float_cap`: the most a single draw (and the initial float) may send;
 - `period_ms`;

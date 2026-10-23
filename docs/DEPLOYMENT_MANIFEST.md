@@ -20,9 +20,11 @@ Each client checks the manifest against the chain at startup and refuses a stale
 | `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
 | `walrus` | Publisher and aggregator URLs. |
 
-Optional type-origin groups are all-or-none: the component catalog, the Seal policy
-and the SF-083 fleet budget (`fleet_budget::*`). A device template may add a
-`[budget]` section ([FLEET_BUDGET.md](FLEET_BUDGET.md)).
+Optional type-origin groups are all-or-none: the component catalog, the Seal policy,
+the SF-083 fleet budget (`fleet_budget::*`) and the SF-130 fleet settings
+(`fleet_settings::*`). A device template may add a `[budget]` section
+([FLEET_BUDGET.md](FLEET_BUDGET.md)); its fleet's settings then apply
+([FLEET_SETTINGS.md](FLEET_SETTINGS.md)).
 
 `manifests/fixture.localnet.json` is a test fixture, not a deployment.
 

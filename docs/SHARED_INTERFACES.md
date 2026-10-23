@@ -64,6 +64,12 @@ exchange calls are listed as reviewed external references. Storage purchases go 
 `fleet_storage::refill_pool`, so the dApp calls no Walrus `System` function
 directly. See [FLEET_BUDGET.md](FLEET_BUDGET.md).
 
+The SF-130 fleet settings add a `fleet_settings` optional origin group and a
+`fleet_settings` catalog section holding their defaults and inclusive bounds.
+The generator emits them as `FLEET_SETTINGS` (TypeScript) and
+`fleet_settings_values` (Rust), and a generated Move test checks the contract's
+`defaults()` and accepts every bound. See [FLEET_SETTINGS.md](FLEET_SETTINGS.md).
+
 The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in
 the same reviewed ABI. Its optional origin group permits existing deployments
 without handover to keep working. Manifest resolution records the new type's own
