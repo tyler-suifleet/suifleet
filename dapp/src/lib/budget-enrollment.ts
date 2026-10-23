@@ -1,4 +1,8 @@
-import { normalizeSuiAddress } from "@mysten/sui/utils";
+import { bcs } from "@mysten/sui/bcs";
+import { ObjectError } from "@mysten/sui/client";
+import { moveType, requireManifest } from "./deployment-manifest";
+import { device_registry_IdentityBcs } from "./fleet-protocol";
+import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
 import type { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { buildEnrollDevicesTx, fetchAccount, fetchBudgets, type BudgetView } from "./fleet-budget";
@@ -10,6 +14,7 @@ export const ENROLLMENT_MAX_GAS = BigInt(2_000_000_000);
 export interface EnrollmentDevice { objectId: string; ownerCapId: string }
 export interface EnrollmentProgress {
   confirmed: number; skipped: number; total: number; chunk: number;
+  excluded: { deviceId: string; reason: string }[];
   digests: string[]; phase: "checking" | "approval" | "confirmed" | "complete" | "stopped";
   estimatedGas?: string;
 }
@@ -33,6 +38,7 @@ export async function enrollBudgetDevices(options: {
   devices: EnrollmentDevice[];
   readBudget: () => Promise<BudgetView>;
   isEnrolled: (device: EnrollmentDevice) => Promise<boolean>;
+  ineligibleReason: (device: EnrollmentDevice) => Promise<string | undefined>;
   prepare: (tx: Transaction) => Promise<string>;
   execute: (tx: Transaction) => Promise<{ digest: string }>;
   onProgress: (progress: EnrollmentProgress) => void;
@@ -44,10 +50,21 @@ export async function enrollBudgetDevices(options: {
     if (seen.has(key) || seen.has(cap)) throw new Error("Duplicate device or owner cap in enrollment selection");
     seen.add(key); seen.add(cap);
   }
-  const progress: EnrollmentProgress = { confirmed: 0, skipped: 0, total: devices.length, chunk: 0, digests: [], phase: "checking" };
+  const progress: EnrollmentProgress = { confirmed: 0, skipped: 0, total: devices.length, chunk: 0, digests: [], excluded: [], phase: "checking" };
   const report = (phase: EnrollmentProgress["phase"]) => {
     progress.phase = phase;
-    options.onProgress({ ...progress, digests: [...progress.digests] });
+    options.onProgress({ ...progress, digests: [...progress.digests], excluded: [...progress.excluded] });
+  };
+  const pendingDevices = async (group: EnrollmentDevice[]) => {
+    const states = await Promise.all(group.map(async device => {
+      if (await options.isEnrolled(device)) return "enrolled";
+      return await options.ineligibleReason(device);
+    }));
+    return group.filter((device, i) => {
+      if (states[i] === "enrolled") { progress.skipped++; return false; }
+      if (states[i]) { progress.excluded.push({ deviceId: device.objectId, reason: states[i]! }); return false; }
+      return true;
+    });
   };
   try {
     // Determine the full outstanding set before reserving funds for future
@@ -56,17 +73,13 @@ export async function enrollBudgetDevices(options: {
     for (let i = 0; i < devices.length; i += ENROLLMENT_CHUNK_SIZE) {
       report("checking");
       const group = devices.slice(i, i + ENROLLMENT_CHUNK_SIZE);
-      const enrolled = await Promise.all(group.map(options.isEnrolled));
-      progress.skipped += enrolled.filter(Boolean).length;
-      outstanding.push(...group.filter((_, j) => !enrolled[j]));
+      outstanding.push(...await pendingDevices(group));
     }
     devices = outstanding;
     while (devices.length) {
       report("checking");
       const candidates = devices.splice(0, ENROLLMENT_CHUNK_SIZE);
-      const enrolled = await Promise.all(candidates.map(options.isEnrolled));
-      const pending = candidates.filter((_, i) => !enrolled[i]);
-      progress.skipped += enrolled.filter(Boolean).length;
+      const pending = await pendingDevices(candidates);
       if (!pending.length) continue;
       const budget = await options.readBudget();
       const float = budget.defaultLimits.floatCap;
@@ -98,6 +111,30 @@ export function enrollmentReads(client: SuiGrpcClient, sender: string, budgetId:
       const budget = (await fetchBudgets(client, sender)).find(b => b.id === budgetId);
       if (!budget) throw new Error("Budget no longer belongs to this wallet");
       return budget;
+    },
+    ineligibleReason: async (device: EnrollmentDevice) => {
+      const registry = requireManifest().shared_objects.registry.id;
+      let field;
+      try {
+        field = await client.getDynamicField({ parentId: registry,
+          name: { type: moveType("device_registry::IdentityKey"), bcs: bcs.Address.serialize(device.objectId).toBytes() } });
+      } catch (error) {
+        if (error instanceof ObjectError && error.reason === "notFound") return "No active registry identity";
+        throw error;
+      }
+      if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(moveType("device_registry::Identity"))) throw new Error("Unexpected Identity type");
+      const identity = device_registry_IdentityBcs.parse(field.dynamicField.value.bcs);
+      if (identity.revoked) return "Device identity revoked";
+      if (normalizeSuiAddress(identity.owner_cap) !== normalizeSuiAddress(device.ownerCapId)) return "Device owner cap changed";
+      try {
+        await client.getDynamicField({ parentId: registry,
+          name: { type: `0x2::dynamic_object_field::Wrapper<${moveType("device_registry::CustodyKey")}>`,
+            bcs: bcs.Address.serialize(device.objectId).toBytes() } });
+      } catch (error) {
+        if (error instanceof ObjectError && error.reason === "notFound") return "Device is not in registry custody";
+        throw error;
+      }
+      return undefined;
     },
     isEnrolled: async (device: EnrollmentDevice) => !!await fetchAccount(client, budgetId, device.objectId),
   };

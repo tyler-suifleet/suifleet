@@ -251,7 +251,8 @@ export function BudgetManager() {
       </button>
       <p>Up to 200 devices per approval (5 approvals for 1,000 new devices). Each chunk is checked for size and gas before signing. Initial floats and up to two period allowances per device come from the budget; limited reserves are shared evenly.</p>
       {batchProgress && <div role="status">
-        <p>{batchProgress.confirmed} of {batchProgress.total} confirmed this run; {batchProgress.skipped} already enrolled. {batchProgress.phase === "approval" ? `Approve chunk ${batchProgress.chunk} (gas budget ${sui(BigInt(batchProgress.estimatedGas!))}).` : batchProgress.phase}.</p>
+        <p>{batchProgress.confirmed} of {batchProgress.total} confirmed this run; {batchProgress.skipped} already enrolled; {batchProgress.excluded.length} excluded. {batchProgress.phase === "approval" ? `Approve chunk ${batchProgress.chunk} (gas budget ${sui(BigInt(batchProgress.estimatedGas!))}).` : batchProgress.phase}.</p>
+        {batchProgress.excluded.map(item => <p key={item.deviceId}>Excluded {item.deviceId}: {item.reason}</p>)}
         {batchProgress.digests.map(digest => <p key={digest}>Confirmed {digest}</p>)}
       </div>}
       {batchError && <p role="alert">{batchError}</p>}

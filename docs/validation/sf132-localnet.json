@@ -1,11 +1,11 @@
 {
   "network": "disposable network-none localnet",
-  "recorded_at": "2026-10-23T20:45:28.091Z",
+  "recorded_at": "2026-10-23T23:36:08.108Z",
   "compiler": "sui 1.81.1-e04cf9aa915c",
   "node": "sui 1.82.1-987123842623 (checksum-verified by localnet wrapper)",
   "chunks": [
     {
-      "digest": "Gr9qGvkEDABWoK1bNb4yGP5euJ2VwWbV6sGQsqAb3vo1",
+      "digest": "9M6CwXUFcv5QyuF2ipKaZHM64kPSf7uHWEhBHSGioNdf",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -15,7 +15,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "CoBL4svmiKTc8w5qR5uqz8LcKEGCdyKMhT1EDcDZX5E5",
+      "digest": "ATD9JbkdbyCQHA5pwskryUt5DUkrpNcWZymd9X2cAuJj",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -25,7 +25,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "6b8poks2Ch1Q5Begizwnxk6U92dZ54Ad9b9UDPqsgUcN",
+      "digest": "6t8Z1whLTP6AxfENHT9Ut67ibX6MNSmCKDNpa9s2mcRs",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -35,7 +35,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "C58XH67nrq6DH36Ai1mB5xD8y3DCSHw27sDB8fC2X621",
+      "digest": "966f2cMPUyG685Aw5e8RcErK4UxuMBHJt9G5uQPWbbEs",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -45,7 +45,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "F5Y4HtzokkZ8AnK2mqh1UonyqSoitKC2qfryN1XyUf6p",
+      "digest": "8nDHrw2RcWp3YrEUjPHGJhxH1zNCQcmdoyhQSYgxfir",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -56,6 +56,7 @@
     }
   ],
   "device_count": 1000,
+  "revoked_device": "Retained owner cap excluded before batching on initial run, resume and repeat",
   "approvals_per_1000": 5,
   "partial_failure_resume": "200 confirmed, rejected second chunk, resumed 800; complete rerun requests zero approvals"
 }

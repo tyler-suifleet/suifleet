@@ -99,13 +99,24 @@ let stage = "startup";
       }
     }
     assert.equal(devices.length, 1000);
+    // An extra revoked identity retains its cap but must never poison the
+    // thousand healthy devices or reappear as eligible on resume.
+    const revokedTx = new Transaction();
+    const [revokedDevice] = protocol.calls.device_registry_register_device(revokedTx, packageId, registryId, "revoked-batch", deviceSigner.toSuiAddress(), "aarch64", "0x6");
+    const [revokedCap] = protocol.calls.device_registry_activate_device(revokedTx, packageId, registryId, revokedDevice);
+    protocol.calls.device_registry_revoke_device(revokedTx, packageId, registryId, revokedCap);
+    revokedTx.transferObjects([revokedCap], operator.toSuiAddress());
+    const revokedResult = await execute(revokedTx);
+    const revokedCapId = Object.keys(revokedResult.objectTypes).find(id => revokedResult.objectTypes[id].endsWith("::device_registry::DeviceOwnerCap"));
+    const { object: revokedObject } = await client.getObject({ objectId: revokedCapId, include: { content: true } });
+    const revoked = { objectId: protocol.device_registry_DeviceOwnerCapBcs.parse(revokedObject.content).device_id, ownerCapId: revokedCapId };
     const limits = { ...budgetLib.DEFAULT_LIMITS, floatCap: 1000n, periodAllowance: 2000n };
     stage = "create budget";
     await execute(budgetLib.buildCreateBudgetTx(10000000n, limits, 0n, operator.toSuiAddress()));
     const budget = (await budgetLib.fetchBudgets(client, operator.toSuiAddress()))[0];
     const reads = batchLib.enrollmentReads(client, operator.toSuiAddress(), budget.id);
     let approvals = 0, reject = true;
-    const options = { devices, ...reads,
+    const options = { devices: [devices[0], revoked, ...devices.slice(1)], ...reads,
       prepare: tx => batchLib.prepareEnrollment(tx, client, operator.toSuiAddress()),
       execute: async tx => {
         if (reject && approvals === 1) throw new Error("fixture user rejection");
@@ -126,6 +137,7 @@ let stage = "startup";
     reject = false;
     stage = "resume enrollment";
     const resumed = await batchLib.enrollBudgetDevices(options);
+    assert.deepEqual(resumed.excluded, [{ deviceId: revoked.objectId, reason: "Device identity revoked" }]);
     assert.equal(resumed.skipped, 200); assert.equal(resumed.confirmed, 800);
     assert.equal(approvals, 5);
     const final = await reads.readBudget();
@@ -138,6 +150,8 @@ let stage = "startup";
     }
     const repeat = await batchLib.enrollBudgetDevices(options);
     assert.equal(repeat.skipped, 1000); assert.equal(approvals, 5);
+    assert.equal(repeat.excluded.length, 1);
+    evidence.revoked_device = "Retained owner cap excluded before batching on initial run, resume and repeat";
     evidence.approvals_per_1000 = approvals;
     evidence.partial_failure_resume = "200 confirmed, rejected second chunk, resumed 800; complete rerun requests zero approvals";
     console.log(JSON.stringify(evidence, null, 2));
