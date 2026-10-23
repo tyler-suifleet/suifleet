@@ -108,7 +108,7 @@ def run(binary):
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 30\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n')
             log = (root / "daemon.log").open("w")
 
             def state():
@@ -279,7 +279,7 @@ def run_helper(binary):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nmode = "privileged-helper"\n'
                 f'firmware_spool = {json.dumps(str(spool))}\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n')
             # The firmware updater: records each run, blocks while `hold` exists
             # (the helper holds its claim meanwhile), fails while `fail` exists.
             script = f"echo ran >> {applied}; while [ -e {hold} ]; do sleep 0.1; done; [ ! -e {fail} ]"

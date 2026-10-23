@@ -125,7 +125,7 @@ def run(binary, receipt):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{ota.DEVICE}"\ndevice_cap_id = "{ota.CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 f'[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\ncomponent_stop_timeout_seconds = 3\n'
                 f'[budget]\nbudget_id = "{budget.BUDGET}"\nlow_water_mist = {budget.LOW_WATER}\ndraw_mist = {budget.DRAW}\n')
 

@@ -52,7 +52,7 @@ def run(binary):
             cfg = root/'config.toml'
             cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+
                 f'[device]\nkeypair_path="{key}"\ndevice_object_id="{DEVICE}"\ndevice_cap_id="{CAP}"\n'+
-                f'[apply]\ncommand="{sys.executable} {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\npoll_seconds=1\n')
+                f'[apply]\ncommand="{sys.executable} {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\npoll_seconds=1\nevent_discovery_seconds=1\n')
             def state():
                 p=root/'state/state.json'
                 return json.loads(p.read_text()) if p.exists() else {}

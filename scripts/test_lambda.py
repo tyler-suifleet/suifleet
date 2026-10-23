@@ -95,7 +95,7 @@ def run(evidence=None):
         config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
             f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
             f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = "/bin/false"\n'
-            f'[runtime]\nstate_dir = "{root / "state"}"\npoll_seconds = 1\n'
+            f'[runtime]\nstate_dir = "{root / "state"}"\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
             f'[ipc]\nsocket = "{socket_path}"\nadministrators = [0]\n'
             f'[ipc.components.sensor]\nuid = {SENSOR}\noperations = ["publish"]\n' + publish.format('sensor', '"sensors/*"') +
             f'[ipc.components.other]\nuid = {OTHER}\noperations = ["publish"]\n' + publish.format('other', '"sensors/*"') +

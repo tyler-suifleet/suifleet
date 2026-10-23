@@ -120,7 +120,7 @@ def inside(args):
         f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
         f'[walrus]\naggregator_url = "{url}"\n'
         '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\n'
-        '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\n'
+        '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
         f'[daemon_update]\nenabled = true\ncomponent = "{COMPONENT}"\nmax_start_attempts = 2\n')
     for path in (etc / "deployment.json", etc / "config.toml"):
         path.chmod(0o644)
