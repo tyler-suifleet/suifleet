@@ -8,6 +8,7 @@ import { fromBase64, normalizeSuiAddress as id, normalizeStructTag, toHex } from
 import { EncryptedObject, ExpiredSessionKeyError, SealClient, type SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
+import { ObjectError } from '@mysten/sui/client';
 import { AnchorBcs, readDeviceData, readFleetData, type FleetDataConfig } from './fleet-data';
 import { readIdentity } from './telemetry';
 import { FleetStorageBcs } from './fleet-budget';
@@ -49,24 +50,58 @@ const exact = (v: object, fields: string[]) => Object.keys(v).sort().join() === 
 export const archiveAad = (config: FleetDataConfig, anchor: Anchor) => new TextEncoder().encode(
   `suifleet/fleet-data/v1/${config.chainIdentifier}/${config.fleetId}/${anchor.seq}/${anchor.kind}`);
 
-/** Fetch a bounded page from the chain's per-device index, never a relay index. */
-export async function readAnchors(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<Anchor[]> {
+async function readAnchorField(client: SuiGrpcClient, config: FleetDataConfig, writerId: string, index: bigint): Promise<Anchor | undefined> {
+  let field;
+  try {
+    field = await client.getDynamicField({ parentId: writerId, name: {
+      type: `${config.typeOrigin}::fleet_data::AnchorKey`, bcs: bcs.struct('AnchorKey', { index: bcs.u64() }).serialize({ index }).toBytes(),
+    } });
+  } catch (error) {
+    // SF-129 owners prune expired archives; their indices are never reused.
+    if (error instanceof ObjectError && error.reason === 'notFound') return undefined;
+    throw error;
+  }
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`)) throw Error('Invalid archive index type');
+  return AnchorBcs.parse(field.dynamicField.value.bcs);
+}
+
+export interface AnchorEntry { index: number; anchor: Anchor }
+/** Pruned indices read per page beyond `limit`; callers continue from `next`. */
+const PRUNED_GAP_READS = 256;
+
+/** Fetch a bounded page from the chain's per-device index, never a relay index.
+ * Pruned indices are skipped; `next` is the first index not yet read. */
+export async function readAnchorEntries(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<{ entries: AnchorEntry[]; next: number }> {
   await readFleetData(client, config);
   if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw Error('Invalid archive page');
   const writer = await readDeviceData(client, config, deviceId);
-  if (!writer) return [];
+  if (!writer) return { entries: [], next: start };
   const count = BigInt(writer.anchor_count);
-  const anchors: Anchor[] = [];
-  for (let index = BigInt(start); index < count && anchors.length < limit; index++) {
-    const field = await client.getDynamicField({ parentId: writer.id, name: {
-      type: `${config.typeOrigin}::fleet_data::AnchorKey`, bcs: bcs.struct('AnchorKey', { index: bcs.u64() }).serialize({ index }).toBytes(),
-    } });
-    if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`)) throw Error('Invalid archive index type');
-    const anchor = AnchorBcs.parse(field.dynamicField.value.bcs);
-    if (BigInt(anchor.seq) > BigInt(writer.batch_seq) || (anchors.length && BigInt(anchor.seq) <= BigInt(anchors[anchors.length - 1].seq))) throw Error('Archive index sequence mismatch');
-    anchors.push(anchor);
+  const entries: AnchorEntry[] = [];
+  let index = BigInt(start), reads = 0;
+  for (; index < count && entries.length < limit && reads < limit + PRUNED_GAP_READS; index++, reads++) {
+    const anchor = await readAnchorField(client, config, writer.id, index);
+    if (!anchor) continue;
+    const previous = entries[entries.length - 1]?.anchor;
+    if (BigInt(anchor.seq) > BigInt(writer.batch_seq) || (previous && BigInt(anchor.seq) <= BigInt(previous.seq))) throw Error('Archive index sequence mismatch');
+    entries.push({ index: Number(index), anchor });
   }
-  return anchors;
+  return { entries, next: Number(index) };
+}
+
+export async function readAnchors(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<Anchor[]> {
+  return (await readAnchorEntries(client, config, deviceId, start, limit)).entries.map((entry) => entry.anchor);
+}
+
+/** Exactly one index: undefined when out of range or pruned, never a neighbour. */
+export async function readAnchorAt(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, index: number): Promise<Anchor | undefined> {
+  await readFleetData(client, config);
+  if (!Number.isSafeInteger(index) || index < 0) throw Error('Invalid archive index');
+  const writer = await readDeviceData(client, config, deviceId);
+  if (!writer || BigInt(index) >= BigInt(writer.anchor_count)) return undefined;
+  const anchor = await readAnchorField(client, config, writer.id, BigInt(index));
+  if (anchor && BigInt(anchor.seq) > BigInt(writer.batch_seq)) throw Error('Archive index sequence mismatch');
+  return anchor;
 }
 
 /** Also used after fetching: the anchor's signer is historical chain authority,
@@ -207,8 +242,8 @@ export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataC
 export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>,
   config: FleetDataConfig, deviceId: string, index: number, aggregator: string,
   decrypt: (encryptedObject: Uint8Array) => Promise<Uint8Array>, fetcher: typeof fetch = fetch): Promise<Archive> {
-  const [anchor] = await readAnchors(client, config, deviceId, index, 1);
-  if (!anchor) throw Error('Archive index does not exist');
+  const anchor = await readAnchorAt(client, config, deviceId, index);
+  if (!anchor) throw Error('Archive index does not exist or was pruned after expiry');
   const state = await walrus.systemState();
   await requireArchiveReadable(client, config, deviceId, anchor, state.committee.epoch);
   const { blobIdFromInt } = await import('@mysten/walrus');
