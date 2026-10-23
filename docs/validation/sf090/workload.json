@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "status": "candidate-not-a-capacity-claim",
+  "producer_pin": "81a4d2e6e8b94a62b7e1b682ba9bdf115367e634",
+  "devices": 128,
+  "concurrency": 4,
+  "rounds": 3,
+  "record_payload_bytes": [16384, 262144, 1048576],
+  "health_cadence_seconds": 3600,
+  "archive_cadence_seconds": 86400,
+  "logs_per_archive": 1024,
+  "retention_epochs": 3,
+  "browser_devices": 128,
+  "browser_page_limit": 100,
+  "retry": {"attempts": 3, "base_delay_ms": 10, "max_delay_ms": 40},
+  "thresholds": {
+    "sign_encrypt_p95_ms": 5000,
+    "verified_fetch_p95_ms": 5000,
+    "health_page_p95_ms": 5000,
+    "index_page_p95_ms": 1000,
+    "unexpected_failures": 0,
+    "peak_rss_bytes": 1073741824,
+    "max_attempts_per_operation": 3,
+    "public_testnet_run_ceiling_mist": 800000000
+  },
+  "targets": {
+    "fixture": "in-process BCS adapters and loopback-equivalent fetch responses; no external I/O",
+    "isolated_chain": "disposable network-none Sui gRPC loopback; synthetic WAL/storage only where explicitly identified",
+    "public_sui": "https://fullnode.testnet.sui.io:443 (chain 4c78adac)",
+    "public_walrus": "https://aggregator.walrus-testnet.walrus.space",
+    "public_seal": "deployment-specific verified provider object IDs; never infer from a URL"
+  },
+  "provider_quotas": {
+    "rpc": null,
+    "walrus_gateway": null,
+    "seal": null,
+    "meaning_of_null": "unquoted/unverified; no availability, throughput, paid quota or production price asserted"
+  }
+}
