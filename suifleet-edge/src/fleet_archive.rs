@@ -47,11 +47,14 @@ struct Pending {
     #[serde(default)] certificate: Option<Certificate>,
     #[serde(default)] certification_digest: Option<String>,
     #[serde(default)] anchor_digest: Option<String>,
+    /// Fingerprint of the archived shadow snapshot (schema 2), if any.
+    #[serde(default)] shadows: String,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate { pub signature: String, pub bitmap: String, pub message: String }
 #[derive(Default, Serialize, Deserialize)]
 struct Completed { crash: String, #[serde(default)] request_seq: u64,
+    #[serde(default)] shadows: String,
     #[serde(default)] seq: u64, #[serde(default)] registration: Option<String>,
     #[serde(default)] certification: Option<String>, #[serde(default)] anchor: Option<String> }
 fn atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
@@ -130,6 +133,12 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         let diagnostics = request_seq > completed.request_seq;
         let crash = !fingerprint.is_empty() && fingerprint != completed.crash;
         let kind = if diagnostics { 1 } else if crash { 2 } else { 0 };
+        // SF-084: with shadows enabled every archive carries their current
+        // documents (schema 2), and a change archives on the routine cadence.
+        let shadows = task.services.lock().unwrap().health_sources().shadows.map(|store| store.lock().unwrap().snapshot());
+        let shadow_fingerprint = match &shadows { Some(s) => hex::encode(Sha256::digest(serde_json::to_vec(s)?)), None => String::new() };
+        let shadows_changed = shadows.is_some() && shadow_fingerprint != completed.shadows;
+        let shadow_bytes = match &shadows { Some(s) => serde_json::to_vec(s)?.len(), None => 0 };
         let last = if kind != 0 { writer.emergency_at_ms } else { writer.batch_at_ms };
         let interval = if kind != 0 { fleet.emergency_interval_ms } else { fleet.batch_interval_ms };
         if last.is_some_and(|at| now < at.saturating_add(interval)) { return Ok(()); }
@@ -143,16 +152,19 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
             anyhow::ensure!(batch.chain_identifier == fleet.chain_identifier && crate::sui_client::same_id(&batch.registry, &fleet.registry_id.to_string())
                 && crate::sui_client::same_id(&batch.device_id,&task.device_id) && crate::sui_client::same_id(&batch.signer,&task.signer.address()), "foreign log spool binding");
             let size = message.len();
-            if bytes + size > 2*1024*1024 || records.len() + batch.records.len() > 4096 { break; }
+            // The shadow snapshot shares the plaintext budget with the logs.
+            if bytes + size + shadow_bytes > 2*1024*1024 || records.len() + batch.records.len() > 4096 { break; }
             bytes += size; logs.push(seq); dropped_lines = dropped_lines.max(batch.dropped_lines);
             records.extend(batch.records.into_iter().map(|r| Record { source: r.source, line: r.line }));
         }
-        if records.is_empty() && kind == 0 { return Ok(()); }
+        if records.is_empty() && kind == 0 && !shadows_changed { return Ok(()); }
         if kind != 0 && records.len() < 4096 { records.push(Record { source: "daemon".into(), line: if diagnostics { "Owner/support diagnostic request observed" } else { "Supervised component crash observed" }.into() }); }
+        if records.is_empty() { records.push(Record { source: "daemon".into(), line: "Shadow state snapshot".into() }); }
         let seq = writer.batch_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("archive sequence exhausted"))?;
-        let archive = Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: fleet.chain_identifier.clone(),
+        let archive = Archive { kind: "fleet-data".into(), chain_identifier: fleet.chain_identifier.clone(),
             registry: fleet.registry_id.to_string(), fleet_id: fleet.id.to_string(), device_id: task.device_id.clone(), signer: task.signer.address(),
-            seq, observed_ms: telemetry::now_ms(), reason: ["logs", "diagnostics", "crash"][kind as usize].into(), dropped_lines, records };
+            seq, observed_ms: telemetry::now_ms(), reason: ["logs", "diagnostics", "crash"][kind as usize].into(), dropped_lines, records,
+            schema: if shadows.is_some() { 2 } else { 1 }, shadows };
         archive.validate()?;
         let message = zeroize::Zeroizing::new(serde_json::to_vec(&archive)?);
         let signature = task.signer.sign_personal_message(&message)?;
@@ -168,7 +180,7 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         let encoded = codec(task, config, &dir, "prepare", json!({})).await?;
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
             blob_id: string(&encoded,"blob_id")?, root_hash: string(&encoded,"root_hash")?, ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
-            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None };
+            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, shadows: shadow_fingerprint };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
     // Never regenerate ciphertext or purchase again after an uncertain submit.
@@ -178,7 +190,7 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         task.sui.verify_archive_anchor(&task.config, pending.anchor_index, pending.seq, &pending.ciphertext_sha256).await?;
         for (seq,path) in spool.pending()? { if pending.logs.contains(&seq) { std::fs::remove_file(path)?; } }
         std::fs::File::open(dir.join("logs"))?.sync_all()?;
-        atomic(&dir.join("completed.json"), &serde_json::to_vec(&Completed { crash: pending.fingerprint, request_seq: pending.request_seq, seq: pending.seq, registration: pending.registration, certification: pending.certification_digest, anchor: pending.anchor_digest })?)?;
+        atomic(&dir.join("completed.json"), &serde_json::to_vec(&Completed { crash: pending.fingerprint, request_seq: pending.request_seq, shadows: pending.shadows, seq: pending.seq, registration: pending.registration, certification: pending.certification_digest, anchor: pending.anchor_digest })?)?;
         for name in ["register.bcs", "certify.bcs", "anchor.bcs", "register.checkpoint", "certify.checkpoint", "anchor.checkpoint"] {
             match std::fs::remove_file(dir.join(name)) { Ok(()) => (), Err(e) if e.kind() == std::io::ErrorKind::NotFound => (), Err(e) => return Err(e.into()) }
         }

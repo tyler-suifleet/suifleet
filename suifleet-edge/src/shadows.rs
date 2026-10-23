@@ -548,6 +548,31 @@ impl Store {
         (self.live() as u64, self.refused, self.sync_status.iter().map(|(name, status)| (name.clone(), status.clone())).collect())
     }
 
+    /// Every existing shadow's documents for the encrypted fleet archive
+    /// (SF-084), by name, within [`crate::fleet_data::MAX_SHADOW_SNAPSHOT`];
+    /// shadows beyond it are only counted.
+    pub fn snapshot(&self) -> crate::fleet_data::ShadowSnapshot {
+        let mut snapshot = crate::fleet_data::ShadowSnapshot::default();
+        // The empty envelope plus a separating comma per document.
+        let mut bytes = serde_json::to_vec(&snapshot).map_or(0, |b| b.len()) + 24;
+        for record in self.records.values() {
+            let Some(document) = &record.document else { continue };
+            let doc = crate::fleet_data::ShadowDocument {
+                name: record.name.clone(), version: record.version, updated_ms: record.updated_ms,
+                desired: section(document, "desired").cloned(), reported: section(document, "reported").cloned(),
+                delta: delta_of(document),
+            };
+            let size = serde_json::to_vec(&doc).map_or(usize::MAX, |b| b.len()) + 1;
+            if bytes.saturating_add(size) > crate::fleet_data::MAX_SHADOW_SNAPSHOT {
+                snapshot.omitted += 1;
+                continue;
+            }
+            bytes += size;
+            snapshot.documents.push(doc);
+        }
+        snapshot
+    }
+
     pub fn set_sync_status(&mut self, name: &str, status: Value) {
         self.sync_status.insert(name.into(), status);
     }

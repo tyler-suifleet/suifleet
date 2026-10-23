@@ -1,0 +1,522 @@
+{
+  "description": "SF-084 shadow snapshots in schema-2 fleet archives (suifleet-edge/src/fleet_data.rs ShadowSnapshot::validate and dapp/src/lib/shadow-documents.ts parseShadowSnapshot). Each case is the archive's `shadows` value and whether both parsers accept it. Document size limits are checked by the daemon before signing and are not repeated here.",
+  "cases": [
+    {
+      "name": "classic and named shadows",
+      "shadows": {
+        "documents": [
+          {
+            "name": "",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "mode": "eco",
+              "fan": {
+                "speed": 2,
+                "auto": true
+              }
+            },
+            "reported": {
+              "mode": "eco",
+              "fan": {
+                "speed": 1,
+                "auto": true
+              }
+            },
+            "delta": {
+              "fan": {
+                "speed": 2
+              }
+            }
+          },
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "no shadows",
+      "shadows": {
+        "documents": [],
+        "omitted": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "only desired: all of it is the delta",
+      "shadows": {
+        "documents": [
+          {
+            "name": "d",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "a": [
+                1,
+                2
+              ]
+            },
+            "reported": null,
+            "delta": {
+              "a": [
+                1,
+                2
+              ]
+            }
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "1 equals 1.0; arrays compare whole",
+      "shadows": {
+        "documents": [
+          {
+            "name": "n",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "x": 1,
+              "y": [
+                1,
+                2
+              ]
+            },
+            "reported": {
+              "x": 1.0,
+              "y": [
+                2,
+                1
+              ]
+            },
+            "delta": {
+              "y": [
+                1,
+                2
+              ]
+            }
+          }
+        ],
+        "omitted": 2
+      },
+      "valid": true
+    },
+    {
+      "name": "a __proto__ key is plain data",
+      "shadows": {
+        "documents": [
+          {
+            "name": "p",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "__proto__": {
+                "a": 1
+              }
+            },
+            "reported": {},
+            "delta": {
+              "__proto__": {
+                "a": 1
+              }
+            }
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "eight levels",
+      "shadows": {
+        "documents": [
+          {
+            "name": "deep",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "k": {
+                "k": {
+                  "k": {
+                    "k": {
+                      "k": {
+                        "k": {
+                          "k": {
+                            "k": 1
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": true
+    },
+    {
+      "name": "nine levels",
+      "shadows": {
+        "documents": [
+          {
+            "name": "deep",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "k": {
+                "k": {
+                  "k": {
+                    "k": {
+                      "k": {
+                        "k": {
+                          "k": {
+                            "k": {
+                              "k": 1
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "inconsistent delta",
+      "shadows": {
+        "documents": [
+          {
+            "name": "",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "mode": "eco",
+              "fan": {
+                "speed": 2,
+                "auto": true
+              }
+            },
+            "reported": {
+              "mode": "eco",
+              "fan": {
+                "speed": 1,
+                "auto": true
+              }
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "delta of reported-only keys",
+      "shadows": {
+        "documents": [
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {
+              "uptime": 9
+            }
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "unsorted names",
+      "shadows": {
+        "documents": [
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {}
+          },
+          {
+            "name": "",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": {
+              "mode": "eco",
+              "fan": {
+                "speed": 2,
+                "auto": true
+              }
+            },
+            "reported": {
+              "mode": "eco",
+              "fan": {
+                "speed": 1,
+                "auto": true
+              }
+            },
+            "delta": {
+              "fan": {
+                "speed": 2
+              }
+            }
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "duplicate names",
+      "shadows": {
+        "documents": [
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {}
+          },
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown document field",
+      "shadows": {
+        "documents": [
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            },
+            "delta": {},
+            "token": "secret"
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "missing document field",
+      "shadows": {
+        "documents": [
+          {
+            "name": "cfg",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "uptime": 9
+            }
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown snapshot field",
+      "shadows": {
+        "documents": [],
+        "omitted": 0,
+        "more": true
+      },
+      "valid": false
+    },
+    {
+      "name": "null inside a section",
+      "shadows": {
+        "documents": [
+          {
+            "name": "z",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "a": null
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "null inside an array",
+      "shadows": {
+        "documents": [
+          {
+            "name": "z",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "a": [
+                null
+              ]
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "array section",
+      "shadows": {
+        "documents": [
+          {
+            "name": "z",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": [
+              1
+            ],
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "invalid name",
+      "shadows": {
+        "documents": [
+          {
+            "name": "bad name",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "a": 1
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "name too long",
+      "shadows": {
+        "documents": [
+          {
+            "name": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+            "version": 3,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "a": 1
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "negative version",
+      "shadows": {
+        "documents": [
+          {
+            "name": "v",
+            "version": -1,
+            "updated_ms": 1792113000000,
+            "desired": null,
+            "reported": {
+              "a": 1
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe update time",
+      "shadows": {
+        "documents": [
+          {
+            "name": "v",
+            "version": 3,
+            "updated_ms": 9007199254740992,
+            "desired": null,
+            "reported": {
+              "a": 1
+            },
+            "delta": {}
+          }
+        ],
+        "omitted": 0
+      },
+      "valid": false
+    },
+    {
+      "name": "negative omitted",
+      "shadows": {
+        "documents": [],
+        "omitted": -1
+      },
+      "valid": false
+    }
+  ]
+}
