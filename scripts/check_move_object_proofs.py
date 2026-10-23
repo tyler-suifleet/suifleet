@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Gate the supported fresh two-slot DOF fixture; arbitrary heaps remain pending.
+"""Gate native allocation, arbitrary DOF inputs and ownership preservation.
 
-This never treats an unsupported projection rejection as a successful proof.
-The separate arbitrary-input add/custody obligations must pass before SF050 Review.
+Every negative executes the real solver; unsupported projection rejections are
+separate coverage limits, never successful property proofs.
 """
 import argparse
 import os
@@ -27,29 +27,47 @@ def main():
                "--prover-source", str(tools / "sui-prover"),
                "--framework-packages", str(tools / "framework"),
                "--prover-binary", str(tools / "sui-prover/target/release/sui-prover")]
-    phases = {f"object_fields::object_roundtrip_spec_{p}" for p in ("Check", "Assume", "SpecNoAbortCheck")}
-    cases = [(None, None), ("object-omit-outer", "0x8C"),
-             ("object-omit-child", "0x8D"), ("object-skip-clear", "0x90"),
-             ("object-wrong-owner", "0x8D"), ("object-wrong-id", "0x8D")]
-    for control, abort in cases:
-        extra = ["--include-object-fixtures", "--functions", "object_roundtrip_spec"]
-        if control:
-            extra += ["--native-model-control", control]
-        result = subprocess.run(command + extra, env=env, text=True, capture_output=True)
+    targets = ["object_roundtrip_spec", "object_add_slots_spec", "object_frame_spec",
+               "allocation_model_spec", "allocation_distinct_spec",
+               "object_local_ownership_spec", "object_return_ownership_spec"]
+    result = subprocess.run(command + ["--include-object-fixtures", "--functions", *targets],
+                            env=env, text=True, capture_output=True)
+    output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout + result.stderr)
+    expected = {f"object_fields::{f}_{p}" for f in targets for p in ("Check", "Assume", "SpecNoAbortCheck")}
+    if (result.returncode != 0 or "❌" in output or "Verification successful" not in output
+            or not expected <= set(re.findall(r"✅ (\w+::\w+)", output))):
+        raise RuntimeError("Native positive obligations failed:\n" + output)
+    print(f"PASS: {len(expected)} native allocation/DOF/ownership phase obligations", flush=True)
+    cases = [("object-omit-outer", "object_roundtrip_spec", "0x8C"),
+             ("object-omit-child", "object_roundtrip_spec", "0x8D"),
+             ("object-skip-clear", "object_roundtrip_spec", "0x90"),
+             ("object-wrong-owner", "object_roundtrip_spec", "0x8D"),
+             ("object-wrong-id", "object_roundtrip_spec", "0x8D"),
+             ("allocator-freeze-counter", "allocation_distinct_spec", "0xB0"),
+             ("allocator-reuse-result", "allocation_distinct_spec", "0xB0"),
+             ("allocator-last-increments", "allocation_model_spec", None),
+             ("object-retain-owner", "object_return_ownership_spec", None)]
+    for control, target, abort in cases:
+        result = subprocess.run(command + ["--include-object-fixtures", "--functions", target,
+                                          "--native-model-control", control],
+                                env=env, text=True, capture_output=True)
         output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout + result.stderr)
-        passed = set(re.findall(r"✅ (\w+::\w+)", output))
-        failed = re.findall(r"❌ (\w+::\w+)", output)
-        if control:
-            valid = (result.returncode == 1 and failed == ["object_fields::object_roundtrip_spec_Check"]
-                     and phases - set(failed) <= passed
-                     and "error: code should not abort" in output
-                     and "abort happened here with code " + abort in output
-                     and "exiting with verification errors" in output)
+        failed = set(re.findall(r"❌ (\w+::\w+)", output))
+        expected_failed = {f"object_fields::{target}_Check"}
+        if control == "object-retain-owner":
+            expected_failed.add(f"object_fields::{target}_Assume")
+            diagnostic = "error: VM local-child ownership separation"
+        elif control == "allocator-last-increments":
+            diagnostic = "error: code should not abort"
         else:
-            valid = result.returncode == 0 and not failed and phases <= passed and "Verification successful" in output
-        if not valid:
-            raise RuntimeError(f"Unexpected DOF proof result ({control}):\n{output}")
-        print("PASS: " + (control or "fresh DOF roundtrip: 3 phase obligations"), flush=True)
+            diagnostic = "abort happened here with code " + abort
+        expected_passed = {f"object_fields::{target}_{p}" for p in ("Check", "Assume", "SpecNoAbortCheck")} - expected_failed
+        if (result.returncode != 1 or failed != expected_failed
+                or not expected_passed <= set(re.findall(r"✅ (\w+::\w+)", output))
+                or diagnostic not in output or "exiting with verification errors" not in output
+                or "timed out" in output or "hard timeout" in output or "compilation errors" in output):
+            raise RuntimeError(f"Unexpected native negative result ({control}):\n{output}")
+        print("PASS: " + control, flush=True)
     result = subprocess.run(command + ["--include-overlap-fixtures", "--functions",
                                       "overlap_same_spec", "overlap_different_spec"],
                             env=env, text=True, capture_output=True)

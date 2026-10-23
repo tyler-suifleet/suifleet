@@ -11,7 +11,15 @@ import sys
 
 
 def mutate(text, kind):
-    if kind == "missing-tag-clear":
+    if kind.startswith("allocator-"):
+        operation = "NativeLastCreatedId" if kind == "allocator-last-increments" else "NativeFreshId"
+        pattern = r"(procedure \{:inline 1\} \$" + operation + r"\(.*?\n\})"
+        old, new = {
+            "allocator-freeze-counter": ("    $NativeCounter := $NativeCounter + 1;", ""),
+            "allocator-reuse-result": ("    id := expected;", "    id := $NativeDeriveId($NativeDigest, 0);"),
+            "allocator-last-increments": ("    id := $NativeDeriveId($NativeDigest, $NativeCounter - 1);", "    id := $NativeDeriveId($NativeDigest, $NativeCounter - 1);\n    $NativeCounter := $NativeCounter + 1;"),
+        }[kind]
+    elif kind == "missing-tag-clear":
         pattern = r"(procedure \{:inline 2\} \$2_dynamic_field_remove'u64_u64_\$2_object_UID'\(.*?\n\})"
         old = "RemoveTable(t->$dynamic_tags'u64', enc_k)"
         new = "t->$dynamic_tags'u64'"
@@ -20,10 +28,11 @@ def mutate(text, kind):
         old = "t->$dynamic_fields'u64_bool'"
         new = "t->$dynamic_fields'u64_u64'"
     elif kind.startswith("object-"):
-        operation = "remove" if kind == "object-skip-clear" else "add"
+        operation = "remove" if kind in ("object-skip-clear", "object-retain-owner") else "add"
         pattern = (r"(procedure \{:inline 2\} \$2_dynamic_object_field_" + operation
                    + r"'u64_\$51_object_fields_Child_\$51_object_fields_Parent'\(.*?\n\})")
         statements = {
+            "object-retain-owner": "    t := $Update'$51_object_fields_Parent'_child_owners(t, RemoveTable(t->$child_owners, child));",
             "object-omit-outer": "    t := $Update'$51_object_fields_Parent'_dynamic_fields'$2_dynamic_object_field_Wrapper'u64'_$2_object_ID'(t, AddTable(t->$dynamic_fields'$2_dynamic_object_field_Wrapper'u64'_$2_object_ID', outer, id));",
             "object-omit-child": "    t := $Update'$51_object_fields_Parent'_dynamic_fields'u64_$51_object_fields_Child'(t, AddTable(t->$dynamic_fields'u64_$51_object_fields_Child', child, v));",
             "object-skip-clear": "    t := $Update'$51_object_fields_Parent'_dynamic_fields'$2_dynamic_object_field_Wrapper'u64'_$2_object_ID'(t, RemoveTable(t->$dynamic_fields'$2_dynamic_object_field_Wrapper'u64'_$2_object_ID', outer));",

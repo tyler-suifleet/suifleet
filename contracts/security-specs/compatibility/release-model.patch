@@ -45,7 +45,7 @@ index 8f37fd228dd08a44a2b58877597777165e95dbb7..69693dcb3444023c3a911a1db6b58b25
                      .join(", ");
                  if field_defaults.is_empty() {
 diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs b/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
-index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226dbc9bcda 100644
+index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..839cee275a745f978cca75ef34968725227b591a 100644
 --- a/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
 +++ b/crates/move-prover-boogie-backend/src/boogie_backend/bytecode_translator.rs
 @@ -1494,6 +1494,13 @@ impl<'env> StructTranslator<'env> {
@@ -109,7 +109,7 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
          // Skip for table_vec and option as it's handled by native templates
          let skip_is_valid = self.parent.env.table_vec_qid().unwrap()
              == struct_env.get_qualified_id()
-@@ -1632,6 +1654,15 @@ impl<'env> StructTranslator<'env> {
+@@ -1632,6 +1654,27 @@ impl<'env> StructTranslator<'env> {
                              );
                              sep = "  && ";
                          }
@@ -122,10 +122,22 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
 +                                sep = "  && ";
 +                            }
 +                        }
++                        // A live rooted carrier cannot also be its own stored
++                        // child. This is VM resource well-formedness, not a
++                        // private application custody/typed-field invariant.
++                        if dynamic_field_info.object_names(&struct_type).next().is_some() {
++                            let uid = env.uid_qid().expect("Sui UID");
++                            let concrete = mono_analysis::get_info(env).is_used_datatype(env, self.parent.targets, &uid, &[]);
++                            let id = if Some(struct_env.get_qualified_id()) == Some(uid) {
++                                if concrete { "s->$id->$bytes" } else { "s->$content" }
++                            } else if concrete { "s->$id->$id->$bytes" } else { "s->$id->$content" };
++                            emitln!(writer, "{}!ContainsTable(s->$child_owners, {})", sep, id);
++                            sep = "  && ";
++                        }
                          if let Some(vec_set_qid) = self.parent.env.vec_set_qid() {
                              if struct_env.get_qualified_id() == vec_set_qid {
                                  emitln!(
-@@ -2151,6 +2182,74 @@ impl<'env> EnumTranslator<'env> {
+@@ -2151,6 +2194,137 @@ impl<'env> EnumTranslator<'env> {
  // Function Translation
 
  impl<'env> FunctionTranslator<'env> {
@@ -145,7 +157,7 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
 +            // Only the pinned framework owns UID's private constructor.
 +            let module = target.func_env.module_env.get_full_name_str();
 +            let fun = target.func_env.get_name_str();
-+            if module == "0x2::object" && (fun == "new" || fun == "new_uid_from_hash") { return; }
++            if module == "0x2::object" && fun == "new" { return; }
 +            env.error(&target.get_bytecode_loc(at), "native storage projection: unsupported UID constructor");
 +            return;
 +        }
@@ -197,10 +209,81 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
 +        }
 +    }
 +
++    /// Supported VM admission projection: a by-value key object is a local
++    /// resource, never simultaneously a live child of an input carrier. The
++    /// Sui input checker rejects ObjectOwner/duplicate inputs; Move consumes
++    /// noncopy arguments. Assume once at verification entry, assert at calls
++    /// and returns. In particular a bad remove must NOT re-assume separation.
++    fn emit_resource_admission(&self, indices: &[usize], admission: bool, summary: bool) {
++        let env = self.parent.env;
++        let info = dynamic_field_analysis::get_env_info(env);
++        let uid = env.uid_qid().expect("Sui UID");
++        let concrete_uid = mono_analysis::get_info(env).is_used_datatype(env, self.parent.targets, &uid, &[]);
++        // An opaque UID has one uninterpreted identity token. If any address
++        // observation/native allocation uses its fields, mono analysis emits
++        // the concrete layout and this projection uses the actual address.
++        let uid_suffix = if concrete_uid { "->$id->$bytes" } else { "->$content" };
++        let mut carriers = Vec::new();
++        let mut locals = Vec::new();
++        let mut roots = Vec::new();
++        for i in indices.iter().copied().collect::<BTreeSet<_>>() {
++            let ty = self.get_local_type(i);
++            let bare = ty.skip_reference();
++            let Some((qid, _)) = bare.get_datatype() else { continue; };
++            let value = if ty.is_mutable_reference() { format!("$Dereference($t{})", i) } else { format!("$t{}",i) };
++            if info.object_names(bare).next().is_some() {
++                carriers.push(value.clone());
++                let root_id = if Some(qid) == env.uid_qid() { format!("{}{}",value,uid_suffix) } else { format!("{}->$id{}",value,uid_suffix) };
++                let command = if admission || summary { "assume" } else { "assert" };
++                emitln!(self.writer(), "{} !ContainsTable({}->$child_owners, {});", command, value, root_id);
++                if admission {
++                    emitln!(self.writer(), "assume (forall id: int :: ContainsTable({}->$child_owners, id) ==> $NativeAllocated[id]);", value);
++                }
++            }
++            if env.get_struct_qid(qid).get_abilities().has_key() {
++                let st = env.get_struct_qid(qid);
++                let first = st.get_fields().next();
++                if !first.is_some_and(|f| env.symbol_pool().string(f.get_name()).as_str() == "id" && f.get_type().get_datatype().is_some_and(|(id,_)| Some(id) == env.uid_qid())) {
++                    env.error(&self.fun_target.get_loc(), "VM admission projection: only key objects with leading id: UID are supported");
++                    continue;
++                }
++                let id = format!("{}->$id{}", value, uid_suffix);
++                roots.push((i, id.clone(), !ty.is_reference()));
++                if admission { emitln!(self.writer(), "assume $NativeAllocated[{}];", id); }
++                if !ty.is_reference() { locals.push(id); }
++            }
++        }
++        for (i, left, owned) in &roots {
++            for (j, right, other_owned) in &roots {
++                if i < j && (*owned || *other_owned) {
++                    let command = if admission || summary { "assume" } else { "assert" };
++                    emitln!(self.writer(), "{} {} != {};", command, left, right);
++                }
++            }
++        }
++        for carrier in &carriers {
++            for id in &locals {
++                if admission || summary {
++                    emitln!(self.writer(), "assume !ContainsTable({}->$child_owners, {});", carrier, id);
++                } else {
++                    emitln!(self.writer(), "assert {{:msg \"assert_failed{}: VM local-child ownership separation\"}} !ContainsTable({}->$child_owners, {});", self.loc_str(&self.fun_target.get_loc()), carrier, id);
++                }
++            }
++        }
++    }
++
      /// Return whether a specific TempIndex involves in bitwise operations
      pub fn bv_flag_from_map(&self, i: &usize, operation_map: &FuncOperationMap) -> bool {
          let mid = self.fun_target.module_env().get_id();
-@@ -3277,6 +3376,7 @@ impl<'env> FunctionTranslator<'env> {
+@@ -2903,6 +3077,7 @@ impl<'env> FunctionTranslator<'env> {
+
+         // Prelude initialization
+         emitln!(writer, "call $InitVerification();");
++        self.emit_resource_admission(&(0..fun_target.get_parameter_count()).collect_vec(), true, false);
+
+         // Assume reference parameters to be based on the Param(i) Location, ensuring
+         // they are disjoint from all other references. This prevents aliasing and is justified as
+@@ -3277,6 +3452,7 @@ impl<'env> FunctionTranslator<'env> {
 
                              // Get dynamic field arguments
                              let struct_type = Type::Datatype(*mid, *sid, inst.to_owned());
@@ -208,7 +291,7 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
                              let dynamic_field_info =
                                  dynamic_field_analysis::get_env_info(fun_target.global_env());
                              let dynamic_field_names_values = dynamic_field_info
-@@ -3287,6 +3387,8 @@ impl<'env> FunctionTranslator<'env> {
+@@ -3287,6 +3463,8 @@ impl<'env> FunctionTranslator<'env> {
                              let dynamic_args = dynamic_field_names_values
                                  .iter()
                                  .map(|_| "EmptyTable()".to_string())
@@ -217,7 +300,67 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
                                  .collect_vec();
 
                              // Combine all arguments
-@@ -4940,6 +5042,7 @@ impl<'env> FunctionTranslator<'env> {
+@@ -4150,6 +4328,13 @@ impl<'env> FunctionTranslator<'env> {
+                 );
+             }
+             Ret(_, rets) => {
++                let mut boundary = (0..fun_target.get_parameter_count()).filter(|i| self.get_local_type(*i).is_reference()).collect_vec();
++                boundary.extend(rets.iter().copied());
++                // This phase deliberately havocs spec results to check only
++                // specification well-definedness, not program state preservation.
++                if self.style != FunctionTranslationStyle::SpecNoAbortCheck {
++                    self.emit_resource_admission(&boundary, false, self.style == FunctionTranslationStyle::Opaque);
++                }
+                 match self.parent.asserts_mode {
+                     AssertsMode::Check | AssertsMode::SpecNoAbortCheck => {
+                         if FunctionTranslationStyle::Opaque == self.style
+@@ -4403,10 +4588,37 @@ impl<'env> FunctionTranslator<'env> {
+                         );
+                     }
+                     Function(mid, fid, inst) => {
++                      'function_call: {
+                         let inst = &self.inst_slice(inst);
+                         let module_env = env.get_module(*mid);
+                         let callee_env = module_env.get_function(*fid);
+
++                        self.emit_resource_admission(srcs, false, false);
++
++                        // Exact release natives, distinct from legacy Move fields.
++                        if module_env.get_full_name_str() == "0x2::tx_context" {
++                            let name = callee_env.get_name_str();
++                            match name.as_str() {
++                                "fresh_id" => {
++                                    emitln!(self.writer(), "call {} := $NativeFreshId();", str_local(dests[0]));
++                                    break 'function_call;
++                                }
++                                "native_ids_created" => {
++                                    emitln!(self.writer(), "{} := $NativeCounter;", str_local(dests[0]));
++                                    break 'function_call;
++                                }
++                                "last_created_id" => {
++                                    emitln!(self.writer(), "call {} := $NativeLastCreatedId();", str_local(dests[0]));
++                                    break 'function_call;
++                                }
++                                "derive_id" => {
++                                    emitln!(self.writer(), "{} := $NativeDeriveId({}, {});", str_local(dests[0]), str_local(srcs[0]), str_local(srcs[1]));
++                                    break 'function_call;
++                                }
++                                _ => {}
++                            }
++                        }
++
+                         let id = &self.fun_target.func_env.get_qualified_id();
+                         let use_impl = self.style == FunctionTranslationStyle::Opaque
+                             && self.parent.targets.omits_opaque(&id);
+@@ -4930,6 +5142,7 @@ impl<'env> FunctionTranslator<'env> {
+                         // Clear the last track location after function call, as the call inserted
+                         // location tracks before it returns.
+                         *last_tracked_loc = None;
++                      }
+                     }
+                     Pack(mid, sid, inst) => {
+                         let inst = &self.inst_slice(inst);
+@@ -4940,6 +5153,7 @@ impl<'env> FunctionTranslator<'env> {
 
                          // Get dynamic field arguments
                          let struct_type = Type::Datatype(*mid, *sid, inst.to_owned());
@@ -225,7 +368,7 @@ index 3f69c2c67f081651b64f7e030c04155d8caf8cd0..74d8d89d875ead1a3fb91a6e8c2cd226
                          let dynamic_field_info = dynamic_field_analysis::get_env_info(env);
                          let dynamic_field_names_values = dynamic_field_info
                              .dynamic_field_names_values(&struct_type)
-@@ -4949,6 +5052,8 @@ impl<'env> FunctionTranslator<'env> {
+@@ -4949,6 +5163,8 @@ impl<'env> FunctionTranslator<'env> {
                          let dynamic_args = dynamic_field_names_values
                              .iter()
                              .map(|_| "EmptyTable()".to_string())
@@ -615,10 +758,58 @@ index d6b3147eabca070ebbaf075d483177ef2fb8f3ec..54cebe792f4645edc0512c4c21813ec4
 +{%- endif %}
 +{% endmacro object_field_module %}
 diff --git a/crates/move-prover-boogie-backend/src/boogie_backend/prelude/prelude.bpl b/crates/move-prover-boogie-backend/src/boogie_backend/prelude/prelude.bpl
-index 4e7cc390e7a711b8f493ed1bcf277fc5deef428f..641d4c4e86e214e6635538ae827440a0b8b09337 100644
+index 4e7cc390e7a711b8f493ed1bcf277fc5deef428f..c5b5daa24a378e2072c48619aa7aa90536631c30 100644
 --- a/crates/move-prover-boogie-backend/src/boogie_backend/prelude/prelude.bpl
 +++ b/crates/move-prover-boogie-backend/src/boogie_backend/prelude/prelude.bpl
-@@ -1537,7 +1537,7 @@ function {:inline} $SliceVecByRange<T>(v: Vec T, r: $Range): Vec T {
+@@ -221,6 +221,36 @@ function {:inline} $1_integer_div_real(x: int, y: int): real {
+     x / y
+ }
+
++// MODEL TRUST BOUNDARY: pinned Sui native transaction allocation. The digest
++// and counter are runtime state, not the legacy Move TxContext fields. Only
++// fresh_id uses the documented collision-free allocation contract. Hash-derived
++// UID registration does not call this procedure and may reuse a deleted ID.
++var $NativeCounter: int;
++const $NativeDigest: Vec (int);
++var $NativeAllocationHighWater: int;
++var $NativeAllocated: [int]bool;
++function $NativeDeriveId(digest: Vec (int), counter: int): int;
++procedure {:inline 1} $NativeFreshId() returns (id: int) {
++    var expected: int;
++    expected := $NativeDeriveId($NativeDigest, $NativeCounter);
++    // Trusted crypto abstraction applies only to an UNUSED allocation tuple.
++    // Reusing a counter does not get a new freshness assumption; controls must
++    // detect the duplicate rather than make the second call unreachable.
++    if ($NativeCounter >= $NativeAllocationHighWater) {
++        assume $IsValid'address'(expected) && !$NativeAllocated[expected];
++    }
++    id := expected;
++    $NativeAllocated := $NativeAllocated[expected := true];
++    if ($NativeCounter >= $NativeAllocationHighWater) {
++        $NativeAllocationHighWater := $NativeCounter + 1;
++    }
++    $NativeCounter := $NativeCounter + 1;
++}
++procedure {:inline 1} $NativeLastCreatedId() returns (id: int) {
++    if ($NativeCounter == 0) { call $ExecFailureAbort(); return; }
++    id := $NativeDeriveId($NativeDigest, $NativeCounter - 1);
++}
++
+ // sui::tx_context native functions (uninterpreted)
+ function $2_tx_context_native_sender(): int;
+ function $2_tx_context_native_epoch(): int;
+@@ -897,6 +927,10 @@ procedure {:inline 1} $InitVerification() {
+     // Set abort_flag to false, and havoc abort_code
+     $abort_flag := false;
+     havoc $abort_code;
++    // Native counter may include allocations before the verified call.
++    assume 0 <= $NativeCounter && $NativeCounter <= $MAX_U64;
++    // Allocation tuples before the incoming native counter were used already.
++    $NativeAllocationHighWater := $NativeCounter;
+     // Initialize event store
+     call $InitEventStore();
+ }
+@@ -1537,7 +1571,7 @@ function {:inline} $SliceVecByRange<T>(v: Vec T, r: $Range): Vec T {
  // ----------------------------------------------------------------------------------
  // Native dynamic fields implementation for type `({{instance.0.suffix}},{{instance.1.suffix}})`
 
@@ -888,3 +1079,46 @@ index 0ecb48f460f0e6e098fb4713bc2b5eb065eca12d..06bc8d6940a503caf696092cd08211aa
 +    record_new_uid(bytes)
  }
 \ No newline at end of file
+diff --git a/packages/sui-specs/sources/sui-framework/tx_context.move b/packages/sui-specs/sources/sui-framework/tx_context.move
+index fe18a52ff25d6a7739b875cfde456938fb9bf208..cd1a6449879fb5c56672532ff74801a538cf90aa 100644
+--- a/packages/sui-specs/sources/sui-framework/tx_context.move
++++ b/packages/sui-specs/sources/sui-framework/tx_context.move
+@@ -18,38 +18,15 @@ use sui::tx_context::{
+ #[mode(spec), ext(spec_only)]
+ use prover::prover::{ensures, clone};
+
+-#[mode(spec), ext(spec(target = sui::tx_context::fresh_object_address))]
+-fun fresh_object_address_spec(ctx: &mut TxContext): address {
+-    let old_ctx = clone!(ctx);
+-    let result = fresh_object_address(ctx);
+-    ensures(ctx.digest() == old_ctx.digest());
+-    result
+-}
+
+-#[mode(spec), ext(spec(target = sui::tx_context::derive_id))]
+-fun derive_id_spec(tx_hash: vector<u8>, ids_created: u64): address {
+-    derive_id(tx_hash, ids_created)
+-}
+
+-#[mode(spec), ext(spec(target = sui::tx_context::fresh_id))]
+-fun fresh_id_spec(): address {
+-    fresh_id()
+-}
+
+-#[mode(spec), ext(spec(target = sui::tx_context::native_ids_created))]
+-fun native_ids_created_spec(): u64 {
+-    native_ids_created()
+-}
+
+ #[mode(spec), ext(spec(target = sui::tx_context::native_gas_budget))]
+ fun native_gas_budget_spec(): u64 {
+     native_gas_budget()
+ }
+
+-#[mode(spec), ext(spec(target = sui::tx_context::last_created_id))]
+-fun last_created_id_spec(): address {
+-    last_created_id()
+-}
+
+ #[mode(spec), ext(spec(target = sui::tx_context::native_sponsor))]
+ fun native_sponsor_spec(): vector<address> {

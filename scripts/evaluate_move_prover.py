@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--framework-packages", type=Path, required=True)
     parser.add_argument("--prover-binary", type=Path, required=True)
     parser.add_argument("--unknown-occupancy-control", action="store_true", help="Deliberately assert unmodeled occupied slots are impossible; must fail")
-    parser.add_argument("--native-model-control", choices=("missing-tag-clear", "wrong-type-alias", "object-omit-outer", "object-omit-child", "object-skip-clear", "object-wrong-owner", "object-wrong-id"), help="Deliberately mutate an emitted native transition; solver rejection required")
+    parser.add_argument("--native-model-control", choices=("missing-tag-clear", "wrong-type-alias", "object-omit-outer", "object-omit-child", "object-skip-clear", "object-wrong-owner", "object-wrong-id", "allocator-freeze-counter", "allocator-reuse-result", "allocator-last-increments", "object-retain-owner"), help="Deliberately mutate an emitted native transition; solver rejection required")
     parser.add_argument("--include-overlap-fixtures", action="store_true", help="Reproduce unsupported same-Name raw/object overlap; not a proof")
     parser.add_argument("--include-object-fixtures", action="store_true", help="Reproduce real outer Wrapper/ID and UID-bearing child obligations")
     parser.add_argument("--include-carrier-fixtures", action="store_true", help="Reproduce existing-UID carrier reconstruction boundary")
@@ -118,6 +118,8 @@ def main():
         # One proof-only native datatype, no bodies/axioms. Check the untouched
         # release checksum before copying; never edit the executable framework.
         shutil.copyfile(overlay / "integer.move", libraries / "move-stdlib/sources/integer.move")
+        context = libraries / "sui-framework/sources/tx_context.move"
+        context.write_text(context.read_text() + (overlay / "allocation-context-helpers.move").read_text())
         dof = libraries / "sui-framework/sources/dynamic_object_field.move"
         dof.write_text(dof.read_text() + (overlay / "dof-spec-helpers.move").read_text())
         for name in ("prover", "sui-specs", "sui-prover"):
@@ -166,6 +168,8 @@ def main():
                 raw_spec = raw_spec.replace(old, "    ensures(!result);")
             (specs / "sources/raw_field_specs.move").write_text(raw_spec)
         if args.include_carrier_fixtures:
+            object_source = libraries / "sui-framework/sources/object.move"
+            object_source.write_text(object_source.read_text() + (overlay / "object-hashed-fixture.move").read_text())
             shutil.copyfile(ROOT / "contracts/security-native-fixtures/sources/carrier_fields.move", specs / "sources/carrier_fields.move")
             shutil.copyfile(overlay / "carrier-field-spec-helpers.move", specs / "sources/carrier_field_specs.move")
         if args.include_overlap_fixtures:

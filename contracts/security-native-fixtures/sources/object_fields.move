@@ -60,3 +60,19 @@ public fun remove_readd_and_frame(ctx: &mut TxContext) {
     let Parent { id } = p; id.delete();
     let Parent { id } = other; id.delete();
 }
+
+public fun allocation_distinct(ctx: &mut TxContext) {
+    let first = sui::tx_context::fresh_object_address(ctx);
+    let second = sui::tx_context::fresh_object_address(ctx);
+    assert!(first != second, 176);
+}
+
+// No external input owns this child while it is stored. Removal must produce a
+// local resource; the subsequent ordinary call must discharge VM separation.
+public fun remove_and_readd(parent: &mut Parent, name: u64) {
+    let child: Child = dof::remove(&mut parent.id, name);
+    add(parent, name, child);
+}
+public fun take(parent: &mut Parent, name: u64): Child {
+    dof::remove(&mut parent.id, name)
+}

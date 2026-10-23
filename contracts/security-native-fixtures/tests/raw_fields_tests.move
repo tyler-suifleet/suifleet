@@ -86,3 +86,20 @@ fun object_missing() {
 #[test] fun object_readd_mutation_frame() {
     sf050_native::object_fields::remove_readd_and_frame(&mut tx_context::dummy());
 }
+
+#[test] fun native_allocation_observations() {
+    let mut ctx = tx_context::dummy();
+    let legacy_bytes = std::bcs::to_bytes(&ctx);
+    let before = ctx.ids_created();
+    let first = ctx.fresh_object_address();
+    assert!(ctx.ids_created() == before + 1, 171);
+    assert!(ctx.last_created_object_id() == first, 172);
+    assert!(ctx.last_created_object_id() == first, 173);
+    assert!(ctx.ids_created() == before + 1, 174);
+    let second = ctx.fresh_object_address();
+    assert!(ctx.ids_created() == before + 2, 175);
+    assert!(first != second, 176);
+    assert!(ctx.last_created_object_id() == second, 177);
+    assert!(std::bcs::to_bytes(&ctx) == legacy_bytes, 179);
+    sf050_native::object_fields::allocation_distinct(&mut ctx);
+}

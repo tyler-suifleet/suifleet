@@ -63,6 +63,16 @@ def main():
             or "exiting with condition generation errors" not in output or "Verification successful" in output):
         raise RuntimeError("Unsupported carrier reconstruction must fail closed:\n" + output)
     print("PASS: existing-UID reconstruction rejected as unsupported (not proved)", flush=True)
+    result = subprocess.run(command + ["--include-carrier-fixtures", "--functions", "hashed_child_reconstruction_spec"],
+                            env=env, text=True, capture_output=True)
+    output = result.stdout + result.stderr
+    if (result.returncode != 1 or "native storage projection: unsupported UID constructor" not in output
+            or "UID { id: ID { bytes } }" not in output
+            or "exiting with condition generation errors" not in output
+            or "Verification successful" in output or "🔄" in output):
+        raise RuntimeError("Hashed UID reconstruction with prior children must fail closed:\n" + output)
+    print("PASS: hashed-UID existing-child reconstruction rejected (not proved)", flush=True)
+
 
 
 if __name__ == "__main__":
