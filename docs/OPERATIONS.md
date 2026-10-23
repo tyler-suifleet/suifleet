@@ -428,6 +428,8 @@ Not verified:
 
 ## Troubleshooting without losing state
 
+For customer fleet recovery from a clean operator machine, dependency outages, frontend rollback, compromised devices, payment failure and customer exit, follow [FLEET_RECOVERY.md](FLEET_RECOVERY.md) (`make test-fleet-recovery-drill`, `make live-fleet-recovery`).
+
 - Docker unavailable/permissions: fix host daemon access; do not invoke Docker inside the dev container.
 - Missing Python in an old image: rebuild the current Dockerfile; `scripts/test_ota.py` requires Python 3.
 - Wallet/SDK type skew: inspect the dependency graph; migrate/deduplicate the supported version set, not `any` casts.
