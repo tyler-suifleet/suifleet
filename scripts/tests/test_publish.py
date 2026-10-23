@@ -314,7 +314,7 @@ class PublishTests(unittest.TestCase):
     # ── failures after the transaction executed ──────────────────────────────
 
     def test_unrecorded_metadata_keeps_pending_and_prior_config_then_recovers(self):
-        self.run_publish()
+        self.run_publish("--aggregator-mirror", "https://mirror.example")
         prior_env, prior_current = self.env_file.read_text(), (self.records / "dev/current").readlink()
         self.cli.write_published = False
         with self.assertRaisesRegex(publish.PublishError, "EXECUTED") as caught:
@@ -335,6 +335,7 @@ class PublishTests(unittest.TestCase):
         publish.run(self.args("--recover", str(pending)), self.cli, self.chain)
         self.assertEqual(self.transactions(), [])
         self.assertFalse(pending.exists())
+        self.assertEqual(self.manifest()["walrus"]["aggregator_urls"], ["https://mirror.example"])
         self.assertEqual(self.manifest()["call_package_id"], oid(0x102))
         self.assertEqual(self.frontend_manifest(), self.manifest())
 
