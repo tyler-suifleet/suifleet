@@ -2089,6 +2089,79 @@
       "validation": "Dashboard and installer regression tests; compare local output with an explicit GitHub snapshot; no service restarts."
     },
     {
+      "key": "SF-117",
+      "title": "Automatically retry stopped implementation workers after transient model-capacity errors",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/tools/pr-coordinator",
+        "repositories/suifleet/docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requests automatic recovery after SF-082 exited with Selected model is at capacity and remained quarantined. Preserve its same atomic claim, branch, worktree and partial work; never start a duplicate editor or silently switch models. Apply the reusable mechanism to configured projects/families.",
+      "evidence": "SF-082 wrapper exited1 at 2026-10-23T02:10:26Z after provider model-capacity errors, with no result handoff. Operator verified complete stop and manually resumed same claim. Installed SF-116 handles active CI failures but reconcile still quarantines every missing handoff.",
+      "acceptance": [
+        "Classify explicit provider model-capacity failures conservatively from bounded CLI output/structured terminal errors; unrelated crashes, malformed receipts, usage/auth errors and uncertain exits must not be mistaken for retryable capacity.",
+        "Only retry after durable nonzero exit, original PID/start/session descendants and detached claim helpers all verified stopped, unchanged valid In Progress claim, same claimed worktree/branch, and no owner-held shared-resource leases. Preserve all dirty/staged/untracked work and original evidence.",
+        "Persist per-claim bounded exponential backoff and retry budget across scans/restarts, heartbeat retained claims during waits, honor configured family/project execution capacity, and launch at most one replacement with the same configured model and ownership. Exhaustion is visible and retains the claim.",
+        "Expose capacity backoff, next retry and exhaustion in fleet-status without duplicate counts or tokens. Coordinate with dependency-resume/CI-redirect states and do not restart Review/Done/Blocked/expired/changed owners.",
+        "Add meaningful classifier, restart/idempotency, live-descendant/resource/ownership refusal, retry-budget/capacity and real-process exit-to-replacement regressions. Document behavior and exact operational rollout evidence."
+      ],
+      "validation": "Offline coordinator/tracking tests and real fake-CLI process tests, fresh exact-head CI/review, then merged-only automatic runtime activation and live service/dashboard checks; no induced real wallet/hardware writes."
+    },
+    {
+      "key": "SF-118",
+      "title": "Port PR150 repair ownership accounting onto the current dispatcher",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "baseline",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/tools/pr-coordinator"
+      ],
+      "resources": [],
+      "description": "Adopt existing untracked PR150 https://github.com/tyler-suifleet/suifleet/pull/150 into the overnight software queue. Its change is still absent: an unmanaged InProgress implementation claim temporarily controlled by a verified PR feedback repair is counted again against implementation capacity. Port the behavior onto current main rather than merging the stale branch.",
+      "evidence": "Independent read-only audit of main7e899f3 confirms Dispatcher.available still counts unmanaged InProgress owners with no repairing exclusion; legacy headceef969 is not an ancestor. SF116 CI repair-first retains one implementation slot deliberately and must remain distinct.",
+      "acceptance": [
+        "Port the minimal repair ownership accounting fix onto current main with exact authenticated jobs.repair_claim token-digest/key/branch/worktree proof, current matching owner generation and verified live repair process/receipt; do not trust ticket-key-only snapshots.",
+        "Exclude only claims truly owned by the review/feedback repair category from duplicate manual implementation accounting. Preserve SF116 CI-repair implementation-slot counting, uncertain/blocked/other-project/wrong-generation reservations and fail-closed capacity behavior.",
+        "Meaningful regressions cover true repair exclusion, stale/wrong claim/branch/worktree/process proof, separate namespaces, ambiguity and coexistence with SF117 capacity retries. Full coordinator regression tests pass.",
+        "Document original PR150/head and scoped replacement in handoff; use Tyler author/committer and normal fresh CI/testnet/independent review. Operational runtime verification occurs after reviewed merge through the merged-only updater."
+      ],
+      "validation": "Offline coordinator/real process accounting regressions and full suite; exact-head CI/testnet and independent source review, then merged-only runtime activation/installed checks.",
+      "legacy_pr": 150,
+      "legacy_head": "ceef969e94f7624a32052b9b4763497977c04d8d"
+    },
+    {
+      "key": "SF-119",
+      "title": "Port PR53 cross-transaction same-checkpoint cursor regression to current registry custody",
+      "priority": "P1",
+      "area": "clients",
+      "phase": "baseline",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "repositories/suifleet/scripts/test_daemon_localnet.py",
+        "repositories/suifleet/scripts/tests"
+      ],
+      "resources": [],
+      "description": "Adopt existing untracked PR53 https://github.com/tyler-suifleet/suifleet/pull/53 into the overnight software queue. Preserve its missing real-chain legacy cursor regression for separate transactions within one checkpoint while updating its obsolete device-group call to current custody rules.",
+      "evidence": "Independent audit of main7e899f3 finds existing same-transaction cursor boundary regression but missing different-transactions/same-checkpoint case. Original09bcdc9 calls device_group::add_device with @device; current helper add_to_group correctly borrows/returns registry custody.",
+      "acceptance": [
+        "Port the minimal original PR53 cross-transaction/same-checkpoint scenario onto current main using current add_to_group/custody helpers and actual current chain adapter. Preserve the existing same-transaction regression.",
+        "Use a real disposable local Sui chain and real daemon/cursor receipt observations; demonstrate the regression distinguishes a deliberately incomplete cursor handling fix or equivalent meaningful negative control. Do not claim mocked success as real chain acceptance.",
+        "Record exact test commands/results, transaction/checkpoint/cursor behavior and current-head CI/testnet/independent review. No public wallet/hardware mutation required for local regression.",
+        "Reference original PR53/head; keep scope confined to the current transport regression and necessary test adapter, no unrelated code or proof waiver."
+      ],
+      "validation": "Run the relevant disposable localnet daemon suite and meaningful failure control plus scoped offline harness checks; normal exact-head CI/testnet and independent review.",
+      "legacy_pr": 53,
+      "legacy_head": "09bcdc9f0873d96c64f14dac5d5af4efd8b7fa19"
+    },
+    {
       "key": "SF-090",
       "title": "Validate encrypted fleet operation at a declared paid-pilot scale",
       "depends_on": [

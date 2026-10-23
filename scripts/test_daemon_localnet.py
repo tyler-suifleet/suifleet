@@ -440,6 +440,81 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
                       "in the same transaction is not replayed and a later one is applied once")
 
+                # SF-119 ports PR53 (09bcdc9); preserve the same-transaction check above.
+                # Same boundary across transactions: two transactions in one
+                # checkpoint, both targeting a group the device is not in yet.
+                # The cursor points at the later one; once the device joins the
+                # group, the earlier one must still not run.
+                cross_group = created(transaction("--move-call", f"{package}::device_group::create_group",
+                                                  '"cross"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
+                # Concurrent transactions need distinct gas coins; earlier calls
+                # merged the operator's coins, so split two off.
+                split = transaction("--split-coins", "gas", "[5000000000, 5000000000]", "--assign", "parts",
+                                    "--transfer-objects", "[parts.0, parts.1]", f"@{operator}")
+                coins = [c["objectId"] for c in split["objectChanges"]
+                         if c["type"] == "created" and c["objectType"].endswith("::coin::Coin<0x2::sui::SUI>")]
+                assert len(coins) == 2, coins
+                pair = None
+                for attempt in range(8):
+                    results = [None, None]
+                    errors = []
+
+                    def submit(slot, version, coin):
+                        try:
+                            result = client("ptb", *create_call(version, groups=[cross_group]),
+                                            "--gas-coin", f"@{coin}", "--gas-budget", "200000000")
+                            assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+                            results[slot] = result
+                        except BaseException as error:
+                            errors.append(error)
+                    threads = [threading.Thread(target=submit, args=(slot, f"8.{attempt}.{slot}", coins[slot]))
+                               for slot in (0, 1)]
+                    for thread in threads:
+                        thread.start()
+                    for thread in threads:
+                        thread.join()
+                    if errors:
+                        raise errors[0]
+                    digests = [r["digest"] for r in results]
+                    assert len(set(digests)) == 2, digests
+                    wait_for(lambda: all(dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}]).get("checkpoint")
+                                         for d in digests), "transactions were not checkpointed")
+                    checkpoints = {d: dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}])["checkpoint"] for d in digests}
+                    if len(set(checkpoints.values())) == 1:
+                        order = dm.rpc(rpc_url, "sui_getCheckpoint", [checkpoints[digests[0]]])["transactions"]
+                        pair = sorted(digests, key=order.index)
+                        break
+                assert pair, "could not place two transactions in one checkpoint"
+
+                def created_event(digest):
+                    [event] = [e for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]
+                               if e["type"].endswith("::deployment_manager::DeploymentCreated")]
+                    return event["parsedJson"]["deployment_id"], event["id"]
+                print(f"Cross-transaction fixture: checkpoint={checkpoints[pair[0]]} ordered_digests={pair}")
+                earlier, boundary = created_event(pair[0]), created_event(pair[1])
+                state = journal()
+                state["cursor"] = boundary[1]
+                state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
+                journal_path.write_text(json.dumps(state))
+                add_to_group(cross_group)
+                following = deploy("9.0.0", devices=[device])
+                before_versions = [r["version"] for r in history()]
+                process = start()
+                wait_for(settled(following, 1), "deployment after the cross-transaction boundary was not applied",
+                         process)
+                receipt_is(following, 1)
+                time.sleep(3)
+                stop(process)
+                process = None
+                versions = [r["version"] for r in history()]
+                assert versions == before_versions + ["9.0.0"], versions
+                assert "after" in journal()["cursor"], journal()["cursor"]
+                assert receipts(earlier[0]) == {}, "earlier transaction received an on-chain receipt"
+                print(f"Legacy boundary={boundary[1]} resumed_cursor={journal()['cursor']} following={following}")
+                assert not outcome(earlier[0]), "earlier transaction in the cursor's checkpoint was replayed"
+                print("PASS: legacy cursor resumes exactly after its event across transactions: an earlier "
+                      "transaction in the same checkpoint is not replayed after it becomes targeted")
+
                 # Revocation is enforced on chain and honored by the daemon: while
                 # revoked it applies nothing; reinstated, it catches up.
                 transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")

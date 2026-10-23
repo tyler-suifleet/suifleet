@@ -46,6 +46,64 @@ TYLER = {'GIT_AUTHOR_NAME': 'Tyler Bush', 'GIT_AUTHOR_EMAIL': 'tyler.jonathan.bu
          'GIT_COMMITTER_NAME': 'Tyler Bush', 'GIT_COMMITTER_EMAIL': 'tyler.jonathan.bush@gmail.com'}
 
 
+CAPACITY_RETRIES = 3
+CAPACITY_DELAY = 60
+CAPACITY_LOG_BYTES = 32768
+
+
+def _capacity_failure(directory):
+    """Recognize explicit terminal provider failures, never quoted model content.
+
+    Receipts and output are bounded; success, signals/timeouts, user handoffs,
+    usage/auth failures and unknown trailing errors fail closed.
+    """
+    directory = Path(directory)
+    receipt = directory/'exit.json'
+    if receipt.stat().st_size > 1024 or (directory/'result.json').exists():
+        return False
+    value = json.loads(receipt.read_text())
+    if (not isinstance(value, dict) or set(value) != {'returncode'}
+            or type(value['returncode']) is not int or not 1 <= value['returncode'] < 124):
+        return False
+    path = directory/'worker.log'
+    with path.open('rb') as stream:
+        size = stream.seek(0, 2)
+        stream.seek(max(0, size-CAPACITY_LOG_BYTES))
+        data = stream.read(CAPACITY_LOG_BYTES)
+    if size > CAPACITY_LOG_BYTES:
+        data = data.split(b'\n', 1)[-1]  # Never accept a truncated prefix as a full line.
+    lines = [line.rstrip() for line in data.decode('utf-8', errors='replace').splitlines() if line.strip()]
+    if not lines:
+        return False
+    pattern = re.compile(r'(?:ERROR: )?Selected model is at capacity\. Please try a different model\.?')
+    # Codex text mode prints an anchored ERROR line; only known CLI accounting
+    # metadata may follow. No JSON assistant/tool text is searched for substrings.
+    while lines and (re.fullmatch(r'tokens used|[0-9,]+', lines[-1])
+                     or re.fullmatch(r'\d{4}-\d\d-\d\dT[0-9:.]+Z ERROR codex_core::session: failed to record rollout items: thread [0-9a-f-]+ not found', lines[-1])):
+        lines.pop()
+    if lines and pattern.fullmatch(lines[-1]) and lines[-1].startswith('ERROR: '):
+        return True
+    try:
+        terminal = json.loads(lines[-1])
+    except (ValueError, IndexError):
+        return False
+    # Provider CLI terminal error envelopes only. A nested assistant message,
+    # source excerpt or successful result containing these words never qualifies.
+    if not isinstance(terminal, dict) or terminal.get('type') not in ('error', 'result'):
+        return False
+    if terminal.get('type') == 'result' and terminal.get('is_error') is not True:
+        return False
+    message = terminal.get('message') if terminal['type'] == 'error' else terminal.get('result')
+    return isinstance(message, str) and bool(pattern.fullmatch(message))
+
+
+def capacity_failure(directory):
+    try:
+        return _capacity_failure(directory)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def dependency_wait(result, key):
     """Return the prerequisite keys of a structured dependency-wait receipt.
 
@@ -97,6 +155,12 @@ class Dispatcher:
             members TEXT, signalled REAL, killed REAL DEFAULT 0, guard_session TEXT, guards TEXT, original_head TEXT,
             snapshot TEXT, repair_dir TEXT, repair_deadline REAL, repaired_head TEXT, resumed_as TEXT,
             created REAL, updated REAL, UNIQUE(claim, fingerprint))''')
+        # A stable token digest survives replacement run/session names; one row
+        # per stopped source preserves evidence and a crash-proof launch history.
+        self.db.execute("""CREATE TABLE IF NOT EXISTS capacity_retries (
+            source TEXT PRIMARY KEY, claim TEXT NOT NULL, project TEXT, family TEXT,
+            state TEXT, attempt INTEGER, retry_after REAL, reason TEXT,
+            replacement TEXT UNIQUE, updated REAL)""")
         for project in config.get('projects', []):
             # Exhaustive shared-mutation resources fenced before any forced CI redirect.
             # Absent disables forced interruption; an inexact list is a configuration error.
@@ -186,6 +250,61 @@ class Dispatcher:
                     if result.get('verdict') == 'fixed' and result.get('evidence'):
                         return True
         return False
+
+    def repair_owned(self, slot, owner):
+        """Whether a manual In-progress claim is held by one verified live coordinator fix job.
+
+        Such a resumed Review claim is repair work counted by review/fix
+        capacity. Proof is the job's fenced repair_claim (token digest, key,
+        branch, worktree), the current published owner generation and the
+        job's live process receipt. A ticket key or snapshot alone never
+        qualifies; any doubt keeps the implementation reservation.
+        """
+        try:
+            if owner.get('status') != 'in_progress' or owner.get('expired') or owner.get('publish_pending'):
+                return False
+            project = next(p for p in self.config['projects'] if p['id'] == slot['project'])
+            path = self.state/'reviews.sqlite3'
+            with closing(sqlite3.connect(f'{path.as_uri()}?mode=ro', uri=True)) as db:
+                db.row_factory = sqlite3.Row
+                if 'repair_claim' not in {r[1] for r in db.execute('PRAGMA table_info(jobs)')}:
+                    return False  # Historical jobs have no fenced same-claim proof.
+                jobs = db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL "
+                                  "AND status IN ('reserved','running','orphaned')", (project['id'],)).fetchall()
+            # Every unfinished fix job naming this ticket must be the same single live repair.
+            named = [job for job in jobs if json.loads(job['repair_claim']).get('key') == owner['key']]
+            if len(named) != 1:
+                return False
+            job = named[0]
+            proof = json.loads(job['repair_claim'])
+            if (job['status'] != 'running' or job['family'] != slot['family'] or not job['pid'] or not job['started']
+                    or any(proof.get(k) != owner.get(k) for k in ('branch', 'worktree'))):
+                return False
+            receipt = Path(job['directory'])/'process.json'
+            if json.loads(receipt.read_text()) != dict(pid=job['pid'], started=job['started']):
+                return False
+            # An unreaped zombie keeps its start identity but is not a live repair.
+            if runnable_identity(job['pid']) != job['started']:
+                return False
+            current = self.ticket(project, 'show', owner['key'])
+            if (current.get('status') != 'in_progress' or current.get('expired') or current.get('publish_pending')
+                    or current.get('revision') != current.get('published_revision')
+                    or not isinstance(current.get('token'), str) or not current['token']
+                    or hashlib.sha256(current['token'].encode()).hexdigest() != proof.get('claim')
+                    or any(current.get(k) != owner.get(k) for k in ('key', 'agent', 'session', 'branch', 'worktree'))
+                    or any(current.get(k) != proof.get(k) for k in ('key', 'branch', 'worktree'))):
+                return False
+            # SF-116 redirects and SF-117 capacity recoveries of this claim keep their own accounting.
+            if self.db.execute("SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN ('resumed','superseded','handed_off','exhausted')",
+                               (proof['claim'],)).fetchone():
+                return False
+            if self.db.execute("SELECT 1 FROM capacity_retries WHERE claim=? AND state NOT IN ('cancelled','exhausted','launched')",
+                               (proof['claim'],)).fetchone():
+                return False
+            return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError, StopIteration,
+                sqlite3.Error, subprocess.CalledProcessError):
+            return False
 
     def retire_obsolete(self, project):
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('parked','quarantined')",
@@ -1479,6 +1598,175 @@ First inspect git status/log and the current-head CI, then continue the unfinish
             self.db.execute('UPDATE ci_redirects SET reason=? WHERE id=?',
                             (f'resume launch failed ({type(error).__name__}); claim retained, never relaunched', record['id']))
 
+    def record_capacity(self, project, row, claim):
+        if row['status'] == 'orphaned' or not capacity_failure(row['directory']):
+            return False
+        digest = hashlib.sha256(claim['token'].encode()).hexdigest()
+        prior = self.db.execute('SELECT * FROM capacity_retries WHERE source=?', (row['session'],)).fetchone()
+        if prior:
+            return True
+        attempt = self.db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM capacity_retries WHERE claim=?',
+                                  (digest,)).fetchone()[0]
+        exhausted = attempt > CAPACITY_RETRIES
+        state = 'exhausted' if exhausted else 'waiting'
+        delay = CAPACITY_DELAY * 2**min(attempt-1, 4)
+        reason = ('provider capacity retry budget exhausted; claim retained for explicit recovery' if exhausted
+                  else f'provider model at capacity; same-claim retry {attempt}/{CAPACITY_RETRIES} in {delay}s')
+        self.db.execute('INSERT INTO capacity_retries VALUES(?,?,?,?,?,?,?,?,?,?)',
+                        (row['session'], digest, project['id'], row['family'], state, attempt,
+                         time.time()+delay, reason, None, time.time()))
+        self.update(row['session'], 'capacity_wait' if not exhausted else 'quarantined', reason)
+        return True
+
+    @staticmethod
+    def capacity_helpers(claim, started):
+        """Any live detached same-claim process, not only heartbeat helpers."""
+        found = []
+        marker = ('PR_COORDINATOR_CLAIM_TOKEN='+claim['token']).encode()
+        for path in Path('/proc').iterdir():
+            if not path.name.isdigit() or int(path.name) == os.getpid():
+                continue
+            try:
+                if path.stat().st_uid != os.getuid():
+                    continue
+                fields = (path/'stat').read_text().rsplit(')', 1)[1].split()
+                if fields[0] in 'ZX' or int(fields[19]) < int(started):
+                    continue
+                if marker in (path/'environ').read_bytes().split(b'\0') or claim['token'].encode() in (path/'cmdline').read_bytes():
+                    found.append(dict(pid=int(path.name), started=fields[19]))
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+        return found
+
+    def capacity_fence(self, project, row, claim):
+        """Read-only stop/ownership/worktree fences, repeated immediately before intent."""
+        owner = self.ticket(project, 'show', claim['key'])
+        fields = ('token', 'session', 'branch', 'worktree', 'agent', 'model')
+        if (owner.get('status') != 'in_progress' or owner.get('publish_pending')
+                or any(owner.get(k) != claim.get(k) for k in fields)):
+            return 'ownership is not the unchanged published In Progress claim'
+        self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+        identity = self.stopped_identity(row)
+        if identity != dict(pid=row['pid'], started=row['started']):
+            return 'original process identity changed or unavailable'
+        if identity is None or self.claim_helpers(claim) or self.capacity_helpers(claim, identity['started']):
+            return 'original worker, session descendant or detached claim helper not verified stopped'
+        if self.owner_locks(project, claim):
+            return 'owner still holds a shared-resource lease'
+        if run(['git', 'branch', '--show-current'], cwd=claim['worktree']).strip() != claim['branch']:
+            return 'worktree left the original branch'
+        for operation in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer', 'index.lock'):
+            if self.git_path(claim['worktree'], operation).exists():
+                return 'worktree has an unfinished git operation'
+        digest = hashlib.sha256(claim['token'].encode()).hexdigest()
+        if self.db.execute("SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN ("+
+                           ','.join('?' for _ in CI_TERMINAL)+")", (digest, *CI_TERMINAL)).fetchone():
+            return 'CI redirect owns the claim recovery'
+        if self.db.execute("SELECT 1 FROM dependency_resumes WHERE claim=? AND state IN ('waiting','resuming')",
+                           (digest,)).fetchone():
+            return 'dependency resume owns the claim recovery'
+        for other in self.db.execute("SELECT * FROM runs WHERE session!=? AND status!='finished'", (row['session'],)):
+            if other['claim'] and json.loads(other['claim']).get('token') == claim['token']:
+                if self.stopped_identity(other) is None:
+                    return 'another same-claim worker is not verified stopped'
+        if self.replacement_repair(project, claim, identity):
+            return 'review repair owns the claim recovery'
+        return None
+
+    def retry_capacity(self, project, slots, owners):
+        families = {slot['family']: slot for slot in slots}
+        records = self.db.execute("SELECT c.*,r.directory,r.claim AS original_claim,r.status AS run_status "
+                                  "FROM capacity_retries c JOIN runs r ON r.session=c.source "
+                                  "WHERE c.project=? AND c.state='waiting' ORDER BY c.retry_after,c.source",
+                                  (project['id'],)).fetchall()
+        for record in records:
+            row = self.db.execute('SELECT * FROM runs WHERE session=?', (record['source'],)).fetchone()
+            claim = json.loads(record['original_claim'])
+            try:
+                owner = self.ticket(project, 'show', claim['key'])
+                fields = ('token', 'session', 'branch', 'worktree', 'agent', 'model')
+                unchanged = all(owner.get(k) == claim.get(k) for k in fields)
+                if owner.get('status') != 'in_progress' or not unchanged:
+                    # Stop retrying authoritative transitions, but do not hide an
+                    # unknown/live process. Existing retirement proofs decide
+                    # whether the retained receipt can subsequently be archived.
+                    if self.stopped_identity(row) is not None and not self.capacity_helpers(claim, self.stopped_identity(row)['started']):
+                        self.db.execute("UPDATE capacity_retries SET state='cancelled',reason=?,updated=? WHERE source=?",
+                                        ('ownership/status changed; capacity recovery cancelled', time.time(), record['source']))
+                        self.update(record['source'], 'quarantined', 'Capacity recovery cancelled after ownership/status transition')
+                    continue
+                self.ticket(project, 'assert', claim['key'], '--token', claim['token'])
+                self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+                slot = families.get(record['family'])
+                if (slot is None or slot['model'] != claim.get('model')
+                        or claim.get('agent') != record['family']
+                        or json.loads((Path(row['directory'])/'command.json').read_text()) != self.config['workers'][record['family']]):
+                    reason = 'original configured family/model/command changed or disabled'
+                else:
+                    reason = self.capacity_fence(project, row, claim)
+                if reason:
+                    self.db.execute('UPDATE capacity_retries SET reason=?,updated=? WHERE source=?',
+                                    (reason, time.time(), record['source']))
+                    continue
+                self.ticket(project, 'heartbeat', claim['key'], '--token', claim['token'])
+                if record['retry_after'] > time.time():
+                    continue
+                if not self.available(slot, owners, retention=False, recovering=True):
+                    self.db.execute('UPDATE capacity_retries SET reason=? WHERE source=?',
+                                    ('waiting for configured implementation capacity', record['source']))
+                    continue
+                # Check after heartbeat/capacity and before the durable single-use
+                # intent. Any crash after intent is uncertain, never an auto replay.
+                if self.capacity_fence(project, row, claim):
+                    continue
+                session = record['source']+'-capacity-'+str(record['attempt'])
+                directory = Path(row['directory'])/('capacity-'+str(record['attempt']))
+                self.db.execute('BEGIN IMMEDIATE')
+                try:
+                    changed = self.db.execute("UPDATE capacity_retries SET state='launch_intent',replacement=?,updated=? "
+                                              "WHERE source=? AND state='waiting'",
+                                              (session, time.time(), record['source'])).rowcount
+                    if not changed:
+                        continue
+                    self.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)',
+                                    (row['session'],row['status'],row['message'],'capacity recovery reserved as '+session,time.time()))
+                    self.db.execute("UPDATE runs SET status='finished',message=? WHERE session=?",
+                                    ('capacity recovery reserved as '+session, record['source']))
+                    self.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                                    (session, project['id'], record['family'], 'launching', str(directory),
+                                     record['original_claim'], None, None, 'same-claim capacity retry launch reserved'))
+                    self.db.execute('COMMIT')
+                finally:
+                    if self.db.in_transaction:
+                        self.db.execute('ROLLBACK')
+                try:
+                    directory.mkdir(mode=0o700)
+                    token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+                    env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE': '1',
+                           'PR_COORDINATOR_CLAIM_TOKEN': claim['token']}
+                    (directory/'command.json').write_text(json.dumps(self.config['workers'][record['family']]))
+                    preface = (f"Your previous worker stopped on an explicit provider capacity error. Original evidence: {row['directory']}.\n"
+                               "Continue the SAME retained implementation claim and existing branch/worktree. Inspect git status first; preserve all staged, dirty and untracked work. "
+                               "Do not claim, recover, release, reset, clean or switch models. Review previous receipts and continue unfinished work.\n")
+                    (directory/'prompt.txt').write_text(preface+self.prompt(project, claim, directory))
+                    child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                             cwd=claim['worktree'], env=env, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                    self.children[session] = child
+                    self.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?",
+                                    (child.pid, process_identity(child.pid), session))
+                    self.db.execute('INSERT OR REPLACE INTO backoff VALUES(?,?,?,?,?)',
+                                    (project['id'], record['family'], 0, time.time()+CAPACITY_DELAY, 'provider capacity recovery stagger'))
+                    self.db.execute("UPDATE capacity_retries SET state='launched',reason=?,updated=? WHERE source=?",
+                                    ('same family/model resumed under unchanged claim', time.time(), record['source']))
+                except Exception as error:
+                    self.update(session, 'orphaned', f'Capacity replacement launch uncertain ({type(error).__name__}); never replayed')
+                    self.db.execute("UPDATE capacity_retries SET state='uncertain',reason=?,updated=? WHERE source=?",
+                                    ('replacement launch uncertain; explicit recovery required', time.time(), record['source']))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error, subprocess.CalledProcessError):
+                self.db.execute('UPDATE capacity_retries SET reason=?,updated=? WHERE source=?',
+                                ('verification unavailable; nothing launched', time.time(), record['source']))
+
     def reconcile(self, project):
         self.retire_obsolete(project)
         rows = self.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('claiming','launching','running','orphaned')", (project['id'],)).fetchall()
@@ -1537,6 +1825,8 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                         and result.get('verdict') == 'blocked' and result.get('evidence')):
                     self.update(row['session'], 'parked', 'Verified stopped blocked worker; ticket retained, execution capacity freed')
                     continue
+                if owner['status'] == 'in_progress' and not owner.get('publish_pending') and self.record_capacity(project, row, claim):
+                    continue
                 self.update(row['session'], 'quarantined', 'Verified stopped without handoff; claim retained for explicit recovery')
                 self.defer(project, row['family'], 'stopped worker quarantined')
             except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
@@ -1555,9 +1845,9 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                 self.db.execute('INSERT OR REPLACE INTO eligibility VALUES(?,?)', (project['id'], fingerprint))
                 self.db.execute("UPDATE backoff SET attempts=0,retry_after=0 WHERE project=? AND reason='idle: no eligible ticket'", (project['id'],))
 
-    def available(self, slot, owners, retention=True):
-        pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
-        if pause and pause[0] > time.time():
+    def available(self, slot, owners, retention=True, recovering=False):
+        pause = self.db.execute('SELECT retry_after,reason FROM backoff WHERE project=? AND family=?', (slot['project'],slot['family'])).fetchone()
+        if pause and pause[0] > time.time() and (not recovering or pause['reason'] == 'provider capacity recovery stagger'):
             return False
         # Review and repair workers have their own capacity. Require the review
         # service database, but a lengthy review/repair must not pause a family.
@@ -1569,7 +1859,7 @@ First inspect git status/log and the current-head CI, then continue the unfinish
         # Missing/malformed claims remain separate conservative reservations.
         retained = set()
         for row in rows:
-            if row['status'] not in ('quarantined', 'parked'):
+            if row['status'] not in ('quarantined', 'parked', 'capacity_wait'):
                 continue
             try:
                 claim = json.loads(row['claim'])
@@ -1585,16 +1875,19 @@ First inspect git status/log and the current-head CI, then continue the unfinish
         # Real ticket responses preserve the dispatch session. Tests/legacy state
         # may preserve it only in the persisted claim; use both identities.
         managed_sessions.update(json.loads(r['claim']).get('session') for r in rows if r['claim'])
+        # A Review claim resumed by a verified live fix job uses review/fix
+        # capacity; counting it again would idle an implementation slot.
         manual = sum(1 for owner in owners
                      if owner.get('agent') == slot['family']
                      and owner['status'] in ('in_progress', 'blocked')
-                     and (not owner.get('session') or owner['session'] not in managed_sessions))
+                     and (not owner.get('session') or owner['session'] not in managed_sessions)
+                     and not self.repair_owned(slot, owner))
         # Retained jobs free execution capacity only while still proven stopped.
         # A dependency resume in flight already holds its slot before launch.
         active = self.db.execute("SELECT count(*) FROM dependency_resumes WHERE project=? AND family=? AND state='resuming'",
                                  (slot['project'], slot['family'])).fetchone()[0]
         for row in rows:
-            if row['status'] not in ('quarantined', 'parked'):
+            if row['status'] not in ('quarantined', 'parked', 'capacity_wait'):
                 active += 1
                 continue
             try:
@@ -1686,6 +1979,8 @@ Specification snapshot: {json.dumps(claim['spec'])}
                 continue
             owners = self.ticket(project, 'list')
             self.wake_on_change(project, owners)
+            # Explicit capacity failures retain the original claim and get first execution capacity.
+            self.retry_capacity(project, slots, owners)
             # Resuming retained work takes precedence over new claims.
             if self.resume_dependency_waits(project, slots, owners):
                 owners = self.ticket(project, 'list')
