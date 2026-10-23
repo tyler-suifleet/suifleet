@@ -181,7 +181,14 @@ def run(binary,shim_binary):
                 (root/'state'/'overlays').mkdir(exist_ok=True)
                 (root/'state'/'overlays'/'mqtt.json').write_text(json.dumps({'/password':'fixture-confidential-value'}))
                 (root/'state'/'supervised'/'mqtt'/'component.log').write_text('login fixture-confidential-value succeeded\n')
-                with config.open('a') as out:out.write(archive_config)
+                # SF-084: device shadows (the store's own durable file format)
+                # travel only in the encrypted archive, never in public health.
+                def shadow(name,version,document):
+                    (root/'state'/'shadows').mkdir(parents=True,exist_ok=True)
+                    (root/'state'/'shadows'/f's-{name.encode().hex()}.json').write_text(json.dumps({'name':name,'version':version,'document':document,'updated_ms':1000+version}))
+                shadow('',2,{'desired':{'mode':'eco','fan':{'speed':2}},'reported':{'mode':'eco','fan':{'speed':1},'secret_key':'shadow-private-value'}})
+                shadow('cfg',5,{'reported':{'firmware':'3.1'}})
+                with config.open('a') as out:out.write(archive_config+'[shadows]\nthing_name="fixture"\n')
                 process=start();wait(lambda:(root/'state'/'fleet-data'/'pending.json').exists())
                 assert not sim.registered,'exhausted prepaid storage must not purchase'
                 stop();sim.uploads_paused=False;process=start()
@@ -202,12 +209,23 @@ def run(binary,shim_binary):
                 sim.clock+=60000;wait(lambda:len(sim.anchors)==3);assert sim.anchors[-1]['kind']==2
                 wait(lambda:not (root/'state'/'fleet-data'/'pending.json').exists())
                 time.sleep(2);assert len(sim.anchors)==3,'one crash fingerprint must not reupload every poll'
+                # A shadow change archives on the routine cadence, even without logs.
+                stop();shadow('',3,{'desired':{'mode':'eco','fan':{'speed':2}},'reported':{'mode':'eco','fan':{'speed':2}}})
+                process=start();time.sleep(3);assert len(sim.anchors)==3,'routine cadence applies to shadow changes'
+                sim.clock+=86400000;wait(lambda:len(sim.anchors)==4);assert sim.anchors[-1]['kind']==0
+                wait(lambda:not (root/'state'/'fleet-data'/'pending.json').exists())
+                sim.clock+=86400000;time.sleep(3);assert len(sim.anchors)==4,'unchanged shadows must not reupload'
                 stop()
+                # Public health carries shadow counts only, never documents.
+                assert b'shadow-private-value' not in sim.message and b'secret_key' not in sim.message
+                assert json.loads(sim.message)['services']['shadows']['shadows']==2
                 fixture=root/'fixture.json';fixture.write_text(json.dumps({'manifest':manifest,'config':dict(schema=1,chainIdentifier=sim.chain,registryId=object_id(ota.REGISTRY),packageId=object_id(PACKAGE),typeOrigin=object_id(PACKAGE),fleetId=object_id(FLEET),budgetId=object_id(budget.BUDGET),storageId=object_id(STORAGE)),
-                    'anchors':sim.anchors,'ciphertexts':{a['blob_object_id']:base64.b64encode((sim.upload_dir/(a['blob_object_id']+'.bin')).read_bytes()).decode() for a in sim.anchors},'device':object_id(ota.DEVICE),'signer':ota.ADDRESS,'fleet':sim.fleet(),'writer':sim.writer(),'now':max(sim.clock,int(time.time()*1000))}))
+                    'anchors':sim.anchors,'ciphertexts':{a['blob_object_id']:base64.b64encode((sim.upload_dir/(a['blob_object_id']+'.bin')).read_bytes()).decode() for a in sim.anchors},'device':object_id(ota.DEVICE),'signer':ota.ADDRESS,'fleet':sim.fleet(),'writer':sim.writer(),'now':max(sim.clock,int(time.time()*1000)),
+                    'shadows':[{'':2,'cfg':5}]*3+[{'':3,'cfg':5}]}))
                 subprocess.run(['node','scripts/verify_native_fleet.cjs',str(fixture)],check=True)
                 assert not sim.errors,sim.errors
-                print('PASS real daemon signed health -> simulated Sui -> browser verification; health/bulk retry, exhaustion, cadence, restart, revocation and diagnostics')
+                print('PASS real daemon signed health -> simulated Sui -> browser verification; health/bulk retry, exhaustion, cadence, restart, revocation and diagnostics; '
+                      'SF-084 encrypted shadow documents archived on change and decrypted/verified in the browser library')
     finally:
         if process:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()
