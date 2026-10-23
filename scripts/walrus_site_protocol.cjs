@@ -1,5 +1,5 @@
 // Exact pinned Site ABI and byte-range resources. No wallet or transport here.
-const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto');
+const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto'),{constants}=require('node:fs');
 const {appRequire}=require('./frontend_test_utils.cjs'),{bcs}=appRequire('@mysten/sui/bcs');
 const pin=require('../tools/walrus-sites/site-abi.json');
 const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -12,7 +12,15 @@ async function pack(directory,files){
  const root=path.resolve(directory),chunks=[],resources=[];let offset=0;
  for(const [name,expected] of Object.entries(files).sort(([a],[b])=>a<b?-1:a>b?1:0)){
   assert(name.startsWith('/') && !name.includes('..') && !name.includes('\\'),'unsafe resource path');
-  const file=path.resolve(root,'.'+name);assert(file.startsWith(root+path.sep));assert(!(await fs.lstat(file)).isSymbolicLink());assert((await fs.realpath(file)).startsWith((await fs.realpath(root))+path.sep),'resource escapes export');const bytes=await fs.readFile(file);
+  const file=path.resolve(root,'.'+name);assert(file.startsWith(root+path.sep));
+  // Publication runs in the pinned Linux image. Inspect the opened descriptor,
+  // rather than checking a pathname and then following a replacement at read.
+  assert.equal(process.platform,'linux','secure Site packing requires the pinned Linux image');
+  const handle=await fs.open(file,constants.O_RDONLY|constants.O_NOFOLLOW);let bytes;
+  try{assert((await handle.stat()).isFile(),'resource is not a regular file');
+   assert((await fs.realpath('/proc/self/fd/'+handle.fd)).startsWith((await fs.realpath(root))+path.sep),'resource escapes export');
+   bytes=await handle.readFile();
+  }finally{await handle.close();}
   assert.equal(bytes.length,expected.bytes,`changed resource size ${name}`);assert.equal(sha(bytes),expected.sha256,`changed resource ${name}`);
   assert(bytes.length>0,'empty resources need a separate encoding policy');assert(offset+bytes.length<=64*1024*1024,'Site packed blob exceeds device-independent publication limit');
   resources.push({path:name,start:offset,end:offset+bytes.length-1,sha256:expected.sha256,hash:hashInt(bytes)});chunks.push(bytes);offset+=bytes.length;

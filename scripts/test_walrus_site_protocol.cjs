@@ -11,6 +11,14 @@ const P=require('./walrus_site_protocol.cjs');
   await fs.writeFile(path.join(root,'index.html'),'bad');await assert.rejects(P.pack(root,files),/changed resource/);
   await assert.rejects(P.pack(root,{'/../outside':{bytes:1,sha256:digest}}),/unsafe resource/);
   await fs.rm(path.join(root,'index.html'));await fs.symlink('/etc/passwd',path.join(root,'index.html'));await assert.rejects(P.pack(root,files));
+  await fs.mkdir(path.join(root,'safe'));await fs.writeFile(path.join(root,'safe/page'),'abc');
+  const outside=await fs.mkdtemp(path.join(os.tmpdir(),'sf082-outside-'));
+  try{await fs.writeFile(path.join(outside,'page'),'abc');await fs.symlink(outside,path.join(root,'escape'));
+   await assert.rejects(P.pack(root,{'/escape/page':{bytes:3,sha256:digest}}),/escapes export/);
+   const saved=fs.open;let swapped=false;
+   fs.open=async(...args)=>{const handle=await saved(...args);if(args[0]===path.join(root,'safe/page')){await fs.rename(path.join(root,'safe/page'),path.join(root,'safe/original'));await fs.symlink('/etc/passwd',path.join(root,'safe/page'));swapped=true;}return handle;};
+   try{assert.equal((await P.pack(root,{'/safe/page':{bytes:3,sha256:digest}})).bytes.toString(),'abc');assert(swapped,'replacement occurred after opening the original descriptor');}finally{fs.open=saved;}
+  }finally{await fs.rm(outside,{recursive:true,force:true});}
   function client(snapshot){return {movePackageService:{getDatatype:async({moduleName,name})=>({response:{datatype:snapshot.types[moduleName+'::'+name]}})},getMoveFunction:async({moduleName,name})=>({function:snapshot.functions[moduleName+'::'+name]})};}
   await P.verifyAbi(client(structuredClone(P.pin)));
   for(const mutate of [x=>delete x.functions['site::new_resource'],x=>x.functions['site::new_resource'].parameters.pop(),x=>x.functions['site::add_resource'].parameters[0].reference='immutable',x=>x.types['site::Resource'].fields.reverse(),x=>x.types['site::Resource'].abilities=[]]){
