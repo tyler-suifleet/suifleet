@@ -488,3 +488,54 @@ Actual bounded testnet renewal, certification/readback and original-intent resta
 evidence is recorded in [the SF-092 receipt](validation/sf092-testnet.json).
 This does not establish final manual-wallet, production-provider, mainnet or
 physical acceptance; exact-head CI and independent review remain separate gates.
+
+## Batch enrollment (SF-132)
+
+On the Network budget page, **Enroll all unenrolled devices** enrolls activated
+owner-held devices in sequential PTBs of at most 200 calls. Every chunk builds
+and simulates before wallet approval, checks the resolved transaction is at most
+120,000 bytes and its estimated gas budget at most 2 SUI, and uses the normal
+manifest/account/network guards and independently confirmed execution effects.
+The wallet pays transaction gas separately from the budget's device funding.
+
+Progress shows confirmed devices, already-enrolled devices, the current approval
+and confirmed digests. Rejection, failed effects, read/preflight errors and
+uncertain confirmation stop subsequent chunks. **Resume enrollment**, including
+after reload, checks the chain's budget index and accounts again. It never trusts
+a local completion cache. A still-unindexed submission can temporarily cause an
+atomic duplicate-enrollment abort; wait for indexing before retrying. Previously
+confirmed chunks remain enrolled. Reads and transaction authorization failures
+never count as successful enrollment.
+
+The initial scan excludes existing accounts from funding requirements. Each chunk
+refreshes the owner's budget and reserves funding for every outstanding initial
+float, then allocates up to two period allowances per device (bounded by the
+contract's 1,000 SUI reserve ceiling). If funds are limited, the reserve available
+beyond the floats is distributed evenly. Insufficient funds for the floats stop
+the run before requesting approval; deposit and resume.
+
+The [isolated localnet measurement](validation/sf132-localnet.json) enrolled
+1,000 devices in **five** 200-device transactions: 36,036 bytes each, estimated
+gas budget 1,523,193,571 MIST and actual net gas 1,522,193,670 MIST per chunk
+(computation + storage − rebate). The total enrollment gas was 7.61096835 SUI;
+this excludes registration and the device floats/reserves. These are localnet
+measurements with 1,000 MIST float and 4,000 MIST reserve per device, not public
+network quotes. The run rejected the second approval after 200 confirmed,
+resumed the other 800, verified all accounts and amounts, then reran with zero
+additional approvals. No Move API, layouts, dependencies or migration changed.
+
+Reproduce in a disposable network-none dev-image container with installed locked
+frontend dependencies, cached Move dependencies and the checksum-pinned network
+CLI at `/opt/sui-network/sui`:
+
+```bash
+node scripts/test_budget_enrollment.cjs
+# Inside the disposable network-none container:
+BATCH_EVIDENCE=/tmp/sf132-localnet.json make test-budget-enrollment-localnet
+```
+
+Frontend typecheck/build and the Wallet Standard browser fixture also pass;
+the fixture checks connect/sign/rejection/effects/network errors and disconnect.
+Manual extension-wallet/production-provider, physical and mainnet acceptance
+remain unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
