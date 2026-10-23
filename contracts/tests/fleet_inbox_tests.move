@@ -76,6 +76,29 @@ module sui_edge::fleet_inbox_tests {
     }
 
     #[test]
+    fun a_new_inbox_takes_announcements_before_it_is_shared() {
+        let mut s = ts::begin(OPERATOR);
+        device_registry::init_for_testing(ts::ctx(&mut s));
+        ts::next_tx(&mut s, OPERATOR);
+        let mut registry = ts::take_shared<DeviceRegistry>(&s);
+        let clock = clock::create_for_testing(ts::ctx(&mut s));
+        let device = device_registry::register_device(&mut registry, string::utf8(b"edge"), KEY,
+            string::utf8(b"arm"), &clock, ts::ctx(&mut s));
+        let device_id = object::id(&device);
+        let cap = device_registry::activate_device(&mut registry, device, ts::ctx(&mut s));
+        let d = record(b"app", vector[], vector[device_id], &clock, &mut s);
+        let mut device_inbox = inbox::new_inbox(&mut registry, &cap);
+        inbox::announce_device(&mut device_inbox, &registry, &cap, &d, &clock, ts::ctx(&mut s));
+        assert!(inbox::seq(&inbox::inbox_head(&device_inbox)) == 1, 0);
+        inbox::share_inbox(device_inbox);
+        dm::share_deployment(d);
+        transfer::public_transfer(cap, OPERATOR);
+        ts::return_shared(registry);
+        clock::destroy_for_testing(clock);
+        ts::end(s);
+    }
+
+    #[test]
     #[expected_failure]
     fun inbox_is_created_once() {
         let (mut s, _, _) = setup();

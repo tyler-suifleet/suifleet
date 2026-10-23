@@ -822,9 +822,11 @@ pub mod fleet_inbox {
     pub const INBOX_GROUPS: &str = "inbox_groups";
     pub const INBOX_HEAD: &str = "inbox_head";
     pub const LATEST: &str = "latest";
+    pub const NEW_INBOX: &str = "new_inbox";
     pub const NEXT_START_MS: &str = "next_start_ms";
     pub const REMOVE_MEMBER: &str = "remove_member";
     pub const SEQ: &str = "seq";
+    pub const SHARE_INBOX: &str = "share_inbox";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Announced {
         pub target: [u8; 32],

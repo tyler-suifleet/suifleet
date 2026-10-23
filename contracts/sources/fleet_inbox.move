@@ -97,11 +97,21 @@ module sui_edge::fleet_inbox {
     /// Create the device's inbox at its derived address. Its operator only;
     /// once per device.
     public fun create_inbox(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap) {
+        share_inbox(new_inbox(registry, cap));
+    }
+
+    /// As `create_inbox`, but returns the inbox so the same transaction can
+    /// announce to it or add the device to a group before `share_inbox`.
+    public fun new_inbox(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap): DeviceInbox {
         let device_id = device_registry::owner_cap_device_id(cap);
         assert_operator(registry, cap, device_id);
         let id = derived_object::claim(device_registry::uid_mut(registry), InboxKey { device_id });
         let inbox = DeviceInbox { id, device_id, version: INBOX_VERSION, head: empty_head(), groups: vector[] };
         event::emit(InboxCreated { inbox_id: object::id(&inbox), device_id });
+        inbox
+    }
+
+    public fun share_inbox(inbox: DeviceInbox) {
         transfer::share_object(inbox);
     }
 

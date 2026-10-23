@@ -3982,6 +3982,18 @@ export const MOVE_ABI = {
           "std::option::Option<sui::object::ID>"
         ]
       },
+      "new_inbox": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_registry::DeviceOwnerCap"
+        ],
+        "returns": [
+          "sui_edge::fleet_inbox::DeviceInbox"
+        ]
+      },
       "next_start_ms": {
         "visibility": "Public",
         "entry": false,
@@ -4014,6 +4026,15 @@ export const MOVE_ABI = {
         "returns": [
           "u64"
         ]
+      },
+      "share_inbox": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::fleet_inbox::DeviceInbox"
+        ],
+        "returns": []
       }
     },
     "structs": {
