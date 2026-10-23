@@ -68,46 +68,88 @@ python3 scripts/evaluate_move_prover.py --prover-source /tools/sui-prover \
   --include-pending-custody --functions activate_device_security_spec
 # Independently: --include-pending-custody --functions return_device_security_spec
 # Independently: --include-name-absence --functions revoke_security_spec
-# Independently: --include-pending-enrollment --functions enroll_security_spec --timeout 120
+# Independently: --include-pending-enrollment --functions enroll_security_spec --timeout 180
 ```
 
-- Activation and return were implemented as separate actual-function obligations
-  with exact typed identity reads and the underlying custody **name**-absence
-  predicate. Both reproduce a backend compilation error: undeclared
-  `$2_dynamic_field_exists'$2_dynamic_object_field_Wrapper'$0_device_registry_CustodyKey''`.
-  The helper observes the real release `field::exists(object, Wrapper { name })`;
-  it does not return an assumed invariant. No positive construction/return proof
-  or activation-removal negative is claimed. Init construction and complete
-  inductive custody/key/value preservation across every UID writer remain unmet.
-- Stronger untyped role-name absence after removal fails with a solver
-  counterexample. Upstream `native.bpl` implements removal by updating the typed
-  table, but constrains untyped existence only by `typed presence ==> name
-  presence`. Absence is not implied, even after removal or fresh construction.
-  The same limitation prevents a theorem that fresh records lack a legacy
-  `StatusesKey`. The verified typed-entry removal/receipt migration statements
-  are narrower; they do not silently substitute for those stronger theorems.
-- Full enrollment abort equivalence and spec safety pass, but its implementation
-  check times out at both 30 and 120 seconds. A separate attempt adds real Boogie
-  split points before/after the call also times out at 120 seconds, without
-  replacing its body. A timeout is
-  neither a source counterexample nor a verified theorem.
+- Activation and return use actual-function obligations with typed identity reads
+  and the raw custody **name**-absence predicate. The pinned backend overlay now
+  repairs the collector/emitter mismatch: unresolved parent provenance appends the
+  UID type selected by the collector, leaving the source operand unchanged.
+  Before this patch the actual bare-UID helper inside the skipped dynamic-field
+  API module emitted an undeclared one-type-argument call. After rebuilding, all
+  six generated Check/Assume/SpecNoAbortCheck files contain matching
+  `Wrapper<CustodyKey>_UID` declarations and call sites. Both Check and Assume
+  phases now fail semantically (0.9–1.1 seconds), while both SpecNoAbortCheck
+  phases pass. **This is a translation repair, not a custody theorem.** The raw
+  wrapper UID predicate and registry-backed DOF tables remain disconnected.
+- The exact observer macro was also tested, not assumed to work. Direct Wrapper
+  construction fails private-field visibility; an exact spec-only constructor
+  permits expansion and reaches the solver, but activation/return still fail.
+  That experimental overlay is not shipped. Neither path adds a trusted body,
+  predicate stub, freshness assumption or relaxed cycle detector.
+- Stronger untyped role-name absence after removal still fails with a solver
+  counterexample. Upstream `native.bpl` updates one typed table on removal and
+  constrains untyped existence only by `typed presence ==> name presence`.
+  Name absence after removal or fresh construction is therefore not established.
+  The same limitation prevents a fresh-record legacy `StatusesKey` absence proof.
+  A faithful extension must represent one shared occupied slot and value-type tag
+  per parent/name-type/key, including unknown value types, and native add/remove,
+  wrong-type and fresh-object transitions. DOF must additionally preserve its
+  real Wrapper-to-ID/child relationship. Universal equality between untyped
+  existence and every typed table is unsound and is not added here.
+- Full enrollment now uses supported bounded VC splitting:
+  `vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120`.
+  With a 180-second hard bound its Check produces a concrete counterexample in
+  **25 seconds**, reaching custody add and identity installation. Assume and
+  SpecNoAbortCheck pass. This supersedes the earlier timeouts; it is still a
+  failing implementation proof, not an established executable exploit.
 
-These are reproduced limitations/failures, not evidence of an exploitable
-current contract defect. A sound extension must model untyped occupancy and its
-mutation/freshness relation, retain UID well-foundedness checks, then discharge
-construction and every preservation obligation. A successful activation
-`set_identity`-removal counterexample remains mandatory before claiming that
-reachable-state theorem. No datatype invariant automatically assumes it on inputs.
+Construction/init and complete inductive custody/key/value preservation across
+all UID writers remain unmet. The real activation `set_identity`-removal negative
+and missing/duplicate/wrong-typed/foreign-parent slot controls remain required
+before claiming that scope. No datatype invariant is silently assumed on inputs.
+These essential software checks are not deferred to hardware/provider acceptance.
 
-- Recipe-field omission and wrong-value implementation negatives also time out
-  at 30 seconds; the omission still times out at 120 seconds after narrowing the
-  search to a concrete valid digest and isolating the typed-binding assertion.
-  These do **not** count as rejected negatives. Normal CI gates the 63 successful
-  obligations and 22 actual solver-rejected controls; the pending binding
-  mutations remain available through `--mutation binding-recipe` and
-  `--mutation binding-recipe-value`. That unmet targeted negative scope remains
-  an acceptance gap, not a waived or falsely passing gate. `--functions` selecting
-  no proof now fails instead of accepting upstream's empty success.
+Recipe binding has advanced: the same bounded VC options turn omission and
+wrong-value mutations into genuine Check counterexamples at the exact typed
+presence/value postconditions (**1.3/2.0 seconds** at the normal 30-second bound).
+Their Assume and SpecNoAbortCheck phases pass. Both controls are now included in
+normal CI, preserving the previous 63 positive obligations and 22 negative
+controls and bringing the negative total to **24**. Timeouts and model/compiler
+errors still cannot qualify as negative proof results.
+
+For exact generated-signature inspection, add `--artifacts /tools/NEW_DIRECTORY`
+to the custody reproduction command above. The evaluator requests upstream
+`--keep-temp` and copies only generated `.bpl` files to a new private directory;
+it preserves the prover's failing exit status. Inspect both call and declaration
+for the hidden UID argument in every phase. Artifacts are diagnostic proof-only
+state and are not published as evidence of successful custody verification.
+
+### Backend continuation evidence (2026-10-22)
+
+The locked offline release rebuild after the UID fallback patch passed in 1m22s.
+`python3 scripts/check_move_proofs.py --tools /tools` then passed all **63 positive
+obligations and 24 exact solver-negative controls** with the final split specs.
+The generated-signature regression uses the actual skipped-API bare-UID helper,
+not a generic outside-module helper that would enable global UID mode. Actual
+activation/return runs preserve all three phases; the failing phases remain
+explicit failures. Python compilation, compatibility checksums and `git diff
+--check` pass. No new executable contract body or native-state axiom is added.
+
+Current main `5137be97ef273848dec1df81a433c0ec5454effb` is integrated separately.
+The root release comparison builds both actual packages and compares all eleven
+module arrays, not just source names: equal, SHA-256
+`1e5d1b39c20e5e19d224aa12eba924f8db550919a86ac0546c595bfc723f4e19`.
+The separate storage/root comparison also passes all twelve arrays, SHA-256
+`61d6a792faab43f0d75a3093cd597af3efb12e5302e788e67a5f256f00526cf7`.
+Its first network-none attempt lacked a pinned framework cache entry and failed;
+retry with download access completed the exact comparison. This accessed sources,
+not a wallet or chain.
+Earlier 169 root / 53 storage Move tests and 35 historical / 47 identity local-chain
+effects checks below remain historical evidence; they were not rerun for this
+proof-only continuation. Public-testnet, independent approval and final current
+head CI are not claimed passed here. The PR stays draft and the claim reserved
+because essential native-state/custody/enrollment proofs remain incomplete.
 
 ### L-01 reachability and separate storage audit
 
