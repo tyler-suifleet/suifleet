@@ -176,9 +176,11 @@ def run(binary, receipt):
                 with (root / "daemon.log").open("w") as log:
                     process = start()
                     daemon_pid = process.pid
-                    ota.wait_for(lambda: funding().get("draws") == 1, "daemon did not draw from the budget", process)
+                    ota.wait_for(lambda: state().get("initialized"), "daemon did not initialize", process)
+                    assert not sim.draws, "idle enrollment must not draw gas"
                     ota.wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
                     sim.add("0x301", event=dict(component_name="svc", version="1.0.0"), recipe=dict(lifecycle={"run": run_command}))
+                    ota.wait_for(lambda: funding().get("draws") == 1, "pending write did not draw from the budget", process)
                     ota.wait_for(lambda: reported("0x301") and status().get("phase") == "running", "supervised component did not start", process)
                     sim.add("0x302")
                     ota.wait_for(lambda: reported("0x302"), "one-shot deployment did not report", process)
