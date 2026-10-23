@@ -372,6 +372,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
     <legend>Protected retention</legend>
+    <p>Renewal executor rewards and gas use these separate protected reserves. They are additional to device health/archive transaction estimates; match the estimate storage horizon to the finite target.</p>
     {version < BigInt(2) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v2 (retires old mutation calls)</button> : <>
       {retentionFacts(policy, blobs, epoch).map((fact) => <p key={fact} role="status">{fact}</p>)}
       <p>Run the owner-configured renewal worker separately from this browser. Check its private status file for persistent failures and notifier delivery acknowledgments. No running notifier means no alert guarantee.</p>

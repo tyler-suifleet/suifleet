@@ -12,7 +12,7 @@ export const MEASURED = {
   /** One fleet_budget::draw_gas, net MIST, measured on testnet (docs/validation/sf083-testnet.json). */
   drawNetMist: BigInt(1_988_540),
   /** Observed Testnet SF-082 effects; conservative maxima, not a production quote. */
-  fleetData: { initialHealthNetMist: BigInt(7_255_298), recurringHealthNetMist: BigInt(4_459_123), archiveNetMist: BigInt(19_718_489) },
+  fleetData: { initialHealthNetMist: BigInt(7_255_298), recurringHealthNetMist: BigInt(4_459_123), archiveNetMist: BigInt(27_075_739) },
   walrus: {
     nShards: 1000,
     /** FROST per encoded MiB per epoch (Mainnet epoch 42). */
