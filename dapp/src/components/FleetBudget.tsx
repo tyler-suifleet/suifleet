@@ -28,8 +28,8 @@ const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
 export const DEFAULT_ESTIMATE: EstimateInput = {
   devices: 1, months: 12, receiptsPerDeviceMonth: 30, anchorsPerDeviceMonth: 0, releasesPerMonth: 1,
-  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: DATA_CONFIG ? 64 * 1024 * 1024 : 0, dataUploadsPerDeviceMonth: 30, storageEpochs: DATA_CONFIG ? 3 : 2,
-  healthSummariesPerDeviceMonth: DATA_CONFIG ? 720 : 0, serverlessData: !!DATA_CONFIG,
+  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 0, storageEpochs: DATA_CONFIG ? 3 : 2,
+  healthSummariesPerDeviceMonth: DATA_CONFIG ? 30 : 0, serverlessData: !!DATA_CONFIG,
   floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
 };
 
@@ -55,14 +55,14 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Months" value={input.months} onChange={set("months")} />
       <NumberField label="Receipts per device per month" value={input.receiptsPerDeviceMonth} onChange={set("receiptsPerDeviceMonth")} />
       <NumberField label="Other device transactions per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
-      <NumberField label="Health summaries per device per month (hourly = 720)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
+      <NumberField label="Health summaries per device per month (daily = 30)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
       <NumberField label="Releases per month" value={input.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
       <NumberField label="Archive uploads per device per month (daily = 30; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
+    {input.serverlessData && <p>Defaults assume daily health and disabled log archives; enabling archives in this estimate does not configure the device. Existing fleets keep their actual on-chain cadence; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
     {result.estimate?.protectedCapacity && <p role="status">If protected retention is enabled: {result.estimate.protectedCapacity.planned} planned archives; {result.estimate.protectedCapacity.remaining} of {PROTECTED_BLOB_LIMIT} fleet-wide slots remain from the entered count. {result.estimate.protectedCapacity.daysToCapacity === null ? "No archive uploads are planned." : `At this rate the index fills in ${result.estimate.protectedCapacity.daysToCapacity.toFixed(1)} days without owner releases.`} Additional releases/diagnostics/crashes consume more slots. {result.estimate.protectedCapacity.exceedsCapacity ? "Planned archives exceed capacity: this deposit cannot make that retention plan feasible." : "Capacity does not guarantee admission."} All new device archives share one absolute target epoch; any expired protected blob halts new registrations until owner maintenance. Reconcile the live retention panel before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">

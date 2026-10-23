@@ -91,7 +91,7 @@ export async function readDeviceData(client: Reads, config: FleetDataConfig, dev
 }
 
 /** Validate fields used to derive health; a signed malformed snapshot is unavailable. */
-export function validateHealthSnapshot(snapshot: Snapshot): void {
+export function validateHealthSnapshot(snapshot: Snapshot, maxIntervalSeconds = 3600): void {
   const integer = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
   const text = (value: unknown, max: number) => typeof value === "string" && new TextEncoder().encode(value).length <= max;
   const keys = (value: object, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
@@ -100,7 +100,7 @@ export function validateHealthSnapshot(snapshot: Snapshot): void {
     throw new Error("Unknown health snapshot field");
   }
   if (![snapshot.seq, snapshot.observed_ms, snapshot.started_ms, snapshot.dropped, snapshot.pending_receipts].every(integer)
-    || !integer(snapshot.interval_seconds) || snapshot.interval_seconds < 10 || snapshot.interval_seconds > 3600
+    || !integer(snapshot.interval_seconds) || snapshot.interval_seconds < 10 || snapshot.interval_seconds > maxIntervalSeconds
     || !snapshot.sync || !integer(snapshot.sync.consecutive_failures)
     || !keys(snapshot.sync, ["last_success_ms", "consecutive_failures", "last_error"])
     || !(snapshot.sync.last_success_ms === null || integer(snapshot.sync.last_success_ms))
@@ -137,7 +137,7 @@ export async function fetchChainHealth(client: Reads, config: FleetDataConfig, d
       if (writer.message.length > 16_384) throw new Error("Health snapshot exceeds its chain bound");
       const snapshot = await verifyReport({ message: toBase64(new Uint8Array(writer.message)), signature: toBase64(new Uint8Array(writer.signature)) }, deviceId, identity.signer);
       if (typeof snapshot === "string") throw new Error(snapshot);
-      validateHealthSnapshot(snapshot);
+      validateHealthSnapshot(snapshot, 86_400);
       if (BigInt(snapshot.seq) !== BigInt(writer.health_seq)) throw new Error("Snapshot sequence differs from the chain anchor");
       const receivedMs = safeNumber(writer.health_at_ms);
       if (receivedMs > now + 300_000 || snapshot.observed_ms > receivedMs + 300_000) throw new Error("Health timestamp is in the future");

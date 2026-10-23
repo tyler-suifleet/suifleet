@@ -153,7 +153,7 @@ module fleet_data::fleet_data_tests {
     #[test]
     fun health_and_daily_batch() {
         let (mut s, mut system) = setup();
-        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001);
+        health(&mut s, 1, 1); health(&mut s, 2, DAY + 1);
         let first = upload(&mut s, &mut system, 42, true);
         anchor(&mut s, first, 1, 0, 1);
         let crash = upload(&mut s, &mut system, 43, true);
@@ -161,6 +161,11 @@ module fleet_data::fleet_data_tests {
         let next = upload(&mut s, &mut system, 44, true);
         anchor(&mut s, next, 3, 0, DAY + 1);
         finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ECadence)]
+    fun daily_default_refuses_an_hourly_report() {
+        let (mut s, system) = setup();
+        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001); finish(s, system);
     }
     #[test, expected_failure(abort_code = fleet_data::ESequence)]
     fun replayed_health() { let (mut s, system) = setup(); health(&mut s, 1, 1); health(&mut s, 1, DAY); finish(s, system); }

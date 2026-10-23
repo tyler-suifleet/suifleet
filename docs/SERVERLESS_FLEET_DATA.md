@@ -58,7 +58,7 @@ on Sui, replacing the previous health value; no per-snapshot Walrus blob exists.
 The snapshot is bounded to 16 KiB, versus the existing telemetry stream's 64 KiB.
 The native producer truncates inventory to the 16 KiB summary bound while
 retaining identity, synchronization and aggregate status. Sequence numbers increase strictly and cadence uses Sui's Clock.
-The default is hourly; owners can configure 1 minute to 1 day. Signatures are
+New fleets default to daily health; owners can configure 1 minute to 1 day. Existing fleets retain their on-chain cadence until the owner changes it. Log archives are opt-in and the budget estimate defaults to zero log uploads. Signatures are
 verified in the browser, not parsed/verified by Move. Authorized malformed device
 claims can therefore consume their own bounded cadence slot, but must never
 be shown as trusted health.

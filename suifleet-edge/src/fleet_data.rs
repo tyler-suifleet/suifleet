@@ -152,7 +152,7 @@ impl Task {
         if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms) { return Ok(()); }
         let seq = writer.health_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("health sequence exhausted"))?;
         let binding = telemetry::Binding { chain_identifier: fleet.chain_identifier,
-            registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: 60,
+            registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: fleet.health_interval_ms / 1000,
             poll_seconds: self.poll_seconds, started_ms: self.started_ms, boot_id: telemetry::boot_id() };
         let mut inventory = telemetry::inventory(&self.state_dir);
         let sources = self.services.lock().unwrap().health_sources();

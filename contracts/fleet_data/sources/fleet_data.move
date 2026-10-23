@@ -81,7 +81,7 @@ module fleet_data::fleet_data {
             id: object::new(ctx), version: VERSION, budget_id: object::id(budget),
             storage_id: object::id(storage), registry_id: fleet_budget::registry_id(budget),
             chain_identifier, key_epoch: 0, support: vector[],
-            health_interval_ms: 3_600_000, batch_interval_ms: 86_400_000,
+            health_interval_ms: 86_400_000, batch_interval_ms: 86_400_000,
             emergency_interval_ms: 300_000, device_count: 0,
         });
     }
