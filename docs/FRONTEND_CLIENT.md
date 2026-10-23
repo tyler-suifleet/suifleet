@@ -31,8 +31,12 @@ Concurrent scans of the same stream share one request. Empty scan pages advance
 the watermark; missing/repeated cursors and incomplete streams fail visibly.
 Each successfully terminated page commits its watermark and discovery atomically.
 At 200 pages the view shows “still loading” and resumes on the next refresh.
-Discovery is bounded to 256 KiB per stream and 2 MiB across this origin’s history
-keys (UTF-16 size estimate). Capacity eviction explicitly marks discovery partial;
+Persisted discovery is bounded to 256 KiB per stream and 2 MiB across this origin’s history
+keys (UTF-16 size estimate). Deployment/group events retain only compact discovery IDs;
+current metadata and targets come from objects. Storage limits never truncate in-memory
+or returned results. Oversized streams remove their saved cursor and warn that reload
+rescans the retained range; origin eviction also causes a retained-range rescan.
+Cache schema v2 rejects older possibly truncated caches and rescans with a partial-history warning;
 storage/quota failures warn and continue in memory instead of wedging the view.
 
 The endpoint's `lowestAvailableCheckpoint` is checked on every scan. First reads

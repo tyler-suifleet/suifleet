@@ -82,7 +82,52 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
   }
   assert.ok([...store].reduce((n,[k,v])=>n+2*(k.length+v.length),0) <= 2*1024*1024, 'origin budget shared across streams');
   const huge=fixture(), e=event(1);e.event.contents.value=new Uint8Array(300000);huge.frames([e,end('huge',400n)]);
-  assert.deepEqual(await history.incrementalEvents(huge.client,'0x1::test::Huge'),[]);
+  assert.equal((await history.incrementalEvents(huge.client,'0x1::test::Huge')).length,1);
+  assert.equal([...store.keys()].some(k => k.includes('::Huge:')), false);
+  huge.frames([end('huge2',401n)]);
+  assert.equal((await history.incrementalEvents(huge.client,'0x1::test::Huge')).length,1, 'oversized events survive later refresh');
   assert.match(history.historySnapshot(), /capacity reached/);
+  // Foreign 1,000/3,000-target deployments must never evict a live victim.
+  const { deployment_manager_DeploymentCreatedBcs: deployment } = loader()('lib/fleet-protocol.ts');
+  const deployments = fixture();
+  const created = (n, count) => {
+    const frame = event(n);
+    frame.event.contents.value = deployment.serialize({ deployment_id: `0x${n}`, creator: '0xa',
+      component_name: 'foreign', version: '1', recipe_blob_id: 'blob', artifact_sha256: 'digest',
+      target_groups: [], target_devices: Array(count).fill('0xb') }).toBytes();
+    return frame;
+  };
+  const type = '0x1::deployment_manager::DeploymentCreated';
+  deployments.frames([created(1, 0), created(2, 1000), created(3, 1000), created(4, 1000), created(5, 3000), end('deployments',500n)]);
+  result = await history.incrementalEvents(deployments.client, type);
+  assert.equal(result.length, 5);
+  assert.ok(result.every(e => e.bcs.length < 100), 'only compact discovery bytes retained');
+  deployments.frames([end('deployments2',501n)]);
+  assert.equal((await history.incrementalEvents(deployments.client,type)).length,5);
+  history = loader()('lib/event-history.ts');
+  const reloadDeployments = fixture(); reloadDeployments.frames([end('deployments3',502n)]);
+  result = await history.incrementalEvents(reloadDeployments.client,type);
+  assert.equal(result.length,5, 'victim and foreign deployments survive reload');
+  assert.equal(deployment.parse(result[4].bcs).deployment_id.slice(-1),'1');
+  const legacyKey = [...store.keys()].find(k => k.includes(type));
+  const legacy = JSON.parse(store.get(legacyKey)); legacy.version = 1; store.set(legacyKey, JSON.stringify(legacy));
+  history = loader()('lib/event-history.ts');
+  const legacyRescan = fixture(); legacyRescan.frames([created(1,0),end('legacy',503n)]);
+  await history.incrementalEvents(legacyRescan.client,type);
+  assert.equal(legacyRescan.calls[0].options.after,undefined,'old potentially truncated caches rescan');
+  // Numerous compact events may exceed persistence capacity, but never the result.
+  const flood = fixture();
+  flood.frames([...Array.from({length: 1500}, (_, i) => created(i + 1, 0)), end('flood',2000n)]);
+  result = await history.incrementalEvents(flood.client,type);
+  assert.equal(result.length,1500);
+  assert.ok(result.some(e => deployment.parse(e.bcs).deployment_id.endsWith('0001')));
+  assert.equal([...store.keys()].some(k => k.includes(type)),false, 'overflow removes stale persisted cursor');
+  flood.frames([end('flood2',2001n)]);
+  assert.equal((await history.incrementalEvents(flood.client,type)).length,1500);
+  assert.match(history.historySnapshot(), /capacity reached/);
+  history = loader()('lib/event-history.ts');
+  const rescan = fixture(); rescan.frames([created(1,0),end('rescan',2002n)]);
+  assert.equal((await history.incrementalEvents(rescan.client,type)).length,1);
+  assert.equal(rescan.calls[0].options.after,undefined,'overflow reload rescans retained range');
   console.log('PASS: type/sender filters; persisted cursor+BCS; reload, empty scan progress, concurrency, pruned/corrupt cache recovery, 250-page reload resumption, origin/stream capacity and nonfatal storage failures');
 })().catch(e => { console.error(e); process.exitCode = 1; });
