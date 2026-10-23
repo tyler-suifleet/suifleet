@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 
@@ -13,6 +14,10 @@ def atomic(path, value):
     os.replace(temporary,path)
 
 
+# Supervisors stop workers with SIGTERM: never inherit an ignored disposition
+# (for example from `unshare -f`) into the wrapper or the model it executes.
+for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+    signal.signal(number, signal.SIG_DFL)
 directory = Path(sys.argv[1])
 identity = Path(f'/proc/{os.getpid()}/stat').read_text().rsplit(')',1)[1].split()[19]
 atomic(directory/'process.json',{'pid':os.getpid(),'started':identity})

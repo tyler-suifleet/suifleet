@@ -591,3 +591,87 @@ record, inspect the reason and original/resume receipts. If `ticket resume`
 already applied, the ticket is In Progress without a worker; stop any surviving
 process, then recover or hand off through the normal atomic ticket workflow. Do
 not delete `dependency_resumes` rows to force a relaunch.
+
+### Failed CI on active implementation PRs (SF-116)
+
+The coordinator observes completed current-head/base CI on every owned open
+same-repository PR, including drafts and In Progress implementations, not only
+Review PRs. Each executing scan stores one `ci_observations` row per failing PR in
+`reviews.sqlite3`: ticket, branch, owner status, exact head/base, draft flag,
+failed runs, the repair fingerprint and `ci_responsibility`, which names who
+actually repairs it (the dispatcher-redirected implementation owner, the
+coordinator's Review CI repair, or a manual/stopped/expired owner who needs
+explicit recovery). Green, pending, cancelled and superseded snapshots clear the
+row; closed PRs are dropped. Scan JSON prints the same `ci_responsibility`.
+Review PRs keep the existing coordinator CI repair (SF-111) unchanged.
+
+Each dispatcher scan, before new claims, matches observations to its own live
+managed implementation runs (same ticket and branch) and keeps one durable
+`ci_redirects` record per claim and failure fingerprint; terminal records never
+replay and a claim is redirected at most three times. After a 10-minute owner
+grace period from the failed run's completion the dispatcher revalidates against
+GitHub (exact head, current base, check runs) every 5 minutes; a fixed, rerun,
+cancelled or moved failure is `superseded` without touching the owner. A changed
+claim, Review handoff, expired/pending ownership or a stopped/reused worker is
+never acted on.
+
+Forced interruption requires the explicit, exhaustive private project setting
+
+```json
+"ci_redirect_protected_resources": ["network:suifleet-testnet", "hardware:raspberrypi3bplus"]
+```
+
+listing every shared-mutation lock (it must include the testnet authorization
+lock). Without it the failure stays visible and the owner is never stopped. The
+owner is interrupted only when its session has no other user's process, claim
+helper, held lock or Sui CLI/wallet process. The dispatcher then takes real
+exclusive `ticket lock` guard leases on every protected resource under a
+distinct `ci-redirect-guard-*` session (lock-obeying workers therefore cannot
+start a wallet or hardware mutation, and acquiring them proves none is running),
+rechecks everything under the fence, persists the exact PID/start identities and
+only then sends SIGTERM. SIGKILL follows after 60 seconds, only while every guard
+is still asserted and only to identity-verified original session members (a
+dead or reused session ID never expands the set). `signalled` and `killed`
+record attempts that actually returned; a crash between the persisted intent and
+the signal retries the guarded signal on restart instead of quarantining. Zombie
+processes count as stopped, while any live original-session descendant keeps the
+fence. A worker that has not stopped 5 minutes after SIGTERM (and 30 seconds
+after an attempted SIGKILL) becomes `uncertain`: guards are released, the claim
+and its capacity stay reserved and the recorded PIDs need explicit inspection.
+Guards are released as soon as the stop is verified, before any repair.
+
+The paused feature worktree is never edited until integration. Its complete
+working state (tracked, staged and untracked, not ignored) is preserved as user-
+authored backup refs `refs/pr-coordinator/ci-redirect/<session>-<id>/{worktree,index}`.
+A same-claim repair worker (same family, token, session and branch) runs in a
+clean linked checkout detached at the failed head. Its prompt grants no
+machine-session shared-network or hardware mutation authority: read-only checks
+and isolated local chains only, with public-testnet acceptance through the
+normal CI its push triggers; a genuine need for a machine-session testnet or
+hardware run is reported as `blocked`. The repair wrapper has no kill timer
+(`limits.json` is never written). After 2 hours the dispatcher stops an overdue
+repair only through the same guard-fenced SIGTERM/SIGKILL escalation
+(`repair_stopping`); a held lock defers it. A `fixed` result must be a
+fast-forward push of user-authored commits; `rerun_requested` needs concrete
+transient-infrastructure evidence and pushes nothing. The repair is merged into
+the paused worktree (fast-forward, or a user-authored merge commit), the
+unfinished changes are verified unchanged against the snapshot, and the original
+implementation resumes automatically under the same claim with a prompt naming
+the repair. A conflict aborts the merge, keeps the work in place and in the
+backup refs, and records `conflict` with the manual next step. Blocked or
+invalid repairs (`repair_failed`), launch failures (`orphaned`, never
+relaunched) and ownership changes keep the claim reserved; verified-stopped
+cases are quarantined so they release execution capacity. Failed steps retry
+with 60–900 second backoff and become `failed` after eight attempts.
+
+The paused owner and its repair use the owner's single implementation slot; no
+review/repair slot is consumed and no second editor runs. `--status` adds
+`ci_redirect` and `ci_redirect_reason`. `fleet-status` shows `ci-repair-requested`
+(pending, only while the coordinator still observes that exact failure),
+`pausing` (guarded interruption), the live repair as a `ci-repair` worker with
+family, model, ticket, PR and failed checks plus the implementation as `paused`,
+`uncertain`/`orphaned`/quarantined outcomes, and the resumed implementation as
+one ordinary worker. Other observed failures appear as `ci-failed` with their
+actual repair responsibility. Tests use offline Git repositories, real worker
+and fake model processes and a fake lock engine with the real lease semantics;
+no tests install or restart services.

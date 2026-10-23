@@ -10,7 +10,8 @@
       "repository": "tyler-suifleet/suifleet",
       "root": "/home/tyler/dev/codex/src/suifleet",
       "github_account": "tyler-suifleet",
-      "review_github_account": "therealtime"
+      "review_github_account": "therealtime",
+      "ci_redirect_protected_resources": ["network:suifleet-testnet", "hardware:raspberrypi3bplus"]
     }
   ]
 }

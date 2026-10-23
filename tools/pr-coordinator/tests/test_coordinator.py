@@ -80,19 +80,27 @@ class Gates(unittest.TestCase):
 
     def test_worker_stopped_requires_identity_and_complete_session_scan(self):
         self.assertFalse(c.worker_stopped(None,None))
-        with patch.object(c,'process_identity',return_value='same'):
+        with patch.object(c,'runnable_identity',return_value='same'):
             self.assertFalse(c.worker_stopped(999,'same'))
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             child=root/'123'; child.mkdir()
             (child/'stat').write_text('123 (child) S 1 999 999 '+'0 '*16)
-            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+            with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
                 self.assertFalse(c.worker_stopped(999,'old'))
             (child/'stat').write_text('123 (child) Z 1 999 999 '+'0 '*16)
-            with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
+            with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',return_value=iter([child])):
                 self.assertTrue(c.worker_stopped(999,'old'))
-        with patch.object(c,'process_identity',return_value=None),patch.object(c.Path,'iterdir',side_effect=PermissionError):
+        with patch.object(c,'runnable_identity',return_value=None),patch.object(c.Path,'iterdir',side_effect=PermissionError):
             self.assertFalse(c.worker_stopped(999,'old'))
+        # An unreaped zombie wrapper keeps its identity but never runs again.
+        with tempfile.TemporaryDirectory() as directory:
+            leader=Path(directory)/'999'; leader.mkdir()
+            (leader/'stat').write_text('999 (wrapper) Z 1 999 999 '+'0 '*15+'same 0 0')
+            real=c.Path
+            with patch.object(c,'Path',side_effect=lambda value: real(str(value).replace('/proc',directory))):
+                self.assertEqual(c.process_identity(999),'same')
+                self.assertIsNone(c.runnable_identity(999))
 
     def test_long_feedback_build_does_not_occupy_readonly_review_slot(self):
         with tempfile.TemporaryDirectory() as directory:
