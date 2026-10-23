@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "mode": "fresh-public-testnet-historical-effects-readback",
+  "revision": "815f2b31c19e6ef35027b1bb3449bc54f6147cd7",
+  "observed_at": "2026-10-23T04:04:06.734Z",
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "peak_concurrency": 2,
+  "measurements": {
+    "n": 8,
+    "p50_ms": 77.840823,
+    "p95_ms": 124.5665439999998,
+    "max_ms": 124.5665439999998
+  },
+  "results": [
+    {
+      "digest": "9LkjrzwTWS9HFTb3ugkmjKxoPBcTEPJiS28YZsEoLZm4",
+      "targets": [
+        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::certify_blob"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "1030957",
+      "read_ms": 122.57954600000016
+    },
+    {
+      "digest": "CWZd8WwZeKJheVkGWYVskaEG3wgNiRbGvgZDCWhcwMUw",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "993869",
+      "read_ms": 124.5665439999998
+    },
+    {
+      "digest": "CQkw4fTXUXNZiFdvcPNc4jvZCtZGt3z76WhR5DiFDwfK",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "1009068",
+      "read_ms": 76.20216699999992
+    },
+    {
+      "digest": "6gLjJ4ZXb44QPpwbbpKQka5HdxvGgKDtxuagNwphnfXd",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "3797989",
+      "read_ms": 108.19264499999986
+    },
+    {
+      "digest": "6zw8xuyLC19Me9vhEHVz7mC9uqn6mZNQULPdMd7M1Amw",
+      "targets": [
+        "0x2c9382fd49ee2f09e3aeddcfc470fbbf922ba0cc30862b72dd3528e668ffb370::fleet_storage::register_blob"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "12297664",
+      "read_ms": 84.42546800000014
+    },
+    {
+      "digest": "7v2f9LCxS7tS1wju6CGvGR9n1cw63DSy6DjUpW8cSJ5t",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "-1802931",
+      "read_ms": 75.43225900000016
+    },
+    {
+      "digest": "A99gJoseg9erT1sPPQpNyaPWKAYa3VEgSWG2tBveisVm",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "4459123",
+      "read_ms": 74.56902999999988
+    },
+    {
+      "digest": "4RwY1sd8xAdQdxD3D2mph7mmDuhbo8sMgervvFsdo8GQ",
+      "targets": [
+        "0xc841f6f5232e60602d4b951d1a6914e1e3b567fc71fbc57f2b98e5ee4a8e4b50::fleet_data::report_health"
+      ],
+      "status": "success",
+      "historical_net_gas_mist": "7255298",
+      "read_ms": 77.840823
+    }
+  ],
+  "new_spend_mist": "0",
+  "writes": 0,
+  "limits": [
+    "historical producer effects independently re-read; not new SF-090 native transactions",
+    "no upload/keyserver latency or availability measurement",
+    "no production capacity claim"
+  ]
+}

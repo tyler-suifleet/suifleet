@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "result": "PASS",
+  "mode": "four-independent-daemon-simulator-drills",
+  "revision": "815f2b31c19e6ef35027b1bb3449bc54f6147cd7",
+  "binary_sha256": "ff723f610720a9595f0023e66f9406519d6362268fa3c65a0e978e22620a3cc1",
+  "shim_sha256": "31283d37cfeaeb15a7854cd15811aa5536f4653d95a4d3f6931e5328ed9d27b3",
+  "elapsed_seconds": 111.31773755399627,
+  "concurrency": 2,
+  "drills": [
+    {
+      "drill": 0,
+      "status": "PASS",
+      "elapsed_seconds": 55.010880756002734
+    },
+    {
+      "drill": 1,
+      "status": "PASS",
+      "elapsed_seconds": 55.15482382099435
+    },
+    {
+      "drill": 2,
+      "status": "PASS",
+      "elapsed_seconds": 55.70622568199178
+    },
+    {
+      "drill": 3,
+      "status": "PASS",
+      "elapsed_seconds": 55.6440554610017
+    }
+  ],
+  "checks": [
+    "real signatures and native Seal ciphertext",
+    "browser signature/archive verification",
+    "storage exhaustion retains pending purchase",
+    "restart during certification and pruned history",
+    "no duplicate registration from repeated polling",
+    "cadence, revocation, diagnostics and crash archives"
+  ],
+  "limits": [
+    "four isolated simulators reuse test identity; not four devices on a shared chain",
+    "test codec/storage/certification responses; no real provider availability",
+    "borrowed binary explicitly hashed; no claim a fresh Rust build ran",
+    "short restart drills, not multi-day soak or hardware recovery"
+  ]
+}
