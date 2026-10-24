@@ -167,6 +167,18 @@ module fleet_data::fleet_data_tests {
         let _ = compact(&mut s, one, 1, DAY, vector[]);
         destroy(system); ts::end(s);
     }
+    // Compact mode deliberately has no unbounded global seen-blob set.
+    // Readers must refuse the old blob's ciphertext sequence at the third link.
+    #[test]
+    fun compact_history_only_deduplicates_current_head() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let two = upload(&mut s, &mut system, 102, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let second = compact(&mut s, two, 2, 2 * DAY, std::hash::sha2_256(first));
+        let _ = compact(&mut s, one, 3, 3 * DAY, std::hash::sha2_256(second));
+        destroy(system); ts::end(s);
+    }
     #[test, expected_failure(abort_code = fleet_data::EExists)]
     fun compact_history_refuses_same_blob_twice() {
         let (mut s, mut system) = setup();

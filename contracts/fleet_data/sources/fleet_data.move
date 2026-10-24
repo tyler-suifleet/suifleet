@@ -256,7 +256,9 @@ module fleet_data::fleet_data {
         let blob = fleet_storage::blob(storage, blob_object_id);
         assert!(!blob.is_deletable() && blob.certified_epoch().is_some(), EBlob);
         let now = clock.timestamp_ms();
-        // Reusing a blob never adds a second history entry.
+        // Legacy entries retain per-blob markers. Compact history only rejects
+        // reuse of its current head below; it retains no unbounded seen-blob set.
+        // Readers independently check ciphertext sequence bindings on every link.
         assert!(!df::exists(&writer.id, blob_object_id), EExists);
         if (kind == 0) {
             if (writer.batch_at_ms.is_some()) assert!(now >= *writer.batch_at_ms.borrow() + fleet.batch_interval_ms, ECadence);
