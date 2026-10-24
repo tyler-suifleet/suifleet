@@ -1353,9 +1353,25 @@ mod tests {
         // Registered, or a concurrently running supervisor test's orphan sweep
         // kills it (the test process is a subreaper there).
         use crate::supervisor::{forget_std_tracked, spawn_std_tracked};
-        let mut child = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
-        let sleep = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
-        assert!(record(&path, child.id(), &sleep).unwrap());
+        // Establish that the foreign executable is running before inspecting
+        // /proc, rather than relying on spawn timing. Keep stdin open so the
+        // shell stays in its read builtin throughout the identity checks.
+        fn ready_child() -> std::process::Child {
+            use std::io::{BufRead, BufReader};
+            use std::process::{Command, Stdio};
+            let mut child = spawn_std_tracked(Command::new("sh")
+                .args(["-c", "printf 'ready\\n'; read -r finish"])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())).unwrap();
+            let mut ready = String::new();
+            BufReader::new(child.stdout.take().unwrap()).read_line(&mut ready).unwrap();
+            assert_eq!(ready, "ready\n");
+            child
+        }
+        let mut child = ready_child();
+        let executable = std::fs::read_link(format!("/proc/{}/exe", child.id())).unwrap();
+        assert!(!same_file(&executable, Path::new("/proc/self/exe")).unwrap());
+        assert!(record(&path, child.id(), &executable).unwrap());
         let main = MainProcess::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(main.pid, child.id());
         assert_eq!(proc_process(child.id()).unwrap().start, main.start);
@@ -1376,9 +1392,9 @@ mod tests {
             child.wait().unwrap();
         }
         forget_std_tracked(child.id());
-        // A main process not running the base binary (here: sleep, against
+        // A main process not running the base binary (here: sh, against
         // this test binary) is not recorded, and an earlier record is removed.
-        let mut other = spawn_std_tracked(std::process::Command::new("sleep").arg("30")).unwrap();
+        let mut other = ready_child();
         assert!(path.exists());
         assert!(!record(&path, other.id(), Path::new("/proc/self/exe")).unwrap());
         assert!(!path.exists(), "a stale record survived");
