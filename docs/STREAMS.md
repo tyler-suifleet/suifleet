@@ -4,6 +4,13 @@ Fleet deployments can supply service configuration and component grants through 
 
 Components store data in bounded local streams through the daemon's IPC socket ([COMPONENT_IPC.md](COMPONENT_IPC.md)). Data survives crashes and restarts. Streams the operator declares can be exported to an HTTP(S) destination, with retries and resumable checkpoints. The design follows AWS Stream Manager and the SF-028 specification ([GREENGRASS_COMPATIBILITY.md](GREENGRASS_COMPATIBILITY.md#streams-sf-034)). Stream data never goes on chain or to Walrus.
 
+Customer storage export is device-to-destination: see [direct S3-compatible and
+HTTP export](STREAM_EXPORTERS.md#customer-owned-storage-no-suifleet-server) for
+customer credential files, lossless external streams and health counters. No
+SuiFleet server/indexer is required. The built-in HTTP exporter below remains
+available with its existing wire format; do not enable it alongside an external
+companion on the same stream.
+
 ## Configuration
 
 ```toml
