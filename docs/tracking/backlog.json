@@ -2765,6 +2765,212 @@
         "Mainnet spending happens only under explicit user authorization for that run, per AGENTS.md."
       ],
       "validation": "Effects-checked Mainnet evidence committed under docs/business; reproducible accounting script; independent review of the updated tables."
+    },
+    {
+      "key": "SF-137",
+      "title": "Remove the server indexer from the product path",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "suifleet-edge/src",
+        "suifleet-indexer",
+        "scripts",
+        "manifests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SuiFleet must operate no application servers. Every product feature must work with no HTTP indexer configured: health and fleet visibility from signed on-chain health, logs and diagnostics from Walrus, alerts derived in the dApp, and history and operations read directly from the chain. Customers who want their own pipeline integrate it themselves (SF-143); the indexer is not SuiFleet infrastructure.",
+      "evidence": "User decision 2026-10-23: no servers in the solution; customers may integrate their own storage. Code audit of main ab621e7: dApp hooks/useFleetAlerts.ts, hooks/useFleetHealth.ts, lib/telemetry.ts, lib/alerts.ts, lib/fleet-data.ts, lib/fleet-recovery.ts, app/page.tsx, app/services/page.tsx and app/devices/page.tsx read the indexer; the daemon ships heartbeats and logs over HTTP (suifleet-edge/src/telemetry.rs, logs.rs; config.rs makes HTTP telemetry and fleet_data mutually exclusive); docs/TELEMETRY.md says the daemon still uses the HTTP path; CloudWatch metrics exports pass indexer signature verification (docs/CLOUDWATCH_METRICS.md:97); support log search, the ops CLI and indexer transaction builds (docs/INDEXER.md, docs/LOGS.md) assume the server; owner-run processes (scripts/retention_worker.py, fleet_alert_relay.cjs) must also be hosted by someone. SF-084 already serves dashboard views without an indexer (docs/DASHBOARD_VIEWS.md). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "An inventory of every indexer-dependent feature in the daemon, dApp, CLI, scripts and docs, each mapped to its serverless replacement or to a customer-owned integration.",
+        "The daemon defaults to serverless mode: on-chain health and Walrus data. HTTP telemetry and log shipping become an optional customer-owned integration, and the exclusivity between HTTP telemetry and fleet_data is removed or made explicit.",
+        "Every dApp view and alert works with no indexer configured; no default manifest or build points at a SuiFleet-hosted indexer.",
+        "Fleet visibility metrics now carried by HTTP heartbeats (messaging, streams, shadows, services) are carried by the bounded on-chain health summary or Walrus data instead.",
+        "The ops CLI and bulk transaction building read and build against the chain directly.",
+        "Owner-run background processes are replaced by dApp-triggered actions, prepaid mechanisms or device-side work, or documented as optional customer-run tools; SuiFleet hosts none.",
+        "The indexer code is removed from the product build or clearly marked as an optional, customer-hosted reference integration; docs updated accordingly."
+      ],
+      "validation": "dApp typecheck, production build and browser tests with no indexer URL; daemon and OTA simulator tests in serverless mode; a localnet end-to-end run with no HTTP services; documentation consistency checks."
+    },
+    {
+      "key": "SF-138",
+      "title": "Gate staged rollouts on signed on-chain health instead of server telemetry",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/rollout.ts",
+        "dapp/src",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "docs/STAGED_ROLLOUTS.md"
+      ],
+      "resources": [],
+      "description": "The staged-rollout health gate requires signed telemetry no older than 120 seconds, which only the HTTP indexer provides. Replace it with a serverless signal: the device writes a bounded on-chain health report immediately after applying a deployment, outside its normal cadence, and the gate judges freshness relative to the deployment grant rather than wall-clock seconds.",
+      "evidence": "dapp/src/lib/rollout.ts:45-54 requires fresh signed health within 120 s via fetchFleetHealth (lib/telemetry.ts). Low-cost defaults make on-chain health daily (docs/BUSINESS_PLAN.md, SF-130/#265), so the current gate cannot pass without the server. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A post-apply health report written on chain right after a deployment outcome, exempt from the normal cadence but bounded per deployment so it cannot be abused; additive Move change if needed.",
+        "The rollout gate admits the next wave from receipts plus post-apply health for this deployment, with timeouts and failure thresholds unchanged in meaning.",
+        "No dependence on the HTTP indexer; behaviour documented in docs/STAGED_ROLLOUTS.md."
+      ],
+      "validation": "Move unit and upgrade tests if contracts change; dApp rollout unit and browser tests; localnet staged-rollout run with daily default health and no indexer."
+    },
+    {
+      "key": "SF-139",
+      "title": "Store any device data on Walrus",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "contracts/fleet_data",
+        "contracts/fleet_storage",
+        "interfaces",
+        "sdk",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let customer components put arbitrary device data on Walrus: files, blobs, durable stream contents, sensor batches, logs or anything else, treated as opaque bytes. Data is batched on the device, encrypted with Seal, stored on fleet storage and indexed on chain, using the same device-local batching as the log archives.",
+      "evidence": "User requirement 2026-10-23: the data stored from a device should not matter; customers can put anything. Today only daemon/component logs and diagnostics reach Walrus (docs/SERVERLESS_FLEET_DATA.md); component streams leave the device only through HTTP or AWS exporters (docs/STREAMS.md, docs/STREAM_EXPORTERS.md). Coordinate with SF-121/#252 (Codex), which implements device-local quilting for log archives: reuse its batching and archive index rather than build a second one. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A device-side API for components (IPC and CLI) to submit opaque data items with a stream or key name, content type and optional metadata; durable streams can be configured to flush to Walrus.",
+        "Items are spooled durably, batched, Seal-encrypted and written to fleet storage with an on-chain index entry per item (device, stream, key, sequence, size, content SHA-256, batch reference), bounded by the fleet's budget and storage quotas.",
+        "Per-item size limits and backpressure are explicit; large files are chunked; nothing is acknowledged or dropped before certified storage and its anchor are independently verified.",
+        "Data is opaque to SuiFleet: no schema is imposed, and authorized readers can retrieve and verify each item independently of its batch."
+      ],
+      "validation": "cargo tests and OTA simulator for intake, spooling, restart and quota limits; Move unit and upgrade tests for index changes; a localnet and bounded testnet round trip storing and retrieving mixed binary and text data."
+    },
+    {
+      "key": "SF-140",
+      "title": "Data section in the dApp for browsing, downloading and sharing device data",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "docs/DASHBOARD_VIEWS.md"
+      ],
+      "resources": [],
+      "description": "Add a Data section to the dApp: a fleet-wide browser for device data stored on Walrus, filterable by device, group, stream, key, content type and time, with in-browser decryption, download, preview for small text items, sharing grants and export to customer-owned storage. It runs entirely in the browser with no server.",
+      "evidence": "User requirement 2026-10-23: there should be a data portion of the dApp. Today the dApp decrypts log and diagnostic archives one device at a time (docs/SERVERLESS_FLEET_DATA.md); fleet-wide log search exists only through the indexer (docs/LOGS.md), which SF-137 removes. Start with existing log and diagnostic archives and add generic items when SF-139 lands. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A Data section listing items fleet-wide from the on-chain index with filters for device, group, stream, key, content type and time range, using incremental, bounded reads.",
+        "Authorized users decrypt and download items in the browser; small text and JSON items preview inline; integrity is checked against the indexed SHA-256.",
+        "Owners grant and revoke read access per stream or device through Seal policies, with the caveat that revocation does not affect data already decrypted.",
+        "Items or filtered sets export directly from the browser to customer-owned storage (S3-compatible presigned upload or HTTP), with credentials kept in the browser session only.",
+        "Clear empty, loading, unavailable-history and access-denied states."
+      ],
+      "validation": "dApp typecheck, production build, unit tests and browser tests against fixture data, including decryption, filtering, sharing and export."
+    },
+    {
+      "key": "SF-141",
+      "title": "Per-stream retention and expiry for device data",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/fleet_storage",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "dapp/src",
+        "docs/RETENTION_RENEWAL.md"
+      ],
+      "resources": [],
+      "description": "Let owners set a retention period per data stream (for example 6 weeks, 6 months, 1 year, or custom up to the Walrus maximum), buy that retention when data is written so no renewal process is needed, and expire data automatically with its storage deposits recovered.",
+      "evidence": "Today periodic archives buy a fixed number of epochs and protected retention relies on an owner-run renewal worker (docs/RETENTION_RENEWAL.md), which SF-137 removes from SuiFleet operations; anchors are kept permanently (docs/SERVERLESS_FLEET_DATA.md). Coordinate with SF-128/#258 (protected-blob cap) and SF-129/#264 (deposit reclaim). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Retention settings per stream stored on chain with bounds, shown and edited in the dApp Data section and settings page.",
+        "Devices buy the configured retention at write time; retention beyond the Walrus maximum renews through a dApp-triggered or prepaid mechanism, not a SuiFleet-hosted worker.",
+        "Expired items drop from the index and their blob objects and anchors are reclaimed through SF-129's mechanisms."
+      ],
+      "validation": "Move unit and upgrade tests; daemon tests for retention at write; localnet lifecycle test through expiry and reclaim."
+    },
+    {
+      "key": "SF-142",
+      "title": "Meter and price device data storage",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "contracts/fleet_storage",
+        "docs/BUSINESS_PLAN.md",
+        "docs/FLEET_BUDGET.md"
+      ],
+      "resources": [],
+      "description": "Measure each fleet's device-data usage (bytes written and bytes stored over time) and show its cost and price before customers commit, using the proposed data add-on: an included allowance per device, then a per-GB write price and per-GB-month storage price.",
+      "evidence": "docs/BUSINESS_PLAN.md (2026-10-23) proposes pricing device data per GB. Walrus costs about $0.018 per GB written and $0.021 per GB-month stored at 2026-10-23 rates, against CloudWatch Logs ingestion at $0.50 per GB. fleet_storage already keeps usage counters. Extends the settings and deposit work in SF-131/#266. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Per-fleet and per-stream usage (written and stored bytes) derived from on-chain records and shown in the dApp.",
+        "Cost and SuiFleet price for data shown live from one configurable price table, including the included allowance; the prepaid deposit accounts for expected data volume.",
+        "Usage figures reconcile with on-chain storage records in tests."
+      ],
+      "validation": "dApp typecheck, build and unit tests for metering and pricing; reconciliation test against localnet storage records."
+    },
+    {
+      "key": "SF-143",
+      "title": "Export device data directly to customer-owned storage without SuiFleet servers",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "sdk",
+        "scripts",
+        "docs/STREAMS.md",
+        "docs/STREAM_EXPORTERS.md",
+        "docs/CLOUDWATCH_METRICS.md"
+      ],
+      "resources": [],
+      "description": "Support customers who want device data in their own storage: devices export streams and data directly to any S3-compatible service (AWS S3, Cloudflare R2, Google Cloud Storage's S3 API, MinIO) or an HTTP endpoint the customer runs, with customer-provided credentials, and no SuiFleet-hosted hop.",
+      "evidence": "Existing exporters are AWS-specific Python companions (Kinesis, S3, Firehose, CloudWatch Logs; docs/STREAM_EXPORTERS.md, docs/FIREHOSE.md) and CloudWatch metrics exports first pass indexer verification (docs/CLOUDWATCH_METRICS.md:97). User decision 2026-10-23: customers may integrate their own storage, but SuiFleet runs no servers. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A generic S3-compatible exporter (configurable endpoint, region, bucket, path layout) and HTTP exporter for durable streams and device data, with credentials supplied and stored on the device as customer secrets.",
+        "No export path depends on the SuiFleet indexer; the CloudWatch metrics verification step moves to the device or is documented as customer-side.",
+        "Exports are durable and resumable with bounded retries, and report export lag and failures in the on-chain health summary."
+      ],
+      "validation": "cargo or Python exporter tests against MinIO and an HTTP fixture; restart and failure-injection tests; documentation consistency checks."
+    },
+    {
+      "key": "SF-144",
+      "title": "Read Walrus data directly from storage nodes when aggregators are unavailable",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/Cargo.toml",
+        "suifleet-edge/meta-suifleet",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let the daemon fetch Walrus slivers directly from storage nodes and reconstruct blobs on the device when public aggregators fail, are rate-limited or cap request sizes. This removes any need for SuiFleet to run aggregators: devices use public aggregators first and fall back to direct reads.",
+      "evidence": "User decision 2026-10-23: SuiFleet runs no servers; Walrus aggregators were only included in the cost model as a conservative large-scale assumption. Public aggregators have no SLA and many cap requests at 10 MiB (docs.wal.app/docs/network-reference). Walrus reads are free at the protocol level. The Rust walrus-core crate is publish=false and pins Rust 1.96 against our 1.94 baseline (walrus mainnet-v1.58.1). Complements SF-124/#255 (aggregator fallback list and ranged downloads). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Measure direct-read feasibility on a Raspberry Pi 3 B+ class device for 50 MB and 200 MB blobs: peak memory, CPU time, connections and wall-clock time, recorded in docs.",
+        "If feasible, implement direct reads as a fallback after the aggregator list, with digest verification unchanged and bounded memory (streaming or chunked reconstruction).",
+        "Resolve the dependency and toolchain issue with a reviewed approach (pinned git dependency, vendored minimal reader, or a documented toolchain bump) that keeps Yocto LTS builds working.",
+        "If not feasible on Pi-class hardware, document the limit and the supported alternatives; do not introduce a SuiFleet-hosted aggregator."
+      ],
+      "validation": "Benchmarks on Pi-class hardware or a faithful QEMU/arm64 emulation recorded with exact versions; cargo tests with simulated aggregator failure; a bounded read-only test against Walrus Mainnet or Testnet storage nodes."
     }
   ]
 }
