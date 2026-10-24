@@ -547,9 +547,12 @@ def run(args):
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
             if inboxes:
+                # A head keeps the latest deployment per component; all of
+                # these share one component, announced in PTB order.
                 heads = json.loads(journal.read_text())["heads"]["seen"]
-                announced = {d for seen in heads.values() for d in seen["components"].values()}
-                assert {dm.object_id(direct), dm.object_id(via_group), dm.object_id(failed)} <= {dm.object_id(d) for d in announced}, heads
+                latest = {dm.object_id(target): {dm.object_id(d) for d in seen["components"].values()} for target, seen in heads.items()}
+                assert latest.get(dm.object_id(inbox)) == {dm.object_id(failed)}, heads
+                assert latest.get(dm.object_id(group)) == {dm.object_id(via_group)}, heads
                 check("head-package deployments announced to the device inbox and the indexed group's head; "
                       "group report authorized by the member index")
             evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
