@@ -1,12 +1,6 @@
 import { batchFields } from "./batch-fields";
-// Device heartbeat, inventory and health (SF-019, docs/TELEMETRY.md).
-//
-// Devices sign telemetry snapshots and send them to the fleet indexer, never
-// to the chain. The dApp reads each device's newest snapshot from the
-// indexer, then verifies its signature itself against the device's identity
-// read from the chain: the indexer can withhold or delay reports, but cannot
-// invent a device's health. Only `received_ms` (the indexer's clock) is taken
-// on trust; it decides online/offline.
+// Device health is read from signed on-chain summaries. Explicit HTTP reader
+// arguments remain available for customer-owned reference integrations only.
 import { bcs } from "@mysten/sui/bcs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
@@ -15,8 +9,8 @@ import { isValidPersonalMessageSignature } from "@mysten/sui/verify";
 import { device_registry_IdentityBcs as IdentityBcs } from "./fleet-protocol";
 import { moveType, requireManifest } from "./deployment-manifest";
 
-/** Fleet indexer base URL with telemetry enabled; empty when not configured. */
-export const TELEMETRY_URL = process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL ?? "";
+/** Product reads never select an HTTP indexer from build environment. */
+export const TELEMETRY_URL = "";
 export const TELEMETRY_SCHEMA = 1;
 /** A snapshot with a services section (SF-085); without one it stays schema 1. */
 export const TELEMETRY_SCHEMA_SERVICES = 2;
@@ -416,16 +410,16 @@ const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavaila
 export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "getObjects" | "ledgerService">>, deviceIds: string[], owner: string,
   url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
   const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
-  if (process.env.NEXT_PUBLIC_FLEET_DATA) {
+  if (!url || process.env.NEXT_PUBLIC_FLEET_DATA) {
     try {
       const { DATA_CONFIG, fetchChainHealth } = await import("./fleet-data");
       const getObject = client.getObject?.bind(client);
       const ledgerService = client.ledgerService;
-      if (!DATA_CONFIG || !getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
+      if (!DATA_CONFIG) return unavailable("Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health");
+      if (!getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
       return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), getObjects: client.getObjects?.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
     } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }
   }
-  if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
   let indexed;
   try {
     indexed = await fetchIndexedHealth(url, token, owner, fetcher);

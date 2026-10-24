@@ -58,6 +58,28 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   for(let i=0;i<2;i++)assert.deepEqual((await client.getObject({objectId:[fleet,writer][i],include:{content:true}})).object.content,before[i]);
   tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::request_diagnostics`,arguments:[tx.object(fleet),tx.object(writer),tx.object(budget),tx.object(budgetCap),tx.object('0x6')]});await execute('diagnostics on existing writer',tx);
   const field=await client.getDynamicField({parentId:writer,name:{type:`${head}::fleet_data::DiagnosticKey`,bcs:bcs.bool().serialize(false).toBytes()}});assert.equal(bcs.struct('DiagnosticRequest',{seq:bcs.u64(),at_ms:bcs.u64()}).parse(field.dynamicField.value.bcs).seq,'1');
+  // SF-137: signed services survive the serverless chain path, including an
+  // existing writer after upgrade. No indexer/HTTP ingress process is started.
+  const coreMetadata=bcs.Object.parse((await client.getObject({objectId:core.pkg,include:{objectBcs:true}})).object.objectBcs).data.Package;
+  const registryObject=(await client.getObject({objectId:registry})).object;
+  const manifest={...require('../manifests/fixture.localnet.json'),chain_identifier:chain,rpc_url:rpc,call_package_id:core.pkg,
+   upgrade_cap_id:core.upgradeCap,package_version:coreMetadata.version,
+   type_origins:Object.fromEntries(coreMetadata.typeOriginTable.map(o=>[o.moduleName+'::'+o.datatypeName,o.package])),
+   shared_objects:{registry:{id:registry,initial_shared_version:registryObject.owner.Shared.initialSharedVersion}}};
+  const config={schema:1,chainIdentifier:chain,registryId:registry,packageId:head,typeOrigin:base.pkg,fleetId:fleet,budgetId:budget,storageId:storage};
+  const snapshot=structuredClone(require('../interfaces/telemetry-cases.json').signed_services_v2.snapshot);
+  Object.assign(snapshot,{chain_identifier:chain,registry,device_id:deviceId,signer:device.toSuiAddress(),seq:1,observed_ms:Date.now(),started_ms:Date.now()-60000});
+  const message=Buffer.from(JSON.stringify(snapshot)),signature=Buffer.from((await device.signPersonalMessage(message)).signature,'base64');
+  tx=new Transaction();tx.moveCall({target:head+'::fleet_data::report_health',arguments:[tx.object(fleet),tx.object(writer),tx.object(budget),tx.object(account),tx.object(registry),tx.object(deviceCap),tx.pure.u64(1),tx.pure.vector('u8',message),tx.pure.vector('u8',signature),tx.object('0x6')]});
+  await execute('serverless signed services health',tx,device);
+  const manifestPath=path.join(tmp,'serverless-manifest.json');await fs.writeFile(manifestPath,JSON.stringify(manifest));
+  const healthEnv={...process.env,NEXT_PUBLIC_FLEET_DATA:JSON.stringify(config),NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL:'http://127.0.0.1:1'};
+  const health=JSON.parse(execFileSync(process.execPath,[path.join(root,'scripts/suifleet_ops.cjs'),manifestPath,'health',owner.toSuiAddress()],{env:healthEnv,encoding:'utf8'}));
+  assert(['healthy','degraded'].includes(health[deviceId].status),JSON.stringify(health));
+  assert.deepEqual(health[deviceId].services,snapshot.services);
+  const alerts=JSON.parse(execFileSync(process.execPath,[path.join(root,'scripts/suifleet_ops.cjs'),manifestPath,'alerts',owner.toSuiAddress()],{env:healthEnv,encoding:'utf8'}));
+  assert.equal(alerts.status,'ok');
+  console.log('PASS: direct-chain CLI health/alerts with signed messaging/bridge/streams/shadows and deliberately unusable legacy URL, no application HTTP services');
   tx=new Transaction();tx.moveCall({target:`${core.pkg}::device_registry::revoke_device`,arguments:[tx.object(registry),tx.object(ownerCap)]});await execute('revoke device',tx);
   // Submit fully resolved transactions, so rejection is a real failed effect.
   const attacks={};

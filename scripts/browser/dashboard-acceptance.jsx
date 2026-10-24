@@ -9,8 +9,10 @@ import { createDAppKit, DAppKitProvider } from "@mysten/dapp-kit-react";
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
-import { bcs } from "@mysten/sui/bcs";
-import { normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils";
+import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
+import { deriveDynamicFieldID, normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils";
+import DevicesPage from "@/app/devices/page";
+import DashboardPage from "@/app/page";
 import ServicesPage from "@/app/services/page";
 import RolloutsPage from "@/app/rollouts/page";
 import DataPage from "@/app/data/page";
@@ -54,6 +56,8 @@ const deployment = { id: rollout.id, creator: f.operator, component_name: "app",
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });
 const responses = manifestClient(m);
 client.ledgerService.getServiceInfo = responses.ledgerService.getServiceInfo;
+responses.listEvents = (request) => client.listEvents(request);
+client.ledgerService.listEvents = responses.ledgerService.listEvents;
 client.getObject = async ({ objectId }) => {
   objectId = id(objectId);
   if (objectId === config.fleetId) return { object: { objectId, owner: { $kind: "Shared" }, type: dataType("FleetData"), content: FleetDataBcs.serialize(fleet).toBytes() } };
@@ -70,11 +74,24 @@ const deviceObject = (d) => ({ objectId: d.id, type: type("device_registry::Devi
   id: d.id, name: d.name, device_address: f.signer, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() });
 client.listOwnedObjects = async ({ type: wanted }) => ({ hasNextPage: false, objects: normalizeStructTag(wanted) === type("device_registry::DeviceOwnerCap")
   ? f.devices.map((d) => ({ objectId: d.cap, content: DeviceOwnerCapBcs.serialize({ id: d.cap, device_id: d.id }).toBytes() })) : [] });
-client.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => {
+client.getObjects = async ({ objectIds }) => ({ objects: await Promise.all(objectIds.map(async (objectId) => {
   if (id(objectId) === id(rollout.id)) return { objectId, type: type("deployment_manager::DeploymentRecord"), content: DeploymentBcs.serialize(deployment).toBytes() };
   const d = f.devices.find((d) => d.id === id(objectId));
-  return d ? deviceObject(d) : notFound();
-}) });
+  if (d) return deviceObject(d);
+  if (writers[id(objectId)]) return (await client.getObject({ objectId })).object;
+  const requests = f.devices.flatMap(d => [
+    { parent: m.shared_objects.registry.id, keyType: type("device_registry::IdentityKey"), key: bcs.Address.serialize(d.id).toBytes() },
+    { parent: config.fleetId, keyType: dataType("DeviceKey"), key: bcs.Address.serialize(d.id).toBytes() },
+  ]);
+  for (const name of ["ReceiptsKey", "TargetGroupsKey", "TargetDevicesKey"]) requests.push({ parent: rollout.id, keyType: type("deployment_manager::" + name), key: bcs.bool().serialize(false).toBytes() });
+  for (const r of requests) {
+    if (deriveDynamicFieldID(r.parent, TypeTagSerializer.parseFromStr(r.keyType), r.key) !== id(objectId)) continue;
+    const { dynamicField: { value } } = await client.getDynamicField({ parentId: r.parent, name: { type: r.keyType, bcs: r.key } });
+    return { objectId, type: normalizeStructTag('0x2::dynamic_field::Field<' + r.keyType + ',' + value.type + '>'),
+      content: new Uint8Array([...bcs.Address.serialize(objectId).toBytes(), ...r.key, ...value.bcs]) };
+  }
+  return notFound();
+})) });
 client.listEvents = async ({ filter }) => {
   const wanted = normalizeStructTag(filter.eventType);
   const events = wanted === type("deployment_manager::DeploymentCreated") ? [{ bcs: DeploymentCreatedBcs.serialize({ deployment_id: rollout.id,
@@ -97,6 +114,9 @@ client.getDynamicField = async ({ parentId, name }) => {
     const d = f.devices.find((d) => d.id === id(bcs.Address.parse(name.bcs)));
     if (!d) throw notFound();
     return { dynamicField: { value: { type: type("device_registry::Identity"), bcs: IdentityBcs.serialize({ signer: f.signer, revoked: false, owner_cap: d.cap }).toBytes() } } };
+  }
+  if (id(parentId) === id(rollout.id) && [type("deployment_manager::TargetGroupsKey"), type("deployment_manager::TargetDevicesKey")].includes(key)) {
+    return { dynamicField: { value: { type: "vector<0x2::object::ID>", bcs: bcs.vector(bcs.Address).serialize(key.endsWith("::TargetGroupsKey") ? [] : rollout.members).toBytes() } } };
   }
   if (id(parentId) === id(rollout.id) && key === type("deployment_manager::ReceiptsKey")) {
     return { dynamicField: { value: { type: type("deployment_manager::Receipts"), bcs: ReceiptsBcs.serialize({ version: "2",
@@ -132,6 +152,6 @@ function ShadowFixture() {
 const kit = createDAppKit({ networks: [m.network], createClient: () => client, autoConnect: false, slushWalletConfig: null, storage: null });
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
-const Page = { "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture, "/shadows": ShadowFixture }[location.pathname];
+const Page = { "/": DashboardPage, "/devices": DevicesPage, "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture, "/shadows": ShadowFixture }[location.pathname];
 createRoot(document.getElementById("root")).render(
   <QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><ConnectButton /><Page /></DAppKitProvider></QueryClientProvider>);
