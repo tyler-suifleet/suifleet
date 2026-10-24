@@ -3,7 +3,7 @@
   "chain": "4c78adac",
   "sdk": "Walrus1.2.35/Sui2.36.0",
   "node": "22.22.2",
-  "runtime_code_commit": "87212840d97bbebfe42151706d58cb0a1af4ce8a",
+  "runtime_code_commit": "222bc2338eb48e5e1eb15af66b9c3cc8d1b3c3ce",
   "source": "actual pinned codec prepare/write + effects checked CLI + browser chain/Seal/Quilt reader; native daemon recovery tested separately in simulator",
   "config": {
     "schema": 1,
@@ -208,9 +208,9 @@
     "dapp/scripts/archive-quilt.mjs": "099ac6faf4df9ec258ba587a5a978dfffeb78ba7f34f24d974246b2780020156",
     "dapp/scripts/walrus-device-codec.mjs": "00d963ede2a6edfc4168751c35c21200dc8282cfbc82a98ae8bede24c7992f9f",
     "dapp/src/lib/archive-quilt.ts": "c7dd0543511c679ee86db826bed4c8f70bf9da5c901cdf4bce6a4fca4fa003c4",
-    "dapp/src/lib/fleet-bulk.ts": "311afd75a61346d593f430d79b4d84bc3f1d310a5cda04af51ff51b7051485cd",
-    "suifleet-edge/src/fleet_archive.rs": "babe712fe61048931b3085348848eff78c4feeb9572370b42b3063225682c137",
-    "suifleet-edge/src/fleet_data.rs": "9e067eaf8b4c0cfb30350666e8232e5b93280b8097f9d933cbfb0e0adfec55bf",
+    "dapp/src/lib/fleet-bulk.ts": "37798dbd2487b19f1057eecffc15c0bef41989f1b766e893575e0f852975ad03",
+    "suifleet-edge/src/fleet_archive.rs": "9210e8d08997f0ca0e954c6f70b5e7a99daf8e92a4eba65069920a504e345922",
+    "suifleet-edge/src/fleet_data.rs": "0f01c9e4bb9905dfd2e71260bbbf7c6918a4dd0461cdbfd7c0b050022c012281",
     "scripts/live_quilt_runtime.cjs": "556bc14ebf421065dd65f73e698dd034f7851a5fc42016f8a88c7a0664dc171b",
     "suifleet-edge/examples/sign_quilt_fixture.rs": "7a725f6c8b110fd4049012d0e35aacb65f1559c4024808d149cc252f42b4492e"
   },
