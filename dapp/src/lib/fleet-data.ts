@@ -1,3 +1,4 @@
+import { batchFields } from "./batch-fields";
 // SF-082 data package interface v1. Separate package/type origins are explicit:
 // upgrading sui_edge does not change the origin of these objects.
 import { bcs } from "@mysten/sui/bcs";
@@ -5,7 +6,7 @@ import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
 import { normalizeStructTag, normalizeSuiAddress as id, toBase64, fromBase58, toHex } from "@mysten/sui/utils";
 import { requireManifest } from "./deployment-manifest";
-import { readIdentity, verifyReport, assess, type DeviceHealth, type Snapshot } from "./telemetry";
+import { readIdentities, readIdentity, verifyReport, assess, type DeviceHealth, type Snapshot } from "./telemetry";
 
 const address = bcs.Address;
 export const FleetDataBcs = bcs.struct("FleetData", {
@@ -49,7 +50,7 @@ export function parseDataConfig(raw: string): FleetDataConfig {
 }
 
 export const DATA_CONFIG = process.env.NEXT_PUBLIC_FLEET_DATA ? parseDataConfig(process.env.NEXT_PUBLIC_FLEET_DATA) : undefined;
-type Reads = Pick<SuiGrpcClient, "getObject" | "getDynamicField" | "ledgerService">;
+type Reads = Pick<SuiGrpcClient, "getObject" | "getDynamicField" | "ledgerService"> & Partial<Pick<SuiGrpcClient, "getObjects">>;
 const unavailable = (reason: string): DeviceHealth => ({ status: "unavailable", codes: ["unavailable"], reasons: [reason], components: [] });
 const type = (config: FleetDataConfig, name: string) => normalizeStructTag(`${config.typeOrigin}::fleet_data::${name}`);
 function safeNumber(value: string): number {
@@ -128,11 +129,41 @@ export async function fetchChainHealth(client: Reads, config: FleetDataConfig, d
   try { cadenceMs = safeNumber((await readFleetData(client, config)).health_interval_ms);
     if (cadenceMs < 60_000 || cadenceMs > 86_400_000) throw new Error("Invalid chain health cadence"); }
   catch (error) { return Object.fromEntries(deviceIds.map(device => [device, unavailable(String(error))])); }
-  return Object.fromEntries(await Promise.all(deviceIds.map(async deviceId => {
+  let identities: Awaited<ReturnType<typeof readIdentities>> | undefined;
+  let writers: (ReturnType<typeof DeviceDataBcs.parse> | undefined)[] | undefined;
+  try {
+    if (client.getObjects) {
+      const batch = { getObjects: client.getObjects.bind(client) };
+      identities = await readIdentities(batch, deviceIds);
+      const values = await batchFields(batch, deviceIds.map(device => ({ parent: config.fleetId,
+        keyType: type(config, "DeviceKey"), key: address.serialize(device).toBytes(), valueType: "0x2::object::ID" })));
+      const writerIds = values.map(value => value ? address.parse(value) : undefined);
+      const ids = writerIds.filter((value): value is string => !!value);
+      const byId = new Map<string, ReturnType<typeof DeviceDataBcs.parse>>();
+      for (let offset = 0; offset < ids.length; offset += 50) {
+        const { objects } = await batch.getObjects({ objectIds: ids.slice(offset, offset + 50), include: { content: true } });
+        if (objects.length !== Math.min(50, ids.length - offset)) throw Error("Incomplete health batch");
+        objects.forEach((object, index) => {
+          if (object instanceof Error) throw object;
+          if (object.owner.$kind !== "Shared" || normalizeStructTag(object.type) !== type(config, "DeviceData") || id(object.objectId) !== id(ids[offset + index])) throw Error("Unexpected DeviceData type origin/ownership/ID");
+          const writer = DeviceDataBcs.parse(object.content);
+          if (writer.version !== "1" || id(writer.id) !== id(object.objectId) || id(writer.fleet_id) !== config.fleetId) throw Error("DeviceData binding/version mismatch");
+          byId.set(id(object.objectId), writer);
+        });
+      }
+      writers = writerIds.map((writerId, index) => {
+        if (!writerId) return undefined;
+        const writer = byId.get(id(writerId))!;
+        if (id(writer.device_id) !== id(deviceIds[index])) throw Error("DeviceData device mismatch");
+        return writer;
+      });
+    }
+  } catch (error) { return Object.fromEntries(deviceIds.map(device => [device, unavailable(`Chain health batch could not be verified: ${String(error)}`)])); }
+  return Object.fromEntries(await Promise.all(deviceIds.map(async (deviceId, index) => {
     try {
-      const identity = await readIdentity(client, deviceId);
+      const identity = identities ? identities[index] : await readIdentity(client, deviceId);
       if (!identity || identity.revoked) return [deviceId, { ...assess(!!identity?.revoked, undefined, now), components: [] }];
-      const writer = await readDeviceData(client, config, deviceId);
+      const writer = writers ? writers[index] : await readDeviceData(client, config, deviceId);
       if (!writer || writer.health_seq === "0") return [deviceId, { ...assess(false, undefined, now), components: [] }];
       if (writer.message.length > 16_384) throw new Error("Health snapshot exceeds its chain bound");
       const snapshot = await verifyReport({ message: toBase64(new Uint8Array(writer.message)), signature: toBase64(new Uint8Array(writer.signature)) }, deviceId, identity.signer);

@@ -18,7 +18,71 @@ One dApp Kit instance selects the manifest's single network. Wallet account chai
 
 ## Queries and layouts
 
-Inventory uses `listOwnedObjects`; groups and deployment history use `listEvents`, including empty scan-limited pages with a continuation cursor. Collection cursors and history `before` cursors are separate. Repeated/missing continuation cursors fail instead of spinning. Object batches skip only missing/deleted records; transport failures propagate.
+Inventory uses `listOwnedObjects` and batches custodied Device objects. Groups,
+policies, catalogs and deployments discover IDs through typed gRPC `ListEvents`
+with a durable ascending watermark. The cursor and decoded event bytes are saved
+atomically in browser local storage, scoped by chain, endpoint, call package, type
+and sender. Immutable publisher/operator streams (catalogs and enrollment policies) combine
+type and sender predicates. Cross-sender streams (gas draws/enrollments, groups
+and deployments) retain type filters: group admins and deployment creators can
+change during handover, and delegated deployments are sent by another address.
+Filtering their creation events by the current operator would hide valid state.
+Concurrent scans of the same stream share one request. Empty scan pages advance
+the watermark; missing/repeated cursors and incomplete streams fail visibly.
+Each successfully terminated page commits its watermark and discovery atomically.
+At 200 pages the view shows “still loading” and resumes on the next refresh.
+Persisted discovery is bounded to 256 KiB per stream and 2 MiB across this origin’s history
+keys (UTF-16 size estimate). Deployment/group events retain only compact discovery IDs;
+current metadata and targets come from objects. Storage limits never truncate in-memory
+or returned results. Oversized streams remove their saved cursor and warn that reload
+rescans the retained range; origin eviction also causes a retained-range rescan.
+Cache schema v2 rejects older possibly truncated caches and rescans with a partial-history warning;
+storage/quota failures warn and continue in memory instead of wedging the view.
+
+The endpoint's `lowestAvailableCheckpoint` is checked on every scan. First reads
+on a pruned endpoint show **History unavailable** with the retained boundary;
+available results remain explicitly partial. A saved cursor that fell behind
+retention restarts from the retained boundary, keeps known events and explicitly
+warns about the gap. Invalid saved caches rescan with a partial-history warning. Missing retention metadata
+also fails. Use an archival endpoint to recover complete discovery; changing the
+endpoint intentionally selects a separate cache. Current group/record objects,
+deployment target fields, receipts and controls are freshly read: cached events
+are discovery hints only. Objects predating retained history cannot be discovered
+from events on a fresh browser. SF-125's deployment inbox must be integrated only
+after that API merges; this change neither guesses its interface nor claims that
+older objects were recovered.
+
+Network refresh defaults are 60 seconds (storage certification checks already
+using a longer interval keep it). Budget accounts batch both deterministic
+DeviceKey fields and GasAccount objects, preserving input order and validating
+budget/device bindings. Fleet health batches identities, device indexes and
+DeviceData objects while retaining signature/origin/binding checks. Only absent
+indexes mean unenrolled/unreported; transport and dangling-object failures stay
+unavailable. Legacy isolated query fixtures without `getObjects` retain the
+single-object health adapter; the shipped SDK client uses batches.
+
+The browser's SDK transport shares one per-tab request queue, spacing starts by
+350 ms (at most 86 starts per 30 seconds), including SDK proof and receipt reads.
+Aborted queued requests never reach the network. A 500-request queue limit fails
+visibly; it does not drop work or treat it as success. Large initial views can
+take longer than a refresh interval and stay loading/unavailable until verified.
+This per-tab bound is not a shared-IP quota across tabs/users and does not make
+public testing endpoints a production service. See the official
+[public endpoint guidance](https://docs.sui.io/operators/data-management/indexer-stack-setup).
+
+`node scripts/test_dashboard_requests.cjs` measures real query calls for 1,000
+fixture devices: 45 inventory calls/proofs, 40 budget-account batches and 62
+chain-health calls, including fresh service-info checks. Its conservative combined load (two inventory/health
+consumers plus two network-wide 100-deployment reads, budget accounts and 30
+additional calls) is 708 requests. Each deployment read costs 212 calls, including
+4 target-field batches rather than 200 individual target calls; authoritative
+receipts and controls still require individual reads. Cross-sender discovery
+remains necessary for delegated deployments, handover and receipt history. The
+queue drains the combined load in 247,450 ms of virtual time, with a peak of 86 starts in any
+30-second window. This is offline query/request-scheduler evidence, not a live
+endpoint throughput or production capacity measurement. The existing browser
+fixtures separately exercise actual browser/wallet/health flows.
+
 
 `dapp/src/lib/move-bcs.ts` defines the current contract layouts. Objects, events, UpgradeCap and receipts decode BCS rather than transport-dependent JSON. Deployment timestamps come from the actual record. Missing authoritative receipts mark legacy history unverified; legacy StatusesKey is never read. Invalid receipt authority generations, unknown statuses and object schema versions are rejected. A positive receipts version is an authority generation, so an additive upgrade may bump it without changing the client layout; protocol/schema compatibility is enforced separately by the manifest. SF-005 remains responsible for generated/compiled layout compatibility; these definitions do not by themselves prove future upgrades compatible.
 

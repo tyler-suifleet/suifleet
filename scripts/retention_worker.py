@@ -248,7 +248,7 @@ def main():
                 raise
         if args.once:
             return
-        time.sleep(30)
+        time.sleep(3600)
 
 
 if __name__ == '__main__':
