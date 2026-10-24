@@ -241,7 +241,16 @@ def verify_publication(publication, rpc_url, operator, client):
     head = publication.get("head_package", old)
     facts = dm.chain_facts(rpc_url, old, cap, registry)
     expected_version = "2" if head != old else "1"
-    assert dm.upgrade_cap(facts["objects"][dm.object_id(cap)])[:2] == (dm.object_id(head), expected_version)
+    actual = dm.upgrade_cap(facts["objects"][dm.object_id(cap)])[:2]
+    pending = publication.get("pending_operation")
+    if (actual != (dm.object_id(head), expected_version) and "head_package" not in publication and pending
+            and reconciler.normal_pending(pending)["label"] == "upgrade to head"):
+        # An executed but uncheckpointed upgrade: the cap may already point at an
+        # unrecorded package. The upgrade step authenticates it from effects and
+        # bytecode, and the result is re-verified strictly before it is recorded.
+        assert actual[1] == "2" and actual[0] != dm.object_id(old)
+    else:
+        assert actual == (dm.object_id(head), expected_version)
     assert owner_of(client, cap) == operator and owner_of(client, registry) == "shared"
 
 
@@ -573,11 +582,13 @@ def run(args):
                             legacy=lambda marker: reconciler.legacy_publication(
                                 marker, chain=facts_reader, operator=operator, built=head_built,
                                 known=reconciler.known_objects(state), now=time.time(), upgrade=target))
-                        if not built["upgrade"].get("policy"):
+                        if not built.get("upgrade", {}).get("policy"):
                             built["upgrade"] = dict(package_proof(head_built, "upgrade"), reconciled=True)
                         new = published(upgraded)
                     else:
                         check("exact root bytecode equals base; separate packages do not trigger a pointless core upgrade")
+                    # The cap must now point at exactly this package before it is recorded.
+                    verify_publication(dict(publication, head_package=new), rpc_url, operator, client)
                     save_publication(head_package=new)
                 if "owner_cap" not in publication:
                     activated = setup_ptb("activate identity in registry custody", [f"{new}::device_registry::activate_device"],

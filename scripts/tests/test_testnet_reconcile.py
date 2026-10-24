@@ -344,12 +344,14 @@ class Funding(unittest.TestCase):
 
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+HEAD = tc.normal('0x' + 'ad' * 32)
+DEVICE = tc.normal('0x' + 'd0' * 32)
 
 
 class RunFlow(unittest.TestCase):
     """Drive run() up to its first chain verification with an offline CLI."""
 
-    def harness(self, root, state, *, balance='2000000000', serialized=None, faucet=None, required=None):
+    def harness(self, root, state, *, balance='2000000000', serialized=None, faucet=None, required=None, upgrade=False):
         tools = {'build': {'path': '/compiler', 'version': tc.BUILD['version']},
                  'network': {'path': '/network', 'version': tc.NETWORK['version'], 'sha256': 'pinned'}}
         buffer = io.BytesIO()
@@ -381,7 +383,9 @@ class RunFlow(unittest.TestCase):
                     balance.pop(0)
             return SimpleNamespace(stdout=output, stderr='', returncode=0)
         digest = 'bytecode-v1:' + bytes(range(32)).hex()
-        key = live.fixture_key(digest, digest)
+        head_digest = 'bytecode-v1:' + bytes(range(1, 33)).hex() if upgrade else digest
+        key = live.fixture_key(digest, head_digest)
+        compiled = [dict(BUILT, digest=list(range(32))), dict(BUILT, digest=list(range(1, 33)) if upgrade else list(range(32)))]
         live.save_state(root / 'state.json', state(key, digest, tools))
         args = SimpleNamespace(wallet=str(root / 'client.yaml'), network='testnet', evidence=str(root / 'evidence.json'),
                                max_spend_mist=800000000, required_balance_mist=required, build_sui='/compiler',
@@ -393,7 +397,7 @@ class RunFlow(unittest.TestCase):
                    patch.object(live.toolchain, 'check_tools', return_value=tools),
                    patch.object(live.toolchain, 'resolve', side_effect=lambda tool: tool),
                    patch.object(live.toolchain, 'preflight', return_value={'protocol_version': 139}),
-                   patch.object(live.toolchain, 'compile_package', return_value=dict(BUILT, digest=list(range(32)))),
+                   patch.object(live.toolchain, 'compile_package', side_effect=compiled),
                    patch.object(live.toolchain, 'framework_pins', return_value={}),
                    patch.object(live.toolchain, 'package_submitter', side_effect=AssertionError('no republication')),
                    patch.object(live.dm, 'chain_facts', return_value={'chain_identifier': '4c78adac'}),
@@ -473,6 +477,117 @@ class RunFlow(unittest.TestCase):
             self.assertEqual(saved['pending_operation']['label'], 'publish base')
             self.assertTrue(saved['pending_operation']['legacy'])
             self.assertEqual(saved['pending_operation']['observed']['epoch'], 1262)
+
+    def upgrade_state(self, marker):
+        def state(key, digest, tools):
+            return {'chain': '4c78adac', 'operator': ADDRESS, 'fixtures': {}, 'publications': {key: {
+                'source_pair': key.rsplit('@', 1)[0].split('..'), 'compiler': tools['build']['version'],
+                'built': {'base': {'kind': 'publish'}}, 'base_package': PACKAGE, 'registry': REGISTRY,
+                'upgrade_cap': CAP, 'device_key': 'offline-device-key', 'device_address': DEVICE,
+                'device': tc.normal('0x' + 'de' * 32), 'device_cap': tc.normal('0x' + 'dc' * 32),
+                'group': tc.normal('0x' + 'd9' * 32), 'member_added': True, 'pending_operation': marker}}}
+        return state
+
+    def restart_after_executed_upgrade(self, marker, chain, decode=None, cap_package=HEAD, stop=('stop at activation', tc.NotSubmitted)):
+        """The upgrade executed but the run died before head_package was saved:
+        the cap already points at HEAD version 2 when the next run starts."""
+        reads = []
+
+        def chain_facts(rpc, *ids):
+            if len(ids) == 3:  # verify_publication: base package, UpgradeCap, registry.
+                reads.append(ids)
+                return {'chain_identifier': '4c78adac', 'objects': {CAP: {
+                    'kind': 'object', 'type': '0x2::package::UpgradeCap', 'owner': {'address': ADDRESS},
+                    'upgrade_cap': {'package': cap_package, 'version': 2}}}}
+            return {'chain_identifier': '4c78adac'}
+
+        def output(argv, **kwargs):
+            return DEVICE if '--derive-address' in argv else 'b' * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, key, patches, commands = self.harness(root, self.upgrade_state(marker), upgrade=True)
+            patches[1] = patch.object(live.subprocess, 'check_output', side_effect=output)
+            extra = [patch.object(live.reconciler, 'Chain', return_value=chain),
+                     patch.object(live.dm, 'chain_facts', side_effect=chain_facts),
+                     patch.object(live, 'owner_of', side_effect=lambda client, oid: ADDRESS if oid == CAP else 'shared'),
+                     patch.object(live.toolchain, 'write_pubfile'),
+                     patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'upgrade'}),
+                     patch.object(live.toolchain, 'ptb_submitter', side_effect=tc.NotSubmitted('stop at activation'))]
+            if decode:
+                extra.append(patch.object(live.toolchain, 'decode', side_effect=decode))
+            with self.assertRaisesRegex(stop[1], stop[0]):
+                self.run_flow(args, patches, extra)
+            saved = json.loads((root / 'state.json').read_text())['publications'][key]
+            evidence = json.loads((root / 'evidence.json').read_text())
+            return saved, evidence, commands, reads
+
+    def test_restart_adopts_executed_but_uncheckpointed_upgrade_from_retained_bytes(self):
+        marker = pending(max_epoch='8')
+        marker['label'] = 'upgrade to head'
+        marker['tx'].update(digest='U1', sender=tc.normal(ADDRESS))
+        upgrade = facts(digest='U1', sender=tc.normal(ADDRESS), created=[{'objectId': HEAD, 'type': 'package'}],
+                        commands=[{'kind': 'MoveCall'}, {'kind': 'Upgrade', 'modules': MODULES, 'dependencies': DEPS,
+                                                         'package': PACKAGE}, {'kind': 'MoveCall'}])
+        chain = FakeChain(epoch=8, transactions={'U1': upgrade})
+        saved, evidence, commands, reads = self.restart_after_executed_upgrade(
+            marker, chain, decode=decoded(digest='U1', sender=ADDRESS))
+        self.assertNotIn('pending_operation', saved)  # Cleared atomically with the recorded head.
+        self.assertEqual(saved['head_package'], HEAD)
+        self.assertEqual(saved['base_package'], PACKAGE)
+        self.assertEqual(len(reads), 2)  # Lenient pre-check, then strict check of the adopted head.
+        self.assertEqual(evidence['reconciliations'][0]['outcome'], 'executed')
+        self.assertEqual(evidence['reconciliations'][0]['digest'], 'U1')
+        self.assertEqual(evidence['transactions'], [])
+        self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))  # No second upgrade.
+
+    def test_adopted_upgrade_must_be_the_package_the_cap_points_at(self):
+        marker = pending(max_epoch='8')
+        marker['label'] = 'upgrade to head'
+        marker['tx'].update(digest='U1', sender=tc.normal(ADDRESS))
+        upgrade = facts(digest='U1', sender=tc.normal(ADDRESS), created=[{'objectId': HEAD, 'type': 'package'}],
+                        commands=[{'kind': 'MoveCall'}, {'kind': 'Upgrade', 'modules': MODULES, 'dependencies': DEPS,
+                                                         'package': PACKAGE}, {'kind': 'MoveCall'}])
+        saved, evidence, commands, reads = self.restart_after_executed_upgrade(
+            marker, FakeChain(epoch=8, transactions={'U1': upgrade}), decode=decoded(digest='U1', sender=ADDRESS),
+            cap_package=OTHER, stop=('', AssertionError))
+        self.assertEqual(saved['pending_operation']['label'], 'upgrade to head')  # Retained on disk.
+        self.assertNotIn('head_package', saved)
+        self.assertEqual(len(reads), 2)
+        self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))
+
+    def test_restart_adopts_executed_but_uncheckpointed_historical_upgrade(self):
+        upgrade = facts(digest='U1', sender=tc.normal(ADDRESS), created=[{'objectId': HEAD, 'type': 'package'}],
+                        commands=[{'kind': 'MoveCall'}, {'kind': 'Upgrade', 'modules': MODULES, 'dependencies': DEPS,
+                                                         'package': PACKAGE}, {'kind': 'MoveCall'}])
+        cap = {'objectId': CAP, 'version': '9', 'package': HEAD, 'cap_version': '2', 'previous_transaction': 'U1'}
+        chain = FakeChain(epoch=8, transactions={'U1': upgrade}, caps=[cap])
+        saved, evidence, commands, _ = self.restart_after_executed_upgrade('upgrade to head', chain)
+        self.assertNotIn('pending_operation', saved)
+        self.assertEqual(saved['head_package'], HEAD)
+        self.assertTrue(evidence['reconciliations'][0]['legacy'])
+        self.assertEqual(evidence['transactions'], [])
+        self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))
+
+    def test_pending_upgrade_never_relaxes_an_unrelated_cap(self):
+        publication = {'base_package': PACKAGE, 'registry': REGISTRY, 'upgrade_cap': CAP,
+                       'pending_operation': 'upgrade to head'}
+
+        def verify(package, version, publication=publication):
+            fact = {'chain_identifier': '4c78adac', 'objects': {CAP: {
+                'kind': 'object', 'type': '0x2::package::UpgradeCap', 'owner': {'address': ADDRESS},
+                'upgrade_cap': {'package': package, 'version': version}}}}
+            with patch.object(live.dm, 'chain_facts', return_value=fact), \
+                    patch.object(live, 'owner_of', side_effect=lambda client, oid: ADDRESS if oid == CAP else 'shared'):
+                live.verify_publication(publication, 'rpc', ADDRESS, None)
+        verify(PACKAGE, 1)
+        verify(HEAD, 2)  # Unrecorded upgrade: authenticated by the upgrade step.
+        for package, version, other in ((PACKAGE, 2, publication), (HEAD, 3, publication),
+                                         (HEAD, 2, dict(publication, pending_operation='add device to group (base)')),
+                                         (HEAD, 2, {k: v for k, v in publication.items() if k != 'pending_operation'}),
+                                         (OTHER, 2, dict(publication, head_package=HEAD))):
+            with self.subTest(package=package, version=version, other=other.get('pending_operation')):
+                with self.assertRaises(AssertionError):
+                    verify(package, version, other)
 
     def test_budget_exhaustion_between_suites_is_refused_before_any_mutation(self):
         faucets = []
