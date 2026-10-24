@@ -109,6 +109,9 @@ Within an observed active maintenance window (including a completed job’s
 retained window), discovery also honors the configured faster rollout cadence.
 Outside those windows, short version-check intervals do not force event scans.
 
+Local firmware results and configuration settlement run before the idle gate;
+a result appearing in the spool does not wait for a chain change or event scan.
+
 Queued receipts validate current authority and retry before the version gate or
 fallible discovery, and new outcomes flush before the normal cadence sleep.
 RPC fallback verifies each candidate chain before use; metrics count every

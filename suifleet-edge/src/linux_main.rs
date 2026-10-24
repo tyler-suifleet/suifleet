@@ -790,6 +790,11 @@ async fn poll(
         services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
     journal.save()?;
+    // Local completion is independent of chain versions and event discovery.
+    if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
+        collect_firmware_results(cfg, journal)?;
+    }
+    settle_configuration(configs, journal, supervisor)?;
     // Independent receipt delivery precedes even a failed watch/discovery read.
     // The helper validates current authority and funds only actual writes.
     flush_funded_reports(cfg, sui, journal).await?;
@@ -871,10 +876,6 @@ async fn poll(
     } else {
         None
     });
-    if cfg.apply.mode == config::ApplyMode::PrivilegedHelper {
-        collect_firmware_results(cfg, journal)?;
-    }
-    settle_configuration(configs, journal, supervisor)?;
     flush_funded_reports(cfg, sui, journal).await?;
     loop {
         let combined = journal.state.discovery_cursor.is_some();
