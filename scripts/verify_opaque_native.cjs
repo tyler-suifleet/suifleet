@@ -29,6 +29,9 @@ const opaque=loader()('lib/opaque-data.ts'),vectors=require('../interfaces/seal-
  }
  for(const [stream,items] of Object.entries(parts)) {
    assert.deepEqual(Buffer.from(opaque.assembleDataItems(items)),Buffer.from(f.expected[stream],'base64'));
+   assert.throws(()=>opaque.assembleDataItems(items.map(p=>({...p,bytes:Uint8Array.from(p.bytes)}))),/Unverified|provenance/);
+   assert.throws(()=>opaque.assembleDataItems(items.map((p,n)=>n? p:{...p,index:{...p.index,key:'forged'}})),/provenance/);
+   if(items[0].bytes.length){items[0].bytes[0]^=1;assert.throws(()=>opaque.assembleDataItems(items),/provenance/);items[0].bytes[0]^=1;}
    if(items.length>1)assert.throws(()=>opaque.assembleDataItems(items.slice(1)),/Incomplete/);
  }
  assert.deepEqual(Object.keys(parts).sort(),Object.keys(f.expected).sort());

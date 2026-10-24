@@ -16,6 +16,8 @@ export const DataItemBcs=bcs.struct('DataItem', {
   sha256:bcs.byteVector(),identifier:bcs.string(),ciphertext_size:bcs.u64(),ciphertext_sha256:bcs.byteVector(),
 });
 export type DataItem=ReturnType<typeof DataItemBcs.parse>;
+// Associate assembly with authenticated provenance, never caller-supplied labels.
+const verifiedParts=new WeakMap<Uint8Array,{scope:string;index:string;content:Uint8Array}>();
 const hash=async(bytes:Uint8Array)=>new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(bytes)));
 const equal=(a:ArrayLike<number>,b:ArrayLike<number>)=>a.length===b.length && Array.from(a).every((v,i)=>v===b[i]);
 export function validateDataItem(value:DataItem) {
@@ -100,6 +102,8 @@ export async function openDataItem(ciphertext:Uint8Array,config:FleetDataConfig,
     if(!equal(m.sha256,index.sha256)||JSON.stringify(Object.entries(m.metadata).sort(([a],[b])=>a<b?-1:a>b?1:0))!==JSON.stringify(Object.entries(JSON.parse(new TextDecoder().decode(new Uint8Array(index.metadata)))).sort(([a],[b])=>a<b?-1:a>b?1:0)))throw Error('Opaque signed metadata mismatch');
     const bytes=fromBase64(item.data);
     if(bytes.length!==Number(index.size)||!equal(await hash(bytes),index.sha256))throw Error('Opaque content digest mismatch');
+    verifiedParts.set(bytes,{scope:`${config.chainIdentifier}/${config.registryId}/${config.fleetId}/${id(device)}`,
+      index:toHex(DataItemBcs.serialize(index).toBytes()),content:Uint8Array.from(bytes)});
     return bytes;
   } finally {message?.fill(0);plaintext.fill(0);}
 }
@@ -132,9 +136,11 @@ export function assembleDataItems(parts:{index:DataItem;bytes:Uint8Array}[]) {
   if(!parts.length)throw Error('Empty opaque upload');
   const sorted=[...parts].sort((a,b)=>a.index.chunk-b.index.chunk),first=sorted[0].index;
   if(parts.length!==first.chunks||BigInt(first.total_size)>BigInt(67108864))throw Error('Incomplete opaque upload');
+  const provenance=verifiedParts.get(sorted[0].bytes);if(!provenance)throw Error('Unverified opaque chunk');
   const result=new Uint8Array(Number(first.total_size));let offset=0;
   for(let n=0;n<sorted.length;n++) {
-    const {index,bytes}=sorted[n];
+    const {index,bytes}=sorted[n],verified=verifiedParts.get(bytes);
+    if(!verified||verified.scope!==provenance.scope||verified.index!==toHex(DataItemBcs.serialize(index).toBytes())||!equal(bytes,verified.content))throw Error('Opaque chunk provenance mismatch');
     if(index.chunk!==n||index.chunks!==first.chunks||index.upload!==first.upload||index.stream!==first.stream
       ||index.key!==first.key||index.content_type!==first.content_type||index.total_size!==first.total_size
       ||bytes.length!==Number(index.size)||offset+bytes.length>result.length)throw Error('Opaque chunk binding mismatch');

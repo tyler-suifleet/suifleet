@@ -183,7 +183,7 @@ pub fn collect_streams(task: &crate::fleet_data::Task, names: &[String]) -> anyh
             anyhow::ensure!(lost == 0,"Walrus stream lost unacknowledged records");
             for message in messages {
                 // Stream messages larger than IPC chunks are broken into independently indexed patches.
-                let upload=hex::encode(Sha256::digest(format!("{name}/{}",message.sequence)));
+                let upload=hex::encode(Sha256::digest(format!("{}/{}/{}/{name}/{}",task.sui.manifest().chain_identifier,task.config.fleet_id.parse::<sui_sdk_types::Address>()?,task.device_id.parse::<sui_sdk_types::Address>()?,message.sequence)));
                 let chunks=message.data.len().max(1).div_ceil(CHUNK) as u32;
                 let old=queue.state.clone();
                 let result: anyhow::Result<()> = (|| {
