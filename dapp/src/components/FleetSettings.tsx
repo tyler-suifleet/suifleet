@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NETWORK } from "@/lib/constants";
 import { useDevices } from "@/hooks/useDevices";
 import { useCostQuote } from "@/hooks/useCostQuote";
@@ -13,7 +13,7 @@ import { SETTING_KEYS, fleetPrice, loadPriceTable, type PriceTable, type Setting
 import {
   DEFAULT_WORKLOAD, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings, type Workload,
 } from "@/lib/fleet-settings-cost";
-import { SETTINGS_BOUNDS, type FleetSettings } from "@/lib/fleet-settings";
+import { SETTINGS_BOUNDS, fetchFleetSettings, settingsSupported, type FleetSettings } from "@/lib/fleet-settings";
 import { settingsSaver } from "@/lib/fleet-settings-tx";
 import { MEASURED, formatToken, rescaled } from "@/lib/network-costs";
 
@@ -46,14 +46,32 @@ export function FleetSettingsPanel() {
   return <SettingsForm table={table} />;
 }
 
+/** Price-table option values for saved settings, when every saved value is one of the table's options. */
+function savedValues(table: PriceTable, saved: FleetSettings): Record<SettingKey, number> | undefined {
+  const values = {} as Record<SettingKey, number>;
+  for (const key of SETTING_KEYS) {
+    const match = table.settings[key].find((o) => key === "archiveRetentionDays"
+      ? retentionEpochs(o.value, NETWORK) === saved.archiveRetentionEpochs : o.value === saved[key]);
+    if (!match) return undefined;
+    values[key] = match.value;
+  }
+  return values;
+}
+
 function SettingsForm({ table }: { table: PriceTable }) {
-  const account = useCurrentAccount();
+  const account = useCurrentAccount(), client = useCurrentClient();
   const { quote, gasError, walrusError, usdError, usdLoading, refreshUsd } = useCostQuote();
   const { budget, storage, config } = useFleetStorage();
   const devices = useDevices();
   const mutation = useFleetTransaction();
   const cache = useQueryClient();
+  const saved = useQuery({
+    queryKey: ["fleet-settings", NETWORK, budget?.id],
+    enabled: !!budget && settingsSupported(),
+    queryFn: async () => (await fetchFleetSettings(client, budget!.id)) ?? null,
+  });
   const [values, setValues] = useState(() => defaultValues(table));
+  const [loaded, setLoaded] = useState(false);
   const [workload, setWorkload] = useState<Workload>(DEFAULT_WORKLOAD);
   const [sized, setSized] = useState(false);
   const [months, setMonths] = useState(3);
@@ -64,6 +82,13 @@ function SettingsForm({ table }: { table: PriceTable }) {
   useEffect(() => {
     if (!sized && devices.data?.length) { setWorkload((w) => ({ ...w, devices: devices.data!.length })); setSized(true); }
   }, [devices.data, sized]);
+  // Start from the fleet's saved settings once they load, when the table offers them.
+  useEffect(() => {
+    if (loaded || saved.data === undefined) return;
+    const fromChain = saved.data && savedValues(table, saved.data);
+    if (fromChain) setValues(fromChain);
+    setLoaded(true);
+  }, [saved.data, loaded, table]);
   // A changed choice needs a fresh deposit check before signing.
   useEffect(() => setWarning(false), [values, workload, months]);
 
@@ -88,7 +113,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
   const shortfall = result.deposit
     ? depositShortfall({ suiDepositMist: result.deposit.suiDepositMist, walDepositFrost: walCounted ? result.deposit.walDepositFrost : BigInt(0) }, budget?.balance, storage?.walBalance)
     : undefined;
-  const saver = settingsSaver();
+  const saver = settingsSaver(budget);
 
   async function save(confirmed: boolean) {
     setMessage(undefined); setError(undefined);
@@ -186,6 +211,9 @@ function SettingsForm({ table }: { table: PriceTable }) {
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
+      {saved.error && <p role="alert">Saved settings unavailable: {saved.error.message}</p>}
+      {saved.data === null && <p data-testid="saved">No settings saved yet: devices keep their local configuration until you save.</p>}
+      {saved.data && <p data-testid="saved">Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p>}
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
         onClick={() => void save(false)}>Save settings</button>
       {warning && shortfall && !shortfall.enough && <div role="alert" className="border border-amber-500 bg-amber-50 rounded p-2 space-y-1">

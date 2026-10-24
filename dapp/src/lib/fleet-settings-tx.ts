@@ -1,10 +1,11 @@
-// SF-131: saving fleet settings on chain. The Move API is SF-130's (#265) and
-// has not merged, so no deployment can save yet; guessing its function names
-// would sign a transaction against an interface that does not exist. When
-// SF-130 merges, build its generated settings call here and enable saving
-// only for deployments whose manifest records that type origin.
+// SF-131: saving fleet settings on chain through SF-130's owner-only
+// fleet_settings::set. Saving is offered only when this deployment's manifest
+// records the settings type origins and the wallet holds a fleet budget's
+// owner cap; otherwise the page explains why and still prices the choices.
 import type { Transaction } from "@mysten/sui/transactions";
-import type { FleetSettings } from "@/lib/fleet-settings";
+import type { BudgetView } from "@/lib/fleet-budget";
+import { MANIFEST } from "@/lib/deployment-manifest";
+import { buildSetFleetSettingsTx, settingsSupported, type FleetSettings } from "@/lib/fleet-settings";
 
 export interface SettingsSaver {
   build?: (settings: FleetSettings) => Transaction | Promise<Transaction>;
@@ -12,6 +13,10 @@ export interface SettingsSaver {
   reason?: string;
 }
 
-export function settingsSaver(): SettingsSaver {
-  return { reason: "This deployment's contracts have no on-chain fleet settings yet (SF-130). Prices and the deposit below still follow your choices." };
+export function settingsSaver(budget: Pick<BudgetView, "id" | "capId"> | undefined, manifest = MANIFEST): SettingsSaver {
+  if (!settingsSupported(manifest)) {
+    return { reason: "This deployment's contracts have no on-chain fleet settings (SF-130); upgrade the contracts to save. Prices and the deposit below still follow your choices." };
+  }
+  if (!budget) return { reason: "Settings are stored on your fleet budget: create one on the Network budget page first." };
+  return { build: (settings) => buildSetFleetSettingsTx(budget.id, budget.capId, settings) };
 }

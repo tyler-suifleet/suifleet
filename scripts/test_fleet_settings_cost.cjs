@@ -13,13 +13,15 @@ const json = (file) => JSON.parse(fs.readFileSync(path.join(root, file), "utf8")
 const snapshot = json("docs/business/sf131/mainnet-quote.json");
 const protocol = json("interfaces/fleet-v1.json");
 const manifest = json("manifests/fixture.localnet.json");
-for (const name of protocol.optional_type_origins.fleet_budget) manifest.type_origins[name] = manifest.call_package_id;
+const withoutSettings = structuredClone(manifest);
+for (const name of [...protocol.optional_type_origins.fleet_budget, ...protocol.optional_type_origins.fleet_settings]) manifest.type_origins[name] = manifest.call_package_id;
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
 const load = loader();
 const costs = load("lib/network-costs.ts");
 const pricing = load("lib/fleet-pricing.ts");
 const settings = load("lib/fleet-settings-cost.ts");
 const quotes = load("lib/cost-quote.ts");
+const saving = load("lib/fleet-settings-tx.ts");
 const { MEASURED, MAINNET_QUOTE, netMist, rescaled } = costs;
 const near = (actual, expected, tolerance, what) =>
   assert.ok(Math.abs(actual - expected) <= expected * tolerance, `${what}: ${actual} is not within ${tolerance * 100}% of ${expected}`);
@@ -171,6 +173,22 @@ const shortSui = settings.depositShortfall(standard, standard.suiDepositMist - B
 assert.deepEqual([shortSui.suiMist, shortSui.walFrost, shortSui.enough], [BigInt(1), BigInt(0), false]);
 assert.equal(settings.depositShortfall({ suiDepositMist: standard.suiDepositMist, walDepositFrost: BigInt(0) }, standard.suiDepositMist, undefined).enough, true);
 console.log("PASS: the recommended deposit follows health, archives, retention, fleet size and months; shortfall against the budget and storage balances");
+
+// ── Saving: SF-130's fleet_settings::set, only with its type origins and a budget ──
+{
+  const budget = { id: "0x" + "b1".repeat(32), capId: "0x" + "c1".repeat(32) };
+  assert.match(saving.settingsSaver(budget, withoutSettings).reason, /no on-chain fleet settings/);
+  assert.equal(saving.settingsSaver(budget, withoutSettings).build, undefined);
+  assert.match(saving.settingsSaver(undefined).reason, /create one on the Network budget page/);
+  const chosen = settings.toSettings({ ...defaults, healthIntervalMs: 3_600_000 }, "testnet");
+  const data = saving.settingsSaver(budget).build(chosen).getData();
+  const [call] = data.commands.map((c) => c.MoveCall);
+  assert.equal(data.commands.length, 1);
+  assert.equal(`${call.module}::${call.function}`, "fleet_settings::set");
+  assert.deepEqual(call.arguments.slice(0, 2).map((a) => data.inputs[a.Input].UnresolvedObject.objectId), [budget.id, budget.capId]);
+  assert.throws(() => saving.settingsSaver(budget).build({ ...chosen, checkIntervalMs: 1 }), /Invalid fleet settings/);
+}
+console.log("PASS: saving builds one SF-130 fleet_settings::set on the owner's budget and cap; refused without the settings type origins, a budget or valid values");
 
 // ── Live quotes: each part keeps its own source and date ──
 const at = Date.parse("2026-10-24T08:00:00Z");
