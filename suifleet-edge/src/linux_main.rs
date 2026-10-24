@@ -769,26 +769,7 @@ async fn poll(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
         }
     }
-    // Reports remain queued across network failures and daemon restarts.
-    let pending: Vec<_> = journal
-        .state
-        .deployments
-        .iter()
-        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
-        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
-        .collect();
-    for (id, status) in pending {
-        match sui
-            .report_status(&id, &cfg.device.device_cap_id, status)
-            .await
-        {
-            Ok(_) => {
-                journal.state.deployments.get_mut(&id).unwrap().reported = true;
-                journal.save()?;
-            }
-            Err(error) => warn!(%id, %error, "Status report remains queued"),
-        }
-    }
+    report_pending(cfg, sui, journal).await?;
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
         for (event, cursor) in page.events {
@@ -844,7 +825,54 @@ async fn poll(
             execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await
+    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
+    report_pending(cfg, sui, journal).await
+}
+
+/// Status and post-outcome health have separate durable completion markers.
+/// Uncertain health execution is retried idempotently, without reapplying work.
+async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) -> anyhow::Result<()> {
+    // Reports remain queued across network failures and daemon restarts.
+    let pending: Vec<_> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| (!outcome.reported || outcome.rollout_health_pending) && outcome.status.is_some())
+        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
+        .collect();
+    for (id, status) in pending {
+        let reported = journal.state.deployments[&id].reported;
+        let result = if reported { Ok(String::new()) } else {
+            sui.report_status(&id, &cfg.device.device_cap_id, status).await
+        };
+        match result {
+            Ok(_) => {
+                if !reported {
+                    let outcome = journal.state.deployments.get_mut(&id).unwrap();
+                    outcome.reported = true;
+                    outcome.rollout_health_pending = true;
+                    journal.save()?;
+                }
+                let mut inventory = telemetry::inventory(&cfg.runtime.state_dir);
+                if let Some(runtime) = &cfg.services {
+                    let sources = runtime.lock().unwrap().health_sources();
+                    let now = telemetry::now_ms();
+                    if let Some(services) = service_health::collect(&sources, &mut service_health::Tracker::default(), 0, now) {
+                        inventory.reasons.extend(service_health::reasons(&services, 60, now));
+                    }
+                }
+                let healthy = status == protocol::STATUS_APPLIED && telemetry::rollout_healthy(&inventory, &id);
+                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, healthy).await {
+                    warn!(%id, %error, "Post-apply health remains queued");
+                    continue;
+                }
+                journal.state.deployments.get_mut(&id).unwrap().rollout_health_pending = false;
+                journal.save()?;
+            }
+            Err(error) => warn!(%id, %error, "Status report remains queued"),
+        }
+    }
+    Ok(())
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
@@ -945,6 +973,7 @@ async fn execute(
         firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
     }
     let _ = std::fs::remove_dir_all(&directory);
+    report_pending(cfg, sui, journal).await?;
     Ok(status)
 }
 

@@ -92,6 +92,10 @@ pub struct Component {
 pub struct Outcome {
     pub status: Option<u8>,
     pub reported: bool,
+    /// Retry separately from the receipt. Older journals have no sample yet;
+    /// the first upgraded poll checks their existing terminal outcomes too.
+    #[serde(default = "missing_rollout_health")]
+    pub rollout_health_pending: bool,
     pub error: Option<String>,
     /// Firmware-helper request this deployment may have submitted, recorded
     /// before the update starts so a restart can still learn its outcome.
@@ -106,6 +110,8 @@ pub struct Outcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_handoff: Option<String>,
 }
+fn missing_rollout_health() -> bool { true }
+
 /// A required-reader marker in the existing binding makes older daemons
 /// refuse the journal before opening stream files whose retirement they cannot
 /// understand. New readers accept the legacy binding and preserve this marker.
@@ -243,6 +249,16 @@ impl Journal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_completed_outcome_queues_missing_health_once() {
+        let legacy = r#"{"status":1,"reported":true,"error":null}"#;
+        let mut outcome: Outcome = serde_json::from_str(legacy).unwrap();
+        assert!(outcome.reported && outcome.rollout_health_pending);
+        outcome.rollout_health_pending = false;
+        let saved = serde_json::to_vec(&outcome).unwrap();
+        assert!(!serde_json::from_slice::<Outcome>(&saved).unwrap().rollout_health_pending);
+    }
 
     /// Reopen after the previous journal was dropped. A child forked by a
     /// concurrently running test can hold the inherited lock until it execs.

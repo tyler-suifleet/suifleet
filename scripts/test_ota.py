@@ -83,6 +83,8 @@ class Simulator:
         self.events = []
         self.recipes = {}
         self.reports = []
+        self.rollout_health = []
+        self.health_built = None
         self.allow_reports = False
         self.fail_execution = True
         self.deleted = set()
@@ -212,9 +214,15 @@ class Simulator:
             assert params[2] == "deployment_manager"
             args = params[5]
             assert args[1] == REGISTRY and args[2] == self.cap
+            if params[3] == "report_rollout_health":
+                assert len(args) == 5 and args[3] in ('0', '1') and args[4] == '0x6'
+                if not self.allow_reports: raise ConnectionError("simulated unavailable health service")
+                self.health_built = (args[0], args[3] == '1')
+                return {"txBytes":base64.b64encode(bytes([1,2,3,4])).decode()}
             assert (params[3] == "report_verified_status" and len(args) == 4) or (params[3] == "report_verified_status_for_group" and args[3] in self.groups and len(args) == 5)
             if not self.allow_reports:
                 raise ConnectionError("simulated unavailable transaction service")
+            self.health_built = None
             self.built.append((args[0], int(args[-1])))
             return {"txBytes":base64.b64encode(bytes([1,2,3,4])).decode()}
         if method == "sui_executeTransactionBlock":
@@ -223,7 +231,10 @@ class Simulator:
             if self.fail_execution:
                 self.fail_execution = False
                 return {"digest":"failed-digest", "effects":{"status":{"status":"failure","error":"simulated abort"}}}
-            self.reports.append(self.built[-1])
+            if self.health_built is not None:
+                if self.health_built not in self.rollout_health: self.rollout_health.append(self.health_built)
+            else:
+                self.reports.append(self.built[-1])
             return {"digest":"success-digest", "effects":{"status":{"status":"success"}}}
         raise AssertionError(f"unexpected RPC method {method}")
 

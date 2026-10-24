@@ -936,6 +936,22 @@ impl SuiClient {
         self.execute(&transaction).await
     }
 
+    /// Grant-bound post-apply signal, independent of periodic fleet-data cadence.
+    pub async fn report_rollout_health(&self, deployment: &str, cap: &str, healthy: bool) -> anyhow::Result<()> {
+        // A deleted historical record has no gate left to satisfy. A read
+        // outage still propagates and retains the pending journal marker.
+        let Some(record) = self.optional_object(deployment).await? else { return Ok(()); };
+        if record.fields["schema_version"].as_str() != Some("3") && record.fields["schema_version"].as_u64() != Some(3) { return Ok(()); }
+        let _mutation = self.mutations.lock().await;
+        let call = Call { module: protocol::deployment_manager::MODULE, function: protocol::deployment_manager::REPORT_ROLLOUT_HEALTH, args: vec![
+            Arg::Object(deployment.into()), Arg::Object(self.manifest().shared_objects.registry.id.clone()),
+            Arg::Object(cap.into()), Arg::Pure(bcs::to_bytes(&healthy)?), Arg::SharedRead(CLOCK.into()),
+        ] };
+        let transaction = self.build(&call).await?;
+        self.execute(&transaction).await?;
+        Ok(())
+    }
+
     /// This device's SUI balance (MIST).
     pub async fn gas_balance(&self) -> anyhow::Result<u64> {
         let mut request = proto::GetBalanceRequest::default();
