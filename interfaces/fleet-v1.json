@@ -1228,6 +1228,10 @@
               "sui::object::UID"
             ],
             [
+              "version",
+              "u64"
+            ],
+            [
               "registry_id",
               "sui::object::ID"
             ],
@@ -1373,6 +1377,10 @@
             [
               "id",
               "sui::object::UID"
+            ],
+            [
+              "version",
+              "u64"
             ],
             [
               "customer_id",

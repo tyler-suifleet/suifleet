@@ -1221,6 +1221,10 @@ export const MOVE_ABI = {
             "sui::object::UID"
           ],
           [
+            "version",
+            "u64"
+          ],
+          [
             "registry_id",
             "sui::object::ID"
           ],
@@ -1366,6 +1370,10 @@ export const MOVE_ABI = {
           [
             "id",
             "sui::object::UID"
+          ],
+          [
+            "version",
+            "u64"
           ],
           [
             "customer_id",

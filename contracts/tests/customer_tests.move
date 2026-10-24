@@ -253,4 +253,22 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); ts::return_shared(r); s.end();
     }
 
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun future_customer_authority_is_not_writable_through_current_credential_api() {
+        let mut s = setup(); let fid = fleet(&mut s);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        customer::set_authority_version_for_testing(&mut c, &mut f, 2);
+        customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun future_customer_authority_cannot_reset_entitlements_through_current_code() {
+        let mut s = setup(); let fid = fleet(&mut s);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let r = s.take_shared<DeviceRegistry>();
+        customer::set_authority_version_for_testing(&mut c, &mut f, 2);
+        customer::set_entitlement(&mut c, &r, 999, 999, 2, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); s.end();
+    }
+
 }

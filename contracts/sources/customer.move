@@ -28,6 +28,7 @@ module sui_edge::customer {
 
     public struct Customer has key {
         id: UID,
+        version: u64,
         registry_id: ID,
         name: String,
         credentials: VecMap<address, bool>,
@@ -43,6 +44,7 @@ module sui_edge::customer {
     }
     public struct Fleet has key {
         id: UID,
+        version: u64,
         customer_id: ID,
         name: String,
         budget_id: ID,
@@ -76,7 +78,7 @@ module sui_edge::customer {
         assert_name(&name);
         let mut credentials = vec_map::empty();
         credentials.insert(ctx.sender(), true);
-        let mut customer = Customer { id: object::new(ctx), registry_id: object::id(registry), name,
+        let mut customer = Customer { id: object::new(ctx), version: 1, registry_id: object::id(registry), name,
             credentials, administrators: 1, fleets: vector[], default_fleet: option::none(),
             active_devices: 0, device_limit: 0, allowance: 0, used: 0, period: 0, charge_type: vector[] };
         create_fleet(&mut customer, registry, std::string::utf8(b"Default fleet"), ctx);
@@ -107,7 +109,7 @@ module sui_edge::customer {
     /// Periods advance monotonically; changing credentials/fleets cannot reset usage.
     public fun set_entitlement(customer: &mut Customer, registry: &DeviceRegistry,
         device_limit: u64, allowance: u64, period: u64, ctx: &TxContext) {
-        assert!(customer.registry_id == object::id(registry), EBinding);
+        assert!(customer.version == 1 && customer.registry_id == object::id(registry), EBinding);
         device_registry::assert_admin(registry, ctx);
         assert!(period >= customer.period, EPeriod);
         assert!(device_limit >= customer.active_devices, ELimit);
@@ -141,7 +143,7 @@ module sui_edge::customer {
         assert!(count <= customer.device_limit - customer.active_devices, ELimit);
         customer.active_devices = customer.active_devices + count;
         fleet_budget::adopt_managed(budget, &cap);
-        let mut fleet = Fleet { id: object::new(ctx), customer_id: object::id(customer), name,
+        let mut fleet = Fleet { id: object::new(ctx), version: 1, customer_id: object::id(customer), name,
             budget_id: object::id(budget), devices: vector[], pending_devices: fleet_budget::device_count(budget), groups: vector[], deployments: vector[], policies: vec_map::empty(), enrollment_policies: vector[] };
         let fleet_id = object::id(&fleet);
         dof::add(&mut fleet.id, BudgetKey {}, cap);
@@ -164,7 +166,7 @@ module sui_edge::customer {
     }
     public fun return_budget_cap(fleet: &mut Fleet, cap: BudgetOwnerCap, loan: BudgetLoan) {
         let BudgetLoan { fleet_id, cap_id } = loan;
-        assert!(object::id(fleet) == fleet_id && object::id(&cap) == cap_id, EBinding);
+        assert!(fleet.version == 1 && object::id(fleet) == fleet_id && object::id(&cap) == cap_id, EBinding);
         dof::add(&mut fleet.id, BudgetKey {}, cap);
     }
 
@@ -585,7 +587,7 @@ module sui_edge::customer {
     /// A non-store, non-publicly-constructible witness then keeps devices from
     /// exhausting the customer ledger by calling its charge function directly.
     public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &TxContext) {
-        assert!(object::id(registry) == customer.registry_id, EBinding);
+        assert!(customer.version == 1 && object::id(registry) == customer.registry_id, EBinding);
         device_registry::assert_admin(registry, ctx);
         let name = std::type_name::with_original_ids<W>().into_string().into_bytes();
         assert!(customer.charge_type.is_empty() || customer.charge_type == name, EBinding);
@@ -593,14 +595,14 @@ module sui_edge::customer {
     }
 
     public fun assert_member(customer: &Customer, ctx: &TxContext) {
-        assert!(customer.credentials.contains(&ctx.sender()), EAccess);
+        assert!(customer.version == 1 && customer.credentials.contains(&ctx.sender()), EAccess);
     }
     public fun assert_admin(customer: &Customer, ctx: &TxContext) {
         assert_member(customer, ctx);
         assert!(*customer.credentials.get(&ctx.sender()), EAccess);
     }
     public fun assert_fleet(customer: &Customer, fleet: &Fleet) {
-        assert!(fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
+        assert!(customer.version == 1 && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
     }
     fun assert_name(name: &String) { assert!(name.length() > 0 && name.length() <= 80, EName); }
     public fun devices(fleet: &Fleet): &vector<ID> { &fleet.devices }
@@ -609,5 +611,9 @@ module sui_edge::customer {
     public fun fleet_budget(fleet: &Fleet): ID { fleet.budget_id }
     public fun fleets(customer: &Customer): &vector<ID> { &customer.fleets }
     public fun active_devices(customer: &Customer): u64 { customer.active_devices }
-    public fun used(customer: &Customer): u64 { customer.used }
+    public fun used(customer: &Customer): u64 { customer.used }    #[test_only]
+    public fun set_authority_version_for_testing(customer: &mut Customer, fleet: &mut Fleet, version: u64) {
+        customer.version = version; fleet.version = version;
+    }
+
 }

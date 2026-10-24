@@ -199,6 +199,7 @@ pub mod customer {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Customer {
         pub id: [u8; 32],
+        pub version: u64,
         pub registry_id: [u8; 32],
         pub name: String,
         pub credentials: super::VecMap<[u8; 32], bool>,
@@ -246,6 +247,7 @@ pub mod customer {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Fleet {
         pub id: [u8; 32],
+        pub version: u64,
         pub customer_id: [u8; 32],
         pub name: String,
         pub budget_id: [u8; 32],
