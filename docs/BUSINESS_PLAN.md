@@ -18,7 +18,11 @@ Prepared by Claude (claude-opus-5-5) at the user's request on 2026-10-23; the us
 
 ### Decisions recorded
 
-- **Sui stack only.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC. The base product needs no SuiFleet-operated web2 service: no CDN, indexer server or message broker. Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
+- **Sui stack only, no servers.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC and operates no application servers: no CDN, indexer server, message broker or hosted worker.
+  - The HTTP indexer is being removed from the product path ([SF-137/#282](https://github.com/tyler-suifleet/suifleet/issues/282)).
+  - Customers who want data in their own storage integrate it directly ([SF-143/#288](https://github.com/tyler-suifleet/suifleet/issues/288)).
+  - Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
+- **Any device data.** Customers can store whatever their devices produce (files, streams, sensor batches, logs), treated as opaque bytes: encrypted on the device, kept on Walrus, and browsed, shared and exported from a Data section in the dApp.
 - **All-in per-device price.** Network fees are included. SuiFleet funds each fleet's on-chain budget (SF-083) from the subscription, so customers need not hold SUI or WAL.
 - **Configurable cost settings.** Every fleet gets sensible defaults and can change the settings that drive cost, seeing the cost and prepaying it before saving ([SF-130/#265](https://github.com/tyler-suifleet/suifleet/issues/265), [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266)).
 - **Packaging by customer segment.** Pricing depends partly on who the customer is, so the same platform is sold in two packages (below), not as two price lists for the same thing.
@@ -44,6 +48,16 @@ The platform price includes the default settings: an update check every 30 minut
 
 Managed plan: the platform price plus $0.10 per device per month, with a $199 monthly minimum. It adds onboarding, help integrating SuiFleet into the customer's device image, and a support SLA. Its premium funds the support time that gross margin excludes.
 
+Fleet data add-on, for any device data stored on Walrus:
+
+| Item | Price | Our cost at 2026-10-23 rates | Gross margin |
+|---|---|---:|---:|
+| Included in the platform plan | 10 MB written per device per month, kept for the default 6 weeks (covers default weekly logs) | – | – |
+| Data written beyond the allowance | $0.10 per GB | ~$0.018 per GB | ~82% |
+| Data stored | $0.05 per GB-month | ~$0.021 per GB-month | ~58% |
+
+For comparison, CloudWatch Logs charges $0.50 per GB ingested plus $0.03 per GB-month, and S3 Standard $0.023 per GB-month plus $0.09 per GB of internet egress. Reading data back from Walrus has no egress fee. Logs count as device data: the log-cadence setting prices how often batches are written, and this add-on prices the volume.
+
 ### Customer segments
 
 - **Greengrass switchers** already run fleet tooling and will compare SuiFleet with their AWS bill.
@@ -59,6 +73,7 @@ Managed plan: the platform price plus $0.10 per device per month, with a $199 mo
 ### Positioning
 
 - **Infrastructure, not a "blockchain product".** Customer-facing language describes fleet and OTA infrastructure: verifiable release authority, tamper-evident update records, no lock-in and low cost. Sui, Walrus and Seal belong in the technical and security documentation, where security reviews will ask how the infrastructure works.
+- **Device data is table stakes.** Every alternative a buyer compares answers "where does my device data go?": Greengrass routes to S3 and Kinesis, Golioth sells pipelines, Memfault centres on diagnostics, Mender sells a monitoring add-on. SuiFleet's answer is the fleet data add-on, plus direct export to the customer's own storage.
 - **Deployments, not telemetry pipelines.** AWS provides live telemetry through IoT Core MQTT, device shadows and rules into services such as CloudWatch, IoT SiteWise and Kinesis. SuiFleet targets deployment and fleet management; live telemetry is not a near-term target.
   - Customers who need minute-level telemetry can keep sending it straight to IoT Core or their existing pipeline, without Greengrass, and move deployments to SuiFleet.
   - That still removes Greengrass's $0.16 per-device fee and its Jobs charges.
@@ -89,7 +104,7 @@ Managed plan: the platform price plus $0.10 per device per month, with a $199 mo
 | Log retention | 1 year | 0.014 | 0.04 | 65% |
 | Encrypted delivery (Seal) | On | ~0.005 | 0.02 | 75% |
 
-Update-check costs assume paid RPC at about $2.50 per million requests. On the public endpoint or SuiFleet's own node their marginal cost is near zero. Hourly health is deliberately priced at a lower margin so heavy fleets still save about 60% against Greengrass.
+Update-check costs assume paid RPC at about $2.50 per million requests. On the public endpoint or SuiFleet's own node their marginal cost is near zero. Hourly health is deliberately priced at a lower margin so heavy fleets still save about 58–60% against Greengrass.
 
 ### Cost to serve, margin and Greengrass comparison by profile
 
@@ -99,7 +114,7 @@ Each Greengrass usage profile is matched with the SuiFleet settings that cover t
 |---|---|---|---:|
 | Light | One 50 MB deployment a month, status every 5 minutes, no cloud logs | 30-minute checks, daily on-chain health, logs off | 0.08 |
 | Typical | Four 50 MB deployments, telemetry each minute, hourly shadows, 10 MB of logs | Defaults: 30-minute checks, daily health, weekly logs kept 6 weeks | 0.08 |
-| Heavy | Eight 200 MB deployments, telemetry every 10 s, 100 MB of logs, tunnels, Device Defender | 15-minute checks (+0.01), hourly health (+0.12), daily logs kept 6 weeks (+0.08) | 0.29 |
+| Heavy | Eight 200 MB deployments, telemetry every 10 s, 100 MB of logs, tunnels, Device Defender | 15-minute checks (+0.01), hourly health (+0.12), daily logs kept 6 weeks (+0.08), 90 MB of data beyond the allowance (+~0.015) | ~0.305 |
 
 Monthly totals for the whole fleet on the platform plan:
 
@@ -107,25 +122,25 @@ Monthly totals for the whole fleet on the platform plan:
 |---:|---|---:|---:|---:|---:|---:|
 | 1,000 | Light | ~$3 | $80 | ~96% | $182 | 56% |
 | 1,000 | Typical | ~$9 | $80 | ~89% | $259 | 69% |
-| 1,000 | Heavy | $108–157 | $290 | 46–63% | $766 | 62% |
+| 1,000 | Heavy | $108–157 | $305 | 48–65% | $766 | 60% |
 | 10,000 | Light | ~$83 | $800 | ~90% | $1,822 | 56% |
 | 10,000 | Typical | ~$138 | $800 | ~83% | $2,590 | 69% |
-| 10,000 | Heavy | $1,340–1,500 | $2,900 | 48–54% | ~$7,300 | 60% |
+| 10,000 | Heavy | $1,340–1,500 | $3,050 | 51–56% | ~$7,300 | 58% |
 | 100,000 | Light | $920–1,600 | $5,300 | 70–83% | ~$18,200 | 71% |
 | 100,000 | Typical | $1,470–2,150 | $5,300 | 59–72% | ~$25,200 | 79% |
-| 100,000 | Heavy | $11,600–12,300 | $26,300 | 53–56% | ~$67,000 | 61% |
+| 100,000 | Heavy | $11,600–12,300 | $27,800 | 56–58% | ~$67,000 | 58% |
 | 1,000,000 | Light | $4,700–5,900 | $41,300 | 86–89% | ~$180,000 | 77% |
 | 1,000,000 | Typical | $10,200–11,500 | $41,300 | 72–75% | ~$243,000 | 83% |
-| 1,000,000 | Heavy | $111,100–113,700 | $251,300 | 55–56% | ~$629,000 | 60% |
+| 1,000,000 | Heavy | $111,100–113,700 | $266,500 | 57–58% | ~$629,000 | 58% |
 
 Notes on the comparison:
 
-- **Heavy is dominated by hourly on-chain health.** Hourly health costs SuiFleet about $0.072 per device and is priced at $0.12. If a heavy fleet keeps daily health instead, it pays SuiFleet $0.17 per device for its first 10,000 devices, 78% less than Greengrass heavy's $0.77. SuiFleet's cost for that fleet falls to about $0.04–0.05 per device: $0.038 in network fees plus about $0.009 of RPC on a paid plan.
+- **Heavy is dominated by hourly on-chain health.** Hourly health costs SuiFleet about $0.072 per device and is priced at $0.12. If a heavy fleet keeps daily health instead, it pays SuiFleet about $0.185 per device for its first 10,000 devices, 76% less than Greengrass heavy's $0.77. SuiFleet's cost for that fleet falls to about $0.04–0.05 per device: $0.038 in network fees plus about $0.009 of RPC on a paid plan.
 - **Gross margin** means (revenue − cost to serve) ÷ revenue. For example, typical at 1,000 devices is ($80 − $9) ÷ $80 = 89%, which is a markup of about 790% on cost.
 - **Gross profit** on the typical profile is about $71 a month at 1,000 devices, $660 at 10,000, $3,100–3,800 at 100,000 and $30,000 at 1,000,000. That is before engineering, support, on-call and card-processing fees (about 3% plus $0.30 per invoice).
 - **The equivalents are not feature-identical.** SuiFleet replaces Greengrass's live telemetry with signed on-chain health at the chosen cadence, and its rows include no cost for secure tunnels or Device Defender.
 - **Greengrass totals use list prices,** including IoT Core's lower messaging tiers above 1 billion messages and S3's lower egress tiers. Greengrass's own $0.16 per device has no published volume discount.
-- **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes, and one to several SuiFleet Walrus aggregators.
+- **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes. Their upper ends also include an optional SuiFleet Walrus aggregator allowance, a conservative assumption that the plan below avoids.
 
 Cost components per device per month:
 
@@ -136,7 +151,7 @@ Cost components per device per month:
   - $0 at 1,000 devices, on the public endpoint or Chainstack's free tier.
   - $49–199 a month on a paid plan at 10,000 devices.
   - SuiFleet nodes from about 100,000 devices: $520–1,040 a month at 100,000, and $1,040–4,160 at 1,000,000.
-- Artifact downloads: free on public Walrus aggregators up to about 10,000 devices (heavy fleets earlier), then SuiFleet aggregators ($60–1,300 a month, depending on traffic).
+- Artifact downloads: free from public Walrus aggregators, with a fallback list and ranged downloads (SF-124). Direct reads from storage nodes are not needed now and are deferred ([SF-144/#290](https://github.com/tyler-suifleet/suifleet/issues/290), closed as not planned unless public aggregators prove inadequate). The tables keep a $60–1,300 a month allowance for an optional SuiFleet aggregator at large scale as a conservative assumption.
 
 Owner-side release uploads add about $0.03 per 50 MB release per fleet. One-time per device: about $0.03 of mostly refundable storage deposits plus a 0.06 SUI gas float, which is working capital (about 60,000 SUI at 1,000,000 devices).
 
@@ -161,7 +176,7 @@ Turnkey OTA products at about 1,000 devices, per device per month:
 | [balenaCloud](https://www.balena.io/pricing) | $3.08–3.22 |
 | [Memfault](https://memfault.com/pricing/) | $3.50 |
 
-Azure IoT Hub with Device Update costs $0.17–0.64 depending on the profile. With equivalent settings, the platform plan costs customers 56–77% less than Greengrass for light fleets, 69–83% less for typical, and 60–62% less for heavy (77–79% less with daily health). The $0.08 small-fleet platform price is 74% below Mender Basic.
+Azure IoT Hub with Device Update costs $0.17–0.64 depending on the profile. With equivalent settings, the platform plan costs customers 56–77% less than Greengrass for light fleets, 69–83% less for typical, and 58–60% less for heavy (75–77% less with daily health). The $0.08 small-fleet platform price is 74% below Mender Basic.
 
 ### Why today's build costs more
 
@@ -182,6 +197,7 @@ As built, every daemon polls every 10 seconds with about 23 gRPC reads, or about
   - Hetzner AX102-class bare metal with extra NVMe, about €449 a month.
   - Cheaper than paid RPC above about 200M requests a month, roughly 100,000 devices at 30-minute checks.
   - Needs prompt upgrades and monitoring.
+- **Network nodes versus servers.** At large scale SuiFleet would run Sui full nodes to absorb read volume. Walrus aggregators are not needed: devices use public aggregators. Direct storage-node reads (SF-144) are deferred and hopefully never needed; a SuiFleet aggregator would only ever be an optional cache, never something devices depend on.
 
 ### Development required
 
@@ -206,6 +222,16 @@ Stage 3, scale and the cost floor:
 - [SF-121/#252](https://github.com/tyler-suifleet/suifleet/issues/252): device-local archive quilting.
 - [SF-132/#259](https://github.com/tyler-suifleet/suifleet/issues/259): batched gas-account enrollment.
 - [SF-133/#260](https://github.com/tyler-suifleet/suifleet/issues/260): threshold Seal key fetch.
+
+Stage 4, no servers and fleet data:
+
+- [SF-137/#282](https://github.com/tyler-suifleet/suifleet/issues/282): remove the server indexer from the product path.
+- [SF-138/#283](https://github.com/tyler-suifleet/suifleet/issues/283): gate staged rollouts on signed on-chain health instead of server telemetry.
+- [SF-139/#284](https://github.com/tyler-suifleet/suifleet/issues/284): store any device data on Walrus.
+- [SF-140/#285](https://github.com/tyler-suifleet/suifleet/issues/285): Data section in the dApp for browsing, downloading, sharing and exporting.
+- [SF-141/#286](https://github.com/tyler-suifleet/suifleet/issues/286): per-stream retention and expiry.
+- [SF-142/#287](https://github.com/tyler-suifleet/suifleet/issues/287): meter and price device data.
+- [SF-143/#288](https://github.com/tyler-suifleet/suifleet/issues/288): export directly to customer-owned storage.
 
 Bug: [SF-134/#261](https://github.com/tyler-suifleet/suifleet/issues/261), where the indexer shows foreign deployments in a device's history.
 
