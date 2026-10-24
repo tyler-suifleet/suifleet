@@ -816,6 +816,15 @@ async fn poll(
     flush_reports(sui, journal, &cfg.device.device_cap_id).await?;
     // Announced deployments come straight from objects (SF-125); the event
     // scan becomes a bounded safety net for older packages and clients.
+    if objects && journal.state.heads.is_none() {
+        // A journal from before inboxes (an older daemon or package): heads
+        // start where its event path stopped, so records created while the
+        // device was offline still apply after the upgrade.
+        let since_ms = heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
+        info!(since_ms, "Reading the device inbox and group heads from the event cursor's boundary");
+        journal.state.heads = Some(heads::Heads { since_ms, event_scan_ms: Some(telemetry::now_ms()), ..Default::default() });
+        journal.save()?;
+    }
     if objects {
         announced(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
     }
@@ -891,15 +900,7 @@ async fn announced(
     // known when heads began from that baseline, later groups from the last
     // poll that did not list them (so records announced while the device
     // was offline still apply).
-    if journal.state.heads.is_none() {
-        let since_ms = now_chain;
-        journal.state.heads = Some(heads::Heads { since_ms, ..Default::default() });
-        let heads = journal.state.heads.as_mut().unwrap();
-        for target in journal.state.groups.iter().chain([&inbox_id]) {
-            heads.seen.insert(target.clone(), heads::Seen { since_ms, ..Default::default() });
-        }
-        journal.save()?;
-    }
+    anyhow::ensure!(journal.state.heads.is_some(), "announced records have no baseline");
     let mut targets = Vec::new();
     if let Some(inbox) = inbox {
         targets.push((inbox_id, inbox.head));
@@ -947,6 +948,40 @@ async fn announced(
     heads.polled_ms = Some(now_chain);
     journal.save()?;
     Ok(())
+}
+
+/// Where announced records apply from for a journal without heads. The
+/// event path handled every record created before its cursor, so the
+/// baseline is that boundary, never the upgrade time. A scan first brings
+/// the cursor to the tip; with pruned history the cursor's own checkpoint
+/// time is the boundary. When neither is knowable the poll fails rather
+/// than skip or replay records.
+#[allow(clippy::too_many_arguments)]
+async fn heads_baseline(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    store: Option<&components::Store>,
+    configs: &configuration::Store,
+    supervisor: &mut supervisor::Supervisor,
+    journal: &mut Journal,
+) -> anyhow::Result<u64> {
+    let before = sui.chain_time_ms().await?;
+    match scan_events(cfg, sui, walrus, runner, store, configs, supervisor, journal).await {
+        // An indexer may lag the tip: the scanned position bounds it too.
+        Ok(()) => Ok(sui.cursor_time_ms(&journal.state.cursor).await.map_or(before, |at| at.min(before))),
+        Err(error) if error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
+            let since_ms = sui.cursor_time_ms(&journal.state.cursor).await.map_err(|time| anyhow::anyhow!(
+                "{error:#}; announced records have no safe baseline either ({time:#})"))?;
+            warn!(%error, since_ms, "Event history is pruned; the device inbox and group heads apply \
+                records from the event cursor's checkpoint time");
+            journal.state.cursor = sui.latest_cursor().await?;
+            journal.save()?;
+            Ok(since_ms)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 /// The DeploymentCreated event scan from the journal cursor.

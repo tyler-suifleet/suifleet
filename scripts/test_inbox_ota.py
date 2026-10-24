@@ -8,7 +8,10 @@ deployment and an indexed-group deployment that exist only in objects (no
 events), a group joined while the daemon was stopped, a scheduled start that runs on time although the poll interval is a
 minute, a device that was offline longer than the node's event history and
 resynchronizes from objects alone, and the bounded event scan that still
-applies an unannounced deployment from an older client.
+applies an unannounced deployment from an older client. A journal written
+before inboxes (no heads) resumes from its event cursor's boundary, so
+records created while it was offline still apply, with history retained
+or pruned.
 Real-chain behaviour is covered by scripts/test_inbox_localnet.py.
 """
 import argparse
@@ -43,7 +46,12 @@ class InboxSimulator(Simulator):
         self.inbox = None
         self.heads = {}
         self.members = {}  # group -> indexed members (MemberKey fields)
+        self.event_ms = []  # Chain time of event i, in checkpoint i + 1.
         self.groups[GROUP] = {"admin": OPERATOR, "device_ids": []}
+
+    def add(self, *args, **kwargs):
+        super().add(*args, **kwargs)
+        self.event_ms.append(self.now_ms)
 
     def head(self):
         return {"seq": "0", "latest": None, "next_start_ms": "0", "components": {"contents": []}}
@@ -73,7 +81,11 @@ class InboxSimulator(Simulator):
     def rpc(self, method, params):
         key = lambda name: f"{test_ota.TYPE_ORIGINS[name]}::{name}"
         if method == "shim_height":
-            return {"height": len(self.events), "lowest": self.lowest, "timestamp_ms": self.now_ms}
+            return {"height": len(self.events), "lowest": self.lowest, "timestamp_ms": self.now_ms, "checkpoints": True}
+        if method == "shim_checkpoint":
+            # Summaries outlive pruned events, as on a public node.
+            n = params[0]
+            return {"timestamp_ms": 0 if n == 0 else self.event_ms[n - 1]} if n <= len(self.events) else None
         if method == "shim_events" and params[0].endswith("::deployment_manager::DeploymentCreated"):
             # Unannounced-only records keep their ledger position but read as
             # another tenant's event, so only objects can reveal them.
@@ -228,6 +240,42 @@ def run(binary):
             assert "Event history is pruned; resynchronized" in text, text[-2000:]
             assert "Sync failed" not in text.split("Event history is pruned")[-1], text[-2000:]
             print("PASS: a device offline beyond the event history resynchronizes from objects alone")
+            stop()
+
+            def legacy():
+                # A journal from a daemon before inboxes: no heads at all.
+                path = root / "state" / "state.json"
+                saved = json.loads(path.read_text())
+                saved.pop("heads")
+                path.write_text(json.dumps(saved))
+
+            # 5b. Such a journal, offline past the node's history: heads start
+            #     at the event cursor's checkpoint time, not the upgrade.
+            legacy()
+            sim.now_ms += 1000
+            sim.deploy("0x708")
+            sim.add("0x7b0", direct=False)
+            sim.lowest = len(sim.events)
+            sim.now_ms += 1000
+            process = start()
+            wait_for(lambda: outcome("0x708") == 1, "legacy journal lost a record created while offline (pruned)", process)
+            settle()
+            text = log_path.read_text()
+            assert "the device inbox and group heads apply records from the event cursor's checkpoint time" in text, text[-2000:]
+            print("PASS: a journal without heads keeps its event boundary when history is pruned")
+            stop()
+
+            # 5c. And with history retained: the event scan runs first, heads
+            #     start where it stopped.
+            legacy()
+            sim.now_ms += 1000
+            sim.deploy("0x709")
+            sim.now_ms += 1000
+            process = start()
+            wait_for(lambda: outcome("0x709") == 1, "legacy journal lost a record created while offline", process)
+            settle()
+            assert state()["heads"]["since_ms"] <= sim.event_ms[-1], state()["heads"]
+            print("PASS: a journal without heads keeps its event boundary when history is retained")
 
             # 6. The bounded event scan still applies a deployment an older
             #    client created without announcing it.
@@ -235,11 +283,11 @@ def run(binary):
             sim.now_ms += 1000
             sim.deploy("0x705", announce=False)
             wait_for(lambda: outcome("0x705") == 1, "unannounced deployment was not found by the event scan", process)
-            wait_for(lambda: len(sim.reports) == 6, "reports were not all delivered", process)
+            wait_for(lambda: len(sim.reports) == 8, "reports were not all delivered", process)
             stop()
             applied_runs = applied.read_text().splitlines()
-            assert len(applied_runs) == 6, applied_runs
-            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705", "0x707"}, sim.reports
+            assert len(applied_runs) == 8, applied_runs
+            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705", "0x707", "0x708", "0x709"}, sim.reports
             assert not sim.errors, sim.errors
             print("PASS: the event scan remains a safety net for unannounced deployments; each applied once")
     finally:

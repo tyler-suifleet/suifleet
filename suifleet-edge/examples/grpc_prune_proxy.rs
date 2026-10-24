@@ -64,6 +64,13 @@ impl proto::ledger_service_server::LedgerService for Proxy {
         self.upstream.clone().ledger_client().get_transaction(request.into_inner()).await
     }
 
+    async fn get_checkpoint(
+        &self,
+        request: Request<proto::GetCheckpointRequest>,
+    ) -> Result<Response<proto::GetCheckpointResponse>, Status> {
+        self.upstream.clone().ledger_client().get_checkpoint(request.into_inner()).await
+    }
+
     async fn list_events(
         &self,
         request: Request<proto::ListEventsRequest>,

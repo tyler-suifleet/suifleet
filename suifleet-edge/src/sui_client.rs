@@ -157,6 +157,22 @@ fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result
     Ok(())
 }
 
+/// The checkpoint a cursor resumes in, when the cursor itself records it.
+/// Genesis resumes before checkpoint 1; a JSON-RPC cursor needs a lookup.
+fn boundary_checkpoint(cursor: &Cursor) -> Option<u64> {
+    match cursor {
+        Cursor::Genesis => Some(0),
+        Cursor::Checkpoint(checkpoint) | Cursor::After(_, Some(checkpoint)) => Some(*checkpoint),
+        Cursor::After(_, None) | Cursor::Legacy(..) => None,
+    }
+}
+
+fn timestamp_ms(at: Option<prost_types::Timestamp>) -> anyhow::Result<u64> {
+    let at = at.ok_or_else(|| anyhow::anyhow!("node reported no checkpoint time"))?;
+    let ms = at.seconds.saturating_mul(1000).saturating_add(i64::from(at.nanos) / 1_000_000);
+    u64::try_from(ms).map_err(|_| anyhow::anyhow!("node reported a negative checkpoint time"))
+}
+
 /// The node no longer holds the events this device resumes from.
 #[derive(Debug)]
 pub struct HistoryPruned {
@@ -892,9 +908,34 @@ impl SuiClient {
     /// Chain time (UTC ms) of the node's latest checkpoint.
     pub async fn chain_time_ms(&self) -> anyhow::Result<u64> {
         let info = self.service_info().await.map_err(status)?.into_inner();
-        let at = info.timestamp.ok_or_else(|| anyhow::anyhow!("node reported no checkpoint time"))?;
-        let ms = at.seconds.saturating_mul(1000).saturating_add(i64::from(at.nanos) / 1_000_000);
-        u64::try_from(ms).map_err(|_| anyhow::anyhow!("node reported a negative checkpoint time"))
+        timestamp_ms(info.timestamp)
+    }
+
+    /// Chain time (UTC ms) from which events after `cursor` can have been
+    /// created: the time of the checkpoint before the cursor's. Records
+    /// created earlier were all within reach of the scan that wrote it.
+    pub async fn cursor_time_ms(&self, cursor: &Option<Value>) -> anyhow::Result<u64> {
+        let parsed = Cursor::parse(cursor)?;
+        let checkpoint = match (boundary_checkpoint(&parsed), &parsed) {
+            (Some(checkpoint), _) => checkpoint,
+            (None, Cursor::Legacy(digest, _)) => self.transaction_checkpoint(digest).await?,
+            _ => anyhow::bail!("the event cursor records no checkpoint"),
+        };
+        if checkpoint == 0 {
+            return Ok(0);
+        }
+        let mut request = proto::GetCheckpointRequest::default();
+        request.checkpoint_id = Some(proto::get_checkpoint_request::CheckpointId::SequenceNumber(checkpoint - 1));
+        request.read_mask = Some(mask(&["summary.timestamp"]));
+        let response = self
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.ledger_client().get_checkpoint(request).await }
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("cannot read checkpoint {}: {}", checkpoint - 1, e.message()))?
+            .into_inner();
+        timestamp_ms(response.checkpoint.and_then(|c| c.summary).and_then(|s| s.timestamp))
     }
 
     /// The next page of DeviceAddedToGroup events after `cursor` (from
@@ -1996,6 +2037,20 @@ mod tests {
         assert_eq!(nested.components["app"], "0xa");
         assert!(parse_head(&json!({"seq": "1", "next_start_ms": "0", "components": {"contents": [{"key": "app"}]}})).is_err());
         assert!(parse_head(&json!({"next_start_ms": "0", "components": {"contents": []}})).is_err());
+    }
+
+    #[test]
+    fn cursor_boundaries_come_from_the_cursor_or_a_lookup() {
+        let parse = |value: Value| Cursor::parse(&Some(value)).unwrap();
+        assert_eq!(boundary_checkpoint(&Cursor::parse(&None).unwrap()), Some(0));
+        assert_eq!(boundary_checkpoint(&parse(json!({"checkpoint": 42}))), Some(42));
+        assert_eq!(boundary_checkpoint(&parse(json!({"after": "AQID", "checkpoint": 7}))), Some(7));
+        // Neither records where it is: a JSON-RPC cursor needs its transaction.
+        assert_eq!(boundary_checkpoint(&parse(json!({"after": "AQID"}))), None);
+        assert_eq!(boundary_checkpoint(&parse(json!({"txDigest": "d", "eventSeq": "0"}))), None);
+        let at = |seconds, nanos| Some(prost_types::Timestamp { seconds, nanos });
+        assert_eq!(timestamp_ms(at(1_700_000_000, 250_000_000)).unwrap(), 1_700_000_000_250);
+        assert!(timestamp_ms(at(-1, 0)).is_err() && timestamp_ms(None).is_err());
     }
 
     #[test]
