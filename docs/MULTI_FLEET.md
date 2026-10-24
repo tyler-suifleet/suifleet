@@ -1,197 +1,219 @@
-# Multiple fleets per customer (SF-136)
+# Multiple named fleets per customer
 
-Status: source audit and proposed integration design, **not implemented**.
-SF-136 is [#280](https://github.com/tyler-suifleet/suifleet/issues/280).
-This document does not establish customer membership, fleet isolation, billing,
-migration safety or UI acceptance. The existing single-wallet application still
-runs unchanged.
+SF-136: [issue #280](https://github.com/tyler-suifleet/suifleet/issues/280).
+The implementation adds shared `customer::Customer` and `customer::Fleet`
+objects. A wallet is a revocable credential; the Customer object ID is the
+stable identity. No indexer or additional always-on service is required.
 
-## Source audit
+## Authority and inventory
 
-Audited baseline: `ab621e7`. A fleet alias must not be confused with a group name,
-a wallet address, the package deployment manifest or the registry singleton.
+A Customer records its display name, current credentials, administrators,
+fleet inventory, default fleet and aggregate entitlements. A Fleet records its
+customer, alias, exact budget and device/group/deployment/policy inventories.
+Aliases may collide: selection persists object IDs, while the switcher displays
+customer and fleet names and exposes IDs in details.
 
-| Area | Existing boundary | Work needed for SF-136 |
+`customer::create(registry, name)` atomically creates one default fleet and its
+empty budget. A registry marker keyed by the initial credential makes retries
+idempotent, including after an unknown transaction outcome. Revoking that
+credential does not erase the marker or create a replacement customer.
+Additional `create_fleet` calls never change entitlements or usage.
+
+Administrators manage every fleet of their customer. Read-only credentials
+can discover inventory but cannot borrow budget authority, administer policies,
+move devices or decrypt owner archives. Owned, non-transferable Membership
+objects are discovery hints; clients re-read Customer credentials and verify
+registry/customer/fleet bindings. Explicit FleetData support grants also discover their configured managed fleets without granting customer administration. Revocation takes effect at contract admission,
+including for retained Membership objects. The last administrator cannot be
+removed. Authorize and verify a replacement before revoking an old credential;
+the Administration page supports this without moving the customer or its caps.
+
+Fleet custody holds budget, device-owner and policy-admin capabilities. Budget
+capability loans have an unstoreable hot potato and must return the same cap to
+the same fleet in the same transaction. This composes the reviewed SF-130/131
+settings API, funding, storage and data owner writes without handing a wallet a
+persistent cap. Device and policy caps are not lent to arbitrary callers.
+
+Groups organize devices **within** a fleet. Managed group admission, deployment
+and rollout targets, desired-state revisions, private policy grants and receipt
+reporting check the exact fleet inventory. An administrator of two fleets cannot
+insert one fleet's device/group into the other. Immutable catalog versions remain
+explicitly shared, authenticated inputs. Catalog publishing authority stays with
+the catalog publisher; customer membership does not confer publisher authority.
+
+FleetData, storage, gas accounts and authenticated archive identities keep their
+existing budget/storage/registry bindings and layouts. Explicit support grants
+and policy account grants stay independent of customer discovery. Membership
+alone does not silently add support access. Managed archive reads use the new
+read-only `fleet_data::seal_approve_customer` entry point: Seal approval PTBs
+contain only approval calls and read-only shared inputs, not capability loans.
+Original FleetData IDs, key epochs and ciphertext identities are preserved. Support diagnostics are separately revalidated and restricted to one exact request for a current device of the selected fleet.
+
+## Enforced legacy boundaries
+
+Older packages remain callable. Adoption establishes these concrete barriers:
+
+| Object | Managed boundary | Older entry points |
 |---|---|---|
-| Customer identity | No persistent customer object or customer-to-wallet membership index exists. | Introduce a stable customer identity, revocable credentials and a discoverable fleet inventory. |
-| Budget | `contracts/sources/fleet_budget.move`: each shared `FleetBudget` has its own `BudgetOwnerCap`, registry, device index, balance, limits and version gate. `enroll_device` checks this budget's cap and the device's current owner cap. Multiple budgets already exist independently. | Bind each managed budget to one customer/fleet; maintain authoritative customer-wide enrollment accounting. A count in one budget cannot enforce a customer-wide allowance. |
-| Storage | `contracts/fleet_storage/sources/fleet_storage.move`: each `FleetStorage` binds one budget; owner/device operations check that binding. Upload quotas and retention balances are storage-local. | Preserve bindings and retention authority; additionally account for any configured customer-wide allowance. Creating another storage object must not reset that allowance. |
-| Data | `contracts/fleet_data/sources/fleet_data.move`: `FleetData` binds budget, storage, registry and chain; writers bind fleet/device/account. Enrollment and account replacement validate the budget index. Multiple independent FleetData objects are possible. | Discover the correct tuple per selected fleet. Preserve support grants, key epochs and archive identity; membership in a customer alone must not silently confer support/decryption authority. |
-| Devices | `contracts/sources/device_registry.move`: shared registry, custodied devices, transferable device owner caps, signer identities and revocation; no customer/fleet binding. | Add authoritative single-fleet assignment for managed devices. Keep device identity and history stable; require an explicit authorized reassignment transaction. |
-| Groups | `contracts/sources/device_group.move`: group has an admin address and device IDs. `add_device` checks the group admin, not customer/fleet membership. | Separate groups from fleets; bind managed groups and every inserted device to the same fleet. A name or matching wallet is insufficient. |
-| Deployment | `contracts/sources/deployment_manager.move`: records have a creator and target ID dynamic fields; construction accepts target IDs without a customer/fleet binding. Receipt authorization separately validates targeting. | Bind managed records to a fleet and validate all target objects at authoritative admission. Reject cross-fleet targets even when one wallet administers both. |
-| Delegation | `contracts/sources/roles.move`: revocable group-scoped deployer roles, attributed to an operator address. | Preserve that scope; customer membership must not widen existing roles. Resolve revoked credentials at each use. |
-| Catalog | `contracts/sources/component_catalog.move`: publisher/catalog provenance is separate from device/group ownership. | Catalog versions may be explicitly shared immutable inputs. Deployments, desired-state revisions, private policies and budgets remain fleet-owned; catalog visibility must not imply deployment or decryption authority. |
-| Manifest | `docs/DEPLOYMENT_MANIFEST.md`: network/package/type origins and shared registry describe a deployment, not a customer. | Keep introduction origins and registry identity unchanged. Add optional discovery origins only when implemented; do not substitute the current package ID for old origins. |
-| Browser inventory | `useDevices`, `useGroups`, `useDeployments` query wallet-scoped inventory with network/account query keys. | Add verified customer/fleet selection to queries and to every mutation's pre-sign checks. Clearing a menu alone does not isolate cached data or pending transactions. |
-| Browser budget/storage | `useFleetStorage` and `components/FleetBudget.tsx` select `budgets.data?.[0]`. | Resolve the selected fleet's exact budget/cap/storage tuple. Never fall back to the first budget after a failed selection lookup. |
-| Browser health/logs | `lib/fleet-data.ts` parses a single `NEXT_PUBLIC_FLEET_DATA`; `chain-alerts.ts` uses that global configuration. Health/alerts hooks also support wallet-scoped HTTP telemetry. | Pass verified selected-fleet configuration through health, archives, alerts, diagnostics and access policies; bind HTTP authorization and caches as well as chain queries. |
-| Onboarding | `components/FirstRun.tsx` registers/enrolls for the connected wallet; `lib/onboarding.ts` derives progress from wallet inventory. | Create/select the customer's one default fleet atomically and idempotently before enrollment. Retry after an unknown transaction outcome must read authoritative state. |
-| Daemon | `src/sui_client.rs` resolves the current device owner from its registry owner cap and checks deployment creator/group authority. `src/config.rs`, `src/funding.rs` and `src/fleet_data.rs` separately configure budget/data bindings. | Teach managed enrollment/admission about stable fleet membership and authorized customer credentials without weakening legacy checks. UI switching never changes daemon enrollment. |
-| Wallet handover | `docs/FLEET_HANDOVER.md`: recipient-confirmed, typed inventory; transfer is resumable, not globally atomic. | Preserve legacy owner/support authority and historical objects; credential rotation must not require moving the customer's identity or resetting allowances. |
-| Billing | Existing prepaid gas/storage is not a subscription billing service. | Define allowance administration and verified customer identity separately from collection. Do not describe deposits or a browser price estimate as subscription enforcement. |
+| Customer / Fleet | Authority version 1, checked at membership, issuer and fleet admission | Future explicit migrations can retire these methods without changing layouts |
+| Budget | Version 2 plus package-created managed marker; cap in fleet custody | Version-1 code refuses mutations/draws; current legacy enrollment/removal APIs refuse managed budgets |
+| Device | Owner cap replaced during adoption and held in fleet custody | Every other legacy account bound to the old cap stops passing registry identity checks; the selected account is explicitly rebound |
+| Group | Stored admin becomes the fleet object address | Wallet callers cannot satisfy the original admin check |
+| Deployment | Creator becomes fleet address; customer binding and receipt authority version 3 | Old report code refuses newer receipts; current legacy report APIs also refuse managed records |
+| Claim policy | Operator is fleet address; legacy `open` remains false; separate managed active marker | Old enrollment aborts closed; wallet-based policy administration cannot impersonate the fleet |
+| Access policy | Admin cap remains in fleet custody | A revoked wallet cannot retain or supply it to older grant APIs |
 
-## Settings interface coordination
+New daemon reporting validates managed custody and the current fleet. Contract
+receipt admission additionally checks the active signer, current device fleet,
+record creator, inventory and target/group membership. A device reassigned later
+cannot write a source fleet's managed receipt through current or old APIs.
 
-SF-130 [#265](https://github.com/tyler-suifleet/suifleet/issues/265) and SF-131
-[#266](https://github.com/tyler-suifleet/suifleet/issues/266) own the settings paths.
-The original audit was made before the settings work merged. Its
-incompatible-export and disabled-save findings are now obsolete. For resumed
-SF-136 development, the verified integration baseline is:
+## Customer allowances
 
-- `origin/main` `b9e8053f4f034ca725686d19870cde6f3f756d63`, including SF-130.
-- PR [#277](https://github.com/tyler-suifleet/suifleet/pull/277) exact remote head
-  `053011823ef3121fe4bf73adc03b9da1564bde0c`, integrated as a development
-  prerequisite only. Its latest independent source review found both prior
-  settings defects repaired, but withheld merge approval pending required CI
-  and automatic testnet evidence.
+New customers receive **zero** device and encoded-upload allowances. Creating
+another customer or rotating a wallet therefore cannot mint a subscription.
+Only the registry's entitlement authority can call `set_entitlement`; customer
+administrators cannot grant themselves capacity. There is no subscription
+collection/payment backend. An eventual billing integration must verify the
+customer identity and grant its allowances through that authority, rather than
+trusting browser input, a wallet address or a budget deposit as payment proof.
 
-The canonical `lib/fleet-settings.ts` exports `settingsSupported`,
-`settingsErrors`, `DEFAULT_SETTINGS`, tuple-valued `SETTINGS_BOUNDS`,
-`buildSetFleetSettingsTx(budgetId, capId, settings)` and
-`fetchFleetSettings(client, budgetId)`. The production `settingsSaver` uses
-that transaction builder. Pricing lives separately in `fleet-pricing.ts` and
-`fleet-settings-cost.ts`. SF-136 must consume these APIs and the selected
-fleet's exact budget/cap; no settings fields belong in Customer.
+`active_devices` counts assigned/enrolled devices, including suspended or revoked
+ones until explicit removal. Adoption reserves the existing budget count before
+any cap is reconciled. Registration, sponsored claims, removal and atomic
+reassignment update customer and fleet accounting together. Each fleet has its
+own gas/storage balances, per-device quotas, settings and retention funding.
 
-The reviewed settings form resets choices, device sizing, deposit confirmation
-and result state on account/budget changes, and preserves deliberate edits
-against delayed saved-record responses. These regressions establish settings
-form behavior, not customer membership, fleet discovery or cross-fleet isolation.
+The customer upload allowance is measured in Walrus **encoded bytes**, shared
+by managed owner and device uploads across all fleets/storage objects. Period
+IDs advance only under entitlement authority and cannot move backwards; changing
+fleets or credentials cannot reset usage. A device still must pass its fleet's
+quota, active identity, account and funding checks. Charges and storage
+registration commit atomically. A rejected upload cannot consume allowance.
 
-The SF-136 branch preserves its original audit and integrates main and the
-pinned prerequisite with separate Tyler-authored merge commits. PR #281 remains
-draft under the explicit operator instruction. Prerequisite integration,
-exact-head/current-base CI, fresh independent review and full SF-136 software
-acceptance remain required; source review of PR #277 is not merge approval for
-either PR.
+The issuer also calls `fleet_storage::configure_customer_charging(customer,
+registry)` once for the reviewed storage producer. A private non-store witness
+binds device charges to that producer's type origin, preventing a device from
+calling the ledger directly to burn the customer allowance outside storage
+quotas. Configuration is idempotent for that origin. Storage upgrades preserve
+it. For a pre-existing paid period, grant only its verified remaining allowance;
+no migration/browser path asserts that billing has been implemented.
 
-### Remaining authority implementation
+## Browser and daemon configuration
 
-The settings API is no longer a development blocker. The following are SF-136
-implementation requirements, not defects assigned back to SF-130/SF-131 and not
-reasons to wait for their merge before developing:
+The switcher keys preferences by chain identifier, registry and credential and
+persists fleet IDs. Queries also include the resolved account/network/customer/
+fleet identity. Reconnects use a fresh discovery generation. Stale explicit
+selections never silently fall back to another fleet. Discovery errors,
+revocation, disconnects and mismatched networks hide previous content. Cross-tab
+storage events revalidate preferences. Changing identity remounts page forms,
+archive plaintext and sessions. Mutations re-read membership, verify the network,
+and check the captured selection immediately before wallet signing.
 
-- `fleet_settings::set` delegates to `fleet_budget::assert_owner`, which checks
-  the budget's version and exact `BudgetOwnerCap`. A new customer membership
-  index alone cannot let another wallet use that wallet-owned cap or revoke a
-  credential that retains it. Define capability custody/delegation before
-  exposing multi-wallet writes; keep the existing settings validation intact.
-- `device_group::add_device` authorizes the group's admin address and accepts a
-  borrowed Device without a fleet binding. Merely filtering the browser's
-  device list cannot establish cross-fleet rejection, including through old
-  packages. Prove the chosen migration barrier against those paths.
-- `deployment_manager::report_verified_status_for_group` validates the group
-  admin against the deployment creator, plus targeting and membership. Managed
-  customer authority must remain coherent with daemon admission and desired
-  state; replacing the display name or query key cannot change that authority.
-- FleetData's owner operations still require its bound budget/cap, and support
-  approval checks its explicit support list. Customer membership must not
-  silently add support/decryption access or rewrite historical archive identity.
+Managed device/group/deployment, health/alerts, access-policy, budget/settings,
+storage, onboarding and claim-enrollment paths use the selected fleet. Storage
+is resolved by its exact budget. The settings form continues to use
+`fetchFleetSettings(client, budgetId)` and
+`buildSetFleetSettingsTx(budgetId, capId, settings)` through the capability loan.
 
-No new customer/fleet authority, migration, entitlement ledger or switcher is
-implemented by this prerequisite integration. In particular, the software work
-above must be completed and tested rather than relabeled as deferred physical,
-mainnet, provider or manual-wallet acceptance.
+For multiple existing data objects, `NEXT_PUBLIC_FLEET_DATA_CONFIGS` is a JSON
+array of the existing schema-1 FleetData configuration records described in
+[SERVERLESS_FLEET_DATA.md](SERVERLESS_FLEET_DATA.md). Each budget has at most one configured record.
+The selected budget chooses its record; a missing record never falls back to
+another fleet or wallet-scoped HTTP telemetry. The original single-record
+`NEXT_PUBLIC_FLEET_DATA` remains supported for legacy manifests and a matching
+managed budget. Readers verify chain, registry, budget and storage on chain.
 
-## Proposed authority and discovery design
+A daemon's enrollment is explicit and never changes when the browser switches.
+Generated managed claim provisioning files add:
 
-This section is a proposal for the implementing worker and shared-interface
-owners, not an agreed ABI or an instruction to migrate existing objects now.
+```toml
+[managed]
+customer_id = "0x…"
+fleet_id = "0x…" # customer::Fleet, not fleet_data::FleetData
+budget_id = "0x…"
+```
 
-Use an additive shared Customer object with stable object identity, an authority
-epoch, credential roles, one default fleet ID, fleet inventory and entitlement
-accounting. Fleet aliases need not be globally unique. Discovery must use a
-chain-verifiable wallet-to-membership index or owned membership credentials;
-each candidate must be checked against current Customer state so a stale or
-transferred credential cannot grant access. Decide how initial customer identity
-is issued and recovered; permitting each new wallet to self-assert the same paid
-customer, or to reset a paid allowance with a new Customer, is not enforcement.
+For managed archive production, the existing `[fleet_data]` configuration adds
+`[fleet_data.managed]` with `customer_id` and `fleet_id`. Keep the original
+FleetData/storage/writer/account IDs and type origin. Managed storage registration
+uses this binding and the same bounded, verify-before-sign policy as legacy
+registration. `suifleet --check-operator CONFIG` reads and verifies the complete
+managed custody/customer/registry chain without submitting a transaction.
 
-Use an additive named-fleet object with immutable customer binding and verified
-budget/storage/data references. Capability custody and the existing owner/support
-checks remain authoritative until an explicit migration changes their handling.
-Multiple wallet credentials cannot safely borrow a wallet-owned budget cap merely
-because the UI lists them as members: implement package-controlled custody or a
-separately reviewed delegation boundary. Define least-privilege membership roles
-and preserve a recovery authority before revoking the last administrator.
+## Explicit migration and recovery
 
-Track active managed devices once at Customer scope and once at fleet scope.
-Enrollment/removal/reassignment updates both atomically; repeated requests cannot
-increment or release capacity twice. Customer diagnostic/log allowances need one
-period ledger across fleets and credentials, with monotonic period identity.
-Per-device/per-fleet limits may tighten this allowance. Serialize only operations
-that need shared accounting; preserve read-only fleet-budget inputs on ordinary
-gas draws where possible. Specify who can grant/change entitlements without
-inventing subscription collection or trusting browser-supplied limits.
+Keep a release inventory before any writes: chain/registry, all introduction
+origins, owner caps, budget accounts, groups, deployments, data/storage IDs,
+support grants, key epochs and ciphertext references. Follow
+[DEPLOYMENT_MANIFEST.md](DEPLOYMENT_MANIFEST.md) and [OPERATIONS.md](OPERATIONS.md).
+Retain the previous manifest while preparing the compatible core, storage and
+data upgrades. New data/storage call packages must use the reviewed managed
+APIs and preserve the original external type origins.
 
-Managed operations must carry and validate the complete customer/fleet/object
-binding at contract admission, receipt verification, daemon admission and Seal
-policy resolution. An isolated module wrapping old entry points is insufficient:
-old packages remain callable. In particular, adding a group membership table
-does not stop an older `add_device`, and adding a customer counter does not stop
-an older `enroll_device`. Use an enforceable migration/version/custody barrier
-and prove old-package bypass rejection before describing managed isolation as
-implemented. Legacy single-fleet objects can retain their old semantics until
-explicit adoption; do not silently claim they gained managed guarantees.
+1. Create/read the Customer and default fleet. The `CustomerCreated` event and
+   registry `CustomerKey { wallet }` resolve an uncertain result; retrying create
+   cannot duplicate it. Have entitlement authority grant verified capacity and
+   configure the storage charging producer before managed device uploads.
+2. Under current ownership, call `adopt_budget(customer, budget, ownerCap, name)`.
+   This consumes the cap, reserves the existing device count and creates a fleet
+   with `pending_devices`. Recover by finding the budget in Customer's fleet
+   inventory; never create another fleet just because a wallet no longer owns
+   the consumed cap. Loans/new enrollment stay sealed while devices are pending.
+3. For **each indexed account**, call `adopt_device(customer, fleet, budget,
+   account, registry, deviceOwnerCap)`. It verifies the exact indexed account and
+   current identity, replaces the owner cap, rebinds only that account and records
+   custody. Account IDs, reserves, limits, signer keys and journals remain.
+   Recover from current Fleet device inventory, `pending_devices` and registry
+   identity events. A consumed cap cannot be adopted twice. Missing/transferred
+   caps require reconciliation under their actual owner; do not guess ownership.
+4. Adopt groups with `adopt_group` only after all their members are assigned to
+   the same fleet. Adopt native/rollout records with `adopt_deployment` after
+   verifying all targets. This preserves their payload, controls and authoritative
+   historical receipts while sealing future reporting. Catalog-bound legacy
+   deployments must be superseded with a managed deployment of the immutable
+   version and an explicit desired-state revision; do not change publisher
+   provenance. Existing unadopted objects retain legacy semantics.
+5. Adopt private policies only when all their device/group grants fit the fleet.
+   Account/support grants are explicit and retained. Replace legacy enrollment
+   policies with managed policies; never repurpose unconsumed claims silently.
+   Record which claims/policies were closed and which were replaced.
+6. Update explicit daemon bindings and current call packages, preserving device
+   keys, journals and component state. Verify `--check-operator`, settings,
+   signer-bound reporting, uploads and archive approvals. Test old-package
+   refusals; an upgrade alone is not evidence that old packages stopped working.
 
-## Browser integration contract
+`rename_fleet` and `set_default_fleet` are explicit administrative operations.
+Removing or reassigning a device requires clearing its group and direct policy
+grants first. `reassign_device` is atomic within one customer: close/reclaim the
+source gas account, retain device key/custody, create a destination account with
+zero initial float/reserve and preserve the aggregate count. Source deployments,
+archives and receipt history stay in the source fleet. Update the daemon's explicit budget/account/data configuration after a move; use FleetData's explicit account replacement API when retaining a destination writer's history. `DeviceReleased`,
+`DeviceAssigned` and registry identity events preserve the authority history.
 
-Selection identity is `(chain identifier, registry, customer ID, fleet ID)`;
-local preference additionally keys on the connected credential. Persist IDs,
-not aliases. Revalidate membership and object bindings after reconnect, account
-or network change, transaction completion and cross-tab storage notifications.
-Hide previous data synchronously while identity is unresolved. Treat loading,
-empty inventory, revoked/stale selection and discovery failure as distinct states.
-Do not automatically substitute another fleet when a stale operation is pending.
+## Verification and acceptance
 
-Capture selection/credential/network for each mutation and recheck after every
-asynchronous proof and immediately before signing. Include them in cache keys,
-invalidate dependent queries on change and discard late responses from a prior
-selection. Contract checks must still reject a forged transaction. Give the
-switcher an accessible label and keyboard interaction; show aliases primarily
-and IDs in optional details, including when aliases collide.
+Changed-behavior tests live in:
 
-## Migration and recovery requirements
+- `contracts/tests/customer_tests.move`: authority, claims, counters, aliases,
+  reassignment, cross-fleet targets/policies and sealed legacy paths.
+- `contracts/fleet_storage/tests/fleet_storage_tests.move`: populated adoption,
+  customer-byte charges, quota refusal and forged producer witnesses.
+- `contracts/fleet_data/tests/fleet_data_tests.move`: unchanged archive identity
+  with read-only customer approval and credential-role rejection.
+- `scripts/test_customer_fleets.cjs`: actual SDK PTB capability composition and
+  chain-read fixtures for discovery, stale credentials and binding failures.
+- `scripts/test_customer_fleets_browser.cjs`: actual React provider/switcher and
+  Chromium account/network/tab/race/selection isolation. The
+  [screenshot](validation/sf136-fleet-switcher.png) is this deterministic software
+  fixture, not a manual extension-wallet or public-network acceptance result.
+- `scripts/test_protocol_localnet.py --customer-upgrade`: disposable network-none
+  base-to-head upgrade, populated adoption, old-package failures and real daemon
+  custody resolution. Temporary keys stay private and are removed.
 
-No migration command exists yet; do not execute a hypothetical migration based
-on this proposal. The implementation must provide a verified, resumable plan:
-
-1. Read and record chain, registry, package/type origins, all selected owner caps,
-   device identities, groups, budgets, data/storage references and support grants.
-   Refuse mixed-customer or foreign inventory before writes.
-2. Create/read the customer's default fleet with an authoritative idempotency
-   marker. Adopt each object only once under its current legitimate authority;
-   do not infer membership from matching wallet addresses or names.
-3. Establish the old-package barrier and reconcile aggregate active devices and
-   outstanding allowance usage before enabling managed writes. Persist progress
-   on chain so a retry after an unknown outcome reads instead of duplicating.
-4. Preserve original archive fleet identity, key epoch, type origin and ciphertext
-   references. Keep historical decryption grants subject to existing policy;
-   rotating a credential cannot retract previously disclosed plaintext.
-5. Regenerate compatible client manifests, update explicit daemon bindings and
-   verify mixed clients/old entry points. Preserve device keys, journals, component
-   state and receipt history. A UI fleet change never reassigns a device.
-
-## Required evidence before Review
-
-No functional tests have been run for SF-136 because no implementation is present.
-The eventual implementation must supply:
-
-- Move tests for two fleets/one customer, separate customers, duplicate aliases,
-  multi-wallet access, rotation/revocation, cross-fleet group/target/writer/storage
-  rejection and aggregate allowance bypass attempts.
-- Actual isolated-chain existing-object adoption and upgrade tests, including
-  calls through old package IDs, interrupted migration and idempotent retry.
-- Generated ABI/BCS checks, Rust tests/build and OTA simulator coverage for managed
-  admission, legacy regression and explicit reassignment/history behavior.
-- Browser tests for default-fleet retry, creation/switching, concurrent tabs,
-  account/network changes, revoked selection, cache/late-response isolation and
-  pre-sign selection changes, plus end-to-end UI evidence.
-- Frontend typecheck/production build, current-head CI, applicable automatic
-  dedicated-wallet public-testnet validation and independent source review.
-
-Physical target/mainnet and final production-provider/manual-wallet acceptance
-remain unrun and tracked in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
-and [#159](https://github.com/tyler-suifleet/suifleet/issues/159). Those deferrals do
-not waive any software/security/regression gate listed above.
+Exact [software validation results](validation/SF136.md) and sanitized local-chain effects are recorded separately. The pushed head belongs in the PR/issue handoff. Hosted CI,
+automatic public-testnet checks and independent exact-head/base review remain
+required integration gates. Physical/mainnet and final provider/manual-wallet
+acceptance remain unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [#159](https://github.com/tyler-suifleet/suifleet/issues/159), under the standing
+implementation/acceptance split. A screenshot or simulator is not those results.
