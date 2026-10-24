@@ -108,7 +108,7 @@ fn string(v: &Value, field: &str) -> anyhow::Result<String> {
     Ok(v[field].as_str().ok_or_else(|| anyhow::anyhow!("invalid codec field {field}"))?.to_owned())
 }
 
-pub async fn tick(task: &Task) -> anyhow::Result<()> {
+pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
     let Some(config) = &task.config.archives else { return Ok(()); };
     let settings = task.log_settings.as_ref().ok_or_else(|| anyhow::anyhow!("archives need [logs] collection limits"))?;
     let dir = task.state_dir.join("fleet-data"); std::fs::create_dir_all(&dir)?;
@@ -140,7 +140,7 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         let shadows_changed = shadows.is_some() && shadow_fingerprint != completed.shadows;
         let shadow_bytes = match &shadows { Some(s) => serde_json::to_vec(s)?.len(), None => 0 };
         let last = if kind != 0 { writer.emergency_at_ms } else { writer.batch_at_ms };
-        let interval = if kind != 0 { fleet.emergency_interval_ms } else { fleet.batch_interval_ms };
+        let interval = if kind != 0 { fleet.emergency_interval_ms } else { crate::fleet_settings::archive_interval_ms(fleet.batch_interval_ms, fleet_settings) };
         if last.is_some_and(|at| now < at.saturating_add(interval)) { return Ok(()); }
         let mut records = Vec::new(); let mut logs = Vec::new(); let mut bytes = 0;
         let mut dropped_lines = spool.dropped().saturating_mul(crate::logs::MAX_RECORDS as u64);

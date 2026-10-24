@@ -85,6 +85,7 @@ test-ota:
 	$(RUN) python3 scripts/test_rollout.py
 	$(RUN) python3 scripts/test_cadence_ota.py
 	$(RUN) python3 scripts/test_budget_ota.py
+	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
 
@@ -167,6 +168,13 @@ test-handover-upgrade-localnet:
 test-budget-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
+
+# SF-130 on a disposable localnet (network none): settings added by upgrade to
+# an existing budget, owner-only changes and events, refusals, daemon/dApp reads.
+.PHONY: test-settings-localnet
+test-settings-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --settings-upgrade
 
 .PHONY: test-catalog-live
 test-catalog-live:
@@ -327,6 +335,7 @@ test-manifest:
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
+	$(RUN) node scripts/test_fleet_settings.cjs
 	$(RUN) node scripts/test_budget_enrollment.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs

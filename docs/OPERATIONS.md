@@ -572,7 +572,9 @@ Known active maintenance windows and deployments waiting for rollout eligibility
 use the faster cadence. An observed active calendar window remains in bounded
 journal metadata until its recorded end/expiry, even after an update completes
 and across daemon restarts. Overlapping observed periods coalesce; this clock
-metadata never grants admission authority. This is a local fallback until SF-130 supplies fleet settings.
+metadata never grants admission authority. A fleet's
+[on-chain settings](FLEET_SETTINGS.md) (SF-130) set floors on both intervals;
+without a record these local values apply.
 An undiscovered deployment or remotely changed control is observed at the next
 check; local timers cannot anticipate unpublished changes.
 
