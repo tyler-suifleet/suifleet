@@ -88,7 +88,11 @@ module sui_edge::deployment_manager {
         window_start_ms: u64, window_end_ms: u64, notice_ms: u64,
         ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        set_control_as(deployment, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx.sender());
+    }
+    public(package) fun set_control_as(deployment: &mut DeploymentRecord, state: u8,
+        not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
         assert!(state <= 2, EInvalidControlState);
         assert!(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
         assert!((window_start_ms == 0 && window_end_ms == 0) ||
@@ -298,7 +302,11 @@ module sui_edge::deployment_manager {
         name: String, version: String, groups: vector<ID>, devices: vector<ID>,
         key: K, value: V, clock: &Clock, ctx: &mut TxContext,
     ): DeploymentRecord {
-        let creator = ctx.sender();
+        new_catalog_as(ctx.sender(), name, version, groups, devices, key, value, clock, ctx)
+    }
+    public(package) fun new_catalog_as<K: copy + drop + store, V: store>(creator: address,
+        name: String, version: String, groups: vector<ID>, devices: vector<ID>,
+        key: K, value: V, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let mut record = make_deployment(creator, name, version, std::string::utf8(b""),
             std::string::utf8(b""), groups, devices, clock, ctx);
         record.schema_version = 2;

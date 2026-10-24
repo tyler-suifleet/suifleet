@@ -102,4 +102,80 @@ module sui_edge::customer_tests {
         customer::reserve_allowance(&mut c, &b, 4, s.ctx());
         ts::return_shared(a); ts::return_shared(b); ts::return_shared(registry); ts::return_shared(c); s.end();
     }
+    fun allow_devices(s: &mut ts::Scenario, count: u64) {
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, count, 100000, 1, s.ctx());
+        ts::return_shared(c); ts::return_shared(r);
+        s.next_tx(OWNER);
+    }
+    fun register(s: &mut ts::Scenario, fid: ID, address: address): ID {
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut r = s.take_shared<DeviceRegistry>();
+        let mut b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f));
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::register_device(&mut c, &mut f, &mut b, &mut r, utf8(b"Device"), address, utf8(b"x86_64"), &clock, s.ctx());
+        let ids = customer::devices(&f);
+        let did = ids[ids.length() - 1];
+        sui::clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r);
+        did
+    }
+    #[test]
+    fun two_fleets_share_device_accounting_and_budget_custody() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 2);
+        let da = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let db = register(&mut s, b, @0xD2); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); assert!(customer::active_devices(&c) == 2);
+        let mut f = s.take_shared_by_id<Fleet>(a);
+        assert!(customer::devices(&f).contains(&da) && !customer::devices(&f).contains(&db));
+        let (cap, loan) = customer::borrow_budget_cap(&c, &mut f, s.ctx());
+        let mut budget = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f));
+        fleet_budget::set_paused(&mut budget, &cap, true);
+        customer::return_budget_cap(&mut f, cap, loan);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(budget); s.end();
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::customer)]
+    fun another_fleet_cannot_bypass_device_limit() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 1); register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        register(&mut s, b, @0xD2); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun same_wallet_cannot_add_foreign_fleet_device_to_group() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 2);
+        let da = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(b);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_group(&c, &mut f, utf8(b"Group"), utf8(b""), &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f);
+        s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(b);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::add_to_group(&c, &mut f, &mut g, da, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(g); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun cross_fleet_deployment_targets_are_rejected() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 2); let da = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(b);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_deployment(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"), utf8(b"hash"),
+            utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), vector[], vector[da], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::device_group)]
+    fun legacy_group_entry_point_cannot_write_managed_group() {
+        let mut s = setup(); let a = fleet(&mut s);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_group(&c, &mut f, utf8(b"Group"), utf8(b""), &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        sui_edge::device_group::remove_device(&mut g, a, s.ctx());
+        ts::return_shared(g); s.end();
+    }
+
 }

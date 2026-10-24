@@ -570,7 +570,6 @@ module sui_edge::fleet_budget {
     /// Adoption seals out all older package versions before capability custody.
     public(package) fun adopt_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap) {
         assert_owner(budget, cap);
-        assert!(budget.device_count == 0, EAlreadyEnrolled);
         budget.version = MANAGED_VERSION;
         df::add(&mut budget.id, CustomerManagedKey {}, true);
     }

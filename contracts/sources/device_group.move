@@ -133,6 +133,11 @@ module sui_edge::device_group {
         event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
         group
     }
+    public(package) fun delete_managed(group: DeviceGroup) {
+        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;
+        event::emit(GroupDeleted { group_id: id.to_inner(), admin });
+        id.delete();
+    }
     public(package) fun share_managed(group: DeviceGroup) { transfer::share_object(group); }
     public(package) fun add_managed(group: &mut DeviceGroup, device_id: ID) {
         assert!(!group.device_ids.contains(&device_id), EDeviceAlreadyInGroup);

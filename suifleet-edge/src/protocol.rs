@@ -9,6 +9,7 @@ pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
+pub const CUSTOMER_TYPES: &[&str] = &["customer::Customer", "customer::Fleet", "customer::Membership", "customer::CustomerKey", "customer::BudgetKey", "customer::DeviceKey", "customer::AssignmentKey", "customer::GroupCountKey", "customer::CustomerCreated", "customer::FleetCreated", "customer::CredentialChanged", "customer::DeviceAssigned", "customer::DeviceReleased"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
 /// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
 pub mod fleet_settings_values {
@@ -112,22 +113,40 @@ pub mod customer {
     pub const ACTIVE_DEVICES: &str = "active_devices";
     pub const ADD_TO_GROUP: &str = "add_to_group";
     pub const ADOPT_BUDGET: &str = "adopt_budget";
+    pub const ADOPT_DEVICE: &str = "adopt_device";
+    pub const ADOPT_GROUP: &str = "adopt_group";
+    pub const ADOPT_POLICY: &str = "adopt_policy";
     pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const ASSERT_FLEET: &str = "assert_fleet";
     pub const ASSERT_MEMBER: &str = "assert_member";
+    pub const BEGIN_REVISION: &str = "begin_revision";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
+    pub const COMMIT_REVISION: &str = "commit_revision";
     pub const CREATE: &str = "create";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_FLEET: &str = "create_fleet";
     pub const CREATE_GROUP: &str = "create_group";
+    pub const CREATE_POLICY: &str = "create_policy";
+    pub const DELETE_GROUP: &str = "delete_group";
+    pub const DEVICES: &str = "devices";
     pub const ENROLL: &str = "enroll";
     pub const FLEET_BUDGET: &str = "fleet_budget";
     pub const FLEET_CUSTOMER: &str = "fleet_customer";
     pub const FLEETS: &str = "fleets";
+    pub const NEW_CATALOG_DEPLOYMENT: &str = "new_catalog_deployment";
+    pub const NEW_DEPLOYMENT: &str = "new_deployment";
+    pub const PENDING_DEVICES: &str = "pending_devices";
+    pub const POLICY_ACCOUNT: &str = "policy_account";
+    pub const POLICY_DEVICE: &str = "policy_device";
+    pub const POLICY_GROUP: &str = "policy_group";
+    pub const REGISTER_DEVICE: &str = "register_device";
     pub const REMOVE_DEVICE: &str = "remove_device";
     pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
     pub const RESERVE_ALLOWANCE: &str = "reserve_allowance";
+    pub const RESERVE_DEVICE_ALLOWANCE: &str = "reserve_device_allowance";
     pub const RETURN_BUDGET_CAP: &str = "return_budget_cap";
+    pub const ROTATE_POLICY: &str = "rotate_policy";
+    pub const SET_CONTROL: &str = "set_control";
     pub const SET_CREDENTIAL: &str = "set_credential";
     pub const SET_ENTITLEMENT: &str = "set_entitlement";
     pub const USED: &str = "used";
@@ -208,8 +227,10 @@ pub mod customer {
         pub name: String,
         pub budget_id: [u8; 32],
         pub devices: Vec<[u8; 32]>,
+        pub pending_devices: u64,
         pub groups: Vec<[u8; 32]>,
         pub deployments: Vec<[u8; 32]>,
+        pub policies: super::VecMap<[u8; 32], [u8; 32]>,
     }
     impl Fleet { pub const MOVE_TYPE: &'static str = "customer::Fleet"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -231,6 +252,11 @@ pub mod customer {
         pub customer_id: [u8; 32],
     }
     impl Membership { pub const MOVE_TYPE: &'static str = "customer::Membership"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyKey {
+        pub policy_id: [u8; 32],
+    }
+    impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -1024,6 +1050,7 @@ pub mod seal_policy {
     pub const MODULE: &str = "seal_policy";
     pub const ACCOUNT_ALLOWED: &str = "account_allowed";
     pub const ACCOUNTS: &str = "accounts";
+    pub const CAP_POLICY: &str = "cap_policy";
     pub const CAP_POLICY_ID: &str = "cap_policy_id";
     pub const CODE_VERSION: &str = "code_version";
     pub const CREATE_POLICY: &str = "create_policy";
@@ -1039,6 +1066,8 @@ pub mod seal_policy {
     pub const KEY_EPOCH: &str = "key_epoch";
     pub const MIGRATE: &str = "migrate";
     pub const NAME: &str = "name";
+    pub const POLICY_DEVICES: &str = "policy_devices";
+    pub const POLICY_GROUPS: &str = "policy_groups";
     pub const REVOKE_ACCOUNT: &str = "revoke_account";
     pub const REVOKE_DEVICE: &str = "revoke_device";
     pub const REVOKE_GROUP: &str = "revoke_group";

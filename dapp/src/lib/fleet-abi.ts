@@ -306,6 +306,45 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "adopt_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui_edge::device_registry::DeviceOwnerCap",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "adopt_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "adopt_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&sui_edge::seal_policy::AccessPolicy",
+          "sui_edge::seal_policy::AccessAdminCap",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "assert_admin": {
         "visibility": "Public",
         "entry": false,
@@ -336,6 +375,20 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "begin_revision": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::desired_state::RevisionPlan"
+        ]
+      },
       "borrow_budget_cap": {
         "visibility": "Public",
         "entry": false,
@@ -349,6 +402,20 @@ export const MOVE_ABI = {
           "sui_edge::fleet_budget::BudgetOwnerCap",
           "sui_edge::customer::BudgetLoan"
         ]
+      },
+      "commit_revision": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "sui_edge::desired_state::RevisionPlan",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::clock::Clock",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "create": {
         "visibility": "Public",
@@ -406,6 +473,41 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "create_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "std::string::String",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "delete_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "devices": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Fleet"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
+        ]
+      },
       "enroll": {
         "visibility": "Public",
         "entry": false,
@@ -456,6 +558,115 @@ export const MOVE_ABI = {
           "&vector<sui::object::ID>"
         ]
       },
+      "new_catalog_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
+      "new_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "std::string::String",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
+      "pending_devices": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Fleet"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "policy_account": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::seal_policy::AccessPolicy",
+          "address",
+          "bool",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "policy_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::seal_policy::AccessPolicy",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "sui::object::ID",
+          "bool",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "policy_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::seal_policy::AccessPolicy",
+          "&sui_edge::device_group::DeviceGroup",
+          "bool",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "register_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&mut sui_edge::device_registry::DeviceRegistry",
+          "std::string::String",
+          "address",
+          "std::string::String",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "remove_device": {
         "visibility": "Public",
         "entry": false,
@@ -495,6 +706,22 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "reserve_device_allowance": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::GasAccount",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "u64",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "return_budget_cap": {
         "visibility": "Public",
         "entry": false,
@@ -503,6 +730,36 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "sui_edge::fleet_budget::BudgetOwnerCap",
           "sui_edge::customer::BudgetLoan"
+        ],
+        "returns": []
+      },
+      "rotate_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::seal_policy::AccessPolicy",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "set_control": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u8",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "&sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -783,12 +1040,20 @@ export const MOVE_ABI = {
             "vector<sui::object::ID>"
           ],
           [
+            "pending_devices",
+            "u64"
+          ],
+          [
             "groups",
             "vector<sui::object::ID>"
           ],
           [
             "deployments",
             "vector<sui::object::ID>"
+          ],
+          [
+            "policies",
+            "sui::vec_map::VecMap<sui::object::ID,sui::object::ID>"
           ]
         ]
       },
@@ -843,6 +1108,20 @@ export const MOVE_ABI = {
           ],
           [
             "customer_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "PolicyKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "policy_id",
             "sui::object::ID"
           ]
         ]
@@ -4765,6 +5044,17 @@ export const MOVE_ABI = {
           "&vector<address>"
         ]
       },
+      "cap_policy": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::seal_policy::AccessAdminCap"
+        ],
+        "returns": [
+          "sui::object::ID"
+        ]
+      },
       "cap_policy_id": {
         "visibility": "Public",
         "entry": false,
@@ -4938,6 +5228,28 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "std::string::String"
+        ]
+      },
+      "policy_devices": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::seal_policy::AccessPolicy"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
+        ]
+      },
+      "policy_groups": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::seal_policy::AccessPolicy"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
         ]
       },
       "revoke_account": {
