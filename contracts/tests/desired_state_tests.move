@@ -234,4 +234,225 @@ module sui_edge::desired_state_tests {
         revise(&mut scenario, ADMIN, group, vector[], vector[b"missing"]);
         ts::end(scenario);
     }
+
+    // ── SF-129 retirement ───────────────────────────────────────────────────
+
+    /// Retire `record` after confirming `groups`, as `sender`; returns whether
+    /// the record object was deleted by the transaction.
+    fun retire(scenario: &mut ts::Scenario, sender: address, record: ID, groups: vector<ID>): bool {
+        ts::next_tx(scenario, sender);
+        let deployment = ts::take_shared_by_id<DeploymentRecord>(scenario, record);
+        let mut retirement = desired_state::begin_retirement(&deployment, ts::ctx(scenario));
+        groups.do!(|id| {
+            let mut group = ts::take_shared_by_id<DeviceGroup>(scenario, id);
+            desired_state::confirm_not_desired(&mut retirement, &mut group, ts::ctx(scenario));
+            ts::return_shared(group);
+        });
+        desired_state::retire(retirement, deployment, ts::ctx(scenario));
+        ts::next_tx(scenario, sender).deleted().contains(&record)
+    }
+
+    #[test]
+    fun superseded_managed_record_is_retired_after_checking_its_groups() {
+        let mut scenario = ts::begin(ADMIN);
+        let a = new_group(&mut scenario, ADMIN);
+        let b = new_group(&mut scenario, ADMIN);
+        let fw1 = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[a, b, a]);
+        revise(&mut scenario, ADMIN, a, vector[fw1], vector[]);
+        revise(&mut scenario, ADMIN, b, vector[fw1], vector[]);
+        let fw2 = deploy(&mut scenario, ADMIN, b"firmware", b"1.1.0", vector[a, b]);
+        revise(&mut scenario, ADMIN, a, vector[fw2], vector[]);
+        revise(&mut scenario, ADMIN, b, vector[], vector[b"firmware"]);
+        assert!(retire(&mut scenario, ADMIN, fw1, vector[a, b]), 0);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun unmanaged_record_needs_no_group_check() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let once = deploy(&mut scenario, ADMIN, b"agent", b"1.0.0", vector[group]);
+        assert!(retire(&mut scenario, ADMIN, once, vector[]), 0);
+        ts::end(scenario);
+    }
+
+    #[test, expected_failure(abort_code = desired_state::EStillDesired)]
+    fun desired_record_cannot_be_retired() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group]);
+        revise(&mut scenario, ADMIN, group, vector[fw], vector[]);
+        retire(&mut scenario, ADMIN, fw, vector[group]);
+        ts::end(scenario);
+    }
+
+    #[test, expected_failure(abort_code = desired_state::EUnconfirmed)]
+    fun every_target_group_must_be_confirmed() {
+        let mut scenario = ts::begin(ADMIN);
+        let a = new_group(&mut scenario, ADMIN);
+        let b = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[a, b]);
+        revise(&mut scenario, ADMIN, b, vector[fw], vector[]);
+        // Group b still desires it; skipping b must not delete the record.
+        retire(&mut scenario, ADMIN, fw, vector[a]);
+        ts::end(scenario);
+    }
+
+    #[test, expected_failure(abort_code = desired_state::EWrongGroup)]
+    fun untargeted_group_does_not_confirm() {
+        let mut scenario = ts::begin(ADMIN);
+        let a = new_group(&mut scenario, ADMIN);
+        let other = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[a]);
+        revise(&mut scenario, ADMIN, a, vector[fw], vector[]);
+        retire(&mut scenario, ADMIN, fw, vector[other]);
+        ts::end(scenario);
+    }
+
+    #[test, expected_failure(abort_code = desired_state::ENotCreator)]
+    fun only_the_creator_retires() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group]);
+        retire(&mut scenario, OTHER, fw, vector[]);
+        ts::end(scenario);
+    }
+
+    #[test, expected_failure(abort_code = desired_state::EWrongRecord)]
+    fun proof_is_bound_to_its_record() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let checked = deploy(&mut scenario, ADMIN, b"agent", b"1.0.0", vector[group]);
+        let desired = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group]);
+        revise(&mut scenario, ADMIN, group, vector[desired], vector[]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let first = ts::take_shared_by_id<DeploymentRecord>(&scenario, checked);
+        let second = ts::take_shared_by_id<DeploymentRecord>(&scenario, desired);
+        let retirement = desired_state::begin_retirement(&first, ts::ctx(&mut scenario));
+        desired_state::retire(retirement, second, ts::ctx(&mut scenario));
+        abort 0
+    }
+
+    // A confirmed group cannot make the record desired again before `retire`.
+    #[test, expected_failure(abort_code = desired_state::ERetiring)]
+    fun confirmed_group_cannot_reassign_the_record_in_the_same_transaction() {
+        let mut scenario = ts::begin(ADMIN);
+        let group_id = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group_id]);
+        revise(&mut scenario, ADMIN, group_id, vector[fw], vector[]);
+        revise(&mut scenario, ADMIN, group_id, vector[], vector[b"firmware"]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut deployment = ts::take_shared_by_id<DeploymentRecord>(&scenario, fw);
+        let mut group = ts::take_shared_by_id<DeviceGroup>(&scenario, group_id);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let mut retirement = desired_state::begin_retirement(&deployment, ts::ctx(&mut scenario));
+        desired_state::confirm_not_desired(&mut retirement, &mut group, ts::ctx(&mut scenario));
+        let mut plan = desired_state::begin(&group, ts::ctx(&mut scenario));
+        desired_state::set_component(&mut plan, &mut deployment);
+        desired_state::commit(plan, &mut group, &clock, ts::ctx(&mut scenario));
+        desired_state::retire(retirement, deployment, ts::ctx(&mut scenario));
+        abort 0
+    }
+
+    // A plan prepared before `begin_retirement` is refused at commit too.
+    #[test, expected_failure(abort_code = desired_state::ERetiring)]
+    fun plan_prepared_before_retirement_cannot_commit_the_record() {
+        let mut scenario = ts::begin(ADMIN);
+        let group_id = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group_id]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut deployment = ts::take_shared_by_id<DeploymentRecord>(&scenario, fw);
+        let mut group = ts::take_shared_by_id<DeviceGroup>(&scenario, group_id);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let mut plan = desired_state::begin(&group, ts::ctx(&mut scenario));
+        desired_state::set_component(&mut plan, &mut deployment);
+        let mut retirement = desired_state::begin_retirement(&deployment, ts::ctx(&mut scenario));
+        desired_state::confirm_not_desired(&mut retirement, &mut group, ts::ctx(&mut scenario));
+        desired_state::commit(plan, &mut group, &clock, ts::ctx(&mut scenario));
+        desired_state::retire(retirement, deployment, ts::ctx(&mut scenario));
+        abort 0
+    }
+
+    // An unmanaged record assigned after `begin_retirement` was never checked.
+    #[test, expected_failure(abort_code = desired_state::ERetiring)]
+    fun record_assigned_after_begin_retirement_is_not_retired() {
+        let mut scenario = ts::begin(ADMIN);
+        let group_id = new_group(&mut scenario, ADMIN);
+        let fw = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group_id]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut deployment = ts::take_shared_by_id<DeploymentRecord>(&scenario, fw);
+        let mut group = ts::take_shared_by_id<DeviceGroup>(&scenario, group_id);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let retirement = desired_state::begin_retirement(&deployment, ts::ctx(&mut scenario));
+        let mut plan = desired_state::begin(&group, ts::ctx(&mut scenario));
+        desired_state::set_component(&mut plan, &mut deployment);
+        desired_state::commit(plan, &mut group, &clock, ts::ctx(&mut scenario));
+        desired_state::retire(retirement, deployment, ts::ctx(&mut scenario));
+        abort 0
+    }
+
+    // The check binds only its own transaction and records: the same
+    // transaction may commit other components, and later revisions proceed.
+    #[test]
+    fun retirement_check_does_not_block_other_revisions() {
+        let mut scenario = ts::begin(ADMIN);
+        let group_id = new_group(&mut scenario, ADMIN);
+        let fw1 = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group_id]);
+        revise(&mut scenario, ADMIN, group_id, vector[fw1], vector[]);
+        let fw2 = deploy(&mut scenario, ADMIN, b"firmware", b"1.1.0", vector[group_id]);
+        let fw3 = deploy(&mut scenario, ADMIN, b"firmware", b"1.2.0", vector[group_id]);
+        ts::next_tx(&mut scenario, ADMIN);
+        let deployment = ts::take_shared_by_id<DeploymentRecord>(&scenario, fw1);
+        let mut next = ts::take_shared_by_id<DeploymentRecord>(&scenario, fw2);
+        let mut group = ts::take_shared_by_id<DeviceGroup>(&scenario, group_id);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let mut plan = desired_state::begin(&group, ts::ctx(&mut scenario));
+        desired_state::set_component(&mut plan, &mut next);
+        desired_state::commit(plan, &mut group, &clock, ts::ctx(&mut scenario));
+        let mut retirement = desired_state::begin_retirement(&deployment, ts::ctx(&mut scenario));
+        desired_state::confirm_not_desired(&mut retirement, &mut group, ts::ctx(&mut scenario));
+        desired_state::retire(retirement, deployment, ts::ctx(&mut scenario));
+        let mut plan = desired_state::begin(&group, ts::ctx(&mut scenario));
+        desired_state::remove_component(&mut plan, string::utf8(b"firmware"));
+        desired_state::commit(plan, &mut group, &clock, ts::ctx(&mut scenario));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(next);
+        ts::return_shared(group);
+        assert!(ts::next_tx(&mut scenario, ADMIN).deleted().contains(&fw1), 0);
+        revise(&mut scenario, ADMIN, group_id, vector[fw3], vector[]);
+        assert!(desired(&mut scenario, group_id, b"firmware") == option::some(fw3), 1);
+        assert!(revision(&mut scenario, group_id) == 4, 2);
+        ts::end(scenario);
+    }
+
+    #[test]
+    fun catalog_and_rollout_records_use_their_deletion_paths() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        ts::next_tx(&mut scenario, ADMIN);
+        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let policy = deployment_manager::rollout_policy(1, 1, 1000, 100, 1, 1, 2000);
+        let rollout = deployment_manager::new_rollout_verified(string::utf8(b"app"), string::utf8(b"1"),
+            string::utf8(b"recipe"), string::utf8(b"hash"), string::utf8(DIGEST), vector[group],
+            vector[object::id_from_address(@0x1)], vector[0], policy, &clock, ts::ctx(&mut scenario));
+        let rollout_id = object::id(&rollout);
+        deployment_manager::share_deployment(rollout);
+        sui_edge::component_catalog::create_catalog(ts::ctx(&mut scenario));
+        ts::next_tx(&mut scenario, ADMIN);
+        let mut catalog = ts::take_shared<sui_edge::component_catalog::ComponentCatalog>(&scenario);
+        sui_edge::component_catalog::publish_version(&mut catalog, string::utf8(b"app"), string::utf8(b"1.0.0"),
+            vector[string::utf8(b"linux")], vector[string::utf8(b"x86_64")], vector[string::utf8(b"recipe")],
+            vector[string::utf8(DIGEST)], vector[string::utf8(DIGEST)], &clock, ts::ctx(&mut scenario));
+        ts::return_shared(catalog);
+        ts::next_tx(&mut scenario, ADMIN);
+        let version = ts::take_immutable<sui_edge::component_catalog::ComponentVersion>(&scenario);
+        sui_edge::component_catalog::create_deployment(&version, vector[group], vector[], &clock, ts::ctx(&mut scenario));
+        ts::return_immutable(version);
+        let effects = ts::next_tx(&mut scenario, ADMIN);
+        let bound = *effects.shared().find_index!(|id| *id != rollout_id && *id != group).map!(|i| effects.shared()[i]).borrow();
+        clock::destroy_for_testing(clock);
+        assert!(retire(&mut scenario, ADMIN, rollout_id, vector[]), 0);
+        assert!(retire(&mut scenario, ADMIN, bound, vector[]), 1);
+        ts::end(scenario);
+    }
 }

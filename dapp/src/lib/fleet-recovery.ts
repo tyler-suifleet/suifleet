@@ -9,7 +9,7 @@ import { bcs } from '@mysten/sui/bcs';
 import { normalizeStructTag, normalizeSuiAddress as id, toHex } from '@mysten/sui/utils';
 import { ExpiredSessionKeyError, GeneralError, InternalError, NoAccessError, SealError, TooManyFailedFetchKeyRequestsError } from '@mysten/seal';
 import { fetchChainHealth, listFleetDeviceIds, readDeviceData, readFleetData, type FleetDataConfig } from './fleet-data';
-import { ArchiveSealBindingError, BlobRecordBcs, fetchVerifiedArchive, readAnchors, type Anchor, type Archive } from './fleet-bulk';
+import { ArchiveSealBindingError, BlobRecordBcs, fetchVerifiedArchive, readAnchorAt, readAnchorEntries, type Anchor, type Archive } from './fleet-bulk';
 import { readIdentity } from './telemetry';
 import type { DeploymentEvent } from './sui';
 
@@ -154,8 +154,8 @@ export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusCl
   if (keyError && hasError(keyError, ExpiredSessionKeyError)) return outcome(index, 'outage', text(keyError), 'session');
   try {
     const fleet = await readFleetData(reads, config);
-    const [anchor] = await readAnchors(reads, config, deviceId, index, 1);
-    if (!anchor) return outcome(index, 'missing', 'archive index does not exist');
+    const anchor = await readAnchorAt(reads, config, deviceId, index);
+    if (!anchor) return outcome(index, 'missing', 'archive index does not exist or was pruned after expiry');
     const identity = await readIdentity(reads, deviceId);
     if (!identity || identity.revoked) return outcome(index, 'device_revoked', 'current registry identity is missing or revoked');
     if (BigInt(anchor.key_epoch) !== BigInt(fleet.key_epoch)) return outcome(index, 'key_epoch_rotated', `anchor epoch ${anchor.key_epoch}, fleet epoch ${fleet.key_epoch}`);
@@ -198,10 +198,12 @@ export async function exportPublicRecords(client: SuiGrpcClient, config: FleetDa
     const count = Number(writer.anchor_count);
     if (!Number.isSafeInteger(count) || count > EXPORT_ANCHOR_LIMIT) throw Error('Device archive index exceeds the export bound');
     const anchors: Anchor[] = [];
-    while (anchors.length < count) {
-      const page = await readAnchors(client, config, deviceId, anchors.length, 64);
-      if (!page.length) throw Error('Archive index ended before its count');
-      anchors.push(...page);
+    // Pruned (expired and reclaimed) indices are absent from the export.
+    for (let next = 0; next < count;) {
+      const page = await readAnchorEntries(client, config, deviceId, next, 64);
+      if (page.next <= next) throw Error('Archive index ended before its count');
+      anchors.push(...page.entries.map((entry) => entry.anchor));
+      next = page.next;
     }
     const h = health[deviceId];
     devices.push({ deviceId: id(deviceId), health: h.status, ...(h.lastSeenMs !== undefined ? { lastSeenMs: h.lastSeenMs } : {}),

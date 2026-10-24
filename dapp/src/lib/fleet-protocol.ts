@@ -31,6 +31,9 @@ export const deployment_manager_TargetGroupsKeyBcs = bcs.struct("TargetGroupsKey
 export const desired_state_DesiredKeyBcs = bcs.struct("DesiredKey", { dummy_field: bcs.bool() });
 export const desired_state_DesiredStateBcs = bcs.struct("DesiredState", { revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }), updated_at: bcs.u64() });
 export const desired_state_DesiredStateChangedBcs = bcs.struct("DesiredStateChanged", { group_id: bcs.Address, revision: bcs.u64(), component_names: bcs.vector(bcs.string()), deployments: bcs.vector(bcs.Address) });
+export const desired_state_RetirementBcs = bcs.struct("Retirement", { deployment_id: bcs.Address, managed: bcs.bool(), pending: bcs.vector(bcs.Address) });
+export const desired_state_RetirementCheckBcs = bcs.struct("RetirementCheck", { tx: bcs.vector(bcs.u8()), deployments: bcs.vector(bcs.Address) });
+export const desired_state_RetirementCheckKeyBcs = bcs.struct("RetirementCheckKey", { dummy_field: bcs.bool() });
 export const desired_state_RevisionPlanBcs = bcs.struct("RevisionPlan", { group_id: bcs.Address, admin: bcs.Address, base_revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
 export const device_cap_DeviceAddressKeyBcs = bcs.struct("DeviceAddressKey", { dummy_field: bcs.bool() });
 export const device_cap_DeviceCapBcs = bcs.struct("DeviceCap", { id: bcs.Address, device_id: bcs.Address });
@@ -123,14 +126,18 @@ export const calls = {
   deployment_manager_rollout_eligible: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_eligible`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   deployment_manager_rollout_policy: (tx: Transaction, packageId: string, a0: number | bigint | string, a1: number | bigint | string, a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string, a5: number | bigint | string, a6: number | bigint | string) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_policy`, arguments: [tx.pure.u64(a0), tx.pure.u64(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4), tx.pure.u64(a5), tx.pure.u64(a6)] }),
   deployment_manager_rollout_progress: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_progress`, arguments: [tx.object(a0)] }),
+  deployment_manager_schema_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::schema_version`, arguments: [tx.object(a0)] }),
   deployment_manager_set_control: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number, a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string, a5: number | bigint | string, a6: number | bigint | string) => tx.moveCall({ target: `${packageId}::deployment_manager::set_control`, arguments: [tx.object(a0), tx.pure.u8(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4), tx.pure.u64(a5), tx.pure.u64(a6)] }),
   deployment_manager_share_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::share_deployment`, arguments: [tx.object(a0)] }),
   deployment_manager_status_applied: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_applied`, arguments: [] }),
   deployment_manager_status_failed: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_failed`, arguments: [] }),
   desired_state_begin: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::begin`, arguments: [tx.object(a0)] }),
+  desired_state_begin_retirement: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::begin_retirement`, arguments: [tx.object(a0)] }),
   desired_state_commit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::commit`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
   desired_state_components: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::components`, arguments: [tx.object(a0)] }),
+  desired_state_confirm_not_desired: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::confirm_not_desired`, arguments: [tx.object(a0), tx.object(a1)] }),
   desired_state_remove_component: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::desired_state::remove_component`, arguments: [tx.object(a0), tx.pure.string(a1)] }),
+  desired_state_retire: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::retire`, arguments: [tx.object(a0), tx.object(a1)] }),
   desired_state_revision: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::revision`, arguments: [tx.object(a0)] }),
   desired_state_set_component: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::set_component`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_cap_assert_active: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_cap::assert_active`, arguments: [tx.object(a0), tx.object(a1)] }),
@@ -312,6 +319,9 @@ export const TYPES = {
   desired_state_DesiredKey: "desired_state::DesiredKey",
   desired_state_DesiredState: "desired_state::DesiredState",
   desired_state_DesiredStateChanged: "desired_state::DesiredStateChanged",
+  desired_state_Retirement: "desired_state::Retirement",
+  desired_state_RetirementCheck: "desired_state::RetirementCheck",
+  desired_state_RetirementCheckKey: "desired_state::RetirementCheckKey",
   desired_state_RevisionPlan: "desired_state::RevisionPlan",
   device_cap_DeviceAddressKey: "device_cap::DeviceAddressKey",
   device_cap_DeviceCap: "device_cap::DeviceCap",

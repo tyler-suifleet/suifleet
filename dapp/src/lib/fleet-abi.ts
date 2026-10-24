@@ -658,6 +658,17 @@ export const MOVE_ABI = {
           "u64"
         ]
       },
+      "schema_version": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
       "set_control": {
         "visibility": "Public",
         "entry": false,
@@ -1205,6 +1216,18 @@ export const MOVE_ABI = {
           "sui_edge::desired_state::RevisionPlan"
         ]
       },
+      "begin_retirement": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::desired_state::Retirement"
+        ]
+      },
       "commit": {
         "visibility": "Public",
         "entry": false,
@@ -1228,6 +1251,17 @@ export const MOVE_ABI = {
           "sui::vec_map::VecMap<std::string::String,sui::object::ID>"
         ]
       },
+      "confirm_not_desired": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::desired_state::Retirement",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "plan_components": {
         "visibility": "Public",
         "entry": false,
@@ -1248,6 +1282,28 @@ export const MOVE_ABI = {
           "std::string::String"
         ],
         "returns": []
+      },
+      "retire": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui_edge::desired_state::Retirement",
+          "sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "retirement_pending": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::desired_state::Retirement"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
+        ]
       },
       "revision": {
         "visibility": "Public",
@@ -1329,6 +1385,55 @@ export const MOVE_ABI = {
           [
             "deployments",
             "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "Retirement": {
+        "abilities": [],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "managed",
+            "bool"
+          ],
+          [
+            "pending",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RetirementCheck": {
+        "abilities": [
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "tx",
+            "vector<u8>"
+          ],
+          [
+            "deployments",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RetirementCheckKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
           ]
         ]
       },
