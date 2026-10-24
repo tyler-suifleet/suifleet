@@ -154,7 +154,21 @@ def run(binary):
                 if gate:
                     gate[0].set()
                     assert gate[1].wait(60), "test did not release the download"
-                self.respond(blobs[blob])
+                body = blobs[blob]
+                if self.headers["Range"]:
+                    start, _, end = self.headers["Range"].removeprefix("bytes=").partition("-")
+                    start = int(start)
+                    end = min(int(end) if end else len(body) - 1, len(body) - 1)
+                    if start > end or start >= len(body):
+                        self.respond(b"range outside blob", 416)
+                        return
+                    self.send_response(206)
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{len(body)}")
+                    self.send_header("Content-Length", str(end - start + 1))
+                    self.end_headers()
+                    self.wfile.write(body[start:end + 1])
+                else:
+                    self.respond(body)
             elif blob in sim.recipes:
                 self.respond(json.dumps(sim.recipes[blob]).encode())
             else:

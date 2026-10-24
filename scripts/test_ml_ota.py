@@ -45,7 +45,21 @@ def run(binary, wheels):
         def do_GET(self):
             name = self.path.removeprefix('/v1/blobs/')
             if name in blobs:
-                self.respond(blobs[name])
+                body = blobs[name]
+                if self.headers['Range']:
+                    start, _, end = self.headers['Range'].removeprefix('bytes=').partition('-')
+                    start = int(start)
+                    end = min(int(end) if end else len(body) - 1, len(body) - 1)
+                    if start > end or start >= len(body):
+                        self.respond(b'range outside blob', 416)
+                        return
+                    self.send_response(206)
+                    self.send_header('Content-Range', f'bytes {start}-{end}/{len(body)}')
+                    self.send_header('Content-Length', str(end - start + 1))
+                    self.end_headers()
+                    self.wfile.write(body[start:end + 1])
+                else:
+                    self.respond(body)
             elif name in sim.recipes:
                 self.respond(json.dumps(sim.recipes[name]).encode())
             else:
