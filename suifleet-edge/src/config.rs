@@ -313,6 +313,8 @@ impl Default for ComponentsConfig {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SuiConfig {
+    #[serde(default)]
+    pub rpc_urls: Vec<String>,
     pub manifest_path: PathBuf,
     #[serde(skip)]
     pub rpc_url: String,
@@ -331,6 +333,8 @@ pub struct DeploymentManifest {
     pub network: String,
     pub chain_identifier: String,
     pub rpc_url: String,
+    #[serde(default)]
+    pub rpc_urls: Vec<String>,
     pub call_package_id: String,
     pub upgrade_cap_id: String,
     pub package_version: String,
@@ -413,6 +417,10 @@ impl DeploymentManifest {
         );
         anyhow::ensure!(positive(&self.package_version), "invalid package version");
         endpoint(&self.rpc_url)?;
+        anyhow::ensure!(self.rpc_urls.len() <= 8, "at most 8 RPC endpoints");
+        for url in &self.rpc_urls {
+            endpoint(url)?;
+        }
         endpoint(&self.walrus.publisher_url)?;
         endpoint(&self.walrus.aggregator_url)?;
         anyhow::ensure!(
@@ -515,6 +523,7 @@ impl EnrollConfig {
         manifest.validate()?;
         let sui = SuiConfig {
             manifest_path: cfg.manifest_path.clone(),
+            rpc_urls: manifest.rpc_urls.clone(),
             rpc_url: manifest.rpc_url.clone(),
             package_id: manifest.call_package_id.clone(),
             manifest: Some(manifest),
@@ -835,6 +844,13 @@ impl Config {
             "stale Walrus configuration"
         );
         cfg.walrus.aggregator_url = manifest.walrus.aggregator_url.clone();
+        anyhow::ensure!(cfg.sui.rpc_urls.len() <= 8, "at most 8 RPC endpoints");
+        for url in &cfg.sui.rpc_urls {
+            endpoint(url)?;
+        }
+        if cfg.sui.rpc_urls.is_empty() {
+            cfg.sui.rpc_urls = manifest.rpc_urls.clone();
+        }
         cfg.sui.rpc_url = manifest.rpc_url.clone();
         cfg.sui.package_id = manifest.call_package_id.clone();
         cfg.sui.manifest = Some(manifest);
@@ -843,8 +859,9 @@ impl Config {
             "[device] needs keypair_path or a [device.signer]"
         );
         anyhow::ensure!(
-            cfg.runtime.poll_seconds > 0,
-            "runtime.poll_seconds must be positive"
+            (1..=86_400).contains(&cfg.runtime.poll_seconds)
+                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds),
+            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400"
         );
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
@@ -970,6 +987,7 @@ impl TelemetryConfig {
 pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
+    pub rollout_poll_seconds: u64,
     pub replay_history: bool,
     /// With device inboxes (SF-125), how often the DeploymentCreated and
     /// DeviceAddedToGroup event scan runs as a safety net for deployments
@@ -994,7 +1012,8 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             state_dir: "/var/lib/suifleet".into(),
-            poll_seconds: 10,
+            poll_seconds: 1800,
+            rollout_poll_seconds: 60,
             replay_history: false,
             event_scan_seconds: 60,
             component_startup_seconds: 3,

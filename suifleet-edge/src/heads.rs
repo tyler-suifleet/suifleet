@@ -72,15 +72,10 @@ pub fn scan_due(last_ms: Option<u64>, now_ms: u64, interval_seconds: u64) -> boo
     }
 }
 
-/// How long to sleep before the next poll: the poll interval, shortened to
-/// wake at the earliest future scheduled start or admission change.
-pub fn wait_ms(now_ms: u64, poll_seconds: u64, wakes: impl IntoIterator<Item = u64>) -> u64 {
-    let poll = poll_seconds.saturating_mul(1000);
-    wakes
-        .into_iter()
-        .filter(|at| *at > now_ms)
-        .map(|at| at - now_ms)
-        .fold(poll, u64::min)
+/// Milliseconds until the earliest announced scheduled start, when one is
+/// still ahead; the daemon wakes then rather than a whole check interval late.
+pub fn until_start(now_ms: u64, next_start_ms: u64) -> Option<u64> {
+    (next_start_ms > now_ms).then(|| next_start_ms - now_ms)
 }
 
 #[cfg(test)]
@@ -131,9 +126,8 @@ mod tests {
 
     #[test]
     fn a_scheduled_start_shortens_the_sleep() {
-        assert_eq!(wait_ms(1_000, 10, []), 10_000);
-        assert_eq!(wait_ms(1_000, 10, [4_000]), 3_000);
-        assert_eq!(wait_ms(1_000, 10, [0, 900, 20_000]), 10_000, "past and far wakes keep the interval");
-        assert_eq!(wait_ms(1_000, 3600, [61_000, 5_000]), 4_000);
+        assert_eq!(until_start(1_000, 4_000), Some(3_000));
+        assert_eq!(until_start(1_000, 0), None, "no scheduled start");
+        assert_eq!(until_start(1_000, 900), None, "a past start does not wake");
     }
 }

@@ -83,6 +83,7 @@ test-ota:
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
+	$(RUN) python3 scripts/test_cadence_ota.py
 	$(RUN) python3 scripts/test_budget_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim

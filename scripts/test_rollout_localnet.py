@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 from urllib.request import Request, urlopen
-from test_desired_state_localnet import base_contracts, wait_for
+from test_desired_state_localnet import wait_for
 import deployment_manifest as dm
 from types import SimpleNamespace
 from test_ota import Simulator, ARTIFACT
@@ -54,7 +54,12 @@ def run():
         def tx(*args):return success(client('ptb',*args,'--gas-budget','100000000'))
         def created(r,suffix):return next(o['objectId'] for o in r['objectChanges'] if o['type']=='created' and o['objectType'].endswith(suffix))
         def published(r):return next(o['packageId'] for o in r['objectChanges'] if o['type']=='published')
-        staging=root/'base';staging.mkdir();base=base_contracts(staging)
+        # Pin the actual pre-rollout parent. main already contains SF-017;
+        # using its merge base would no longer exercise old-package attacks.
+        base = subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', '6640cd6^'], text=True).strip()
+        staging=root/'base';staging.mkdir()
+        archive=subprocess.check_output(['git','-C',str(ROOT),'archive',base,'contracts'])
+        subprocess.run(['tar','-x','-C',str(staging)],input=archive,check=True)
         package=root/'package';shutil.copytree(staging/'contracts',package,ignore=shutil.ignore_patterns('build','Published.toml'))
         common=['--build-env','testnet','--pubfile-path',root/'Pub.toml','--gas-budget','400000000','--silence-warnings']
         first=success(client('test-publish',package,*common));old=published(first);cap=created(first,'::package::UpgradeCap');registry=created(first,'::device_registry::DeviceRegistry')
@@ -71,7 +76,7 @@ def run():
         assert origins['deployment_manager::DeploymentRecord']==dm.object_id(old)
         # Pre-existing record still accepts an active identity through new API.
         tx('--move-call',f'{new}::deployment_manager::report_verified_status',f'@{legacy}',f'@{registry}',f'@{caps[0]}','1')
-        record=created(tx('--move-call',f'{new}::deployment_manager::rollout_policy','2','2','100','100','2','5000','5000','--assign','policy','--move-call',f'{new}::deployment_manager::new_rollout_verified','"app"','"1"','"blob"',digest,recipe,'vector[]',members,'vector[0u64,0u64]','policy','@0x6','--assign','rollout','--move-call',f'{new}::deployment_manager::share_deployment','rollout'),'::deployment_manager::DeploymentRecord')
+        record=created(tx('--move-call',f'{new}::deployment_manager::rollout_policy','2','2','100','100','2','5000','3600000','--assign','policy','--move-call',f'{new}::deployment_manager::new_rollout_verified','"app"','"1"','"blob"',digest,recipe,'vector[]',members,'vector[0u64,0u64]','policy','@0x6','--assign','rollout','--move-call',f'{new}::deployment_manager::share_deployment','rollout'),'::deployment_manager::DeploymentRecord')
         def read():return dm.rpc(rpc,'suix_getDynamicFieldObject',[record,{'type':f'{new}::deployment_manager::RolloutKey','value':{'dummy_field':False}}])['data']['content']['fields']['value']['fields']
         def report(pkg,i,status,ok=True):
             r=client('ptb','--move-call',f'{pkg}::deployment_manager::report_verified_status',f'@{record}',f'@{registry}',f'@{caps[i]}',str(status),'--gas-budget','100000000',allow_failure=not ok)
@@ -105,9 +110,9 @@ def run():
             manifest=dm.resolve(SimpleNamespace(chain_identifier=facts['chain_identifier'],rpc=rpc,package=new,upgrade_cap=cap,registry=registry,network='localnet',publisher=aggregator,aggregator=aggregator))
             (root/'deployment.json').write_text(json.dumps(manifest))
             artifact_hash=json.dumps(hashlib.sha256(ARTIFACT).hexdigest());recipe_hash=json.dumps(hashlib.sha256(json.dumps(recipe).encode()).hexdigest())
-            live=created(tx('--move-call',f'{new}::deployment_manager::rollout_policy','1','1','100','0','1','10000','5000','--assign','policy','--move-call',f'{new}::deployment_manager::new_rollout_verified','"live-app"','"1.0.0"','"rollout-recipe"',artifact_hash,recipe_hash,'vector[]',f'vector[@{device}]','vector[0u64]','policy','@0x6','--assign','rollout','--move-call',f'{new}::deployment_manager::share_deployment','rollout'),'::deployment_manager::DeploymentRecord')
+            live=created(tx('--move-call',f'{new}::deployment_manager::rollout_policy','1','1','100','0','1','10000','3600000','--assign','policy','--move-call',f'{new}::deployment_manager::new_rollout_verified','"live-app"','"1.0.0"','"rollout-recipe"',artifact_hash,recipe_hash,'vector[]',f'vector[@{device}]','vector[0u64]','policy','@0x6','--assign','rollout','--move-call',f'{new}::deployment_manager::share_deployment','rollout'),'::deployment_manager::DeploymentRecord')
             applied=root/'applied';updater=root/'apply.py';updater.write_text(f"from pathlib import Path\nPath({str(applied)!r}).touch()\n")
-            cfg=root/'config.toml';cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{device_cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\npoll_seconds=1\nevent_scan_seconds=0\nreplay_history=true\n')
+            cfg=root/'config.toml';cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{device_cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{root}/state"\nevent_scan_seconds=0\nreplay_history=true\n')
             def state():
                 path=root/'state/state.json';return json.loads(path.read_text()) if path.exists() else {}
             with (root/'daemon.log').open('w') as log:
@@ -116,7 +121,7 @@ def run():
                     wait_for(lambda:state().get('deferred',{}).get(live,{}).get('reason')=='waiting for rollout eligibility','real-chain ungranted admission not deferred',process)
                     assert not applied.exists()
                     tx('--move-call',f'{new}::deployment_manager::advance_rollout',f'@{live}',f'vector[@{device}]','vector[]','vector[]','@0x6')
-                    wait_for(lambda:state().get('deployments',{}).get(live,{}).get('reported'),'real-chain grant did not apply/report',process)
+                    wait_for(lambda:state().get('deployments',{}).get(live,{}).get('reported'),'real-chain grant did not apply/report',process,timeout=100)
                     assert applied.exists() and state()['deployments'][live]['status']==1
                     def live_outcomes():
                         field=dm.rpc(rpc,'suix_getDynamicFieldObject',[live,{'type':f'{new}::deployment_manager::RolloutKey','value':{'dummy_field':False}}])
