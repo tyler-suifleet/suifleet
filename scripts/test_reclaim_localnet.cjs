@@ -313,7 +313,7 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     const deploymentPlan = await reclaim.planDeploymentReclaim(client, events, owner.toSuiAddress());
     assert.deepEqual(deploymentPlan.map((p) => [p.deployment.version, p.eligible, p.groups.length]), [['1.0.0', true, 1], ['1.1.0', false, 1], ['0.9.0', true, 0]]);
     const desiredRefused = await executeFailing('still-desired record refused', async (tx, shared) => {
-      const record = await shared(current, true), groupRef = await shared(group);
+      const record = await shared(current, true), groupRef = await shared(group, true);
       const [retirement] = tx.moveCall({ target: `${coreHead}::desired_state::begin_retirement`, arguments: [record] });
       tx.moveCall({ target: `${coreHead}::desired_state::confirm_not_desired`, arguments: [retirement, groupRef] });
       tx.moveCall({ target: `${coreHead}::desired_state::retire`, arguments: [retirement, record] });

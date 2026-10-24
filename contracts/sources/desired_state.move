@@ -36,6 +36,7 @@ module sui_edge::desired_state {
     const EStillDesired: u64 = 7;
     const EUnconfirmed: u64 = 8;
     const EWrongRecord: u64 = 9;
+    const ERetiring: u64 = 10;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -48,6 +49,17 @@ module sui_edge::desired_state {
         /// Component name → DeploymentRecord ID.
         components: VecMap<String, ID>,
         updated_at: u64,
+    }
+
+    /// Dynamic-field key on a DeviceGroup (SF-129): records confirmed not
+    /// desired by `confirm_not_desired` in the transaction `tx`. `commit` in
+    /// that transaction refuses to make them desired again; a later commit
+    /// removes the stale check and its deposit.
+    public struct RetirementCheckKey has copy, drop, store {}
+
+    public struct RetirementCheck has store, drop {
+        tx: vector<u8>,
+        deployments: vector<ID>,
     }
 
     /// An uncommitted revision of one group's desired state.
@@ -110,8 +122,16 @@ module sui_edge::desired_state {
         assert!(revision(group) == base_revision, EStaleRevision);
         let state = DesiredState { revision: base_revision + 1, components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();
-        event::emit(DesiredStateChanged { group_id, revision: state.revision, component_names, deployments });
         let uid = device_group::uid_mut(group);
+        if (df::exists(uid, RetirementCheckKey {})) {
+            let check: &RetirementCheck = df::borrow(uid, RetirementCheckKey {});
+            if (check.tx == *ctx.digest()) {
+                assert!(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
+            } else {
+                let _: RetirementCheck = df::remove(uid, RetirementCheckKey {});
+            };
+        };
+        event::emit(DesiredStateChanged { group_id, revision: state.revision, component_names, deployments });
         if (df::exists(uid, DesiredKey {})) {
             let _: DesiredState = df::remove(uid, DesiredKey {});
         };
@@ -122,8 +142,15 @@ module sui_edge::desired_state {
 
     /// Proof, within one transaction, that no group still desires a record.
     /// No abilities: it must be consumed by `retire` in the same transaction.
+    ///
+    /// The proof stays valid for the rest of the transaction: a confirmed
+    /// group's `commit` refuses the record (`ERetiring`), and `retire` refuses
+    /// a record that became managed after `begin_retirement`. A plan prepared
+    /// earlier in the transaction is covered by the same `commit` check.
     public struct Retirement {
         deployment_id: ID,
+        /// Whether the record was managed at `begin_retirement`.
+        managed: bool,
         /// Target groups whose current desired state is still unchecked.
         pending: vector<ID>,
     }
@@ -133,19 +160,31 @@ module sui_edge::desired_state {
     /// the complete set to check. Creator only.
     public fun begin_retirement(deployment: &DeploymentRecord, ctx: &mut TxContext): Retirement {
         assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
-        let pending = if (deployment_manager::is_managed(deployment)) {
-            *deployment_manager::target_groups(deployment)
-        } else { vector[] };
-        Retirement { deployment_id: object::id(deployment), pending }
+        let managed = deployment_manager::is_managed(deployment);
+        let pending = if (managed) *deployment_manager::target_groups(deployment) else vector[];
+        Retirement { deployment_id: object::id(deployment), managed, pending }
     }
 
     /// Check one target group's current desired state. Aborts while it still
     /// references the record: commit a revision that supersedes it first.
-    public fun confirm_not_desired(retirement: &mut Retirement, group: &DeviceGroup) {
+    /// Records the check on the group so a later `commit` in this transaction
+    /// cannot make the record desired again.
+    public fun confirm_not_desired(retirement: &mut Retirement, group: &mut DeviceGroup, ctx: &TxContext) {
         let group_id = device_group::group_id(group);
         assert!(retirement.pending.contains(&group_id), EWrongGroup);
         let (_, deployments) = components(group).into_keys_values();
         assert!(!deployments.contains(&retirement.deployment_id), EStillDesired);
+        let uid = device_group::uid_mut(group);
+        if (df::exists(uid, RetirementCheckKey {})) {
+            let check: &mut RetirementCheck = df::borrow_mut(uid, RetirementCheckKey {});
+            if (check.tx != *ctx.digest()) {
+                check.tx = *ctx.digest();
+                check.deployments = vector[];
+            };
+            check.deployments.push_back(retirement.deployment_id);
+        } else {
+            df::add(uid, RetirementCheckKey {}, RetirementCheck { tx: *ctx.digest(), deployments: vector[retirement.deployment_id] });
+        };
         // A record may list a group more than once.
         while (retirement.pending.contains(&group_id)) {
             let (_, index) = retirement.pending.index_of(&group_id);
@@ -157,9 +196,11 @@ module sui_edge::desired_state {
     /// is confirmed. Catalog bindings are removed by their defining module
     /// first; devices already refuse deleted records.
     public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &mut TxContext) {
-        let Retirement { deployment_id, pending } = retirement;
+        let Retirement { deployment_id, managed, pending } = retirement;
         assert!(object::id(&deployment) == deployment_id, EWrongRecord);
         assert!(pending.is_empty(), EUnconfirmed);
+        // Assigned to a plan after `begin_retirement`: its groups were never checked.
+        assert!(managed || !deployment_manager::is_managed(&deployment), ERetiring);
         let schema = deployment_manager::schema_version(&deployment);
         if (schema == 2) component_catalog::delete_deployment(deployment, ctx)
         else if (schema == 3) deployment_manager::delete_rollout(deployment, ctx)

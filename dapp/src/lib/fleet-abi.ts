@@ -1257,7 +1257,8 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&mut sui_edge::desired_state::Retirement",
-          "&sui_edge::device_group::DeviceGroup"
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1396,8 +1397,43 @@ export const MOVE_ABI = {
             "sui::object::ID"
           ],
           [
+            "managed",
+            "bool"
+          ],
+          [
             "pending",
             "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RetirementCheck": {
+        "abilities": [
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "tx",
+            "vector<u8>"
+          ],
+          [
+            "deployments",
+            "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RetirementCheckKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
           ]
         ]
       },

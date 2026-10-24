@@ -31,7 +31,9 @@ export const deployment_manager_TargetGroupsKeyBcs = bcs.struct("TargetGroupsKey
 export const desired_state_DesiredKeyBcs = bcs.struct("DesiredKey", { dummy_field: bcs.bool() });
 export const desired_state_DesiredStateBcs = bcs.struct("DesiredState", { revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }), updated_at: bcs.u64() });
 export const desired_state_DesiredStateChangedBcs = bcs.struct("DesiredStateChanged", { group_id: bcs.Address, revision: bcs.u64(), component_names: bcs.vector(bcs.string()), deployments: bcs.vector(bcs.Address) });
-export const desired_state_RetirementBcs = bcs.struct("Retirement", { deployment_id: bcs.Address, pending: bcs.vector(bcs.Address) });
+export const desired_state_RetirementBcs = bcs.struct("Retirement", { deployment_id: bcs.Address, managed: bcs.bool(), pending: bcs.vector(bcs.Address) });
+export const desired_state_RetirementCheckBcs = bcs.struct("RetirementCheck", { tx: bcs.vector(bcs.u8()), deployments: bcs.vector(bcs.Address) });
+export const desired_state_RetirementCheckKeyBcs = bcs.struct("RetirementCheckKey", { dummy_field: bcs.bool() });
 export const desired_state_RevisionPlanBcs = bcs.struct("RevisionPlan", { group_id: bcs.Address, admin: bcs.Address, base_revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
 export const device_cap_DeviceAddressKeyBcs = bcs.struct("DeviceAddressKey", { dummy_field: bcs.bool() });
 export const device_cap_DeviceCapBcs = bcs.struct("DeviceCap", { id: bcs.Address, device_id: bcs.Address });
@@ -305,6 +307,8 @@ export const TYPES = {
   desired_state_DesiredState: "desired_state::DesiredState",
   desired_state_DesiredStateChanged: "desired_state::DesiredStateChanged",
   desired_state_Retirement: "desired_state::Retirement",
+  desired_state_RetirementCheck: "desired_state::RetirementCheck",
+  desired_state_RetirementCheckKey: "desired_state::RetirementCheckKey",
   desired_state_RevisionPlan: "desired_state::RevisionPlan",
   device_cap_DeviceAddressKey: "device_cap::DeviceAddressKey",
   device_cap_DeviceCap: "device_cap::DeviceCap",

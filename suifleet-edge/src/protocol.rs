@@ -311,9 +311,21 @@ pub mod desired_state {
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Retirement {
         pub deployment_id: [u8; 32],
+        pub managed: bool,
         pub pending: Vec<[u8; 32]>,
     }
     impl Retirement { pub const MOVE_TYPE: &'static str = "desired_state::Retirement"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RetirementCheck {
+        pub tx: Vec<u8>,
+        pub deployments: Vec<[u8; 32]>,
+    }
+    impl RetirementCheck { pub const MOVE_TYPE: &'static str = "desired_state::RetirementCheck"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RetirementCheckKey {
+        pub dummy_field: bool,
+    }
+    impl RetirementCheckKey { pub const MOVE_TYPE: &'static str = "desired_state::RetirementCheckKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RevisionPlan {
         pub group_id: [u8; 32],
