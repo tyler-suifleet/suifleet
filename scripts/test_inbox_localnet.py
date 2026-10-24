@@ -303,7 +303,8 @@ def run(rpc_url, faucet_url, base_dir, evidence_path):
                                                   upgrade_cap=upgrade_cap, registry=registry, network="localnet",
                                                   publisher=walrus, aggregator=walrus))
             assert all(name in manifest["type_origins"] for name in dm.INBOX_TYPES)
-            manifest["rpc_url"] = proxy_url
+            # Every endpoint goes through the pruning proxy.
+            manifest["rpc_url"], manifest["rpc_urls"] = proxy_url, [proxy_url]
             (root / "deployment.json").write_text(json.dumps(manifest))
             applied = root / "applied.jsonl"
             updater = root / "apply.py"
