@@ -27,15 +27,48 @@ const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toB
      const keys=new Map(vectors.servers.map(s=>[`${fullId}:${s.object_id}`,hashToG1(Buffer.from(fullId.replace(/^0x/,''),'hex')).multiply(Scalar.fromBytes(Buffer.from(s.master_secret,'hex')))]));
      return decrypt({encryptedObject,keys,publicKeys:vectors.servers.map(s=>G2Element.fromBytes(Buffer.from(s.public_key,'hex'))),checkLEEncoding:false});
    };
-   for(let index=0;index<f.anchors.length;index++){
+   let compact=f.compact_heads?.length?bulk.parseCompactHead(Buffer.from(f.compact_heads.at(-1),'hex')):undefined;
+   for(let position=0;position<f.anchors.length;position++){
+     const index=compact?f.anchors.length-1-position:position;
      const anchor=f.anchors[index],ciphertext=Buffer.from(f.ciphertexts[anchor.blob_object_id],'base64');
      const fetcher=async()=>new Response(ciphertext);
-     const archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
+     let archive;
+     const patches=f.patches?.[anchor.blob_object_id]??[];
+     if(patches.length){
+       const {encodeQuilt,WalrusBlob}=appRequire('@mysten/walrus');
+       const walrusRoot=path.dirname(appRequire.resolve('@mysten/walrus'));
+       const {QuiltReader}=await import(pathToFileURL(path.join(walrusRoot,'files/readers/quilt.mjs')));
+       const {getSourceSymbols}=await import(pathToFileURL(path.join(walrusRoot,'utils/index.mjs')));
+       const blobs=[{identifier:'manifest',contents:ciphertext},...patches.map(p=>({identifier:p.identifier,contents:Buffer.from(p.ciphertext,'base64')}))];
+       const {quilt}=encodeQuilt({blobs,numShards:1000,encodingType:'RS2'});
+       const {primarySymbols:rows,secondarySymbols:columns}=getSourceSymbols(1000,'RS2');
+       const symbolSize=quilt.length/(rows*columns);
+       const reader=new QuiltReader({blob:{blobId:Buffer.alloc(32).toString('base64url'),hasStartedLoadingFullBlob:true,getBytes:async()=>quilt,
+         getRowSize:async()=>columns*symbolSize,getSymbolSize:async()=>symbolSize,getColumnSize:async()=>rows*symbolSize}});
+       const storage={systemState:async()=>({committee:{epoch:1,n_shards:1000}}),getBlob:async()=>new WalrusBlob({reader:{getQuiltReader:async()=>reader}})};
+       archive=await bulk.fetchVerifiedArchive(chain,storage,f.config,f.device,index,'http://localhost',open,async()=>new Response(quilt));
+       assert.equal(archive.schema,4);
+       // Native patch signatures and ciphertext commitments must each verify,
+       // even though this test's chain and node transport are simulators.
+       for(const item of archive.items){
+         const patch=patches.find(p=>p.identifier===item.identifier);assert(patch);
+         const bad=Buffer.from(patch.ciphertext,'base64');bad[bad.length-1]^=1;
+         await assert.rejects(bulk.openArchive(bad,f.config,f.device,{...anchor,ciphertext_sha256:[...Buffer.from(item.sha256,'hex')]},open),/digest/);
+       }
+       if(compact) compact=await bulk.previousCompactHead(archive,compact);
+     } else if(compact){
+       assert.deepEqual(compact.anchor,anchor);
+       archive=await bulk.openArchive(ciphertext,f.config,f.device,compact.anchor,open);
+       const previous=await bulk.previousCompactHead(archive,compact);
+       if(index>0)assert.equal(Buffer.from(bulk.CompactHeadBcs.serialize(previous).toBytes()).toString('hex'),f.compact_heads[index-1]);
+       else assert.equal(previous,undefined);
+       compact=previous;
+     }else archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1,n_shards:1000}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
      assert.equal(archive.reason,['logs','diagnostics','crash'][anchor.kind]);
      assert(!JSON.stringify(archive).includes('fixture-confidential-value'),'collector must redact before signing and encryption');
      if(f.shadows){
        // SF-084: every archive carries the device's shadow documents (schema 2).
-       assert.equal(archive.schema,2);
+       assert.equal(archive.schema,patches.length?4:f.compact_heads?.length?3:2);
        assert.deepEqual(Object.fromEntries(archive.shadows.documents.map(d=>[d.name,d.version])),f.shadows[index]);
        const view=shadows.shadowDocumentsView(archive,index,f.anchors.length);
        assert.equal(view.newest,index===f.anchors.length-1);

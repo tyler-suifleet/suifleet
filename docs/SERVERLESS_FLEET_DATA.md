@@ -60,7 +60,7 @@ on Sui, replacing the previous health value; no per-snapshot Walrus blob exists.
 The snapshot is bounded to 16 KiB, versus the existing telemetry stream's 64 KiB.
 The native producer truncates inventory to the 16 KiB summary bound while
 retaining identity, synchronization and aggregate status. Sequence numbers increase strictly and cadence uses Sui's Clock.
-The default is hourly; owners can configure 1 minute to 1 day. Signatures are
+New fleets default to daily health; owners can configure 1 minute to 1 day. Existing fleets retain their on-chain cadence until the owner changes it. Log archives are opt-in and the budget estimate defaults to zero log uploads. Signatures are
 verified in the browser, not parsed/verified by Move. Authorized malformed device
 claims can therefore consume their own bounded cadence slot, but must never
 be shown as trusted health.
@@ -410,3 +410,103 @@ writes remain explicitly unrun in [SF-031/#32](https://github.com/tyler-suifleet
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). These do
 not waive software or authorized automatic public-Testnet gates. Publishing a
 Testnet fixture never establishes a production deployment or a hardware result.
+
+## Opt-in bounded archive history (SF-121)
+
+After deploying the additive data-package API, set `compact_history = true` in
+`[fleet_data.archives]` configuration and set `compactHistoryOrigin` in
+`NEXT_PUBLIC_FLEET_DATA` to the actual introduction origin of `CompactHeadKey`
+and `CompactHead`. Both clients verify the package type-origin table. The daemon
+option defaults to false; existing fleets, packages and archive formats keep
+working. This change does not update an existing Pi image or deploy to hardware.
+
+`anchor_compact` replaces one dynamic-field root per writer. The signed,
+Seal-encrypted schema-3 archive includes the exact predecessor root BCS bytes;
+the current root commits their SHA-256. Compare-and-swap against the previous
+root prevents stale writers from severing history. Device authorization, fleet
+storage ownership, certification, cadence and monotonic sequence checks remain.
+The browser follows verified predecessor hashes and historical device signatures,
+including across signer rotation. Missing/expired predecessors are unavailable,
+never trusted from an unauthenticated discovery service.
+
+Only the data-history index is bounded. Walrus Blob objects and fleet-storage
+BlobRecords still exist per upload. Legacy `anchor` APIs remain callable, including
+through old packages; legacy entries are preserved and are not automatically
+pruned. This is not a global constant-storage claim. Browser traversal is bounded
+to 64 linked archives per request; unlimited historical browsing/pagination is
+not implemented. Periodic refresh rebuilds discovery from the chain root.
+
+The native journal persists ciphertext and predecessor bytes across retries;
+source records are acknowledged only after independently reading the matching
+committed root. The signer's exact transaction verification permits SDK input
+aliasing only when every typed argument matches and every input is used.
+
+See [the controlled cost experiment](business/SF121_ARCHIVE_COSTS.md) for measured
+retention/cleanup costs and the outstanding public-testnet certification check.
+
+
+## Device-local encrypted Quilts (SF-121)
+
+`[fleet_data.archives] quilt = true` opts into the existing daemon scheduler's
+multi-item path. Configure the same option in the isolated signer service's
+archive policy. Existing configurations default to regular blobs. No collector,
+new server, fleet gateway or open browser is needed to publish. SF-139/#284 owns
+component opaque-data intake/stream export; it must reuse this scheduler rather
+than introduce another publisher.
+
+The scheduler uses the chain's routine/emergency cadence as the collection
+window, retaining the existing 2 MiB plaintext/4,096-record selection budget.
+It splits at source boundaries or 256 records, into at most 16 ordered items;
+the last item absorbs remaining selected records when the item limit is reached.
+A single item stays a regular blob. Every item is independently signed and
+Seal-encrypted with the same chain/registry/fleet/device/sequence/signer,
+key epoch, access policy, reason and observation time. A separately signed,
+encrypted schema-4 manifest commits each identifier, exact ciphertext byte length
+and SHA-256. Identifiers (`item-00`, etc.) and Quilt patch IDs are locators, never
+content digests. The manifest is the Quilt's `manifest` item; its ciphertext
+digest is committed by the existing authenticated on-chain archive reference.
+There is one registration, certification and anchor for the whole Quilt.
+No Move object layout or existing type origin changes for this format.
+
+The pinned Walrus 1.2.35 codec refuses more than 17 total transport items and
+4 MiB of input **or resulting Quilt bytes**; this producer uses at most 17 total
+items including the manifest, below QuiltV1's 666-item limit. Padding can make a
+small Quilt much larger than its ciphertexts. Oversize formation stays pending
+with an explicit error and never purchases storage. Encryption/envelope overhead
+and padding mean splitting an already packed archive can increase bytes; this
+feature supplies independently authenticated retrieval, not automatic gas savings.
+
+Before purchasing, the daemon fsyncs every encrypted item, the manifest and its
+journal, and rechecks the deterministic encoding. Restart reuses those bytes,
+registration identity, certificate and signed transaction checkpoints; an
+uncertain response never authorizes another purchase. Corrupt/missing artifacts
+fail closed. Source spool entries retire only after independently reading the
+required chain anchor; that anchor requires the certified fleet-owned blob.
+The complete batch shares retention, renewal and deletion through the existing
+fleet storage object. No per-patch expiry or cross-device pooling is promised.
+
+One pending batch blocks formation of a second. The existing bounded log ring
+continues its explicit overflow accounting; selected records also remain in the
+pending encrypted artifacts until verified completion. Automatic Quilt attempts
+are bounded to 32 and seven days, with persisted backoff (early attempts one
+second, later doubling to one hour). Exhaustion retains the exact batch for
+operator reconciliation rather than dropping or re-encrypting it. Inspect
+`fleet-data/status.json` (`pending`, `items`, `attempts`, `retry_at_ms`, `blocked`)
+and retain all `.bcs`, checkpoint, journal and ciphertext files. After reconciling
+chain effects and restoring availability, an operator can reset only retry
+metadata; never delete purchase/signing checkpoints to force a fresh upload.
+These are publication recovery controls, not firmware boot/reboot logic.
+
+The reader accepts the reviewed QuiltV1/RS2/1,000-shard profile without tags.
+The codec validates that profile before purchase. Index counts, lengths, column
+ranges and item headers are checked against the bounded parent before any
+length-based allocation; unsupported profiles fail unavailable.
+
+The browser first checks the chain/identity/retention policy, authenticates and
+decrypts the manifest, then resolves each identifier inside that same Quilt and
+checks its expected size/digest, independent signature and Seal bindings.
+Missing, substituted, replayed, withheld or inaccessible patches return unavailable;
+the caller never gets a partially trusted archive. Authority is rechecked after
+slow reads/key requests. Legacy regular blobs and schemas 1–3 remain readable;
+compact history and shadow documents also work with schema 4. Device-local
+batching does not reduce separate health writes or deployment receipts.
