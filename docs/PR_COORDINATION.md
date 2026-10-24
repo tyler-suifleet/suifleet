@@ -759,7 +759,9 @@ it rechecks the following:
 - the same published In Progress token digest, key, branch, worktree, family and model;
 - an unchanged worker command;
 - a stopped original PID/start identity and session;
-- no live process carrying the claim token;
+- no live process carrying the claim token. A same-user process whose environment
+  cannot be read (for example a nondumpable helper) counts as carrying it, so the
+  wait continues;
 - no live lock naming the claim's session or ticket;
 - no unfinished git operation;
 - an open same-repository PR on the branch;

@@ -546,12 +546,18 @@ def quota_reset(directory, now=None):
 
 
 def claim_processes(token, started):
-    """Live same-user processes started after `started` that carry the claim token."""
+    """Live same-user processes started after `started` that carry the claim token.
+
+    A same-user process whose environment or command line cannot be read (for
+    example a nondumpable helper) is reported as `uninspectable`: denied
+    inspection is an unknown outcome, never proof that no same-claim process exists.
+    """
     found = []
     marker = ('PR_COORDINATOR_CLAIM_TOKEN='+token).encode()
     for path in Path('/proc').iterdir():
         if not path.name.isdigit() or int(path.name) == os.getpid():
             continue
+        fields = None
         try:
             if path.stat().st_uid != os.getuid():
                 continue
@@ -560,8 +566,10 @@ def claim_processes(token, started):
                 continue
             if marker in (path/'environ').read_bytes().split(b'\0') or token.encode() in (path/'cmdline').read_bytes():
                 found.append(dict(pid=int(path.name), started=fields[19]))
-        except (FileNotFoundError, ProcessLookupError, PermissionError):
+        except (FileNotFoundError, ProcessLookupError):
             continue
+        except PermissionError:
+            found.append(dict(pid=int(path.name), started=fields[19] if fields else None, uninspectable=True))
     return found
 
 

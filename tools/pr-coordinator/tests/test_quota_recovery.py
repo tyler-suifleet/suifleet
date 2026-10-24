@@ -117,6 +117,36 @@ class Classification(unittest.TestCase):
         self.assertFalse(d.capacity_failure(self.path))
 
 
+NONDUMPABLE = ('import ctypes,sys,time\n'
+               'ctypes.CDLL(None, use_errno=True).prctl(4, 0, 0, 0, 0)  # PR_SET_DUMPABLE=0\n'
+               'print("ready", flush=True)\n'
+               'time.sleep(300)\n')
+
+
+def nondumpable(test, token):
+    """A live detached same-user process carrying `token` whose environ cannot be read."""
+    child = subprocess.Popen([sys.executable, '-c', NONDUMPABLE], env={**os.environ, 'PR_COORDINATOR_CLAIM_TOKEN': token},
+                             stdout=subprocess.PIPE, start_new_session=True)
+    test.addCleanup(lambda: (child.kill(), child.wait(), child.stdout.close()))
+    test.assertEqual(child.stdout.readline(), b'ready\n')
+    try:
+        Path(f'/proc/{child.pid}/environ').read_bytes()
+    except PermissionError:
+        return child
+    test.skipTest('nondumpable process environ remains readable (privileged test runner)')
+
+
+class Inspection(unittest.TestCase):
+    def test_denied_inspection_is_reported_never_skipped(self):
+        token = uuid.uuid4().hex
+        child = nondumpable(self, token)
+        started = c.process_identity(os.getpid())
+        found = [p for p in c.claim_processes(token, started) if p['pid'] == child.pid]
+        self.assertEqual(found, [dict(pid=child.pid, started=c.process_identity(child.pid), uninspectable=True)])
+        child.kill(); child.wait()
+        self.assertEqual([p for p in c.claim_processes(token, started) if p['pid'] == child.pid], [])
+
+
 class Implementation(Recovery):
     """Dispatcher implementation workers: same claim, after the stated reset only."""
 
@@ -226,6 +256,17 @@ class Implementation(Recovery):
         self.run_retry()
         self.assertEqual(self.worker.db.execute('SELECT state FROM capacity_retries').fetchone()[0], 'cancelled')
         self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0], 1)
+
+    def test_uninspectable_detached_claim_process_fences_recovery(self):
+        self.stopped(); self.recorded(); self.due(); self.worker.db.execute('DELETE FROM backoff')
+        child = nondumpable(self, self.claim['token'])
+        self.run_retry(); self.run_retry()
+        self.assertEqual(tuple(self.worker.db.execute('SELECT state,reason FROM capacity_retries').fetchone()),
+                         ('waiting', 'original worker, session descendant or detached claim helper not verified stopped'))
+        self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0], 1, 'no replacement')
+        child.kill(); child.wait()
+        self.run_retry()
+        self.assertEqual(self.worker.db.execute('SELECT state FROM capacity_retries').fetchone()[0], 'launched')
 
     def test_deferred_coordinator_repair_owns_the_claim(self):
         self.stopped(); self.recorded(); self.due(); self.worker.db.execute('DELETE FROM backoff')
@@ -393,6 +434,19 @@ class Repair(Fixture):
         self.assertEqual(self.job_row()['status'], 'quarantined')
         self.assertEqual(self.engine.store.db.execute('SELECT state FROM quota_recoveries').fetchone()[0], 'cancelled')
         self.assertFalse(Path(str(self.marker)+'.resumed').exists())
+
+    def test_uninspectable_detached_claim_process_fences_recovery(self):
+        self.stopped_repair(); self.collect(); self.due()
+        child = nondumpable(self, self.token)
+        self.collect(); self.collect()
+        self.assertEqual(self.job_row()['status'], 'quota_wait')
+        self.assertEqual(self.engine.store.db.execute('SELECT reason FROM quota_recoveries').fetchone()[0],
+                         'a live process still carries the claim token')
+        self.assertEqual(self.engine.children, {}, 'no replacement')
+        self.assertFalse(Path(str(self.marker)+'.resumed').exists())
+        child.kill(); child.wait()
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'running')
 
     def test_uncertain_launch_is_held_and_never_replayed(self):
         self.stopped_repair(); self.collect(); self.due()
