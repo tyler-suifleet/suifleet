@@ -324,3 +324,41 @@ rerun for this coordinator-only base synchronization. Hosted checks and automati
 testnet must run against the new head/current base; no pending check is approval.
 Physical acceptance (#32), mainnet and final provider/manual-wallet acceptance
 (#159) remain deferred and unrun. No deployment or hardware operation occurred.
+
+
+### Current-base synchronization after Walrus publisher exhaustion
+
+Automatic run [40140933114](https://github.com/tyler-suifleet/suifleet/actions/runs/40140933114)
+used base `233f4605e6d6e7c7c9f5c646e27d5528f001b948` and head
+`4e3c6140740b5659f21487271754c2de2ba64fe2`. Its failed-step log reports
+successful cached-package verification, four independently effects-checked
+receipt writes and deployment cleanup in the package-upgrade phase (allowance
+used: 81,977,600 MIST). The upgrade-security phase then exhausted the existing
+three-attempt publisher retry bound with HTTP 500 while uploading an artifact.
+That phase recorded five transactions, 120,855,047 MIST allowance used and
+approximately 0.0789 SUI net spend before failure. These log observations are
+partial failed-run evidence, not successful full testnet acceptance. No new
+public-chain transaction was submitted by this feedback worker.
+
+The uploader already retries transient 5xx errors three times with bounded
+backoff and fails closed on exhaustion; its existing offline regressions cover
+transient recovery, exhaustion and immediate rejection of client errors. No
+unbounded retry, spending increase or fabricated success was introduced.
+Merged snapshot/current main `de238f73a6b12b9fccca8e257be6fc1a3b265714`
+without conflicts in `bcb4b183724698294e9c8751d971f88a5a954959`. The base delta
+contains testnet repair dispatch, coordinator regressions and documentation/
+tracking only. Receipt runtime and spending controls are unchanged.
+
+Scoped local checks on the combined tree: offline testnet regressions (81 tests,
+one skip), live-common regressions (37 tests) and tracking tests (10 tests)
+passed. Synthetic cleanup/connection-reset diagnostics are expected negative
+fixtures. Broader Move/Rust/frontend/OTA/localnet receipt suites were not rerun
+for this coordinator-only base integration; their earlier evidence is historical.
+Hosted CI and automatic public-testnet must pass on the new head/current base,
+followed by fresh independent review; this worker does not poll them. Physical
+acceptance (#32), mainnet and final provider/manual-wallet acceptance (#159)
+remain deferred and unrun. No merge, deployment or hardware operation occurred.
+
+Full coordinator regression: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
+discover -s tools/pr-coordinator/tests` passed all 384 tests in 120.836s.
+`git diff --check` passed.
