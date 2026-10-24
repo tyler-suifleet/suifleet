@@ -18,7 +18,7 @@ from urllib.parse import quote
 import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
-                         failed_checks, repairable, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
+                         failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
                          QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
@@ -764,8 +764,6 @@ resolve conflicts, then continue the unfinished software and rerun all required 
                     print(f"{project['id']}: CI redirect {record['id']} deferred ({detail})", flush=True)
 
     def detect_redirect(self, project, row, claim, observation):
-        if not repairable(json.loads(observation['failures'])):
-            return  # Transient testnet infrastructure/funding/uncertainty: visible, but no source redirect.
         digest = hashlib.sha256(claim['token'].encode()).hexdigest()
         if self.db.execute('SELECT 1 FROM ci_redirects WHERE claim=? AND fingerprint=?',
                            (digest, observation['fingerprint'])).fetchone():
@@ -801,7 +799,8 @@ resolve conflicts, then continue the unfinished software and rerun all required 
         ref = json.loads(run(['gh', 'api', f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'], safe='/')}"],
                              cwd=project['root'], env=env))
         pr['baseRefOid'] = ref['object']['sha']
-        # The automatic testnet result is a head commit status, not a check run.
+        # Testnet reports a commit status rather than a CheckRun. Revalidate it
+        # for this exact head before redirecting an existing implementation.
         statuses = json.loads(run(['gh', 'api', f"repos/{project['repository']}/commits/{pr['headRefOid']}/status"],
                                   cwd=project['root'], env=env))
         pr['_testnet_status'] = next((row for row in statuses.get('statuses', [])

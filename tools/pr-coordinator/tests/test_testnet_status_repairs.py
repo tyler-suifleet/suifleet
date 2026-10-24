@@ -1,4 +1,4 @@
-"""Automatic testnet commit-status failures reach bounded repair (SF-146)."""
+"""SF-148: testnet statuses must have bounded repair ownership, not disappear."""
 import json
 from pathlib import Path
 import tempfile
@@ -6,134 +6,96 @@ import unittest
 from unittest.mock import patch
 
 import test_ci_repairs as repairs
-from test_coordinator import c
-import dispatcher as d
+import test_coordinator as previous
+from test_coordinator import c, fixture
+import dispatcher
 
-BASE = 'b' * 40  # fixture()'s baseRefOid
+BASE = 'b' * 40
 RUN = 'https://github.com/owner/repo/actions/runs/77'
 
 
-def status(state='failure', base=BASE, cls='source', url=RUN):
-    return dict(context=c.TESTNET_CONTEXT, state=state, target_url=url,
-                description=f'base:{base}' + (f' class:{cls}' if cls else ''),
-                created_at='2026-10-24T13:00:00Z', updated_at='2026-10-24T13:05:00Z')
+def status(state='failure', base=BASE, classification=None, url=RUN):
+    return dict(context='testnet/package-upgrade', state=state, target_url=url,
+                description='base:' + base + ((' class:' + classification) if classification else ''),
+                created_at='2026-10-24T22:00:00Z', updated_at='2026-10-24T22:05:00Z')
 
 
 class TestnetStatusRepairs(unittest.TestCase):
     def snapshot(self, **fields):
-        return {'statusCheckRollup': [], 'baseRefOid': BASE, '_testnet_status': status(**fields)}
+        return dict(statusCheckRollup=[], baseRefOid=BASE, _testnet_status=status(**fields))
 
-    def test_exact_head_current_base_failure_with_durable_run_is_a_failure(self):
-        failures = c.failed_checks(self.snapshot())
-        self.assertEqual(failures, [{'name': 'testnet/package-upgrade', 'workflowName': 'Automatic testnet',
-                                     'conclusion': 'FAILURE', 'detailsUrl': RUN,
-                                     'startedAt': '2026-10-24T13:00:00Z', 'completedAt': '2026-10-24T13:05:00Z',
-                                     'classification': 'source'}])
-        self.assertEqual(c.repairable(failures), failures)
-        # Statuses written before classes existed are source failures.
-        self.assertEqual(c.failed_checks(self.snapshot(cls=None))[0]['classification'], 'source')
+    def test_current_base_failure_includes_run_and_classification(self):
+        for classification in (None, 'source', 'infrastructure', 'funding', 'uncertain'):
+            with self.subTest(classification=classification):
+                failures = c.failed_checks(self.snapshot(classification=classification))
+                self.assertEqual(len(failures), 1)
+                self.assertEqual(failures[0]['detailsUrl'], RUN)
+                self.assertEqual(failures[0]['classification'], classification or 'source')
 
-    def test_pending_cancelled_stale_and_unlinked_statuses_never_schedule(self):
-        for fields in ({'state': 'pending', 'cls': None}, {'state': 'error', 'cls': None},
-                       {'state': 'success', 'cls': None}, {'base': 'c' * 40}, {'url': None},
-                       {'url': 'https://example.test/actions/runs/77'},
-                       {'url': RUN + '/../../pulls'}):
+    def test_pending_cancelled_stale_and_malformed_evidence_does_not_launch(self):
+        for fields in ({'state':'pending'}, {'state':'error'}, {'state':'success'},
+                       {'base':'c'*40}, {'url':None}, {'url':'https://example.test/run'},
+                       {'url':RUN+'/../../pulls'}, {'classification':'source trailing'}):
             with self.subTest(**fields):
                 self.assertEqual(c.failed_checks(self.snapshot(**fields)), [])
-        self.assertEqual(c.failed_checks({'statusCheckRollup': [], 'baseRefOid': BASE}), [])
-        stale = self.snapshot()
-        stale['_testnet_status']['description'] = 'base:' + BASE + ' class:source trailing'
-        self.assertEqual(c.failed_checks(stale), [])
 
-    def test_transient_classes_stay_visible_without_source_repair(self):
-        owner = {'status': 'review', 'agent': 'Claude', 'model': 'm', 'expired': False}
-        for cls in c.TRANSIENT_CI:
-            with self.subTest(cls=cls):
-                failures = c.failed_checks(self.snapshot(cls=cls))
-                self.assertEqual(len(failures), 1)
-                self.assertEqual(c.repairable(failures), [])
-                self.assertIn('no source repair launched', c.ci_responsibility({'state': 'OPEN'}, owner, failures))
-        mixed = c.failed_checks({**self.snapshot(cls='funding'), 'statusCheckRollup': [repairs.failure()]})
-        self.assertEqual(len(mixed), 2)
-        self.assertEqual(c.repairable(mixed), [row for row in mixed if row['name'] != c.TESTNET_CONTEXT])
-        self.assertIn('coordinator CI repair', c.ci_responsibility({'state': 'OPEN'}, owner, mixed))
+    def test_every_failure_class_reserves_one_repair_across_scans_and_restart(self):
+        for classification in ('source', 'infrastructure', 'funding', 'uncertain'):
+            with self.subTest(classification=classification), tempfile.TemporaryDirectory() as directory:
+                engine, project, pr, owner = repairs.CIRepairs().setup(directory)
+                pr['statusCheckRollup'] = fixture()[0]['statusCheckRollup']
+                pr.update(_testnet_required=True, _testnet_status=status(classification=classification))
+                launched = []
+                def launch(project, current, owner, kind):
+                    self.assertEqual(kind, 'fix')
+                    job = engine.store.reserve(project['id'], current, owner['agent'], kind, Path(directory)/'repair')
+                    if job is not None: launched.append(job)
+                with patch.object(engine, 'launch', side_effect=launch), patch.object(engine, 'merge') as merge:
+                    engine.tick(True)
+                    engine.tick(True)
+                    merge.assert_not_called()
+                self.assertEqual(len(launched), 1)
+                observation = engine.store.db.execute('SELECT failures,responsibility FROM ci_observations').fetchone()
+                self.assertEqual(json.loads(observation[0])[0]['classification'], classification)
+                self.assertIn('coordinator CI repair', observation[1])
+                engine.store.db.execute("UPDATE jobs SET status='done' WHERE kind='fix'")
+                engine = c.Coordinator(engine.config, Path(directory))
+                previous.CheckFreshnessTests().configure_scan(engine, pr, owner)
+                with patch.object(engine, 'launch', side_effect=launch): engine.tick(True)
+                self.assertEqual(len(launched), 1)
+                pr['_testnet_status'] = status(state='pending')
+                with patch.object(engine, 'launch') as launch_again:
+                    engine.tick(True)
+                    launch_again.assert_not_called()
+                self.assertEqual(engine.store.db.execute('SELECT COUNT(*) FROM ci_observations').fetchone()[0], 0)
 
-    def scan(self, directory, cls):
-        engine, project, pr, owner = repairs.CIRepairs().setup(directory)
-        pr['statusCheckRollup'] = [{'__typename': 'CheckRun', 'name': 'check', 'status': 'COMPLETED',
-                                    'conclusion': 'SUCCESS'}]
-        pr.update(_testnet_required=True, _testnet_status=status(cls=cls))
-        launched = []
-
-        def launch(project, current, owner, kind):
-            if kind == 'fix' and current.get('_ci_repair'):
-                job = engine.store.reserve(project['id'], current, 'Codex', 'fix', Path('unused'))
-                if job:
-                    launched.append(current['_ci_repair'])
-        with patch.object(engine, 'launch', side_effect=launch), patch.object(engine, 'merge') as merge:
-            engine.tick(True)
-            engine.tick(True)
-            merge.assert_not_called()  # A failed exact-head testnet status still blocks merge.
-        observed = engine.store.db.execute('SELECT failures,responsibility FROM ci_observations').fetchall()
-        return engine, pr, launched, observed
-
-    def test_scan_launches_one_bounded_source_repair_with_run_evidence(self):
+    def test_failed_testnet_blocks_approval_and_success_requests_final_review(self):
         with tempfile.TemporaryDirectory() as directory:
-            engine, pr, launched, observed = self.scan(directory, 'source')
-            self.assertEqual(len(launched), 1)  # Deduplicated across ticks by the repair receipt.
-            self.assertEqual(launched[0][0]['detailsUrl'], RUN)
-            self.assertEqual(len(observed), 1)
-            self.assertEqual(c.checks_blocker(pr), 'exact-head testnet status for current base is missing or unsuccessful')
-            # A new rerun reports pending first: the observation clears and nothing relaunches.
-            pr['_testnet_status'] = status(state='pending', cls=None)
-            with patch.object(engine, 'launch') as launch:
+            pr, owner, approval = fixture()
+            pr.update(_testnet_required=True, _testnet_status=status())
+            approval['feedback'] = c.feedback(pr)
+            self.assertIsNotNone(c.gate(pr, owner, approval))
+            engine, project, owner = previous.CheckFreshnessTests().setup_scan(directory, pr)
+            pending_fingerprint = c.feedback(pr)
+            pr['_testnet_status'] = status(state='success')
+            self.assertNotEqual(c.feedback(pr), pending_fingerprint)
+            with patch.object(engine, 'launch') as launch, patch.object(engine, 'merge') as merge:
                 engine.tick(True)
-                launch.assert_not_called()
-            self.assertEqual(engine.store.db.execute('SELECT COUNT(*) FROM ci_observations').fetchone()[0], 0)
+                self.assertEqual(launch.call_args.args[-1], 'review')
+                merge.assert_not_called()
 
-    def test_scan_records_transient_failure_without_launching_a_worker(self):
-        for cls in c.TRANSIENT_CI:
-            with self.subTest(cls=cls), tempfile.TemporaryDirectory() as directory:
-                _, _, launched, observed = self.scan(directory, cls)
-                self.assertEqual(launched, [])
-                self.assertEqual(len(observed), 1)
-                self.assertEqual(json.loads(observed[0][0])[0]['classification'], cls)
-                self.assertIn('no source repair launched', observed[0][1])
-
-    def test_dispatcher_fresh_read_includes_exact_head_testnet_status(self):
-        config = {'projects': [{'id': 'test', 'root': '/unused', 'repository': 'owner/repo', 'github_account': 'acct'}]}
-        project = config['projects'][0]
+    def test_dispatcher_revalidation_reads_status_for_exact_head(self):
+        project = dict(id='test', root='/unused', repository='owner/repo', github_account='acct')
         calls = []
-
         def run(args, **kwargs):
             calls.append(args)
-            if args[:3] == ['gh', 'auth', 'token']:
-                return 'token\n'
+            if args[:3] == ['gh', 'auth', 'token']: return 'private-token'
             if args[:3] == ['gh', 'pr', 'view']:
-                return json.dumps({'number': 7, 'headRefOid': 'a' * 40, 'headRefName': 'work/x', 'baseRefName': 'main',
-                                   'state': 'OPEN', 'isDraft': False, 'isCrossRepository': False, 'statusCheckRollup': []})
-            if args[-1].endswith('/status'):
-                return json.dumps({'statuses': [status(), {**status(cls='funding'), 'context': 'other'}]})
-            return json.dumps({'object': {'sha': BASE}})
-        with tempfile.TemporaryDirectory() as directory:
-            worker = d.Dispatcher.__new__(d.Dispatcher)
-            with patch.object(d, 'run', side_effect=run):
-                pr = worker.fresh_pr(project, 7)
-        self.assertEqual(calls[-1], ['gh', 'api', 'repos/owner/repo/commits/' + 'a' * 40 + '/status'])
-        self.assertEqual(c.failed_checks(pr)[0]['classification'], 'source')
-
-    def test_dispatcher_redirects_active_owner_only_for_repairable_failures(self):
-        worker = d.Dispatcher.__new__(d.Dispatcher)
-
-        class NoDatabase:
-            def execute(self, *args):
-                raise AssertionError('transient-only failures must not create redirects')
-        worker.db = NoDatabase()
-        observation = {'failures': json.dumps(c.failed_checks(self.snapshot(cls='uncertain'))),
-                       'fingerprint': 'f', 'pr': 1, 'head': 'a' * 40, 'base': BASE}
-        worker.detect_redirect({'id': 'test'}, {'session': 's', 'family': 'Claude'},
-                               {'token': 't', 'key': 'SF-1', 'branch': 'b'}, observation)
-
-
-if __name__ == '__main__':
-    unittest.main()
+                return json.dumps(dict(number=7, headRefOid='a'*40, headRefName='work/x', baseRefName='main', statusCheckRollup=[]))
+            if args[-1].endswith('/status'): return json.dumps({'statuses':[status()]})
+            return json.dumps({'object':{'sha':BASE}})
+        worker = dispatcher.Dispatcher.__new__(dispatcher.Dispatcher)
+        with patch.object(dispatcher, 'run', side_effect=run):
+            pr = worker.fresh_pr(project, 7)
+        self.assertEqual(calls[-1][-1], 'repos/owner/repo/commits/'+'a'*40+'/status')
+        self.assertEqual(c.failed_checks(pr)[0]['detailsUrl'], RUN)
