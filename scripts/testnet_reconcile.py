@@ -150,6 +150,16 @@ def reconcile(pending, *, chain, operator, inspect, verify, resubmit, now, legac
         verify(data, tx)
     except toolchain.NotSubmitted as error:
         raise Uncertain(f'retained transaction no longer matches its verified intent: {error}') from error
+    # The death proof and the ledger reservation use only fields re-derived from
+    # the verified bytes; any disagreement with the retained copy is tampering.
+    try:
+        derived = toolchain.identity(tx['tx_bytes'], data, data['gas_budget'])
+    except (KeyError, TypeError, ValueError) as error:
+        raise Uncertain(f'retained transaction bytes lack a decodable identity: {error}') from error
+    mismatched = sorted(key for key in derived if tx.get(key) != derived[key])
+    if mismatched:
+        raise Uncertain(f'retained transaction {mismatched} differ from its bytes (tampered provenance)')
+    tx = derived
     facts = chain.transaction(tx['digest'])
     if facts:
         return settle(facts, operator)

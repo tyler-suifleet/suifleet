@@ -91,8 +91,10 @@ def pending(tx=True, created=1000.0, max_epoch='8', payment=()):
     return marker
 
 
-def decoded(digest='D1', sender=OPERATOR):
-    return lambda tx_bytes: {'digest': digest, 'sender': sender, 'gas_owner': sender}
+def decoded(digest='D1', sender=OPERATOR, max_epoch='8', payment=(), budget='400000000'):
+    return lambda tx_bytes: {'digest': digest, 'sender': sender, 'gas_owner': sender, 'gas_budget': budget,
+                             'gas_payment': [dict(p, digest='X') for p in payment],
+                             'expiration': {'kind': 'ValidDuring', 'min_epoch': None, 'max_epoch': max_epoch}}
 
 
 class Reconcile(unittest.TestCase):
@@ -119,7 +121,8 @@ class Reconcile(unittest.TestCase):
     def test_coin_paid_transaction_is_dead_once_its_gas_coin_moved(self):
         coin = tc.normal('0x' + 'c0' * 32)
         payment = [{'objectId': coin, 'version': '5'}, {'objectId': tc.normal('0x' + 'c1' * 32), 'version': '0'}]
-        outcome, reason = self.decide(pending(max_epoch=None, payment=payment), FakeChain(versions={coin: '6'}))
+        outcome, reason = self.decide(pending(max_epoch=None, payment=payment), FakeChain(versions={coin: '6'}),
+                                      inspect=decoded(max_epoch=None, payment=payment))
         self.assertEqual(outcome, 'absent')
         self.assertIn('moved past version 5', reason)
 
@@ -145,6 +148,26 @@ class Reconcile(unittest.TestCase):
             self.decide(pending(), FakeChain(transactions={'D1': facts()}), verify=refuse)
         with self.assertRaisesRegex(rc.Uncertain, 'not sent and paid'):
             self.decide(pending(), FakeChain(transactions={'D1': facts(sender=OTHER)}))
+
+    def test_tampered_death_proof_fields_retain_the_marker_without_any_submission(self):
+        coin = tc.normal('0x' + 'c0' * 32)
+        signed = [{'objectId': coin, 'version': '5'}]
+        cases = [
+            # Cached window ends before the signed one: epoch 7 would wrongly look expired.
+            (pending(max_epoch='6'), decoded(max_epoch='8'), FakeChain(epoch=7), 'expiration'),
+            # Cached coin reference that has moved, while the signed coin is untouched.
+            (pending(payment=[{'objectId': coin, 'version': '4'}]), decoded(payment=signed),
+             FakeChain(epoch=7, versions={coin: '5'}), 'gas_payment'),
+            # Cached budget below the signed one would under-reserve the allowance.
+            (pending(), decoded(budget='900000000'), FakeChain(epoch=7), 'gas_budget'),
+        ]
+        for marker, inspect, chain, field in cases:
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(rc.Uncertain, f'{field}.*tampered'):
+                    self.decide(marker, chain, inspect=inspect)
+                self.assertEqual(chain.reads, [])  # Decided before any chain lookup or resubmission.
+        with self.assertRaisesRegex(rc.Uncertain, 'decodable identity'):
+            self.decide(pending(), FakeChain(), inspect=lambda b: {'digest': 'D1', 'sender': OPERATOR})
 
     def test_interrupted_before_signing_and_beyond_history_window(self):
         self.assertEqual(self.decide(pending(tx=False), FakeChain())[0], 'absent')
@@ -403,8 +426,7 @@ class RunFlow(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'stop at publication verification'):
                 self.run_flow(args, patches, [
                     patch.object(live.reconciler, 'Chain', return_value=chain),
-                    patch.object(live.toolchain, 'decode', side_effect=lambda b: {
-                        'digest': 'D1', 'sender': ADDRESS, 'gas_owner': ADDRESS}),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
                     patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'}),
                     patch.object(live, 'verify_publication', side_effect=stop)])
             saved = json.loads((root / 'state.json').read_text())['publications'][key]
@@ -431,8 +453,7 @@ class RunFlow(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'stop'):
                 self.run_flow(args, patches, [
                     patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=8)),
-                    patch.object(live.toolchain, 'decode', side_effect=lambda b: {
-                        'digest': 'D1', 'sender': ADDRESS, 'gas_owner': ADDRESS}),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
                     patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'}),
                     patch.object(live, 'verify_publication', side_effect=RuntimeError('stop'))])
             self.assertEqual(sent, ['BYTES'])
