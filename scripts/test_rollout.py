@@ -95,10 +95,12 @@ def run():
             wait(lambda:all(deferred(i,'waiting for rollout eligibility') for i in (0,1)),'ungranted members not deferred')
             assert [count(i) for i in range(3)]==[0,0,0]
             # Coordinator grants only the canary, with both online devices polling.
+            handles[0]['sim'].checkpoint_pending_reads=2
             health_fault[0]=True
             rollout['admitted_at'][0]=1
             wait(lambda:handles[0]['sim'].reports,'canary not applied/reported')
             wait(lambda:state(0).get('deployments',{}).get(RECORD,{}).get('rollout_health_pending'), 'health retry not durable')
+            wait(lambda:handles[0]['sim'].checkpoint_reads >= 3, 'receipt checkpoint barrier did not wait')
             assert handles[0]['sim'].rollout_health == []
             stop(0,True); start(0)
             time.sleep(1)

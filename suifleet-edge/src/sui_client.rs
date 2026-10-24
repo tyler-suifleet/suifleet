@@ -1071,12 +1071,15 @@ impl SuiClient {
     }
 
     /// Grant-bound post-apply signal, independent of periodic fleet-data cadence.
-    pub async fn report_rollout_health(&self, deployment: &str, cap: &str, applied: bool, inventory: &crate::telemetry::Inventory) -> anyhow::Result<()> {
+    pub async fn report_rollout_health(&self, deployment: &str, cap: &str, applied: bool, inventory: &crate::telemetry::Inventory, receipt: Option<&str>) -> anyhow::Result<()> {
         // A deleted historical record has no gate left to satisfy. A read
         // outage still propagates and retains the pending journal marker.
         let Some(record) = self.optional_object(deployment).await? else { return Ok(()); };
         if record.fields["schema_version"].as_str() != Some("3") && record.fields["schema_version"].as_u64() != Some(3) { return Ok(()); }
         anyhow::ensure!(protocol::ROLLOUT_HEALTH_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "rollout health requires an upgraded package and regenerated manifest");
+        // Simulation can lag effects until the receipt reaches a checkpoint.
+        // This is a bounded read barrier, never another status submission.
+        if let Some(digest) = receipt { self.health_receipt_checkpoint(digest).await?; }
         let component = record.fields["component_name"].as_str().ok_or_else(|| anyhow::anyhow!("missing rollout component name"))?;
         let version = record.fields["version"].as_str().ok_or_else(|| anyhow::anyhow!("missing rollout component version"))?;
         let healthy = applied && crate::telemetry::rollout_healthy(inventory, deployment, component, version);
@@ -1088,6 +1091,30 @@ impl SuiClient {
         let transaction = self.build(&call).await?;
         self.execute(&transaction).await?;
         Ok(())
+    }
+
+    async fn health_receipt_checkpoint(&self, digest: &str) -> anyhow::Result<()> {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let mut request = proto::GetTransactionRequest::default();
+                request.digest = Some(digest.to_owned());
+                request.read_mask = Some(mask(&["digest", "effects.status", "checkpoint"]));
+                match self.rpc_call(|mut rpc| {
+                    let request = request.clone();
+                    async move { rpc.ledger_client().get_transaction(request).await }
+                }).await {
+                    Ok(response) => {
+                        let tx = response.into_inner().transaction
+                            .ok_or_else(|| anyhow::anyhow!("receipt read returned no transaction"))?;
+                        anyhow::ensure!(execution_digest(&tx)? == digest, "receipt digest mismatch");
+                        if tx.checkpoint.is_some() { return Ok(()); }
+                    }
+                    Err(error) if error.code() == tonic::Code::NotFound => (),
+                    Err(error) => return Err(status(error)),
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        }).await.map_err(|_| anyhow::anyhow!("receipt checkpoint pending; health remains queued"))?
     }
 
     /// This device's SUI balance (MIST).

@@ -56,6 +56,14 @@ pub struct Cadence {
     failures: u32,
 }
 impl Cadence {
+    /// A pending deployment signal is known rollout work, not a new normal
+    /// discovery. Preserve exponential backoff when discovery itself failed.
+    pub fn post_apply_delay(&self, config: &RuntimeConfig, normal: Duration, pending: bool) -> Duration {
+        if pending && self.failures == 0 {
+            normal.min(Duration::from_secs(config.rollout_poll_seconds.min(config.poll_seconds)))
+        } else { normal }
+    }
+
     pub fn record(&mut self, success: bool) {
         self.failures = if success {
             0
@@ -132,6 +140,18 @@ mod tests {
             terminal: false,
         }
     }
+    #[test]
+    fn pending_health_wakes_fast_without_overriding_rpc_failure_backoff() {
+        let mut cfg = RuntimeConfig::default();
+        let c = Cadence::default();
+        assert_eq!(c.post_apply_delay(&cfg, Duration::from_secs(1800), false).as_secs(), 1800);
+        assert_eq!(c.post_apply_delay(&cfg, Duration::from_secs(1800), true).as_secs(), 60);
+        cfg.poll_seconds = 1;
+        assert_eq!(c.post_apply_delay(&cfg, Duration::from_secs(1), true).as_secs(), 1);
+        let failed = Cadence { failures: 10 };
+        assert_eq!(failed.post_apply_delay(&cfg, Duration::from_secs(512), true).as_secs(), 512);
+    }
+
     #[test]
     fn defaults_fast_windows_and_short_local_deadlines() {
         let cfg = RuntimeConfig::default();

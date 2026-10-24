@@ -57,6 +57,10 @@ this deployment's grant and outcome**, rather than within 120 wall-clock seconds
 
 The daemon journals health completion separately from the ordinary receipt, retries
 uncertain execution after restart, and never replays the updater to get a sample.
+Before preparing the immediate health transaction, it waits up to ten seconds
+for the successful receipt to reach a checkpoint, so simulation can observe the
+outcome. A timeout leaves health queued. Pending health retains the configured
+rollout check cadence even after apply; discovery failures still use RPC backoff.
 Older journals queue their missing sample once on upgrade; deleted historical
 records and non-staged deployments require no health write. A healthy sample must
 still belong to an active signer at advance time. Revocation/rotation fails closed;

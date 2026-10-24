@@ -486,12 +486,12 @@ async fn main() -> anyhow::Result<()> {
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(cadence.delay(
+            let delay = tokio::time::sleep(cadence.post_apply_delay(&cfg.runtime, cadence.delay(
                 &cfg.runtime,
                 journal.state.deferred.values(),
                 telemetry::now_ms(),
                 journal.state.check_window,
-            ));
+            ), pending_rollout_health(&cfg, &journal)));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -527,7 +527,7 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
+                            cadence.post_apply_delay(&cfg.runtime, cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window), pending_rollout_health(&cfg, &journal))
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
@@ -859,6 +859,12 @@ async fn poll(
     report_pending(cfg, sui, journal).await
 }
 
+fn pending_rollout_health(cfg: &Config, journal: &Journal) -> bool {
+    cfg.sui.manifest.as_ref().is_some_and(|m| protocol::ROLLOUT_HEALTH_TYPES.iter()
+        .all(|name| m.type_origins.contains_key(*name)))
+        && journal.state.deployments.values().any(|o| o.status.is_some() && o.rollout_health_pending)
+}
+
 /// Status and post-outcome health have separate durable completion markers.
 /// Uncertain health execution is retried idempotently, without reapplying work.
 async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) -> anyhow::Result<()> {
@@ -876,7 +882,7 @@ async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) ->
             sui.report_status(&id, &cfg.device.device_cap_id, status).await
         };
         match result {
-            Ok(_) => {
+            Ok(digest) => {
                 if !reported {
                     let outcome = journal.state.deployments.get_mut(&id).unwrap();
                     outcome.reported = true;
@@ -891,7 +897,7 @@ async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) ->
                         inventory.reasons.extend(service_health::reasons(&services, 60, now));
                     }
                 }
-                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, status == protocol::STATUS_APPLIED, &inventory).await {
+                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, status == protocol::STATUS_APPLIED, &inventory, (!reported).then_some(digest.as_str())).await {
                     warn!(%id, %error, "Post-apply health remains queued");
                     continue;
                 }

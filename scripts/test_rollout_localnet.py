@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 from urllib.request import Request, urlopen
 from test_desired_state_localnet import base_contracts, wait_for
@@ -166,6 +167,13 @@ def run():
                     previous=dm.rpc(rpc,'sui_getObject',[receipt['data']['objectId'],{'showPreviousTransaction':True}])['data']['previousTransaction']
                     assert dm.rpc(rpc,'sui_getTransactionBlock',[previous,{'showEffects':True}])['effects']['status']['status']=='success'
                     evidence.append(previous)
+                except Exception:
+                    # Disposable fixture only: journal contains public IDs and
+                    # status, never key material. Preserve the actual failure.
+                    print(json.dumps({'outcome':state().get('deployments',{}).get(live),
+                        'deferred':state().get('deferred',{}).get(live)}),file=sys.stderr)
+                    print((root/'daemon.log').read_text()[-12000:],file=sys.stderr)
+                    raise
                 finally:
                     process.terminate();process.wait(timeout=10)
             tx('--move-call',f'{new}::deployment_manager::delete_rollout',f'@{live}')

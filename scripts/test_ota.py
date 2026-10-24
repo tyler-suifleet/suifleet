@@ -86,6 +86,8 @@ class Simulator:
         self.reports = []
         self.rollout_health = []
         self.health_built = None
+        self.checkpoint_pending_reads = 0
+        self.checkpoint_reads = 0
         self.allow_reports = False
         self.fail_execution = True
         self.deleted = set()
@@ -210,6 +212,12 @@ class Simulator:
             assert params[1]["type"] in (f"{ORIGIN}::deployment_manager::TargetDevicesKey", f"{ORIGIN}::deployment_manager::TargetGroupsKey")
             field = "target_devices" if params[1]["type"].endswith("TargetDevicesKey") else "target_groups"
             return {"data":{"content":{"fields":{"value":event[field]}}}}
+        if method == "shim_fleet_transaction":
+            if params[0] != "success-digest" or not self.reports: return None
+            self.checkpoint_reads += 1
+            pending = self.checkpoint_pending_reads > 0
+            if pending: self.checkpoint_pending_reads -= 1
+            return {"effects":{"status":{"status":"success"}}, "checkpoint":None if pending else 1}
         if method == "unsafe_moveCall":
             assert params[0] == ADDRESS and params[1] == PACKAGE
             assert params[2] == "deployment_manager"
