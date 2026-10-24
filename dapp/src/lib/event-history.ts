@@ -44,7 +44,7 @@ function persist(key: string, scan: Scan) {
     // Removing the old cursor ensures reload rescans instead of skipping IDs.
     if (value.length * 2 > STREAM_LIMIT) {
       local.removeItem(key);
-      warn(`${key}:capacity`, 'History unavailable on reload: discovery cache capacity reached. All discovered objects remain available in this tab; reload rescans the retained range. Use an archival indexer for durable complete discovery.');
+      warn(`${key}:capacity`, 'History unavailable on reload: discovery cache capacity reached. All discovered objects remain available in this tab; reload rescans the retained range. Use an archival fullnode for complete retained history.');
       return;
     }
     const keys = Array.from({ length: local.length }, (_, i) => local.key(i)).filter((k): k is string => !!k && k.startsWith(PREFIX) && k !== key);

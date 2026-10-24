@@ -1,29 +1,10 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
-import { currentHealth, fetchFleetHealth, HEALTH_REFRESH_MS, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
-
-// The indexer read token stays in this browser tab only (never in the build).
-const TOKEN_KEY = "suifleet.telemetryToken";
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => { listeners.delete(listener); };
-}
-
-export function setTelemetryToken(token: string) {
-  if (token) sessionStorage.setItem(TOKEN_KEY, token);
-  else sessionStorage.removeItem(TOKEN_KEY);
-  listeners.forEach((listener) => listener());
-}
-
-export function useTelemetryToken(): string {
-  return useSyncExternalStore(subscribe, () => sessionStorage.getItem(TOKEN_KEY) ?? "", () => "");
-}
+import { currentHealth, fetchFleetHealth, HEALTH_REFRESH_MS, type DeviceHealth } from "@/lib/telemetry";
 
 /** The browser clock, re-read every few seconds so stale health expires on screen. */
 function useNow(periodMs: number): number {
@@ -43,11 +24,10 @@ function useNow(periodMs: number): number {
 export function useFleetHealth(deviceIds: string[]) {
   const client = useCurrentClient();
   const account = useCurrentAccount();
-  const token = useTelemetryToken();
   const now = useNow(5_000);
   const query = useQuery<Record<string, DeviceHealth>>({
-    queryKey: ["health", NETWORK, TELEMETRY_URL, account?.address, token, ...deviceIds],
-    queryFn: () => fetchFleetHealth(client, deviceIds, account!.address, TELEMETRY_URL, token),
+    queryKey: ["health", NETWORK, account?.address, ...deviceIds],
+    queryFn: () => fetchFleetHealth(client, deviceIds, account!.address),
     enabled: !!account?.address && deviceIds.length > 0,
     refetchInterval: HEALTH_REFRESH_MS,
   });

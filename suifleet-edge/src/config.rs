@@ -69,10 +69,10 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
-    /// Heartbeat and health telemetry (SF-019); none when omitted.
+    /// Optional customer-owned HTTP telemetry; no HTTP output when omitted.
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
-    /// Redacted remote logs (SF-020); needs `[telemetry]` for the indexer URL.
+    /// Redacted log collection for Walrus archives, or optional customer HTTP output.
     #[serde(default)]
     pub logs: Option<LogsConfig>,
     #[serde(default)]
@@ -778,6 +778,13 @@ impl FirmwareHelperConfig {
 }
 
 impl Config {
+    /// Walrus archives own the durable log cursor when enabled. Optional HTTP
+    /// health can coexist, but a second log collector must never race it.
+    pub fn http_logs_enabled(&self) -> bool {
+        self.logs.is_some() && self.telemetry.is_some()
+            && !self.fleet_data.as_ref().is_some_and(|d| d.archives.is_some())
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
@@ -873,7 +880,6 @@ impl Config {
         if let Some(data) = &cfg.fleet_data {
             data.validate()?;
             anyhow::ensure!(data.archives.is_none() || cfg.logs.is_some(), "fleet_data.archives needs [logs]");
-            anyhow::ensure!(cfg.telemetry.is_none(), "configure fleet_data or HTTP telemetry, not both");
         }
         if let Some(budget) = &cfg.budget {
             budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
@@ -1143,6 +1149,31 @@ mod tests {
         }
         assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
     }
+    #[test]
+    fn serverless_health_can_coexist_with_customer_http_health() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-serverless-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let fleet = "[fleet_data]\npackage_id='0x3'\ntype_origin='0x3'\nfleet_id='0x4'\nbudget_id='0x5'\nstorage_id='0x6'\nwriter_id='0x7'\naccount_id='0x8'\n";
+        let path = dir.join("config.toml");
+        std::fs::write(&path, format!("{base}{fleet}")).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.fleet_data.is_some() && config.telemetry.is_none());
+        assert!(!config.http_logs_enabled());
+        std::fs::write(&path, format!("{base}{fleet}[telemetry]\nurl='https://customer.example'\n[logs]\n")).unwrap();
+        let mut config = Config::load(&path).unwrap();
+        assert!(config.fleet_data.is_some() && config.telemetry.is_some());
+        assert!(config.http_logs_enabled());
+        config.fleet_data.as_mut().unwrap().archives = Some(crate::fleet_archive::Config {
+            storage_package: "0x1".into(), storage_type_origin: "0x1".into(), system_id: "0x2".into(),
+            walrus_package: "0x3".into(), key_server_package: "0x4".into(), key_servers: vec![],
+            threshold: 1, node: "/usr/bin/node".into(), codec: "/codec".into(), codec_sha256: "00".repeat(32),
+        });
+        assert!(!config.http_logs_enabled(), "Walrus archives must be the only log collector");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn logs_are_optional_bounded_and_need_telemetry() {
         let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\
