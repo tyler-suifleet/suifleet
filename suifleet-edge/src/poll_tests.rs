@@ -166,3 +166,128 @@ async fn concurrent_reads_do_not_hide_changes_and_unused_group_fields_are_pruned
     assert!(!watch.versions.contains_key(&desired));
     assert_eq!(watch.versions[&writer], Some(3)); // Sleeping fleet producer retained.
 }
+
+#[derive(Clone)]
+struct HistoryNode {
+    floor: Arc<std::sync::atomic::AtomicU64>,
+    starts: Arc<Mutex<Vec<u64>>>,
+    package_reads: Arc<Mutex<u64>>,
+    publication_reads: Arc<Mutex<u64>>,
+}
+#[tonic::async_trait]
+impl proto::ledger_service_server::LedgerService for HistoryNode {
+    async fn get_service_info(
+        &self,
+        _: tonic::Request<proto::GetServiceInfoRequest>,
+    ) -> Result<tonic::Response<proto::GetServiceInfoResponse>, tonic::Status> {
+        let mut info = proto::GetServiceInfoResponse::default();
+        info.lowest_available_checkpoint =
+            Some(self.floor.load(std::sync::atomic::Ordering::SeqCst));
+        Ok(tonic::Response::new(info))
+    }
+    async fn get_object(
+        &self,
+        request: tonic::Request<proto::GetObjectRequest>,
+    ) -> Result<tonic::Response<proto::GetObjectResponse>, tonic::Status> {
+        *self.package_reads.lock().unwrap() += 1;
+        let package = sui_sdk_types::MovePackage {
+            id: Address::from_str(request.into_inner().object_id.as_ref().unwrap()).unwrap(),
+            version: 1,
+            modules: Default::default(),
+            type_origin_table: vec![],
+            linkage_table: Default::default(),
+        };
+        let object = sui_sdk_types::Object::new(
+            sui_sdk_types::ObjectData::Package(package),
+            sui_sdk_types::Owner::Immutable,
+            sui_sdk_types::Digest::new([7; 32]),
+            0,
+        );
+        let mut bytes = proto::Bcs::default();
+        bytes.value = Some(bcs::to_bytes(&object).unwrap().into());
+        let mut object = proto::Object::default();
+        object.bcs = Some(bytes);
+        let mut response = proto::GetObjectResponse::default();
+        response.object = Some(object);
+        Ok(tonic::Response::new(response))
+    }
+    async fn get_transaction(
+        &self,
+        request: tonic::Request<proto::GetTransactionRequest>,
+    ) -> Result<tonic::Response<proto::GetTransactionResponse>, tonic::Status> {
+        assert_eq!(
+            request.into_inner().digest.unwrap(),
+            sui_sdk_types::Digest::new([7; 32]).to_string()
+        );
+        *self.publication_reads.lock().unwrap() += 1;
+        let mut transaction = proto::ExecutedTransaction::default();
+        transaction.checkpoint = Some(10);
+        let mut response = proto::GetTransactionResponse::default();
+        response.transaction = Some(transaction);
+        Ok(tonic::Response::new(response))
+    }
+    async fn list_events(
+        &self,
+        request: tonic::Request<proto::ListEventsRequest>,
+    ) -> Result<tonic::Response<tonic::codegen::BoxStream<proto::ListEventsResponse>>, tonic::Status>
+    {
+        self.starts
+            .lock()
+            .unwrap()
+            .push(request.into_inner().start_checkpoint.unwrap());
+        let mut watermark = proto::Watermark::default();
+        watermark.cursor = Some(vec![1].into());
+        watermark.checkpoint = Some(20);
+        let mut end = proto::QueryEnd::default();
+        end.reason = Some(proto::QueryEndReason::LedgerTip as i32);
+        let mut frame = proto::ListEventsResponse::default();
+        frame.watermark = Some(watermark);
+        frame.end = Some(end);
+        Ok(tonic::Response::new(Box::pin(tokio_stream::iter([Ok(
+            frame,
+        )]))))
+    }
+}
+
+#[tokio::test]
+async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pruned_history() {
+    let node = HistoryNode {
+        floor: Arc::new(std::sync::atomic::AtomicU64::new(5)),
+        starts: Default::default(),
+        package_reads: Default::default(),
+        publication_reads: Default::default(),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
+    let server_node = node.clone();
+    let _server = Server(tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(proto::ledger_service_server::LedgerServiceServer::new(
+                server_node,
+            ))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    }));
+    sui.memberships(&None).await.unwrap();
+    sui.memberships(&None).await.unwrap();
+    assert_eq!(*node.starts.lock().unwrap(), [10, 10]); // Inclusive type publication.
+    assert_eq!(*node.package_reads.lock().unwrap(), 1);
+    assert_eq!(*node.publication_reads.lock().unwrap(), 1); // Manifest-bound immutable cache.
+    assert!(sui
+        .memberships(&Some(json!({"checkpoint": 4})))
+        .await
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("pruned"));
+    node.floor.store(11, std::sync::atomic::Ordering::SeqCst);
+    assert!(sui
+        .memberships(&None)
+        .await
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("pruned"));
+    assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
+}

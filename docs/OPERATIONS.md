@@ -90,7 +90,12 @@ events, with a local creator/target prefilter before authority reads. Both old
 journal cursors drain to a persisted exclusive checkpoint fence before switching
 to `discovery_cursor`; an indexer that has not reached that fence causes a retry,
 not a guessed resume point. Existing pruned-history and exact legacy-event
-boundary failures remain fail closed.
+boundary failures remain fail closed. A missing membership cursor starts at genesis
+when retained; on a pruned node it starts inclusively at the membership type
+origin package’s verified publication checkpoint. No event of that type could
+exist earlier. Publication metadata is cached per manifest; unavailable publication
+or pruned type history stops migration. Existing cursors are never moved forward
+to work around pruning.
 
 Fleet health and archive producers wait on monotonic due times or watch
 invalidation, collect local logs without chain reads while asleep, and revalidate
@@ -305,7 +310,7 @@ A group can carry a **desired state**: a revisioned map from component name to t
 - The dApp's firmware page creates the deployment and commits it as the groups' desired version in one transaction, by default. Targeting individual devices stays a one-shot deployment.
 
 **How the daemon reconciles each poll:**
-- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
+- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, initially scanned from genesis (or the verified type-publication checkpoint on a pruned node) with their own journal cursor before the one-time combined-cursor merge.
 - **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
 - **Authority re-check.** After reading every group's desired state it reads the operator again. If ownership changed in between, it plans nothing that poll, so a transfer cannot admit the previous operator's new desired state.
 - **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.

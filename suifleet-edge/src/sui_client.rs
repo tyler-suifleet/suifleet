@@ -205,6 +205,8 @@ struct PollWatch {
     generation: u64,
     event_limit: Option<u64>,
     registry_metadata: Option<Object>,
+    package_transactions: std::collections::BTreeMap<String, String>,
+    membership_birth: Option<u64>,
 }
 
 /// Objects created by a successful enrollment (SF-021).
@@ -590,6 +592,11 @@ impl SuiClient {
             .map_err(|e| anyhow::anyhow!("undecodable package {id}: {e}"))?;
         match object.data() {
             sui_sdk_types::ObjectData::Package(package) => {
+                self.poll
+                    .lock()
+                    .unwrap()
+                    .package_transactions
+                    .insert(id.to_owned(), object.previous_transaction().to_string());
                 packages.insert(id.to_owned(), package.clone());
                 Ok(package.clone())
             }
@@ -987,13 +994,55 @@ impl SuiClient {
             })
     }
 
-    /// The next page of DeviceAddedToGroup events after `cursor` (from
-    /// genesis when None). Pruned history fails loudly, as for deployments.
+    /// A missing membership cursor covers the type's complete history. On a
+    /// pruned chain, its immutable origin package's publication is a proven
+    /// lower bound: this event type could not exist before that checkpoint.
+    /// Never replace an existing cursor or skip a pruned part of that history.
+    async fn membership_start(&self) -> anyhow::Result<u64> {
+        let info = self
+            .rpc
+            .clone()
+            .ledger_client()
+            .get_service_info(proto::GetServiceInfoRequest::default())
+            .await
+            .inspect_err(|_| {
+                self.stats.lock().unwrap().0 += 1;
+            })
+            .map_err(status)?
+            .read_into_inner(&self.stats);
+        if info.lowest_available_checkpoint.unwrap_or(0) == 0 {
+            return Ok(0);
+        }
+        let cached = self.poll.lock().unwrap().membership_birth;
+        let checkpoint = match cached {
+            Some(checkpoint) => checkpoint,
+            None => {
+                let origin = &self.manifest().type_origins[DEVICE_ADDED_TO_GROUP];
+                self.package(origin).await?;
+                let digest = self
+                    .poll
+                    .lock()
+                    .unwrap()
+                    .package_transactions
+                    .get(origin)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("membership origin publication unavailable"))?;
+                let checkpoint = self.transaction_checkpoint(&digest).await?;
+                self.poll.lock().unwrap().membership_birth = Some(checkpoint);
+                checkpoint
+            }
+        };
+        ensure_retained(Some(checkpoint), info.lowest_available_checkpoint)?;
+        Ok(checkpoint)
+    }
+
+    /// The next page of DeviceAddedToGroup events after `cursor`. A missing
+    /// cursor starts no later than the type's publication; pruned history fails.
     pub async fn memberships(&self, cursor: &Option<Value>) -> anyhow::Result<MembershipPage> {
         let (start, position) = match Cursor::parse(cursor)? {
             Cursor::After(bytes, checkpoint) => (Start::After(bytes), checkpoint),
             Cursor::Checkpoint(checkpoint) => (Start::Checkpoint(checkpoint), Some(checkpoint)),
-            Cursor::Genesis => (Start::Checkpoint(0), Some(0)),
+            Cursor::Genesis => (Start::Checkpoint(self.membership_start().await?), None),
             Cursor::Legacy(..) => anyhow::bail!("membership cursor cannot be a JSON-RPC cursor"),
         };
         self.ensure_retained(position).await?;
