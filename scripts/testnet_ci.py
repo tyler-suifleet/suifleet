@@ -6,11 +6,17 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 CONTEXT = 'testnet/package-upgrade'
+# Failure classes a status may carry. Only `source` (and unclassified) failures
+# are source-repair candidates; the others are infrastructure, funding or a
+# retained on-chain uncertainty that a rerun reconciles. Merge gates ignore the
+# class: anything but exact-head/base success blocks.
+FAILURE_CLASSES = ('source', 'infrastructure', 'funding', 'uncertain')
 SHA = re.compile(r'^[0-9a-f]{40}$')
 # The keyless preflight job has a 5-minute timeout; keep all retry waiting
 # well inside it so an exhausted budget fails with a diagnostic, not a kill.
@@ -184,10 +190,47 @@ def environment_ready(environment, branches):
             and [(b['name'], b.get('type', 'branch')) for b in branches['branch_policies']] == [('main', 'branch')])
 
 
-def status(repo, head, base, state, url):
+def failure_class(outcome, evidence_dir='evidence', dependencies='success'):
+    """Classify a failed run for repair scheduling.
+
+    A revision whose dependencies fail to build is a source failure. A run that
+    otherwise failed before the acceptance step executed is infrastructure.
+    Otherwise the revision's own evidence may name a class; anything missing,
+    malformed or unknown is treated as a source failure. A wrong class can only
+    change who is asked to look at the failure, never the merge gate."""
+    if dependencies == 'failure':
+        return 'source'
+    if outcome != 'failure':
+        return 'infrastructure'
+    found = []
+    for path in sorted(Path(evidence_dir).glob('*.json'))[:16]:
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 << 20:
+                continue
+            value = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get('success') is False:
+            found.append(value.get('failure_class'))
+    if not found or any(value not in FAILURE_CLASSES for value in found):
+        return 'source'
+    for name in ('source', 'funding', 'uncertain', 'infrastructure'):
+        if name in found:
+            return name
+
+
+def description(base, state, failure=None):
+    assert SHA.fullmatch(base)
+    if state == 'failure':
+        assert failure in FAILURE_CLASSES
+        return f'base:{base} class:{failure}'
+    return f'base:{base}'
+
+
+def status(repo, head, base, state, url, failure=None):
     assert SHA.fullmatch(head) and SHA.fullmatch(base)
     api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
-        description=f'base:{base}', target_url=url))
+        description=description(base, state, failure), target_url=url))
 
 
 def verify_checkout(expected, run=subprocess.run):
@@ -206,7 +249,8 @@ if __name__ == '__main__':
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
-    parser.add_argument('--status', choices=['pending', 'success', 'failure'])
+    # `error` marks a cancelled run: never a source failure, never success.
+    parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
     if args.verify_checkout:
@@ -218,8 +262,10 @@ if __name__ == '__main__':
             parser.error('probe cannot publish status or authorize a run')
         print(json.dumps(verify_environment(repo), sort_keys=True))
     elif args.status:
+        failure = failure_class(os.environ.get('ACCEPTANCE_OUTCOME', ''),
+                                dependencies=os.environ.get('DEPENDENCIES_OUTCOME', '')) if args.status == 'failure' else None
         status(repo, os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.status,
-               f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}')
+               f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}', failure)
     else:
         with open(os.environ['GITHUB_EVENT_PATH']) as stream:
             selection = plan(os.environ['GITHUB_EVENT_NAME'], json.load(stream), repo)
