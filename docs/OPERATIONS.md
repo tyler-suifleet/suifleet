@@ -105,6 +105,10 @@ balance/account checks happen before writes, so idle enrollment no longer draws
 gas merely to build a float. Failed writes stay queued with the existing funding
 and durable-transaction recovery behavior.
 
+Within an observed active maintenance window (including a completed job’s
+retained window), discovery also honors the configured faster rollout cadence.
+Outside those windows, short version-check intervals do not force event scans.
+
 Queued receipts validate current authority and retry before the version gate or
 fallible discovery, and new outcomes flush before the normal cadence sleep.
 RPC fallback verifies each candidate chain before use; metrics count every

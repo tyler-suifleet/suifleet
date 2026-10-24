@@ -507,7 +507,8 @@ async fn main() -> anyhow::Result<()> {
             }
             let delay = tokio::time::sleep(cadence.delay(
                 &cfg.runtime,
-                journal.state.deferred.values(),
+                journal.state.deferred.iter().filter_map(|(id, d)|
+                    (!journal.state.deployments.contains_key(id)).then_some(d)),
                 telemetry::now_ms(),
                 journal.state.check_window,
             ));
@@ -546,7 +547,8 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
+                            cadence.delay(&cfg.runtime, journal.state.deferred.iter().filter_map(|(id, d)|
+                    (!journal.state.deployments.contains_key(id)).then_some(d)), telemetry::now_ms(), journal.state.check_window)
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
@@ -819,7 +821,9 @@ async fn poll(
             &watch_roots,
             &sleeping_roots,
             cfg.runtime.full_revalidation_seconds,
-            cfg.runtime.event_discovery_seconds,
+            cadence::discovery_bound(&cfg.runtime, journal.state.deferred.iter().filter_map(|(id, d)|
+                    (!journal.state.deployments.contains_key(id)).then_some(d)),
+                telemetry::now_ms(), journal.state.check_window),
         )
         .await?;
     let pending_work = !journal.state.initialized
