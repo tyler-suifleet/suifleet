@@ -63,7 +63,9 @@
     #[mode(spec), ext(spec(prove, target = handover))]
     fun deployment_handover_security_spec(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
         prover::prover::asserts(ctx.sender() == d.creator);
-        if (d.schema_version == 4) {
+        // Directory presence selects sharded storage, including schema-2 catalogs.
+        // A present field must have the expected value type before borrowing it.
+        if (df::exists(&d.id, ReceiptShardKey {})) {
             prover::prover::asserts(df::exists_with_type<ReceiptShardKey, ReceiptDirectory>(&d.id, ReceiptShardKey {}));
         };
         prover::prover::asserts(receipt_schema(d) != 2);
