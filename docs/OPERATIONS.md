@@ -113,7 +113,18 @@ Local firmware results and configuration settlement run before the idle gate;
 a result appearing in the spool does not wait for a chain change or event scan.
 
 Queued receipts validate current authority and retry before the version gate or
-fallible discovery, and new outcomes flush before the normal cadence sleep.
+fallible discovery, and new outcomes flush before the normal cadence sleep,
+reusing that poll's validation. Each receipt is attempted at most once per poll.
+Failed attempts wait eight poll intervals (bounded to 8–60 seconds), including
+failed authority/funding reads; newly produced outcomes do not wait for older
+receipts. Retry timers are local and reset on restart; durable outcomes remain
+in the journal. Idle polls between retries still use one version batch.
+Receipt and fleet-data writers share one funding lock across balance reads,
+funding decisions and draws. Each waiter re-reads balance under that lock. Their
+shared funding record is copied into the journal on each main poll for persistence
+and telemetry; there is no separate fleet-data funding record. Health/telemetry
+snapshots also read the live shared record, so they expose fleet-writer funding
+blocks even while the main poll is busy.
 RPC fallback verifies each candidate chain before use; metrics count every
 explicit read attempt, identity probe and partial event response, including retries.
 
