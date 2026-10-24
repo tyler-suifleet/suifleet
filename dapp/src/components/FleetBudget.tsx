@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
@@ -18,6 +18,8 @@ import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToke
 import {
   FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
 } from "@/lib/onramp";
+
+import { enrollBudgetDevices, enrollmentReads, prepareEnrollment, type EnrollmentProgress } from "@/lib/budget-enrollment";
 
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { ArchiveReclaimPanel } from "@/components/StorageReclaim";
@@ -189,7 +191,13 @@ export function BudgetManager() {
   const account = useCurrentAccount(), client = useCurrentClient();
   const { budget, isLoading, error: readError } = useFleetBudget();
   const devices = useDevices();
-  const { submit, message, error, pending } = useSubmit();
+  const { submit, message, error, pending: singlePending } = useSubmit();
+  const batchMutation = useFleetTransaction(), cache = useQueryClient(), wallet = useDAppKit();
+  const batchBusy = useRef(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<EnrollmentProgress>();
+  const [batchError, setBatchError] = useState("");
+  const pending = singlePending || batchRunning;
   const [withdraw, setWithdraw] = useState("");
   const activated = (devices.data ?? []).filter((device) => device.ownerCapId);
   const accounts = useQuery<(AccountView | undefined)[]>({
@@ -199,6 +207,28 @@ export function BudgetManager() {
     queryFn: () => fetchAccounts(client, budget!.id, activated.map((device) => device.objectId)),
   });
   if (!account || !budget) return isLoading ? <p className="text-xs">Loading…</p> : readError ? <p role="alert" className="text-xs">{readError.message}</p> : null;
+  async function enrollAll() {
+    if (batchBusy.current || singlePending || !account || !budget) return;
+    batchBusy.current = true; setBatchRunning(true); setBatchError("");
+    try {
+      await enrollBudgetDevices({
+        devices: activated.map(d => ({ objectId: d.objectId, ownerCapId: d.ownerCapId! })),
+        ...enrollmentReads(client, account.address, budget.id),
+        prepare: tx => prepareEnrollment(tx, client, account.address),
+        execute: tx => {
+          if (wallet.stores.$connection.get().account?.address !== account.address) throw new Error("Wallet account changed; stop and resume with the original owner");
+          return batchMutation.mutateAsync({ transaction: tx });
+        },
+        onProgress: setBatchProgress,
+      });
+    } catch (cause) {
+      setBatchError(`${cause instanceof Error ? cause.message : "Enrollment stopped"}. Confirmed chunks remain enrolled. Resume rechecks every device on chain; an uncertain submission may require waiting for indexing before retrying.`);
+    } finally {
+      batchBusy.current = false; setBatchRunning(false);
+      await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-budgets"] }),
+        cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] })]);
+    }
+  }
   const accountsReady = !accounts.error && accounts.data !== undefined && devices.isSuccess;
   const now = BigInt(Date.now());
   const enrolled = (accounts.data ?? []).filter((a): a is AccountView => !!a);
@@ -217,6 +247,18 @@ export function BudgetManager() {
       <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildWithdrawTx(budget.id, budget.capId, parseToken(withdraw), account.address))}>Withdraw unallocated funds</button>
     </div>
     <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period, never more than its reserve, until you suspend or remove it here, pause the budget or revoke its key on the Devices page.</p>
+    <div className="space-y-1">
+      <button type="button" className="border rounded px-2 py-1" disabled={pending || !accountsReady || !activated.length} onClick={() => void enrollAll()}>
+        {batchProgress?.phase === "stopped" ? "Resume enrollment" : "Enroll all unenrolled devices"}
+      </button>
+      <p>Up to 200 devices per approval (5 approvals for 1,000 new devices). Each chunk is checked for size and gas before signing. Initial floats and up to two period allowances per device come from the budget; limited reserves are shared evenly.</p>
+      {batchProgress && <div role="status">
+        <p>{batchProgress.confirmed} of {batchProgress.total} confirmed this run; {batchProgress.skipped} already enrolled; {batchProgress.excluded.length} excluded. {batchProgress.phase === "approval" ? `Approve chunk ${batchProgress.chunk} (gas budget ${sui(BigInt(batchProgress.estimatedGas!))}).` : batchProgress.phase}.</p>
+        {batchProgress.excluded.map(item => <p key={item.deviceId}>Excluded {item.deviceId}: {item.reason}</p>)}
+        {batchProgress.digests.map(digest => <p key={digest}>Confirmed {digest}</p>)}
+      </div>}
+      {batchError && <p role="alert">{batchError}</p>}
+    </div>
     {accounts.error ? <p role="alert">Budget accounts unavailable: {accounts.error.message}</p>
       : devices.error ? <p role="alert">Budget devices unavailable: {devices.error.message}</p>
       : !accountsReady ? <p>Loading budget accounts…</p> : <table className="w-full border">
@@ -237,7 +279,7 @@ export function BudgetManager() {
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, a.accountId, a.limits.floatCap))}>Send float</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, a.accountId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId))}>Remove</button>
-          </> : <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
+          </> : <button type="button" className="underline" disabled={pending || !accounts.isSuccess} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
             defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;
       })}</tbody>

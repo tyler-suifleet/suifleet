@@ -1,0 +1,62 @@
+{
+  "network": "disposable network-none localnet",
+  "recorded_at": "2026-10-24T01:25:10.009Z",
+  "compiler": "sui 1.81.1-e04cf9aa915c",
+  "node": "sui 1.82.1-987123842623 (checksum-verified by localnet wrapper)",
+  "chunks": [
+    {
+      "digest": "EaZajAfH4H6SwdGjRiPW42rCQGdUqbHFPrcJZW3QiDAK",
+      "devices": 200,
+      "bytes": 36036,
+      "gas_budget_mist": "1523193571",
+      "computation_mist": "240800000",
+      "storage_mist": "1618055200",
+      "rebate_mist": "336661530",
+      "net_gas_mist": "1522193670"
+    },
+    {
+      "digest": "9Bxct5pKkv75CvNsUq3cgr4mAMSv9QTNucDhfc6Bnf9S",
+      "devices": 200,
+      "bytes": 36036,
+      "gas_budget_mist": "1523193571",
+      "computation_mist": "240800000",
+      "storage_mist": "1618055200",
+      "rebate_mist": "336661530",
+      "net_gas_mist": "1522193670"
+    },
+    {
+      "digest": "FFJS3aTF2RBQusYqaSpXVVeLyvUNzaWLY42rzFU4wDkx",
+      "devices": 200,
+      "bytes": 36036,
+      "gas_budget_mist": "1523193571",
+      "computation_mist": "240800000",
+      "storage_mist": "1618055200",
+      "rebate_mist": "336661530",
+      "net_gas_mist": "1522193670"
+    },
+    {
+      "digest": "EP4qqPnUj8rLvpBwjf2YCSDajGkx313QxMSLvTNMXF8r",
+      "devices": 200,
+      "bytes": 36036,
+      "gas_budget_mist": "1523193571",
+      "computation_mist": "240800000",
+      "storage_mist": "1618055200",
+      "rebate_mist": "336661530",
+      "net_gas_mist": "1522193670"
+    },
+    {
+      "digest": "435HQKSTT7wNKWhCakWKcmXAqL8EemztxwK3cpi61P2q",
+      "devices": 200,
+      "bytes": 36036,
+      "gas_budget_mist": "1523193571",
+      "computation_mist": "240800000",
+      "storage_mist": "1618055200",
+      "rebate_mist": "336661530",
+      "net_gas_mist": "1522193670"
+    }
+  ],
+  "device_count": 1000,
+  "revoked_device": "Retained owner cap excluded before batching on initial run, resume and repeat",
+  "approvals_per_1000": 5,
+  "partial_failure_resume": "200 confirmed, rejected second chunk, resumed 800; complete rerun requests zero approvals"
+}
