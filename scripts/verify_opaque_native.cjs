@@ -18,7 +18,7 @@ const opaque=loader()('lib/opaque-data.ts'),vectors=require('../interfaces/seal-
    const [seq,n]=key.split('/'),index=opaque.DataItemBcs.parse(Buffer.from(value,'hex')),anchor=f.anchors.find(a=>a.seq===seq);
    const patch=f.patches[anchor.blob_object_id].find(p=>p.identifier===index.identifier),bytes=Buffer.from(patch.ciphertext,'base64');
    const result=await opaque.openDataItem(bytes,f.config,f.device,anchor,index,open);
-   (parts[index.stream]??=[]).push({index,bytes:result});
+   (parts[`${index.stream}/${index.upload}`]??=[]).push({index,bytes:result});
    const before=requests,bad=Buffer.from(bytes);bad[bad.length-1]^=1;
    await assert.rejects(opaque.openDataItem(bad,f.config,f.device,anchor,index,open),/digest/);
    await assert.rejects(opaque.openDataItem(bytes,f.config,f.device,anchor,{...index,stream:'another'},open),/scope/);
@@ -28,12 +28,12 @@ const opaque=loader()('lib/opaque-data.ts'),vectors=require('../interfaces/seal-
    await assert.rejects(opaque.openDataItem(bytes,f.config,f.device,anchor,{...index,key:'forged'},open),/metadata/);
  }
  for(const [stream,items] of Object.entries(parts)) {
-   assert.deepEqual(Buffer.from(opaque.assembleDataItems(items)),Buffer.from(f.expected[stream],'base64'));
+   assert.deepEqual(Buffer.from(opaque.assembleDataItems(items)),Buffer.from(f.expected[stream.split('/')[0]],'base64'));
    assert.throws(()=>opaque.assembleDataItems(items.map(p=>({...p,bytes:Uint8Array.from(p.bytes)}))),/Unverified|provenance/);
    assert.throws(()=>opaque.assembleDataItems(items.map((p,n)=>n? p:{...p,index:{...p.index,key:'forged'}})),/provenance/);
    if(items[0].bytes.length){items[0].bytes[0]^=1;assert.throws(()=>opaque.assembleDataItems(items),/provenance/);items[0].bytes[0]^=1;}
    if(items.length>1)assert.throws(()=>opaque.assembleDataItems(items.slice(1)),/Incomplete/);
  }
- assert.deepEqual(Object.keys(parts).sort(),Object.keys(f.expected).sort());
+ assert.deepEqual([...new Set(Object.keys(parts).map(k=>k.split('/')[0]))].sort(),Object.keys(f.expected).sort());
  console.log('PASS native signatures/Seal ciphertext independently decrypted with pinned SDK; raw binary/text, chunk assembly, signed metadata, pre-key ciphertext/scope/epoch tamper refusal');
 })().catch(e=>{console.error(e);process.exitCode=1});

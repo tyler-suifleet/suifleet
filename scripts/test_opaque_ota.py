@@ -66,29 +66,36 @@ def run(binary,shim_binary):
                 process=start();fleet.wait(lambda:socket.exists());client=Client(str(socket))
                 binary_data=bytes(range(256))*200;text='opaque ☃\ntext'.encode()
                 stream_payload={'raw':'durable bytes','value':17}
-                stream_result=client.request('stream_append',topic='durable',payload=stream_payload)
+                stream_results=[client.request('stream_append',topic='durable',payload=stream_payload) for _ in range(6)]
+                stream_result=stream_results[-1]
                 stream_expected=json.dumps(stream_payload,separators=(',',':'),sort_keys=True).encode()
                 for stream,data,upload in [('sensor',binary_data,'aa'*32),('text',text,'bb'*32)]:
                     result=client.put_data(stream,'sample',data,metadata={'10':'ten','2':'two',**{f'm{n}':'x'*200 for n in range(14)}},upload=upload)
                     assert all(not c['storage_acknowledged'] for c in result['chunks'])
-                pending=state/'fleet-data/pending.json';queue=state/'fleet-data/opaque/queue.json'
+                pending=state/'fleet-data/pending.json';queue=state/'fleet-data/opaque/index.json'
                 fleet.wait(lambda:pending.exists());stop();before=json.loads(pending.read_text());assert len(before['opaque_items'])>=1
-                assert json.loads(queue.read_text())['items'],'failed prepaid storage preserves custody'
+                assert json.loads(queue.read_text())['entries'],'failed prepaid storage preserves custody'
                 log_source=state/'supervised/service/component.log';log_source.parent.mkdir(parents=True,exist_ok=True);log_source.write_text('routine log must not starve\n')
                 original={p.name:p.read_bytes() for p in pending.parent.glob('data-*.bin')}
                 sim.uploads_paused=False;process=start();fleet.wait(lambda:bool(sim.registered));time.sleep(2);stop()
-                assert json.loads(queue.read_text())['items'] and not sim.anchors,'certification outage must retain queue'
+                assert json.loads(queue.read_text())['entries'] and not sim.anchors,'certification outage must retain queue'
                 for name,bytes_ in original.items():assert (pending.parent/name).read_bytes()==bytes_
                 sim.certify_outage=False;process=start();fleet.wait(lambda:len(sim.anchors)==1);fleet.wait(lambda:not pending.exists());stop()
                 assert len(sim.registered)==1,'restart reuses purchase'
                 # A second batch may contain items enqueued after first formation.
-                while json.loads(queue.read_text())['items']:
+                while json.loads(queue.read_text())['entries']:
                     count=len(sim.anchors);sim.clock+=86400000;process=start();fleet.wait(lambda:len(sim.anchors)==count+1);fleet.wait(lambda:not pending.exists());stop()
                 fixture=root/'opaque.json';fixture.write_text(json.dumps({'manifest':manifest,'config':dict(schema=1,chainIdentifier=sim.chain,registryId=fleet.object_id(ota.REGISTRY),packageId=fleet.object_id(fleet.PACKAGE),typeOrigin=fleet.object_id(fleet.PACKAGE),fleetId=fleet.object_id(fleet.FLEET),budgetId=fleet.object_id(budget.BUDGET),storageId=fleet.object_id(fleet.STORAGE)),
                     'device':fleet.object_id(ota.DEVICE),'anchors':sim.anchors,'index':{f'{seq}/{n}':b.hex() for (seq,n),b in sim.opaque_items.items()},'patches':{a['blob_object_id']:json.loads((sim.upload_dir/(a['blob_object_id']+'-items.json')).read_text()) for a in sim.anchors},'expected':{'sensor':base64.b64encode(binary_data).decode(),'text':base64.b64encode(text).decode(),'durable':base64.b64encode(stream_expected).decode()}}))
                 subprocess.run(['node','scripts/verify_opaque_native.cjs',str(fixture)],check=True)
                 process=start();fleet.wait(lambda:socket.exists());description=Client(str(socket)).request('stream_describe',topic='durable');stop()
                 assert description['exported']==stream_result['sequence'],description
+                durable_batches={}
+                for (seq,n),value in sim.opaque_items.items():
+                    # Public BCS starts with anchor_index + sequence + stream string.
+                    if value[17:24]==b'durable':durable_batches[seq]=durable_batches.get(seq,0)+1
+                assert sum(durable_batches.values())==6,durable_batches
+                assert max(durable_batches.values())>1,'multiple stream messages must share a batch'
                 assert any(not any(p['identifier'].startswith('data-') for p in json.loads((sim.upload_dir/(a['blob_object_id']+'-items.json')).read_text())) for a in sim.anchors),'routine logs get a batch between opaque batches'
                 assert not sim.errors,sim.errors
                 print('PASS opaque real IPC chunk intake, durable storage/certification outage, restart exact ciphertext/purchase reuse, verified index retirement, independent SDK binary/text retrieval')
