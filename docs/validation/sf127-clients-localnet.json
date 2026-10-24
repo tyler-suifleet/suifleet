@@ -1,0 +1,40 @@
+{
+  "result": "PASS",
+  "network": "isolated network-none localnet",
+  "base": "14b351b9389c058117297343ced34f262db6f3c3",
+  "old": "0x6ca110e954393cdad70ecbe7f5dd2f5bd5723665807181a915828a272e0f97d6",
+  "head": "0x42d185a00a7e38c61e1fce1b3af42e7d05c7af7c2b3b6c765212ae73f1122a9f",
+  "digests": {
+    "publish pre-identity package": "DcmuQEBbCUYVcsqgRpuGrvJzRf2FftA5oQyyL4idnLCr",
+    "create on old package": "GPxEcAeGErBVXT9nCS98mj1Wh17QiUvQAyuYFZmAP39J",
+    "compatible pre-identity upgrade": "FNucsLfcCQHnnNtzDGESnEqxx4MrfdRy8knwuK7fXjGb",
+    "protect oldest deletion path": "EZAtxU5sYjGoJ1bK855xqZYot1JbWcqj4hgaKcre3x9o",
+    "bounded legacy cleanup 4": "DtwKCjTEV5LpstjiK3BSbgHjP7yKzgkVL4CJAmn2aDDZ",
+    "bounded legacy cleanup 5": "DQzPBHViZW6XBKYvuhdmogQvQAbUkVinQkdaeT5E6xww",
+    "bounded legacy cleanup 6": "9xCMk55DW4rpUGYxptmNukyLtNh5czaexCd99WLRknNS",
+    "bounded legacy cleanup 7": "DA9fuUZmdEr7NJ47orEyYeux7oQbWxy6sQs18WgT3eS7",
+    "bounded legacy cleanup 8": "2eQUzG3zrsmU1AADratnZpfum4HrP4V1eLarFeXB5pPw",
+    "bounded legacy cleanup 9": "EpQnaDq3RwDEueyu51dEicj7hgdMn31iA1HU3tfXDktk",
+    "activate probe device": "EfS3csXxgCMGYvk7KXMF7T25Y9Hx93PrUU5vq5cYxPFF",
+    "new sharded failure probe": "7EgtFfUE4vpottM9nPdjRisEWF6VnBg9y3dezpL6Aehq",
+    "bounded probe cleanup 12": "Hfkv7dMZTqaRpxqCPGLG96KrFsLxenvVdPrJcokzYczq",
+    "bounded probe cleanup 13": "8wsmZ67yq1QhxP2HVeGdsSCsHvNFxfXcz6jbBKj1JX8S",
+    "bounded probe cleanup 14": "DBy3wAt6PHJ8Aww9Goem97eFem2UxBkJSWfGSpAwRdv8",
+    "bounded probe cleanup 15": "DqLoZnYpmwr6xt2hKDxaupizRCk7ZptVYUF26NG2HVfN",
+    "bounded probe cleanup 16": "E4te1oFkvahjxJyUTYkgQPCZBP8ZWSE2zULhcctNqiDB",
+    "bounded probe cleanup 17": "6RrNzZqXA2aC98KewpFJ71yoazaHqWfeaQkrqkzQHnYu",
+    "bounded probe cleanup 18": "9nA4CtuDiPBF3mzTberiPJ18EydNQVko4AKQPGfX3RST"
+  },
+  "failures": {
+    "old no-schema-check delete blocked": {
+      "digest": "7DHJj5tVWUtAaUmq1sAs4GH2ncXxGjnEHJEgsyUo5jim",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0x0000000000000000000000000000000000000000000000000000000000000002::dynamic_field::remove_child_object' (instruction 0)"
+    }
+  },
+  "daemon": "actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path",
+  "indexer": "actual production index command independently materialized v3 Failed receipt",
+  "limits": [
+    "No successful artifact installation in this probe; existing OTA simulator covers successful apply",
+    "No public-network, hardware, mainnet or manual wallet acceptance"
+  ]
+}
