@@ -2728,6 +2728,7 @@ mod tests {
             use sha2::Digest; hex::encode(sha2::Sha256::digest(f.dir.join("supervised/app").as_os_str().as_encoded_bytes()))
         })]);
         let current = String::from_utf8(current.stdout).unwrap().trim().to_owned();
+        assert!(!current.is_empty(), "restart must leave a running container");
         engine(&["kill", &current]);
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
@@ -2738,7 +2739,16 @@ mod tests {
             }
         }).await.unwrap();
         assert!(!f.dir.join("supervised/recovery-intent.json").exists());
-        assert!(engine(&["ps", "-q", "--filter", &format!("id={current}")]).stdout.is_empty());
+        // The attached client can exit before Docker's running-container
+        // listing observes the kill. Cleanup is deliberately unavailable, so
+        // wait for the engine's terminal state rather than assuming that the
+        // supervisor's Backoff transition synchronizes Docker's state cache.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !engine(&["ps", "-q", "--filter", &format!("id={current}")]).stdout.is_empty() {
+                assert_eq!(phase(&s), Phase::Backoff);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }).await.expect("killed OCI container remained running during cleanup outage");
         std::fs::remove_file(&outage).unwrap();
         tokio::time::timeout(Duration::from_secs(15), async {
             while phase(&s) != Phase::Running { tokio::time::sleep(Duration::from_millis(100)).await; }
