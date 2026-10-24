@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -36,7 +37,7 @@ CHAINS = {"testnet": "4c78adac"}
 # The public Walrus endpoints refuse Python's default User-Agent (HTTP 403).
 AGENT = {"User-Agent": "suifleet-acceptance/1"}
 # The public publisher occasionally stalls; uploads are retried (content-addressed).
-WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 3, 10
+WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 5, 15
 WALRUS_TESTNET = ("https://publisher.walrus-testnet.walrus.space", "https://aggregator.walrus-testnet.walrus.space")
 # Move aborts as the CLI reports them: "... aborted within function
 # '0x…::module::function' at instruction N with code C", or the older
@@ -336,9 +337,12 @@ class Walrus:
             except urllib.error.HTTPError as error:
                 if error.code < 500 or attempt == WALRUS_ATTEMPTS:
                     raise
-            except OSError:
+                reason = f"HTTP {error.code}"
+            except OSError as error:
                 if attempt == WALRUS_ATTEMPTS:
                     raise
+                reason = type(error).__name__
+            print(f"Walrus publisher attempt {attempt}/{WALRUS_ATTEMPTS} failed ({reason}); retrying", file=sys.stderr)
             time.sleep(WALRUS_RETRY_SECONDS * attempt)
 
     def readable(self, blob, body):
