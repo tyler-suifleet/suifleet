@@ -269,8 +269,10 @@ allowance or returns backpressure/loss counters, not imaginary free aggregation.
 Six retained weekly archives per device means 6,000 live blob records and
 396,204,000,000 encoded bytes for 1,000 devices at this small-blob geometry;
 daily archives over 42 days mean 42,000 records and 2,773,428,000,000 encoded bytes.
-The whole Quilt shares expiry/deletion/renewal. Protected retention's existing
-1,024-blob ceiling/scanning costs still apply per storage object; finite storage
+The whole Quilt shares expiry/deletion/renewal. Unmigrated v2 protected retention retains its
+1,024-blob ceiling/scanning costs; integrated SF-128 v3 keyed protection removes
+that ceiling/scan, with localnet scale evidence separately recorded. This cost
+fixture uses the earlier finite package, not a measurement of v3 scaling. Finite storage
 still needs funded capacity and owner cleanup. No unattended expiry cleanup or
 infinite capacity is claimed.
 

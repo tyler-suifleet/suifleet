@@ -7,8 +7,8 @@ import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDesiredStates } from "@/hooks/useDesiredStates";
-import { useFleetHealth, useTelemetryToken, setTelemetryToken } from "@/hooks/useFleetHealth";
-import { describeServices, lastSeenLabel, TELEMETRY_URL, type DeviceHealth } from "@/lib/telemetry";
+import { useFleetHealth } from "@/hooks/useFleetHealth";
+import { describeServices, lastSeenLabel, type DeviceHealth } from "@/lib/telemetry";
 import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
   buildRegisterDeviceTx, buildActivateDeviceTx, buildDeregisterDeviceTx,
@@ -466,31 +466,9 @@ function GroupsTab() {
 
 // ── Device health (SF-019) ────────────────────────────────────────────────────
 
-/** The indexer read token, kept for this browser tab only. */
+/** Health and archives are verified directly from the fleet's on-chain index. */
 function TelemetrySettings() {
-  const token = useTelemetryToken();
-  const [draft, setDraft] = useState("");
-  if (DATA_CONFIG) return <p className="text-xs text-gray-500">Health is verified directly from Sui. <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
-  if (!TELEMETRY_URL) {
-    return <p className="text-xs text-gray-500">Device health is not reported: no telemetry service is configured for this build.</p>;
-  }
-  return (
-    <form
-      className="flex items-center gap-2 text-xs text-gray-600"
-      onSubmit={(e) => { e.preventDefault(); setTelemetryToken(draft.trim()); setDraft(""); }}
-    >
-      <span>Telemetry: {TELEMETRY_URL}</span>
-      {token ? (
-        <button type="button" onClick={() => setTelemetryToken("")} className="text-[#4DA2FF] hover:underline">Forget read token</button>
-      ) : (
-        <>
-          <input type="password" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Read token"
-            className="border border-gray-300 rounded px-2 py-1 text-xs w-48" />
-          <button type="submit" className="text-[#4DA2FF] hover:underline">Use</button>
-        </>
-      )}
-    </form>
-  );
+  return <p className="text-xs text-gray-500">{DATA_CONFIG ? "Health is verified directly from Sui." : "Configure the on-chain fleet to publish and read device health."} <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
 }
 
 function HealthDetails({ health }: { health?: DeviceHealth }) {

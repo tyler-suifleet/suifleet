@@ -45,8 +45,51 @@ class Chain:
 
 
 class RetentionTests(unittest.TestCase):
+    def test_service_poll_is_hourly_and_once_does_not_sleep(self):
+        from unittest.mock import patch, MagicMock
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'config.json'
+            config.write_text('{}')
+            worker = MagicMock()
+            arguments = ['retention_worker.py', '--config', str(config), '--state-dir', directory]
+            with patch.object(sys, 'argv', arguments), patch.object(module, 'Worker', return_value=worker), patch.object(module.time, 'sleep', side_effect=InterruptedError) as sleep:
+                with self.assertRaises(InterruptedError):
+                    module.main()
+                worker.tick.assert_called_once_with()
+                sleep.assert_called_once_with(3600)
+            worker.reset_mock()
+            with patch.object(sys, 'argv', arguments + ['--once']), patch.object(module, 'Worker', return_value=worker), patch.object(module.time, 'sleep') as sleep:
+                module.main()
+                worker.tick.assert_called_once_with()
+                sleep.assert_not_called()
+
     def worker(self, directory, chain):
         return module.Worker({'gas_budget': '10', 'spend_ceiling': '20'}, directory, chain)
+
+    def test_ten_thousand_records_and_expired_blob_do_not_stop_other_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = Chain()
+            def transport(action, value=None):
+                if action == 'snapshot':
+                    snapshot = chain(action)
+                    snapshot['blobs'] = [
+                        {'id': f'complete-{i}', 'end': 7, 'target': 7, 'affordable': True}
+                        for i in range(10_000)]
+                    snapshot['blobs'] += [
+                        {'id': 'expired', 'end': 3, 'target': 7, 'affordable': True},
+                        {'id': 'blob', 'end': chain.end, 'target': 7, 'affordable': True}]
+                    return snapshot
+                return chain(action, value)
+            worker = self.worker(directory, transport)
+            worker.tick(0)
+            self.assertEqual(chain.submitted, 1)
+            self.assertIn('expired', worker.state['failures'])
+            worker.lock.close()
+            worker = self.worker(directory, transport)
+            worker.tick(1)
+            self.assertEqual(worker.state['last_success']['blob']['end'], 7)
+            worker.lock.close()
 
     def test_uncertain_restart_reuses_original_transaction_and_confirms_effects(self):
         with tempfile.TemporaryDirectory() as directory:

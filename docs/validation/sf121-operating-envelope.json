@@ -105,7 +105,7 @@
     "Current Quilt write fee quote was 363951FROST; prior 2048-byte quote341523FROST was observed at a different time. Do not attribute the price change to Quilt.",
     "No compression is implemented; measured JSON, signed envelopes and ciphertext bytes are explicitly separate.",
     "Six-week retention is planning only; the public sample expired at Walrus epoch562, not a verified six-week retention or cleanup run.",
-    "Unattended owner cleanup is not implemented; plan finite capacity, quotas and owner maintenance. Protected retention retains its1024-blob ceiling and scanning limits.",
+    "Unattended owner cleanup is not implemented; plan finite capacity, quotas and owner maintenance. Unmigrated v2 protected retention retains its1024-blob ceiling and scan; integrated SF128 v3 keyed protection removes them, with separate localnet evidence. This public finite fixture does not measure v3 scaling.",
     "Illustrative $100 price and mainnet profitability remain unapproved/unproven, not promised by this implementation."
   ]
 }

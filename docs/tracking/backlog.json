@@ -2404,6 +2404,575 @@
       "validation": "Script tests and dry runs; rehearsal evidence with effects checked; mainnet evidence only under explicit authorization."
     },
     {
+      "key": "SF-122",
+      "title": "Cut daemon chain reads to one batched read per poll",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "scripts/test_ota.py",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "Make the daemon's steady-state poll a single BatchGetObjects version check instead of ~23 to ~45 separate gRPC reads, so a 1,000-device fleet can run on Mysten's public full node and later on one shared node. This is Stage 1 of the low-cost Sui-only product in docs/BUSINESS_PLAN.md (pricing proposal 2026-10-23).",
+      "evidence": "Code review of main e19970e (2026-10-23): with a budget and one group, each 10 s poll makes 21+2G reads: validate_deployment 4 (sui_client.rs:289-345), validate_cap 3 (sui_client.rs:847-875), funding::top_up 4 (funding.rs:248-250), deployments() 2 (sui_client.rs:484-520) and reconcile 2+3+2G+3 (linux_main.rs:1064-1095). fleet_data health adds 10 reads (fleet_data.rs:145-182) and the archive tick 12 (fleet_archive.rs:122-144), refetching the whole package (sui_client.rs:1148-1158). That is ~11.7B reads and ~39 TB of RPC traffic a month for 1,000 devices, which forces dedicated full nodes ($0.78-2.29/device/month). One device alone exceeds Mysten's documented public-endpoint guidance of 100 requests per 30 s (docs.sui.io/references/sui-api/rpc-best-practices). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Cache immutables per manifest: package bytes and type origins, registry type and initial shared version, and chain identity; invalidate only when the manifest changes.",
+        "The steady-state poll is one BatchGetObjects with a version-only read mask over the watch set: UpgradeCap, DeviceCap and its DeviceAddressKey/IdentityKey fields, the device owner cap, groups and DesiredKey, deferred DeploymentRecords, and FleetData writer/diagnostic objects when enabled. Any version change or NotFound triggers the existing full validation, which still fails closed.",
+        "Event discovery runs on the slow path only (a watched version changed, or a bounded interval): one ListEvents DNF query for DeploymentCreated and DeviceAddedToGroup with a local creator/target pre-filter, preserving the reconcile double-read guarantee, with a tested one-time merge of the two journal cursors.",
+        "fleet_data health and archive loops sleep until due without validation reads; the diagnostic-request read joins the version batch. Gas top-up reads balance and budget only immediately before a write.",
+        "A full revalidation still runs at a configurable bound (default daily). Revocation, key rotation, package upgrade and chain-reset detection are no slower than one poll interval.",
+        "Instrument and report reads and bytes per poll before and after, on the OTA simulator and localnet."
+      ],
+      "validation": "cargo test plus make test-ota; localnet tests proving revocation, rotation, upgrade and chain reset still fail closed under caching; a read-count test asserting one request per steady-state poll; bounded testnet run under docs/TESTNET.md."
+    },
+    {
+      "key": "SF-123",
+      "title": "Configurable check cadence, rollout fast-checks, jittered backoff and RPC endpoint fallback",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-122"
+      ],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/config.example.toml",
+        "manifests",
+        "scripts",
+        "docs/OPERATIONS.md",
+        "docs/STAGED_ROLLOUTS.md"
+      ],
+      "resources": [],
+      "description": "Replace the fixed 10 s poll with the low-cost defaults: check every 30 minutes, every 60 s only during an active rollout window, jittered exponential backoff after failures, local timers for maintenance windows and scheduled starts, and an ordered list of RPC endpoints (Mysten public endpoint first for pilots; a paid plan or SuiFleet's own node later).",
+      "evidence": "poll_seconds defaults to 10 (suifleet-edge/config.example.toml:51; config.rs:990). Failed polls retry without backoff or jitter (linux_main.rs:470-472), so 1,000 devices retry in lockstep after an outage. A maintenance window shorter than the poll can be missed (control.rs:55-57). The manifest pins one RPC endpoint. User decision 2026-10-23: 30-minute or 1-hour defaults, configurable per customer. Live probe 2026-10-23: Chainstack and Mysten public nodes both serve every call the daemon uses. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Defaults: update check every 30 minutes; 60 s checks while a rollout window is active; both configurable within bounds, with local config as the fallback until SF-130 supplies on-chain settings.",
+        "Jittered exponential backoff on failures; a test shows simultaneous failures do not retry in lockstep.",
+        "Maintenance windows and scheduled starts are armed as local timers from the record's controls, so they are not missed when shorter than the check interval.",
+        "An ordered RPC endpoint list in the manifest/config with failover on unavailable, rate-limited (HTTP 429 or RESOURCE_EXHAUSTED) and timeout errors. Every endpoint must report the manifest chain identity; a mismatch is rejected, not failed over to.",
+        "Update rollout guidance so offline_timeout_ms exceeds the check interval plus apply time; existing tests that pin fast polling keep working."
+      ],
+      "validation": "cargo tests for cadence, jitter, timers and failover; OTA simulator including endpoint failure and rate-limit injection; staged-rollout localnet test at the new defaults."
+    },
+    {
+      "key": "SF-124",
+      "title": "Download artifacts from public Walrus aggregators with fallback and ranged requests",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "manifests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let devices fetch artifacts from public Walrus aggregators instead of one pinned aggregator, so artifact delivery needs no SuiFleet server: an ordered mirror list with fallback, ranged downloads within public request limits, and unchanged SHA-256 verification against the signed recipe.",
+      "evidence": "The daemon uses one manifest-pinned aggregator with no fallback (config.rs:672-675, 830-835); downloads already support Range resume and verify SHA-256 against the on-chain digest (walrus_client.rs:144-320; components.rs:325-330). Walrus docs report that most public endpoints cap requests at 10 MiB (docs.wal.app/docs/network-reference); 44 of 60 listed mainnet aggregators have caching on (docs.wal.app/operators.json, read 2026-10-23). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "An ordered aggregator list in the manifest/config, falling back per mirror on errors, with Range chunks of a configurable size that stay under public request limits, plus resume.",
+        "Read-only measurement against at least three public mainnet aggregators for blobs above 10 MiB: whether the limit applies to reads, ranged throughput and cache behaviour, recorded in docs.",
+        "Digest verification is unchanged, and a corrupt or truncated mirror response is rejected and retried elsewhere."
+      ],
+      "validation": "cargo tests with simulated mirrors (failure, truncation, wrong bytes, range limits); OTA simulator; documented read-only public-aggregator measurements."
+    },
+    {
+      "key": "SF-125",
+      "title": "Device inbox, group heads and per-member group index",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-122"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "interfaces",
+        "suifleet-edge/src",
+        "dapp/src",
+        "suifleet-indexer",
+        "docs/SHARED_INTERFACES.md"
+      ],
+      "resources": [],
+      "description": "Additive Move upgrade so devices read their current state from objects rather than reconstructing it from event history: a per-device inbox object (sequence, latest deployment, next scheduled start), a head field on each group bumped by the deployment transaction, and a per-member group index. This lets fleets run on Mysten's public node, which keeps only ~14 days of events, removes package-wide scans across tenants and lifts the ~7,800-member group cap.",
+      "evidence": "DeploymentCreated is a non-generic type with no registry or fleet field (deployment_manager.move:145-154), so ListEvents returns every tenant's deployments and each device spends 3 reads per foreign event (sui_client.rs:814-845). Group membership is rebuilt by scanning DeviceAddedToGroup from genesis (linux_main.rs:1065-1081) and reading the full 68 KB member vector (sui_client.rs:834-845; device_group.move:21-26). Mysten's public node keeps ~14 days of history and rejects older ranges with OUT_OF_RANGE (live probe 2026-10-23). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Additive, upgrade-compatible API following AGENTS.md: existing public signatures, layouts and abilities preserved; old package entry points cannot bump heads or inboxes; only the deployment creator, who must be the device operator or group admin, can announce.",
+        "Announce calls are appended to the deployment PTBs built by the dApp and indexer; the inbox carries the next scheduled start so devices arm a local timer, and scheduled rollouts start on time whatever the check interval.",
+        "The daemon reads inbox and group-head versions in its single batch (SF-122) and fetches records directly; a slow event scan remains as a bounded safety net for old packages and clients.",
+        "A device offline longer than the node's history window resynchronizes from objects alone.",
+        "A MemberKey dynamic-field index with migration for existing members; contains_device is O(1); a group read drops to about 0.2 KB.",
+        "Old-package/new-package and existing-object upgrade tests on localnet and testnet."
+      ],
+      "validation": "Move unit and upgrade tests; daemon and OTA simulator tests; localnet resync test with history pruned below the device cursor; testnet upgrade acceptance per AGENTS.md."
+    },
+    {
+      "key": "SF-126",
+      "title": "Stop full-history scans and per-device sweeps in the dApp and indexer",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "suifleet-indexer/src",
+        "scripts/retention_worker.py",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "Make the dashboard and owner tools work within a public node's ~14-day event history and its request guidance: cursor-incremental, sender-filtered event scans, batched object reads, slower refresh, and explicit 'history unavailable' states instead of silently empty results.",
+      "evidence": "allEvents pages the entire package history (dapp/src/lib/sui.ts:277-289) every 10 s (useDeployments.ts:16) and every 30 s for alerts; the budget page calls fetchAccount for every device every 15 s (FleetBudget.tsx:194-198). The indexer's device sweep re-reads 500 devices x 3 objects every 2 s (indexer.rs:94-95, 140-146). The retention worker lists every FleetStorage dynamic field every 30 s (retention_worker.py:251). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Event views scan incrementally from a persisted cursor with sender/type filters; current state comes from objects (records, groups, inbox when SF-125 lands) via BatchGetObjects.",
+        "Ranges older than the endpoint's lowestAvailableCheckpoint show an explicit 'history unavailable' state, never an empty success.",
+        "Refresh intervals default to 60 s; the budget page batches account reads.",
+        "The indexer's device sweep runs every 10 to 15 minutes; the retention worker checks hourly.",
+        "Measured request rate per open dashboard tab at 1,000 devices stays within the public endpoint's guidance."
+      ],
+      "validation": "Frontend typecheck, production build and existing browser tests; request-count test against a fixture fleet; indexer and retention-worker tests."
+    },
+    {
+      "key": "SF-127",
+      "title": "Shard deployment receipts to remove the per-deployment cap and contention",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "interfaces",
+        "suifleet-indexer",
+        "dapp/src",
+        "suifleet-edge/src"
+      ],
+      "resources": [],
+      "description": "Replace the single receipts map on each DeploymentRecord with bounded shards keyed by device ID, so a deployment can accept ~120,000 receipts, reports stop contending on one object, and a device's float covers the storage it must front.",
+      "evidence": "Receipts live in one VecMap<ID,u8> under ReceiptsKey, scanned linearly and rewritten on every report (deployment_manager.move:64-67, 416-459). Each entry is 33 B (measured 250,800 MIST = 33 x 7,600; docs/business/FLEET_COST_MODEL.md). At 1,000 targets the field is ~33 KB, so each reporting device must front ~0.25 SUI of storage before the 99.99% rebate, more than its 0.06 SUI float; the object caps near ~7,500 receipts. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "16 bounded shards (ReceiptShardKey) keyed by device ID; RECEIPTS_VERSION 3 copies existing v2 statuses on migration; the v2 package path aborts as authority rules require.",
+        "receipt_statuses() keeps its signature; receipt_status reads the shards; delete_deployment drains them so nothing is orphaned.",
+        "Indexer, dApp and daemon readers updated; SF-001 old-package attack tests extended to the new layout.",
+        "Measured gross storage fronted per receipt at 1,000 targets fits inside the default gas float."
+      ],
+      "validation": "Move unit, migration and old-package attack tests; localnet 1,000-target receipt test with float-sized gas budgets; testnet upgrade acceptance per AGENTS.md."
+    },
+    {
+      "key": "SF-128",
+      "title": "Lift the fleet's 1,024 protected-blob cap and stop expired blobs halting registration",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/fleet_storage",
+        "scripts/retention_worker.py",
+        "scripts",
+        "dapp/src",
+        "docs/RETENTION_RENEWAL.md"
+      ],
+      "resources": [],
+      "description": "Make protected retention scale with fleet size: store protected blobs so registration is O(1), remove the 1,024-blob fleet-wide cap, and stop one expired blob from blocking every new registration. Archives bought for their full retention up front should not consume protection capacity.",
+      "evidence": "fleet_storage caps protected blobs at 1,024 fleet-wide (fleet_storage.move:343-345) and every registration loads all of them (fleet_storage.move:857-861); any expired protected blob halts registrations (docs/RETENTION_RENEWAL.md:292-306). With the low-cost default of weekly per-device log archives, 1,000 devices fill the cap in about a week. Coordinate with SF-121 (archive quilting). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Protected blobs held in a Table or dynamic fields keyed by blob ID with O(1) registration and removal; additive and upgrade-compatible.",
+        "An expired protected blob is handled per blob and never blocks unrelated registrations.",
+        "Archives purchased for their full retention are excluded from renewal protection, or counted separately; releases and recipes keep renewal.",
+        "Measured registration gas stays flat from 10 to 10,000 protected blobs."
+      ],
+      "validation": "Move unit and upgrade tests; localnet scale test; retention-worker tests; testnet upgrade acceptance per AGENTS.md."
+    },
+    {
+      "key": "SF-129",
+      "title": "Reclaim storage deposits from expired archives, anchors and finished deployments",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-128"
+      ],
+      "paths": [
+        "contracts/fleet_data",
+        "contracts/fleet_storage",
+        "contracts/sources",
+        "scripts",
+        "dapp/src",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Recover the 99.99% storage rebate on objects the fleet no longer needs. The low-cost price assumes this: without it each weekly log archive keeps ~0.021 SUI locked, so archives cost ~$0.10 per device per month instead of ~$0.004.",
+      "evidence": "Per-device archive transactions lock ~21M MIST each, mostly storage deposits (docs/validation/sf082-device-effects.json); anchors are two permanent dynamic fields with no delete API (docs/SERVERLESS_FLEET_DATA.md:109-111). Deleting a finished DeploymentRecord returned 11.75M MIST on Testnet (docs/business/FLEET_COST_MODEL.md). No code deletes expired blobs or anchors today. Coordinate with SF-121. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "An owner-authorized prune_anchors for expired archive anchors, plus release and burn of expired Walrus blob objects; additive.",
+        "Deletion of finished DeploymentRecords that no group's desired state references, with catalog bindings removed first; devices already refuse deleted records.",
+        "Automation in the dApp or retention worker, with dry-run previews and the recoverable SUI shown before signing.",
+        "Measured net cost per weekly archive after reclaim, and the locked deposit per device at the default retention."
+      ],
+      "validation": "Move unit and upgrade tests; localnet lifecycle test measuring rebates; worker/dApp tests; testnet effects-checked run."
+    },
+    {
+      "key": "SF-130",
+      "title": "On-chain per-fleet cost settings that devices read",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-123"
+      ],
+      "paths": [
+        "contracts",
+        "interfaces",
+        "suifleet-edge/src",
+        "dapp/src",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let each customer fleet choose the settings that drive its cost, with contract-enforced bounds: update-check interval (default 30 min), rollout fast-check interval (default 60 s, or off), on-chain health interval (default daily), log-archive cadence (default weekly) and retention (default 6 weeks). Devices pick up changes within one check.",
+      "evidence": "User decision 2026-10-23: sensible defaults, configurable per customer, with the cost shown and prepaid. fleet_data already enforces health-interval bounds of 1 minute to 1 day (fleet_data.move:84, 127); the check interval is local-only today (config.toml poll_seconds). Price list and per-setting costs are in docs/BUSINESS_PLAN.md (2026-10-23 proposal). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Settings stored on chain per fleet with bounds that keep request rates within public-endpoint guidance; additive and upgrade-compatible; only the fleet owner can change them.",
+        "The daemon reads settings in its batched check and applies them within one interval; local config can only tighten, not exceed, on-chain bounds.",
+        "Defaults match the business plan; changing a setting emits an auditable event."
+      ],
+      "validation": "Move unit and upgrade tests; daemon and OTA simulator tests for setting changes; testnet upgrade acceptance per AGENTS.md."
+    },
+    {
+      "key": "SF-131",
+      "title": "Fleet settings page with live cost and a prepaid deposit sized from the settings",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-130"
+      ],
+      "paths": [
+        "dapp/src",
+        "docs/FLEET_BUDGET.md",
+        "docs/BUSINESS_PLAN.md"
+      ],
+      "resources": [],
+      "description": "Show each cost setting's per-device and per-fleet monthly cost before saving, and size the prepaid fleet-budget deposit from the chosen settings, keeping network cost and the SuiFleet price visibly separate.",
+      "evidence": "The estimator uses Testnet MIST constants with Mainnet WAL rates (dapp/src/lib/network-costs.ts:7-27, 146-167), and its defaults assume 720 health reports and 30 archives a month (components/FleetBudget.tsx:29-34), which no longer match the low-cost defaults. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Settings UI for the SF-130 fields showing per-option cost per device and per fleet, with the defaults and add-on prices from docs/BUSINESS_PLAN.md held in one configurable price table, not scattered constants.",
+        "The estimator uses Mainnet-rescaled measured constants and live gas/WAL quotes, with their date shown.",
+        "The deposit recommendation follows the chosen settings and fleet size; saving settings without enough deposit warns before signing."
+      ],
+      "validation": "Frontend typecheck, production build, unit tests for the estimator, and browser tests for the settings flow."
+    },
+    {
+      "key": "SF-132",
+      "title": "Enroll device gas accounts in batched transactions",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src"
+      ],
+      "resources": [],
+      "description": "Enroll fleet-budget gas accounts 200 to 500 per transaction instead of one per device, so a 1,000-device fleet needs a handful of wallet approvals.",
+      "evidence": "The budget page enrolls one device per transaction (dapp/src/lib/fleet-budget.ts:163-168), about 1,000 approvals for 1,000 devices; enroll_device takes &mut budget and an owned cap (fleet_budget.move:330-336), so batching in one PTB is feasible. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Chunked PTBs within transaction size and gas limits, with progress, partial-failure reporting and safe resume.",
+        "Measured gas per chunk and approvals per 1,000 devices recorded."
+      ],
+      "validation": "Frontend typecheck, build and tests; localnet batch-enrollment test."
+    },
+    {
+      "key": "SF-133",
+      "title": "Fetch Seal keys from a threshold of servers and reuse cached group reads",
+      "priority": "P2",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src"
+      ],
+      "resources": [],
+      "description": "Request decryption keys from only as many Seal servers as the threshold needs, falling back to others on failure, and reuse the poll's cached group state instead of rereading policy and groups on every decrypt. Seal key-server plans bill per request.",
+      "evidence": "fetch_key contacts every listed server, not a threshold subset (seal_client.rs:608-609), and each decrypt rereads the policy and full groups (seal_client.rs:514-549). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Threshold-first key fetching with deterministic fallback; decryption semantics and failure modes unchanged.",
+        "Group/policy reads come from the poll's cache with version checks."
+      ],
+      "validation": "cargo tests including server failure and threshold edge cases; existing Seal delivery tests."
+    },
+    {
+      "key": "SF-134",
+      "title": "Indexer shows foreign deployments in a device's history",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "suifleet-indexer/src"
+      ],
+      "resources": [],
+      "description": "The indexer's per-device deployment query accepts any direct device target regardless of who created the deployment, so anyone can create a deployment naming a device ID and it appears in that device's history and dashboards, although the daemon would refuse it.",
+      "evidence": "suifleet-indexer/src/store.rs:615-628: for the device filter, group targets require g.admin = d.creator, but direct device targets have no creator check. The daemon's authorization rule requires the creator to be the device's operator (suifleet-edge/src/sui_client.rs:814-832). Found in the 2026-10-23 cost review. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Direct device targets match only when the deployment creator is the device's operator, mirroring the daemon's rule, including delegated deployments where the daemon accepts them.",
+        "A regression test shows a foreign-creator deployment targeting a device is excluded from /v1/deployments?device=, while authorized direct and group deployments still appear."
+      ],
+      "validation": "Indexer unit/integration tests with authorized, delegated and foreign creators."
+    },
+    {
+      "key": "SF-135",
+      "title": "Measure the low-cost configuration's bill on Mainnet",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-122",
+        "SF-123",
+        "SF-125",
+        "SF-127",
+        "SF-129",
+        "SF-130",
+        "SF-087"
+      ],
+      "paths": [
+        "scripts",
+        "docs/business",
+        "docs/BUSINESS_PLAN.md"
+      ],
+      "resources": [],
+      "description": "Replace the business plan's Testnet-rescaled estimates with a measured Mainnet bill for the default low-cost configuration: receipts, daily health, weekly archives after reclaim, owner uploads, deposits recovered, and requests per device on the public endpoint. Also depends on SF-087 (Mainnet deployment) and SF-121 (archive cost work) through native issue links.",
+      "evidence": "Every gas figure in docs/BUSINESS_PLAN.md's 2026-10-23 pricing proposal is Testnet evidence rescaled to Mainnet's 100 MIST gas price; no Mainnet transaction has run (docs/business/FLEET_COST_MODEL.md). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A small Mainnet pilot fleet (real or emulated devices) runs the default settings for at least two weeks; record every transaction digest, effects, gas, storage charged and rebated, WAL, and recovered deposits.",
+        "Measure actual requests per device and endpoint behaviour on Mysten's public node, plus aggregator downloads.",
+        "Update the business plan's cost-to-serve and margin tables with measured values and clearly mark what is still estimated.",
+        "Mainnet spending happens only under explicit user authorization for that run, per AGENTS.md."
+      ],
+      "validation": "Effects-checked Mainnet evidence committed under docs/business; reproducible accounting script; independent review of the updated tables."
+    },
+    {
+      "key": "SF-137",
+      "title": "Remove the server indexer from the product path",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "suifleet-edge/src",
+        "suifleet-indexer",
+        "scripts",
+        "manifests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SuiFleet must operate no application servers. Every product feature must work with no HTTP indexer configured: health and fleet visibility from signed on-chain health, logs and diagnostics from Walrus, alerts derived in the dApp, and history and operations read directly from the chain. Customers who want their own pipeline integrate it themselves (SF-143); the indexer is not SuiFleet infrastructure.",
+      "evidence": "User decision 2026-10-23: no servers in the solution; customers may integrate their own storage. Code audit of main ab621e7: dApp hooks/useFleetAlerts.ts, hooks/useFleetHealth.ts, lib/telemetry.ts, lib/alerts.ts, lib/fleet-data.ts, lib/fleet-recovery.ts, app/page.tsx, app/services/page.tsx and app/devices/page.tsx read the indexer; the daemon ships heartbeats and logs over HTTP (suifleet-edge/src/telemetry.rs, logs.rs; config.rs makes HTTP telemetry and fleet_data mutually exclusive); docs/TELEMETRY.md says the daemon still uses the HTTP path; CloudWatch metrics exports pass indexer signature verification (docs/CLOUDWATCH_METRICS.md:97); support log search, the ops CLI and indexer transaction builds (docs/INDEXER.md, docs/LOGS.md) assume the server; owner-run processes (scripts/retention_worker.py, fleet_alert_relay.cjs) must also be hosted by someone. SF-084 already serves dashboard views without an indexer (docs/DASHBOARD_VIEWS.md). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "An inventory of every indexer-dependent feature in the daemon, dApp, CLI, scripts and docs, each mapped to its serverless replacement or to a customer-owned integration.",
+        "The daemon defaults to serverless mode: on-chain health and Walrus data. HTTP telemetry and log shipping become an optional customer-owned integration, and the exclusivity between HTTP telemetry and fleet_data is removed or made explicit.",
+        "Every dApp view and alert works with no indexer configured; no default manifest or build points at a SuiFleet-hosted indexer.",
+        "Fleet visibility metrics now carried by HTTP heartbeats (messaging, streams, shadows, services) are carried by the bounded on-chain health summary or Walrus data instead.",
+        "The ops CLI and bulk transaction building read and build against the chain directly.",
+        "Owner-run background processes are replaced by dApp-triggered actions, prepaid mechanisms or device-side work, or documented as optional customer-run tools; SuiFleet hosts none.",
+        "The indexer code is removed from the product build or clearly marked as an optional, customer-hosted reference integration; docs updated accordingly."
+      ],
+      "validation": "dApp typecheck, production build and browser tests with no indexer URL; daemon and OTA simulator tests in serverless mode; a localnet end-to-end run with no HTTP services; documentation consistency checks."
+    },
+    {
+      "key": "SF-138",
+      "title": "Gate staged rollouts on signed on-chain health instead of server telemetry",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/rollout.ts",
+        "dapp/src",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "docs/STAGED_ROLLOUTS.md"
+      ],
+      "resources": [],
+      "description": "The staged-rollout health gate requires signed telemetry no older than 120 seconds, which only the HTTP indexer provides. Replace it with a serverless signal: the device writes a bounded on-chain health report immediately after applying a deployment, outside its normal cadence, and the gate judges freshness relative to the deployment grant rather than wall-clock seconds.",
+      "evidence": "dapp/src/lib/rollout.ts:45-54 requires fresh signed health within 120 s via fetchFleetHealth (lib/telemetry.ts). Low-cost defaults make on-chain health daily (docs/BUSINESS_PLAN.md, SF-130/#265), so the current gate cannot pass without the server. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A post-apply health report written on chain right after a deployment outcome, exempt from the normal cadence but bounded per deployment so it cannot be abused; additive Move change if needed.",
+        "The rollout gate admits the next wave from receipts plus post-apply health for this deployment, with timeouts and failure thresholds unchanged in meaning.",
+        "No dependence on the HTTP indexer; behaviour documented in docs/STAGED_ROLLOUTS.md."
+      ],
+      "validation": "Move unit and upgrade tests if contracts change; dApp rollout unit and browser tests; localnet staged-rollout run with daily default health and no indexer."
+    },
+    {
+      "key": "SF-139",
+      "title": "Store any device data on Walrus",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "contracts/fleet_data",
+        "contracts/fleet_storage",
+        "interfaces",
+        "sdk",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let customer components put arbitrary device data on Walrus: files, blobs, durable stream contents, sensor batches, logs or anything else, treated as opaque bytes. Data is batched on the device, encrypted with Seal, stored on fleet storage and indexed on chain, using the same device-local batching as the log archives.",
+      "evidence": "User requirement 2026-10-23: the data stored from a device should not matter; customers can put anything. Today only daemon/component logs and diagnostics reach Walrus (docs/SERVERLESS_FLEET_DATA.md); component streams leave the device only through HTTP or AWS exporters (docs/STREAMS.md, docs/STREAM_EXPORTERS.md). Coordinate with SF-121/#252 (Codex), which implements device-local quilting for log archives: reuse its batching and archive index rather than build a second one. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A device-side API for components (IPC and CLI) to submit opaque data items with a stream or key name, content type and optional metadata; durable streams can be configured to flush to Walrus.",
+        "Items are spooled durably, batched, Seal-encrypted and written to fleet storage with an on-chain index entry per item (device, stream, key, sequence, size, content SHA-256, batch reference), bounded by the fleet's budget and storage quotas.",
+        "Per-item size limits and backpressure are explicit; large files are chunked; nothing is acknowledged or dropped before certified storage and its anchor are independently verified.",
+        "Data is opaque to SuiFleet: no schema is imposed, and authorized readers can retrieve and verify each item independently of its batch."
+      ],
+      "validation": "cargo tests and OTA simulator for intake, spooling, restart and quota limits; Move unit and upgrade tests for index changes; a localnet and bounded testnet round trip storing and retrieving mixed binary and text data."
+    },
+    {
+      "key": "SF-140",
+      "title": "Data section in the dApp for browsing, downloading and sharing device data",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "docs/DASHBOARD_VIEWS.md"
+      ],
+      "resources": [],
+      "description": "Add a Data section to the dApp: a fleet-wide browser for device data stored on Walrus, filterable by device, group, stream, key, content type and time, with in-browser decryption, download, preview for small text items, sharing grants and export to customer-owned storage. It runs entirely in the browser with no server.",
+      "evidence": "User requirement 2026-10-23: there should be a data portion of the dApp. Today the dApp decrypts log and diagnostic archives one device at a time (docs/SERVERLESS_FLEET_DATA.md); fleet-wide log search exists only through the indexer (docs/LOGS.md), which SF-137 removes. Start with existing log and diagnostic archives and add generic items when SF-139 lands. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A Data section listing items fleet-wide from the on-chain index with filters for device, group, stream, key, content type and time range, using incremental, bounded reads.",
+        "Authorized users decrypt and download items in the browser; small text and JSON items preview inline; integrity is checked against the indexed SHA-256.",
+        "Owners grant and revoke read access per stream or device through Seal policies, with the caveat that revocation does not affect data already decrypted.",
+        "Items or filtered sets export directly from the browser to customer-owned storage (S3-compatible presigned upload or HTTP), with credentials kept in the browser session only.",
+        "Clear empty, loading, unavailable-history and access-denied states."
+      ],
+      "validation": "dApp typecheck, production build, unit tests and browser tests against fixture data, including decryption, filtering, sharing and export."
+    },
+    {
+      "key": "SF-141",
+      "title": "Per-stream retention and expiry for device data",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/fleet_storage",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "dapp/src",
+        "docs/RETENTION_RENEWAL.md"
+      ],
+      "resources": [],
+      "description": "Let owners set a retention period per data stream (for example 6 weeks, 6 months, 1 year, or custom up to the Walrus maximum), buy that retention when data is written so no renewal process is needed, and expire data automatically with its storage deposits recovered.",
+      "evidence": "Today periodic archives buy a fixed number of epochs and protected retention relies on an owner-run renewal worker (docs/RETENTION_RENEWAL.md), which SF-137 removes from SuiFleet operations; anchors are kept permanently (docs/SERVERLESS_FLEET_DATA.md). Coordinate with SF-128/#258 (protected-blob cap) and SF-129/#264 (deposit reclaim). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Retention settings per stream stored on chain with bounds, shown and edited in the dApp Data section and settings page.",
+        "Devices buy the configured retention at write time; retention beyond the Walrus maximum renews through a dApp-triggered or prepaid mechanism, not a SuiFleet-hosted worker.",
+        "Expired items drop from the index and their blob objects and anchors are reclaimed through SF-129's mechanisms."
+      ],
+      "validation": "Move unit and upgrade tests; daemon tests for retention at write; localnet lifecycle test through expiry and reclaim."
+    },
+    {
+      "key": "SF-142",
+      "title": "Meter and price device data storage",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "contracts/fleet_storage",
+        "docs/BUSINESS_PLAN.md",
+        "docs/FLEET_BUDGET.md"
+      ],
+      "resources": [],
+      "description": "Measure each fleet's device-data usage (bytes written and bytes stored over time) and show its cost and price before customers commit, using the proposed data add-on: an included allowance per device, then a per-GB write price and per-GB-month storage price.",
+      "evidence": "docs/BUSINESS_PLAN.md (2026-10-23) proposes pricing device data per GB. Walrus costs about $0.018 per GB written and $0.021 per GB-month stored at 2026-10-23 rates, against CloudWatch Logs ingestion at $0.50 per GB. fleet_storage already keeps usage counters. Extends the settings and deposit work in SF-131/#266. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Per-fleet and per-stream usage (written and stored bytes) derived from on-chain records and shown in the dApp.",
+        "Cost and SuiFleet price for data shown live from one configurable price table, including the included allowance; the prepaid deposit accounts for expected data volume.",
+        "Usage figures reconcile with on-chain storage records in tests."
+      ],
+      "validation": "dApp typecheck, build and unit tests for metering and pricing; reconciliation test against localnet storage records."
+    },
+    {
+      "key": "SF-143",
+      "title": "Export device data directly to customer-owned storage without SuiFleet servers",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "sdk",
+        "scripts",
+        "docs/STREAMS.md",
+        "docs/STREAM_EXPORTERS.md",
+        "docs/CLOUDWATCH_METRICS.md"
+      ],
+      "resources": [],
+      "description": "Support customers who want device data in their own storage: devices export streams and data directly to any S3-compatible service (AWS S3, Cloudflare R2, Google Cloud Storage's S3 API, MinIO) or an HTTP endpoint the customer runs, with customer-provided credentials, and no SuiFleet-hosted hop.",
+      "evidence": "Existing exporters are AWS-specific Python companions (Kinesis, S3, Firehose, CloudWatch Logs; docs/STREAM_EXPORTERS.md, docs/FIREHOSE.md) and CloudWatch metrics exports first pass indexer verification (docs/CLOUDWATCH_METRICS.md:97). User decision 2026-10-23: customers may integrate their own storage, but SuiFleet runs no servers. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A generic S3-compatible exporter (configurable endpoint, region, bucket, path layout) and HTTP exporter for durable streams and device data, with credentials supplied and stored on the device as customer secrets.",
+        "No export path depends on the SuiFleet indexer; the CloudWatch metrics verification step moves to the device or is documented as customer-side.",
+        "Exports are durable and resumable with bounded retries, and report export lag and failures in the on-chain health summary."
+      ],
+      "validation": "cargo or Python exporter tests against MinIO and an HTTP fixture; restart and failure-injection tests; documentation consistency checks."
+    },
+    {
+      "key": "SF-144",
+      "title": "Read Walrus data directly from storage nodes when aggregators are unavailable",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/Cargo.toml",
+        "suifleet-edge/meta-suifleet",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let the daemon fetch Walrus slivers directly from storage nodes and reconstruct blobs on the device when public aggregators fail, are rate-limited or cap request sizes. This removes any need for SuiFleet to run aggregators: devices use public aggregators first and fall back to direct reads.",
+      "evidence": "User decision 2026-10-23: SuiFleet runs no servers; Walrus aggregators were only included in the cost model as a conservative large-scale assumption. Public aggregators have no SLA and many cap requests at 10 MiB (docs.wal.app/docs/network-reference). Walrus reads are free at the protocol level. The Rust walrus-core crate is publish=false and pins Rust 1.96 against our 1.94 baseline (walrus mainnet-v1.58.1). Complements SF-124/#255 (aggregator fallback list and ranged downloads). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Measure direct-read feasibility on a Raspberry Pi 3 B+ class device for 50 MB and 200 MB blobs: peak memory, CPU time, connections and wall-clock time, recorded in docs.",
+        "If feasible, implement direct reads as a fallback after the aggregator list, with digest verification unchanged and bounded memory (streaming or chunked reconstruction).",
+        "Resolve the dependency and toolchain issue with a reviewed approach (pinned git dependency, vendored minimal reader, or a documented toolchain bump) that keeps Yocto LTS builds working.",
+        "If not feasible on Pi-class hardware, document the limit and the supported alternatives; do not introduce a SuiFleet-hosted aggregator."
+      ],
+      "validation": "Benchmarks on Pi-class hardware or a faithful QEMU/arm64 emulation recorded with exact versions; cargo tests with simulated aggregator failure; a bounded read-only test against Walrus Mainnet or Testnet storage nodes."
+    },
+    {
       "key": "SF-121",
       "title": "Reduce serverless fleet telemetry and log costs; validate subscription economics",
       "priority": "P1",

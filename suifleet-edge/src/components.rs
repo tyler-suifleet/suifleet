@@ -255,28 +255,78 @@ pub async fn recipe(
     blob_id: &str,
     sha256: &str,
 ) -> anyhow::Result<Authentic> {
-    let plain = |bytes: &[u8]| Ok(Authentic { recipe: serde_json::from_slice(bytes)?, confidential: false });
+    let plain = |bytes: &[u8]| {
+        Ok(Authentic {
+            recipe: serde_json::from_slice(bytes)?,
+            confidential: false,
+        })
+    };
     let store = store.filter(|_| !walrus.confidential_only());
     if let Some(bytes) = store.and_then(|s| s.recipe(sha256)) {
         return plain(&bytes);
     }
+    tokio::time::timeout(walrus.deadline(), async {
+        let mut error = anyhow::anyhow!("no Walrus mirrors configured");
+        for mirror in walrus.mirrors() {
+            match tokio::time::timeout(
+                walrus.mirror_deadline(),
+                recipe_from_mirror(&mirror, store, blob_id, sha256),
+            )
+            .await
+            {
+                Ok(Ok(recipe)) => return Ok(recipe),
+                Ok(Err(e)) => error = e,
+                Err(_) => error = anyhow::anyhow!("recipe mirror deadline exceeded"),
+            }
+        }
+        Err(error)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("recipe mirror deadline exceeded"))?
+}
+
+async fn recipe_from_mirror(
+    walrus: &WalrusClient,
+    store: Option<&Store>,
+    blob_id: &str,
+    sha256: &str,
+) -> anyhow::Result<Authentic> {
     let bytes = walrus.recipe_bytes(blob_id).await?;
     if crate::seal::is_envelope(&bytes) {
-        let plaintext = walrus.open(bytes, crate::seal::Kind::Recipe, sha256).await?;
+        let plaintext = walrus
+            .open(bytes, crate::seal::Kind::Recipe, sha256)
+            .await?;
         let recipe = serde_json::from_slice(&plaintext).map_err(|error| {
             // Its category and position are content-free; its message is not.
-            withheld(&format!("parsing ({:?} error at line {} column {})", error.classify(), error.line(), error.column()))
+            withheld(&format!(
+                "parsing ({:?} error at line {} column {})",
+                error.classify(),
+                error.line(),
+                error.column()
+            ))
         })?;
-        return Ok(Authentic { recipe, confidential: true });
+        return Ok(Authentic {
+            recipe,
+            confidential: true,
+        });
     }
-    anyhow::ensure!(!walrus.confidential_only(), "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery");
-    anyhow::ensure!(hex::encode(Sha256::digest(&bytes)) == sha256, "recipe SHA-256 mismatch");
+    anyhow::ensure!(
+        !walrus.confidential_only(),
+        "unencrypted recipe refused: [seal] mode = \"required\" accepts only confidential delivery"
+    );
+    anyhow::ensure!(
+        hex::encode(Sha256::digest(&bytes)) == sha256,
+        "recipe SHA-256 mismatch"
+    );
     if let Some(store) = store {
         if let Err(error) = store.save_recipe(sha256, &bytes) {
             warn!(%error, "Cannot cache recipe");
         }
     }
-    plain(&bytes)
+    Ok(Authentic {
+        recipe: serde_json::from_slice(&bytes)?,
+        confidential: false,
+    })
 }
 
 /// Write decrypted plaintext beside `dest` (owner-only) and move it into place.
@@ -315,11 +365,57 @@ pub async fn artifact(
             return Ok(());
         }
     }
+    tokio::time::timeout(walrus.deadline(), async {
+        let mut error = anyhow::anyhow!("no Walrus mirrors configured");
+        for (index, mirror) in walrus.mirrors().enumerate() {
+            // Start each fallback mirror cleanly. The first attempt can resume
+            // persisted bytes; the final digest authenticates the entire file.
+            if index > 0 {
+                WalrusClient::discard_partial(dest)?;
+            }
+            match tokio::time::timeout(
+                walrus.mirror_deadline(),
+                artifact_from_mirror(&mirror, blob_id, sha256, dest),
+            )
+            .await
+            {
+                Ok(Ok(())) => return Ok(()),
+                outcome => {
+                    let e = match outcome {
+                        Ok(Err(e)) => e,
+                        _ => anyhow::anyhow!("artifact mirror deadline exceeded"),
+                    };
+                    let _ = std::fs::remove_file(dest);
+                    error = e;
+                }
+            }
+        }
+        // A complete corrupt candidate must not poison the next poll's resume.
+        Err(error)
+    })
+    .await
+    .map_err(|_| anyhow::anyhow!("artifact mirror deadline exceeded"))??;
+    if let Some(store) = store {
+        if let Err(error) = store.save_artifact(walrus, sha256, dest) {
+            warn!(%error, "Cannot cache artifact");
+        }
+    }
+    Ok(())
+}
+
+async fn artifact_from_mirror(
+    walrus: &WalrusClient,
+    blob_id: &str,
+    sha256: &str,
+    dest: &Path,
+) -> anyhow::Result<()> {
     let actual = walrus.download(blob_id, dest).await?;
     if actual != sha256 && is_envelope_file(dest)? {
         let ciphertext = std::fs::read(dest)?;
         let _ = std::fs::remove_file(dest);
-        let plaintext = walrus.open(ciphertext, crate::seal::Kind::Artifact, sha256).await?;
+        let plaintext = walrus
+            .open(ciphertext, crate::seal::Kind::Artifact, sha256)
+            .await?;
         return replace_private(dest, &plaintext);
     }
     anyhow::ensure!(
@@ -331,11 +427,6 @@ pub async fn artifact(
     if walrus.confidential_only() {
         let _ = std::fs::remove_file(dest);
         anyhow::bail!("unencrypted artifact refused: [seal] mode = \"required\" accepts only confidential delivery");
-    }
-    if let Some(store) = store {
-        if let Err(error) = store.save_artifact(walrus, sha256, dest) {
-            warn!(%error, "Cannot cache artifact");
-        }
     }
     Ok(())
 }

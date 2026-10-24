@@ -40,7 +40,7 @@ export async function fetchRetention(client: SuiGrpcClient, storage: string, ori
         records.set(id, { id, end: record.end_epoch, encodedSize: BigInt(record.encoded_size) });
       }
       if (matches('RenewalKey')) renewals.set(bcs.Address.parse(entry.name.bcs), RenewalBcs.parse(entry.value.bcs));
-      if (records.size > 1024 || renewals.size > 1024) throw new Error('Retention view exceeds 1024 blobs; export and partition the fleet');
+      if (records.size > 100_000 || renewals.size > 100_000) throw new Error('Retention view exceeds local display safety bound; use paginated chain export');
     }
     cursor = page.hasNextPage ? page.cursor : undefined;
   } while (cursor);
@@ -52,7 +52,7 @@ export function retentionFacts(policy: RetentionView | undefined, blobs: Retaine
   if (!policy) return ['Retention is not configured; no scheduled renewal or alerts are guaranteed.'];
   const facts: string[] = [];
   if (BigInt(policy.wal.value) < BigInt(policy.pending_wal) || BigInt(policy.gas.value) < BigInt(policy.pending_count) * BigInt(policy.reward)) facts.push('Protected reserve is underfunded; discretionary writes pause.');
-  if (blobs.some((b) => !b.policy)) facts.push('Fleet blob closure is incomplete; discretionary writes pause until every fleet blob has a finite target.');
+  if (BigInt(policy.covered_count) !== BigInt(blobs.length)) facts.push('Fleet blob closure is incomplete; discretionary writes pause until every fleet blob has a finite target.');
   if (blobs.some((b) => b.policy && b.policy.last_success_epoch === null && b.policy.max_fee !== '0')) facts.push('Renewal capacity is not prepaid; discretionary writes pause until actual Walrus capacity is purchased.');
   if (epoch !== undefined && blobs.some((b) => b.end <= epoch)) facts.push('Blob expired: restore verified customer bytes and authorize an updated reference. Sui cannot reconstruct binaries.');
   if (epoch !== undefined && blobs.some((b) => b.end > epoch && b.end - epoch <= policy.margin)) facts.push('Renewal deadline approaching; check the owner-run worker and its persistent failure/delivery status.');

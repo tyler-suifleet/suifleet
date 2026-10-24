@@ -11,7 +11,10 @@ use tracing::{info, warn};
 
 const MAX_RECIPE_BYTES: usize = 1024 * 1024;
 
+#[derive(Clone)]
 pub struct WalrusClient {
+    aggregator_urls: Vec<String>,
+    range_chunk_bytes: u64,
     /// Seal decryption for confidential blobs (SF-022), when configured.
     seal: Option<std::sync::Arc<crate::seal_client::Seal>>,
     aggregator_url: String,
@@ -35,6 +38,12 @@ impl WalrusClient {
     pub fn new(config: &WalrusConfig) -> Self {
         Self {
             seal: None,
+            aggregator_urls: if config.aggregator_urls.is_empty() {
+                vec![config.aggregator_url.clone()]
+            } else {
+                config.aggregator_urls.clone()
+            },
+            range_chunk_bytes: config.range_chunk_bytes.clamp(1, 10 * 1024 * 1024),
             aggregator_url: config.aggregator_url.trim_end_matches('/').to_owned(),
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(30))
@@ -49,9 +58,42 @@ impl WalrusClient {
         }
     }
 
+    /// Reserve a bounded share of the blob deadline for each ordered mirror.
+    pub fn mirror_deadline(&self) -> Duration {
+        self.deadline / u32::try_from(self.aggregator_urls.len().max(1)).unwrap_or(u32::MAX)
+    }
+
+    /// One client per manifest mirror, preserving operator order.
+    pub fn mirrors(&self) -> impl Iterator<Item = Self> + '_ {
+        self.aggregator_urls.iter().map(|url| {
+            let mut client = self.clone();
+            client.aggregator_url = url.trim_end_matches('/').to_owned();
+            client
+        })
+    }
+
+    pub fn deadline(&self) -> Duration {
+        self.deadline
+    }
+
+    pub fn discard_partial(dest: &Path) -> anyhow::Result<()> {
+        match std::fs::remove_file(partial_path(dest)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e.into()),
+        }
+    }
+
     pub fn with_seal(mut self, seal: Option<std::sync::Arc<crate::seal_client::Seal>>) -> Self {
         self.seal = seal;
         self
+    }
+
+    /// Start a poll: Seal rereads access policies and groups once for it.
+    pub fn begin_poll(&self) {
+        if let Some(seal) = &self.seal {
+            seal.begin_poll();
+        }
     }
 
     /// Whether only Seal-encrypted recipes and artifacts may be applied.
@@ -61,9 +103,17 @@ impl WalrusClient {
 
     /// Decrypt a confidential blob (`MAGIC || EncryptedObject`) in memory and
     /// check its plaintext digest; returns the plaintext. Nothing is written.
-    pub async fn open(&self, mut blob: Vec<u8>, kind: crate::seal::Kind, sha256: &str) -> anyhow::Result<zeroize::Zeroizing<Vec<u8>>> {
+    pub async fn open(
+        &self,
+        mut blob: Vec<u8>,
+        kind: crate::seal::Kind,
+        sha256: &str,
+    ) -> anyhow::Result<zeroize::Zeroizing<Vec<u8>>> {
         let seal = self.seal.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("this {} is Seal-encrypted, but confidential delivery is not configured ([seal])", kind.as_str())
+            anyhow::anyhow!(
+                "this {} is Seal-encrypted, but confidential delivery is not configured ([seal])",
+                kind.as_str()
+            )
         })?;
         anyhow::ensure!(
             blob.len() as u64 <= seal.max_plaintext_bytes() + 64 * 1024,
@@ -94,7 +144,8 @@ impl WalrusClient {
         format!("{}/v1/blobs/{}", self.aggregator_url, blob_id)
     }
 
-    /// Raw recipe bytes; callers authenticate them against a SHA-256 digest.
+    /// Raw recipe bytes from one mirror; the component layer authenticates
+    /// them inside its mirror loop before parsing, caching or applying.
     pub async fn recipe_bytes(&self, blob_id: &str) -> anyhow::Result<Vec<u8>> {
         let bytes = self
             .retry(blob_id, || async {
@@ -186,9 +237,18 @@ impl WalrusClient {
     }
 
     async fn get(&self, blob_id: &str, offset: Option<u64>) -> Result<reqwest::Response, Failure> {
-        let mut request = self.http.get(self.url(blob_id));
+        let mut request = self
+            .http
+            .get(self.url(blob_id))
+            .header(reqwest::header::ACCEPT_ENCODING, "identity");
         if let Some(offset) = offset {
-            request = request.header(reqwest::header::RANGE, format!("bytes={offset}-"));
+            request = request.header(
+                reqwest::header::RANGE,
+                format!(
+                    "bytes={offset}-{}",
+                    offset.saturating_add(self.range_chunk_bytes - 1)
+                ),
+            );
         }
         let response = request
             .send()
@@ -210,90 +270,123 @@ impl WalrusClient {
     }
 
     async fn transfer(&self, blob_id: &str, partial: &Path) -> Result<(), Failure> {
-        let local = |e: std::io::Error| Failure::Permanent(e.into());
-        let mut offset = std::fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
-        let response = match self.get(blob_id, (offset > 0).then_some(offset)).await {
-            // Some servers reject a range starting at the exact end; restart cleanly.
-            Err(Failure::Permanent(_)) if offset > 0 => {
-                offset = 0;
-                std::fs::remove_file(partial).map_err(local)?;
-                self.get(blob_id, None).await?
+        let mut first_request = true;
+        loop {
+            let local = |e: std::io::Error| Failure::Permanent(e.into());
+            let mut offset = std::fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
+            let response = match self.get(blob_id, Some(offset)).await {
+                // A persisted partial may already end at EOF. Restart at most
+                // once, before any chunk has succeeded in this transfer.
+                Err(Failure::Permanent(_)) if first_request && offset > 0 => {
+                    offset = 0;
+                    std::fs::remove_file(partial).map_err(local)?;
+                    self.get(blob_id, Some(0)).await?
+                }
+                other => other?,
+            };
+            first_request = false;
+            let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+            if offset > 0 && !resumed {
+                offset = 0; // Range ignored: the body is the whole blob.
             }
-            other => other?,
-        };
-        let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
-        if offset > 0 && !resumed {
-            offset = 0; // Range ignored: the body is the whole blob.
-        }
-        if resumed {
-            let range = response
-                .headers()
-                .get(reqwest::header::CONTENT_RANGE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or_default();
-            if !range.starts_with(&format!("bytes {offset}-")) {
-                return Err(Failure::Permanent(anyhow::anyhow!(
-                    "aggregator resumed at the wrong offset ({range:?}, expected {offset})"
-                )));
+            let range_end = offset.saturating_add(self.range_chunk_bytes - 1);
+            let (expected_total, expected_end) = if resumed {
+                let range = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or_default();
+                let parsed = range
+                    .strip_prefix("bytes ")
+                    .and_then(|v| v.split_once('/'))
+                    .and_then(|(r, total)| r.split_once('-').map(|(a, b)| (a, b, total)))
+                    .and_then(|(a, b, t)| {
+                        Some((
+                            a.parse::<u64>().ok()?,
+                            b.parse::<u64>().ok()?,
+                            t.parse::<u64>().ok()?,
+                        ))
+                    });
+                let Some((start, end, total)) = parsed else {
+                    return Err(Failure::Permanent(anyhow::anyhow!(
+                        "invalid Content-Range {range:?}"
+                    )));
+                };
+                if start != offset || end < start || end > range_end || end >= total {
+                    return Err(Failure::Permanent(anyhow::anyhow!("aggregator resumed at the wrong offset or invalid range ({range:?}, expected {offset})")));
+                }
+                (Some(total), Some(end + 1))
+            } else {
+                // Legacy endpoints may ignore Range. Only accept a complete small response.
+                if response
+                    .content_length()
+                    .is_some_and(|n| n > self.range_chunk_bytes)
+                {
+                    return Err(Failure::Permanent(anyhow::anyhow!(
+                        "aggregator ignored bounded Range request"
+                    )));
+                }
+                (response.content_length(), response.content_length())
+            };
+            let directory = partial.parent().unwrap_or(Path::new("."));
+            if let Some(total) = expected_total {
+                self.check_space(directory, total, offset)?;
             }
-        }
-        let expected_total = response
-            .content_length()
-            .map(|remaining| offset + remaining);
-        let directory = partial.parent().unwrap_or(Path::new("."));
-        if let Some(total) = expected_total {
-            self.check_space(directory, total, offset)?;
-        }
-        // Bytes writable before free space must be checked again. Covers
-        // chunked/unknown-length bodies and space consumed by other writers.
-        let mut allowance = 0u64;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(resumed)
-            .truncate(!resumed)
-            .open(partial)
-            .map_err(local)?;
-        let mut length = offset;
-        let mut stream = response.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| Failure::Transient(e.into()))?;
-            let size = chunk.len() as u64;
-            length += size;
-            let refusal = if length > self.max_artifact_bytes {
-                Some(anyhow::anyhow!(
-                    "artifact exceeds the {} byte download limit",
-                    self.max_artifact_bytes
-                ))
-            } else if size > allowance {
-                allowance = self.writable(directory)?;
-                (size > allowance).then(|| {
-                    anyhow::anyhow!(
+            // Bytes writable before free space must be checked again. Covers
+            // chunked/unknown-length bodies and space consumed by other writers.
+            let mut allowance = 0u64;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .append(resumed)
+                .truncate(!resumed)
+                .open(partial)
+                .map_err(local)?;
+            let mut length = offset;
+            let mut stream = response.bytes_stream();
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(|e| Failure::Transient(e.into()))?;
+                let size = chunk.len() as u64;
+                length += size;
+                let refusal = if length > expected_end.unwrap_or(self.range_chunk_bytes) {
+                    Some(anyhow::anyhow!("response exceeds requested range"))
+                } else if length > self.max_artifact_bytes {
+                    Some(anyhow::anyhow!(
+                        "artifact exceeds the {} byte download limit",
+                        self.max_artifact_bytes
+                    ))
+                } else if size > allowance {
+                    allowance = self.writable(directory)?;
+                    (size > allowance).then(|| {
+                        anyhow::anyhow!(
                         "insufficient disk space: {} bytes reserved, artifact stopped at {} bytes",
                         self.min_free_bytes,
                         length - size
                     )
-                })
-            } else {
-                None
-            };
-            if let Some(error) = refusal {
-                drop(file);
-                let _ = std::fs::remove_file(partial);
-                return Err(Failure::Permanent(error));
+                    })
+                } else {
+                    None
+                };
+                if let Some(error) = refusal {
+                    drop(file);
+                    let _ = std::fs::remove_file(partial);
+                    return Err(Failure::Permanent(error));
+                }
+                allowance -= size;
+                file.write_all(&chunk).map_err(local)?;
             }
-            allowance -= size;
-            file.write_all(&chunk).map_err(local)?;
-        }
-        file.sync_all().map_err(local)?;
-        if let Some(total) = expected_total {
-            if length != total {
-                return Err(Failure::Transient(anyhow::anyhow!(
-                    "transfer ended at {length} of {total} bytes"
-                )));
+            file.sync_all().map_err(local)?;
+            if let Some(total) = expected_end {
+                if length != total {
+                    return Err(Failure::Transient(anyhow::anyhow!(
+                        "transfer ended at {length} of {total} bytes"
+                    )));
+                }
+            }
+            if !resumed || expected_total == Some(length) {
+                return Ok(());
             }
         }
-        Ok(())
     }
 
     /// Refuse a transfer that exceeds the artifact limit or would leave less
@@ -411,6 +504,20 @@ mod tests {
     where
         F: Fn(usize, Option<u64>) -> Vec<u8> + Send + Sync + 'static,
     {
+        raw_server(move |n, text| {
+            let range = text
+                .lines()
+                .find_map(|l| l.strip_prefix("range: bytes="))
+                .and_then(|r| r.split('-').next()?.parse().ok());
+            respond(n, range)
+        })
+        .await
+    }
+
+    async fn raw_server<F>(respond: F) -> (String, Arc<Mutex<Vec<Option<u64>>>>)
+    where
+        F: Fn(usize, &str) -> Vec<u8> + Send + Sync + 'static,
+    {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let seen = Arc::new(Mutex::new(Vec::new()));
@@ -425,13 +532,13 @@ mod tests {
                 let range = text
                     .lines()
                     .find_map(|l| l.strip_prefix("range: bytes="))
-                    .and_then(|r| r.trim_end_matches('-').parse().ok());
+                    .and_then(|r| r.split('-').next()?.parse().ok());
                 let number = {
                     let mut seen = log.lock().unwrap();
                     seen.push(range);
                     seen.len()
                 };
-                let _ = socket.write_all(&respond(number, range)).await;
+                let _ = socket.write_all(&respond(number, &text)).await;
                 let _ = socket.shutdown().await;
             }
         });
@@ -493,6 +600,7 @@ mod tests {
             min_free_bytes: free,
             download_attempts: 4,
             download_timeout_seconds: 3600,
+            ..Default::default()
         });
         client.backoff = Duration::from_millis(10);
         client
@@ -511,9 +619,169 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bounded_chunks_and_persisted_resume() {
+        let (url, seen) = raw_server(|_, text| {
+            let range = text.lines().find_map(|l| l.strip_prefix("range: bytes=")).unwrap();
+            let (a,b) = range.split_once('-').unwrap();
+            let a: usize = a.parse().unwrap(); let b: usize = b.parse().unwrap();
+            assert_eq!(b - a + 1, 8);
+            let b = b.min(BLOB.len()-1);
+            let mut out = format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {a}-{b}/{}\r\nConnection: close\r\n\r\n", b-a+1, BLOB.len()).into_bytes();
+            out.extend_from_slice(&BLOB[a..=b]); out
+        }).await;
+        let dest = dest("bounded");
+        std::fs::write(partial_path(&dest), &BLOB[..5]).unwrap();
+        let mut client = client(url, 1 << 20, 0);
+        client.range_chunk_bytes = 8;
+        crate::components::artifact(&client, None, "blob", &expected(), &dest)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![Some(5), Some(13), Some(21), Some(29)]
+        );
+    }
+
+    #[tokio::test]
+    async fn mid_transfer_permanent_errors_fail_fast_and_fall_back() {
+        for code in ["403 Forbidden", "404 Not Found", "410 Gone", "416 Range Not Satisfiable"] {
+            let (bad, bad_seen) = server(move |_, offset| {
+                if offset == Some(0) {
+                    let mut response = b"HTTP/1.1 206 Partial Content\r\nContent-Length: 8\r\nContent-Range: bytes 0-7/36\r\nConnection: close\r\n\r\n".to_vec();
+                    response.extend_from_slice(&BLOB[..8]);
+                    response
+                } else {
+                    status(code)
+                }
+            }).await;
+            let (good, good_seen) = server(|_, offset| {
+                let start = offset.unwrap() as usize;
+                let end = (start + 8).min(BLOB.len());
+                let mut response = format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{}\r\nConnection: close\r\n\r\n", end-start, end-1, BLOB.len()).into_bytes();
+                response.extend_from_slice(&BLOB[start..end]);
+                response
+            }).await;
+            let mut client = client(bad.clone(), 1 << 20, 0);
+            client.range_chunk_bytes = 8;
+            let dest = dest(&format!("mid-transfer-{}", &code[..3]));
+            let error = tokio::time::timeout(Duration::from_secs(2), client.download("blob", &dest))
+                .await.expect("permanent error must fail before the mirror deadline").unwrap_err();
+            assert!(error.to_string().contains(&code[..3]), "{error:#}");
+            assert_eq!(*bad_seen.lock().unwrap(), vec![Some(0), Some(8)]);
+            bad_seen.lock().unwrap().clear();
+            std::fs::remove_file(partial_path(&dest)).unwrap();
+            client.aggregator_urls = vec![bad, good];
+            tokio::time::timeout(Duration::from_secs(2), crate::components::artifact(&client, None, "blob", &expected(), &dest))
+                .await.expect("fallback must not wait for the mirror deadline").unwrap();
+            assert_eq!(*bad_seen.lock().unwrap(), vec![Some(0), Some(8)]);
+            assert_eq!(*good_seen.lock().unwrap(), vec![Some(0), Some(8), Some(16), Some(24), Some(32)]);
+            assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
+        }
+    }
+
+    #[tokio::test]
+    async fn completed_persisted_partial_can_restart_once() {
+        let (url, seen) = server(|_, offset| {
+            if offset == Some(BLOB.len() as u64) {
+                status("416 Range Not Satisfiable")
+            } else {
+                ok(BLOB)
+            }
+        }).await;
+        let dest = dest("persisted-eof");
+        std::fs::write(partial_path(&dest), BLOB).unwrap();
+        assert_eq!(client(url, 1 << 20, 0).download("blob", &dest).await.unwrap(), expected());
+        assert_eq!(*seen.lock().unwrap(), vec![Some(BLOB.len() as u64), Some(0)]);
+    }
+
+    #[tokio::test]
+    async fn artifact_falls_back_on_status_truncation_corruption_and_invalid_ranges() {
+        for kind in [
+            "missing",
+            "server",
+            "truncated",
+            "corrupt",
+            "bad-range",
+            "ignored-range",
+        ] {
+            let (bad, _) = server(move |_, _| match kind {
+                "missing" => status("404 Not Found"),
+                "server" => status("503 Service Unavailable"),
+                "truncated" => truncated(5),
+                "corrupt" => ok(&[b'x'; BLOB.len()]),
+                "bad-range" => partial(3),
+                _ => ok(&[b'x'; 100]),
+            })
+            .await;
+            let (good, seen) = server(|_, _| ok(BLOB)).await;
+            let mut client = client(bad.clone(), 1 << 20, 0);
+            client.aggregator_urls = vec![bad, good];
+            client.range_chunk_bytes = 64;
+            let dest = dest(kind);
+            crate::components::artifact(&client, None, "blob", &expected(), &dest)
+                .await
+                .unwrap();
+            assert_eq!(std::fs::read(&dest).unwrap(), BLOB, "{kind}");
+            assert_eq!(*seen.lock().unwrap(), vec![Some(0)], "{kind}");
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_first_mirror_leaves_time_for_fallback() {
+        let (bad, _) = server(|_, _| status("503 Service Unavailable")).await;
+        let (good, _) = server(|_, _| ok(BLOB)).await;
+        let mut client = client(bad.clone(), 1 << 20, 0);
+        client.aggregator_urls = vec![bad, good];
+        client.attempts = 100;
+        client.backoff = Duration::from_secs(10);
+        client.deadline = Duration::from_secs(2);
+        let dest = dest("mirror-deadline");
+        crate::components::artifact(&client, None, "blob", &expected(), &dest)
+            .await
+            .unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
+    }
+
+    #[tokio::test]
+    async fn recipe_integrity_failure_falls_back_before_parsing() {
+        let recipe = serde_json::json!({
+            "schemaVersion": "1.0", "componentName": "app", "componentVersion": "1.0.0",
+            "artifactBlobId": "blob", "artifactSha256": expected(), "lifecycle": {}, "configuration": {}
+        })
+        .to_string()
+        .into_bytes();
+        let sha = hex::encode(Sha256::digest(&recipe));
+        let (bad, _) = server(|_, _| ok(b"{")).await;
+        let (good, seen) = server(move |_, _| ok(&recipe)).await;
+        let mut client = client(bad.clone(), 1 << 20, 0);
+        client.aggregator_urls = vec![bad, good];
+        let loaded = crate::components::recipe(&client, None, "recipe", &sha)
+            .await
+            .unwrap();
+        assert!(!loaded.confidential);
+        assert_eq!(loaded.recipe.component_name, "app");
+        assert_eq!(*seen.lock().unwrap(), vec![None]);
+    }
+
+    #[tokio::test]
+    async fn all_corrupt_mirrors_leave_no_candidate() {
+        let (bad, _) = server(|_, _| ok(b"wrong")).await;
+        let mut client = client(bad.clone(), 1 << 20, 0);
+        client.aggregator_urls = vec![bad.clone(), bad];
+        let dest = dest("all-corrupt");
+        let error = crate::components::artifact(&client, None, "blob", &expected(), &dest)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("SHA-256 mismatch"));
+        assert!(!dest.exists());
+        assert!(!partial_path(&dest).exists());
+    }
+
+    #[tokio::test]
     async fn interrupted_transfer_resumes_with_range() {
         let (url, seen) = server(|n, range| match (n, range) {
-            (1, None) => truncated(10),
+            (1, Some(0)) => truncated(10),
             (_, Some(offset)) => partial(offset as usize),
             _ => status("500 Internal Server Error"),
         })
@@ -525,7 +793,7 @@ mod tests {
             .unwrap();
         assert_eq!(hash, expected());
         assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
-        assert_eq!(*seen.lock().unwrap(), vec![None, Some(10)]);
+        assert_eq!(*seen.lock().unwrap(), vec![Some(0), Some(10)]);
         assert!(!partial_path(&dest).exists());
     }
 
@@ -649,7 +917,10 @@ mod tests {
             .to_string();
         assert!(error.contains("insufficient disk space"), "{error}");
         assert!(!dest.exists());
-        assert!(!partial_path(&dest).exists(), "refused bytes must not stay on disk");
+        assert!(
+            !partial_path(&dest).exists(),
+            "refused bytes must not stay on disk"
+        );
     }
 
     #[tokio::test]
@@ -676,10 +947,7 @@ mod tests {
                 tokio::spawn(async move {
                     let mut request = vec![0u8; 4096];
                     let _ = socket.read(&mut request).await;
-                    let head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n",
-                        BLOB.len()
-                    );
+                    let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", BLOB.len());
                     let _ = socket.write_all(head.as_bytes()).await;
                     for byte in BLOB {
                         if socket.write_all(&[*byte]).await.is_err() {
@@ -694,7 +962,11 @@ mod tests {
         let mut client = client(url, 1 << 20, 0);
         client.deadline = Duration::from_millis(700);
         let started = std::time::Instant::now();
-        let error = client.download("blob", &dest).await.unwrap_err().to_string();
+        let error = client
+            .download("blob", &dest)
+            .await
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("did not finish within"), "{error}");
         assert!(started.elapsed() < Duration::from_secs(3));
         assert!(!dest.exists());

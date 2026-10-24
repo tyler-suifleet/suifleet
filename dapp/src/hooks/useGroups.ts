@@ -13,6 +13,6 @@ export function useGroups() {
     queryKey: ["groups", NETWORK, account?.address],
     queryFn: () => fetchGroups(client, account!.address),
     enabled: !!account?.address,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 }

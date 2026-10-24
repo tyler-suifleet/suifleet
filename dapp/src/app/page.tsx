@@ -35,11 +35,11 @@ export default function DashboardPage() {
         <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
       </div>
 
-      {/* Active incidents (SF-020): derived by the fleet indexer from verified telemetry and receipts.
+      {/* Active incidents (SF-020): derived in this browser from verified telemetry and receipts.
           Device health above is current; failed results recovered later (SF-098) remain only in deployment history. */}
       <Section title="Active incidents">
         {alerts.status === "unavailable" ? (
-          <p className="text-sm text-gray-400">Alerts unavailable: {alerts.reason}. Enter the indexer read token on the Devices page.</p>
+          <p className="text-sm text-gray-400">Alerts unavailable: {alerts.reason}. Check the fleet configuration and chain connection.</p>
         ) : alerts.items.length === 0 ? (
           <p className="text-sm text-gray-500">No active incidents for your devices.</p>
         ) : (
@@ -54,11 +54,11 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-400 mt-0.5">{a.action}</p>
               </li>
             ))}
-            {alerts.items.length > 20 && <li className="py-2 text-xs text-gray-400">{alerts.items.length - 20} more (suifleet-indexer ctl alerts)</li>}
+            {alerts.items.length > 20 && <li className="py-2 text-xs text-gray-400">{alerts.items.length - 20} more (filter by device on the Services page)</li>}
           </ul>
         )}
         <p className="mt-2 text-xs text-gray-400">
-          Reported by the fleet indexer. A failed deployment stays an incident until the device reports that component running from a later applied deployment.
+          Derived in your browser from verified on-chain health and receipts. A failed deployment stays an incident until the device reports that component running from a later applied deployment.
           {!depl && failedResults > 0 && (
             <> Deployment history keeps {failedResults} failed device result{failedResults === 1 ? "" : "s"}: <Link href="/deployments" className="hover:underline">view deployments</Link>.</>
           )}

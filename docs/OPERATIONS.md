@@ -10,7 +10,7 @@ This runbook describes current local operations and the intended release gates. 
 - Browser frontend: `http://localhost:3000` after `make dapp-dev`.
 - Cache/wallet volumes: `cargo-registry`, `cargo-git`, `pnpm-store`, `move-cache`, `sui-config`.
 - Device service: `suifleet.service`, config/key in `/etc/suifleet`, journal under `/var/lib/suifleet`; service provisioning is idempotent.
-- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices can report signed heartbeat and health telemetry to the fleet indexer ([TELEMETRY.md](TELEMETRY.md)). No production indexer, coordinator, hosted health ingress, secrets service or hosting deployment is currently recorded.
+- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices publish signed on-chain health and encrypted Walrus archives ([serverless operation](SERVERLESS_PRODUCT.md)). SuiFleet hosts no application servers. HTTP indexer and background relay/retention tools are optional customer-owned integrations.
 
 Fleet wallet and native multisig handover uses the recipient-confirmed procedure in
 [FLEET_HANDOVER.md](FLEET_HANDOVER.md). Transfer all relevant authority records and
@@ -559,3 +559,54 @@ are unnecessary in this mode. Do not remove a pending transaction or ciphertext
 to force a fresh upload: reconcile retained effects first. Owner prepaid storage,
 revocation and cadence remain enforced on chain. A static export or simulator run
 does not establish live Site deployment, certification or production acceptance.
+
+## Check cadence and endpoint fallback (SF-123)
+
+`[runtime] poll_seconds` defaults to 1800 (30 minutes); customers may set
+1..=86400 seconds, including 3600 for hourly checks. `rollout_poll_seconds`
+defaults to 60, accepts the same bounds, and is capped at `poll_seconds`.
+Known active maintenance windows and deployments waiting for rollout eligibility
+use the faster cadence. An observed active calendar window remains in bounded
+journal metadata until its recorded end/expiry, even after an update completes
+and across daemon restarts. Overlapping observed periods coalesce; this clock
+metadata never grants admission authority. A fleet's
+[on-chain settings](FLEET_SETTINGS.md) (SF-130) set floors on both intervals;
+without a record these local values apply.
+An undiscovered deployment or remotely changed control is observed at the next
+check; local timers cannot anticipate unpublished changes.
+
+After discovering controls, the daemon arms a local wakeup for the latest of
+scheduled start, maintenance-window start and durable advance-notice completion.
+Thus a known window shorter than 30 minutes can still be entered. Restarts
+reconstruct deadlines from the journal. Every wake re-reads identity, targeting,
+controls and grants; a timer grants no authority. Paused, terminal and impossible
+windows do not cause a tight loop. Failures use exponential equal jitter with
+millisecond randomness (initially 1–2 seconds, capped at one hour or twice the
+configured check interval, whichever is lower); a successful check resets it.
+Discovery/reconciliation failure backoff takes precedence over control wakeups
+during an outage. Receipt-delivery failures stay queued and logged independently;
+they do not fail an otherwise successful check or suppress local timers, even
+when a deleted deployment or lost targeting makes delivery permanently impossible.
+
+The manifest may include `rpc_urls`, an ordered list of at most eight gRPC v2
+endpoints. `[sui] rpc_urls` is an optional local override. An empty or omitted
+list falls back to the existing manifest `rpc_url`, preserving older manifests.
+Newly generated manifests include a one-element list. For pilots put Mysten's
+public endpoint first (testnet `https://fullnode.testnet.sui.io:443`), followed by
+an explicitly configured provider or your own indexed node. No provider is
+purchased or automatically discovered.
+
+Before using a candidate the daemon verifies its chain identity. A missing,
+malformed or mismatched identity is a hard rejection, never a reason to try a
+different chain. Unavailable, rate-limited (including HTTP 429), and timed-out
+calls try the next endpoint in order. Calls and whole event pages have a
+30-second timeout per candidate; partial event pages are discarded before
+retrying, so no cursor advances over missing frames. Simulation retries rebuild
+the same intended call and retain verify-before-sign checks. Execution retries
+submit the same signed bytes; effects still determine success. Configure endpoints
+without credentials in URLs and ensure every candidate retains the required
+indexed history. Other authorization, data and execution errors fail closed.
+
+Set staged rollout `offline_timeout_ms` **above the normal check interval plus
+worst-case download/apply/report time** (and allow for network/backoff delays).
+Do not keep the old few-second stall timeout when normal checks take 30 minutes.
