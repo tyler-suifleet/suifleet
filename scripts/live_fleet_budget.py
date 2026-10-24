@@ -90,13 +90,14 @@ def fixture_key(tools):
     return f"{digest.hexdigest()[:24]}@{tools['build']['version'].split()[-1]}"
 
 
-def record_publication(package_dir, chain, package, upgrade_cap):
+def record_publication(package_dir, chain, package, upgrade_cap, published_at=None, version=1):
     """The staged sui_edge's Published.toml names the fixture's publication,
     so fleet_storage resolves every dependency (sui_edge, Walrus, WAL) from a
-    Published.toml; Walrus's pubfile mode accepts only local sources."""
+    Published.toml; Walrus's pubfile mode accepts only local sources. An
+    upgraded package records its latest version beside its original ID."""
     (package_dir / "Published.toml").write_text(
-        f'[published.testnet]\nchain-id = "{chain}"\npublished-at = "{toolchain.normal(package)}"\n'
-        f'original-id = "{toolchain.normal(package)}"\nversion = 1\ntoolchain-version = "{toolchain.BUILD["version"].split()[1].split("-")[0]}"\n'
+        f'[published.testnet]\nchain-id = "{chain}"\npublished-at = "{toolchain.normal(published_at or package)}"\n'
+        f'original-id = "{toolchain.normal(package)}"\nversion = {int(version)}\ntoolchain-version = "{toolchain.BUILD["version"].split()[1].split("-")[0]}"\n'
         f'build-config = {{ flavor = "sui", edition = "2024" }}\nupgrade-capability = "{toolchain.normal(upgrade_cap)}"\n')
 
 

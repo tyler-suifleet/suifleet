@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """SF-129 dedicated-Testnet reclaim run against the existing SF-082 fleet.
 
-Upgrades the SF-082 fleet_data package in place (bytecode verified before
-signing), checks type origins and that existing fleet objects are unchanged,
-then exercises the on-chain expiry guard and, for archives whose Walrus
-storage has actually ended, prunes them and records the executed rebate.
-Never runs on mainnet; the caller holds network:suifleet-testnet. The run
-re-reads its cache on chain before reusing an upgrade; identical code is never
-republished.
+Upgrades the SF-082 fleet_data package in place from the latest version its
+UpgradeCap names (bytecode verified before signing), checks that every type
+keeps the origin of the version that introduced it and that existing fleet
+objects are unchanged, then exercises the on-chain expiry guard and, for
+archives whose Walrus storage has actually ended, prunes them and records the
+executed rebate.
+Never runs on mainnet; the caller holds network:suifleet-testnet. The
+UpgradeCap, not the cache, decides reuse: a latest version whose bytecode
+matches this source is reused, so identical code is never republished.
 """
 import argparse
 import base64
@@ -26,6 +28,40 @@ import sui_toolchain as tc
 FLEET = json.loads((ROOT / 'docs/validation/sf082-testnet-native.json').read_text())
 CORE = '0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2'
 CORE_CAP = '0x400dda2c3b0788a08841c0a81a4bdc444c6e399268d60f352eb37f04066d0983'
+RECLAIM_EVENTS = ('fleet_data::AnchorsPruned', 'fleet_data::ExpiredBlobsBurned')
+
+
+def fixture_step(base, cap_package, cap_version, matches):
+    """('reuse', latest) when the cap's latest version already carries this
+    source's bytecode, otherwise ('upgrade', latest): upgrade from the version
+    the cap actually names, whatever earlier source produced it."""
+    latest = dm.object_id(cap_package)
+    if not cap_version.isdigit() or int(cap_version) < 1 or (latest == dm.object_id(base)) != (cap_version == '1'):
+        raise AssertionError(f'inconsistent data UpgradeCap: {latest} at version {cap_version}')
+    return ('reuse' if matches(latest) else 'upgrade'), latest
+
+
+def check_origins(head, base, head_origins, base_origins, introduced, previous=None):
+    """Base types keep the base origin; every later type keeps the package
+    that introduced it, which names itself as that type's origin. After an
+    upgrade, all types of the previous version keep their origins and only
+    the new version's new types originate in it. Returns head_origins."""
+    head, base = dm.object_id(head), dm.object_id(base)
+    for name, origin in base_origins.items():
+        assert dm.object_id(origin) == base and dm.object_id(head_origins.get(name, '0x0')) == base, f'{name} lost its base origin'
+    if previous is not None:
+        for name, origin in previous.items():
+            assert dm.object_id(head_origins.get(name, '0x0')) == dm.object_id(origin), f'{name} changed origin in the upgrade'
+    for name in RECLAIM_EVENTS:
+        assert name in head_origins and dm.object_id(head_origins[name]) != base, f'{name} is missing or has the base origin'
+    for name, origin in head_origins.items():
+        origin = dm.object_id(origin)
+        if name in base_origins:
+            continue
+        if previous is not None and name not in previous:
+            assert origin == head, f'{name} is new in this upgrade but originates in {origin}'
+        assert origin == head or dm.object_id(introduced(origin).get(name, '0x0')) == origin, f'{name} origin {origin} did not introduce it'
+    return head_origins
 
 
 def run(args):
@@ -63,17 +99,23 @@ def run(args):
             stage(ROOT / 'contracts', tree)
             record_publication(tree, live.chain, CORE, CORE_CAP)
             record_publication(tree / 'fleet_storage', live.chain, storage_package['package'], storage_package['cap'])
-            record_publication(tree / 'fleet_data', live.chain, base, cap)
+            record_publication(tree / 'fleet_data', live.chain, base, cap, published_at=cap_package, version=cap_version)
             built = tc.compile_package(live.build_sui, tree / 'fleet_data')
             key = hashlib.sha256(head_source + base.encode() + live.tools['build']['version'].encode()).hexdigest()
             fixture = cache.setdefault(key, {})
+            package_origins = lambda package: dm.origins(dm.chain_facts(live.rpc_url, package)['objects'][dm.object_id(package)])
 
             def same_modules(package):
                 raw = live.client('object', package, '--bcs')['data']['Package']
                 return sorted(unrelocate_module(unrelocate_module(bytes(v), base), package) for v in raw['module_map'].values()) == sorted(
                     base64.b64decode(v) for v in built['modules'])
-            if 'head' not in fixture:
-                assert (dm.object_id(cap_package), cap_version) == (dm.object_id(base), '1'), 'unexpected data package version'
+            step, latest = fixture_step(base, cap_package, cap_version, same_modules)
+            previous = None
+            if step == 'reuse':
+                head, version = latest, cap_version
+                live.check(f'data package version {version} {head} already carries this source; not republished')
+            else:
+                previous = package_origins(latest)
                 record = live.evidence.setdefault('verified_package_transactions', {}).setdefault('upgrade fleet_data', {})
 
                 def submit(budget):
@@ -83,22 +125,18 @@ def run(args):
                     assert (tree / 'fleet_data/Move.lock').read_bytes() == pinned
                     tx = unsigned.stdout.strip().splitlines()[-1]
                     record.update(tc.verify_package_transaction(tc.decode(tx), built, sender=live.operator, budget=budget,
-                                                                upgrade={'cap': cap, 'package': base}))
+                                                                upgrade={'cap': cap, 'package': latest}))
                     return live.executor()('serialized-tx', tx)
-                result = live.execute('compatible fleet_data upgrade adding reclaim', submit, gas=args.upgrade_budget)
-                fixture['head'] = live.published(result)
+                result = live.execute(f'compatible fleet_data upgrade from version {cap_version}', submit, gas=args.upgrade_budget)
+                head, version = live.published(result), str(int(cap_version) + 1)
+                fixture.update(head=head, upgraded_from=latest, version=version)
                 state.write_text(json.dumps(cache, indent=2) + '\n')
-            head = fixture['head']
             assert same_modules(head), 'deployed head bytecode differs from this source'
-            assert dm.upgrade_cap(dm.chain_facts(live.rpc_url, cap)['objects'][dm.object_id(cap)])[:2] == (dm.object_id(head), '2')
-            origins = dm.origins(dm.chain_facts(live.rpc_url, head)['objects'][dm.object_id(head)])
-            for name in ('FleetData', 'DeviceData', 'AnchorKey', 'Anchor'):
-                assert dm.object_id(origins['fleet_data::' + name]) == dm.object_id(base), name
-            for name in ('AnchorsPruned', 'ExpiredBlobsBurned'):
-                assert dm.object_id(origins['fleet_data::' + name]) == dm.object_id(head), name
+            assert dm.upgrade_cap(dm.chain_facts(live.rpc_url, cap)['objects'][dm.object_id(cap)])[:2] == (dm.object_id(head), version)
+            origins = check_origins(head, base, package_origins(head), package_origins(base), package_origins, previous)
             after = {name: plain(live.object(data[name])['content']) for name in ('fleetId', 'writerId')}
             assert after == before, 'the upgrade must not change existing fleet objects'
-            live.check('in-place upgrade: verified bytecode, base origins kept, new event origins, existing objects unchanged')
+            live.check('in-place upgrade: verified bytecode, introduction origins kept, existing objects unchanged')
 
             # Candidates come from the dApp planner, the epoch from the pinned Walrus SDK.
             config = {k: data[k] for k in ('schema', 'chainIdentifier', 'registryId', 'packageId', 'typeOrigin', 'fleetId', 'budgetId', 'storageId')}
@@ -120,7 +158,7 @@ def run(args):
                 gas = result['effects']['gasUsed']
                 live.evidence['reclaim'] = {'indices': [i for i, _ in expired], 'net_returned_mist': -net_gas(result), 'gas': gas}
                 live.check(f'pruned {len(expired)} expired archive(s); {-net_gas(result)} MIST returned net of fees')
-            live.evidence.update(fixture=dict(fixture, base=base, cap=cap, budget_cap=budget_cap), origins=origins,
+            live.evidence.update(fixture=dict(fixture, head=head, version=version, base=base, cap=cap, budget_cap=budget_cap), origins=origins,
                                  source_sha256=hashlib.sha256(head_source).hexdigest(), compiled_digest=bytes(built['digest']).hex())
     finally:
         live.finish(args.evidence)
