@@ -178,4 +178,79 @@ module sui_edge::customer_tests {
         ts::return_shared(g); s.end();
     }
 
+    fun claim_setup(): (ts::Scenario, ID) {
+        let mut s = setup(); let fid = fleet(&mut s); allow_devices(&mut s, 1);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid); let r = s.take_shared<DeviceRegistry>();
+        customer::create_enrollment_policy(&c, &mut f, &r, 2, 0, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut p = s.take_shared<sui_edge::enrollment::EnrollmentPolicy>();
+        customer::add_claims(&c, &f, &mut p, vector[@0xCA], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(p);
+        (s, fid)
+    }
+    #[test]
+    fun sponsored_managed_claim_consumes_customer_capacity_without_wallet_membership() {
+        let (mut s, fid) = claim_setup(); s.next_tx(@0xD1);
+        let builder = ts::ctx_builder(&s).set_sponsor(@0xCA); ts::next_with_context(&mut s, builder);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut p = s.take_shared<sui_edge::enrollment::EnrollmentPolicy>();
+        let mut b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f)); let mut r = s.take_shared<DeviceRegistry>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::enroll_claim(&mut c, &mut f, &mut b, &mut p, &mut r, utf8(b"Claimed"), utf8(b"x86_64"), &clock, s.ctx());
+        assert!(customer::active_devices(&c) == 1 && customer::devices(&f).length() == 1);
+        assert!(sui_edge::enrollment::remaining(&p) == 1 && !sui_edge::enrollment::is_claim(&p, @0xCA));
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); ts::return_shared(b); ts::return_shared(r); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::enrollment)]
+    fun old_enrollment_entry_is_sealed_by_policy_open_flag() {
+        let (mut s, _) = claim_setup(); s.next_tx(@0xD1);
+        let builder = ts::ctx_builder(&s).set_sponsor(@0xCA); ts::next_with_context(&mut s, builder);
+        let mut p = s.take_shared<sui_edge::enrollment::EnrollmentPolicy>(); let mut r = s.take_shared<DeviceRegistry>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        sui_edge::enrollment::enroll(&mut p, &mut r, utf8(b"Bypass"), utf8(b"x86_64"), &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(p); ts::return_shared(r); s.end();
+    }
+    #[test]
+    fun explicit_reassignment_keeps_identity_and_aggregate_count() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s); allow_devices(&mut s, 1);
+        let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut source = s.take_shared_by_id<Fleet>(a); let mut dest = s.take_shared_by_id<Fleet>(b);
+        let mut sb = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&source));
+        let mut db = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&dest));
+        let mut account = s.take_shared<sui_edge::fleet_budget::GasAccount>(); let r = s.take_shared<DeviceRegistry>();
+        let before = device_registry::identity(&r, did).destroy_some();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::reassign_device(&mut c, &mut source, &mut dest, &mut sb, &mut db, &mut account, &r, did, &clock, s.ctx());
+        assert!(customer::active_devices(&c) == 1 && customer::devices(&source).is_empty() && customer::devices(&dest).contains(&did));
+        assert!(fleet_budget::device_count(&sb) == 0 && fleet_budget::device_count(&db) == 1);
+        let after = device_registry::identity(&r, did).destroy_some();
+        assert!(device_registry::identity_owner_cap(&before) == device_registry::identity_owner_cap(&after));
+        assert!(device_registry::identity_signer(&before) == device_registry::identity_signer(&after));
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(source); ts::return_shared(dest);
+        ts::return_shared(sb); ts::return_shared(db); ts::return_shared(account); ts::return_shared(r); s.end();
+    }
+    #[test, expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun legacy_receipt_api_cannot_report_for_managed_deployment() {
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a); let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_deployment(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"), utf8(b"hash"),
+            utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), vector[], vector[did], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.next_tx(@0xD1);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>(); let r = s.take_shared<DeviceRegistry>();
+        let cap = s.take_from_sender<sui_edge::device_cap::DeviceCap>();
+        sui_edge::deployment_manager::report_verified_status(&mut d, &r, &cap, 1, s.ctx());
+        ts::return_shared(d); ts::return_shared(r); ts::return_to_address(@0xD1, cap); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun policy_device_grants_cannot_cross_fleets() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(b);
+        customer::create_policy(&c, &mut f, utf8(b"Private release"), s.ctx()); ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(b);
+        let mut p = s.take_shared<sui_edge::seal_policy::AccessPolicy>(); let r = s.take_shared<DeviceRegistry>();
+        customer::policy_device(&c, &mut f, &mut p, &r, did, true, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); ts::return_shared(r); s.end();
+    }
+
 }

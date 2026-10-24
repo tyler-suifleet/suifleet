@@ -1086,13 +1086,16 @@ module fleet_storage::fleet_storage_tests {
         ts::return_shared(registry); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
         customer::set_entitlement(&mut c, &r, 2, allowance, 1, s.ctx());
+        fleet_storage::configure_customer_charging(&mut c, &r, s.ctx());
         let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
         customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
         ts::return_shared(c); ts::return_shared(r); ts::return_shared(b); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>(); let fid = object::id(&f);
-        let b = s.take_shared_by_id<FleetBudget>(bid); let r = s.take_shared<DeviceRegistry>();
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut r = s.take_shared<DeviceRegistry>();
+        let mut account = s.take_shared<GasAccount>();
         let cap = s.take_from_sender<DeviceOwnerCap>();
-        customer::adopt_device(&mut c, &mut f, &b, &r, cap, s.ctx());
+        customer::adopt_device(&mut c, &mut f, &b, &mut account, &mut r, cap, s.ctx());
+        ts::return_shared(account);
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r);
         (s, system, fid, bid)
     }
@@ -1131,6 +1134,18 @@ module fleet_storage::fleet_storage_tests {
         fleet_storage::register_managed_blob(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, s.ctx());
         clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
         ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun device_cannot_burn_customer_allowance_with_a_forged_producer_witness() {
+        let (mut s, system, fid, bid) = managed_setup(POOL);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let a = s.take_shared<GasAccount>();
+        let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        customer::reserve_device_allowance(&mut c, &f, &b, &a, &r, &cap, POOL, true, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); ts::return_shared(r);
+        ts::return_to_address(DEVICE, cap); finish(s, system);
     }
 
 }

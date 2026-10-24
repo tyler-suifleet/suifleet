@@ -50,6 +50,7 @@ module sui_edge::deployment_manager {
     public struct ReceiptsKey has copy, drop, store {}
     /// Present (true) on records that a group's desired state has referenced:
     /// desired-state reconciliation applies them, not the one-shot event path.
+    public struct CustomerFleetKey has copy, drop, store {}
     public struct ManagedKey has copy, drop, store {}
     /// The delegate who created a record under a deployer role (`roles`);
     /// the record's `creator` is the operator the role acts for.
@@ -317,7 +318,10 @@ module sui_edge::deployment_manager {
     public(package) fun remove_catalog_binding<K: copy + drop + store, V: store + drop>(
         deployment: &mut DeploymentRecord, key: K, ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == deployment.creator, ENotCreator);
+        remove_catalog_binding_as<K, V>(deployment, key, ctx.sender());
+    }
+    public(package) fun remove_catalog_binding_as<K: copy + drop + store, V: store + drop>(deployment: &mut DeploymentRecord, key: K, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
         let _: V = df::remove(&mut deployment.id, key);
         deployment.schema_version = SCHEMA_VERSION;
     }
@@ -434,6 +438,14 @@ module sui_edge::deployment_manager {
     }
 
     fun record_status(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
+        assert!(!df::exists(&deployment.id, CustomerFleetKey {}), EPackageOutdated);
+        record_status_internal(deployment, cap, status, ctx);
+    }
+    public(package) fun record_customer_status(deployment: &mut DeploymentRecord, fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
+        assert!(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
+        record_status_internal(deployment, cap, status, ctx);
+    }
+    fun record_status_internal(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
         assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
 
         let device_id = device_cap::device_id(cap);
@@ -458,6 +470,14 @@ module sui_edge::deployment_manager {
         });
     }
 
+    public(package) fun bind_customer(deployment: &mut DeploymentRecord, fleet_id: ID) {
+        // Preserve already-authoritative historical receipts at the cutover.
+        let receipts = receipts_mut(deployment);
+        receipts.version = 3;
+        df::add(&mut deployment.id, CustomerFleetKey {}, fleet_id);
+    }
+    public fun schema_version(deployment: &DeploymentRecord): u64 { deployment.schema_version }
+
     fun new_receipts(): Receipts {
         Receipts { version: RECEIPTS_VERSION, statuses: vec_map::empty() }
     }
@@ -469,18 +489,31 @@ module sui_edge::deployment_manager {
         if (!df::exists(&deployment.id, ReceiptsKey {})) {
             df::add(&mut deployment.id, ReceiptsKey {}, new_receipts());
         };
+        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else RECEIPTS_VERSION;
         let receipts: &mut Receipts = df::borrow_mut(&mut deployment.id, ReceiptsKey {});
-        assert!(receipts.version <= RECEIPTS_VERSION, EPackageOutdated);
-        if (receipts.version < RECEIPTS_VERSION) {
+        assert!(receipts.version <= target_version, EPackageOutdated);
+        if (receipts.version < target_version) {
             receipts.statuses = vec_map::empty();
-            receipts.version = RECEIPTS_VERSION;
+            receipts.version = target_version;
         };
         receipts
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
-    public entry fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
-        assert!(ctx.sender() == deployment.creator, ENotCreator);
+    public entry fun delete_deployment(deployment: DeploymentRecord, ctx: &TxContext) {
+        delete_as(deployment, ctx.sender());
+    }
+    public(package) fun delete_for_customer(mut deployment: DeploymentRecord, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
+        if (deployment.schema_version == 3) {
+            let _: Rollout = df::remove(&mut deployment.id, RolloutKey {});
+            deployment.schema_version = SCHEMA_VERSION;
+        };
+        let _: ID = df::remove(&mut deployment.id, CustomerFleetKey {});
+        delete_as(deployment, authority);
+    }
+    fun delete_as(mut deployment: DeploymentRecord, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
 
         // Catalog records require their defining module to remove the binding first.
         assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
@@ -688,6 +721,13 @@ module sui_edge::deployment_manager {
         target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext,
     ): DeploymentRecord {
+        new_rollout_as(ctx.sender(), component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256,
+            target_groups, members, cohorts, policy, clock, ctx)
+    }
+    public(package) fun new_rollout_as(authority: address, component_name: String, version: String,
+        recipe_blob_id: String, artifact_sha256: String, recipe_sha256: String,
+        target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
+        policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let n = members.length();
         assert!(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
         let mut i = 0; let mut count = 0; let mut current = 0;
@@ -703,7 +743,7 @@ module sui_edge::deployment_manager {
         assert!(count >= policy.minimum_samples, ERolloutPolicy);
         // Direct targets bind the snapshot even if there are no groups. The
         // operator check in the daemon remains mandatory for every member.
-        let mut d = new_deployment_verified(component_name, version, recipe_blob_id, artifact_sha256,
+        let mut d = new_customer_deployment(authority, component_name, version, recipe_blob_id, artifact_sha256,
             recipe_sha256, target_groups, members, clock, ctx);
         d.schema_version = 3;
         let mut admitted_at = vector[]; let mut outcomes = vector[]; let mut skipped = vector[];
@@ -753,7 +793,10 @@ module sui_edge::deployment_manager {
     public fun advance_rollout(d: &mut DeploymentRecord, online: vector<ID>,
         healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == d.creator, ENotCreator);
+        advance_rollout_as(d, online, healthy, unhealthy, clock, ctx.sender());
+    }
+    public(package) fun advance_rollout_as(d: &mut DeploymentRecord, online: vector<ID>, healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, authority: address) {
+        assert!(authority == d.creator, ENotCreator);
         assert!(d.schema_version == 3, ERolloutState);
         let control = control(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
@@ -821,7 +864,10 @@ module sui_edge::deployment_manager {
     public fun control_rollout(d: &mut DeploymentRecord, state: u8, skip: vector<ID>,
         reason: String, clock: &Clock, ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == d.creator, ENotCreator);
+        control_rollout_as(d, state, skip, reason, clock, ctx.sender());
+    }
+    public(package) fun control_rollout_as(d: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, authority: address) {
+        assert!(authority == d.creator, ENotCreator);
         assert!(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         assert!(r.state < 2, ERolloutState);

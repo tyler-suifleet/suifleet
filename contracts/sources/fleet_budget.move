@@ -703,6 +703,16 @@ module sui_edge::fleet_budget {
     public fun account_total_drawn(account: &GasAccount): u64 { account.total_drawn }
     public fun account_enrolled_at_ms(account: &GasAccount): u64 { account.enrolled_at_ms }
 
+    /// Adoption keeps the account ID/reserve/limits but binds it to the new
+    /// custodied capability; unrelated old accounts remain retired by identity.
+    public(package) fun rebind_account(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
+        assert_current(budget, account);
+        assert!(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
+        let identity = device_registry::identity(registry, account.device_id).destroy_some();
+        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
+        account.owner_cap_id = object::id(cap);
+    }
+
     /// For per-fleet records kept by other modules of this package
     /// (`fleet_settings`); each module owns its own dynamic-field key types.
     public(package) fun uid(budget: &FleetBudget): &UID { &budget.id }

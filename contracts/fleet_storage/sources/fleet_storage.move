@@ -73,6 +73,8 @@ module fleet_storage::fleet_storage {
         write_fees_per_period: u64,
     }
 
+    public struct CustomerCharge has drop {}
+
     public struct FleetStorage has key {
         id: UID,
         version: u64,
@@ -704,6 +706,12 @@ module fleet_storage::fleet_storage {
         register_device_impl(fs, budget, account, registry, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx)
     }
 
+    /// Issuer configuration, idempotent for this producer type origin. The
+    /// witness is never returned or publicly constructible by a device.
+    public fun configure_customer_charging(customer: &mut Customer, registry: &DeviceRegistry, ctx: &TxContext) {
+        customer::configure_charging(customer, registry, CustomerCharge {}, ctx);
+    }
+
     public fun register_managed_blob(
         customer: &mut Customer, fleet: &Fleet, fs: &mut FleetStorage,
         budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
@@ -712,7 +720,7 @@ module fleet_storage::fleet_storage {
     ): ID {
         assert!(customer::fleet_budget(fleet) == object::id(budget) && fs.budget_id == object::id(budget), EWrongBudget);
         let amount = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
-        customer::reserve_device_allowance(customer, fleet, budget, account, registry, cap, amount, ctx);
+        customer::reserve_device_allowance(customer, fleet, budget, account, registry, cap, amount, CustomerCharge {}, ctx);
         register_device_impl(fs, budget, account, registry, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx)
     }
 

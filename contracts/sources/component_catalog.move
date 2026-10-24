@@ -96,6 +96,9 @@ module sui_edge::component_catalog {
         deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
         deployment_manager::delete_deployment(deployment, ctx);
     }
+    public(package) fun remove_for_customer(record: &mut DeploymentRecord, authority: address) {
+        deployment_manager::remove_catalog_binding_as<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
+    }
     public(package) fun new_for_customer(value: &ComponentVersion, creator: address, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         deployment_manager::new_catalog_as(creator, value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
