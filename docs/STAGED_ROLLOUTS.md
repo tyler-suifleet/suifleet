@@ -26,7 +26,12 @@ reason, grants, state, cohort, time and revision. Manual pause/resume/abort and
 skips require an audit reason. The transaction inputs and updated snapshot retain
 which IDs were skipped. Only never-admitted members can be skipped.
 
-An advance attempts grants to members of the current cohort, subject to both
+The browser requires explicit admission candidate IDs; blank evaluates health without
+new grants. Select reachable members and omit offline members so they can still be
+skipped with an audit reason. The chain verifies membership and cohort eligibility;
+the candidate list is not a liveness attestation.
+
+An advance attempts grants to selected members of the current cohort, subject to both
 outstanding-grant concurrency and a rolling time-window rate limit. Offline
 admitted members retain their slot: timing out never proves an updater stopped.
 A grant does not prove the device is online or has started work. A stalled cohort
@@ -131,3 +136,8 @@ Physical Pi/target acceptance remains [SF-031/#32](https://github.com/tyler-suif
 and was not established by these tests. Normal current-head CI and automatic
 public-testnet checks remain implementation gates. No production rollout or
 physical programming is authorized by implementation acceptance.
+
+Failed post-apply health attempts remain durably queued but retry at the normal
+discovery cadence, including authorization aborts. Undelivered legacy receipts do
+not trigger fast health polling. Old daemons do not emit these samples: upgrade
+participating daemons before admitting them to an on-chain-health rollout.
