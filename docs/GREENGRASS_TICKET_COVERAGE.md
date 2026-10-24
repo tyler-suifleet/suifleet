@@ -51,7 +51,7 @@ P2 means broader compatibility, not optional for a full-parity claim. Each row n
 | Diagnostics and remote logs | [SF-020](https://github.com/tyler-suifleet/suifleet/issues/24) |
 | Fleet API/CLI and automation | [SF-024](https://github.com/tyler-suifleet/suifleet/issues/15) |
 | Operator RBAC and delegation | [SF-021](https://github.com/tyler-suifleet/suifleet/issues/14) |
-| Production indexer | [SF-024](https://github.com/tyler-suifleet/suifleet/issues/15) |
+| Direct-chain product / optional customer indexer reference | [SF-137](https://github.com/tyler-suifleet/suifleet/issues/282), [SF-024](https://github.com/tyler-suifleet/suifleet/issues/15) |
 | Secrets and confidential configuration | [SF-022](https://github.com/tyler-suifleet/suifleet/issues/25) |
 | Cost/network policy | [SF-021](https://github.com/tyler-suifleet/suifleet/issues/14), [SF-023](https://github.com/tyler-suifleet/suifleet/issues/5), [SF-024](https://github.com/tyler-suifleet/suifleet/issues/15) |
 | Packaging/provisioning lifecycle | [SF-025](https://github.com/tyler-suifleet/suifleet/issues/16), [SF-029](https://github.com/tyler-suifleet/suifleet/issues/29) |

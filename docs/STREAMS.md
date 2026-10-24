@@ -136,7 +136,7 @@ SF-077 adds a separate [Firehose exporter](FIREHOSE.md) over native IPC reads,
 with its own destination-bound checkpoint and scoped credentials. It does not
 change the HTTP export protocol or native stream retention.
 
-**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each stream's usage, rejected appends, export lag, messages lost before export and export failures, never data, export URLs or tokens, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+**Fleet visibility.** With `[fleet_data]`, every signed on-chain health summary also reports each stream's usage, rejected appends, export lag, messages lost before export and export failures, never data, export URLs or tokens, and the dApp derives alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
 
 ## Evidence
 
