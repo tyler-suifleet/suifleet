@@ -169,7 +169,7 @@ module sui_edge::desired_state {
     /// references the record: commit a revision that supersedes it first.
     /// Records the check on the group so a later `commit` in this transaction
     /// cannot make the record desired again.
-    public fun confirm_not_desired(retirement: &mut Retirement, group: &mut DeviceGroup, ctx: &TxContext) {
+    public fun confirm_not_desired(retirement: &mut Retirement, group: &mut DeviceGroup, ctx: &mut TxContext) {
         let group_id = device_group::group_id(group);
         assert!(retirement.pending.contains(&group_id), EWrongGroup);
         let (_, deployments) = components(group).into_keys_values();
