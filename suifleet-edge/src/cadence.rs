@@ -54,8 +54,13 @@ impl Window {
 #[derive(Default)]
 pub struct Cadence {
     failures: u32,
+    poll_started_ms: u64,
 }
 impl Cadence {
+    pub fn begin_poll(&mut self, now: u64) {
+        self.poll_started_ms = now;
+    }
+
     /// A pending deployment signal is known rollout work, not a new normal
     /// discovery. Preserve exponential backoff when discovery itself failed.
     pub fn post_apply_delay(&self, config: &RuntimeConfig, normal: Duration, pending: bool) -> Duration {
@@ -120,6 +125,18 @@ impl Cadence {
             {
                 delay = delay.min(start - now);
             }
+            // Reporting after admission reads can cross the start of a short
+            // window. Revisit a now-eligible temporal deferral immediately;
+            // sleeping a full fast interval could consume the entire window.
+            // Only do this if the boundary crossed during this poll, so an
+            // obsolete deferral cannot cause a busy loop on later polls.
+            // This is only a wakeup hint; the next poll rechecks chain authority.
+            if matches!(d.reason.as_str(), "not yet scheduled" | "outside maintenance window" | "advance notice")
+                && start >= self.poll_started_ms
+                && matches!(c.reason(now, d.notified_ms), Ok(None))
+            {
+                delay = 1;
+            }
             if d.reason == "waiting for rollout eligibility" || d.reason == "ready for admission" {
                 delay = delay.min(fast_ms);
             }
@@ -148,7 +165,7 @@ mod tests {
         assert_eq!(c.post_apply_delay(&cfg, Duration::from_secs(1800), true).as_secs(), 60);
         cfg.poll_seconds = 1;
         assert_eq!(c.post_apply_delay(&cfg, Duration::from_secs(1), true).as_secs(), 1);
-        let failed = Cadence { failures: 10 };
+        let failed = Cadence { failures: 10, ..Default::default() };
         assert_eq!(failed.post_apply_delay(&cfg, Duration::from_secs(512), true).as_secs(), 512);
     }
 
@@ -181,7 +198,7 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(c.delay(&cfg, [&d].into_iter(), 0, None).as_millis(), 6000);
-        assert_eq!(c.delay(&cfg, [&d].into_iter(), 6000, None).as_secs(), 1);
+        assert_eq!(c.delay(&cfg, [&d].into_iter(), 6000, None).as_millis(), 1);
         assert_eq!(c.delay(&cfg, [&d].into_iter(), 7000, None).as_secs(), 1800);
         let d = deferred(Control {
             notice_ms: 2500,
@@ -189,6 +206,31 @@ mod tests {
         });
         assert_eq!(c.delay(&cfg, [&d].into_iter(), 0, None).as_millis(), 2500);
     }
+    #[test]
+    fn report_retry_crossing_admission_deadline_rechecks_without_consuming_window() {
+        let cfg = RuntimeConfig::default();
+        let cadence = Cadence::default();
+        for reason in ["not yet scheduled", "outside maintenance window", "advance notice"] {
+            let mut d = deferred(Control {
+                not_before_ms: 1000, window_start_ms: 1000, window_end_ms: 2000,
+                notice_ms: 1000, ..Default::default()
+            });
+            d.reason = reason.into();
+            assert_eq!(cadence.delay(&cfg, [&d].into_iter(), 999, None).as_millis(), 1);
+            assert_eq!(cadence.delay(&cfg, [&d].into_iter(), 1001, None).as_millis(), 1);
+            assert_eq!(cadence.delay(&cfg, [&d].into_iter(), 2000, None).as_secs(), 1800);
+            d.control.state = 1;
+            assert_ne!(cadence.delay(&cfg, [&d].into_iter(), 1001, None).as_millis(), 1);
+            d.control.state = 0;
+            let mut already_checked = Cadence::default();
+            already_checked.begin_poll(1001);
+            assert_ne!(already_checked.delay(&cfg, [&d].into_iter(), 1002, None).as_millis(), 1,
+                "an obsolete temporal deferral must not create a busy loop");
+            let failed = Cadence { failures: 3, ..Default::default() };
+            assert!(failed.delay(&cfg, [&d].into_iter(), 1001, None).as_millis() >= 4000);
+        }
+    }
+
     #[test]
     fn completed_windows_survive_journal_restart_and_expire() {
         let cfg = RuntimeConfig::default();

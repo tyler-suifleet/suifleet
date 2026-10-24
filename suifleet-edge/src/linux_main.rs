@@ -459,6 +459,7 @@ async fn main() -> anyhow::Result<()> {
         );
         let mut cadence = cadence::Cadence::default();
         loop {
+            cadence.begin_poll(telemetry::now_ms());
             let cycle = poll(
                 &cfg,
                 &sui,
