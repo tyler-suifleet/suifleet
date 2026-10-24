@@ -8,7 +8,7 @@ import sys
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
 # SF-010 suites after the package-upgrade gate, each with its own strict
-# allowance (run ceiling: 0.6 + 0.5 + 0.15 SUI). They spend real gas, so
+# allowance (run ceiling: 1.0 + 0.7 + 0.15 = 1.85 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
 # dispatch (the `wallet` live gate); scheduled main runs skip them.
 SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 700_000_000),
@@ -78,7 +78,7 @@ active_address: '{ADDRESS}'
 ''')
         wallet.chmod(0o600)
         code = run(['python3', 'scripts/live_package_upgrade.py', '--wallet', str(wallet),
-                    '--base-ref', base, '--state', state, '--evidence', 'evidence/package-upgrade.json',
+                    '--base-ref', base, '--state', state, '--max-spend-mist', '1000000000', '--evidence', 'evidence/package-upgrade.json',
                     '--faucet-tool', os.environ.get('SUIFLEET_FAUCET_TOOL', '/opt/sui-network/sui')],
                    check=False).returncode
         if code or not relevant(base):

@@ -29,6 +29,31 @@ class TrustTests(unittest.TestCase):
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
+    def test_fresh_sf127_package_costs_leave_room_without_replenishing_allowance(self):
+        # Actual successful costs/funding from run 40125390496. Its 0.8-SUI
+        # ceiling left 31,017,219 MIST and the deployment batch ran out of gas.
+        observed = [341_773_600, 8_425_378, 1_243_578, 377_802_963,
+                    8_737_163, 31_000_099]
+        evidence = []
+        ledger = Budget(1_000_000_000, evidence)
+        for cost in observed:
+            ledger.grant(cost)
+        self.assertEqual(ledger.remaining, 231_017_219)
+        def result(*args):
+            return dict(digest='offline', effects=dict(status=dict(status='success'),
+                        gasUsed=dict(computationCost='1000000', storageCost='34000000', storageRebate='0')))
+        # Synthetic 35M batch exceeds the failed run's remainder; this is a
+        # ledger regression, not an asserted on-chain measurement.
+        ledger.execute(result, 'deployment batch', ['ptb'], gas=200_000_000)
+        self.assertEqual(ledger.remaining, 196_017_219)
+        def unknown(*args):
+            raise RuntimeError('unknown outcome')
+        with self.assertRaises(RuntimeError):
+            ledger.execute(unknown, 'unknown', ['ptb'], gas=100_000_000)
+        self.assertEqual(ledger.remaining, 96_017_219)
+        with self.assertRaises(Spent):
+            ledger.grant(96_017_220)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)
@@ -183,12 +208,14 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '700000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[0], '1000000000', 'evidence/package-upgrade.json'),
+                                               (calls[1], '700000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
-                self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
+                if command is not calls[0]:
+                    self.assertNotIn('--faucet-tool', command)  # Package gate only.
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
