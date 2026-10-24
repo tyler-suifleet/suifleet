@@ -9,7 +9,7 @@ import { useCostQuote } from "@/hooks/useCostQuote";
 import { useFleetStorage } from "@/hooks/useFleetStorage";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { quoteDate } from "@/lib/cost-quote";
-import { SETTING_KEYS, fleetPrice, loadPriceTable, type PriceTable, type SettingKey } from "@/lib/fleet-pricing";
+import { LOG_SETTING_KEYS, SETTING_KEYS, fleetPrice, loadPriceTable, type PriceTable, type SettingKey } from "@/lib/fleet-pricing";
 import {
   DEFAULT_WORKLOAD, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings, type Workload,
 } from "@/lib/fleet-settings-cost";
@@ -112,7 +112,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     try {
       const settings = toSettings(values, NETWORK);
       const network = fleetNetworkCost(settings, workload, quote);
-      const price = fleetPrice(table, workload.devices, { values, encryptedDelivery: encrypted, annualPrepay: annual });
+      const price = fleetPrice(table, workload.devices, { values, logUploads: workload.logUploads, encryptedDelivery: encrypted, annualPrepay: annual });
       const deposit = recommendDeposit(settings, workload, months, quote);
       return { settings, network, price, deposit };
     } catch (cause) { return { error: (cause as Error).message }; }
@@ -149,20 +149,22 @@ function SettingsForm({ table }: { table: PriceTable }) {
     }
   }
 
-  const set = (key: keyof Workload, scale = 1) => (value: number) => setWorkload({ ...workload, [key]: Math.round(value * scale) });
+  const set = (key: Exclude<keyof Workload, "logUploads">, scale = 1) => (value: number) => setWorkload({ ...workload, [key]: Math.round(value * scale) });
   const fee = rescaled(quote);
   return <div className="space-y-4 text-sm">
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
       <NumberField label="Devices" value={workload.devices} onChange={set("devices")} />
       <NumberField label="Deployments per month" value={workload.deploymentsPerMonth} onChange={set("deploymentsPerMonth")} />
-      <NumberField label="Log data per device per month (MiB)" step={0.1} value={workload.logBytesPerDeviceMonth / MIB} onChange={set("logBytesPerDeviceMonth", MIB)} />
+      {workload.logUploads && <NumberField label="Log data per device per month (MiB)" step={0.1} value={workload.logBytesPerDeviceMonth / MIB} onChange={set("logBytesPerDeviceMonth", MIB)} />}
       <NumberField label="Releases per month" value={workload.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Release artifact size (MiB)" step={0.1} value={workload.artifactBytes / MIB} onChange={set("artifactBytes", MIB)} />
       <NumberField label="Months to prepay" value={months} onChange={setMonths} />
     </div>
+    <label className="flex gap-1 items-center text-xs"><input type="checkbox" checked={workload.logUploads} onChange={(e) => setWorkload({ ...workload, logUploads: e.target.checked })} />
+      Estimate with device log uploads (off for new plans). This only sizes the estimate: the saved archive cadence and retention do not turn uploads on.</label>
 
     {SETTING_KEYS.map((key) => <fieldset key={key} className="border rounded p-2">
-      <legend className="px-1 text-xs font-semibold">{TITLES[key]}</legend>
+      <legend className="px-1 text-xs font-semibold">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads ? " (applies once log uploads are on; no cost while off)" : ""}</legend>
       <table className="w-full text-xs">
         <thead><tr className="text-left">
           <th className="p-1">Option</th><th className="p-1">Usage per device</th>
@@ -170,6 +172,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
           <th className="p-1 text-right">SuiFleet price per device</th><th className="p-1 text-right">SuiFleet price per fleet</th>
         </tr></thead>
         <tbody>{table.settings[key].map((o) => {
+          const idle = LOG_SETTING_KEYS.includes(key) && !workload.logUploads;
           const { settings, reason } = option(key, o.value);
           const network = settings ? settingNetworkCost(key, settings, workload, quote) : undefined;
           const id = `${key}-${o.value}`;
@@ -180,8 +183,8 @@ function SettingsForm({ table }: { table: PriceTable }) {
             <td className="p-1">{network?.detail ?? reason}</td>
             <td className="p-1 text-right">{network ? usd(network.usdPerDevice) : "–"}</td>
             <td className="p-1 text-right">{network ? usd(network.usdPerFleet) : "–"}</td>
-            <td className="p-1 text-right">{o.usdPerDeviceMonth ? usd(o.usdPerDeviceMonth) : "included"}</td>
-            <td className="p-1 text-right">{o.usdPerDeviceMonth ? usd(o.usdPerDeviceMonth * workload.devices) : "included"}</td>
+            <td className="p-1 text-right">{!o.usdPerDeviceMonth ? "included" : idle ? "not charged" : usd(o.usdPerDeviceMonth)}</td>
+            <td className="p-1 text-right">{!o.usdPerDeviceMonth ? "included" : idle ? "not charged" : usd(o.usdPerDeviceMonth * workload.devices)}</td>
           </tr>;
         })}</tbody>
       </table>

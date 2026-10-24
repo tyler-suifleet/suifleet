@@ -149,7 +149,11 @@ export function basePrice(table: PriceTable, devices: number) {
   return { usd, custom };
 }
 
-export interface PriceSelection { values: Record<SettingKey, number>; encryptedDelivery: boolean; annualPrepay: boolean }
+/** Settings that only apply while devices upload logs. */
+export const LOG_SETTING_KEYS: readonly SettingKey[] = ["archiveIntervalMs", "archiveRetentionDays"];
+
+/** `logUploads` false (the new-plan default) leaves the archive cadence and retention unpriced. */
+export interface PriceSelection { values: Record<SettingKey, number>; logUploads: boolean; encryptedDelivery: boolean; annualPrepay: boolean }
 
 /** The SuiFleet price for a fleet: base, each add-on per device and per fleet, the minimum, annual discount and activation. */
 export function fleetPrice(table: PriceTable, devices: number, selection: PriceSelection) {
@@ -158,7 +162,8 @@ export function fleetPrice(table: PriceTable, devices: number, selection: PriceS
   const addOns = SETTING_KEYS.map((key) => {
     const option = optionFor(table, key, selection.values[key]);
     if (!option) throw new Error(`${key}: ${selection.values[key]} is not an option in the price table`);
-    return { key, label: option.label, usdPerDevice: option.usdPerDeviceMonth, usdPerFleet: option.usdPerDeviceMonth * devices };
+    const usdPerDevice = selection.logUploads || !LOG_SETTING_KEYS.includes(key) ? option.usdPerDeviceMonth : 0;
+    return { key, label: option.label, usdPerDevice, usdPerFleet: usdPerDevice * devices };
   });
   if (selection.encryptedDelivery) {
     const seal = table.addOns.encryptedDelivery;

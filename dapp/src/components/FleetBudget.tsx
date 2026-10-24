@@ -33,8 +33,8 @@ const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
 // The default fleet settings (SF-131: daily health) for one device over a year, with log uploads
-// disabled as new fleets default (2026-10-23); the Fleet settings page sizes archives from the chosen settings.
-const SETTINGS_ESTIMATE = depositInput(toSettings(defaultValues(DEFAULT_PRICE_TABLE), NETWORK), { ...DEFAULT_WORKLOAD, devices: 1, releasesPerMonth: 1, artifactBytes: 1024 * 1024, logBytesPerDeviceMonth: 0 }, 12);
+// off as new fleets default (2026-10-23), the same default the Fleet settings page starts from.
+const SETTINGS_ESTIMATE = depositInput(toSettings(defaultValues(DEFAULT_PRICE_TABLE), NETWORK), { ...DEFAULT_WORKLOAD, devices: 1, releasesPerMonth: 1, artifactBytes: 1024 * 1024 }, 12);
 export const DEFAULT_ESTIMATE: EstimateInput = DATA_CONFIG ? { ...SETTINGS_ESTIMATE, serverlessData: true }
   : { ...SETTINGS_ESTIMATE, healthSummariesPerDeviceMonth: 0, serverlessData: false, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 0, storageEpochs: 2 };
 
