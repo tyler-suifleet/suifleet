@@ -65,7 +65,7 @@ async function main() {
   assert.throws(()=>validateItems([{...items[0],identifier:'../escape'},items[1]]), /bounds/);
   assert.throws(()=>validateItems(Array.from({length:65},(_,i)=>({...items[0],identifier:String(i)}))), /count/);
   await assert.rejects(prepareQuilt(storage, [{identifier:'one',contents:Buffer.alloc(3*1024*1024)}, {identifier:'two',contents:Buffer.alloc(3*1024*1024)}]), /bounds/);
-  for(const [count,size] of [[3,65536],[9,2048],[17,65536],[3,524288]]) {
+  for(const [count,size] of [[2,24576],[3,65536],[9,2048],[17,65536],[3,524288]]) {
     const blobs=Array.from({length:count},(_,i)=>({identifier:i===0?'manifest':`item-${i}`,contents:Buffer.alloc(size,i)}));
     const {quilt:encoded}=encodeQuilt({blobs,numShards:1000,encodingType:'RS2'});
     const parsed=readArchiveQuilt(encoded);

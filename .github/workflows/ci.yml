@@ -114,6 +114,9 @@ jobs:
             -v "$PWD:/workspace" -w /workspace suifleet-dev:ci \
             python3 scripts/test_ipc.py
 
+      - name: Opaque IPC chunk custody, encrypted batching and verified retirement
+        run: make test-opaque SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+
       - name: Industrial collector into the real daemon's durable stream
         run: |
           docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \
