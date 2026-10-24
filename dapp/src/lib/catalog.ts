@@ -38,7 +38,7 @@ export async function fetchVersion(client:SuiGrpcClient,id:string):Promise<Compo
 }
 export async function fetchCatalogs(client:SuiGrpcClient,publisher:string) {
   catalogPackage(); await verifyDeployment(client);
-  const events=await allEvents(client,moveType('component_catalog::CatalogCreated'));
+  const events=await allEvents(client,moveType('component_catalog::CatalogCreated'),publisher);
   const ids=[...new Set(events.map(e=>CreatedBcs.parse(e.bcs)).filter(e=>normalizeId(e.publisher)===normalizeId(publisher)).map(e=>e.catalog_id))];
   return Promise.all(ids.map(async id=> {
     const {object}=await client.getObject({objectId:id,include:{content:true}});

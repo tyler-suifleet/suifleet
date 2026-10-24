@@ -12,6 +12,6 @@ export function useDesiredStates(groupIds: string[]) {
     queryKey: ["desired", NETWORK, ...groupIds],
     queryFn: () => fetchDesiredStates(client, groupIds),
     enabled: groupIds.length > 0,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 }

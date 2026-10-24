@@ -336,7 +336,7 @@ function parsePolicy(object: { objectId: string; type: string; content: Uint8Arr
 /** The connected operator's policies for this fleet's registry, newest first. */
 export async function fetchPolicies(client: SuiGrpcClient, operator: string, include: string[] = []): Promise<PolicyState[]> {
   await verifyDeployment(client);
-  const ids = (await allEvents(client, policyCreatedType())).map((e) => enrollment_PolicyCreatedBcs.parse(e.bcs))
+  const ids = (await allEvents(client, policyCreatedType(), operator)).map((e) => enrollment_PolicyCreatedBcs.parse(e.bcs))
     .filter((e) => e.operator === normalizeId(operator) && e.registry === normalizeId(REGISTRY_ID)).map((e) => e.policy_id);
   // `include`: e.g. a policy just created, before its event is indexed.
   return (await objectsInBatches(client, [...new Set([...include.map(normalizeId), ...ids])])).map(parsePolicy)
