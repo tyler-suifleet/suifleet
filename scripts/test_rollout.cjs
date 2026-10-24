@@ -27,6 +27,7 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   assert.deepEqual(commands.map(c=>c.MoveCall.function), ['advance_rollout_onchain']);
   assert.equal(commands[0].MoveCall.arguments.length, 4);
   await assert.rejects(r.buildAdvanceRolloutTx({...client,getDynamicField:async()=>{throw Error('chain offline');}},'0x42','0xad'),/chain offline/);
+  assert.equal(load('lib/deployment-manifest.ts').moveType('deployment_manager::RolloutHealthKey'), `${m.type_origins['deployment_manager::RolloutHealthKey']}::deployment_manager::RolloutHealthKey`);
   const legacy = structuredClone(m);
   delete legacy.type_origins['deployment_manager::RolloutHealthKey'];
   delete legacy.type_origins['deployment_manager::RolloutHealth'];
