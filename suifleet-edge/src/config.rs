@@ -436,6 +436,7 @@ impl DeploymentManifest {
             ("catalog", crate::catalog::TYPES),
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
+            ("fleet settings", crate::protocol::SETTINGS_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
             anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
@@ -477,6 +478,7 @@ impl DeploymentManifest {
             .iter()
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
+            .chain(crate::protocol::SETTINGS_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
@@ -930,6 +932,9 @@ impl Config {
         }
         if let Some(budget) = &cfg.budget {
             budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
+            // One fleet: its settings (SF-130) come from this budget.
+            anyhow::ensure!(cfg.fleet_data.as_ref().is_none_or(|d| crate::sui_client::same_id(&d.budget_id, &budget.budget_id)),
+                "[budget] and [fleet_data] must name the same fleet budget");
         }
         if let Some(client_devices) = &mut cfg.client_devices {
             if client_devices.device_groups_file.is_relative() {

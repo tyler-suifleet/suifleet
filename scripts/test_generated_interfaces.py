@@ -50,7 +50,7 @@ def main():
     assert generator.normalize(changed) == expected
     catalog = json.loads(generator.CATALOG.read_text())
     recipe = json.loads(generator.RECIPE.read_text())
-    for unsupported in ["u128", "u32", "vector<bool>"]:
+    for unsupported in ["u128", "u16", "vector<bool>"]:
         changed = deepcopy(catalog)
         changed["modules"]["deployment_manager"]["functions"]["report_status"]["parameters"][2] = unsupported
         try:
