@@ -29,6 +29,24 @@ class TrustTests(unittest.TestCase):
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
+    def test_large_upgrade_uses_remaining_allowance_without_replenishment(self):
+        evidence = []
+        budget = Budget(800_000_000, evidence)
+        budget.grant(351_442_556)  # Setup in failed run 40140740252.
+        def upgrade(reserved):
+            self.assertEqual(reserved, 448_557_444)
+            return dict(digest='upgrade', effects=dict(status=dict(status='success'),
+                gasUsed=dict(computationCost='10000000', storageCost='400000000', storageRebate='0')))
+        budget.execute(Mock(), 'upgrade to head', upgrade, gas=budget.remaining)
+        self.assertEqual(budget.used, 761_442_556)
+        self.assertEqual(budget.remaining, 38_557_444)
+        # A later unknown operation keeps its entire remaining reservation.
+        with self.assertRaises(TimeoutError):
+            budget.execute(Mock(), 'unknown', Mock(side_effect=TimeoutError()), gas=budget.remaining)
+        self.assertEqual(budget.used, 800_000_000)
+        with self.assertRaises(Spent):
+            budget.execute(Mock(), 'retry', upgrade, gas=400_000_000)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)

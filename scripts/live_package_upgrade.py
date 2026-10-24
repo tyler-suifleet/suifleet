@@ -450,7 +450,11 @@ def run(args):
                         shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                         upgraded = step("upgrade to head", lambda: mutate("upgrade to head", toolchain.package_submitter(
                             client, tools["build"]["path"], package_dir, common, sender=operator,
-                            upgrade={"cap": upgrade_cap, "package": old}, record=built.setdefault("upgrade", {})), gas=400_000_000))
+                            upgrade={"cap": upgrade_cap, "package": old}, record=built.setdefault("upgrade", {})),
+                            # Growing additive packages can exceed the old 0.4 SUI
+                            # reservation. Use only the existing run allowance;
+                            # Budget still settles effects and retains unknown costs.
+                            gas=ledger.remaining))
                         new = published(upgraded)
                     else:
                         check("exact root bytecode equals base; separate packages do not trigger a pointless core upgrade")
