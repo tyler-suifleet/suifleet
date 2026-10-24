@@ -799,6 +799,12 @@ resolve conflicts, then continue the unfinished software and rerun all required 
         ref = json.loads(run(['gh', 'api', f"repos/{project['repository']}/git/ref/heads/{quote(pr['baseRefName'], safe='/')}"],
                              cwd=project['root'], env=env))
         pr['baseRefOid'] = ref['object']['sha']
+        # Testnet reports a commit status rather than a CheckRun. Revalidate it
+        # for this exact head before redirecting an existing implementation.
+        statuses = json.loads(run(['gh', 'api', f"repos/{project['repository']}/commits/{pr['headRefOid']}/status"],
+                                  cwd=project['root'], env=env))
+        pr['_testnet_status'] = next((row for row in statuses.get('statuses', [])
+                                      if row.get('context') == 'testnet/package-upgrade'), None)
         return pr
 
     def failure_superseded(self, project, record):
