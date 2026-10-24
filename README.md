@@ -1,5 +1,10 @@
 # SuiFleet
 
+SuiFleet hosts no application servers. Devices publish signed health to Sui
+and encrypted logs/diagnostics to Walrus; the static dApp verifies reads and
+derives alerts. See [setup/migration](docs/SERVERLESS_PRODUCT.md).
+The HTTP indexer is an optional customer-hosted reference integration.
+
 Decentralized edge software and firmware deployment using Sui contracts, Walrus storage, a Next.js wallet app and a Rust Linux daemon.
 
 **Status:** locally testable one-shot OTA foundation. Greengrass OTA/fleet feature compatibility is the product goal, not the current release claim. See [the feature audit](docs/GREENGRASS_PARITY_AUDIT.md) and [delivery plan](PLAN.md).
