@@ -12,7 +12,7 @@ cost and collects the prepaid deposit is SF-131 (#266).
 | Field | Default | Bounds (inclusive) | Applied by |
 |---|---|---|---|
 | `check_interval_ms` | 30 minutes | 5 minutes to 6 hours | every device's chain check |
-| `rollout_check_interval_ms` | 60 seconds | 30 seconds to 10 minutes, at most `check_interval_ms`; 0 turns fast checks off | devices with a deployment awaiting a rollout wave or its advance notice |
+| `rollout_check_interval_ms` | 60 seconds | 30 seconds to 10 minutes, at most `check_interval_ms`; 0 turns fast checks off | the fast checks of the [check cadence](OPERATIONS.md#check-cadence-and-endpoint-fallback-sf-123) |
 | `health_interval_ms` | daily | 1 minute to 1 day (as `fleet_data`) | on-chain health reports (`fleet_data`) |
 | `archive_interval_ms` | weekly | 1 hour to 1 week (as `fleet_data`) | routine encrypted log archives (`fleet_data`) |
 | `archive_retention_epochs` | 3 (six weeks of two-week Mainnet epochs) | 1 to 53 Walrus epochs | the owner's archive storage purchases |
@@ -58,12 +58,16 @@ name the same budget when both are set. A deployment manifest without the
 `fleet_settings` type origins, or a fleet without a record, leaves the local
 configuration in force.
 
-- **Checks.** After every check the daemon reads the record and waits
-  `max(runtime.poll_seconds, check_interval_ms)` before the next. While one of
-  its deployments is waiting for rollout eligibility or in its advance-notice
-  period, it waits `max(runtime.poll_seconds, rollout_check_interval_ms)`
-  instead, unless fast checks are off. Paused, scheduled and out-of-window
-  deployments wait at the routine interval.
+- **Checks.** After every check the daemon reads the record and applies it
+  to the [check cadence](OPERATIONS.md#check-cadence-and-endpoint-fallback-sf-123)
+  as floors: the routine interval becomes
+  `max(runtime.poll_seconds, check_interval_ms)` and the fast interval
+  (used while a deployment waits for rollout eligibility or admission, or a
+  maintenance window is open) becomes
+  `max(runtime.rollout_poll_seconds, rollout_check_interval_ms)`. With fast
+  checks off (0) the fast interval is the routine interval. The cadence's
+  single wakeups at a known admission time or window start, and its failure
+  backoff, are unchanged. Intervals that are not whole seconds round up.
 - **Health and archives.** The `fleet_data` loop reads the record each round
   and reports health or archives logs at the slower of the `fleet_data`
   cadence (the contract-enforced minimum) and the fleet's setting. With a
@@ -91,8 +95,8 @@ read). The settings page with live cost and prepaid deposit is SF-131.
 | Command | Covers |
 |---|---|
 | `sui move test --path contracts fleet_settings` (in `make test-contracts`) | defaults, inclusive bounds, owner-only writes, events with previous values, version gates, additive record on an existing budget |
-| `cargo test fleet_settings` (in `make edge-test`) | parsing and bounds, local-only-slower schedule, fast-check conditions, keeping settings in force on unusable reads |
-| `python3 scripts/test_fleet_settings_ota.py` (in `make test-ota`) | the real daemon against the simulator: local cadence without a record, refused records, the fast interval during a notice, a change picked up within one interval, no checks before the routine interval |
+| `cargo test fleet_settings` (in `make edge-test`) | parsing and bounds, local-only-slower floors on the check cadence, fast checks off, keeping settings in force on unusable reads |
+| `python3 scripts/test_fleet_settings_ota.py` (in `make test-ota`) | the real daemon against the simulator: local cadence without a record, refused records, the fast interval during a notice in an open maintenance window, a change picked up within one interval, no checks before the routine interval |
 | `scripts/test_fleet_data_ota.py` (in `make test-ota`) | health and routine archives slowed beyond the `fleet_data` minimum |
 | `node scripts/test_fleet_settings.cjs` (in `make test-manifest`) | the dApp's defaults, bounds, transaction and read |
 | `make test-settings-localnet` (disposable network-none localnet) | base-to-head upgrade over an existing budget, type origins, owner changes and events, on-chain refusals, base-package budget operations, real daemon and dApp reads |
