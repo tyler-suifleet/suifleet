@@ -14,7 +14,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from test_capacity_retry import Recovery
-from test_ci_redirects import Fixture, ROOT, git, d, c, REAL_RUN
+from test_ci_redirects import Fixture, ROOT, git, d, c, REAL_RUN, TEST_UNINSPECTABLE
 
 # Observed verbatim in stopped Claude workers on 2026-10-23.
 OBSERVED = "You've hit your session limit · resets 4:30pm (America/Los_Angeles)"
@@ -127,7 +127,8 @@ def nondumpable(test, token):
     """A live detached same-user process carrying `token` whose environ cannot be read."""
     child = subprocess.Popen([sys.executable, '-c', NONDUMPABLE], env={**os.environ, 'PR_COORDINATOR_CLAIM_TOKEN': token},
                              stdout=subprocess.PIPE, start_new_session=True)
-    test.addCleanup(lambda: (child.kill(), child.wait(), child.stdout.close()))
+    TEST_UNINSPECTABLE.add(child.pid)
+    test.addCleanup(lambda: (child.kill(), child.wait(), child.stdout.close(), TEST_UNINSPECTABLE.discard(child.pid)))
     test.assertEqual(child.stdout.readline(), b'ready\n')
     try:
         Path(f'/proc/{child.pid}/environ').read_bytes()
