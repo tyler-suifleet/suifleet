@@ -22,10 +22,22 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   assert.equal(key,`${m.type_origins['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey`);
   await assert.rejects(r.readRollout({getDynamicField:async()=>{throw Error('offline');}},'0x42'),/offline/);
   const client = {getObject:async()=>({object}),getDynamicField:async()=>result};
-  const advance = await r.buildAdvanceRolloutTx(client,'0x42','0xad');
+  const advance = await r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x1']);
   const commands = advance.getData().commands;
   assert.deepEqual(commands.map(c=>c.MoveCall.function), ['advance_rollout_onchain']);
   assert.equal(commands[0].MoveCall.arguments.length, 4);
+  const { bcs } = appRequire('@mysten/sui/bcs');
+  const candidatesOf = tx => {
+    const data = tx.getData();
+    const arg = data.commands[0].MoveCall.arguments[2];
+    return bcs.vector(bcs.Address).parse(Buffer.from(data.inputs[arg.Input].Pure.bytes, 'base64'));
+  };
+  assert.deepEqual(candidatesOf(advance), [n('0x1')]); // Offline 0x2 is never admitted.
+  assert.deepEqual(candidatesOf(await r.buildAdvanceRolloutTx(client,'0x42','0xad')), []);
+  const skipOffline = r.buildRolloutControlTx('0x42', 0, ['0x2'], 'skip offline canary');
+  assert.equal(skipOffline.getData().commands[0].MoveCall.function, 'control_rollout');
+  await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x3']), /rollout members/);
+  await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x1','0x01']), /distinct/);
   await assert.rejects(r.buildAdvanceRolloutTx({...client,getDynamicField:async()=>{throw Error('chain offline');}},'0x42','0xad'),/chain offline/);
   assert.equal(load('lib/deployment-manifest.ts').moveType('deployment_manager::RolloutHealthKey'), `${m.type_origins['deployment_manager::RolloutHealthKey']}::deployment_manager::RolloutHealthKey`);
   const legacy = structuredClone(m);

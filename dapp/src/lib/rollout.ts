@@ -50,13 +50,15 @@ export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">
     normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
   return { componentName: record.component_name, version: record.version };
 }
-export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string) {
+export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, candidates: string[] = []) {
   const manifest = requireManifest();
   if (!ROLLOUT_HEALTH_TYPES.every(name => manifest.type_origins[name])) throw new Error("On-chain rollout health requires an upgraded package and regenerated manifest");
   const [r] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, owner)]);
+  const selected = candidates.map(id => normalizeSuiAddress(id));
+  if (new Set(selected).size !== selected.length || selected.some(id => !r.members.includes(id))) throw new Error("Admission candidates must be distinct rollout members");
   const tx = new Transaction();
   calls.deployment_manager_advance_rollout_onchain(tx, PACKAGE_ID, id,
-    manifest.shared_objects.registry.id, r.members, "0x6");
+    manifest.shared_objects.registry.id, selected, "0x6");
   return tx;
 }
 export function buildRolloutControlTx(id: string, state: number, skip: string[], reason: string) {

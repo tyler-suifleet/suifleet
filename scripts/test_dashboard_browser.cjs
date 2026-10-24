@@ -132,10 +132,21 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     // token, 120-second telemetry snapshot or periodic fleet-data read exists.
     page = await open("/rollouts#onchain");
     await page.getByRole("button", { name: "app 2.0.0" }).click();
+    await page.getByLabel("Admission candidate IDs").fill(members[2]);
     await page.getByRole("button", { name: "Verify on-chain health and advance" }).click();
     await waitText(page, "Fixture wallet stopped before signing");
     const submitted = await page.evaluate(() => window.rolloutTransaction);
     assert.deepEqual(submitted.commands.map(c => c.MoveCall.function), ["advance_rollout_onchain"]);
+    const candidateArg = submitted.commands[0].MoveCall.arguments[2];
+    const { bcs } = appRequire("@mysten/sui/bcs");
+    assert.deepEqual(bcs.vector(bcs.Address).parse(Buffer.from(submitted.inputs[candidateArg.Input].Pure.bytes, "base64")), [members[2]]);
+    await page.getByLabel("Skip never-admitted offline IDs (optional)").fill(members[3]);
+    await page.getByLabel("Audit reason").fill("skip offline member before admission");
+    await page.getByRole("button", { name: "Resume / apply skips" }).click();
+    await page.waitForFunction(() => window.rolloutTransaction?.commands[0]?.MoveCall.function === "control_rollout");
+    const recovery = await page.evaluate(() => window.rolloutTransaction);
+    const skipArg = recovery.commands[0].MoveCall.arguments[2];
+    assert.deepEqual(bcs.vector(bcs.Address).parse(Buffer.from(recovery.inputs[skipArg.Input].Pure.bytes, "base64")), [members[3]]);
     assert.equal(await page.evaluate(() => sessionStorage.getItem("suifleet.telemetryToken")), null);
     await page.close();
 

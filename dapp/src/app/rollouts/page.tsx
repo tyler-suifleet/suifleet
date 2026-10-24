@@ -19,6 +19,7 @@ export default function RolloutsPage() {
   const { data: deployments = [] } = useDeployments();
   const [input, setInput] = useState(defaults); const [cohorts, setCohorts] = useState("");
   const [selected, setSelected] = useState(""); const [reason, setReason] = useState(""); const [skip, setSkip] = useState("");
+  const [candidates, setCandidates] = useState("");
   const [error, setError] = useState(""); const [preparing, setPreparing] = useState(false);
   const { mutateAsync, isPending } = useFleetTransaction();
   const { data: rollout, refetch, error: readError } = useQuery({ queryKey: ["rollout", account?.address, selected],
@@ -50,7 +51,9 @@ export default function RolloutsPage() {
     {rollout && <div className="space-y-3 border p-4">
       <p role="status">{["Active", "Paused", "Aborted permanently", "Complete"][rollout.state]} · cohort {Number(rollout.cohort) + 1} · decision {rollout.revision}</p>
       <RolloutDetail id={selected} rollout={rollout} />
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address))}>Verify on-chain health and advance</button>
+      <label className="block">Admission candidate IDs<input className="border ml-2" value={candidates} onChange={e => setCandidates(e.target.value)} /></label>
+      <p>Choose reachable members to admit. Leave blank to evaluate health without new grants. Omitted offline members remain eligible for audited skips; admitted members retain capacity until they report.</p>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean)))}>Verify on-chain health and advance</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
       {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason))}>{label}</button>)}
