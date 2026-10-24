@@ -67,8 +67,12 @@ the creator can still delete them individually after review.
 - **Dry run first.** The transaction is built with the owner's actual gas coins
   and those exact bytes are simulated. The panel shows the SUI returned after
   the transaction's own fees, with its rebate, computation and new-storage
-  parts. *Sign and reclaim* is enabled only after a successful dry run, and the
-  confirmed net amount is read back from executed effects.
+  parts. *Sign and reclaim* is enabled only after a successful dry run of the
+  current plan, and the confirmed net amount is read back from executed effects.
+  The preview is bound to its plan, fleet context, account and network. A
+  rescan, *Continue scan* or account change discards it, and a slow dry run of
+  an earlier plan is dropped, so signing never submits a plan that was not
+  simulated.
 - **Batching.** At most 64 entries per call and 256 removals per transaction.
   Larger histories are reclaimed in successive transactions.
 - **Scanning.** The planner lists only the index entries that still exist, so
@@ -146,6 +150,7 @@ sizes and storage-unit price are protocol constants.
 | Move security gate | `python3 scripts/check_move_security.py` | PASS |
 | Interfaces | `make check-interfaces` | PASS |
 | dApp unit tests | `node scripts/test_storage_reclaim.cjs` | PASS |
+| Panel preview binding | `node scripts/test_storage_reclaim_panel.cjs` | PASS: rescan, Continue scan, late dry run and account change never enable signing |
 | Affected dApp tests | `test_fleet_bulk`, `test_fleet_recovery`, `test_shadow_documents`, `test_dashboard_views`, `test_fleet_data`, `test_data_session_browser` | PASS |
 | Production build | `pnpm build` | PASS |
 | Localnet lifecycle and upgrade | `make test-reclaim-localnet` | PASS, see below |
