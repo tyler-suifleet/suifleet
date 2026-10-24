@@ -13,13 +13,14 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'sdk/python'), str(ROOT / '.ci-cache/aws-export-python')]
 from defusedxml import ElementTree as ET
-from suifleet_stream_export import Exporter, validate, private_secret
+from suifleet_stream_export import Exporter, validate, private_secret, atomic as atomic_checkpoint
 from suifleet_ipc import Client, IpcError
 from test_ota import Simulator, start_grpc, wait_for, PACKAGE, REGISTRY, DEVICE, CAP, UPGRADE_CAP, TYPE_ORIGINS
 
@@ -334,6 +335,40 @@ class ActualExporters(unittest.TestCase):
         self.assertEqual(exporter.state['status']['failures'], 1)
         exporter.report(False)
         self.assertEqual(self.source.stream_describe(self.stream)['external_export_status']['consecutive_failures'], 0)
+
+    def test_customer_idle_polls_do_not_write_or_report(self):
+        for service in ('http', 'customer_s3'):
+            with self.subTest(service=service):
+                exporter = self.customer(service)
+                def idle_polls():
+                    polls = []
+                    def sleep(delay):
+                        polls.append(delay)
+                        if len(polls) == 10:
+                            raise KeyboardInterrupt()
+                    exporter.sleep = sleep
+                    with patch('suifleet_stream_export.atomic') as atomic, patch.object(
+                            exporter.source, 'request', wraps=exporter.source.request) as request:
+                        with self.assertRaises(KeyboardInterrupt):
+                            exporter.run()
+                        atomic.assert_not_called()
+                        self.assertFalse(any(call.args[0] == 'stream_export_status'
+                                             for call in request.call_args_list))
+                    self.assertEqual(polls, [self.config['poll_seconds']] * 10)
+                idle_polls()
+                exporter.report(True)
+                with patch('suifleet_stream_export.atomic', wraps=atomic_checkpoint) as atomic:
+                    exporter.report(False)
+                    self.assertEqual(atomic.call_count, 1)
+                status = self.source.stream_describe(self.stream)['external_export_status']
+                self.assertEqual((status['failures'], status['consecutive_failures']), (1, 0))
+                idle_polls()
+                # Persisted healthy counters remain quiet after exporter restart too.
+                exporter = self.open()
+                idle_polls()
+                exporter.lock.close()
+                # Each service needs its own config-bound checkpoint.
+                exporter.path.unlink()
 
     def test_customer_backoff_reports_failures_without_advancing(self):
         self.append([{'retain': 'during outage'}])

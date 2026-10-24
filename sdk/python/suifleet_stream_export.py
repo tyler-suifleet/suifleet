@@ -328,6 +328,10 @@ class Exporter:
         # replay the identical snapshot/idempotency key; receiver must deduplicate.
 
     def report(self, failed, delivered=False):
+        # Idle polls neither change health counters nor need durable flash writes.
+        # A successful poll after failure still clears and reports degraded health.
+        if not failed and not delivered and not self.state.get('status', {}).get('consecutive_failures', 0):
+            return
         status = self.state.setdefault('status', {'batches': 0, 'failures': 0,
                                                   'consecutive_failures': 0})
         if failed:
