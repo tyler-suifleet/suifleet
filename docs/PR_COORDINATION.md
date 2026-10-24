@@ -719,3 +719,74 @@ and the normal activation mechanism. Validation uses offline classifier/fence te
 real fake-CLI exits, surviving descendants, repeated replacement exhaustion and
 read-only matching against the preserved SF-082 incident output; no provider outage
 or shared-wallet/hardware mutation is induced for this test.
+
+### Provider quota-reset recovery and CI handoff (SF-145)
+
+Claude workers can stop on an explicit session/weekly quota limit that names its
+reset time. The shared classifier (`coordinator.quota_reset`) accepts only a final
+terminal line, or a `result` error envelope, that is exactly the observed CLI form
+`You've hit your session limit · resets 4:30pm (America/Los_Angeles)` or a weekly
+form that names the day (`resets Oct 27, 9am (Zone)`). The receipt rules match
+SF-117: a nonzero, non-signal, non-timeout exit receipt, no result receipt, and at
+most 32 KiB of output tail. The message carries no date, so the reset is anchored
+to the exit receipt's modification time and must be a valid IANA zone. A session
+reset must fall within six hours after the exit and a dated reset within eight days.
+Five minutes of clock skew before the exit is tolerated. Quoted or prefixed copies,
+assistant JSON, authentication/billing/usage text without a time, weekly limits
+without a day, unknown zones and trailing errors are rejected. Those exits keep
+their existing quarantine. A reset is never guessed. Codex usage-limit text is not
+recognized yet and remains quarantined.
+
+**Implementation workers.** A validated quota exit becomes a `capacity_retries` row
+marked `quota` in the side table `capacity_kinds`. The SF-117 table layout is unchanged,
+so an activation rollback still works; unmarked rows are capacity retries. It uses the same SF-117 fences, launch intent, single-replacement
+rule and no-replay guarantees, with a separate budget of four recoveries per claim
+token digest. The replacement is due 120 seconds after the stated reset. A reset
+that already passed is due immediately, for example after dispatcher downtime. The
+claim is asserted and heartbeated while it waits. The quota is shared by the
+account, so the project/family `backoff` row also pauses new claims for that family
+until the reset (`provider quota reset wait`). Replacement sessions/directories are
+`SOURCE-quota-N`. Exhaustion quarantines the run with the claim retained for
+explicit recovery.
+
+**Repair workers.** A coordinator fix job with a fenced `repair_claim` that stops
+on a validated quota exit becomes `quota_wait`. It keeps the PR reserved against
+new review/fix jobs. `quota_recoveries` in the review database records the source
+receipt, reset time and state. Before the reset, the coordinator only asserts and
+heartbeats the unchanged claim and makes no GitHub reads. Once the reset passes,
+it rechecks the following:
+
+- the same published In Progress token digest, key, branch, worktree, family and model;
+- an unchanged worker command;
+- a stopped original PID/start identity and session;
+- no live process carrying the claim token;
+- no live lock naming the claim's session or ticket;
+- no unfinished git operation;
+- an open same-repository PR on the branch;
+- available configured fix capacity.
+
+It then records a launch intent and starts one same-family worker in `quota-N/`
+under the same job and claim. Dirty, staged, untracked and already-pushed work is
+preserved for the worker to continue. A changed owner or status cancels the wait and
+quarantines the job. An interrupted or uncertain launch becomes `orphaned`, with its
+process identity cleared, so it is held for explicit recovery and never replayed or
+auto-quarantined. Each repair job gets four quota recoveries; exhaustion follows the
+existing orphaned → quarantined path. A review job that stops on a quota limit
+retries no earlier than the reset. The dispatcher treats a `quota_wait` or
+`quota_launch` repair as owning the claim's recovery. `fleet-status` shows
+`quota-wait` for both kinds with the attempt and due time.
+
+**CI handoff.** Implementation and repair prompts no longer ask models to wait for
+hosted CI. Workers finish meaningful local work and push. Implementation workers
+then mark the PR Ready and the ticket Review; repair workers post their feedback
+reply. Each records that hosted CI is pending and exits, with no sleep/watch loops,
+monitors or detached watchers. Pending CI is never approval. The coordinator still
+requires exact-head/current-base checks, fresh independent review and its merge
+gates, and dispatches the bounded SF-111/SF-116 CI repair if a check fails.
+Reviewers still perform source-only review while CI is unready.
+
+Validation is offline: `tests/test_quota_recovery.py` covers the observed message,
+past and future resets, rejected text, fences for changed ownership, live
+descendants and shared locks, budgets, restart/no-replay and the CI-handoff prompts.
+It reruns the SF-117 fence suite against quota receipts. Runtime restart and later
+advancing jobs are verified only after reviewed merged activation.
