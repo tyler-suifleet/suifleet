@@ -399,6 +399,9 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
       useFleetBudget: () => ({ budget: { ...view, paused } }),
       useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
       useSubmit: () => ({ submit: () => {}, pending: false }), useState: () => ['', () => {}],
+      useFleetTransaction: () => ({ mutateAsync: async () => { throw Error('unexpected approval'); } }),
+      useQueryClient: () => ({ invalidateQueries: async () => {} }), useDAppKit: () => ({}),
+      useRef: value => ({ current: value }),
       useQuery: () => query, sui: (value) => `${value} SUI`,
     };
     vm.runInNewContext(compiled, sandbox);
@@ -406,6 +409,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     assert.ok(html.includes(paused ? 'Resume all devices' : 'Pause all devices'));
     assert.ok(html.includes('Withdraw unallocated funds'));
     assert.ok(html.includes('Deposited 100 SUI'));
+    assert.match(html, /<button[^>]*disabled=""[^>]*>Enroll all unenrolled devices<\/button>/);
     assert.ok(html.includes(query.error ? query.error.message : 'Loading budget accounts'));
     for (const hidden of ['<table', 'not enrolled', 'Enroll with float', '999 SUI', 'No draws this period', 'days left', '<ul']) {
       assert.ok(!html.includes(hidden), `unavailable account data must not render ${hidden}`);

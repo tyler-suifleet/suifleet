@@ -325,6 +325,7 @@ test-manifest:
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
+	$(RUN) node scripts/test_budget_enrollment.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_incremental_history.cjs
@@ -711,3 +712,8 @@ pilot-public-read:
 .PHONY: test-retention-scale-upgrade
 test-retention-scale-upgrade:
 	$(RUN) python3 scripts/test_protocol_localnet.py --retention-scale-upgrade
+
+# SF-132: use a disposable network-none container with the pinned network CLI.
+.PHONY: test-budget-enrollment-localnet
+test-budget-enrollment-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
