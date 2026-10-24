@@ -18,7 +18,11 @@ Prepared by Claude (claude-opus-5-5) at the user's request on 2026-10-23; the us
 
 ### Decisions recorded
 
-- **Sui stack only.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC. The base product needs no SuiFleet-operated web2 service: no CDN, indexer server or message broker. Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
+- **Sui stack only, no servers.** SuiFleet runs on Sui, Walrus, Seal and Sui RPC and operates no application servers: no CDN, indexer server, message broker or hosted worker.
+  - The HTTP indexer is being removed from the product path ([SF-137/#282](https://github.com/tyler-suifleet/suifleet/issues/282)).
+  - Customers who want data in their own storage integrate it directly ([SF-143/#288](https://github.com/tyler-suifleet/suifleet/issues/288)).
+  - Pilots use Mysten's public full node; paying fleets move to a SuiFleet-run Sui full node or a paid RPC plan under SuiFleet's account. Customers never need their own RPC account.
+- **Any device data.** Customers can store whatever their devices produce (files, streams, sensor batches, logs), treated as opaque bytes: encrypted on the device, kept on Walrus, and browsed, shared and exported from a Data section in the dApp.
 - **All-in per-device price.** Network fees are included. SuiFleet funds each fleet's on-chain budget (SF-083) from the subscription, so customers need not hold SUI or WAL.
 - **Configurable cost settings.** Every fleet gets sensible defaults and can change the settings that drive cost, seeing the cost and prepaying it before saving ([SF-130/#265](https://github.com/tyler-suifleet/suifleet/issues/265), [SF-131/#266](https://github.com/tyler-suifleet/suifleet/issues/266)).
 - **Packaging by customer segment.** Pricing depends partly on who the customer is, so the same platform is sold in two packages (below), not as two price lists for the same thing.
@@ -44,6 +48,16 @@ The platform price includes the default settings: an update check every 30 minut
 
 Managed plan: the platform price plus $0.10 per device per month, with a $199 monthly minimum. It adds onboarding, help integrating SuiFleet into the customer's device image, and a support SLA. Its premium funds the support time that gross margin excludes.
 
+Fleet data add-on, for any device data stored on Walrus:
+
+| Item | Price | Our cost at 2026-10-23 rates | Gross margin |
+|---|---|---:|---:|
+| Included in the platform plan | 10 MB written per device per month (covers default weekly logs) | – | – |
+| Data written beyond the allowance | $0.10 per GB | ~$0.018 per GB | ~82% |
+| Data stored | $0.05 per GB-month | ~$0.021 per GB-month | ~58% |
+
+For comparison, CloudWatch Logs charges $0.50 per GB ingested plus $0.03 per GB-month, and S3 Standard $0.023 per GB-month plus $0.09 per GB of internet egress. Reading data back from Walrus has no egress fee.
+
 ### Customer segments
 
 - **Greengrass switchers** already run fleet tooling and will compare SuiFleet with their AWS bill.
@@ -59,6 +73,7 @@ Managed plan: the platform price plus $0.10 per device per month, with a $199 mo
 ### Positioning
 
 - **Infrastructure, not a "blockchain product".** Customer-facing language describes fleet and OTA infrastructure: verifiable release authority, tamper-evident update records, no lock-in and low cost. Sui, Walrus and Seal belong in the technical and security documentation, where security reviews will ask how the infrastructure works.
+- **Device data is table stakes.** Every alternative a buyer compares answers "where does my device data go?": Greengrass routes to S3 and Kinesis, Golioth sells pipelines, Memfault centres on diagnostics, Mender sells a monitoring add-on. SuiFleet's answer is the fleet data add-on, plus direct export to the customer's own storage.
 - **Deployments, not telemetry pipelines.** AWS provides live telemetry through IoT Core MQTT, device shadows and rules into services such as CloudWatch, IoT SiteWise and Kinesis. SuiFleet targets deployment and fleet management; live telemetry is not a near-term target.
   - Customers who need minute-level telemetry can keep sending it straight to IoT Core or their existing pipeline, without Greengrass, and move deployments to SuiFleet.
   - That still removes Greengrass's $0.16 per-device fee and its Jobs charges.
@@ -182,6 +197,7 @@ As built, every daemon polls every 10 seconds with about 23 gRPC reads, or about
   - Hetzner AX102-class bare metal with extra NVMe, about €449 a month.
   - Cheaper than paid RPC above about 200M requests a month, roughly 100,000 devices at 30-minute checks.
   - Needs prompt upgrades and monitoring.
+- **Network nodes versus servers.** At large scale SuiFleet would run Sui full nodes and Walrus aggregators. Those are Sui-stack network nodes that any party can run interchangeably, not application servers holding customer state; devices fall back to public endpoints if they fail.
 
 ### Development required
 
@@ -206,6 +222,16 @@ Stage 3, scale and the cost floor:
 - [SF-121/#252](https://github.com/tyler-suifleet/suifleet/issues/252): device-local archive quilting.
 - [SF-132/#259](https://github.com/tyler-suifleet/suifleet/issues/259): batched gas-account enrollment.
 - [SF-133/#260](https://github.com/tyler-suifleet/suifleet/issues/260): threshold Seal key fetch.
+
+Stage 4, no servers and fleet data:
+
+- [SF-137/#282](https://github.com/tyler-suifleet/suifleet/issues/282): remove the server indexer from the product path.
+- [SF-138/#283](https://github.com/tyler-suifleet/suifleet/issues/283): gate staged rollouts on signed on-chain health instead of server telemetry.
+- [SF-139/#284](https://github.com/tyler-suifleet/suifleet/issues/284): store any device data on Walrus.
+- [SF-140/#285](https://github.com/tyler-suifleet/suifleet/issues/285): Data section in the dApp for browsing, downloading, sharing and exporting.
+- [SF-141/#286](https://github.com/tyler-suifleet/suifleet/issues/286): per-stream retention and expiry.
+- [SF-142/#287](https://github.com/tyler-suifleet/suifleet/issues/287): meter and price device data.
+- [SF-143/#288](https://github.com/tyler-suifleet/suifleet/issues/288): export directly to customer-owned storage.
 
 Bug: [SF-134/#261](https://github.com/tyler-suifleet/suifleet/issues/261), where the indexer shows foreign deployments in a device's history.
 
