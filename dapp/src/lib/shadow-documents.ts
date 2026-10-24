@@ -103,7 +103,7 @@ export type ShadowDocumentsView =
  */
 export function shadowDocumentsView(archive: { schema: number; seq: number; observed_ms: number; shadows?: ShadowSnapshot },
   index: number, anchorCount: number): ShadowDocumentsView {
-  if (archive.schema !== 2 || !archive.shadows) {
+  if (![2,3,4].includes(archive.schema) || !archive.shadows) {
     return { state: 'unavailable', reason: 'This archive has no shadow documents: the device had no shadow service enabled, or its daemon predates archived shadows.' };
   }
   const documents = archive.shadows.documents.map((d): DocumentView => isExactHere(d) ? { state: 'verified', ...d }

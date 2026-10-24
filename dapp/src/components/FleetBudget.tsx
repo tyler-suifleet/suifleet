@@ -30,8 +30,8 @@ const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
 export const DEFAULT_ESTIMATE: EstimateInput = {
   devices: 1, months: 12, receiptsPerDeviceMonth: 30, anchorsPerDeviceMonth: 0, releasesPerMonth: 1,
-  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: DATA_CONFIG ? 64 * 1024 * 1024 : 0, dataUploadsPerDeviceMonth: 30, storageEpochs: DATA_CONFIG ? 3 : 2,
-  healthSummariesPerDeviceMonth: DATA_CONFIG ? 720 : 0, serverlessData: !!DATA_CONFIG,
+  artifactBytes: 1024 * 1024, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 0, storageEpochs: DATA_CONFIG ? 3 : 2,
+  healthSummariesPerDeviceMonth: DATA_CONFIG ? 30 : 0, serverlessData: !!DATA_CONFIG,
   floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
 };
 
@@ -57,14 +57,14 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Months" value={input.months} onChange={set("months")} />
       <NumberField label="Receipts per device per month" value={input.receiptsPerDeviceMonth} onChange={set("receiptsPerDeviceMonth")} />
       <NumberField label="Other device transactions per month" value={input.anchorsPerDeviceMonth} onChange={set("anchorsPerDeviceMonth")} />
-      <NumberField label="Health summaries per device per month (hourly = 720)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
+      <NumberField label="Health summaries per device per month (daily = 30)" value={input.healthSummariesPerDeviceMonth ?? 0} onChange={set("healthSummariesPerDeviceMonth")} />
       <NumberField label="Releases per month" value={input.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
       <NumberField label="Archive uploads per device per month (daily = 30; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults assume hourly health and daily archives; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
+    {input.serverlessData && <p>Defaults assume daily health and disabled log archives; enabling this estimate does not configure the device; existing fleets keep their on-chain settings; match these counts to your configured cadence. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
     {result.estimate?.protectedCapacity && <p role="status">Projected archives: {result.estimate.protectedCapacity.planned}; existing covered blobs entered: {result.estimate.protectedCapacity.existing}. Migrated v3 storage has no fleet-wide protection slot cap. Archives purchased through their full owner-approved target need no renewal reserve. Releases and recipes still require finite renewal authorization. Check actual coverage, reserves and per-blob expiry before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">

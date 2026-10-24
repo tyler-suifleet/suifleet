@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Local, keyless codec/storage-node worker. Run from the locked dApp SDK
 // installation. It never signs transactions or receives archive plaintext.
-import { readFile } from 'node:fs/promises';
 import { writeBounded, requireWeightedQuorum } from './walrus-node-writes.mjs';
 import { createInterface } from 'node:readline';
 import { SuiGrpcClient } from '@mysten/sui/grpc';
 import { walrus, TESTNET_WALRUS_PACKAGE_CONFIG, blobIdToInt } from '@mysten/walrus';
 import { bcs } from '@mysten/sui/bcs';
 import { normalizeSuiAddress as id, fromBase58, toHex } from '@mysten/sui/utils';
+import { prepareQuilt, digest, readBounded, MAX_ITEMS, MAX_BYTES } from './archive-quilt.mjs';
 async function main() {
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity })[Symbol.asyncIterator]();
 try {
@@ -15,7 +15,7 @@ try {
   if (first.done || first.value.length > 16384) throw Error('Invalid codec request');
   const request = JSON.parse(first.value);
   if (request.chain !== '4c78adac') throw Error('Only the pinned testnet Walrus deployment is supported');
-  const bytes = new Uint8Array(await readFile(request.ciphertext_path));
+  const bytes = new Uint8Array(await readBounded(request.ciphertext_path));
   if (!bytes.length || bytes.length > 4 * 1024 * 1024) throw Error('Archive size out of bounds');
   const client = new SuiGrpcClient({ network: 'testnet', baseUrl: request.rpc_url });
   const info = await client.getChainIdentifier();
@@ -25,8 +25,23 @@ try {
   if (id(TESTNET_WALRUS_PACKAGE_CONFIG.systemObjectId) !== id(request.system_id)
       || id((await storage.systemObject()).package_id) !== id(request.walrus_package)) throw Error('Unsupported Walrus deployment');
   const committee = (await storage.systemState()).committee;
-  const encoded = await storage.encodeBlob(bytes);
-  const prepared = { blob_id: blobIdToInt(encoded.blobId).toString(), root_hash: bcs.u256().parse(encoded.rootHash).toString() };
+  let encoded, size = bytes.length, items;
+  if (request.items !== undefined) {
+    if (!Array.isArray(request.items) || request.items.length < 1 || request.items.length >= MAX_ITEMS) throw Error('Invalid item list');
+    const blobs = [{ identifier: 'manifest', contents: bytes }];
+    let total = bytes.length;
+    for (const item of request.items) {
+      if (!item || !Number.isSafeInteger(item.size) || item.size < 1 || (total += item.size) > MAX_BYTES) throw Error('Item quota exceeded');
+      // The signed manifest/journal supplies the expected digest. Read at most
+      // the configured maximum and refuse mutated spool bytes before encoding.
+      const contents = new Uint8Array(await readBounded(item.path, item.size));
+      if (contents.length !== item.size || digest(contents) !== item.sha256) throw Error('Changed pending item');
+      blobs.push({ identifier: item.identifier, contents });
+    }
+    ({ encoded, size, items } = await prepareQuilt(storage, blobs));
+  } else encoded = await storage.encodeBlob(bytes);
+  const prepared = { blob_id: blobIdToInt(encoded.blobId).toString(), root_hash: bcs.u256().parse(encoded.rootHash).toString(), size,
+    ...(items ? { items } : {}) };
   if (request.operation === 'prepare') console.log(JSON.stringify(prepared));
   else if (request.operation === 'registered') {
     const result = await client.waitForTransaction({ digest: request.digest, include: { effects: true, events: true } });
