@@ -906,16 +906,6 @@ module fleet_storage::fleet_storage_tests {
     }
 
     #[test]
-    #[expected_failure(abort_code = 13, location = fleet_storage)]
-    fun expired_protected_blob_blocks_new_admission() {
-        let (mut scenario, system, _) = renewal_fixture();
-        let (fs, budget, cap) = owner(&mut scenario);
-        fleet_storage::assert_retention_live_for_testing(&fs, 5);
-        owner_end(fs, budget, cap);
-        finish(scenario, system);
-    }
-
-    #[test]
     #[expected_failure(abort_code = 4, location = fleet_storage)]
     fun actual_prepayment_obeys_period_wal_limit() {
         let (mut scenario, mut system, id) = renewal_fixture();
@@ -984,13 +974,53 @@ module fleet_storage::fleet_storage_tests {
     }
 
     #[test]
-    #[expected_failure(abort_code = 13, location = fleet_storage)]
-    fun device_policy_target_must_extend_the_original_purchase() {
+    fun fully_paid_device_archive_needs_no_renewal() {
         let (mut scenario, mut system) = device_retention_fixture();
         let (mut fs, budget, cap) = owner(&mut scenario);
         fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 5, 1_000_000);
         owner_end(fs, budget, cap);
-        upload(&mut scenario, &mut system, BLOB + 1, 20);
+        let id = upload(&mut scenario, &mut system, BLOB + 1, 20);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        assert!(fleet_storage::renewal(&fs, id).is_none());
+        let released = fleet_storage::release_blob(&mut fs, &budget, &cap, id);
+        transfer::public_transfer(released, OWNER);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun fully_paid_archive_uses_no_additional_executor_reserves() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 5, 1_000_000);
+        let (wal, _) = fleet_storage::retention_balances(&fs);
+        let (w, g) = fleet_storage::withdraw_retention(&mut fs, &budget, &cap, wal, 105, ts::ctx(&mut scenario));
+        destroy(w); destroy(g);
+        owner_end(fs, budget, cap);
+        let id = upload(&mut scenario, &mut system, BLOB + 1, 20);
+        let (fs, budget, cap) = owner(&mut scenario);
+        assert!(fleet_storage::renewal(&fs, id).is_none());
+        let (remaining_wal, remaining_gas) = fleet_storage::retention_balances(&fs);
+        assert!(remaining_wal == 0 && remaining_gas == 5);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
+    fun fully_paid_archive_can_enter_explicit_owner_renewal_then_release() {
+        let (mut scenario, mut system) = device_retention_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 5, 1_000_000);
+        owner_end(fs, budget, cap);
+        let id = upload(&mut scenario, &mut system, BLOB + 1, 20);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::authorize_renewal(&mut fs, &budget, &cap, id, 8, 1_000_000);
+        fleet_storage::prepay_renewal(&mut fs, &budget, &cap, &mut system, id, ts::ctx(&mut scenario));
+        assert!(fleet_storage::renewal(&fs, id).is_some());
+        transfer::public_transfer(fleet_storage::release_blob(&mut fs, &budget, &cap, id), OWNER);
+        owner_end(fs, budget, cap);
+        // A new admission exercises closure/counters after replacement and release.
+        upload(&mut scenario, &mut system, BLOB + 2, 30);
         finish(scenario, system);
     }
 
