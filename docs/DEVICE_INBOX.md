@@ -81,6 +81,12 @@ checks reports as before.
   every target group and activated target device; add/remove-devices use
   `add_member`/`remove_member`. `ctl` rebuilds the same calls from its own
   chain reads before signing.
+- Serverless operations CLI (`scripts/suifleet_ops.cjs build`, via
+  `dapp/src/lib/fleet-ops.ts`): the same dApp rules. Create-deployment
+  announces to administered target groups and operated target devices;
+  add-devices lists the group in each activated device's inbox, creating a
+  missing one before the custody loan; remove-devices unlists it when the
+  inbox exists.
 - Not announced: catalog deployments (`component_catalog::create_deployment`
   shares the record internally), delegated role deployments (the delegate is
   not the creator) and deployments from older clients or packages. Devices
@@ -153,6 +159,7 @@ entries this feature adds; until SF-122 merges they are direct reads.
   migration, and retained), the event
   safety net.
 - dApp: `scripts/test_inbox.cjs` (in `make check-interfaces`).
+- Operations CLI: `scripts/test_fleet_ops.cjs` call shapes with and without inbox origins.
 - Indexer: `txbuild` unit test of announced call shapes.
 - Real localnet across an upgrade of main's contracts:
   `make test-inbox-localnet` (start a disposable node first) — origins,
