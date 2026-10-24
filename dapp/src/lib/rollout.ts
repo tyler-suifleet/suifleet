@@ -1,3 +1,4 @@
+import { readReceiptDirectory, receiptShardIndex } from "./receipt-shards";
 import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -33,6 +34,7 @@ export function buildRolloutTx(input: RolloutInput) {
   const [record] = calls.deployment_manager_new_rollout_verified(tx, PACKAGE_ID, input.component, input.version,
     input.recipe, input.artifactSha256, input.recipeSha256, [], input.cohorts.flat(),
     input.cohorts.flatMap((cohort, i) => cohort.map(() => i)), policy, "0x6");
+  if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) calls.deployment_manager_begin_sharded_receipts(tx, PACKAGE_ID, record);
   calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   return tx;
 }
@@ -61,11 +63,11 @@ export function rolloutHealth(r: Rollout, id: string, target: { componentName: s
   });
   return { online, healthy, unhealthy };
 }
-export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">, id: string, owner: string) {
+export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject" | "getDynamicField">, id: string, owner: string) {
   const { object } = await client.getObject({ objectId: id, include: { content: true } });
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("deployment_manager::DeploymentRecord"))) throw new Error("Unexpected rollout deployment type");
   const record = deployment_manager_DeploymentRecordBcs.parse(object.content);
-  if (record.schema_version !== "3" || normalizeSuiAddress(record.id) !== normalizeSuiAddress(id) ||
+  if ((record.schema_version !== "3" && !(record.schema_version === "4" && (await readReceiptDirectory(client, id))?.original_schema === "3")) || normalizeSuiAddress(record.id) !== normalizeSuiAddress(id) ||
     normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
   return { componentName: record.component_name, version: record.version };
 }
@@ -75,6 +77,7 @@ export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDyna
   const health = await fetchFleetHealth(client, r.members, owner, undefined, token);
   const a = rolloutHealth(r, id, target, health);
   const tx = new Transaction();
+  await appendRolloutReceiptSync(client, tx, id, r.members);
   calls.deployment_manager_advance_rollout(tx, PACKAGE_ID, id, a.online, a.healthy, a.unhealthy, "0x6");
   return tx;
 }
@@ -85,4 +88,17 @@ export function buildRolloutControlTx(id: string, state: number, skip: string[],
   const tx = new Transaction();
   calls.deployment_manager_control_rollout(tx, PACKAGE_ID, id, state, skip, reason, "0x6");
   return tx;
+}
+
+/** Chain settlement is separate from device reporting, so roots can report
+ * concurrently without taking the rollout coordinator object mutably. */
+export async function appendRolloutReceiptSync(client: Pick<SuiGrpcClient, "getDynamicField">, tx: Transaction, id: string, members: string[]) {
+  const directory = await readReceiptDirectory(client, id);
+  if (directory) {
+    if (!directory.ready || directory.retiring) throw Error("Receipt migration or retirement in progress");
+    directory.roots.forEach((root, index) => {
+      const devices = members.filter(device => receiptShardIndex(device) === index);
+      for (let start = 0; start < devices.length; start += 64) calls.deployment_manager_sync_rollout_receipts(tx, PACKAGE_ID, id, root, devices.slice(start, start + 64));
+    });
+  }
 }

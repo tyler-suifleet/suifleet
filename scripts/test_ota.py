@@ -381,7 +381,7 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 sim.add("0x103", creator="0xbad")
                 # Unsupported records must fail individually, with no downloads,
                 # and must not poison discovery of the valid group deployment.
-                for id, version in (("0x10b", "4"), ("0x10c", None), ("0x10d", "invalid")):
+                for id, version in (("0x10b", "5"), ("0x10c", None), ("0x10d", "invalid")):
                     sim.schema_fields[id] = {"schema_version": version}
                     sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)

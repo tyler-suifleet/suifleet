@@ -43,6 +43,7 @@ and the next run sweeps it first, charged to its own allowance.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import signal
 import sys
@@ -52,7 +53,7 @@ from types import SimpleNamespace
 
 import deployment_manifest as dm
 from live_common import (CLOCK, DAEMON, Live, Spent, Walrus, contracts_at, deployment_args, history, ids, key_wallet,
-                         pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
+                         plain, pending_key, recover_key, stage, start_daemon, stop_daemon, sweep, wait_for)
 from live_package_upgrade import contracts_digest, fixture_key, load_state, save_state
 import subprocess
 
@@ -215,10 +216,52 @@ def run(args):
             assert history(components) == ["2.0.0"], history(components)
             live.check("activated legacy device: the real daemon applied the new deployment (artifact from "
                        f"{'Walrus testnet' if args.walrus == 'testnet' else 'local stand-in'}); its existing bound cap reported Applied")
+            # SF-127: freeze the populated v2 receipt before copying it to
+            # independently shared roots. The still-callable v1 package cannot
+            # cross the barrier, and the daemon must report a fresh v3 record.
+            live.transaction("begin populated v3 migration", "--move-call", f"{new}::deployment_manager::begin_sharded_receipts", f"@{d2}", budget=50_000_000)
+            roots = live.receipt_directory(d2)["roots"]
+            assert len(roots) == 16
+            assert live.receipts(d2) == {}, "partial migration is not authoritative"
+            live.transaction("migrate v2 receipt in bounded chunks", *(
+                arg for root_id in roots for arg in ("--move-call", f"{new}::deployment_manager::migrate_receipt_chunk", f"@{d2}", f"@{root_id}", "64")),
+                "--move-call", f"{new}::deployment_manager::finish_receipt_migration", f"@{d2}", budget=50_000_000)
+            assert live.receipts(d2) == {dm.object_id(device): 1}, "migration dropped the v2 receipt"
+            attack("old package report after v3 migration", "--move-call", f"{old}::deployment_manager::report_status", f"@{d2}", f"@{cap}", "2u8",
+                   module="deployment_manager", function="receipts_mut", code=5)
+            # Reuse the migrated roots and the already-applied outcome. A
+            # durable report retry proves the daemon uses the new report path
+            # without another publication/root allocation or updater replay.
+            def v3_reported():
+                root_id = roots[int(device[-2:], 16) % 16]
+                for field in live.client("dynamic-field", root_id)["dynamicFields"]:
+                    value = live.object(field["fieldId"])
+                    if "::ReceiptKey" in str(value.get("objType", "")):
+                        data = plain(value["content"])
+                        if dm.object_id(data["name"]["device"]) == dm.object_id(device):
+                            return data["value"]["reported_v3"]
+                return False
+            assert not v3_reported(), "copied v2 receipt was promoted into v3 rollout authority"
+            daemon.send_signal(signal.SIGINT)
+            daemon.wait(timeout=60)
+            daemon = None
+            journal_path = root / "state-legacy" / "state.json"
+            journal = json.loads(journal_path.read_text())
+            journal["deployments"][d2]["reported"] = False
+            journal_path.write_text(json.dumps(journal))
+            with (root / "daemon-legacy.log").open("a") as log:
+                daemon = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release-legacy" / "config.toml")}, stdout=log, stderr=log)
+            wait_for(v3_reported, "daemon did not retry through the immutable-deployment v3 report API", daemon)
+            assert live.receipts(d2) == {dm.object_id(device): 1}
+            assert history(components) == ["2.0.0"], "migration retry replayed the updater"
+            live.check("populated v2 receipt preserved; old-package write rejected; real daemon durable retry reports v3 with new provenance and no updater replay")
             live.transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
             attack("verified report after revocation", "--move-call", f"{new}::deployment_manager::report_verified_status",
                    f"@{d2}", f"@{registry}", f"@{cap}", "2u8", module="device_cap", function="assert_active", code=2)
             assert live.receipts(d2) == {dm.object_id(device): 1}, "revoked device changed its receipt"
+            attack("v3 report after revocation", "--move-call", f"{new}::deployment_manager::report_status_v3",
+                   f"@{d2}", f"@{live.receipt_directory(d2)['roots'][int(device[-2:], 16) % 16]}", f"@{registry}", f"@{cap}", "2u8",
+                   module="device_cap", function="assert_active", code=2)
             live.check("after revocation the device's reports abort and its receipt is unchanged")
             daemon.send_signal(signal.SIGINT)
             daemon.wait(timeout=60)
@@ -247,6 +290,21 @@ def teardown(live, made):
     The device key stays pending beside the wallet unless its sweep
     succeeds. Returns the first failure, or None."""
     steps, package, registry = [], made.get("package"), made.get("registry")
+    def clean_shards():
+        for record in made["head_records"]:
+            directory = live.receipt_directory(record)
+            if not directory:
+                continue
+            live.transaction("begin sharded cleanup", "--move-call", f"{package}::deployment_manager::begin_receipt_cleanup", f"@{record}", budget=CLEANUP_GAS)
+            for root in directory["roots"]:
+                if int(root, 16) == 0:
+                    continue
+                # Gate fixtures have one receipt; root-by-root chunks stay well
+                # within native child-object limits and permit safe retries.
+                while int(plain(live.object(root)["content"])["count"]) > 0:
+                    live.transaction("drain receipt chunk", "--move-call", f"{package}::deployment_manager::cleanup_receipt_chunk", f"@{record}", f"@{root}", "64", budget=CLEANUP_GAS)
+                live.transaction("retire receipt root", "--move-call", f"{package}::deployment_manager::retire_receipt_shard", f"@{record}", f"@{root}", budget=CLEANUP_GAS)
+    steps.append(("clean sharded receipts", clean_shards))
     if made["head_records"]:
         steps.append(("delete head deployments", lambda: live.transaction("delete head deployments", *(
             arg for record in made["head_records"]

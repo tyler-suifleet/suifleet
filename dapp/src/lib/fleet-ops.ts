@@ -8,8 +8,9 @@ import { fetchDevices, fetchGroups, buildCreateDeploymentTx, type DeviceObject, 
 import { readIdentities } from './telemetry';
 
 export interface Operation {
-  command: 'add-devices' | 'remove-devices' | 'create-deployment';
+  command: 'add-devices' | 'remove-devices' | 'create-deployment' | 'migrate-receipts' | 'cleanup-receipts';
   sender: string;
+  deployment?: string;
   devices?: string[];
   group?: string;
   component?: string;
@@ -60,6 +61,13 @@ export function planOperation(request: Operation, devices: DeviceObject[], group
 }
 export async function buildOperation(client: SuiGrpcClient, request: Operation): Promise<Transaction> {
   const sender = id(request.sender);
+  if (request.command === 'migrate-receipts' || request.command === 'cleanup-receipts') {
+    if (!request.deployment) throw Error('deployment required');
+    const { deployment_manager_DeploymentRecordBcs } = await import('./fleet-protocol');
+    const object = (await client.getObject({ objectId: id(request.deployment), include: { content: true } })).object;
+    if (id(deployment_manager_DeploymentRecordBcs.parse(object.content).creator) !== sender) throw Error('Sender is not deployment creator');
+    return (await import('./receipt-shards')).buildReceiptMaintenanceTx(client, id(request.deployment), request.command === 'migrate-receipts' ? 'migrate' : 'cleanup');
+  }
   const [devices, groups] = await Promise.all([fetchDevices(client, sender), fetchGroups(client, sender)]);
   const identities = await readIdentities(client, devices.map(d => d.objectId));
   const active = new Set(devices.filter((_, index) => identities[index] && !identities[index]!.revoked).map(device => id(device.objectId)));

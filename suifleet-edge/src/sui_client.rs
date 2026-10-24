@@ -900,7 +900,7 @@ impl SuiClient {
             "{id} is not a DeploymentRecord"
         );
         let field = |name: &str| record.fields[name].as_str().unwrap_or_default().to_owned();
-        let groups = self.dynamic_field(id, "deployment_manager::TargetGroupsKey").await?;
+        let groups = self.dynamic_field(id, if number(&record.fields["schema_version"]) == Some(4) { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" }).await?;
         let devices = self.dynamic_field(id, "deployment_manager::TargetDevicesKey").await?;
         let event = DeploymentCreatedEvent {
             deployment_id: id.to_owned(),
@@ -926,11 +926,34 @@ impl SuiClient {
         }
     }
 
+    /// Schema 4 is the old-package deletion barrier. Payload schema and
+    /// rollout admission remain explicit in the introduction-origin directory.
+    pub async fn deployment_schema(&self, deployment: &str, fields: &Value) -> anyhow::Result<u64> {
+        let schema = number(&fields["schema_version"]).filter(|s| (1..=4).contains(s)).ok_or_else(|| anyhow::anyhow!("unsupported DeploymentRecord schema version"))?;
+        if schema != 4 { return Ok(schema); }
+        anyhow::ensure!(protocol::SHARD_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "missing receipt shard type origins");
+        let receipts = self.dynamic_field(deployment, "deployment_manager::ReceiptsKey").await?
+            .ok_or_else(|| anyhow::anyhow!("missing v3 receipt authority"))?;
+        anyhow::ensure!(number(&receipts["version"]) == Some(3), "unsupported receipt authority version");
+        let directory = self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?
+            .ok_or_else(|| anyhow::anyhow!("missing receipt directory"))?;
+        anyhow::ensure!(directory["ready"] == true && directory["retiring"] == false && number(&directory["migrated"]) == Some(16), "receipt migration or retirement in progress");
+        number(&directory["original_schema"]).filter(|s| (1..=3).contains(s)).ok_or_else(|| anyhow::anyhow!("invalid original deployment schema"))
+    }
+
     /// Schema 3 requires a grant in the introduction-origin rollout field.
     /// Every call re-reads chain state, including after artifact downloads.
     pub async fn rollout_admission(&self, deployment: &str, device: &str) -> anyhow::Result<Option<&'static str>> {
         let record = self.object(deployment).await?;
-        if number(&record.fields["schema_version"]) != Some(3) { return Ok(None); }
+        let schema = match number(&record.fields["schema_version"]) {
+            Some(4) => match self.deployment_schema(deployment, &record.fields).await {
+                Ok(schema) => schema,
+                Err(_) => return Ok(Some("receipt authority unavailable; migration or retirement in progress")),
+            },
+            Some(schema) => schema,
+            None => return Ok(None), // payload resolution journals unsupported schemas
+        };
+        if schema != 3 { return Ok(None); }
         // Ownership or signer trust can change while artifacts are fetched.
         // Refresh both at the same final admission boundary as the grant.
         let identity = self.identity(device).await?;
@@ -1072,7 +1095,7 @@ impl SuiClient {
         let mut function = protocol::deployment_manager::REPORT_VERIFIED_STATUS;
         if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
             let groups = self
-                .dynamic_field(deployment, "deployment_manager::TargetGroupsKey")
+                .dynamic_field(deployment, if number(&record.fields["schema_version"]) == Some(4) { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" })
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("missing target groups"))?;
             let creator = record.fields["creator"].as_str().unwrap_or("").to_owned();
@@ -1087,6 +1110,23 @@ impl SuiClient {
             function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
         }
         let mut args: Vec<Arg> = objects.into_iter().map(Arg::Object).collect();
+        if number(&record.fields["schema_version"]) == Some(4) {
+            self.deployment_schema(deployment, &record.fields).await?;
+            let directory = self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.unwrap();
+            let device = Address::from_str(&device_id)?;
+            let index = (device.inner()[31] % 16) as usize;
+            let roots = id_list(&directory["roots"]);
+            anyhow::ensure!(roots.len() == 16, "invalid receipt roots");
+            let root = self.object(&roots[index]).await?;
+            anyhow::ensure!(same_type(&root.object_type, &self.move_type("deployment_manager::ReceiptShard")) && matches!(root.owner, Owner::Shared { .. })
+                && root.fields["deployment"].as_str().is_some_and(|id| same_id(id, deployment))
+                && number(&root.fields["index"]) == Some(index as u64) && root.fields["migrated"] == true, "invalid receipt root binding");
+            args[0] = Arg::SharedRead(deployment.into());
+            args.insert(1, Arg::Object(roots[index].clone()));
+            function = if function == protocol::deployment_manager::REPORT_VERIFIED_STATUS {
+                protocol::deployment_manager::REPORT_STATUS_V3
+            } else { protocol::deployment_manager::REPORT_STATUS_FOR_GROUP_V3 };
+        }
         args.push(Arg::Pure(vec![status]));
         let call = Call { module: protocol::deployment_manager::MODULE, function, args };
         let transaction = self.build(&call).await?;

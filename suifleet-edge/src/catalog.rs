@@ -184,21 +184,13 @@ pub async fn resolve(
     fields: &serde_json::Value,
 ) -> anyhow::Result<Resolved> {
     let mut resolved = event.clone();
-    anyhow::ensure!(
-        fields["schema_version"] == "1"
-            || fields["schema_version"] == 1
-            || fields["schema_version"] == "2"
-            || fields["schema_version"] == 2
-            || fields["schema_version"] == "3"
-            || fields["schema_version"] == 3,
-        "unsupported DeploymentRecord schema version"
-    );
+    let schema = sui.deployment_schema(&event.deployment_id, fields).await?;
+    anyhow::ensure!((1..=3).contains(&schema), "unsupported DeploymentRecord schema version");
     anyhow::ensure!(
         fields["component_name"] == event.component_name && fields["version"] == event.version,
         "deployment identity mismatch"
     );
-    if fields["schema_version"] == "1" || fields["schema_version"] == 1
-        || fields["schema_version"] == "3" || fields["schema_version"] == 3 {
+    if schema == 1 || schema == 3 {
         let digest = sui
             .dynamic_field(&event.deployment_id, "deployment_manager::RecipeDigestKey")
             .await?;
@@ -212,10 +204,6 @@ pub async fn resolve(
             version: None,
         });
     }
-    anyhow::ensure!(
-        fields["schema_version"] == "2" || fields["schema_version"] == 2,
-        "unsupported DeploymentRecord schema version"
-    );
     for name in TYPES {
         anyhow::ensure!(
             sui.manifest().type_origins.contains_key(*name),
@@ -223,7 +211,7 @@ pub async fn resolve(
         );
     }
     let binding = sui
-        .dynamic_field(&event.deployment_id, "component_catalog::CatalogBindingKey")
+        .dynamic_field(&event.deployment_id, if fields["schema_version"] == "4" || fields["schema_version"] == 4 { "component_catalog::ShardedCatalogBindingKey" } else { "component_catalog::CatalogBindingKey" })
         .await?
         .ok_or_else(|| anyhow::anyhow!("missing catalog binding"))?;
     let id = binding["version_id"]

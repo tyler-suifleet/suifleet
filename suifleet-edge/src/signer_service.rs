@@ -252,19 +252,25 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
     anyhow::ensure!(ptb.inputs.len() == call.arguments.len(), "transaction has extra inputs");
     let args: Vec<&Input> = call.arguments.iter().map(|a| input(&ptb.inputs, a)).collect::<anyhow::Result<_>>()?;
     match (call.module.as_str(), call.function.as_str()) {
-        (dm::MODULE, function @ (dm::REPORT_VERIFIED_STATUS | dm::REPORT_VERIFIED_STATUS_FOR_GROUP)) => {
+        (dm::MODULE, function @ (dm::REPORT_VERIFIED_STATUS | dm::REPORT_VERIFIED_STATUS_FOR_GROUP | dm::REPORT_STATUS_V3 | dm::REPORT_STATUS_FOR_GROUP_V3)) => {
             anyhow::ensure!(tx.gas_payment.owner == policy.device, "a status report must be paid by the device");
             anyhow::ensure!(tx.gas_payment.budget <= policy.max_budget, "gas budget {} exceeds {}", tx.gas_payment.budget, policy.max_budget);
-            let group = function == dm::REPORT_VERIFIED_STATUS_FOR_GROUP;
-            anyhow::ensure!(args.len() == if group { 5 } else { 4 }, "unexpected argument count");
+            let group = function == dm::REPORT_VERIFIED_STATUS_FOR_GROUP || function == dm::REPORT_STATUS_FOR_GROUP_V3;
+            let sharded = function == dm::REPORT_STATUS_V3 || function == dm::REPORT_STATUS_FOR_GROUP_V3;
+            let shift = usize::from(sharded);
+            anyhow::ensure!(args.len() == (if group { 5 } else { 4 }) + shift, "unexpected argument count");
             shared(args[0])?;
-            anyhow::ensure!(shared(args[1])? == policy.registry, "not this fleet's registry");
+            if sharded {
+                anyhow::ensure!(matches!(args[0], Input::Shared(s) if !s.mutability().is_mutable()), "v3 deployment must be read only");
+                shared(args[1])?;
+            }
+            anyhow::ensure!(shared(args[1 + shift])? == policy.registry, "not this fleet's registry");
             anyhow::ensure!(
-                matches!(args[2], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
+                matches!(args[2 + shift], Input::ImmutableOrOwned(reference) if *reference.object_id() == policy.cap),
                 "not this device's cap"
             );
             if group {
-                shared(args[3])?;
+                shared(args[3 + shift])?;
             }
             anyhow::ensure!(
                 matches!(args[args.len() - 1], Input::Pure(value) if value.as_slice() == [1] || value.as_slice() == [2]),
@@ -975,21 +981,24 @@ mod tests {
         gas_owner: &'static str,
         budget: u64,
         extra_command: bool,
+        write_deployment: bool,
     }
     impl Default for Tx {
         fn default() -> Self {
             Tx { module: dm::MODULE, function: dm::REPORT_VERIFIED_STATUS, package: "0x3", registry: "0x13", cap: "0x11",
-                 status: 1, group: false, sender: "0xa0", gas_owner: "0xa0", budget: 10_000_000, extra_command: false }
+                 status: 1, group: false, sender: "0xa0", gas_owner: "0xa0", budget: 10_000_000, extra_command: false, write_deployment: false }
         }
     }
     impl Tx {
         fn bytes(&self) -> Vec<u8> {
             let a = |s: &str| Address::from_str(s).unwrap();
             let mut b = TransactionBuilder::new();
-            let record = b.object(ObjectInput::shared(a("0x10"), 1, true));
+            let sharded = self.function == dm::REPORT_STATUS_V3 || self.function == dm::REPORT_STATUS_FOR_GROUP_V3;
+            let record = b.object(ObjectInput::shared(a("0x10"), 1, !sharded || self.write_deployment));
             let registry = b.object(ObjectInput::shared(a(self.registry), 1, false));
             let cap = b.object(ObjectInput::owned(a(self.cap), 2, Digest::ZERO));
             let mut args = vec![record, registry, cap];
+            if sharded { args.insert(1, b.object(ObjectInput::shared(a("0x15"), 1, true))); }
             if self.group {
                 args.push(b.object(ObjectInput::shared(a("0x14"), 1, false)));
             }
@@ -1034,6 +1043,20 @@ mod tests {
         let mut trailing = Tx::default().bytes();
         trailing.push(0);
         assert!(check(&p, &trailing).is_err(), "trailing bytes were accepted");
+    }
+
+    #[test]
+    fn shard_reports_preserve_signer_scope_and_read_only_deployment() {
+        let p = policy();
+        for (function, group) in [(dm::REPORT_STATUS_V3, false), (dm::REPORT_STATUS_FOR_GROUP_V3, true)] {
+            let make = || Tx { function, group, ..Tx::default() };
+            assert_eq!(check(&p, &make().bytes()).unwrap(), Intent::Report);
+            assert!(check(&p, &Tx { write_deployment: true, ..make() }.bytes()).is_err());
+            assert!(check(&p, &Tx { cap: "0x99", ..make() }.bytes()).is_err());
+            assert!(check(&p, &Tx { registry: "0x99", ..make() }.bytes()).is_err());
+            assert!(check(&p, &Tx { status: 3, ..make() }.bytes()).is_err());
+            assert!(check(&p, &Tx { extra_command: true, ..make() }.bytes()).is_err());
+        }
     }
 
     struct Key;

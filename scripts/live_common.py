@@ -266,13 +266,52 @@ class Live:
     def readable(self, object_id):
         wait_for(lambda: isinstance(self.client("object", object_id, check=False), dict), f"{object_id} never became readable")
 
+    def receipt_directory(self, deployment):
+        for field in self.client("dynamic-field", deployment)["dynamicFields"]:
+            value = self.client("object", field["fieldId"])
+            if "::ReceiptShardKey" in str(value.get("objType", "")):
+                return plain(value.get("content", {}))["value"]
+        return None
+
     def receipts(self, deployment):
-        """Authoritative statuses read with the Sui CLI, independent of the daemon."""
+        """Independent CLI receipt view for small live-gate fixtures.
+
+        Production readers paginate by bounded index pages. This helper checks
+        the root count against every observed field, refusing truncated CLI
+        pages instead of presenting a partial fleet as authoritative.
+        """
         for field in self.client("dynamic-field", deployment)["dynamicFields"]:
             value = self.client("object", field["fieldId"])
             if "ReceiptsKey" in str(value.get("objType", "")):
-                statuses = plain(value.get("content", {}))["value"]["statuses"]["contents"]
-                return {dm.object_id(e["key"]): int(e["value"]) for e in statuses}
+                receipts = plain(value.get("content", {}))["value"]
+                version = int(receipts["version"])
+                if version < 3:
+                    return {dm.object_id(e["key"]): int(e["value"]) for e in receipts["statuses"]["contents"]}
+                assert version == 3, "unsupported receipts version"
+                directory = self.receipt_directory(deployment)
+                assert directory and len(directory["roots"]) == 16
+                if not directory["ready"] or directory["retiring"]:
+                    return {}
+                result = {}
+                for index, root in enumerate(directory["roots"]):
+                    shard = plain(self.object(root)["content"])
+                    assert dm.object_id(shard["deployment"]) == dm.object_id(deployment) and int(shard["index"]) == index
+                    count = 0
+                    if int(shard["count"]) == 0:
+                        continue  # The CLI emits a message-only result for empty parents.
+                    for entry in self.client("dynamic-field", root)["dynamicFields"]:
+                        field = self.object(entry["fieldId"])
+                        if "::ReceiptKey" not in str(field.get("objType", "")):
+                            continue
+                        data = plain(field["content"])
+                        device = dm.object_id(data["name"]["device"])
+                        assert int(device[-2:], 16) % 16 == index
+                        status = int(data["value"]["status"])
+                        assert status in (1, 2)
+                        result[device] = status
+                        count += 1
+                    assert count == int(shard["count"]), "CLI fixture view truncated; use paginated client"
+                return result
         return {}
 
     def finish(self, path):

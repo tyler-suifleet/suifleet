@@ -437,6 +437,7 @@ impl DeploymentManifest {
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
+            ("receipt shards", crate::protocol::SHARD_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
             anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
@@ -479,6 +480,7 @@ impl DeploymentManifest {
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
+            .chain(crate::protocol::SHARD_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
