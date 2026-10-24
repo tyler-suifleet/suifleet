@@ -11,7 +11,8 @@ The existing daemon forms multi-source/record-chunk Quilts with independent nati
 signatures/Seal encryption, an authenticated encrypted item manifest and one
 fleet-owned storage lifecycle. Formation is journaled before codec execution;
 restart reuses exact ciphertext, registration/certification and anchor intents.
-Bounded retries/age retain the pending batch for reconciliation. Selected sources
+Persisted, rate-limited retries retain the pending batch for reconciliation without
+permanent failure-count or offline-age exhaustion. Selected sources
 retire only after independently verifying the required chain anchor.
 
 The producer permits at most 16 data items plus a manifest and 4 MiB resulting
@@ -86,3 +87,77 @@ not watched. Physical target, actual mainnet and final production-provider/manua
 wallet acceptance remain unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [#159](https://github.com/tyler-suifleet/suifleet/issues/159). No deployment,
 production credentials, mainnet write, physical programming or final pricing approval.
+
+## PR #253 independent-review repairs (2026-10-24)
+
+The feedback on `f3f3963b8917064a3aaa8c6f2a70c24a2ce52595` identified two
+implementation defects and one overstated invariant. The owner branch already
+contains snapshot/current main `b9e8053f4f034ca725686d19870cde6f3f756d63`;
+`git merge --no-edit origin/main` confirmed it was up to date.
+
+- Fleet chain-summary service degradation keeps the established two-minute sustain threshold,
+  independently of signed health reporting cadence. The snapshot regression
+  exercises minute/hour/day reporting at 119,999/120,000/180,000 ms for both full
+  pub/sub queues and disconnected MQTT bridges. Cadence metadata remains intact;
+  the legacy HTTP telemetry path keeps its two-heartbeat-interval judgment,
+  checked independently in the same regression.
+- Quilt failures use a saturating counter and persisted exponential backoff,
+  capped at one hour, with no terminal attempt-count or wall-clock age gate.
+  Backoff/idle ticks do not increment failures. A retry deadline is persisted
+  before publication work so a crash cannot turn retries into a tight loop.
+  Exact ciphertext, purchase and signing identities remain durable. Corruption,
+  revoked keys and unknown effects still fail closed; ring overflow remains
+  explicit while storage is unavailable. Existing pending journals keep the same
+  fields/checkpoints and resume under the new retry policy without a migration.
+- Compact history deliberately retains only its head, not an unbounded seen-blob
+  set. The corrected contract comment, operating documentation and A→B→A Move
+  regression make this limitation explicit. The reader's sequence binding refuses
+  an old ciphertext linked at a later sequence; adjacent reuse still aborts.
+
+Fresh checks for these repairs:
+
+- Rust 1.94.0 `cargo test --locked --manifest-path suifleet-edge/Cargo.toml` with
+  `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf121-build`:
+  **422 passed, 4 existing ignored**, zero failed. Same toolchain/target
+  `cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed.
+- `/tmp/sf121-tools/sui move test --path contracts/fleet_data --build-env testnet`:
+  **22 passed**, zero failed, pinned compiler 1.81.1.
+- `scripts/test_fleet_data_ota.py --binary .../debug/suifleet --shim
+  .../debug/examples/grpc_sim_shim --compact-history --quilt`: passed with the
+  actual daemon, native Seal encryption/signing, shim and browser verifier.
+  The new case restarts an eight-day-old batch with 32 prior failures, observes
+  failure 33 and hourly backoff, verifies idle ticks preserve the counter, then
+  recovers certification and the verified anchor with one registration and the
+  original ciphertext descriptors. The fixture advances only persisted retry
+  deadlines while the daemon is stopped rather than waiting hours; it does not
+  reset the failure count or delete signing checkpoints.
+- All 26 post-build OTA harness commands from make test-ota passed against the final rebuilt binaries in a disposable network-none suifleet-dev:sf037 container. The driver ran each exact Makefile command with check=True, as dev except test_supervisor.py as root. Initial host supervisor /proc permissions and an initial all-root CloudWatch adapter refusal were environment errors; the complete final run used the required per-harness users, without changing or ignoring tests.
+- `python3 scripts/test_protocol_localnet.py --fleet-data-upgrade` in a disposable
+  `suifleet-dev:sf037` container with `--network none`: passed. Existing objects,
+  type origins and old/new revoked-device refusal were exercised on local chain
+  `9dd26ddd`. [Effects, origins and checks](sf121-feedback-upgrade.json).
+  Corrected container mounts for the pinned transaction CLI, shared Git metadata
+  and Move cache before the successful run; initial harness setup failures were
+  not suppressed or counted as passes.
+- Node 22.22.2 frontend `node node_modules/typescript/bin/tsc --noEmit` and
+  `node node_modules/next/dist/bin/next build` in `suifleet-dev:sf037`: passed,
+  including static production export.
+- `cargo build --locked --manifest-path suifleet-indexer/Cargo.toml` with the
+  same Rust 1.94.0 target: passed. Final-daemon/indexer
+  `python3 scripts/test_service_health.py` in a disposable root network-none
+  container: passed. All eight alerts were derived from signed reports,
+  sustained failures degraded the device at legacy heartbeat timing, recovery
+  resolved the alerts, privacy checks passed and the dApp verified all nine
+  envelopes. This verifies that fixing daily chain summaries preserves the
+  existing HTTP telemetry behavior.
+- `node scripts/test_compact_archives.cjs`, `test_archive_quilt.cjs`,
+  `test_fleet_data.cjs`, `test_fleet_bulk.cjs`, `test_fleet_recovery.cjs` and
+  `python3 scripts/check_archive_envelope.py`: passed.
+
+Hosted exact-head CI, automatic public-testnet status and fresh independent
+review remain coordinator gates, not asserted here. This repair made no public
+network write. Earlier public Quilt effects remain historical evidence above.
+Physical targets, actual mainnet and final production-provider/manual-wallet
+checks remain deferred and unrun in #32/#159. No deployment, hardware programming,
+production credentials or final subscription economics are claimed.

@@ -63,7 +63,10 @@ retaining identity, synchronization and aggregate status. Sequence numbers incre
 New fleets default to daily health; owners can configure 1 minute to 1 day. Existing fleets retain their on-chain cadence until the owner changes it. Log archives are opt-in and the budget estimate defaults to zero log uploads. Signatures are
 verified in the browser, not parsed/verified by Move. Authorized malformed device
 claims can therefore consume their own bounded cadence slot, but must never
-be shown as trusted health.
+be shown as trusted health. Sustained service failures (including a full pub/sub
+queue or disconnected MQTT bridge) degrade a snapshot after two minutes,
+independent of the signed report cadence. The next scheduled report carries that
+judgment; daily reporting still trades visibility latency for fewer writes.
 
 `anchor` accepts only a certified, non-deletable blob recorded for this device
 under the fleet's configured storage object. It records a ciphertext SHA-256,
@@ -487,14 +490,19 @@ fleet storage object. No per-patch expiry or cross-device pooling is promised.
 
 One pending batch blocks formation of a second. The existing bounded log ring
 continues its explicit overflow accounting; selected records also remain in the
-pending encrypted artifacts until verified completion. Automatic Quilt attempts
-are bounded to 32 and seven days, with persisted backoff (early attempts one
-second, later doubling to one hour). Exhaustion retains the exact batch for
-operator reconciliation rather than dropping or re-encrypting it. Inspect
-`fleet-data/status.json` (`pending`, `items`, `attempts`, `retry_at_ms`, `blocked`)
-and retain all `.bcs`, checkpoint, journal and ciphertext files. After reconciling
-chain effects and restoring availability, an operator can reset only retry
-metadata; never delete purchase/signing checkpoints to force a fresh upload.
+pending encrypted artifacts until verified completion. Quilt publication retries
+use persisted backoff (early failures one second, later doubling to one hour).
+The saturating `attempts` counter records failed publication work, not an
+exhaustion budget. Neither an overnight provider outage nor a device powered off
+for more than seven days permanently suspends the batch: retries continue at the
+bounded slow rate with the exact ciphertext and purchase/signing checkpoints.
+Formation age remains journal metadata, not a wall-clock expiry gate. Disk/item
+bounds and the single pending batch bound retained work; this trades freshness
+and possible ring overflow for safe, automatic recovery without a second purchase.
+Inspect `fleet-data/status.json` (`pending`, `items`, `attempts`, `retry_at_ms`,
+`blocked`). Corrupt artifacts, revoked keys and unresolved signed effects still
+fail closed; retrying does not bypass reconciliation or current authority.
+Never delete purchase/signing checkpoints to force a fresh upload.
 These are publication recovery controls, not firmware boot/reboot logic.
 
 The reader accepts the reviewed QuiltV1/RS2/1,000-shard profile without tags.
@@ -510,3 +518,10 @@ the caller never gets a partially trusted archive. Authority is rechecked after
 slow reads/key requests. Legacy regular blobs and schemas 1–3 remain readable;
 compact history and shadow documents also work with schema 4. Device-local
 batching does not reduce separate health writes or deployment receipts.
+
+Compact history retains only its current authenticated head, not a permanent
+set of every previously used blob. It rejects adjacent reuse and reuse of a blob
+with a legacy marker; a device can re-anchor an older compact blob after another
+head. Readers reject its mismatched ciphertext sequence binding and report the
+older suffix unavailable. Device publishers must use fresh sequence-bound
+ciphertexts for each head; compact mode does not promise global deduplication.
