@@ -35,24 +35,64 @@ a wallet address, the package deployment manifest or the registry singleton.
 
 SF-130 [#265](https://github.com/tyler-suifleet/suifleet/issues/265) and SF-131
 [#266](https://github.com/tyler-suifleet/suifleet/issues/266) own the settings paths.
-The following unmerged snapshots have incompatible exports from the same file:
+The original audit was made before the settings work merged. Its
+incompatible-export and disabled-save findings are now obsolete. For resumed
+SF-136 development, the verified integration baseline is:
 
-- SF-130 `5b0c5ff0571d046479914ee7dba51b9c2ee6613f` exports tuple-valued
-  `SETTINGS_BOUNDS`, `DEFAULT_SETTINGS`, `settingsErrors`,
-  `buildSetFleetSettingsTx(budgetId, capId, settings)` and
-  `fetchFleetSettings(client, budgetId)` from `lib/fleet-settings.ts`.
-- SF-131 `91f6cdc68482a5417c48e304ee870a39f3506dc3` exports object-valued
-  `SETTINGS_BOUNDS`, `validateSettings` and pricing/estimator helpers from that
-  same path. `lib/fleet-settings-tx.ts` still returns a disabled `settingsSaver()`.
-  PR [#277](https://github.com/tyler-suifleet/suifleet/pull/277) is open.
+- `origin/main` `b9e8053f4f034ca725686d19870cde6f3f756d63`, including SF-130.
+- PR [#277](https://github.com/tyler-suifleet/suifleet/pull/277) exact remote head
+  `053011823ef3121fe4bf73adc03b9da1564bde0c`, integrated as a development
+  prerequisite only. Its latest independent source review found both prior
+  settings defects repaired, but withheld merge approval pending required CI
+  and automatic testnet evidence.
 
-Required integration agreement: retain SF-130's settings dynamic field on the
-selected `FleetBudget`; keep price/estimator presentation separate from wire
-validation; pass the selected budget/cap explicitly into reads and saves. Do not
-copy settings into Customer or assume either unmerged export shape is canonical.
-The owners must reconcile these exports and the saving adapter before SF-136
-changes the shared settings/budget selection flow. The source audit above does
-not depend on that merge and has been completed independently.
+The canonical `lib/fleet-settings.ts` exports `settingsSupported`,
+`settingsErrors`, `DEFAULT_SETTINGS`, tuple-valued `SETTINGS_BOUNDS`,
+`buildSetFleetSettingsTx(budgetId, capId, settings)` and
+`fetchFleetSettings(client, budgetId)`. The production `settingsSaver` uses
+that transaction builder. Pricing lives separately in `fleet-pricing.ts` and
+`fleet-settings-cost.ts`. SF-136 must consume these APIs and the selected
+fleet's exact budget/cap; no settings fields belong in Customer.
+
+The reviewed settings form resets choices, device sizing, deposit confirmation
+and result state on account/budget changes, and preserves deliberate edits
+against delayed saved-record responses. These regressions establish settings
+form behavior, not customer membership, fleet discovery or cross-fleet isolation.
+
+The SF-136 branch preserves its original audit and integrates main and the
+pinned prerequisite with separate Tyler-authored merge commits. PR #281 remains
+draft under the explicit operator instruction. Prerequisite integration,
+exact-head/current-base CI, fresh independent review and full SF-136 software
+acceptance remain required; source review of PR #277 is not merge approval for
+either PR.
+
+### Remaining authority implementation
+
+The settings API is no longer a development blocker. The following are SF-136
+implementation requirements, not defects assigned back to SF-130/SF-131 and not
+reasons to wait for their merge before developing:
+
+- `fleet_settings::set` delegates to `fleet_budget::assert_owner`, which checks
+  the budget's version and exact `BudgetOwnerCap`. A new customer membership
+  index alone cannot let another wallet use that wallet-owned cap or revoke a
+  credential that retains it. Define capability custody/delegation before
+  exposing multi-wallet writes; keep the existing settings validation intact.
+- `device_group::add_device` authorizes the group's admin address and accepts a
+  borrowed Device without a fleet binding. Merely filtering the browser's
+  device list cannot establish cross-fleet rejection, including through old
+  packages. Prove the chosen migration barrier against those paths.
+- `deployment_manager::report_verified_status_for_group` validates the group
+  admin against the deployment creator, plus targeting and membership. Managed
+  customer authority must remain coherent with daemon admission and desired
+  state; replacing the display name or query key cannot change that authority.
+- FleetData's owner operations still require its bound budget/cap, and support
+  approval checks its explicit support list. Customer membership must not
+  silently add support/decryption access or rewrite historical archive identity.
+
+No new customer/fleet authority, migration, entitlement ledger or switcher is
+implemented by this prerequisite integration. In particular, the software work
+above must be completed and tested rather than relabeled as deferred physical,
+mainnet, provider or manual-wallet acceptance.
 
 ## Proposed authority and discovery design
 
