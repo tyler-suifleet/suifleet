@@ -233,3 +233,15 @@ Hosted checks and automatic testnet on the pushed head remain pending coordinato
 checks, with no polling or fabricated approval. No machine-session testnet write,
 new publication, hardware, production-provider credential or mainnet operation
 was performed during repair. Deferred external acceptance remains in#32/#159.
+
+After the initial repair push, main advanced to
+`233f4605e6d6e7c7c9f5c646e27d5528f001b948` (reviewed SF147 dashboard refresh).
+The owner branch merged that new base before final handoff. Its changes are
+limited to dashboard/coordinator documentation and tracking; `git diff --cached
+--exit-code eb5b1b87bc150a177917ea417fb314c6b3b19efb -- suifleet-edge contracts
+dapp scripts sdk interfaces` confirmed the tested application/contract/SDK source
+was unchanged. Additional merged-base checks passed:
+`python3 -m unittest discover -s tools/pr-coordinator/tests -p test_dashboard.py`
+(**45 tests**) and `python3 -m unittest discover -s scripts/tests -p test_tracking.py`
+(**10 tests**). The merge preserves the upstream implementation; no coordinator
+runtime/database or service was changed by this worker.

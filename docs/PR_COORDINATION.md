@@ -795,3 +795,25 @@ past and future resets, rejected text, fences for changed ownership, live
 descendants and shared locks, budgets, restart/no-replay and the CI-handoff prompts.
 It reruns the SF-117 fence suite against quota receipts. Runtime restart and later
 advancing jobs are verified only after reviewed merged activation.
+
+## Status evidence freshness (SF-147)
+
+`fleet-status --project suifleet --refresh-github --once` refreshes both the
+complete issue/PR inventory and current PR checks, including the testnet status.
+Check requests are batched (25 PRs per GraphQL request, at most 1,000 PRs and
+100 contexts per PR); partial/error/truncated responses preserve the old cache
+and report refresh failure rather than claiming a fresh complete result.
+
+The offline display prefers matching GitHub evidence over older worker-start
+snapshots. It shows `ci-failed`, `ci-pending`, `awaiting-review`, `ci-unknown`
+(missing/mismatched testnet or revision evidence), or `ci-stale` after 15 minutes.
+Every result carries its evidence source and age. Testnet success for an old base
+is not current success. Ordinary live refresh makes no network calls; use the
+explicit refresh when current remote checks matter. This display never grants
+merge approval or changes ticket ownership.
+
+The source ages at the top are database/file modification ages, **not service
+heartbeats**. A coordinator can scan without changing job records. Historical
+retry notices for verified merged PRs are hidden without editing the review DB.
+The dashboard-only installer replaces only the CLI and its launchers, leaving
+running workers, services and their configuration untouched.
