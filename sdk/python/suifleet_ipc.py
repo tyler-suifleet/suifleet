@@ -117,6 +117,12 @@ class Client:
         """Trusted operator exporter only; acknowledge confirmed remote delivery."""
         return self.request('stream_export_ack', topic=name, payload=dict(sequence=sequence))
 
+    def stream_export_status(self, name, batches, failures, consecutive_failures, last_success_ms=None):
+        """Trusted external exporter only; numeric health report, never secrets."""
+        return self.request('stream_export_status', topic=name, payload=dict(
+            batches=batches, failures=failures, consecutive_failures=consecutive_failures,
+            last_success_ms=last_success_ms))
+
     def stream_delete(self, name):
         return self.request('stream_delete', topic=name)
 
