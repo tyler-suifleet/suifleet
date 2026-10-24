@@ -195,3 +195,106 @@ review and enforce exact-head/current-base CI before merging. No full 120,000-
 device concurrency benchmark or physical/mainnet/provider/manual-wallet result
 is claimed. Deferred acceptance remains in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+
+## Automatic testnet allowance repair and current-base integration
+
+The automatic run [40125390496](https://github.com/tyler-suifleet/suifleet/actions/runs/40125390496)
+failed on head `30ba0e3` against base `b9e8053`. Its effects evidence records
+341,773,600 MIST to publish the base and 377,802,963 MIST to upgrade the head.
+After device setup, activation and funding, only 31,017,219 MIST remained of the
+800,000,000-MIST allowance. The three-deployment transaction
+`9Ri2vzRURkxxeTDt9bfqyiDG2SgyPh7xznKGsjkXQzpt` failed with `InsufficientGas`.
+The unknown-result reservation correctly consumed the remaining allowance.
+
+The package gate now defaults to a strict 1,000,000,000-MIST allowance; the CI
+wallet wrapper passes that ceiling explicitly. Upgrade-security and wallet
+allowances remain 700M and 150M, for a maximum 1.85 SUI across all three suites.
+The 200M ordinary transaction cap, non-replenishing ledger, failed/unknown
+charging, cache verification, dedicated wallet and one-faucet controls remain
+in force. Offline regressions check CI arguments and replay the observed setup
+costs followed by synthetic successful/unknown transactions. Synthetic costs
+are ledger test inputs, not claimed public-chain measurements.
+
+Current snapshot/base `c7548c4325a1a600bece25c8485af35faadd5361` was merged in
+`59b8b1c`; it includes the reviewed Quilt changes. The package gate was also
+executed on an isolated local chain through the wallet/localnet setup used in
+`test_receipt_security_localnet.cjs`, substituting the driver command:
+
+```bash
+python3 scripts/live_package_upgrade.py --base-ref c7548c4325a1a600bece25c8485af35faadd5361 \
+  --wallet TEMPORARY_LOCAL_WALLET --network localnet --walrus local \
+  --state TEMPORARY_STATE --evidence TEMPORARY_EVIDENCE
+```
+
+It passed actual compatible upgrade/manifest verification, direct/group and
+old-package reports by the real daemon, injected health failure and cleanup.
+The ledger charged **818,891,984 MIST over nine operator transactions**, above
+the former 800M ceiling and below the new 1B ceiling. This is a localnet
+measurement with the pinned 1.82.1 transaction CLI, not a new public-testnet
+result.
+
+Current-base local checks used network-none `suifleet-dev:sf010-chrome`, pinned
+compiler 1.81.1, Node 22.22.2/pnpm 11.0.8 and the populated Move cache. Host Rust
+commands used 1.94.0 and locked dependencies. Results:
+
+- `python3 scripts/check_move_security.py`: strict compiler/lints, reviewed
+  diagnostics, authority negative controls; Move tests 207 + 61 + 22 passed.
+- `INSIDE_DEV_CONTAINER=1 make check-interfaces`: compiled/generated ABI and
+  independent wire/client/shard failure-path checks passed.
+- `INSIDE_DEV_CONTAINER=1 make test-testnet test-tracking`: 81 testnet/toolchain,
+  37 live-common and 10 tracking tests passed; authenticated cache negatives
+  passed. Initial setup attempts mounted the Move cache at the wrong home and
+  omitted the pinned transaction CLI; corrected mounts passed.
+- `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml`: 424
+  passed, four existing OCI tests ignored. Corresponding indexer command: 47
+  passed. Both binaries and edge examples rebuilt with locked dependencies.
+- `pnpm typecheck && pnpm build` in `dapp/`: passed, production static export.
+
+- `python3 scripts/test_protocol_localnet.py --receipt-shards`: current-base
+  compatible upgrade, actual old-package attacks, preserved 70 v2 receipts,
+  1,000 v3 receipts and complete cleanup passed. Largest individual report
+  fronted 10,585,200 MIST, below the 60M float. Refreshed sanitized effects in
+  [sf127-localnet.json](sf127-localnet.json).
+- `python3 scripts/test_protocol_localnet.py --receipt-clients`: actual daemon
+  ordinary/catalog v3 report effects, independent production-indexer binding
+  and receipt reads, pre-identity deletion rejection and cleanup passed.
+  Refreshed [client effects](sf127-clients-localnet.json).
+
+The broader OTA run initially failed `test_budget_ota.py` with a recorded
+`EOverAllowance` refusal; a serial rerun passed. The fixture had treated journal
+admission as completed application while changing synthetic funding state on a
+live daemon. The repair waits for the terminal Applied outcome, stops gracefully,
+changes the allowance/balance fixture and restarts. An intermediate repair that
+stopped on admission reproduced an indeterminate apply and failed queued-report
+recovery; that failed attempt is not acceptance. Production funding behavior and
+the simulator's no-refused-draw, no-new-work, queue and recovery assertions remain
+unchanged.
+
+The final repaired budget simulator passed twice, including zero refused draws.
+All **25 Python commands** in the current `test-ota` recipe passed individually:
+the 23 commands listed earlier plus the current-base compact-history variants
+below. The first 15 ran as root in a disposable container with its own PID
+namespace; CloudWatch and the suffix ran as the normal dev user. The initial
+suffix stopped on the budget failure; the repaired budget/settings/recovery/data
+suffix then exited zero. The root segment, compact/Quilt segment and earlier
+CloudWatch/console/rollout/cadence commands also passed. This records equivalent
+recipe-command coverage, not a successful monolithic `make test-ota` invocation.
+
+```bash
+node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
+python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
+python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
+```
+
+The bounded fixture signer and both new archive modes passed. Simulator HTTP
+BrokenPipe traces during interrupted downloads did not fail their enclosing
+checks. `git diff --check` and JSON parsing of both refreshed effects files
+passed. Proof scripts, pkcs11/OCI integration and hosted platform jobs were not
+rerun locally for this allowance/fixture repair; earlier evidence is historical.
+
+Hosted exact-head/current-base CI and automatic testnet remain pending after
+push; this worker did not watch or poll hosted checks. Fresh independent review
+and successful coordinator gates are still required. No public-chain mutations,
+physical programming or deployment occurred. Deferred acceptance in #32/#159
+remains unrun; the 120k storage-layout target is not a measured concurrency bound.
