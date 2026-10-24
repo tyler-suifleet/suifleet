@@ -34,11 +34,15 @@ def managed_ts(header):
 def move_type(value):
     if isinstance(value, str):
         return value
+    if "NamedTypeParameter" in value:
+        return value["NamedTypeParameter"]
     if "Reference" in value:
         mutable, inner = value["Reference"]
         return ("&mut " if mutable else "&") + move_type(inner)
     if "vector" in value:
         return "vector<" + move_type(value["vector"]) + ">"
+    if "Datatype" not in value:
+        raise ValueError(f"unsupported compiled Move type: {value!r}")
     datatype = value["Datatype"]
     module = datatype["module"]
     name = f'{module["address"]}::{module["name"]}::{datatype["name"]}'
@@ -354,6 +358,11 @@ def generate(catalog, recipe):
     move_types = []
     for module, contents in abi.items():
         for name, function in contents["functions"].items():
+            # Generic witness values are constructed by their defining Move
+            # module, not serialized as browser pure inputs. Keep their exact
+            # type constraints in the reviewed ABI; omit unusable JS builders.
+            if function["type_parameters"]:
+                continue
             if any(t.startswith("&") for t in function["returns"]):
                 continue
             params = [p for p in function["parameters"] if p not in ["&sui::tx_context::TxContext", "&mut sui::tx_context::TxContext"]]
