@@ -802,7 +802,10 @@ async fn poll(
     settle_configuration(configs, journal, supervisor)?;
     // Independent receipt delivery precedes even a failed watch/discovery read.
     // The helper validates current authority and funds only actual writes.
-    flush_funded_reports(cfg, sui, journal).await?;
+    let prior_receipts = journal.state.deployments.iter()
+        .filter(|(_, o)| !o.reported && o.status.is_some())
+        .map(|(id, _)| id.clone()).collect::<std::collections::BTreeSet<_>>();
+    flush_funded_reports(cfg, sui, journal, false, &Default::default()).await?;
     let mut watch_roots = vec![
         sui.manifest().upgrade_cap_id.clone(),
         sui.manifest().shared_objects.registry.id.clone(),
@@ -881,7 +884,6 @@ async fn poll(
     } else {
         None
     });
-    flush_funded_reports(cfg, sui, journal).await?;
     loop {
         let combined = journal.state.discovery_cursor.is_some();
         let page_start = if combined {
@@ -984,7 +986,7 @@ async fn poll(
     }
     sui.finish_full_poll();
     // Report new outcomes before the long normal sleep.
-    flush_funded_reports(cfg, sui, journal).await
+    flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await
 }
 /// Retry only real queued writes, with fresh authority, before fallible watch
 /// or discovery work. Reporting failures remain independent of event cadence.
@@ -992,25 +994,30 @@ async fn flush_funded_reports(
     cfg: &Config,
     sui: &SuiClient,
     journal: &mut Journal,
+    validated: bool,
+    attempted_before_work: &std::collections::BTreeSet<String>,
 ) -> anyhow::Result<()> {
-    if !journal
-        .state
-        .deployments
-        .values()
-        .any(|o| !o.reported && o.status.is_some())
-    {
+    let now = std::time::Instant::now();
+    let retry_at = now + std::time::Duration::from_secs(cfg.runtime.poll_seconds.saturating_mul(8).clamp(8, 60));
+    let pending: Vec<_> = journal.state.deployments.iter()
+        .filter(|(id, o)| !o.reported && o.status.is_some()
+            && !attempted_before_work.contains(*id)
+            && sui.receipt_retries.lock().unwrap().get(*id).is_none_or(|next| now >= *next))
+        .map(|(id, o)| (id.clone(), o.status.unwrap()))
+        .collect();
+    if pending.is_empty() {
         return Ok(());
     }
-    sui.validate_deployment().await?;
-    sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
-        .await?;
-    if let Some(budget) = cfg.budget.as_ref().filter(|_| {
-        journal
-            .state
-            .deployments
-            .values()
-            .any(|o| !o.reported && o.status.is_some())
-    }) {
+    // Reserve every due attempt before fallible authority/funding reads. Even
+    // permanently undeliverable receipts cannot amplify every idle poll.
+    for (id, _) in &pending {
+        sui.receipt_retries.lock().unwrap().insert(id.clone(), retry_at);
+    }
+    if !validated {
+        sui.validate_deployment().await?;
+        sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id).await?;
+    }
+    if let Some(budget) = cfg.budget.as_ref() {
         let mut funding = journal.state.funding.clone().unwrap_or_default();
         match funding::top_up(
             budget,
@@ -1028,26 +1035,25 @@ async fn flush_funded_reports(
                     journal.save()?;
                 }
             }
-            Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
+            Err(error) => warn!(%error, "Gas top-up check failed; retrying after receipt backoff"),
         }
     }
-    flush_reports(sui, journal, &cfg.device.device_cap_id).await
+    flush_reports(sui, journal, &cfg.device.device_cap_id, pending).await
 }
 /// Keep durable receipt retries independent of later discovery/reconciliation.
 /// Report failures remain queued without poisoning discovery cadence: a deleted
 /// deployment or lost targeting can make a receipt permanently undeliverable.
 /// Journal I/O failures still abort the cycle immediately.
-async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str) -> anyhow::Result<()> {
-    let pending: Vec<_> = journal
-        .state
-        .deployments
-        .iter()
-        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
-        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
-        .collect();
+async fn flush_reports(
+    sui: &SuiClient,
+    journal: &mut Journal,
+    cap: &str,
+    pending: Vec<(String, u8)>,
+) -> anyhow::Result<()> {
     for (id, status) in pending {
         match sui.report_status(&id, cap, status).await {
             Ok(_) => {
+                sui.receipt_retries.lock().unwrap().remove(&id);
                 journal.state.deployments.get_mut(&id).unwrap().reported = true;
                 journal.save()?;
             }

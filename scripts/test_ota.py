@@ -453,6 +453,27 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                     delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
                     assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
                     print(f"PASS: reported rejection history returns to one batch per idle poll: {delta}")
+                    # A permanently undeliverable receipt must not turn idle
+                    # polls into authority/funding/report read amplification.
+                    sim.allow_reports = False
+                    sim.schema_fields["0x201"] = {"schema_version": "99"}
+                    sim.add("0x201")
+                    sim.groups[GROUP]["device_ids"].append("0xbeef")
+                    wait_for(lambda: state().get("deployments", {}).get("0x201", {}).get("status") == 2,
+                             "undeliverable rejection did not queue", process)
+                    wait_for(lambda: "Status report remains queued" in (root / "daemon.log").read_text(),
+                             "queued receipt was not attempted", process)
+                    batches = sim.reads["BatchGetObjects"]
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 1, "queue did not settle", process)
+                    before = dict(sim.reads)
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= before["BatchGetObjects"] + 3,
+                             "idle queued-receipt polls missing", process)
+                    delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    assert not state()["deployments"]["0x201"]["reported"]
+                    print(f"PASS: undeliverable queued receipt backs off; three idle polls use only three batches: {delta}")
+                    sim.allow_reports = True
+                    wait_for(lambda: state()["deployments"]["0x201"]["reported"], "receipt retry did not recover", process)
                     stop(process)
                     assert not sim.errors, sim.errors
                     return

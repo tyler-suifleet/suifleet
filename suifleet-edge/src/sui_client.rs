@@ -172,6 +172,7 @@ pub struct SuiClient {
     verified: std::sync::Arc<Vec<std::sync::atomic::AtomicBool>>,
     mutations: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub funding: std::sync::Arc<tokio::sync::Mutex<crate::funding::Funding>>,
+    pub receipt_retries: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::time::Instant>>>,
     stats: std::sync::Arc<std::sync::Mutex<(u64, u64)>>,
     poll: std::sync::Arc<std::sync::Mutex<PollWatch>>,
     packages: std::sync::Arc<
@@ -345,6 +346,7 @@ impl SuiClient {
             rpc,
             mutations: Default::default(),
             funding: Default::default(),
+            receipt_retries: Default::default(),
             stats: Default::default(),
             poll: Default::default(),
             packages: Default::default(),
