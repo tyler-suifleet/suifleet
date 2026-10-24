@@ -99,6 +99,10 @@ pub struct Outcome {
     /// the first upgraded poll checks their existing terminal outcomes too.
     #[serde(default = "missing_rollout_health")]
     pub rollout_health_pending: bool,
+    /// After any failed health attempt, retry only at normal discovery cadence.
+    /// Persist this across restarts, including deterministic authorization aborts.
+    #[serde(default)]
+    pub rollout_health_slow_retry: bool,
     pub error: Option<String>,
     /// Firmware-helper request this deployment may have submitted, recorded
     /// before the update starts so a restart can still learn its outcome.
@@ -112,6 +116,11 @@ pub struct Outcome {
     /// on a later start, never settled as an interrupted apply.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_handoff: Option<String>,
+}
+impl Outcome {
+    pub fn fast_rollout_health_pending(&self) -> bool {
+        self.reported && self.status.is_some() && self.rollout_health_pending && !self.rollout_health_slow_retry
+    }
 }
 fn missing_rollout_health() -> bool { true }
 

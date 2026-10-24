@@ -153,6 +153,23 @@ mod tests {
     }
 
     #[test]
+    fn legacy_unreported_and_failed_health_preserve_normal_cadence() {
+        let cfg = RuntimeConfig::default();
+        let c = Cadence::default();
+        let mut o: crate::state::Outcome = serde_json::from_str(
+            r#"{"status":1,"reported":false,"error":null}"#).unwrap();
+        let delay = |o: &crate::state::Outcome| c.post_apply_delay(&cfg,
+            c.delay(&cfg, [].iter(), 0, None), o.fast_rollout_health_pending());
+        assert_eq!(delay(&o).as_secs(), 1800);
+        o.reported = true;
+        assert_eq!(delay(&o).as_secs(), 60);
+        o.rollout_health_slow_retry = true;
+        let restored = serde_json::from_slice(&serde_json::to_vec(&o).unwrap()).unwrap();
+        assert_eq!(delay(&restored).as_secs(), 1800);
+        assert!(restored.rollout_health_pending); // Still recoverable on a later normal poll.
+    }
+
+    #[test]
     fn defaults_fast_windows_and_short_local_deadlines() {
         let cfg = RuntimeConfig::default();
         let c = Cadence::default();

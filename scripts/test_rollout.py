@@ -99,7 +99,9 @@ def run():
             health_fault[0]=True
             rollout['admitted_at'][0]=1
             wait(lambda:handles[0]['sim'].reports,'canary not applied/reported')
-            wait(lambda:state(0).get('deployments',{}).get(RECORD,{}).get('rollout_health_pending'), 'health retry not durable')
+            wait(lambda:state(0).get('deployments',{}).get(RECORD,{}).get('rollout_health_slow_retry'), 'normal-cadence health retry not durable')
+            assert state(0)['deployments'][RECORD]['reported']
+            assert state(0)['deployments'][RECORD]['rollout_health_pending']
             wait(lambda:handles[0]['sim'].checkpoint_reads >= 3, 'receipt checkpoint barrier did not wait')
             assert handles[0]['sim'].rollout_health == []
             stop(0,True); start(0)

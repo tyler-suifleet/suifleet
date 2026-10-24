@@ -519,7 +519,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let needs_report = pending.request.operation == "install" && result.is_ok()
-                            && journal.state.deployments.values().any(|o| o.status.is_some() && (!o.reported || o.rollout_health_pending));
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && (!o.reported || o.fast_rollout_health_pending()));
                         let _ = pending.reply.send(ipc::response(result));
                         // A local request can discover a scheduled record while
                         // the normal check sleeps. Only shorten the wakeup;
@@ -862,7 +862,7 @@ async fn poll(
 fn pending_rollout_health(cfg: &Config, journal: &Journal) -> bool {
     cfg.sui.manifest.as_ref().is_some_and(|m| protocol::ROLLOUT_HEALTH_TYPES.iter()
         .all(|name| m.type_origins.contains_key(*name)))
-        && journal.state.deployments.values().any(|o| o.status.is_some() && o.rollout_health_pending)
+        && journal.state.deployments.values().any(|o| o.fast_rollout_health_pending())
 }
 
 /// Status and post-outcome health have separate durable completion markers.
@@ -898,7 +898,9 @@ async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) ->
                     }
                 }
                 if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, status == protocol::STATUS_APPLIED, &inventory, (!reported).then_some(digest.as_str())).await {
-                    warn!(%id, %error, "Post-apply health remains queued");
+                    journal.state.deployments.get_mut(&id).unwrap().rollout_health_slow_retry = true;
+                    journal.save()?;
+                    warn!(%id, %error, "Post-apply health remains queued at normal cadence");
                     continue;
                 }
                 journal.state.deployments.get_mut(&id).unwrap().rollout_health_pending = false;
