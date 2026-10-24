@@ -255,24 +255,27 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
             sim.downloads.append(self.path)
             blob = self.path.removeprefix("/v1/blobs/")
             if blob == "artifact":
-                offset = int(self.headers["Range"].removeprefix("bytes=").rstrip("-")) if self.headers["Range"] else 0
+                requested = self.headers["Range"]
+                start, _, end = requested.removeprefix("bytes=").partition("-") if requested else ("0", "-", "")
+                offset = int(start)
+                end = min(int(end) if end else len(ARTIFACT) - 1, len(ARTIFACT) - 1)
                 sim.ranges.append(offset)
+                if offset >= len(ARTIFACT):
+                    self.respond(b"range outside blob", 416)
+                    return
+                body = ARTIFACT[offset:end + 1]
+                self.send_response(206 if requested else 200)
+                if requested:
+                    self.send_header("Content-Range", f"bytes {offset}-{end}/{len(ARTIFACT)}")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
                 if sim.truncate_next_artifact:
-                    # Promise the whole artifact, send a prefix, drop the connection.
+                    # Promise this range, send a prefix, drop the connection.
                     sim.truncate_next_artifact = False
-                    self.send_response(200)
-                    self.send_header("Content-Length", str(len(ARTIFACT)))
-                    self.end_headers()
-                    self.wfile.write(ARTIFACT[:10])
+                    self.wfile.write(body[:10])
                     self.close_connection = True
-                elif offset:
-                    self.send_response(206)
-                    self.send_header("Content-Range", f"bytes {offset}-{len(ARTIFACT)-1}/{len(ARTIFACT)}")
-                    self.send_header("Content-Length", str(len(ARTIFACT) - offset))
-                    self.end_headers()
-                    self.wfile.write(ARTIFACT[offset:])
                 else:
-                    self.respond(ARTIFACT)
+                    self.wfile.write(body)
             elif blob in sim.recipes:
                 self.respond(json.dumps(sim.recipes[blob]).encode())
             else:
@@ -312,7 +315,7 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
             mode = f'mode = "privileged-helper"\nfirmware_spool = {json.dumps(str(spool))}\n' if firmware_helper else ""
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
-                f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = {json.dumps("/bin/false" if firmware_helper else command)}\n'
+                f'[walrus]\naggregator_url = "{url}"\nrange_chunk_bytes = 16\n[apply]\ncommand = {json.dumps("/bin/false" if firmware_helper else command)}\n'
                 f'timeout_seconds = 2\n{mode}'
                 f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
             helper_config = root / "firmware.toml"
