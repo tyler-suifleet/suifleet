@@ -236,9 +236,40 @@ def run(binary,shim_binary,compact=False,quilt=False):
                     stop();first.write_bytes(saved[pending['items'][0]['identifier']])
                 sim.uploads_paused=False;process=start()
                 wait(lambda:len(sim.registered)==1);wait(lambda:(root/'state'/'fleet-data'/'certify.bcs').exists())
-                stop();sim.certify_outage=False;sim.clock+=60000;sim.history_pruned=True;process=start()
+                stop()
+                if quilt:
+                    # Simulate a batch left powered off beyond the old age limit,
+                    # with more failures than the old permanent attempt budget.
+                    pending=json.loads((durable/'pending.json').read_text())
+                    pending.update(attempts=32,created_ms=int(time.time()*1000)-8*86400000,retry_at_ms=0)
+                    (durable/'pending.json').write_text(json.dumps(pending))
+                    process=start()
+                    wait(lambda:json.loads((durable/'pending.json').read_text())['attempts']==33)
+                    failed=json.loads((durable/'pending.json').read_text())
+                    assert 3500000 < failed['retry_at_ms']-int(time.time()*1000) <= 3600000,'long outages must back off hourly'
+                    time.sleep(2)
+                    assert json.loads((durable/'pending.json').read_text())['attempts']==33,'idle backoff ticks must not spend attempts'
+                    assert len(sim.registered)==1 and not sim.anchors,'certification outage must retain the purchase reservation'
+                    stop()
+                sim.certify_outage=False;sim.clock+=60000;sim.history_pruned=True
+                if quilt:
+                    resumed=json.loads((durable/'pending.json').read_text())
+                    assert resumed['created_ms']==failed['created_ms'],'old batch must recover without replacement'
+                    assert resumed['items']==failed['items'],'retry must preserve ciphertext identities'
+                    # Advance only the retry deadline instead of waiting an hour.
+                    # Ciphertexts, failure count and signing checkpoints stay intact.
+                    resumed['retry_at_ms']=0
+                    (durable/'pending.json').write_text(json.dumps(resumed))
+                process=start()
                 time.sleep(3);assert not sim.anchors and len(sim.registered)==1,'pruned/unknown outcomes must retain the purchase reservation'
-                sim.history_pruned=False;wait(lambda:len(sim.anchors)==1)
+                sim.history_pruned=False
+                if quilt:
+                    stop()
+                    resumed=json.loads((durable/'pending.json').read_text())
+                    resumed['retry_at_ms']=0
+                    (durable/'pending.json').write_text(json.dumps(resumed))
+                    process=start()
+                wait(lambda:len(sim.anchors)==1)
                 wait(lambda:not (root/'state'/'fleet-data'/'pending.json').exists())
                 assert len(sim.registered)==1,'restart must resume the existing purchase'
                 assert sim.stale_certificate_rejections>=1,'rejected pre-sign certificate must be refreshed without a second registration'

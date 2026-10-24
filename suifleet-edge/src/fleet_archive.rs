@@ -146,9 +146,23 @@ fn quilt_record_groups(records: &[Record]) -> Vec<Vec<Record>> {
     groups
 }
 
+// `attempts` is a saturating failure counter, not an exhaustion budget.
+fn quilt_retry_delay(attempts: u32) -> u64 {
+    if attempts <= 8 { 1000 } else { (1000u64 << attempts.saturating_sub(8).min(22)).min(3_600_000) }
+}
+
 #[cfg(test)]
 mod quilt_tests {
     use super::*;
+    #[test]
+    fn retry_rate_stays_bounded_after_long_outages() {
+        assert_eq!(quilt_retry_delay(0), 1000);
+        assert_eq!(quilt_retry_delay(8), 1000);
+        assert_eq!(quilt_retry_delay(9), 2000);
+        for failures in [20, 32, 100, u32::MAX] {
+            assert_eq!(quilt_retry_delay(failures), 3_600_000);
+        }
+    }
     #[test]
     fn source_and_record_windows_are_lossless_and_bounded() {
         assert!(quilt_record_groups(&[]).is_empty());
@@ -311,19 +325,15 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
         for item in &pending.items { let _ = std::fs::remove_file(dir.join(format!("{}.bin", item.identifier))); }
         return Ok(());
     }
-    // Bounded automatic retries never discard or acknowledge a source item.
-    // Exhaustion/age suspends this one durable batch for explicit recovery;
-    // no fresh registration, replacement encryption or growing queue follows.
+    // Rate-limit this one immutable batch, including across crashes. Neither
+    // elapsed offline time nor failure count permanently disables publication.
     if !pending.items.is_empty() {
-    let now = telemetry::now_ms();
-    anyhow::ensure!(pending.attempts < 32 && (pending.created_ms == 0 || now.saturating_sub(pending.created_ms) <= 7*86_400_000), "archive retry/age limit; durable batch retained for operator recovery");
-    if now < pending.retry_at_ms { return Ok(()); }
-    pending.attempts += 1;
-    // Keep early transient recovery responsive; later attempts are capped at
-    // one per hour. The exact signed transaction remains the retry identity.
-    pending.retry_at_ms = now.saturating_add(if pending.attempts <= 8 { 1000 } else { (1000u64 << (pending.attempts - 8).min(22)).min(3_600_000) });
-    atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
+        let now = telemetry::now_ms();
+        if now < pending.retry_at_ms { return Ok(()); }
+        pending.retry_at_ms = now.saturating_add(quilt_retry_delay(pending.attempts));
+        atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
+    let result: anyhow::Result<()> = async {
     // Formation itself is durable: a timeout/oversize result here retains
     // the selected source mapping and exact encrypted items, not just logs.
     let encoding_fresh = pending.blob_id.is_empty();
@@ -382,6 +392,15 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
         atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     Ok(()) // Next tick verifies the anchored record before deleting any spool data.
+    }.await;
+    if !pending.items.is_empty() && result.is_err() {
+        // Count actual failed publication work, never idle/offline ticks. Keep
+        // exact purchase/signing checkpoints and retry at most hourly forever.
+        pending.attempts = pending.attempts.saturating_add(1);
+        pending.retry_at_ms = telemetry::now_ms().saturating_add(quilt_retry_delay(pending.attempts));
+        atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
+    }
+    result
 }
 
 /// Persistent categorical status only: errors can quote private upstream data.
