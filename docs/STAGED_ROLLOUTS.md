@@ -90,7 +90,9 @@ unchanged. Schema 1 and catalog schema 2 keep their existing paths; older client
 reject schema 3 before apply. Regenerate manifests for the new clients: record
 the introduction origins of `RolloutKey`, `Rollout`, `RolloutPolicy`,
 `RolloutDecision`, `RolloutHealthKey` and `RolloutHealth`, while preserving older
-types' origins. Existing rollout objects acquire the new health field lazily; no
+types' origins. Health types form the all-or-none optional `rollout_health`
+manifest group: historical manifests still restore, while the new gate refuses
+a manifest without this group. Existing rollout objects acquire the new health field lazily; no
 layout migration is needed. No existing objects
 are automatically converted to staged rollouts. Delete schema-3 records through
 `delete_rollout`, which removes the new dynamic field before existing cleanup.
@@ -108,7 +110,8 @@ are automatically converted to staged rollouts. Delete schema-3 records through
   new health type origins with existing rollout objects, old-package receipts
   without health, grant-checked reporting,
   minimum-sample failure abort, real-daemon post-apply health and next-cohort
-  admission without an indexer or periodic producer, and cleanup, with execution
+  admission with a real daily-cadence fleet-data writer and no HTTP indexer,
+  and cleanup, with execution
   effects checked.
 
 Physical Pi/target acceptance remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
