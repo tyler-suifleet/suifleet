@@ -120,6 +120,74 @@ module fleet_data::fleet_data_tests {
         ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry);
         ts::return_to_address(DEVICE, cap);
     }
+    fun compact(s: &mut ts::Scenario, id: ID, seq: u64, at: u64, previous: vector<u8>): vector<u8> {
+        ts::next_tx(s, DEVICE);
+        let fleet = ts::take_shared<FleetData>(s);
+        let mut writer = ts::take_shared<DeviceData>(s);
+        let storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let account = ts::take_shared<GasAccount>(s);
+        let registry = ts::take_shared<DeviceRegistry>(s);
+        let cap = ts::take_from_address<DeviceCap>(s, DEVICE);
+        let clock = clock_at(s, at);
+        fleet_data::anchor_compact(&fleet, &mut writer, &budget, &account, &registry, &cap, &storage,
+            id, seq, 0, zeros(32), previous, &clock, ts::ctx(s));
+        let bytes = sui::bcs::to_bytes(&fleet_data::compact_head(&writer).destroy_some());
+        clock::destroy_for_testing(clock);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry);
+        ts::return_to_address(DEVICE, cap);
+        bytes
+    }
+    #[test]
+    fun compact_history_commits_previous_head_without_legacy_entries() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let two = upload(&mut s, &mut system, 102, true);
+        let second = compact(&mut s, two, 2, 2 * DAY, std::hash::sha2_256(first));
+        let three = upload(&mut s, &mut system, 103, true);
+        let third = compact(&mut s, three, 3, 3 * DAY, std::hash::sha2_256(second));
+        // After the initial empty predecessor, the root never grows with history.
+        assert!(third.length() < 512);
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ESequence)]
+    fun compact_history_refuses_stale_predecessor() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let _ = compact(&mut s, one, 1, DAY, vector[]);
+        let two = upload(&mut s, &mut system, 102, true);
+        let _ = compact(&mut s, two, 2, 2 * DAY, vector[]);
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EBlob)]
+    fun compact_history_refuses_uncertified_archive() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, false);
+        let _ = compact(&mut s, one, 1, DAY, vector[]);
+        destroy(system); ts::end(s);
+    }
+    // Compact mode deliberately has no unbounded global seen-blob set.
+    // Readers must refuse the old blob's ciphertext sequence at the third link.
+    #[test]
+    fun compact_history_only_deduplicates_current_head() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let two = upload(&mut s, &mut system, 102, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let second = compact(&mut s, two, 2, 2 * DAY, std::hash::sha2_256(first));
+        let _ = compact(&mut s, one, 3, 3 * DAY, std::hash::sha2_256(second));
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EExists)]
+    fun compact_history_refuses_same_blob_twice() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let _ = compact(&mut s, one, 2, 2 * DAY, std::hash::sha2_256(first));
+        destroy(system); ts::end(s);
+    }
     fun admin(s: &mut ts::Scenario, operation: u8) {
         ts::next_tx(s, OWNER);
         let mut fleet = ts::take_shared<FleetData>(s);
@@ -154,7 +222,7 @@ module fleet_data::fleet_data_tests {
     #[test]
     fun health_and_daily_batch() {
         let (mut s, mut system) = setup();
-        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001);
+        health(&mut s, 1, 1); health(&mut s, 2, DAY + 1);
         let first = upload(&mut s, &mut system, 42, true);
         anchor(&mut s, first, 1, 0, 1);
         let crash = upload(&mut s, &mut system, 43, true);
@@ -162,6 +230,11 @@ module fleet_data::fleet_data_tests {
         let next = upload(&mut s, &mut system, 44, true);
         anchor(&mut s, next, 3, 0, DAY + 1);
         finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ECadence)]
+    fun daily_default_refuses_an_hourly_report() {
+        let (mut s, system) = setup();
+        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001); finish(s, system);
     }
     #[test, expected_failure(abort_code = fleet_data::ESequence)]
     fun replayed_health() { let (mut s, system) = setup(); health(&mut s, 1, 1); health(&mut s, 1, DAY); finish(s, system); }

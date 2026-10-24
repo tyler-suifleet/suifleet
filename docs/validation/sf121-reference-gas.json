@@ -1,0 +1,20 @@
+{
+  "observed_utc": "2026-10-24T02:44:06.900Z",
+  "scope": "read-only reference gas; not a mainnet transaction quote or invoice",
+  "rates": [
+    {
+      "network": "mainnet",
+      "chain": "35834a8a",
+      "reference_gas_price": {
+        "referenceGasPrice": "100"
+      }
+    },
+    {
+      "network": "testnet",
+      "chain": "4c78adac",
+      "reference_gas_price": {
+        "referenceGasPrice": "1000"
+      }
+    }
+  ]
+}

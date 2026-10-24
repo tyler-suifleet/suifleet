@@ -1,0 +1,2107 @@
+{
+  "started": "2026-10-23T19:01:07Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "cost probe: isolated device owned by operator",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "FsiMrgRQBAgKQgZuR58M6uyKxAeQ3pE8KiMF2VXDUGvM",
+      "gas_mist": 14300178,
+      "allowance_used_mist": 14300178
+    },
+    {
+      "label": "cost probe: isolated prepaid budget",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "HUBSCLAYdpG7tFruGbCGCoUp3a4mDD2oCzagBELbXPcs",
+      "gas_mist": 1395595,
+      "allowance_used_mist": 35695773
+    },
+    {
+      "label": "cost probe: enroll operator device",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "HHo6x4h28gGSGy5MmcuiTJsLj9RfQw2UGopXAmvm3nM8",
+      "gas_mist": 6419400,
+      "allowance_used_mist": 42115173
+    },
+    {
+      "label": "cost probe: finite storage",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AbM2ne2ALdD7nJeXH5pZqSGS1oNWsr2Dux47o4jiwYgV",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 45357336
+    },
+    {
+      "label": "cost probe: finite funded pool",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "FUFd7Pwj1UeTPq7vFW82s2nQUh1WEvu5ogGSNL4qcY8Z",
+      "gas_mist": 1376517,
+      "allowance_used_mist": 66733853
+    },
+    {
+      "label": "cost probe: finite register 0",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "9NgtPQQDoWybqFR8kLdHkmxAres6v9ZKaY5qnLNvJf2z",
+      "gas_mist": 12297565,
+      "allowance_used_mist": 79031418
+    },
+    {
+      "label": "cost probe: finite certify 0",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "not_submitted",
+      "allowance_used_mist": 89031418,
+      "refusal_proof": {
+        "phase": "CLI PTB parser, before transaction build/sign/submit",
+        "log_sha256": "14dd68fcc3b4555d958a77a76dec0a91ac4b41f98db656f8f1a7c5fe90d1304d",
+        "allowance_restored": false
+      }
+    },
+    {
+      "label": "cost probe: finite certify 0",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4ZNWW8jHENYyYFZJHu6erGK4vN1RpVniWugGsY73dDvY",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 90062276
+    },
+    {
+      "label": "cost probe: finite register 1",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AKouzqQMXurn67MjCLRQpQQb5W4VcShyyutc8f1KVezE",
+      "gas_mist": 9212273,
+      "allowance_used_mist": 99274549
+    },
+    {
+      "label": "cost probe: finite certify 1",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "5AXsB1e5yPWfKgbMSSP5e2d4ng1cNs4cPsy6iBftvmcs",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 100305407
+    },
+    {
+      "label": "cost probe: owner cleanup finite 0",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2inHoTxeEhEQcFETv116TouKwmcTXUcmhWy5Wh7eSnAr",
+      "gas_mist": 0,
+      "allowance_used_mist": 100305407
+    },
+    {
+      "label": "cost probe: owner cleanup finite 1",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2rKhqEVJy6hmGc8hpE9G1Eqdd9mKbNKLoyuKJomvKGEr",
+      "gas_mist": 0,
+      "allowance_used_mist": 100305407
+    },
+    {
+      "label": "cost probe: retained storage",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "HheYRspPXWyv5w7YRroWL1vMwabhucKUBSMCfxNGEqYG",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 103547570
+    },
+    {
+      "label": "cost probe: retained funded pool",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "RqrN2dKYqo3BGLKKp5QpbCPyDbtWKsa4SfirqNKaN2r",
+      "gas_mist": 1376517,
+      "allowance_used_mist": 124924087
+    },
+    {
+      "label": "cost probe: enable and prepay retained policy",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 5000000,
+      "status": "not_submitted",
+      "allowance_used_mist": 169924087,
+      "refusal_proof": {
+        "phase": "CLI PTB parser, before transaction build/sign/submit",
+        "log_sha256": "d45d27c94282a1f727e9e3161c728464262a78784be1d9aee75785d1b54fb452",
+        "allowance_restored": false
+      }
+    },
+    {
+      "label": "cost probe: enable and prepay retained policy",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 5000000,
+      "status": "success",
+      "digest": "54tCkLUb3BSm2tvZya9htj1CELMe1CDSsi1txqvRJifN",
+      "gas_mist": 10720824,
+      "allowance_used_mist": 185644911
+    },
+    {
+      "label": "cost probe: retained register 0",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "BSudjjmN7kmW1dpmwpEbzgKjTZUvdDD58NsMEDWAFszj",
+      "gas_mist": 19655095,
+      "allowance_used_mist": 205300006
+    },
+    {
+      "label": "cost probe: retained certify 0",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "6MkzyetVKAq1S9rEr1td5R6Zb4HQro2QALSxMeavMiZB",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 206330864
+    },
+    {
+      "label": "cost probe: retained register 1",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Cqp1rAjSYRCbqc3bghdFxZENPi1sWLkK19Vigw26Hrpq",
+      "gas_mist": 16569827,
+      "allowance_used_mist": 222900691
+    },
+    {
+      "label": "cost probe: retained certify 1",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "6U9M4oagTNwJVhuQP9rct35gPEaN7KAPezKBdqfC36xL",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 223931549
+    },
+    {
+      "label": "cost probe: owner cleanup retained 0",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "GyXNkZqQKBRQhH5F58WfDu9uBBmrkfwS8ErHQzG32aK",
+      "gas_mist": 0,
+      "allowance_used_mist": 223931549
+    },
+    {
+      "label": "cost probe: owner cleanup retained 1",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "72848h92S9kFDPfngtLbf7TxBoJvgv7C6BM8PRYJ26t7",
+      "gas_mist": 0,
+      "allowance_used_mist": 223931549
+    },
+    {
+      "label": "cost probe: finite_upfront storage",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "GhAwtVzuKpkm5uHZjR3fLiJbKJA7yUHKsHrqHYsDuZQg",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 227173712
+    },
+    {
+      "label": "cost probe: finite_upfront funded pool",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "6yDRVGjFmr7BqGMJc9wPfbf1VVMFJKqGGDT2ioMrmRdL",
+      "gas_mist": 1376517,
+      "allowance_used_mist": 248550229
+    },
+    {
+      "label": "cost probe: finite_upfront register 0",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "UBYjj1CPLMgV1944No74n1n97ASgKi1wH6xbaRkp898",
+      "gas_mist": 12297565,
+      "allowance_used_mist": 260847794
+    },
+    {
+      "label": "cost probe: finite_upfront certify 0",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "HpvWjkFciTtK9tCkV2WVSXJ7DKe3zuCWetEuie1WjoZ9",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 261878652
+    },
+    {
+      "label": "cost probe: finite_upfront register 1",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Ej4SLCBtcze6pgX1R6g8GtKBna4H89Bhubju95CPueAz",
+      "gas_mist": 9212273,
+      "allowance_used_mist": 271090925
+    },
+    {
+      "label": "cost probe: finite_upfront certify 1",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "8wmvi8N2nxcoi9E16pCC3jDknzuKiTFuHdexUqji5ZBB",
+      "gas_mist": 1030858,
+      "allowance_used_mist": 272121783
+    },
+    {
+      "label": "cost probe: owner cleanup finite_upfront 0",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "FUtJRsHL4qZmhxRWHS4bnWwSGvzNAdMdAB4QQbmZYjWC",
+      "gas_mist": 0,
+      "allowance_used_mist": 272121783
+    },
+    {
+      "label": "cost probe: owner cleanup finite_upfront 1",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4QPxLbqLrZn7Uy14xFMNTJycupo3HRTDf4L5LPJqBGfY",
+      "gas_mist": 0,
+      "allowance_used_mist": 272121783
+    },
+    {
+      "label": "cost probe: publish compact data 7d3fdc12fcfb",
+      "gas_budget_mist": 227878217,
+      "funding_mist": 0,
+      "status": "not_submitted",
+      "allowance_used_mist": 272121783
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf121-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf121-tools/network-sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1261,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 889215921,
+  "max_spend_mist": 500000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "dfc93103b8cda6e66d44af91d56d0dddc89bb72e",
+  "scope": "synthetic matched-size per-device archives; no confidential-data or automatic-cleanup acceptance",
+  "fixture": {
+    "core": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+    "registry": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+    "storage_package": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8"
+  },
+  "measured": {
+    "finite_register_0": {
+      "digest": "9NgtPQQDoWybqFR8kLdHkmxAres6v9ZKaY5qnLNvJf2z",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "126935200",
+        "storageRebate": "115637635",
+        "nonRefundableStorageFee": "11565"
+      },
+      "net_gas_mist": 12297565,
+      "upload": {
+        "at_limit": false,
+        "blob_id": "105462165429902439962137140955335869835013731353759294807696084590422445898039",
+        "blob_object_id": "0x1163c30b23d812cebc32e503e2ea8333377fda1878b6de4bc791de3584689799",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "66034000",
+        "encoded_size": "66034000",
+        "end_epoch": 562.0,
+        "pool_size": "198102000",
+        "size": "2048",
+        "storage_id": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+        "uploads_in_period": "1",
+        "wal_balance": "17608961",
+        "write_fee": "341523"
+      }
+    },
+    "finite_certify_0": {
+      "digest": "4ZNWW8jHENYyYFZJHu6erGK4vN1RpVniWugGsY73dDvY",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858
+    },
+    "finite_register_1": {
+      "digest": "AKouzqQMXurn67MjCLRQpQQb5W4VcShyyutc8f1KVezE",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "126935200",
+        "storageRebate": "118722927",
+        "nonRefundableStorageFee": "11873"
+      },
+      "net_gas_mist": 9212273,
+      "upload": {
+        "at_limit": false,
+        "blob_id": "25509980764827812299838326358444412385414701286958168437943416462434663054152",
+        "blob_object_id": "0xeb920bd13db9399536d4add266af29a437bf1a5b5fc2491715f47472aa01e291",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "132068000",
+        "encoded_size": "66034000",
+        "end_epoch": 562.0,
+        "pool_size": "132068000",
+        "size": "2048",
+        "storage_id": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+        "uploads_in_period": "2",
+        "wal_balance": "17267438",
+        "write_fee": "341523"
+      }
+    },
+    "finite_certify_1": {
+      "digest": "5AXsB1e5yPWfKgbMSSP5e2d4ng1cNs4cPsy6iBftvmcs",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858
+    },
+    "finite_cleanup_0": {
+      "digest": "2inHoTxeEhEQcFETv116TouKwmcTXUcmhWy5Wh7eSnAr",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4240800",
+        "storageRebate": "12470353",
+        "nonRefundableStorageFee": "1247"
+      },
+      "net_gas_mist": -7229553
+    },
+    "finite_cleanup_1": {
+      "digest": "2rKhqEVJy6hmGc8hpE9G1Eqdd9mKbNKLoyuKJomvKGEr",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4240800",
+        "storageRebate": "12470353",
+        "nonRefundableStorageFee": "1247"
+      },
+      "net_gas_mist": -7229553
+    },
+    "retained_register_0": {
+      "digest": "BSudjjmN7kmW1dpmwpEbzgKjTZUvdDD58NsMEDWAFszj",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "141588000",
+        "storageRebate": "122932905",
+        "nonRefundableStorageFee": "12295"
+      },
+      "net_gas_mist": 19655095,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidCountKey, u64>",
+          "objectId": "0x095154a0b1f5cfc5f986dbc9534d343607d91b24f24249ede6c1a99a15558855",
+          "version": "1064109970",
+          "previousVersion": "1064105316",
+          "digest": "ABQAz64wrYiCMJQ7SMkMRKbkFxTmeRwqiP8o6HmURBTw"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Retention>",
+          "objectId": "0x313e2e6f02176151de8ced0a23f3b85d7626245611a88142b46f23f1821e8f76",
+          "version": "1064109970",
+          "previousVersion": "1064105316",
+          "digest": "BYoGTM7ZiffixmfFrqprWUJwVvASNXnhBCKbQoRuSkwM"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0x4b44d14ec0b84a7fd5aa5893ad54a4f4acdf57a69de1b0f90dfea12897b8c405",
+          "version": "1064109970",
+          "digest": "6FvaYsxY2NzYpX9fL4cYEuJX2GzP12pYdPtC1U4gKua"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x795eb60ac2ea8099861186114313979b7936c14a9690c17949a8d29b5e0c9328"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::storage_resource::Storage",
+          "objectId": "0x5b38e79a065f15377427b3203806a0e081a6562893ce5ac0f458e16216df2cff",
+          "version": "1064109970",
+          "digest": "HsAwCzVtEkNiuMXFTmnqbsDoeCfnTZM1Ce7QsdySunTh"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UsageKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Usage>",
+          "objectId": "0x5b63de77ebc3c4a91d42d9d964994ab0526df94b97ebf04a3a6fe944d3768dc5",
+          "version": "1064109970",
+          "digest": "J79B6GsG1Z4puEMsm44Ko1iRNoZYtGcn6BKMdBEUCq5P"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x5c0dca56ce40b47a088405f0933154f629a9eabd8036b12724e10b3850e6644b",
+          "version": "1064109970",
+          "digest": "H2jThvqPsvPYcCVTWx8699gB2Wpqk9RmPACtGvZz7ofW"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Renewal>",
+          "objectId": "0x61bb9e6591f15fdb26da957605ea9bc75ac6eedb6c31f2d423a52ef6ebfeb858",
+          "version": "1064109970",
+          "digest": "Djkrdm12imSJqLCahv7oaTpg7CFwLonAhE57r87zCsR4"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 400185623
+            }
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system::System",
+          "objectId": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "version": "1064109970",
+          "previousVersion": "1064105317",
+          "digest": "BFYf44HSWLnWfqjh9X62odgEK6ZEG4dXUn5zgp18Y8xx"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::device_cap::DeviceCap",
+          "objectId": "0x7205836e9eddde9bb9f182bc8da8859dd06e13fa31ca304b68cc239ca3e36667",
+          "version": "1064109970",
+          "previousVersion": "1064105298",
+          "digest": "47B3b3MetD1XH6S9KyJq6GjbA2uDB6mVueKt7rY3oYEs"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidKey>, 0x2::object::ID>",
+          "objectId": "0x795eb60ac2ea8099861186114313979b7936c14a9690c17949a8d29b5e0c9328",
+          "version": "1064109970",
+          "digest": "aCFFNoZiSdz6UcM9BeftyCH7uqaz7nJtRGRA317AKMu"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064109970",
+          "previousVersion": "1064105316",
+          "digest": "9nGB1soHK62tAg6v1SmnCLW6YNXESzSRTbC1NoAA8WhX"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x4b44d14ec0b84a7fd5aa5893ad54a4f4acdf57a69de1b0f90dfea12897b8c405"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+          "version": "1064109970",
+          "digest": "EBMAVngJUsa5o2u3zmbRidNfEzapeeJLQbJVd4Bwvg9E"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::ProtectedBlobsKey, vector<0x2::object::ID>>",
+          "objectId": "0xf7d4a2c248cb4c48a6fb974a6a1044b8219ad2bec003f8a41ede8dd63ca7a7a8",
+          "version": "1064109970",
+          "previousVersion": "1064105316",
+          "digest": "3RUdLJnzkKyaavWGNVwAbhCAqccJ46W1HBReuPYMr2bg"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af"
+          },
+          "objectType": "0x2::dynamic_field::Field<u64, 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system_state_inner::SystemStateInnerV1>",
+          "objectId": "0xfffdecb59f75ba8740810134217645ea660b77144d14536e4e2e821388358720",
+          "version": "1064109970",
+          "previousVersion": "1064105317",
+          "digest": "4GJNhquxEKkkB3E8vPrmWSCp3esZ4kDHV3zqM4caSxaY"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "BSudjjmN7kmW1dpmwpEbzgKjTZUvdDD58NsMEDWAFszj",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+          "parsedJson": {
+            "blob_id": "11097437327798803339566368445276596403207889377483949888305790601443458191173",
+            "deletable": false,
+            "encoding_type": 1.0,
+            "end_epoch": 562.0,
+            "epoch": 559.0,
+            "object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+            "size": "2048"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAAEWPYGordzF1sQjb2YYc2vu4+zsPWgdH5pvnb+5L7YgYAAgAAAAAAAABMgIAAADWdIT3DKmuyG1+tL7eT+/JgSE9Pm+JVPPk79JfBuXONg==",
+          "timestampMs": "1792782631807"
+        },
+        {
+          "id": {
+            "txDigest": "BSudjjmN7kmW1dpmwpEbzgKjTZUvdDD58NsMEDWAFszj",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UploadRegistered",
+          "parsedJson": {
+            "at_limit": false,
+            "blob_id": "11097437327798803339566368445276596403207889377483949888305790601443458191173",
+            "blob_object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+            "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+            "encoded_bytes_in_period": "66034000",
+            "encoded_size": "66034000",
+            "end_epoch": 562.0,
+            "pool_size": "198102000",
+            "size": "2048",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "uploads_in_period": "1",
+            "wal_balance": "7608961",
+            "write_fee": "341523"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5lsEE4rFEq5goM6CQKJzliV09xIE2JG7N5jdpx/Rj8mctZ0hPcMqa7IbX60vt5P78mBIT0+b4lU8+Tv0l8G5c42RY9gait3MXWxCNvZhhza+7j7Ow9aB0fmm+dv7kvtiBgACAAAAAAAAFCZ7wMAAAAAEzYFAAAAAAAyAgAAUJnvAwAAAAABAAAAAAAAAPDLzgsAAAAAgRp0AAAAAAAA",
+          "timestampMs": "1792782631807"
+        },
+        {
+          "id": {
+            "txDigest": "BSudjjmN7kmW1dpmwpEbzgKjTZUvdDD58NsMEDWAFszj",
+            "eventSeq": "2"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalPrepaid",
+          "parsedJson": {
+            "blob_object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+            "fee": "170793",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "target": 563.0
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5nWdIT3DKmuyG1+tL7eT+/JgSE9Pm+JVPPk79JfBuXONimbAgAAAAAAMwIAAA==",
+          "timestampMs": "1792782631807"
+        }
+      ],
+      "upload": {
+        "at_limit": false,
+        "blob_id": "11097437327798803339566368445276596403207889377483949888305790601443458191173",
+        "blob_object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "66034000",
+        "encoded_size": "66034000",
+        "end_epoch": 562.0,
+        "pool_size": "198102000",
+        "size": "2048",
+        "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+        "uploads_in_period": "1",
+        "wal_balance": "7608961",
+        "write_fee": "341523"
+      }
+    },
+    "retained_certify_0": {
+      "digest": "6MkzyetVKAq1S9rEr1td5R6Zb4HQro2QALSxMeavMiZB",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064109972",
+          "previousVersion": "1064109970",
+          "digest": "AuSS6EpT5rdp8xy2F8D2meqNU86WckrkK9YoshoVVUdR"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x4b44d14ec0b84a7fd5aa5893ad54a4f4acdf57a69de1b0f90dfea12897b8c405"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+          "version": "1064109972",
+          "previousVersion": "1064109970",
+          "digest": "FsqYaF3dEzeMmfRfXbZ6rjmiEScMHshPWjLv3aCbRbrp"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "6MkzyetVKAq1S9rEr1td5R6Zb4HQro2QALSxMeavMiZB",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+          "parsedJson": {
+            "blob_id": "11097437327798803339566368445276596403207889377483949888305790601443458191173",
+            "deletable": false,
+            "end_epoch": 562.0,
+            "epoch": 559.0,
+            "is_extension": false,
+            "object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAAEWPYGordzF1sQjb2YYc2vu4+zsPWgdH5pvnb+5L7YgYMgIAAADWdIT3DKmuyG1+tL7eT+/JgSE9Pm+JVPPk79JfBuXONgA=",
+          "timestampMs": "1792782667396"
+        }
+      ]
+    },
+    "retained_register_1": {
+      "digest": "Cqp1rAjSYRCbqc3bghdFxZENPi1sWLkK19Vigw26Hrpq",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "141831200",
+        "storageRebate": "126261373",
+        "nonRefundableStorageFee": "12627"
+      },
+      "net_gas_mist": 16569827,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidCountKey, u64>",
+          "objectId": "0x095154a0b1f5cfc5f986dbc9534d343607d91b24f24249ede6c1a99a15558855",
+          "version": "1064110761",
+          "previousVersion": "1064109970",
+          "digest": "4ut98cJ5bz92MXhMgaoQ6Lns4i348v6rpttaBKUPkpqg"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0x208ffb504fc06011fc62440c522ed8310f5800e5b745616c97ce041530f0a91c",
+          "version": "1064110761",
+          "digest": "8E5DUZpRM1HpnYXwjAvjCRNQFmsgzpmhPTdzeAEoZyCG"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Retention>",
+          "objectId": "0x313e2e6f02176151de8ced0a23f3b85d7626245611a88142b46f23f1821e8f76",
+          "version": "1064110761",
+          "previousVersion": "1064109970",
+          "digest": "7JDUb9gt6A71jj2ghJfcvuvcL2EPchSY3uy84oAhhbUa"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidKey>, 0x2::object::ID>",
+          "objectId": "0x3b9b0ce8919ff4c7e18f887d05da4e1dd8f4a8801a1f56ec8e7aefdd005ea112",
+          "version": "1064110761",
+          "digest": "DwppeQCKb2hf7jwhMFHgCyhWVfTwvxzNHcgNSJLhtSrx"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UsageKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Usage>",
+          "objectId": "0x5b63de77ebc3c4a91d42d9d964994ab0526df94b97ebf04a3a6fe944d3768dc5",
+          "version": "1064110761",
+          "previousVersion": "1064109970",
+          "digest": "C7An2EsdXZYLV8V4XjCPR5TXpDRV6rHUZK26skWU9t41"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x3b9b0ce8919ff4c7e18f887d05da4e1dd8f4a8801a1f56ec8e7aefdd005ea112"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::storage_resource::Storage",
+          "objectId": "0x63af34637b361dc7100638755dae971777b95c1f9cbec320da77b3943fc72263",
+          "version": "1064110761",
+          "digest": "7AWgMvj7mZDzPV9ZX7eFvPEA4fqAdebuHaVRk9qgjTtu"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 400185623
+            }
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system::System",
+          "objectId": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "version": "1064110761",
+          "previousVersion": "1064109971",
+          "digest": "uapVHUTaxRS4CfkTnJoWUsqE54mjSogszDH5tk39kxs"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::device_cap::DeviceCap",
+          "objectId": "0x7205836e9eddde9bb9f182bc8da8859dd06e13fa31ca304b68cc239ca3e36667",
+          "version": "1064110761",
+          "previousVersion": "1064109970",
+          "digest": "8EomAEZufSsKLrVFhQZeADGVRcBBCZ25YUYAmRpM9zHn"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064110761",
+          "previousVersion": "1064109972",
+          "digest": "FTGbsUcXgQ569yAzH265cy47n8mnJVnAZdSr6fMZHL8j"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Renewal>",
+          "objectId": "0xca137d4ecd88d002df211c8b76c293a74af6a16953e3751a58ba232c5b9de914",
+          "version": "1064110761",
+          "digest": "B6Bc8rmXzUNnmk8zJLejsKQyjS4AYioatzp6jWNWLW1c"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x208ffb504fc06011fc62440c522ed8310f5800e5b745616c97ce041530f0a91c"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+          "version": "1064110761",
+          "digest": "ANH2KB8KKaKk2wcdUcqmk2cijf914n9Lz7iK3LkASVBS"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0xf75fcbf3996e2a4601cd074dffa799f560d596267177ee49bbf0af64385bbcdc",
+          "version": "1064110761",
+          "digest": "92vRWPeoSiwzZwSr5Sfyv9zFoJNSvMZfEmszuy48y38G"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::ProtectedBlobsKey, vector<0x2::object::ID>>",
+          "objectId": "0xf7d4a2c248cb4c48a6fb974a6a1044b8219ad2bec003f8a41ede8dd63ca7a7a8",
+          "version": "1064110761",
+          "previousVersion": "1064109970",
+          "digest": "E6piHMa71rQd5s75uHrvX3NqVKstMoeTQfmU7p8HGHPv"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af"
+          },
+          "objectType": "0x2::dynamic_field::Field<u64, 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system_state_inner::SystemStateInnerV1>",
+          "objectId": "0xfffdecb59f75ba8740810134217645ea660b77144d14536e4e2e821388358720",
+          "version": "1064110761",
+          "previousVersion": "1064109971",
+          "digest": "2ByebGpJnFsJrf8m6WRYENNY4ZxAcMzPgkrj6xoat4kk"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "Cqp1rAjSYRCbqc3bghdFxZENPi1sWLkK19Vigw26Hrpq",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+          "parsedJson": {
+            "blob_id": "47702051493855442340027590130356700684331441033773726513320399768512244997668",
+            "deletable": false,
+            "encoding_type": 1.0,
+            "end_epoch": 562.0,
+            "epoch": 559.0,
+            "object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+            "size": "2048"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAACTeX75XdriYYgctEiwSvyNzNSogqBQYdIlzoAOEZ3ZpAAgAAAAAAAABMgIAAADSK/ecxcjQ5VzzCVyHYvELWgvdZzi3zzJDUx7SAR9Cbg==",
+          "timestampMs": "1792782686483"
+        },
+        {
+          "id": {
+            "txDigest": "Cqp1rAjSYRCbqc3bghdFxZENPi1sWLkK19Vigw26Hrpq",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UploadRegistered",
+          "parsedJson": {
+            "at_limit": false,
+            "blob_id": "47702051493855442340027590130356700684331441033773726513320399768512244997668",
+            "blob_object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+            "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+            "encoded_bytes_in_period": "132068000",
+            "encoded_size": "66034000",
+            "end_epoch": 562.0,
+            "pool_size": "132068000",
+            "size": "2048",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "uploads_in_period": "2",
+            "wal_balance": "7267438",
+            "write_fee": "341523"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5lsEE4rFEq5goM6CQKJzliV09xIE2JG7N5jdpx/Rj8mctIr95zFyNDlXPMJXIdi8QtaC91nOLfPMkNTHtIBH0JuJN5fvld2uJhiBy0SLBK/I3M1KiCoFBh0iXOgA4RndmkACAAAAAAAAFCZ7wMAAAAAEzYFAAAAAAAyAgAAoDLfBwAAAAACAAAAAAAAAKAy3wcAAAAAbuRuAAAAAAAA",
+          "timestampMs": "1792782686483"
+        },
+        {
+          "id": {
+            "txDigest": "Cqp1rAjSYRCbqc3bghdFxZENPi1sWLkK19Vigw26Hrpq",
+            "eventSeq": "2"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalPrepaid",
+          "parsedJson": {
+            "blob_object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+            "fee": "170793",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "target": 563.0
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5nSK/ecxcjQ5VzzCVyHYvELWgvdZzi3zzJDUx7SAR9CbimbAgAAAAAAMwIAAA==",
+          "timestampMs": "1792782686483"
+        }
+      ],
+      "upload": {
+        "at_limit": false,
+        "blob_id": "47702051493855442340027590130356700684331441033773726513320399768512244997668",
+        "blob_object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "132068000",
+        "encoded_size": "66034000",
+        "end_epoch": 562.0,
+        "pool_size": "132068000",
+        "size": "2048",
+        "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+        "uploads_in_period": "2",
+        "wal_balance": "7267438",
+        "write_fee": "341523"
+      }
+    },
+    "retained_certify_1": {
+      "digest": "6U9M4oagTNwJVhuQP9rct35gPEaN7KAPezKBdqfC36xL",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064110762",
+          "previousVersion": "1064110761",
+          "digest": "AJgsU1JB4Zv9XiRvPB9uVq2sgvuL7rWvAN3R2tRqupot"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x208ffb504fc06011fc62440c522ed8310f5800e5b745616c97ce041530f0a91c"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+          "version": "1064110762",
+          "previousVersion": "1064110761",
+          "digest": "57VTBorDxocd7tuVbNnXcfXV1Fd7yK5yKMYT2xo8LqBM"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "6U9M4oagTNwJVhuQP9rct35gPEaN7KAPezKBdqfC36xL",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+          "parsedJson": {
+            "blob_id": "47702051493855442340027590130356700684331441033773726513320399768512244997668",
+            "deletable": false,
+            "end_epoch": 562.0,
+            "epoch": 559.0,
+            "is_extension": false,
+            "object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAACTeX75XdriYYgctEiwSvyNzNSogqBQYdIlzoAOEZ3ZpMgIAAADSK/ecxcjQ5VzzCVyHYvELWgvdZzi3zzJDUx7SAR9CbgA=",
+          "timestampMs": "1792782711438"
+        }
+      ]
+    },
+    "retained_cleanup_0": {
+      "digest": "GyXNkZqQKBRQhH5F58WfDu9uBBmrkfwS8ErHQzG32aK",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "11780000",
+        "storageRebate": "27364863",
+        "nonRefundableStorageFee": "2737"
+      },
+      "net_gas_mist": -14584863,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidCountKey, u64>",
+          "objectId": "0x095154a0b1f5cfc5f986dbc9534d343607d91b24f24249ede6c1a99a15558855",
+          "version": "1064110763",
+          "previousVersion": "1064110761",
+          "digest": "mCMJU4DKBkfRAfESA7J1rXoNT4CpYBognjmbbkJn1SG"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::BudgetOwnerCap",
+          "objectId": "0x26b7a4aaf1f0420e8d3693b89ec6843436d0c1b10518c836f42dcdacdea22efd",
+          "version": "1064110763",
+          "previousVersion": "1064105316",
+          "digest": "4QLjcmdMejXWHinp2mEhALNoBcz9NKoRHULBTD8aScPc"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Retention>",
+          "objectId": "0x313e2e6f02176151de8ced0a23f3b85d7626245611a88142b46f23f1821e8f76",
+          "version": "1064110763",
+          "previousVersion": "1064110761",
+          "digest": "BTiYfsNZSAvb5k3Y1PGLtmWvzJrE6N6GpRLVbe1zWMne"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0x4b44d14ec0b84a7fd5aa5893ad54a4f4acdf57a69de1b0f90dfea12897b8c405",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::storage_resource::Storage",
+          "objectId": "0x5b38e79a065f15377427b3203806a0e081a6562893ce5ac0f458e16216df2cff",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x5c0dca56ce40b47a088405f0933154f629a9eabd8036b12724e10b3850e6644b",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Renewal>",
+          "objectId": "0x61bb9e6591f15fdb26da957605ea9bc75ac6eedb6c31f2d423a52ef6ebfeb858",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidKey>, 0x2::object::ID>",
+          "objectId": "0x795eb60ac2ea8099861186114313979b7936c14a9690c17949a8d29b5e0c9328",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064110763",
+          "previousVersion": "1064110762",
+          "digest": "EtSar6Kvds6FbsJ7E2YEyTCTzKGt2CzcdWuiNDDEmWGt"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::ProtectedBlobsKey, vector<0x2::object::ID>>",
+          "objectId": "0xf7d4a2c248cb4c48a6fb974a6a1044b8219ad2bec003f8a41ede8dd63ca7a7a8",
+          "version": "1064110763",
+          "previousVersion": "1064110761",
+          "digest": "DNJMZ26TsoSFPSbYwq9CfpdDQbLFRMp8fHb7N9cGgY1L"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "GyXNkZqQKBRQhH5F58WfDu9uBBmrkfwS8ErHQzG32aK",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionRisk",
+          "parsedJson": {
+            "gas_removed": "0",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "wal_removed": "0"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5kAAAAAAAAAAAAAAAAAAAAA",
+          "timestampMs": "1792782722876"
+        },
+        {
+          "id": {
+            "txDigest": "GyXNkZqQKBRQhH5F58WfDu9uBBmrkfwS8ErHQzG32aK",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionRisk",
+          "parsedJson": {
+            "gas_removed": "0",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "wal_removed": "0"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5kAAAAAAAAAAAAAAAAAAAAA",
+          "timestampMs": "1792782722876"
+        },
+        {
+          "id": {
+            "txDigest": "GyXNkZqQKBRQhH5F58WfDu9uBBmrkfwS8ErHQzG32aK",
+            "eventSeq": "2"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobReleased",
+          "parsedJson": {
+            "blob_object_id": "0xd67484f70ca9aec86d7eb4bede4fefc981213d3e6f8954f3e4efd25f06e5ce36",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5nWdIT3DKmuyG1+tL7eT+/JgSE9Pm+JVPPk79JfBuXONg==",
+          "timestampMs": "1792782722876"
+        }
+      ]
+    },
+    "retained_cleanup_1": {
+      "digest": "72848h92S9kFDPfngtLbf7TxBoJvgv7C6BM8PRYJ26t7",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "11536800",
+        "storageRebate": "27121688",
+        "nonRefundableStorageFee": "2712"
+      },
+      "net_gas_mist": -14584888,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidCountKey, u64>",
+          "objectId": "0x095154a0b1f5cfc5f986dbc9534d343607d91b24f24249ede6c1a99a15558855",
+          "version": "1064110764",
+          "previousVersion": "1064110763",
+          "digest": "A3TYhyzVgLsJKwGskBcnYfTW3QzrNEtdaA1bXHGhGe1Y"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0x208ffb504fc06011fc62440c522ed8310f5800e5b745616c97ce041530f0a91c",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::BudgetOwnerCap",
+          "objectId": "0x26b7a4aaf1f0420e8d3693b89ec6843436d0c1b10518c836f42dcdacdea22efd",
+          "version": "1064110764",
+          "previousVersion": "1064110763",
+          "digest": "J9wfTsd5jcZZ9hHXcHSZKSu79rWRZdgiynWhGHLWe8dg"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Retention>",
+          "objectId": "0x313e2e6f02176151de8ced0a23f3b85d7626245611a88142b46f23f1821e8f76",
+          "version": "1064110764",
+          "previousVersion": "1064110763",
+          "digest": "EmqMRPRyLBQMfdFpxzf3P22kfictwxXMGiD1AtL38Kg5"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::PrepaidKey>, 0x2::object::ID>",
+          "objectId": "0x3b9b0ce8919ff4c7e18f887d05da4e1dd8f4a8801a1f56ec8e7aefdd005ea112",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::storage_resource::Storage",
+          "objectId": "0x63af34637b361dc7100638755dae971777b95c1f9cbec320da77b3943fc72263",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064105314
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+          "version": "1064110764",
+          "previousVersion": "1064110763",
+          "digest": "6939EmmjUUfcfVFjpcnPPFTdoZa9idQX4Mcjoden45QG"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RenewalKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Renewal>",
+          "objectId": "0xca137d4ecd88d002df211c8b76c293a74af6a16953e3751a58ba232c5b9de914",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0xf75fcbf3996e2a4601cd074dffa799f560d596267177ee49bbf0af64385bbcdc",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::ProtectedBlobsKey, vector<0x2::object::ID>>",
+          "objectId": "0xf7d4a2c248cb4c48a6fb974a6a1044b8219ad2bec003f8a41ede8dd63ca7a7a8",
+          "version": "1064110764",
+          "previousVersion": "1064110763",
+          "digest": "FzHu62meSegbGGBS51pHNXFEa4Gd8zG4cFxCrJUBFCH8"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "72848h92S9kFDPfngtLbf7TxBoJvgv7C6BM8PRYJ26t7",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionRisk",
+          "parsedJson": {
+            "gas_removed": "0",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "wal_removed": "0"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5kAAAAAAAAAAAAAAAAAAAAA",
+          "timestampMs": "1792782726943"
+        },
+        {
+          "id": {
+            "txDigest": "72848h92S9kFDPfngtLbf7TxBoJvgv7C6BM8PRYJ26t7",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RetentionRisk",
+          "parsedJson": {
+            "gas_removed": "0",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+            "wal_removed": "0"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5kAAAAAAAAAAAAAAAAAAAAA",
+          "timestampMs": "1792782726943"
+        },
+        {
+          "id": {
+            "txDigest": "72848h92S9kFDPfngtLbf7TxBoJvgv7C6BM8PRYJ26t7",
+            "eventSeq": "2"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobReleased",
+          "parsedJson": {
+            "blob_object_id": "0xd22bf79cc5c8d0e55cf3095c8762f10b5a0bdd6738b7cf3243531ed2011f426e",
+            "storage_id": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "ifEcFFjrWLaHLW5KdUuWxC9DAbIboafwpyY+M+aoq5nSK/ecxcjQ5VzzCVyHYvELWgvdZzi3zzJDUx7SAR9Cbg==",
+          "timestampMs": "1792782726943"
+        }
+      ]
+    },
+    "finite_upfront_register_0": {
+      "digest": "UBYjj1CPLMgV1944No74n1n97ASgKi1wH6xbaRkp898",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "126935200",
+        "storageRebate": "115637635",
+        "nonRefundableStorageFee": "11565"
+      },
+      "net_gas_mist": 12297565,
+      "object_changes": [
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UsageKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Usage>",
+          "objectId": "0x225402ac9a586af9f00025617a63475c7515163b42882c6ed2a373cd2001c293",
+          "version": "1064113650",
+          "digest": "s9WDRPPuudP21j4ZcHRZkRoDoV3iwjv9rvs1i8882qk"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 400185623
+            }
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system::System",
+          "objectId": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "version": "1064113650",
+          "previousVersion": "1064110775",
+          "digest": "8uemFrSCWDWemy72WcwHkdkS5qzBGBni4DyvLnkoN2xv"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::device_cap::DeviceCap",
+          "objectId": "0x7205836e9eddde9bb9f182bc8da8859dd06e13fa31ca304b68cc239ca3e36667",
+          "version": "1064113650",
+          "previousVersion": "1064110761",
+          "digest": "4aPqBi4F7c8sSXVxZq4pSG7D26oSJNbaxMcBvNUJwiRF"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x8f51b72bce66499de33f9ee5691383c428048c13f6f6f3aac6ae61e4c1ea0a30",
+          "version": "1064113650",
+          "digest": "6aHpX32CJgDxTwBXQjg9MRtGMKkd2wLkepbyB2gewM9N"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064113650",
+          "previousVersion": "1064110775",
+          "digest": "76BHUe7qdLzhXPc9zChY3GwX8sFPYXREVJ4p8pggUmex"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0xaf1b05964e97f99c5c96111088f1225c2af0d373f6dff9f957c30a9cc10892b8",
+          "version": "1064113650",
+          "digest": "8vXJfvVjzjPeUSHkKKcxYbr6iS7rh8HfK6dCzEY3raFv"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0xaf1b05964e97f99c5c96111088f1225c2af0d373f6dff9f957c30a9cc10892b8"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+          "version": "1064113650",
+          "digest": "42iHdsJJFWhnBxejK9FgV5kAqDG3t891HtXJyPGTgVPB"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af"
+          },
+          "objectType": "0x2::dynamic_field::Field<u64, 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system_state_inner::SystemStateInnerV1>",
+          "objectId": "0xfffdecb59f75ba8740810134217645ea660b77144d14536e4e2e821388358720",
+          "version": "1064113650",
+          "previousVersion": "1064110775",
+          "digest": "ERo5jkquTHLeuAoy5tgas7pqCh62nrQ4WeyPZJajn6gv"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "UBYjj1CPLMgV1944No74n1n97ASgKi1wH6xbaRkp898",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+          "parsedJson": {
+            "blob_id": "53232439179915429930185971556559377364214504153910101604493752566106196943071",
+            "deletable": false,
+            "encoding_type": 1.0,
+            "end_epoch": 563.0,
+            "epoch": 559.0,
+            "object_id": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+            "size": "2048"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAAN8g8vcGtoECySnn+vWIrDUnuZfNvSRstI7W7DgsfrB1AAgAAAAAAAABMwIAAADtSTpVwhMe8lHUQ5QeGD7ZTyLJnCB5/Pq4rb6MA2OR8A==",
+          "timestampMs": "1792782885917"
+        },
+        {
+          "id": {
+            "txDigest": "UBYjj1CPLMgV1944No74n1n97ASgKi1wH6xbaRkp898",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UploadRegistered",
+          "parsedJson": {
+            "at_limit": false,
+            "blob_id": "53232439179915429930185971556559377364214504153910101604493752566106196943071",
+            "blob_object_id": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+            "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+            "encoded_bytes_in_period": "66034000",
+            "encoded_size": "66034000",
+            "end_epoch": 563.0,
+            "pool_size": "198102000",
+            "size": "2048",
+            "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+            "uploads_in_period": "1",
+            "wal_balance": "16925789",
+            "write_fee": "341523"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "lFcRTzfT9C0IbvEmhSPKoGDie0q9zsM1uAXPXKYAB/hsEE4rFEq5goM6CQKJzliV09xIE2JG7N5jdpx/Rj8mcu1JOlXCEx7yUdRDlB4YPtlPIsmcIHn8+ritvowDY5Hw3yDy9wa2gQLJKef69YisNSe5l829JGy0jtbsOCx+sHUACAAAAAAAAFCZ7wMAAAAAEzYFAAAAAAAzAgAAUJnvAwAAAAABAAAAAAAAAPDLzgsAAAAAXUQCAQAAAAAA",
+          "timestampMs": "1792782885917"
+        }
+      ],
+      "upload": {
+        "at_limit": false,
+        "blob_id": "53232439179915429930185971556559377364214504153910101604493752566106196943071",
+        "blob_object_id": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "66034000",
+        "encoded_size": "66034000",
+        "end_epoch": 563.0,
+        "pool_size": "198102000",
+        "size": "2048",
+        "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+        "uploads_in_period": "1",
+        "wal_balance": "16925789",
+        "write_fee": "341523"
+      }
+    },
+    "finite_upfront_certify_0": {
+      "digest": "HpvWjkFciTtK9tCkV2WVSXJ7DKe3zuCWetEuie1WjoZ9",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064113651",
+          "previousVersion": "1064113650",
+          "digest": "7RdyaD7X8tRRAayVBhqAMMc3M9nunPdjGSqz65LkVJrs"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0xaf1b05964e97f99c5c96111088f1225c2af0d373f6dff9f957c30a9cc10892b8"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+          "version": "1064113651",
+          "previousVersion": "1064113650",
+          "digest": "6PipEBE1A1LjeZb8AJZFUARxrr6tr7JdLe4cFUs5oErL"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "HpvWjkFciTtK9tCkV2WVSXJ7DKe3zuCWetEuie1WjoZ9",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+          "parsedJson": {
+            "blob_id": "53232439179915429930185971556559377364214504153910101604493752566106196943071",
+            "deletable": false,
+            "end_epoch": 563.0,
+            "epoch": 559.0,
+            "is_extension": false,
+            "object_id": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAAN8g8vcGtoECySnn+vWIrDUnuZfNvSRstI7W7DgsfrB1MwIAAADtSTpVwhMe8lHUQ5QeGD7ZTyLJnCB5/Pq4rb6MA2OR8AA=",
+          "timestampMs": "1792782912929"
+        }
+      ]
+    },
+    "finite_upfront_register_1": {
+      "digest": "Ej4SLCBtcze6pgX1R6g8GtKBna4H89Bhubju95CPueAz",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "126935200",
+        "storageRebate": "118722927",
+        "nonRefundableStorageFee": "11873"
+      },
+      "net_gas_mist": 9212273,
+      "object_changes": [
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x2103a7799978b1e5da16417316752e1f06c4847b76a352dec465efe1b78c1176",
+          "version": "1064114271",
+          "digest": "FCmUmwngDzoZRGwwK9fhVFLWgQvnpU25885tZ9Qpnd6T"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UsageKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::Usage>",
+          "objectId": "0x225402ac9a586af9f00025617a63475c7515163b42882c6ed2a373cd2001c293",
+          "version": "1064114271",
+          "previousVersion": "1064113650",
+          "digest": "HsrdbbVsR7vZKoDY7hdPErKsftvc84NrF4my92bbFzhE"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 400185623
+            }
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system::System",
+          "objectId": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af",
+          "version": "1064114271",
+          "previousVersion": "1064113650",
+          "digest": "3VGZqrSvZa4ioRiRTu9FRwEWZJnVFsbood24DPczdi6r"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::device_cap::DeviceCap",
+          "objectId": "0x7205836e9eddde9bb9f182bc8da8859dd06e13fa31ca304b68cc239ca3e36667",
+          "version": "1064114271",
+          "previousVersion": "1064113650",
+          "digest": "FTu5sTWCbW3VVQvFZYPRQ9HctXeJe6UkRYRVid6T2Vsb"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064114271",
+          "previousVersion": "1064113651",
+          "digest": "5kWhPXQMDffYKMqwTU724k9EPDoif2YbKeTT34X1m1Yk"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0xec6c2adab24cd4892f48735f3608a476e53e2795a7df2ad5cf4f96d585e22ced"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+          "version": "1064114271",
+          "digest": "AiwkkFzYU9PA8XTEpDz69Ck4KM1NzGhWLqfy4as5x4c6"
+        },
+        {
+          "type": "created",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0xec6c2adab24cd4892f48735f3608a476e53e2795a7df2ad5cf4f96d585e22ced",
+          "version": "1064114271",
+          "digest": "CnfJ9LQxPSgMys8ACgZHJGAvUEUmquitKkzLU5haXxnS"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0x6c2547cbbc38025cf3adac45f63cb0a8d12ecf777cdc75a4971612bf97fdf6af"
+          },
+          "objectType": "0x2::dynamic_field::Field<u64, 0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::system_state_inner::SystemStateInnerV1>",
+          "objectId": "0xfffdecb59f75ba8740810134217645ea660b77144d14536e4e2e821388358720",
+          "version": "1064114271",
+          "previousVersion": "1064113650",
+          "digest": "8QbDnmdzzvzsJWBkrgtQ7EdGCZbVnz1Cx9Fbi4TbhsVq"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "Ej4SLCBtcze6pgX1R6g8GtKBna4H89Bhubju95CPueAz",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobRegistered",
+          "parsedJson": {
+            "blob_id": "52554518448502246853820043335473444678152733997723720311032633510176159420180",
+            "deletable": false,
+            "encoding_type": 1.0,
+            "end_epoch": 563.0,
+            "epoch": 559.0,
+            "object_id": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+            "size": "2048"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAABTPc7zB/ZMKOzaqatsshS9KgoMkQc0Ke8RGicGmzTB0AAgAAAAAAAABMwIAAADmofCJQzZv6iEwV3hgaigWX5JbKV4MlVUU4/SalG/Jtg==",
+          "timestampMs": "1792782928851"
+        },
+        {
+          "id": {
+            "txDigest": "Ej4SLCBtcze6pgX1R6g8GtKBna4H89Bhubju95CPueAz",
+            "eventSeq": "1"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::UploadRegistered",
+          "parsedJson": {
+            "at_limit": false,
+            "blob_id": "52554518448502246853820043335473444678152733997723720311032633510176159420180",
+            "blob_object_id": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+            "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+            "encoded_bytes_in_period": "132068000",
+            "encoded_size": "66034000",
+            "end_epoch": 563.0,
+            "pool_size": "132068000",
+            "size": "2048",
+            "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+            "uploads_in_period": "2",
+            "wal_balance": "16584266",
+            "write_fee": "341523"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "lFcRTzfT9C0IbvEmhSPKoGDie0q9zsM1uAXPXKYAB/hsEE4rFEq5goM6CQKJzliV09xIE2JG7N5jdpx/Rj8mcuah8IlDNm/qITBXeGBqKBZfklspXgyVVRTj9JqUb8m2FM9zvMH9kwo7Nqpq2yyFL0qCgyRBzQp7xEaJwabNMHQACAAAAAAAAFCZ7wMAAAAAEzYFAAAAAAAzAgAAoDLfBwAAAAACAAAAAAAAAKAy3wcAAAAASg79AAAAAAAA",
+          "timestampMs": "1792782928851"
+        }
+      ],
+      "upload": {
+        "at_limit": false,
+        "blob_id": "52554518448502246853820043335473444678152733997723720311032633510176159420180",
+        "blob_object_id": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+        "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+        "encoded_bytes_in_period": "132068000",
+        "encoded_size": "66034000",
+        "end_epoch": 563.0,
+        "pool_size": "132068000",
+        "size": "2048",
+        "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+        "uploads_in_period": "2",
+        "wal_balance": "16584266",
+        "write_fee": "341523"
+      }
+    },
+    "finite_upfront_certify_1": {
+      "digest": "8wmvi8N2nxcoi9E16pCC3jDknzuKiTFuHdexUqji5ZBB",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064114272",
+          "previousVersion": "1064114271",
+          "digest": "FjKPGJm6iJpkk4CQhRS7vAjWa7vzaUoepdqBcQY8x5s8"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "ObjectOwner": "0xec6c2adab24cd4892f48735f3608a476e53e2795a7df2ad5cf4f96d585e22ced"
+          },
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+          "version": "1064114272",
+          "previousVersion": "1064114271",
+          "digest": "GPXP1MniTvyR77hDG7M9ao9YKSuUH11fA9HaGogfeG8e"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "8wmvi8N2nxcoi9E16pCC3jDknzuKiTFuHdexUqji5ZBB",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::events::BlobCertified",
+          "parsedJson": {
+            "blob_id": "52554518448502246853820043335473444678152733997723720311032633510176159420180",
+            "deletable": false,
+            "end_epoch": 563.0,
+            "epoch": 559.0,
+            "is_extension": false,
+            "object_id": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "LwIAABTPc7zB/ZMKOzaqatsshS9KgoMkQc0Ke8RGicGmzTB0MwIAAADmofCJQzZv6iEwV3hgaigWX5JbKV4MlVUU4/SalG/JtgA=",
+          "timestampMs": "1792782954275"
+        }
+      ]
+    },
+    "finite_upfront_cleanup_0": {
+      "digest": "FUtJRsHL4qZmhxRWHS4bnWwSGvzNAdMdAB4QQbmZYjWC",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4240800",
+        "storageRebate": "12470353",
+        "nonRefundableStorageFee": "1247"
+      },
+      "net_gas_mist": -7229553,
+      "object_changes": [
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::BudgetOwnerCap",
+          "objectId": "0x26b7a4aaf1f0420e8d3693b89ec6843436d0c1b10518c836f42dcdacdea22efd",
+          "version": "1064114273",
+          "previousVersion": "1064110775",
+          "digest": "C3ZRZyMacP1PJJoetvrxs92HaUs85hunVYEPgBN34gqw"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x8f51b72bce66499de33f9ee5691383c428048c13f6f6f3aac6ae61e4c1ea0a30",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064114273",
+          "previousVersion": "1064114272",
+          "digest": "GFL4Y2yHgdgCAxecTqr1psa5ZjFAVGE8orS6Eugj5Ywz"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0xaf1b05964e97f99c5c96111088f1225c2af0d373f6dff9f957c30a9cc10892b8",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+          "version": "0"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "FUtJRsHL4qZmhxRWHS4bnWwSGvzNAdMdAB4QQbmZYjWC",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobReleased",
+          "parsedJson": {
+            "blob_object_id": "0xed493a55c2131ef251d443941e183ed94f22c99c2079fcfab8adbe8c036391f0",
+            "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "lFcRTzfT9C0IbvEmhSPKoGDie0q9zsM1uAXPXKYAB/jtSTpVwhMe8lHUQ5QeGD7ZTyLJnCB5/Pq4rb6MA2OR8A==",
+          "timestampMs": "1792782967962"
+        }
+      ]
+    },
+    "finite_upfront_cleanup_1": {
+      "digest": "4QPxLbqLrZn7Uy14xFMNTJycupo3HRTDf4L5LPJqBGfY",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4240800",
+        "storageRebate": "12470353",
+        "nonRefundableStorageFee": "1247"
+      },
+      "net_gas_mist": -7229553,
+      "object_changes": [
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::RecordKey, 0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobRecord>",
+          "objectId": "0x2103a7799978b1e5da16417316752e1f06c4847b76a352dec465efe1b78c1176",
+          "version": "0"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+          },
+          "objectType": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2::fleet_budget::BudgetOwnerCap",
+          "objectId": "0x26b7a4aaf1f0420e8d3693b89ec6843436d0c1b10518c836f42dcdacdea22efd",
+          "version": "1064114274",
+          "previousVersion": "1064114273",
+          "digest": "4KEe1XGAPQmmHTx5H9oXaZ8PUWNgfKaoxbYhnyQfHARx"
+        },
+        {
+          "type": "mutated",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "owner": {
+            "Shared": {
+              "initial_shared_version": 1064110765
+            }
+          },
+          "objectType": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::FleetStorage",
+          "objectId": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8",
+          "version": "1064114274",
+          "previousVersion": "1064114273",
+          "digest": "CwpZNnurpLeDSyfvymEjDdxXCwhx6gjAyhg6oU8e8A9F"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+          "objectId": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+          "version": "0"
+        },
+        {
+          "type": "deleted",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "objectType": "0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobKey>, 0x2::object::ID>",
+          "objectId": "0xec6c2adab24cd4892f48735f3608a476e53e2795a7df2ad5cf4f96d585e22ced",
+          "version": "0"
+        }
+      ],
+      "events": [
+        {
+          "id": {
+            "txDigest": "4QPxLbqLrZn7Uy14xFMNTJycupo3HRTDf4L5LPJqBGfY",
+            "eventSeq": "0"
+          },
+          "packageId": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8",
+          "transactionModule": "fleet_storage",
+          "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "type": "0x6086be9634604896a9fac794f0b069d01c589b7fec734b1dec0efd790e04dbc8::fleet_storage::BlobReleased",
+          "parsedJson": {
+            "blob_object_id": "0xe6a1f08943366fea21305778606a28165f925b295e0c955514e3f49a946fc9b6",
+            "storage_id": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+          },
+          "bcsEncoding": "base64",
+          "bcs": "lFcRTzfT9C0IbvEmhSPKoGDie0q9zsM1uAXPXKYAB/jmofCJQzZv6iEwV3hgaigWX5JbKV4MlVUU4/SalG/Jtg==",
+          "timestampMs": "1792782973411"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Dedicated testnet effects, not a mainnet price.",
+    "Owner release/burn is immediate on disposable synthetic archives, not unattended expiry cleanup.",
+    "WAL storage/write payments are consumed; Sui storage rebates do not refund WAL.",
+    "No SuiFleet data anchors are created, so this is storage-registration/certification/cleanup only.",
+    "One-off setup, remaining fleet/device objects, deposits and reserve funds are separate from per-upload costs."
+  ],
+  "objects": {
+    "budget": "0x608926d7acc22accb32a7a08bcb150dece58d4ca3176c46154ba79169aaf0d89",
+    "budget_cap": "0x26b7a4aaf1f0420e8d3693b89ec6843436d0c1b10518c836f42dcdacdea22efd",
+    "account": "0xe87fc14f72fd67ca455a9d6eec9c0ebb0e5c119f16b18d1173ef31fcf5158425",
+    "device_cap": "0x7205836e9eddde9bb9f182bc8da8859dd06e13fa31ca304b68cc239ca3e36667",
+    "finite_storage": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+    "retained_storage": "0x89f11c1458eb58b6872d6e4a754b96c42f4301b21ba1a7f0a7263e33e6a8ab99",
+    "finite_upfront_storage": "0x9457114f37d3f42d086ef1268523caa060e27b4abdcec335b805cf5ca60007f8"
+  },
+  "allowance_used_mist": 272121783,
+  "resume_preflights": [
+    {
+      "started": "2026-10-23T19:04:01Z",
+      "start_balance_mist": 810184503,
+      "head": "dfc93103b8cda6e66d44af91d56d0dddc89bb72e"
+    },
+    {
+      "started": "2026-10-23T19:06:37Z",
+      "start_balance_mist": 799941372,
+      "head": "dfc93103b8cda6e66d44af91d56d0dddc89bb72e"
+    },
+    {
+      "started": "2026-10-23T19:10:03Z",
+      "start_balance_mist": 788750940,
+      "head": "dfc93103b8cda6e66d44af91d56d0dddc89bb72e"
+    },
+    {
+      "started": "2026-10-23T19:14:21Z",
+      "start_balance_mist": 763913229,
+      "head": "dfc93103b8cda6e66d44af91d56d0dddc89bb72e"
+    }
+  ],
+  "retention_intervals": {
+    "finite": {
+      "initial_end_epoch": 562,
+      "target_end_epoch": 562,
+      "initial_epochs": 3,
+      "renewal_prepaid": false
+    },
+    "retained": {
+      "initial_end_epoch": 562,
+      "target_end_epoch": 563,
+      "initial_epochs": 3,
+      "renewal_prepaid": true
+    },
+    "finite_upfront": {
+      "initial_end_epoch": 563,
+      "target_end_epoch": 563,
+      "initial_epochs": 4,
+      "renewal_prepaid": false
+    }
+  },
+  "verified_package_transactions": {
+    "cost probe: publish compact data 7d3fdc12fcfb": {}
+  }
+}

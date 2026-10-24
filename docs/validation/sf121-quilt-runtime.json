@@ -1,0 +1,218 @@
+{
+  "schema": 1,
+  "chain": "4c78adac",
+  "sdk": "Walrus1.2.35/Sui2.36.0",
+  "node": "22.22.2",
+  "runtime_code_commit": "222bc2338eb48e5e1eb15af66b9c3cc8d1b3c3ce",
+  "source": "actual pinned codec prepare/write + effects checked CLI + browser chain/Seal/Quilt reader; native daemon recovery tested separately in simulator",
+  "config": {
+    "schema": 1,
+    "chainIdentifier": "4c78adac",
+    "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+    "packageId": "0x2517111f7b9d705f577f22b3d1aac28f67c42495ccd39fa3e51eed0e6e4bdc71",
+    "typeOrigin": "0x2517111f7b9d705f577f22b3d1aac28f67c42495ccd39fa3e51eed0e6e4bdc71",
+    "fleetId": "0xd826099c1a1c7e5432678d914c2a7e7d2e108a675c7f1443608b282fd242e795",
+    "budgetId": "0x608926d7acc22accb32a7a08bcb150dece58d4ca3176c46154ba79169aaf0d89",
+    "storageId": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+    "compactHistoryOrigin": "0x2517111f7b9d705f577f22b3d1aac28f67c42495ccd39fa3e51eed0e6e4bdc71"
+  },
+  "device": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+  "writer": "0xa063da5337952f8d8db5834284e58709f366ece60c706f79652db1a91c0782a9",
+  "blob": "0xb4875854e3941c7f498c7d66a6fdcabbf7482312cb49cd47d36930f74a351bb4",
+  "encoding": {
+    "blob_id": "72247716853910005254926268969736947856780032079638868943833541931556064116247",
+    "root_hash": "62653321643244925795137636657967791324230874598874653554740660966184934607088",
+    "size": 445556,
+    "items": [
+      {
+        "identifier": "manifest",
+        "size": 1613,
+        "sha256": "eea9766999854f6b657fc8711a9813701a59d83940a79feeb9e421d9583f8c90"
+      },
+      {
+        "identifier": "item-00",
+        "size": 1349,
+        "sha256": "27501be114920846e6966c132b691917ce028718efdf1bc33f5ab712a2e9f9af"
+      },
+      {
+        "identifier": "item-01",
+        "size": 1365,
+        "sha256": "edeae457c716079961a9e36919613dca38497df9e4b13089f03cc67e343f8254"
+      }
+    ]
+  },
+  "ciphertext_bytes": 4327,
+  "readback": {
+    "result": {
+      "verified": true,
+      "owner": true,
+      "support": true,
+      "supportDenied": false,
+      "wrongOrMissingPatchRefused": true,
+      "plaintextSizes": [
+        {
+          "envelope_bytes": 1121,
+          "message_bytes": 719
+        },
+        {
+          "envelope_bytes": 857,
+          "message_bytes": 522
+        },
+        {
+          "envelope_bytes": 873,
+          "message_bytes": 532
+        }
+      ],
+      "compression": "none",
+      "items": 2,
+      "records": 2,
+      "seq": 1
+    }
+  },
+  "support_revocation": {
+    "result": {
+      "verified": true,
+      "owner": true,
+      "support": false,
+      "supportDenied": true,
+      "wrongOrMissingPatchRefused": true,
+      "items": 2,
+      "records": 2,
+      "seq": 1
+    }
+  },
+  "upload": {
+    "at_limit": false,
+    "blob_id": "72247716853910005254926268969736947856780032079638868943833541931556064116247",
+    "blob_object_id": "0xb4875854e3941c7f498c7d66a6fdcabbf7482312cb49cd47d36930f74a351bb4",
+    "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+    "encoded_bytes_in_period": "198102000",
+    "encoded_size": "66034000",
+    "end_epoch": 562.0,
+    "pool_size": "66034000",
+    "size": "445556",
+    "storage_id": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+    "uploads_in_period": "3",
+    "wal_balance": "16903487",
+    "write_fee": "363951"
+  },
+  "transactions": [
+    {
+      "label": "quilt: bound fixture item quota",
+      "digest": "9WqihzidWwuUTn7HFWfz5vf67GAM911Wqyb6Xtw1Nd7G",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "7326400",
+        "storageRebate": "7325667",
+        "nonRefundableStorageFee": "733"
+      },
+      "net_gas_mist": 1000733,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: create isolated data fleet",
+      "digest": "8MRGUiHynLAaYBEixVr33RF9YJu1YWfhr6XA6Mrou1Qm",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4142000",
+        "storageRebate": "1633837",
+        "nonRefundableStorageFee": "163"
+      },
+      "net_gas_mist": 3508163,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: enroll writer and support",
+      "digest": "BCtAkxkcoQruP91gDZbGqX3hZnxYDzEaGc6he4NmGcBW",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "9363200",
+        "storageRebate": "4141586",
+        "nonRefundableStorageFee": "414"
+      },
+      "net_gas_mist": 6221614,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: register pinned encrypted batch",
+      "digest": "4anFYRC1AVSwhSYkhUmGE3AgBEHxybks3TqwMA48adFn",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "126935200",
+        "storageRebate": "118722927",
+        "nonRefundableStorageFee": "11873"
+      },
+      "net_gas_mist": 9212273,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: certify pinned encrypted batch",
+      "digest": "4cnm5reTeAYa25zcunf19sgSsh1XTYAThXEMxcn3NA8t",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4613200",
+        "storageRebate": "4582342",
+        "nonRefundableStorageFee": "458"
+      },
+      "net_gas_mist": 1030858,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: anchor manifest commitment",
+      "digest": "FfK1dbtsvDUqFNrpRv8EDYuNxJHZJxfY1StEBvtJvMYf",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "7607600",
+        "storageRebate": "3989601",
+        "nonRefundableStorageFee": "399"
+      },
+      "net_gas_mist": 4617999,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: revoke support role",
+      "digest": "CXahwkxWehFNt21tzumeid97taUypcgvTfL7sUD8zbrH",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4142000",
+        "storageRebate": "4384761",
+        "nonRefundableStorageFee": "439"
+      },
+      "net_gas_mist": 757239,
+      "independently_verified": true
+    },
+    {
+      "label": "quilt: restore support role",
+      "digest": "5nEDXH5EwVnAqTS435yrutpRSEBsLCDBBKCcqmKHyzQJ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4385200",
+        "storageRebate": "4141586",
+        "nonRefundableStorageFee": "414"
+      },
+      "net_gas_mist": 1243614,
+      "independently_verified": true
+    }
+  ],
+  "original_allowance_mist": 500000000,
+  "allowance_used_mist": 393465439,
+  "no_faucet_or_publication_in_quilt_probe": true,
+  "limits": [
+    "Synthetic public test records only; no customer data.",
+    "Dedicated testnet effects and open testnet Seal providers only; not mainnet prices, production-provider acceptance or a subscription margin.",
+    "Native daemon signing/encryption/recovery independently exercised against simulator; public fixture signs bounded synthetic messages via the native explicit-wallet bridge.",
+    "Selected finite cost fixture quota and new fleet/writer only; existing legacy/compact app objects preserved.",
+    "Physical target, actual mainnet, production credentials and manual wallets unrun in #32/#159."
+  ],
+  "source_sha256": {
+    "dapp/scripts/archive-quilt.mjs": "099ac6faf4df9ec258ba587a5a978dfffeb78ba7f34f24d974246b2780020156",
+    "dapp/scripts/walrus-device-codec.mjs": "00d963ede2a6edfc4168751c35c21200dc8282cfbc82a98ae8bede24c7992f9f",
+    "dapp/src/lib/archive-quilt.ts": "c7dd0543511c679ee86db826bed4c8f70bf9da5c901cdf4bce6a4fca4fa003c4",
+    "dapp/src/lib/fleet-bulk.ts": "37798dbd2487b19f1057eecffc15c0bef41989f1b766e893575e0f852975ad03",
+    "suifleet-edge/src/fleet_archive.rs": "9210e8d08997f0ca0e954c6f70b5e7a99daf8e92a4eba65069920a504e345922",
+    "suifleet-edge/src/fleet_data.rs": "0f01c9e4bb9905dfd2e71260bbbf7c6918a4dd0461cdbfd7c0b050022c012281",
+    "scripts/live_quilt_runtime.cjs": "556bc14ebf421065dd65f73e698dd034f7851a5fc42016f8a88c7a0664dc171b",
+    "suifleet-edge/examples/sign_quilt_fixture.rs": "7a725f6c8b110fd4049012d0e35aacb65f1559c4024808d149cc252f42b4492e"
+  },
+  "current_codec_reprepared_same_blob_without_purchase": true
+}
