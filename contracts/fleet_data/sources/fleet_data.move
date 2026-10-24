@@ -232,7 +232,7 @@ module fleet_data::fleet_data {
         budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
         cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
         seq: u64, kind: u8, ciphertext_sha256: vector<u8>, expected_previous: vector<u8>,
-        clock: &Clock, ctx: &TxContext) {
+        clock: &Clock, ctx: &mut TxContext) {
         assert!(expected_previous.is_empty() || expected_previous.length() == 32, EBounds);
         anchor_impl(fleet, writer, budget, account, registry, cap, storage,
             blob_object_id, seq, kind, ciphertext_sha256, true, expected_previous, clock, ctx);
