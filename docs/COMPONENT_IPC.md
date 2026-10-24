@@ -173,3 +173,7 @@ SF-057 adds a separate [scoped AWS credential adapter](AWS_CREDENTIALS.md) using
 the same distinct-UID provisioning boundary. Native IPC ACLs do not implicitly
 grant AWS credentials; its credential socket has an explicit operator grant list.
 Shared-daemon-UID components remain denied.
+
+SF-139 adds `data_put` under the existing per-component `streams` ACL globs.
+See [opaque data](OPAQUE_DATA.md) for exact descriptors, custody/backpressure,
+chunk limits and SDK/CLI examples. A queued response is not a storage acknowledgement.
