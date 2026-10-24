@@ -34,6 +34,16 @@ dspec.loader.exec_module(dash)
 IDENTITY = {'GIT_AUTHOR_NAME': 'Tyler Bush', 'GIT_AUTHOR_EMAIL': 'tyler.jonathan.bush@gmail.com',
             'GIT_COMMITTER_NAME': 'Tyler Bush', 'GIT_COMMITTER_EMAIL': 'tyler.jonathan.bush@gmail.com'}
 REAL_RUN = d.run
+REAL_CLAIM_PROCESSES = c.claim_processes
+# Nondumpable processes a test spawned on purpose. Any other uninspectable
+# same-user process (ssh, gpg-agent) that happens to start during a run is host
+# noise that would otherwise fence recovery nondeterministically.
+TEST_UNINSPECTABLE = set()
+
+
+def test_claim_processes(token, started):
+    return [p for p in REAL_CLAIM_PROCESSES(token, started)
+            if not p.get('uninspectable') or p['pid'] in TEST_UNINSPECTABLE]
 
 
 def git(*args, cwd, env=None):
@@ -95,6 +105,10 @@ class Fixture(unittest.TestCase):
                                               'FAKE_TICKET_DB': str(self.lock_path)})
         environment.start()
         self.addCleanup(environment.stop)
+        for module in (c, d):
+            isolated = patch.object(module, 'claim_processes', test_claim_processes)
+            isolated.start()
+            self.addCleanup(isolated.stop)
 
     def dispatcher(self):
         worker = d.Dispatcher(self.config, self.state)
