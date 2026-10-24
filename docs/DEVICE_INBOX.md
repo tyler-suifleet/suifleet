@@ -97,7 +97,7 @@ With `fleet_inbox` origins in the manifest, every poll:
 3. for each head whose `seq` changed, applies the components whose deployment
    changed since it last acted, through the ordinary checks. A record created
    before the head's baseline is not applied: the enrollment baseline (chain
-   time), the first poll that read heads after an upgrade, or, for a group
+   time), the event path's boundary for a journal from before inboxes, or, for a group
    followed later, the chain time taken before the last completed poll read
    the inbox (which did not list it yet). A group joined while the daemon
    was stopped therefore applies what was announced since then — matching
@@ -106,6 +106,17 @@ With `fleet_inbox` origins in the manifest, every poll:
    `runtime.event_scan_seconds` (default 60; 0 scans every poll), so unannounced deployments arrive within a minute, as a
    safety net for unannounced deployments. Without inbox origins the scan runs
    every poll as before.
+
+A journal written before inboxes (an older daemon, or a deployment without
+inbox origins at enrollment) has no heads. Its event path handled every record
+created before its cursor, so heads start from that boundary, never from the
+upgrade: records created while the device was offline still apply. The daemon
+first scans events to the tip and starts heads at the chain time taken before
+the scan (or the scanned checkpoint's time, if earlier). If that history is
+pruned, it starts heads at the time of the checkpoint before the cursor's
+(`GetCheckpoint`; a JSON-RPC-era cursor is located through its transaction).
+When neither is available the poll fails with an explicit error instead of
+skipping or replaying records.
 
 If the node has pruned the history at the device's cursor (or rejects the
 range with `OUT_OF_RANGE`), a device with inbox origins logs it, moves the
@@ -135,7 +146,9 @@ entries this feature adds; until SF-122 merges they are direct reads.
 - Simulator (`make test-ota`): `scripts/test_inbox_ota.py` — baseline, inbox
   and indexed-group deployments without events, a group joined while the
   daemon was stopped, an on-time scheduled start
-  with a 60 s poll, resync after pruned history, the event safety net.
+  with a 60 s poll, resync after pruned history, a journal without heads
+  resuming from its event boundary (history pruned and retained), the event
+  safety net.
 - dApp: `scripts/test_inbox.cjs` (in `make check-interfaces`).
 - Indexer: `txbuild` unit test of announced call shapes.
 - Real localnet across an upgrade of main's contracts:
