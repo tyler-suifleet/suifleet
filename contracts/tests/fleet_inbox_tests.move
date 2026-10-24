@@ -98,6 +98,60 @@ module sui_edge::fleet_inbox_tests {
         ts::end(s);
     }
 
+    /// The first membership of an activated device without an inbox, in the
+    /// dApp and API builders' call order: the inbox is created while the
+    /// device is still in custody, then the loan adds it to the group.
+    fun add_member_creating_inbox(create_during_loan: bool) {
+        let mut s = ts::begin(OPERATOR);
+        device_registry::init_for_testing(ts::ctx(&mut s));
+        let clock = clock::create_for_testing(ts::ctx(&mut s));
+        device_group::create_group(string::utf8(b"fleet"), string::utf8(b""), &clock, ts::ctx(&mut s));
+        ts::next_tx(&mut s, OPERATOR);
+        let mut registry = ts::take_shared<DeviceRegistry>(&s);
+        let mut group = ts::take_shared<DeviceGroup>(&s);
+        let device = device_registry::register_device(&mut registry, string::utf8(b"edge"), KEY,
+            string::utf8(b"arm"), &clock, ts::ctx(&mut s));
+        let device_id = object::id(&device);
+        let cap = device_registry::activate_device(&mut registry, device, ts::ctx(&mut s));
+        let mut device_inbox = if (create_during_loan) {
+            let (device, loan) = device_registry::borrow_device(&mut registry, &cap);
+            let created = inbox::new_inbox(&mut registry, &cap);
+            device_registry::return_device(&mut registry, device, loan);
+            created
+        } else {
+            inbox::new_inbox(&mut registry, &cap)
+        };
+        let (device, loan) = device_registry::borrow_device(&mut registry, &cap);
+        inbox::add_member(&mut group, &mut device_inbox, &device, ts::ctx(&mut s));
+        device_registry::return_device(&mut registry, device, loan);
+        inbox::share_inbox(device_inbox);
+        assert!(device_group::contains_device(&group, device_id), 0);
+        assert!(inbox::inbox_exists(&registry, device_id), 1);
+        transfer::public_transfer(cap, OPERATOR);
+        ts::return_shared(group);
+        ts::return_shared(registry);
+        clock::destroy_for_testing(clock);
+        ts::next_tx(&mut s, OPERATOR);
+        let device_inbox = ts::take_shared<DeviceInbox>(&s);
+        let group = ts::take_shared<DeviceGroup>(&s);
+        assert!(inbox::inbox_groups(&device_inbox) == &vector[object::id(&group)], 2);
+        ts::return_shared(group);
+        ts::return_shared(device_inbox);
+        ts::end(s);
+    }
+
+    #[test]
+    fun first_membership_creates_the_inbox_before_the_loan() {
+        add_member_creating_inbox(false);
+    }
+
+    /// A device on loan is out of custody, so its inbox cannot be created then.
+    #[test]
+    #[expected_failure(abort_code = inbox::ENotOperator)]
+    fun inbox_cannot_be_created_while_the_device_is_on_loan() {
+        add_member_creating_inbox(true);
+    }
+
     #[test]
     #[expected_failure]
     fun inbox_is_created_once() {

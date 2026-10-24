@@ -71,8 +71,9 @@ checks reports as before.
 - dApp: one-shot deployments announce to target groups the sender
   administers and target devices it operates, creating a missing inbox in the
   same transaction; staged rollouts announce to members' existing inboxes;
-  adding an activated device to a group lists the group in its inbox. The
-  group panel's "Index members" runs one bounded batch and lists the group in
+  adding an activated device to a group lists the group in its inbox,
+  creating a missing inbox before the custody loan (`new_inbox` needs the
+  device in custody). The group panel's "Index members" runs one bounded batch and lists the group in
   operated members' inboxes.
 - Indexer API and `suifleet-indexer ctl`: create-deployment announces to
   every target group and activated target device; add/remove-devices use
@@ -134,7 +135,8 @@ entries this feature adds; until SF-122 merges they are direct reads.
 - Real localnet across an upgrade of main's contracts:
   `make test-inbox-localnet` (start a disposable node first) — origins,
   in-place indexing of an existing group, old-package report fails closed,
-  stranger announcement aborts, and the real daemon through
+  a first membership creating the inbox in the builders' order (the reverse
+  aborts), stranger announcement aborts, and the real daemon through
   `examples/grpc_prune_proxy.rs`: inbox and group-head deployments, resync
   beyond pruned history and the event safety net, judged by on-chain
   receipts.

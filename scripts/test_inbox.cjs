@@ -55,7 +55,7 @@ const load = loader(), sui = load('lib/sui.ts'), inbox = load('lib/fleet-inbox.t
 
   // Membership lists the group in the device's inbox, creating it if needed.
   assert.deepEqual(fns(sui.buildAddDeviceToGroupTx('0x10', { objectId: '0xde', ownerCapId: '0xc1' }, false)),
-    ['device_registry::borrow_device', 'fleet_inbox::new_inbox', 'fleet_inbox::add_member', 'fleet_inbox::share_inbox', 'device_registry::return_device']);
+    ['fleet_inbox::new_inbox', 'device_registry::borrow_device', 'fleet_inbox::add_member', 'device_registry::return_device', 'fleet_inbox::share_inbox']);
   assert.deepEqual(fns(sui.buildAddDeviceToGroupTx('0x10', { objectId: '0xde', ownerCapId: '0xc1' }, true)),
     ['device_registry::borrow_device', 'fleet_inbox::add_member', 'device_registry::return_device']);
   assert.deepEqual(fns(sui.buildAddDeviceToGroupTx('0x10', { objectId: '0xe0' })), ['device_group::add_device']);

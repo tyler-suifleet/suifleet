@@ -189,8 +189,10 @@ export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef
   const tx = new Transaction();
   const ownerCapId = device.ownerCapId;
   if (inboxSupported() && ownerCapId && inboxExists !== undefined) {
-    withDevice(tx, device, (target) => withInbox(tx, { deviceId: device.objectId, ownerCapId, exists: inboxExists },
-      (inbox) => calls.fleet_inbox_add_member(tx, PACKAGE_ID, groupObjectId, inbox, target)));
+    // A new inbox is created before the custody loan: new_inbox requires
+    // the device to be in the registry's custody.
+    withInbox(tx, { deviceId: device.objectId, ownerCapId, exists: inboxExists }, (inbox) =>
+      withDevice(tx, device, (target) => calls.fleet_inbox_add_member(tx, PACKAGE_ID, groupObjectId, inbox, target)));
   } else {
     withDevice(tx, device, (target) => calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, target));
   }

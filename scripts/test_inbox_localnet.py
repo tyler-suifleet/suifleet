@@ -11,6 +11,8 @@ then upgrades to this tree's contracts and checks, on chain:
     fields) and indexed membership authorizes the new package's group report
     on the pre-upgrade record, while the old package's report fails closed;
   - an older package's add_device on an indexed group, and removal of both;
+  - a first membership that creates the device's inbox, in the dApp/API
+    builders' order (inbox before the custody loan; the reverse aborts);
   - a stranger cannot announce to the group (aborts on chain).
 
 The real daemon then runs over a gRPC proxy (grpc_prune_proxy) in front of
@@ -233,6 +235,25 @@ def run(rpc_url, faucet_url, base_dir, evidence_path):
         transaction("--move-call", f"{new}::device_group::remove_device", f"@{group}", f"@{other}")
         assert fields(group)["device_ids"] == [] and not member(other)
         evidence["checks"].append("old-package add_device on an indexed group; removal clears vector and index")
+
+        # ── First membership creating the inbox (dApp/API builder order) ──
+        # new_inbox needs the device in custody, so it precedes the loan; the
+        # reverse order aborts with ENotOperator.
+        def add_member_creating_inbox(during_loan):
+            borrow = ["--move-call", f"{new}::device_registry::borrow_device", f"@{registry}", f"@{other_owner}", "--assign", "loan"]
+            create = ["--move-call", f"{new}::fleet_inbox::new_inbox", f"@{registry}", f"@{other_owner}", "--assign", "created"]
+            rest = ["--move-call", f"{new}::fleet_inbox::add_member", f"@{group}", "created", "loan.0",
+                    "--move-call", f"{new}::device_registry::return_device", f"@{registry}", "loan.0", "loan.1",
+                    "--move-call", f"{new}::fleet_inbox::share_inbox", "created"]
+            return (*(borrow + create if during_loan else create + borrow), *rest)
+
+        why = fails(*add_member_creating_inbox(True))
+        assert "fleet_inbox::" in why and "with code 3" in why, why  # ENotOperator
+        other_inbox = created(transaction(*add_member_creating_inbox(False)), "::fleet_inbox::DeviceInbox")[0]
+        assert member(other) and fields(other_inbox)["groups"] == [group]
+        transaction("--move-call", f"{new}::fleet_inbox::remove_member", f"@{group}", f"@{other_inbox}")
+        assert not member(other) and fields(other_inbox)["groups"] == []
+        evidence["checks"].append("first membership creates the inbox before the custody loan; the reverse order aborts")
 
         # ── Inbox and announcement authority ──────────────────────────────
         made = transaction("--move-call", f"{new}::fleet_inbox::new_inbox", f"@{registry}", f"@{device_owner}",

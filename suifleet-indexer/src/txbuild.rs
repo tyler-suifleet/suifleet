@@ -216,20 +216,36 @@ pub fn calls(
                     ));
                     continue;
                 };
-                let borrow = calls.len() as u16;
                 let registry = id(registry, "registry")?;
+                let inbox = inbox_of(&device);
+                // new_inbox requires the device in custody: create a missing
+                // inbox before the loan and share it after the return.
+                let created = match inbox {
+                    Some(inbox) if !inbox.exists => {
+                        calls.push(("fleet_inbox", "new_inbox",
+                            vec![Argument::Object(registry.clone()), Argument::Object(cap.clone())]));
+                        Some(calls.len() as u16 - 1)
+                    }
+                    _ => None,
+                };
+                let borrow = calls.len() as u16;
                 calls.push((
                     "device_registry",
                     "borrow_device",
                     vec![Argument::Object(registry.clone()), Argument::Object(cap.clone())],
                 ));
-                match inbox_of(&device) {
-                    Some(inbox) => with_inbox(&mut calls, inbox, &registry, cap, |inbox| (
+                match (inbox, created) {
+                    (Some(_), Some(created)) => calls.push((
                         "fleet_inbox",
                         "add_member",
-                        vec![Argument::Object(group.clone()), inbox, Argument::Result(borrow, 0)],
+                        vec![Argument::Object(group.clone()), Argument::Result(created, 0), Argument::Result(borrow, 0)],
                     )),
-                    None => calls.push((
+                    (Some(inbox), None) => calls.push((
+                        "fleet_inbox",
+                        "add_member",
+                        vec![Argument::Object(group.clone()), Argument::Object(inbox.id.clone()), Argument::Result(borrow, 0)],
+                    )),
+                    (None, _) => calls.push((
                         "device_group",
                         "add_device",
                         vec![Argument::Object(group.clone()), Argument::Result(borrow, 0)],
@@ -244,6 +260,9 @@ pub fn calls(
                         Argument::Result(borrow, 1),
                     ],
                 ));
+                if let Some(created) = created {
+                    calls.push(("fleet_inbox", "share_inbox", vec![Argument::Result(created, 0)]));
+                }
             }
             calls
         }
@@ -595,11 +614,14 @@ mod tests {
         let names: Vec<_> = planned.iter().map(|(m, f, _)| format!("{m}::{f}")).collect();
         assert_eq!(names, [
             "device_registry::borrow_device", "fleet_inbox::add_member", "device_registry::return_device",
-            "device_registry::borrow_device", "fleet_inbox::new_inbox", "fleet_inbox::add_member",
-            "fleet_inbox::share_inbox", "device_registry::return_device",
+            "fleet_inbox::new_inbox", "device_registry::borrow_device", "fleet_inbox::add_member",
+            "device_registry::return_device", "fleet_inbox::share_inbox",
         ]);
         assert_eq!(planned[1].2, vec![Argument::Object(group.clone()), Argument::Object(hex(901)), Argument::Result(0, 0)]);
-        assert_eq!(planned[5].2, vec![Argument::Object(group.clone()), Argument::Result(4, 0), Argument::Result(3, 0)]);
+        // The new inbox exists before the custody loan (new_inbox needs custody).
+        assert_eq!(planned[3].2, vec![Argument::Object(registry.clone()), Argument::Object(hex(804))]);
+        assert_eq!(planned[5].2, vec![Argument::Object(group.clone()), Argument::Result(3, 0), Argument::Result(4, 0)]);
+        assert_eq!(planned[7].2, vec![Argument::Result(3, 0)]);
         let remove = Request { devices: vec![hex(1), hex(4)], ..add };
         let planned = calls("remove-devices", &remove, &registry, &caps, &inboxes).unwrap();
         assert_eq!(planned, vec![
