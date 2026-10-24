@@ -127,11 +127,12 @@ The serverless estimator defaults to 720 health summaries and 30 periodic batche
 per device per 30 days. Measured first health costs 7,255,298 MIST, recurring health
 up to 4,459,123 MIST, and a complete periodic archive (registration, certification,
 anchor) was observed at 27,075,739 MIST with protected retention in the small fixture.
-This is not an upper bound: registration scans all protected blobs and gas grows
-linearly with retained history. There is no measured fleet-scale maximum; protocol
-gas/object limits may stop admission before the 1,024-record ceiling. The estimator
-uses this fixture observation separately from Walrus fees, and projects capacity;
-headroom does not make an over-capacity plan feasible. Match the
+This is not an upper bound. Migrated v3 storage uses keyed protection; localnet
+registration gas stayed flat from 10 to 10,000 protected blobs (see
+[SF-128 evidence](validation/SF128_RETENTION.md)). Unmigrated v2 retains the
+history scan and 1,024-record ceiling. Protocol transaction limits and funding
+still apply. The estimator uses the small Testnet fixture observation separately
+from Walrus fees and projects capacity without a v3 slot ceiling. Match the
 configured cadence and add diagnostic/crash allowance and headroom. See the
 [sender effects](validation/sf082-device-effects.json). SF-083 quotas must
 cover **encoded** bytes, uploads and write fees. Retention is the prepaid pool's
@@ -156,7 +157,7 @@ Clearing admission preserves existing history and renewal obligations.
 Configure the finite policy through a reviewed owner transaction before enabling
 native device uploads on protected storage. The native producer keeps the same
 registration/certification API and binds the current call package and per-type
-origins explicitly. Browser reads support storage v1/v2 and verify the current
+origins explicitly. Browser reads support storage v1/v2/v3 and verify the current
 record before and after decryption. Executor reward/gas reserves are additional
 to the device transaction estimates; select the same finite horizon in the WAL
 estimate and the retention policy. No background renewal worker is implied by
@@ -164,33 +165,23 @@ opening the dApp; see [retention operations](RETENTION_RENEWAL.md).
 
 ### Fleet-wide capacity and owner maintenance
 
-Protected retention has a hard **1,024 protected blob** ceiling across this entire
-storage object, including device archives and owner releases/recipes/sites. Renewal
-does not remove entries. Only owner `release_blob` removes a protected entry; no
-automatic expiry pruning or rolling per-device window exists. With no other blobs,
-10 devices uploading daily fill it in 102.4 days (1,020 blobs after day 102);
-monthly planning at 30 days gives 300 slots/month. Diagnostics/crashes and owner
-uploads shorten that horizon. At capacity the next registration aborts with
-`EOverQuota`; device gas can still be charged for failed transactions. This finite
-maintenance design is unsuitable for unattended growing fleets without owner
-retirement. It is not an indefinite history service.
-
-Every protected registration scans all indexed blob objects for liveness: costs
-rise with retained history, and chain gas/object limits can fail earlier. The
-27,075,739 MIST fixture measurement cannot price that growth or guarantee a month's
-budget. The estimator displays planned archives, remaining slots and days to the
-ceiling from an entered existing count; owner uploads and emergency traffic must
-be included separately. Reconcile that input against the live protected panel and
-simulate the actual transaction against current state before committing funds.
+Migrated v3 storage keeps renewal policies in dynamic fields keyed by blob ID.
+Registration and removal touch keyed records and aggregate counters, with no
+fleet-wide 1,024-slot ceiling or history scan. Archives paid through their full
+finite target are counted separately and need no renewal policy; releases and
+recipes keep renewal protection. Coverage, reserves and protocol transaction limits
+still apply. Unmigrated v2 storage retains its 1,024-protected-blob ceiling,
+history scan and fleet-wide expiry blocker until the owner migrates it.
 
 `DeviceRetention.target` is one **absolute Walrus epoch**, not a rolling lifetime.
-New blobs share it; applying their prepaid resources brings them to that same
-exclusive expiry. If any protected blob expires, all new registrations abort with
-`EInvalidEpochs` until owner maintenance removes expired entries. Changing the
-new-archive target does not renew existing blobs. Before expiry/capacity, follow
-the [owner maintenance runbook](RETENTION_RENEWAL.md#archive-capacity-and-expiry-maintenance).
-After release, the old archive is unavailable in the browser even though permanent
-anchor metadata remains. Devices cannot release their own history.
+New blobs require a future target; applying their prepaid resources brings them
+to that same exclusive expiry. On v3, an expired blob is handled per blob and does
+not block unrelated registrations. Changing the new-archive target does not renew
+existing blobs. Follow the [owner maintenance runbook](RETENTION_RENEWAL.md#archive-capacity-and-expiry-maintenance)
+for migration, funding and per-blob recovery. Do not release expired records merely
+to resume v3 admission: release removes browser readability and discards attached
+capacity without a WAL refund. Permanent anchor metadata remains. Devices cannot
+release their own history.
 
 ## Direct browser health reads
 

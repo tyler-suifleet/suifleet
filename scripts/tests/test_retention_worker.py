@@ -67,6 +67,30 @@ class RetentionTests(unittest.TestCase):
     def worker(self, directory, chain):
         return module.Worker({'gas_budget': '10', 'spend_ceiling': '20'}, directory, chain)
 
+    def test_ten_thousand_records_and_expired_blob_do_not_stop_other_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chain = Chain()
+            def transport(action, value=None):
+                if action == 'snapshot':
+                    snapshot = chain(action)
+                    snapshot['blobs'] = [
+                        {'id': f'complete-{i}', 'end': 7, 'target': 7, 'affordable': True}
+                        for i in range(10_000)]
+                    snapshot['blobs'] += [
+                        {'id': 'expired', 'end': 3, 'target': 7, 'affordable': True},
+                        {'id': 'blob', 'end': chain.end, 'target': 7, 'affordable': True}]
+                    return snapshot
+                return chain(action, value)
+            worker = self.worker(directory, transport)
+            worker.tick(0)
+            self.assertEqual(chain.submitted, 1)
+            self.assertIn('expired', worker.state['failures'])
+            worker.lock.close()
+            worker = self.worker(directory, transport)
+            worker.tick(1)
+            self.assertEqual(worker.state['last_success']['blob']['end'], 7)
+            worker.lock.close()
+
     def test_uncertain_restart_reuses_original_transaction_and_confirms_effects(self):
         with tempfile.TemporaryDirectory() as directory:
             chain = Chain()
