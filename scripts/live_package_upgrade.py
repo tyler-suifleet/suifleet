@@ -645,9 +645,10 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    # A fresh base->head fixture with the SF-083 budget costs about 0.58 SUI
-    # (base publish 0.265 + head upgrade 0.316, run 39720082567).
-    parser.add_argument("--max-spend-mist", type=int, default=800_000_000)
+    # A fresh base->head fixture with SF-125 inboxes costs about 0.78 SUI before
+    # the deployments (base publish 0.342 + head upgrade 0.376, run 40092917058),
+    # about 0.85 SUI in total.
+    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
     parser.add_argument("--evidence", help="write evidence JSON here")
     parser.add_argument("--state", help="fixture cache (default: live-state.json beside the wallet)")
     parser.add_argument("--faucet-tool", help="request testnet funds (at most once) with this tool; must be the "
