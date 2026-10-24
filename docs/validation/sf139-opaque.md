@@ -150,3 +150,86 @@ manual IdP/prover/Slush/extension-wallet acceptance remain explicitly **unrun** 
 [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159). No production credentials,
 paid services, physical programming, mainnet writes or merge authorization is inferred.
+
+## PR302 independent-review repair (2026-10-24)
+
+Codex gpt-6.1-sol repaired the feedback on head `85f9041785df` in the existing
+SF139 claim/worktree. `git fetch origin main` and `git merge --no-edit origin/main`
+confirmed snapshot/current base `c7548c4325a1a600bece25c8485af35faadd5361` was
+already included; no artificial merge commit was needed.
+
+- Durable stream collection now requests up to16 messages /384 KiB per stream,
+  rather than one message. A whole stream message reserves and commits all of its
+  chunks together; insufficient space leaves its source checkpoint unchanged and
+  permits older custody to publish. A queued final chunk prevents recopying
+  earlier retired chunks while later chunks await publication. FIFO verified
+  acknowledgement and the16-item/8 KiB archive limits remain enforced.
+- Immutable `*.item` files replace repeated payload rewrites in `queue.json`.
+  Intake loads only the compact sequence/retry/length index; a duplicate reads
+  only its matching chunk. Archive reads still validate every loaded payload.
+  No full queue clone occurs. Index replacement and directory scans remain
+  proportional to pending item count; this is not constant-time intake. One-time
+  legacy migration preserves sequences/descriptors/source checkpoints and commits
+  the new index before deleting legacy custody. Interrupted unreferenced writes
+  and retired files are reclaimed under the same lock. Old queue.json-only readers
+  cannot consume the migrated format: drain custody before downgrading.
+- Regression tests cover65 independent chunk intakes with an untouched/corrupted
+  earlier payload (new intake succeeds without reading/rewriting it, publication
+  fails closed), a compact index below16 KiB at that size, a new chunk file
+  below48 KiB, legacy migration, orphan cleanup, atomic stream capacity rejection,
+  retries/restarts and4,096-item backpressure.
+- The actual daemon/SDK test now appends six stream messages, verifies all six
+  immutable indexes with multiple messages sharing a batch, and checks the final
+  source checkpoint. The independent SDK verifier groups by stream **and upload**
+  so distinct messages are verified separately. Certification outage/restart,
+  ciphertext/purchase reuse, binary/text assembly, signed metadata, scope tamper
+  and log fairness checks remain exercised.
+- Finding3 takes the reviewer's explicitly accepted documentation option(b),
+  preserving the ticket's public content SHA-256 format. The first section of
+  OPAQUE_DATA.md now prominently discloses exact public sizes and unsalted plaintext
+  hashes, offline candidate guessing and the lack of low-entropy confidentiality.
+  This repair does **not** introduce salted commitments or claim to eliminate that
+  exposure. Application-side encryption requires separately held keys.
+- The nonblocking source-reconfiguration note is documented with the fail-closed
+  recovery requirement: restore the original stream definition/state and finish
+  verified retirement; never edit custody journals to force acknowledgement.
+
+Verification on the repaired source:
+
+- `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  **435 passed, zero failed,4 pre-existing ignored**.
+- Same environment, `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed; rebuilt actual daemon, gRPC shim and signing examples.
+- Disposable root/network-none `suifleet-dev:sf037`, mounting that build:
+  `python3 scripts/test_opaque_ota.py --binary /build/debug/suifleet --shim /build/debug/examples/grpc_sim_shim`:
+  passed, including six-message batching and independent pinned SDK verification.
+- `/tmp/sf121-tools/sui move test --path contracts/fleet_data --build-env testnet`:
+  **29 passed, zero failed**. Contract/ABI/layouts were not changed by this repair;
+  the earlier real upgrade/testnet evidence above is historical, not a fresh run.
+- Node22.22.2 in the same disposable image, from `dapp/`:
+  `node node_modules/typescript/bin/tsc --noEmit && node node_modules/next/dist/bin/next build`:
+  passed; static production export completed. Reader source is unchanged.
+- `python3 -m unittest discover -s scripts/tests -p test_opaque_sdk.py`:
+  **1 passed**. `python3 -m py_compile scripts/test_opaque_ota.py`,
+  `node --check scripts/verify_opaque_native.cjs`, and `git diff --check`: passed.
+
+- All **26 post-build Makefile `test-ota` commands passed** against the rebuilt
+  default-feature daemon, across the initial16 successful commands, corrected
+  CloudWatch rerun and the remaining9-command run. Commands were generated with
+  `make -n INSIDE_DEV_CONTAINER=1 test-ota` (excluding the already completed locked
+  build) and executed sequentially with `bash -ex` in disposable network-none
+  `suifleet-dev:sf037` containers. All three final fleet-data variants (legacy,
+  compact-history, compact-history+Quilt) passed. No command failure was ignored:
+  the initial root run stopped at CloudWatch because that adapter correctly
+  rejects root. Diagnostic stderr confirmed that refusal. A first non-root UID1000
+  setup could not read this private UID1001 checkout; the actual full CloudWatch
+  test passed as `--user 1001:1001`, including daemon/file ingestion, outage,
+  lost response, SIGKILL, rotation, sibling-file denial and credential negatives.
+  The remaining9-command run exited0. No source change was needed for setup.
+- Both changed documents' relative Markdown links resolve; `git diff --check`
+  passed after recording the final results.
+
+Hosted checks and automatic testnet on the pushed head remain pending coordinator
+checks, with no polling or fabricated approval. No machine-session testnet write,
+new publication, hardware, production-provider credential or mainnet operation
+was performed during repair. Deferred external acceptance remains in#32/#159.

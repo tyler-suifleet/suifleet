@@ -4,7 +4,14 @@ Components can queue arbitrary bytes for fleet-paid Walrus storage. SuiFleet
 interprets only the bounded descriptor; it does not parse, redact, normalize or
 re-encode payloads as JSON, text or log lines. Public on-chain metadata is **not
 confidential**: do not put secrets in stream/key/content type/custom metadata.
-Payloads are signed and independently Seal encrypted.
+**The exact chunk and upload sizes and unsalted SHA-256 of every plaintext
+chunk are also public. Anyone can test candidate bytes offline against these
+hashes. Seal scoping therefore does not hide low-entropy or known content
+(sensor readings, status values, predictable text or known files).** Customers
+requiring confidentiality against guessing must encrypt/randomize bytes in their
+application before intake, keeping those keys outside public metadata. This API
+preserves the required content SHA-256 index; it does not provide salted or keyed
+content commitments. Payloads are signed and independently Seal encrypted.
 
 ## Intake and custody
 
@@ -57,15 +64,25 @@ partial SDK submission; resume with `start_chunk=error.chunk` (CLI
 not promise global exactly-once deduplication after custody has retired.
 
 Bounds: **24 KiB raw per chunk**, **64 MiB logical upload**, at most **2,731
-chunks**, **4,096 pending chunks** and **64 MiB serialized queue**, whichever
-fills first. Base64/metadata overhead means usable payload capacity is lower than
+chunks**, **4,096 pending chunks** and **64 MiB serialized chunk files**, whichever
+fills first, plus a compact index bounded to 2 MiB. Base64/metadata overhead
+means usable payload capacity is lower than
 64 MiB. Stream names follow existing stream naming rules with a128-byte opaque limit; keys are 1–256 UTF-8
 bytes, content types 1–128, custom metadata has at most 16 entries (keys1–64,
 values0–256) and at most6,144 serialized JSON bytes. Files can encounter
-backpressure midway through submission; retain the source and retry. The private
-atomic journal uses up to another queue-size temporary file during replacement;
-the immutable pending Quilt adds at most4 MiB. Memory is bounded by these
-fixed limits, rather than by logical file length.
+backpressure midway through submission; retain the source and retry. Each payload
+has a private immutable per-chunk file. Intake reads a compact
+sequence/retry/length index and, for a retry, only its matching chunk; it validates
+only new bytes and replaces the small index rather than rewriting payloads.
+Index updates and directory scans still scale with pending item count (4,096
+maximum). Archive loading may read the bounded spool; it does not clone it on
+intake. Atomic writes need at most one additional chunk plus a temporary index;
+the immutable pending Quilt adds at most4 MiB. Existing queue.json custody migrates
+under the queue lock before intake; no queued bytes or sequence IDs change.
+One-time migration temporarily needs space for both the legacy queue and chunk
+files; normal intake does not duplicate the spool. Older daemon revisions that
+only read queue.json cannot read the new index/chunk format. Drain custody before
+such a downgrade; do not roll back the daemon over a nonempty migrated spool.
 
 ## Durable streams
 
@@ -77,11 +94,25 @@ cannot create or select this destination through IPC, or acknowledge its export
 checkpoint through the external-export API.
 
 The existing store supplies exact retained message bytes. Large messages are
-chunked into the same queue in one atomic custody write. A stream message's
+chunked into immutable files with one atomic custody-index commit per message.
+If the complete message cannot fit, earlier custody can still publish to free
+space; the source checkpoint remains unchanged. A stream message's
 checkpoint advances only after its final chunk's index and anchor are read back;
 FIFO chunk scheduling verifies earlier chunks first. Restart reuses queued source
 mappings; a lost acknowledgement repeats verification, never a new purchase.
 Missing/changed source streams or detected loss fail closed and retain custody.
+To recover a pending batch after accidental stream removal/reconfiguration, restore
+its original operator-owned stream definition and retained stream state, then
+restart with streams enabled so verified checkpoint retirement can finish. Do not
+edit pending/index journals or erase source state to force acknowledgement. The
+shared archive queue remains blocked until this recovery; disabling stream export
+is not a way to discard an already formed batch.
+Each collection pass takes up to16 messages /384 KiB of raw bytes per stream
+(the first message can exceed that byte target and is chunked). Multiple messages
+share the next archive batch, subject to the16-chunk/8 KiB index limits. At most
+16 small messages per archive cadence can drain when descriptors fit; alternating
+log batches can halve that rate. Configure cadence and quotas to exceed input
+rate; there is no unbounded-throughput promise.
 The stream's own disk reservation is additional to the opaque queue bound.
 
 ## Shared publication and index
