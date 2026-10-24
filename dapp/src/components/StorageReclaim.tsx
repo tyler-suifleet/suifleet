@@ -56,7 +56,8 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
   const [plan, setPlan] = useState<ArchivePlan>(), [scanError, setScanError] = useState<string>(), [scanning, setScanning] = useState(false);
   const reclaim = useReclaim(() => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
   if (!DATA_CONFIG) return null;
-  async function scan() {
+  // `resume` continues a bounded scan past the history it already listed.
+  async function scan(resume?: Record<string, string>) {
     setScanning(true); setScanError(undefined); setPlan(undefined);
     try {
       const devices: string[] = [];
@@ -66,7 +67,7 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
         devices.push(...page.devices);
         cursor = page.hasNextPage ? page.cursor : undefined;
       } while (cursor);
-      setPlan(await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!));
+      setPlan(await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!, undefined, resume));
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setScanning(false); }
   }
@@ -76,7 +77,8 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
     <p>Deletes the chain index entry of each archive whose Walrus storage has ended, releases its blob from fleet storage and burns it, returning those storage deposits. Archives whose storage was renewed are kept. Expired archives are no longer readable from Walrus; export anything you must keep before it expires.</p>
     <button type="button" disabled={epoch === undefined} onClick={() => void scan()}>Find expired archives</button>
     {scanError && <p role="alert">Archive scan failed: {scanError}</p>}
-    {plan && <p role="status">Walrus epoch {plan.epoch}: {plan.anchors.length} expired indexed archive(s) and {plan.loose.length} unindexed expired device blob(s) of {plan.scanned} live index entries.{plan.truncated ? " More history exists past the scan bound; reclaim again afterwards." : ""}</p>}
+    {plan && <p role="status">Walrus epoch {plan.epoch}: {plan.anchors.length} expired indexed archive(s) and {plan.loose.length} unindexed expired device blob(s) of {plan.scanned} live index entries.{plan.truncated ? " More history exists past the scan bound; reclaim these, then continue the scan." : ""}</p>}
+    {plan?.truncated && <button type="button" onClick={() => void scan(plan.resume)}>Continue scan</button>}
     {plan && count > 0 && <div className="flex gap-2">
       <button type="button" onClick={() => void reclaim.dryRun()}>Dry run</button>
       <button type="button" disabled={!reclaim.preview?.ok} onClick={() => void reclaim.sign()}>Sign and reclaim</button>

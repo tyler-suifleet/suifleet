@@ -18,7 +18,7 @@ const config = { schema: 1, chainIdentifier: '4c78adac', registryId: id(manifest
   typeOrigin: origin, fleetId: id('0xf1'), budgetId: id('0xb1'), storageId: id('0x51') };
 const device = id('0xd1'), writerId = id('0xe1'), other = id('0xd2');
 const missing = () => new ObjectError('missing', 'not found', { reason: 'notFound' });
-const anchor = (seq, blob, end) => ({ seq: String(seq), kind: 0, blob_object_id: blob, blob_id: String(seq), ciphertext_sha256: Array(32).fill(seq),
+const anchor = (seq, blob, end) => ({ seq: String(seq), kind: 0, blob_object_id: blob, blob_id: String(seq), ciphertext_sha256: Array(32).fill(seq % 256),
   signer: id('0x5160'), at_ms: String(seq * 1000), end_epoch: end, key_epoch: '0' });
 const record = (end, owner = device) => ({ device_id: owner, blob_id: '1', size: '10', encoded_size: '100', end_epoch: end, uploaded_at_ms: '1' });
 
@@ -28,8 +28,16 @@ function world({ anchors, records, count = 6 }) {
     chain_identifier: config.chainIdentifier, key_epoch: '0', support: [], health_interval_ms: '86400000', batch_interval_ms: '86400000', emergency_interval_ms: '300000', device_count: '1' };
   const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: device, account_id: id('0xa1'), health_seq: '0', health_at_ms: '0',
     message: [], signature: [], batch_seq: '99', batch_at_ms: null, emergency_at_ms: null, anchor_count: String(count) };
-  const reads = [];
-  return { reads,
+  const reads = [], lists = [];
+  // The writer's fields in an arbitrary (field-ID) order: each live anchor, its
+  // reuse marker and a diagnostic request. Pruned indices have no fields.
+  const fields = [{ name: { type: `${origin}::fleet_data::DiagnosticKey`, bcs: new Uint8Array([0]) }, valueType: `${origin}::fleet_data::DiagnosticRequest`, value: { bcs: new Uint8Array() } }];
+  for (const [index, a] of Object.entries(anchors)) fields.push(
+    { order: (Number(index) * 7919) % 1009, name: { type: `${origin}::fleet_data::AnchorKey`, bcs: bcs.u64().serialize(index).toBytes() },
+      valueType: `${origin}::fleet_data::Anchor`, value: { bcs: data.AnchorBcs.serialize(a).toBytes() } },
+    { order: (Number(index) * 7919 + 500) % 1009, name: { type: '0x2::object::ID', bcs: bcs.Address.serialize(a.blob_object_id).toBytes() }, valueType: 'bool', value: { bcs: bcs.bool().serialize(true).toBytes() } });
+  fields.sort((x, y) => (x.order ?? -1) - (y.order ?? -1));
+  return { reads, lists,
     ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(config.chainIdentifier + '00'.repeat(28), 'hex')) } }; } },
     async getObject({ objectId }) {
       const isFleet = objectId === config.fleetId;
@@ -52,7 +60,13 @@ function world({ anchors, records, count = 6 }) {
       if (!records[blob]) throw missing();
       return { dynamicField: { value: { type: `${storageOrigin}::fleet_storage::BlobRecord`, bcs: retention.RecordBcs.serialize(records[blob]).toBytes() } } };
     },
-    async listDynamicFields({ parentId }) {
+    async listDynamicFields({ parentId, cursor, limit }) {
+      if (parentId === writerId) {
+        assert.ok(limit >= 1 && limit <= 100);
+        const start = cursor ? Number(cursor) : 0, end = Math.min(fields.length, start + limit);
+        lists.push(end - start);
+        return { hasNextPage: end < fields.length, cursor: end < fields.length ? String(end) : null, dynamicFields: fields.slice(start, end) };
+      }
       assert.equal(parentId, config.storageId);
       return { hasNextPage: false, dynamicFields: Object.entries(records).map(([blob, r]) => ({
         name: { type: `${storageOrigin}::fleet_storage::RecordKey`, bcs: bcs.Address.serialize(blob).toBytes() },
@@ -99,8 +113,40 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   assert.deepEqual(plan.loose, [loose], 'owner release/recipe blobs and anchored blobs are not burned as loose archives');
   assert.equal(plan.scanned, 5);
   assert.equal(plan.truncated, false);
+  assert.deepEqual(plan.resume, {});
+  assert.deepEqual(chain.reads, [], 'only existing index entries are listed');
   const bounded = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, 2);
   assert.equal(bounded.truncated, true);
+  assert.deepEqual(Object.keys(bounded.resume), [device]);
+  // Continuing from each cursor covers the history exactly once.
+  const seen = [...bounded.anchors.map((c) => c.index)];
+  let next = bounded;
+  while (next.truncated) {
+    next = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, 2, next.resume);
+    seen.push(...next.anchors.map((c) => c.index));
+  }
+  assert.deepEqual(seen.sort(), [0, 2]);
+  await assert.rejects(reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, 0), /Invalid scan bound/);
+
+  // Regression: a pruned prefix longer than the scan bound never hides later
+  // expired history (anchor_count 513, indices 0..511 already pruned).
+  const tail = b(8);
+  chain = world({ anchors: { 512: anchor(513, tail, 3) }, records: { [tail]: record(3) }, count: 513 });
+  const afterPrune = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10);
+  assert.deepEqual(afterPrune.anchors.map((c) => [c.index, c.held]), [[512, true]]);
+  assert.deepEqual([afterPrune.truncated, afterPrune.loose], [false, []]);
+  assert.deepEqual(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, afterPrune).anchors, 1);
+  // More live history than one scan lists: an expired entry beyond the bound
+  // is reached by continuing, never by restarting.
+  const live = {};
+  for (let index = 0; index < 700; index++) live[index] = anchor(index + 1, id('0xc' + index.toString(16).padStart(4, '0')), 50);
+  live[650] = anchor(651, tail, 3);
+  chain = world({ anchors: live, records: { [tail]: record(3) }, count: 700 });
+  let scan = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10), found = [...scan.anchors], pages = 1;
+  while (scan.truncated) { scan = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, undefined, scan.resume); found.push(...scan.anchors); pages++; }
+  assert.deepEqual(found.map((c) => c.index), [650]);
+  assert.equal(pages, 2);
+  assert.ok(Math.max(...chain.lists) <= 100 && chain.reads.length === 0);
   await assert.rejects(reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], -1), /Invalid Walrus epoch/);
 
   const built = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, plan);

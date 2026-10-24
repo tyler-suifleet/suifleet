@@ -9,6 +9,6 @@ const { SuiGrpcClient } = appRequire('@mysten/sui/grpc');
   const { walrus, TESTNET_WALRUS_PACKAGE_CONFIG } = await import(appRequire.resolve('@mysten/walrus'));
   const { committee: { epoch } } = await client.$extend(walrus({ packageConfig: TESTNET_WALRUS_PACKAGE_CONFIG })).walrus.systemState();
   const plan = await loader()('lib/storage-reclaim.ts').planArchiveReclaim(client, config, storageOrigin, devices, epoch);
-  console.log(JSON.stringify({ epoch, scanned: plan.scanned, truncated: plan.truncated, loose: plan.loose,
+  console.log(JSON.stringify({ epoch, scanned: plan.scanned, truncated: plan.truncated, resume: plan.resume, loose: plan.loose,
     anchors: plan.anchors.map((c) => ({ deviceId: c.deviceId, writerId: c.writerId, index: c.index, endEpoch: c.endEpoch, held: c.held, blob: c.anchor.blob_object_id })) }));
 })().catch((error) => { console.error(String(error.stack || error).slice(0, 1500)); process.exitCode = 1; });

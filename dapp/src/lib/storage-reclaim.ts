@@ -19,11 +19,14 @@ import type { DeploymentEvent } from "./sui";
 export const RECLAIM_BATCH = 64;
 /** Per transaction, so one signature stays well inside protocol limits. */
 export const RECLAIM_TRANSACTION_LIMIT = 256;
-/** Bounds browser reads per device; larger histories are reclaimed in pages. */
-export const RECLAIM_SCAN_LIMIT = 512;
+/** Bounds dynamic fields listed per device and scan (about two per live
+ * archive); larger histories continue from the returned cursor. */
+export const RECLAIM_SCAN_LIMIT = 1024;
 
 type Anchor = ReturnType<typeof AnchorBcs.parse>;
 const notFound = (error: unknown) => error instanceof ObjectError && error.reason === "notFound";
+const listFields = (client: Pick<SuiGrpcClient, "listDynamicFields">, parentId: string, cursor: string | null | undefined, limit: number) =>
+  client.listDynamicFields({ parentId, cursor, limit, include: { value: true } });
 const chunks = <T,>(values: T[]) => Array.from({ length: Math.ceil(values.length / RECLAIM_BATCH) }, (_, i) => values.slice(i * RECLAIM_BATCH, (i + 1) * RECLAIM_BATCH));
 
 // ── Previews ────────────────────────────────────────────────────────────────
@@ -91,8 +94,10 @@ export interface ArchivePlan {
   loose: string[];
   /** Live anchors read; unexpired ones are kept. */
   scanned: number;
-  /** More history exists past the scan bound; reclaim again for the rest. */
+  /** More history exists past the scan bound; continue from `resume`. */
   truncated: boolean;
+  /** Per device, the listing cursor where the bounded scan stopped. */
+  resume: Record<string, string>;
 }
 
 async function heldRecord(client: Pick<SuiGrpcClient, "getDynamicField">, config: FleetDataConfig, storageOrigin: string, blobObjectId: string) {
@@ -111,38 +116,49 @@ async function heldRecord(client: Pick<SuiGrpcClient, "getDynamicField">, config
  * Find expired archives of the given devices. A blob still in fleet storage is
  * expired when its current end epoch (including renewals) has passed; one the
  * owner released earlier is judged by its anchored end epoch, as on chain.
- * Missing indices were already pruned and are skipped.
+ * Only existing index entries are listed, so pruned history costs no reads and
+ * never blocks the scan. Each device lists at most `scanLimit` fields; pass the
+ * returned `resume` back to continue past that bound.
  */
 export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject" | "getDynamicField" | "listDynamicFields" | "ledgerService">,
-  config: FleetDataConfig, storageOrigin: string, deviceIds: string[], epoch: number, scanLimit = RECLAIM_SCAN_LIMIT): Promise<ArchivePlan> {
+  config: FleetDataConfig, storageOrigin: string, deviceIds: string[], epoch: number, scanLimit = RECLAIM_SCAN_LIMIT,
+  from: Record<string, string> = {}): Promise<ArchivePlan> {
   if (!Number.isSafeInteger(epoch) || epoch < 0) throw new Error("Invalid Walrus epoch");
-  const anchors: ArchiveCandidate[] = [], referenced = new Set<string>();
-  let scanned = 0, truncated = false;
+  if (!Number.isSafeInteger(scanLimit) || scanLimit < 1) throw new Error("Invalid scan bound");
+  const anchors: ArchiveCandidate[] = [], referenced = new Set<string>(), resume: Record<string, string> = {};
+  const anchorKey = normalizeStructTag(`${config.typeOrigin}::fleet_data::AnchorKey`), anchorType = normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`);
+  let scanned = 0;
   for (const deviceId of deviceIds) {
     const writer = await readDeviceData(client, config, deviceId);
     if (!writer) continue;
-    const count = Number(writer.anchor_count);
-    if (!Number.isSafeInteger(count)) throw new Error("Archive index exceeds browser limits");
-    let reads = 0;
-    for (let index = 0; index < count; index++) {
-      if (reads++ >= scanLimit) { truncated = true; break; }
-      let field;
-      try {
-        field = await client.getDynamicField({ parentId: writer.id, name: {
-          type: `${config.typeOrigin}::fleet_data::AnchorKey`, bcs: bcs.struct("AnchorKey", { index: bcs.u64() }).serialize({ index }).toBytes() } });
-      } catch (error) {
-        if (notFound(error)) continue;
-        throw error;
+    const count = BigInt(writer.anchor_count);
+    let cursor: string | null | undefined = from[id(deviceId)], listed = 0, more = true;
+    while (more && listed < scanLimit) {
+      const page = await listFields(client, writer.id, cursor, Math.min(100, scanLimit - listed));
+      listed += page.dynamicFields.length;
+      more = page.hasNextPage && !!page.cursor;
+      cursor = page.cursor;
+      for (const entry of page.dynamicFields) {
+        // Reuse markers and diagnostic requests share the writer's fields.
+        if (normalizeStructTag(entry.name.type) !== anchorKey) continue;
+        if (normalizeStructTag(entry.valueType) !== anchorType) throw new Error("Invalid archive index type");
+        const index = BigInt(bcs.u64().parse(entry.name.bcs));
+        if (index >= count) throw new Error("Archive index beyond the anchor count");
+        const anchor = AnchorBcs.parse(entry.value.bcs), blob = id(anchor.blob_object_id);
+        scanned++;
+        referenced.add(blob);
+        // Renewal only extends a held blob past its anchored end, so a later
+        // anchored end is unexpired either way and needs no record read.
+        if (anchor.end_epoch > epoch) continue;
+        const record = await heldRecord(client, config, storageOrigin, blob);
+        const endEpoch = record ? record.end_epoch : anchor.end_epoch;
+        if (endEpoch <= epoch) anchors.push({ deviceId: id(deviceId), writerId: id(writer.id), index: Number(index), anchor, held: !!record, endEpoch });
       }
-      if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`)) throw new Error("Invalid archive index type");
-      const anchor = AnchorBcs.parse(field.dynamicField.value.bcs), blob = id(anchor.blob_object_id);
-      scanned++;
-      referenced.add(blob);
-      const record = await heldRecord(client, config, storageOrigin, blob);
-      const endEpoch = record ? record.end_epoch : anchor.end_epoch;
-      if (endEpoch <= epoch) anchors.push({ deviceId: id(deviceId), writerId: id(writer.id), index, anchor, held: !!record, endEpoch });
     }
+    if (more && cursor) resume[id(deviceId)] = cursor;
   }
+  // Listing order is by field ID; keep each writer's batches in index order.
+  anchors.sort((x, y) => x.writerId.localeCompare(y.writerId) || x.index - y.index);
   const loose: string[] = [];
   let cursor: string | null | undefined;
   do {
@@ -156,7 +172,7 @@ export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject"
     }
     cursor = page.hasNextPage ? page.cursor : undefined;
   } while (cursor && loose.length < RECLAIM_TRANSACTION_LIMIT);
-  return { epoch, anchors, loose, scanned, truncated };
+  return { epoch, anchors, loose, scanned, truncated: Object.keys(resume).length > 0, resume };
 }
 
 /** The first transaction's worth of a plan; reclaim again for the remainder. */
