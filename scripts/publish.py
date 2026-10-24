@@ -303,7 +303,7 @@ def reconcile(records):
 def device_template(path):
     """The device sections of a daemon config; [sui] is generated."""
     text = path.read_text()
-    return re.sub(r"(?ms)^\[sui\][^\[]*", "", text) if re.search(r"(?m)^\[sui\]", text) else text
+    return re.sub(r"(?ms)^\[sui\][^\n]*\n.*?(?=^\s*\[|\Z)", "", text) if re.search(r"(?m)^\[sui\]", text) else text
 
 
 # ── Publish / upgrade ─────────────────────────────────────────────────────────

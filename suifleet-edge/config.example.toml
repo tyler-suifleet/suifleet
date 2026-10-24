@@ -1,4 +1,6 @@
 [sui]
+# Optional ordered override; every endpoint must match the manifest chain.
+# rpc_urls = ["https://fullnode.testnet.sui.io:443", "https://your-fallback.example"]
 # Generated together with frontend.env; path is relative to this config.
 manifest_path = "deployment.json"
 
@@ -50,7 +52,10 @@ allow_recipe_commands = false
 
 [runtime]
 state_dir = "/var/lib/suifleet"
-poll_seconds = 10
+# Customer-configurable check cadence (1..=86400 seconds).
+poll_seconds = 1800
+# Used only for known active rollout/window records; capped at poll_seconds.
+rollout_poll_seconds = 60
 
 # First enrollment skips historical events; existing cursors always catch up.
 # Enable only if explicitly replaying old one-shot deployments is safe.

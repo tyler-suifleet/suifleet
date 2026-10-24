@@ -11,7 +11,7 @@ import deployment_manifest as dm
 
 def fixture():
     return dict(schema_version=1, protocol_version=1, network="localnet", chain_identifier="1234abcd",
-        rpc_url="http://127.0.0.1:9000", call_package_id=dm.object_id("0x3"), upgrade_cap_id=dm.object_id("0xc0"), package_version="3",
+        rpc_url="http://127.0.0.1:9000", rpc_urls=["http://127.0.0.1:9000"], call_package_id=dm.object_id("0x3"), upgrade_cap_id=dm.object_id("0xc0"), package_version="3",
         type_origins={name: dm.object_id("0x2" if name.endswith("RecipeDigestKey") else "0x3" if name.endswith("DeviceAddressKey") else "0x1") for name in dm.REQUIRED_TYPES},
         shared_objects={"registry": {"id":dm.object_id("0xbe"), "initial_shared_version":"1"}},
         supported_clients={"dapp": {"min":"0.0.2", "max_exclusive":"0.2.0"}, "edge": {"min":"0.2.1", "max_exclusive":"0.3.0"}},
@@ -44,6 +44,18 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(dm.validate(manifest)["walrus"]["aggregator_urls"], mirrors)
         for invalid in ["https://one.example", ["file:///tmp/blob"], [""]]:
             manifest["walrus"]["aggregator_urls"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
+    def test_optional_endpoint_lists_are_bounded_and_legacy_is_valid(self):
+        manifest = fixture()
+        del manifest["rpc_urls"]
+        dm.validate(manifest)
+        for urls in [[], [manifest["rpc_url"], "https://fallback.example"]]:
+            manifest["rpc_urls"] = urls
+            dm.validate(manifest)
+        for urls in ["https://bad.example", ["file:///etc/passwd"], [manifest["rpc_url"]]*9]:
+            manifest["rpc_urls"] = urls
             with self.assertRaises(ValueError):
                 dm.validate(manifest)
 
