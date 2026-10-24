@@ -290,4 +290,99 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); s.end();
     }
 
+    // mode 0: deregistered; 1: adopted in another budget; 2: unavailable cap;
+    // mode 3: live adoptable account (explicit administrator retirement allowed).
+    fun pending_fixture(mode: u8): (ts::Scenario, ID, ID, ID) {
+        let mut s = setup(); allow_devices(&mut s, 3);
+        let mut r = s.take_shared<DeviceRegistry>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let device = device_registry::register_device(&mut r, utf8(b"Legacy"), @0xD1, utf8(b"x86_64"), &clock, s.ctx());
+        let cap = device_registry::activate_device(&mut r, device, s.ctx());
+        let did = device_registry::owner_cap_device_id(&cap);
+        let (mut budget, bcap) = fleet_budget::new_budget(&r, coin::mint_for_testing<SUI>(100, s.ctx()),
+            fleet_budget::new_limits(1, 1000, 1, 1, 1), 0, s.ctx());
+        let bid = object::id(&budget);
+        let aid = fleet_budget::enroll_device(&mut budget, &bcap, &r, &cap, 0, 10, &clock, s.ctx());
+        let mut c = s.take_shared<Customer>();
+        if (mode == 1) {
+            let (mut other, ocap) = fleet_budget::new_budget(&r, coin::zero(s.ctx()),
+                fleet_budget::new_limits(1, 1000, 1, 1, 1), 0, s.ctx());
+            fleet_budget::enroll_device(&mut other, &ocap, &r, &cap, 0, 0, &clock, s.ctx());
+            customer::adopt_budget(&mut c, &mut other, ocap, utf8(b"Other"), s.ctx());
+            fleet_budget::share_managed(other);
+        };
+        customer::adopt_budget(&mut c, &mut budget, bcap, utf8(b"Legacy"), s.ctx());
+        fleet_budget::share_managed(budget);
+        if (mode == 0) device_registry::deregister_activated_device(&mut r, cap, s.ctx())
+        else transfer::public_transfer(cap, if (mode == 2) OTHER else OWNER);
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(r);
+        s.next_tx(OWNER);
+        let fid = ts::most_recent_id_shared<Fleet>().destroy_some();
+        if (mode == 1) {
+            let mut c = s.take_shared<Customer>(); let ids = customer::fleets(&c);
+            let other_id = ids[ids.length() - 2];
+            let mut f = s.take_shared_by_id<Fleet>(other_id);
+            let b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f));
+            let mut account = s.take_shared_by_id<sui_edge::fleet_budget::GasAccount>(fleet_budget::account_id(&b, did).destroy_some());
+            let mut r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<sui_edge::device_registry::DeviceOwnerCap>();
+            customer::adopt_device(&mut c, &mut f, &b, &mut account, &mut r, cap, s.ctx());
+            ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(account); ts::return_shared(r);
+            s.next_tx(OWNER);
+        };
+        (s, fid, bid, aid)
+    }
+    fun retire_fixture(mode: u8, twice: bool, unauthorized: bool) {
+        let (mut s, fid, bid, aid) = pending_fixture(mode);
+        if (unauthorized) { s.next_tx(OTHER); };
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let before = customer::active_devices(&c);
+        let mut b = s.take_shared_by_id<FleetBudget>(bid);
+        let mut a = s.take_shared_by_id<sui_edge::fleet_budget::GasAccount>(aid);
+        customer::retire_pending_device(&mut c, &mut f, &mut b, &mut a, s.ctx());
+        assert!(customer::active_devices(&c) == before - 1 && fleet_budget::device_count(&b) == 0);
+        assert!(fleet_budget::account_closed(&a) && fleet_budget::account_reserve(&a) == 0);
+        assert!(fleet_budget::account_id(&b, fleet_budget::account_device_id(&a)).is_none());
+        if (twice) customer::retire_pending_device(&mut c, &mut f, &mut b, &mut a, s.ctx());
+        if (mode == 1) {
+            let ids = customer::fleets(&c);
+            let other = s.take_shared_by_id<Fleet>(ids[ids.length() - 2]);
+            let did = fleet_budget::account_device_id(&a);
+            assert!(customer::devices(&other).contains(&did) && customer::active_devices(&c) == 1);
+            let r = s.take_shared<DeviceRegistry>();
+            assert!(device_registry::identity(&r, did).is_some());
+            ts::return_shared(other); ts::return_shared(r);
+        };
+        // Completion unlocks the exact cap, funds and settings, not just a counter.
+        let (cap, loan) = customer::borrow_budget_cap(&c, &mut f, s.ctx());
+        let funds = fleet_budget::withdraw(&mut b, &cap, 100, s.ctx());
+        coin::burn_for_testing(funds);
+        customer::return_budget_cap(&mut f, cap, loan);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); s.end();
+    }
+    #[test] fun retire_deregistered_legacy_account_unlocks_funds() { retire_fixture(0, false, false); }
+    #[test] fun retire_duplicate_legacy_account_preserves_other_assignment() { retire_fixture(1, false, false); }
+    #[test] fun retire_lost_cap_account_unlocks_funds() { retire_fixture(2, false, false); }
+    #[test] fun admin_can_explicitly_retire_live_pending_account() { retire_fixture(3, false, false); }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun pending_account_cannot_be_retired_twice() { retire_fixture(0, true, false); }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun non_admin_cannot_retire_pending_account() { retire_fixture(0, false, true); }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun adopted_device_cannot_be_retired_as_pending() {
+        let (mut s, fid, bid, aid) = pending_fixture(3);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid);
+        let mut a = s.take_shared_by_id<sui_edge::fleet_budget::GasAccount>(aid);
+        let mut r = s.take_shared<DeviceRegistry>();
+        let cap = s.take_from_sender<sui_edge::device_registry::DeviceOwnerCap>();
+        customer::adopt_device(&mut c, &mut f, &b, &mut a, &mut r, cap, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); ts::return_shared(r);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut b = s.take_shared_by_id<FleetBudget>(bid);
+        let mut a = s.take_shared_by_id<sui_edge::fleet_budget::GasAccount>(aid);
+        customer::retire_pending_device(&mut c, &mut f, &mut b, &mut a, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); s.end();
+    }
+
 }

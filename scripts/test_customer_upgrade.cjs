@@ -37,6 +37,7 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   }
   const created=(r,suffix)=>{const id=Object.keys(r.objectTypes).find(id=>r.objectTypes[id].endsWith(suffix));assert.ok(id,`missing ${suffix}`);return id;};
   const expectedErrors = {
+   "retired pending account cannot release capacity twice": [1, "customer::retire_pending_device"],
    "pending migration cannot lend cap": [1, "customer::borrow_budget_cap"],
    "old group mutation after adoption": [0, "device_group::remove_device"],
    "old budget mutation with borrowed cap": /InvalidLinkage|invalid linkage/i,
@@ -83,6 +84,13 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::enroll_device`,arguments:[tx.object(budget),tx.object(cap),tx.object(registry),tx.object(ownerCap),tx.pure.u64(0),tx.pure.u64(100_000_000),tx.object("0x6")]});const legacyAccount=created(await execute("legacy enrollment",tx),"::fleet_budget::GasAccount");
   tx=new Transaction();tx.moveCall({target:`${old}::device_group::create_group`,arguments:[tx.pure.string("Existing group"),tx.pure.string(""),tx.object("0x6")]});const group=created(await execute("legacy group",tx),"::device_group::DeviceGroup");
   tx=new Transaction();const [borrowed,loan]=tx.moveCall({target:`${old}::device_registry::borrow_device`,arguments:[tx.object(registry),tx.object(ownerCap)]});tx.moveCall({target:`${old}::device_group::add_device`,arguments:[tx.object(group),borrowed]});tx.moveCall({target:`${old}::device_registry::return_device`,arguments:[tx.object(registry),borrowed,loan]});await execute("legacy membership",tx);
+  // Ordinary legacy deregistration leaves an indexed budget account behind.
+  tx=new Transaction();const [staleDevice]=tx.moveCall({target:`${old}::device_registry::register_device`,arguments:[tx.object(registry),tx.pure.string("Deregistered legacy device"),tx.pure.address(delegate.toSuiAddress()),tx.pure.string("x86_64"),tx.object("0x6")]});
+  const [staleCap]=tx.moveCall({target:`${old}::device_registry::activate_device`,arguments:[tx.object(registry),staleDevice]});tx.transferObjects([staleCap],owner.toSuiAddress());
+  const stale=await execute("legacy stale device",tx), staleOwnerCap=created(stale,"::device_registry::DeviceOwnerCap");
+  tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::enroll_device`,arguments:[tx.object(budget),tx.object(cap),tx.object(registry),tx.object(staleOwnerCap),tx.pure.u64(0),tx.pure.u64(1000000),tx.object("0x6")]});
+  const staleAccount=created(await execute("legacy stale enrollment",tx),"::fleet_budget::GasAccount");
+  tx=new Transaction();tx.moveCall({target:`${old}::device_registry::deregister_activated_device`,arguments:[tx.object(registry),tx.object(staleOwnerCap)]});await execute("legacy deregistration leaves account",tx);
   const built=compile(path.join(root,"contracts"));tx=new Transaction();const [ticket]=tx.moveCall({target:"0x2::package::authorize_upgrade",arguments:[tx.object(upgradeCap),tx.pure.u8(0),tx.pure.vector("u8",built.digest)]});const receipt=tx.upgrade({modules:built.modules,dependencies:built.dependencies,package:old,ticket});tx.moveCall({target:"0x2::package::commit_upgrade",arguments:[tx.object(upgradeCap),receipt]});
   const upgraded=await execute("upgrade head",tx), head=upgraded.effects.changedObjects.find(o=>o.outputState==="PackageWrite").objectId;
   const pkg=bcs.Object.parse((await client.getObject({objectId:head,include:{objectBcs:true}})).object.objectBcs).data.Package;
@@ -91,10 +99,12 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   const call=(name,args)=>{const t=new Transaction();t.moveCall({target:`${head}::customer::${name}`,arguments:args(t)});return t;};
   const r=await execute("create customer and default",call("create",t=>[t.object(registry),t.pure.string("Customer")]));const customer=created(r,"::customer::Customer");
   await execute("retry customer",call("create",t=>[t.object(registry),t.pure.string("Customer")]));
-  await execute("set entitlement",call("set_entitlement",t=>[t.object(customer),t.object(registry),t.pure.u64(1),t.pure.u64(10000000),t.pure.u64(1)]));
+  await execute("set entitlement",call("set_entitlement",t=>[t.object(customer),t.object(registry),t.pure.u64(2),t.pure.u64(10000000),t.pure.u64(1)]));
   const ar=await execute("adopt populated budget",call("adopt_budget",t=>[t.object(customer),t.object(budget),t.object(cap),t.pure.string("Production")]));const fleet=created(ar,"::customer::Fleet");
   tx=new Transaction();const [bc,bl]=tx.moveCall({target:`${head}::customer::borrow_budget_cap`,arguments:[tx.object(customer),tx.object(fleet)]});tx.moveCall({target:`${head}::customer::return_budget_cap`,arguments:[tx.object(fleet),bc,bl]});await reject("pending migration cannot lend cap",tx);
   await execute("reconcile device",call("adopt_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(legacyAccount),t.object(registry),t.object(ownerCap)]));
+  await execute("retire stale pending account",call("retire_pending_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(staleAccount)]));
+  await reject("retired pending account cannot release capacity twice",call("retire_pending_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(staleAccount)]));
   await execute("adopt populated group",call("adopt_group",t=>[t.object(customer),t.object(fleet),t.object(group)]));
   tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::draw_gas`,arguments:[tx.object(budget),tx.object(legacyAccount),tx.object(registry),tx.object(deviceCap),tx.pure.u64(1000000),tx.object("0x6")]});await reject("old gas draw after adoption",tx,device);
   tx=new Transaction();tx.moveCall({target:`${old}::device_group::remove_device`,arguments:[tx.object(group),tx.pure.id(deviceId)]});await reject("old group mutation after adoption",tx);

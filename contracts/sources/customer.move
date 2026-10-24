@@ -308,6 +308,24 @@ module sui_edge::customer {
         event::emit(DeviceAssigned { customer_id: object::id(customer), fleet_id: object::id(fleet), device_id });
     }
 
+    /// Explicit migration recovery, including lost capabilities which cannot be
+    /// proven absent on chain. Only an administrator may retire a still-indexed,
+    /// unadopted account. Identity and assignments in other fleets are untouched.
+    public fun retire_pending_device(customer: &mut Customer, fleet: &mut Fleet,
+        budget: &mut FleetBudget, account: &mut GasAccount, ctx: &mut TxContext) {
+        assert_admin(customer, ctx);
+        assert_fleet(customer, fleet);
+        assert!(object::id(budget) == fleet.budget_id && fleet.pending_devices > 0, EBinding);
+        let device_id = fleet_budget::account_device_id(account);
+        assert!(!fleet.devices.contains(&device_id), EAssigned);
+        assert!(fleet_budget::account_id(budget, device_id) == option::some(object::id(account)), EBinding);
+        let cap = dof::borrow(&fleet.id, BudgetKey {});
+        fleet_budget::remove_managed(budget, cap, account);
+        fleet.pending_devices = fleet.pending_devices - 1;
+        customer.active_devices = customer.active_devices - 1;
+        event::emit(DeviceReleased { customer_id: object::id(customer), fleet_id: object::id(fleet), device_id });
+    }
+
     /// Adopt a legacy group only after every member is assigned to this fleet.
     /// Updating its stored admin defeats old package mutation entry points too.
     public fun adopt_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup, ctx: &mut TxContext) {

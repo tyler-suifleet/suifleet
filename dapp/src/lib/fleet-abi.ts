@@ -999,6 +999,19 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "retire_pending_device": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&mut sui_edge::fleet_budget::GasAccount",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "return_budget_cap": {
         "visibility": "Public",
         "entry": false,

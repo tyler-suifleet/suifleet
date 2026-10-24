@@ -171,7 +171,19 @@ APIs and preserve the original external type origins.
    custody. Account IDs, reserves, limits, signer keys and journals remain.
    Recover from current Fleet device inventory, `pending_devices` and registry
    identity events. A consumed cap cannot be adopted twice. Missing/transferred
-   caps require reconciliation under their actual owner; do not guess ownership.
+   caps can instead be explicitly retired by a customer administrator using
+   `retire_pending_device(customer, fleet, budget, account)`. Use this for stale
+   accounts after legacy deregistration, duplicate enrollment already adopted by
+   another fleet/customer, or lost/destroyed capabilities. Because capability loss
+   cannot be proven on chain, an administrator may deliberately retire any still
+   indexed, unadopted account; inspect its ID before signing. This permanently
+   closes that account, returns its reserve to this budget, and decrements pending
+   and customer active counts exactly once. It does not delete the registry
+   identity, another fleet's assignment or historical archives. Adopted devices
+   require the normal group-aware removal flow. Repeat retirement is rejected;
+   recover uncertain results from the budget index and account closed flag.
+   Once every indexed account is adopted or retired, capability loans and budget
+   withdrawals/settings resume. Re-enrollment is a separate authorized operation.
 4. Adopt groups with `adopt_group` only after all their members are assigned to
    the same fleet. Adopt native/rollout records with `adopt_deployment` after
    verifying all targets. This preserves their payload, controls and authoritative
@@ -222,3 +234,9 @@ required integration gates. Physical/mainnet and final provider/manual-wallet
 acceptance remain unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [#159](https://github.com/tyler-suifleet/suifleet/issues/159), under the standing
 implementation/acceptance split. A screenshot or simulator is not those results.
+
+A revoked initial wallet cannot create a replacement customer by retrying
+onboarding: the initial registry mapping is permanent. Ask a current
+administrator to restore access or grant membership; retrying Create is
+idempotent. Managed enrollment policy closure is permanent; create a replacement
+policy to resume claims.

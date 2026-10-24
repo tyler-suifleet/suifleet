@@ -161,6 +161,7 @@ pub mod customer {
     pub const REPORT_STATUS: &str = "report_status";
     pub const RESERVE_ALLOWANCE: &str = "reserve_allowance";
     pub const RESERVE_DEVICE_ALLOWANCE: &str = "reserve_device_allowance";
+    pub const RETIRE_PENDING_DEVICE: &str = "retire_pending_device";
     pub const RETURN_BUDGET_CAP: &str = "return_budget_cap";
     pub const REVOKE_CLAIM: &str = "revoke_claim";
     pub const REVOKE_POLICY_GROUP: &str = "revoke_policy_group";
