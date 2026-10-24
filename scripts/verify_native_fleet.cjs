@@ -45,7 +45,7 @@ const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toB
        const symbolSize=quilt.length/(rows*columns);
        const reader=new QuiltReader({blob:{blobId:Buffer.alloc(32).toString('base64url'),hasStartedLoadingFullBlob:true,getBytes:async()=>quilt,
          getRowSize:async()=>columns*symbolSize,getSymbolSize:async()=>symbolSize,getColumnSize:async()=>rows*symbolSize}});
-       const storage={systemState:async()=>({committee:{epoch:1}}),getBlob:async()=>new WalrusBlob({reader:{getQuiltReader:async()=>reader}})};
+       const storage={systemState:async()=>({committee:{epoch:1,n_shards:1000}}),getBlob:async()=>new WalrusBlob({reader:{getQuiltReader:async()=>reader}})};
        archive=await bulk.fetchVerifiedArchive(chain,storage,f.config,f.device,index,'http://localhost',open,async()=>new Response(quilt));
        assert.equal(archive.schema,4);
        // Native patch signatures and ciphertext commitments must each verify,
@@ -63,7 +63,7 @@ const chain={ledgerService:{async getServiceInfo(){return {response:{chainId:toB
        if(index>0)assert.equal(Buffer.from(bulk.CompactHeadBcs.serialize(previous).toBytes()).toString('hex'),f.compact_heads[index-1]);
        else assert.equal(previous,undefined);
        compact=previous;
-     }else archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
+     }else archive=await bulk.fetchVerifiedArchive(chain,{systemState:async()=>({committee:{epoch:1,n_shards:1000}})},f.config,f.device,index,'https://fixture.invalid',open,fetcher);
      assert.equal(archive.reason,['logs','diagnostics','crash'][anchor.kind]);
      assert(!JSON.stringify(archive).includes('fixture-confidential-value'),'collector must redact before signing and encryption');
      if(f.shadows){

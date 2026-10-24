@@ -87,13 +87,13 @@ async function signed(value, signer = key) {
  const fleet = { id: config.fleetId, version: '1', budget_id: config.budgetId, storage_id: config.storageId, registry_id: config.registryId,
   chain_identifier: config.chainIdentifier, key_epoch: '0', support: [], health_interval_ms: '3600000', batch_interval_ms: '86400000', emergency_interval_ms: '300000', device_count: '1' };
  const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: device, account_id: id('0xa3'), health_seq: '0', health_at_ms: '0', message: [], signature: [], batch_seq: '8', batch_at_ms: null, emergency_at_ms: null, anchor_count: '1' };
- function reads({ revoked = false, keyEpoch = '0', badIndex = false, revokeAfter = false, endEpoch = 100, released = false, foreignRecord = false, shorten = false, foreignBlob = false, badRecordType = false, foreignStorage = false, storageVersion = '1' } = {}) {
+ function reads({ revoked = false, keyEpoch = '0', badIndex = false, revokeAfter = false, endEpoch = 100, released = false, foreignRecord = false, shorten = false, foreignBlob = false, badRecordType = false, foreignStorage = false, storageVersion = '1', recordSize = '1' } = {}) {
   let identityReads = 0;
   return {
    ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(config.chainIdentifier + '00'.repeat(28), 'hex')) } }; } },
    async getObject({ objectId }) { if(objectId===config.storageId)return {object:{owner:{$kind:'Shared'},type:`${storageOrigin}::fleet_storage::FleetStorage`,content:budget.FleetStorageBcs.serialize({id:config.storageId,version:storageVersion,budget_id:foreignStorage?id('0xbe'):config.budgetId,pool:null,wal:{value:'0'},default_quota:{period_ms:'1',encoded_bytes_per_period:'1',uploads_per_period:'1',max_blob_size:'1',write_fees_per_period:'1'},blob_count:'1',total_encoded_bytes:'1',total_write_fees:'1'}).toBytes()}}; const isFleet = objectId === config.fleetId; return { object: { owner: { $kind: 'Shared' }, type: `${config.typeOrigin}::fleet_data::${isFleet ? 'FleetData' : 'DeviceData'}`, content: (isFleet ? data.FleetDataBcs : data.DeviceDataBcs).serialize(isFleet ? { ...fleet, key_epoch: keyEpoch } : writer).toBytes() } }; },
    async getDynamicField({ parentId }) {
-    if(parentId===config.storageId){if(released || (shorten && identityReads>1))throw Error('Missing released record');return {dynamicField:{value:{type:`${storageOrigin}::fleet_storage::${badRecordType?'WrongRecord':'BlobRecord'}`,bcs:bulk.BlobRecordBcs.serialize({device_id:foreignRecord?id('0xde'):device,blob_id:foreignBlob?'999':encryptedAnchor.blob_id,size:'1',encoded_size:'1',end_epoch:endEpoch,uploaded_at_ms:'1'}).toBytes()}}};}
+    if(parentId===config.storageId){if(released || (shorten && identityReads>1))throw Error('Missing released record');return {dynamicField:{value:{type:`${storageOrigin}::fleet_storage::${badRecordType?'WrongRecord':'BlobRecord'}`,bcs:bulk.BlobRecordBcs.serialize({device_id:foreignRecord?id('0xde'):device,blob_id:foreignBlob?'999':encryptedAnchor.blob_id,size:recordSize,encoded_size:'1',end_epoch:endEpoch,uploaded_at_ms:'1'}).toBytes()}}};}
     if (parentId === config.fleetId) return { dynamicField: { value: { type: '0x2::object::ID', bcs: bcs.Address.serialize(writerId).toBytes() } } };
     if (parentId === writerId) return { dynamicField: { value: { type: `${config.typeOrigin}::fleet_data::${badIndex ? 'Bad' : 'Anchor'}`, bcs: data.AnchorBcs.serialize(encryptedAnchor).toBytes() } } };
     identityReads++;
@@ -103,6 +103,11 @@ async function signed(value, signer = key) {
  }
  const walrus = epoch => ({ async systemState() { return { committee: { epoch } }; } });
  const request = async () => new Response(ciphertext);
+ for (const recordSize of ['0','4194305','18446744073709551615']) {
+   let fetched=false;
+   await assert.rejects(bulk.fetchVerifiedArchive(reads({recordSize}),walrus(99),config,device,0,'https://fixture.invalid',decrypt,async()=>{fetched=true;return new Response(new Uint8Array());}),/parent exceeds size/);
+   assert.equal(fetched,false,'certified parent bound must run before untrusted transport');
+ }
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads(), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive);
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads({endEpoch:110}), walrus(105), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'owner extension remains readable after original anchor expiry');
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads({storageVersion:'2'}), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'migrated v2 storage preserves existing archive reads');

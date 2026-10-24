@@ -13,6 +13,7 @@ import { AnchorBcs, readDeviceData, readFleetData, type FleetDataConfig } from '
 import { readIdentity } from './telemetry';
 import { FleetStorageBcs } from './fleet-budget';
 import { MAGIC, isEnvelope, type SealSettings } from './seal';
+import { readArchiveQuilt } from './archive-quilt';
 import { parseShadowSnapshot, type ShadowSnapshot } from './shadow-documents';
 
 export const BlobRecordBcs = bcs.struct('BlobRecord', { device_id: bcs.option(bcs.Address), blob_id: bcs.u256(), size: bcs.u64(), encoded_size: bcs.u64(), end_epoch: bcs.u32(), uploaded_at_ms: bcs.u64() });
@@ -242,6 +243,10 @@ export async function requireArchiveReadable(client: SuiGrpcClient, config: Flee
   } });
   if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${origin}::fleet_storage::BlobRecord`)) throw Error('Invalid live archive record');
   const record = BlobRecordBcs.parse(field.dynamicField.value.bcs);
+  // SDK patch reads allocate from the certified parent metadata. Bound the
+  // chain-authenticated parent before allowing any SDK Quilt/index allocation;
+  // an untrusted aggregator's short response is not a parent-size commitment.
+  if (BigInt(record.size) < BigInt(1) || BigInt(record.size) > BigInt(MAX_ARCHIVE_BYTES)) throw Error('Archive parent exceeds size limit');
   if (!record.device_id || id(record.device_id) !== id(deviceId) || BigInt(record.blob_id) !== BigInt(anchor.blob_id)
     || record.end_epoch < anchor.end_epoch || currentEpoch >= record.end_epoch) throw Error('Archive expired, released or foreign');
 }
@@ -281,7 +286,7 @@ export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataC
  * policy/revocation and Walrus epoch, fetch bounded ciphertext, then open it.
  * The Walrus client must use this deployment's pinned network configuration.
  * A relay can supply these bytes but never the identity, index or authority. */
-export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'> & Partial<Pick<WalrusClient, 'getBlob'>>,
+export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>,
   config: FleetDataConfig, deviceId: string, index: number, aggregator: string,
   decrypt: (encryptedObject: Uint8Array) => Promise<Uint8Array>, fetcher: typeof fetch = fetch): Promise<Archive> {
   if (!Number.isSafeInteger(index) || index < 0) throw Error('Invalid archive index');
@@ -305,7 +310,7 @@ export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<W
   return fetchAnchorArchive(client, walrus, config, deviceId, anchor, aggregator, decrypt, fetcher);
 }
 
-async function fetchAnchorArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'> & Partial<Pick<WalrusClient, 'getBlob'>>,
+async function fetchAnchorArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>,
   config: FleetDataConfig, deviceId: string, anchor: Anchor, aggregator: string,
   decrypt: (encryptedObject: Uint8Array) => Promise<Uint8Array>, fetcher: typeof fetch): Promise<Archive> {
   const state = await walrus.systemState();
@@ -314,17 +319,18 @@ async function fetchAnchorArchive(client: SuiGrpcClient, walrus: Pick<WalrusClie
   const url = new URL(aggregator);
   if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw Error('Invalid archive aggregator URL');
   let ciphertext = await fetchArchiveBytes(`${aggregator.replace(/\/+$/, '')}/v1/blobs/${blobIdFromInt(anchor.blob_id)}`, fetcher);
-  let quilt: Awaited<ReturnType<WalrusClient['getBlob']>> | undefined;
+  let patches: Map<string,Uint8Array> | undefined;
   const patch = async (identifier: string, size?: number, sha256?: string) => {
-    if (!walrus.getBlob) throw Error('Quilt reader unavailable');
-    quilt ??= await walrus.getBlob({blobId:blobIdFromInt(anchor.blob_id)});
-    const files = await quilt.files();
-    if (files.length < 3 || files.length > 17) throw Error('Quilt index exceeds bounds');
-    const matches = [];
-    for (const file of files) if (await file.getIdentifier() === identifier) matches.push(file);
-    if (matches.length !== 1) throw Error('Quilt patch unavailable or ambiguous');
-    const bytes = await matches[0].bytes();
-    if (bytes.length > MAX_ARCHIVE_BYTES || (size !== undefined && bytes.length !== size)
+    // The producer profile is pinned to 1000-shard RS2. Parse the already
+    // streaming-bounded parent locally, so hostile index/header lengths never
+    // reach SDK allocations or trigger unbounded storage-node requests.
+    if (!patches) {
+      if (state.committee.n_shards !== 1000) throw Error('Unsupported archive Quilt committee profile');
+      patches = readArchiveQuilt(ciphertext);
+    }
+    const bytes = patches.get(identifier);
+    if (!bytes) throw Error('Quilt patch unavailable');
+    if ((size !== undefined && bytes.length !== size)
       || (sha256 !== undefined && toHex(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes)))) !== sha256)) throw Error('Quilt patch digest/size mismatch');
     return bytes;
   };
