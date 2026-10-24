@@ -4,6 +4,14 @@ The wallet's Deployments → Staged rollouts page creates schema-3 deployments
 from an authenticated recipe blob and both SHA-256 digests. Enter ordered cohorts
 (one line per cohort), concurrency, grants per rolling window, bake duration,
 minimum samples, inclusive failure threshold in basis points and stall timeout.
+With the daemon's default 30-minute normal checks and 60-second checks for a
+known active rollout, set `offline_timeout_ms` above 1,800,000 ms **plus the
+worst-case download/apply/report time**, with additional outage/backoff margin.
+A newly created rollout may take a normal check to discover. Both cadences are
+customer-configurable; see [check cadence](OPERATIONS.md#check-cadence-and-endpoint-fallback-sf-123).
+Observed active calendar windows retain fast checks through their recorded end/expiry,
+including after completion and restart. Existing fast-poll test configurations remain supported.
+
 Cohorts are immutable, disjoint snapshots of at most 512 direct device targets.
 Each cohort must initially contain at least the minimum sample count.
 

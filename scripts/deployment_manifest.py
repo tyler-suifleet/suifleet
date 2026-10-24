@@ -66,6 +66,11 @@ def validate(manifest):
     object_id(manifest["call_package_id"])
     object_id(manifest["upgrade_cap_id"])
     endpoint(manifest["rpc_url"])
+    urls = manifest.get("rpc_urls", [])
+    if not isinstance(urls, list) or len(urls) > 8:
+        raise ValueError("rpc_urls must be a list of at most 8 endpoints")
+    for url in urls:
+        endpoint(url)
     for name in manifest_types(manifest):
         object_id(manifest["type_origins"][name])
     registry = manifest["shared_objects"]["registry"]
@@ -176,7 +181,7 @@ def resolve(args, read=chain_facts):
         raise ValueError("package lacks required types: " + ", ".join(missing))
     registry = facts["objects"][object_id(args.registry)]
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
-        chain_identifier=args.chain_identifier, rpc_url=args.rpc,
+        chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
         type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),

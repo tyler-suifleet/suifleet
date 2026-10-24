@@ -22,6 +22,9 @@ pub struct State {
     /// Pre-apply notices/deferrals are not execution intents or status receipts.
     #[serde(default)]
     pub deferred: BTreeMap<String, crate::control::Deferred>,
+    /// Last observed active calendar window survives completion and restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_window: Option<crate::cadence::Window>,
     pub cursor: Option<Value>,
     #[serde(default)]
     pub initialized: bool,

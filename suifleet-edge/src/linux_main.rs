@@ -8,6 +8,7 @@ mod tunneling;
 mod clientdevices;
 mod client_gateway;
 mod control;
+mod cadence;
 mod apply;
 mod oci;
 mod bridge;
@@ -453,8 +454,18 @@ async fn main() -> anyhow::Result<()> {
             address = sui.address(),
             "Daemon started with durable deployment polling"
         );
+        let mut cadence = cadence::Cadence::default();
         loop {
-            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
+            let cycle = poll(
+                &cfg,
+                &sui,
+                &walrus,
+                &runner,
+                store.as_ref(),
+                &configs,
+                &mut supervisor,
+                &mut journal,
+            );
             tokio::select! {
                 result = cycle => match result {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
@@ -468,13 +479,19 @@ async fn main() -> anyhow::Result<()> {
                         break;
                     }
                     result => {
+                        cadence.record(result.is_ok());
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            let delay = tokio::time::sleep(cadence.delay(
+                &cfg.runtime,
+                journal.state.deferred.values(),
+                telemetry::now_ms(),
+                journal.state.check_window,
+            ));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -501,7 +518,18 @@ async fn main() -> anyhow::Result<()> {
                             break;
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
+                        let needs_report = pending.request.operation == "install" && result.is_ok()
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && (!o.reported || o.rollout_health_pending));
                         let _ = pending.reply.send(ipc::response(result));
+                        // A local request can discover a scheduled record while
+                        // the normal check sleeps. Only shorten the wakeup;
+                        // unrelated IPC traffic must never postpone a check.
+                        let next = tokio::time::Instant::now() + if needs_report {
+                            Duration::ZERO
+                        } else {
+                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
+                        };
+                        if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
                     Some(control) = async {
                         match console_server.as_mut() {
@@ -769,6 +797,8 @@ async fn poll(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
         }
     }
+    // Retry receipts/health before discovery; reporting errors do not poison
+    // the independent normal/rollout discovery cadence.
     report_pending(cfg, sui, journal).await?;
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
@@ -1059,7 +1089,9 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -
     let notified = journal.state.deferred.get(id)
         .filter(|d| d.control == control && d.notified_ms <= now)
         .map(|d| d.notified_ms).unwrap_or(now);
-    let reason = match control.reason(now, notified)? {
+    let policy_reason = control.reason(now, notified)?;
+    cadence::Window::remember(&mut journal.state.check_window, &control, now);
+    let reason = match policy_reason {
         Some(reason) => Some(reason),
         None => sui.rollout_admission(id, device).await?,
     };
