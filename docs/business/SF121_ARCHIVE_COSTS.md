@@ -67,15 +67,34 @@ frontend typecheck and production build with pinned Node 22; interface/manifest
 and offline tracking checks. These results do not establish physical Pi or
 mainnet acceptance.
 
-The new compact package was published once on dedicated testnet and its module
-bytes were checked against the pinned build. The additional synthetic blob was
-registered once; storage-node writes failed to reach quorum (fetch failures and
-some nodes reporting registration unavailable). Retries reused the registered
-blob and did not purchase it again. Consequently **live compact anchor cost and
-its percentage saving are not measured yet**. No successful certification/root
-write is claimed. The implementation retains simulator evidence and awaits
-public integration review/acceptance. The existing SF-121 issue remains open for
-its broader economics/Quilt scope rather than being closed by these partial gains.
+The preserved probe subsequently completed two synthetic registrations,
+certifications and compact root writes. Their six executed effects and exact gas
+values were independently re-read on 2026-10-23, and the application reader
+rediscovered the second root. [Effects, digests and both root readbacks](../validation/sf121-compact-effects.json)
+supersede the earlier incomplete summary; earlier quorum failures remain recorded.
+No new publication or purchase was needed for this reconciliation.
+
+| Synthetic 2 KiB upload, testSUI | First | Second |
+|---|---:|---:|
+| Registration | 0.009212273 | 0.008847473 |
+| Certification | 0.001030858 | 0.001030822 |
+| Compact anchor | 0.004617999 | 0.001304761 |
+| Subtotal before cleanup/WAL | 0.014861130 | 0.011183056 |
+
+The second upload was an emergency-kind archive, whereas the first was routine.
+This is a measured pair, not a controlled percentage reduction against legacy
+anchors or proof of constant future cost. Registration/certification and health
+writes remain separate transactions. The compact root bounds discovery state;
+per-blob storage still grows until cleanup. The two compact samples have not
+been released and their actual cleanup cost is not included in this subtotal.
+
+This public probe used an isolated audit installation of Walrus SDK **1.2.36**
+and Sui SDK **2.37.0**. The application remains pinned to **1.2.35 / 2.36.0**.
+The synthetic roundtrip does not establish the required pinned-SDK Quilt path,
+confidential owner/support access, or current-head upgrade compatibility. The
+published package also predates the TxContext lint repair. Full SF-121 acceptance,
+including device-local quilting, remains outstanding; this evidence must not
+close the issue or establish subscription viability.
 
 ## Reproduction and spending controls
 

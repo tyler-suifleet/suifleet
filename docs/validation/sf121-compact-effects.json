@@ -789,13 +789,328 @@
       ]
     }
   },
-  "result": "incomplete: node write quorum unavailable; no compact certification or anchor success",
+  "result": "compact synthetic registration, certification and anchor effects succeeded; discovery reverified read-only",
   "diagnostics": {
     "same_registered_blob_reused": true,
-    "node_failures": [
+    "prior_node_failures": [
       "fetch failed",
       "400 the blob has not been registered or has already expired"
     ],
-    "wallet_lock_released": true
-  }
+    "wallet_lock_released": true,
+    "prior_failure_summary_superseded": true
+  },
+  "compact_heads": [
+    {
+      "head": {
+        "first_index": "0",
+        "index": "0",
+        "anchor": {
+          "seq": "1",
+          "kind": 0,
+          "blob_object_id": "0xd06587bf56606e3c5fe1999d51e2762c1c64a9a4593b1d76667fb92af894ab67",
+          "blob_id": "91658798153977927625374525746421072250367993810684597039470658407643932109227",
+          "ciphertext_sha256": [
+            228,
+            253,
+            232,
+            159,
+            57,
+            188,
+            83,
+            185,
+            14,
+            153,
+            53,
+            168,
+            1,
+            91,
+            128,
+            221,
+            110,
+            65,
+            53,
+            72,
+            94,
+            137,
+            64,
+            148,
+            163,
+            81,
+            127,
+            162,
+            80,
+            227,
+            68,
+            174
+          ],
+          "signer": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "at_ms": "1792784615860",
+          "end_epoch": 563,
+          "key_epoch": "0"
+        },
+        "previous_hash": {}
+      },
+      "bcs_hex": "00000000000000000000000000000000010000000000000000d06587bf56606e3c5fe1999d51e2762c1c64a9a4593b1d76667fb92af894ab67aba9f1960a3c0cbfe2987380fc57e77e7880628f21db76c6954505c6920aa5ca20e4fde89f39bc53b90e9935a8015b80dd6e4135485e894094a3517fa250e344ae0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965b4494a6aa101000033020000000000000000000000",
+      "anchors": [
+        {
+          "seq": "1",
+          "kind": 0,
+          "blob_object_id": "0xd06587bf56606e3c5fe1999d51e2762c1c64a9a4593b1d76667fb92af894ab67",
+          "blob_id": "91658798153977927625374525746421072250367993810684597039470658407643932109227",
+          "ciphertext_sha256": [
+            228,
+            253,
+            232,
+            159,
+            57,
+            188,
+            83,
+            185,
+            14,
+            153,
+            53,
+            168,
+            1,
+            91,
+            128,
+            221,
+            110,
+            65,
+            53,
+            72,
+            94,
+            137,
+            64,
+            148,
+            163,
+            81,
+            127,
+            162,
+            80,
+            227,
+            68,
+            174
+          ],
+          "signer": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "at_ms": "1792784615860",
+          "end_epoch": 563,
+          "key_epoch": "0",
+          "index": 0
+        }
+      ]
+    },
+    {
+      "head": {
+        "first_index": "0",
+        "index": "1",
+        "anchor": {
+          "seq": "2",
+          "kind": 1,
+          "blob_object_id": "0xe6eaee1f23d57ad4eb7ecc243294ef8a62a5e7fa54886ca712ecfba1a1ee4e37",
+          "blob_id": "104179188090621400863723924430556410812964186266837870443864986937448938661611",
+          "ciphertext_sha256": [
+            149,
+            9,
+            95,
+            207,
+            32,
+            12,
+            64,
+            81,
+            104,
+            248,
+            188,
+            64,
+            86,
+            25,
+            161,
+            51,
+            131,
+            52,
+            194,
+            212,
+            16,
+            61,
+            57,
+            52,
+            214,
+            108,
+            75,
+            185,
+            162,
+            26,
+            223,
+            114
+          ],
+          "signer": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "at_ms": "1792784680790",
+          "end_epoch": 563,
+          "key_epoch": "0"
+        },
+        "previous_hash": {
+          "0": 86,
+          "1": 174,
+          "2": 99,
+          "3": 48,
+          "4": 224,
+          "5": 122,
+          "6": 255,
+          "7": 219,
+          "8": 219,
+          "9": 101,
+          "10": 246,
+          "11": 54,
+          "12": 240,
+          "13": 42,
+          "14": 245,
+          "15": 77,
+          "16": 238,
+          "17": 150,
+          "18": 255,
+          "19": 156,
+          "20": 140,
+          "21": 87,
+          "22": 149,
+          "23": 65,
+          "24": 185,
+          "25": 73,
+          "26": 99,
+          "27": 17,
+          "28": 57,
+          "29": 203,
+          "30": 121,
+          "31": 76
+        }
+      },
+      "bcs_hex": "00000000000000000100000000000000020000000000000001e6eaee1f23d57ad4eb7ecc243294ef8a62a5e7fa54886ca712ecfba1a1ee4e37ebe6e4d9bcb13f9906bf757891d35b78a085112b0a52691c3078bf64b45453e62095095fcf200c405168f8bc405619a1338334c2d4103d3934d66c4bb9a21adf720e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f71637696556474b6aa10100003302000000000000000000002056ae6330e07affdbdb65f636f02af54dee96ff9c8c579541b949631139cb794c",
+      "anchors": [
+        {
+          "seq": "2",
+          "kind": 1,
+          "blob_object_id": "0xe6eaee1f23d57ad4eb7ecc243294ef8a62a5e7fa54886ca712ecfba1a1ee4e37",
+          "blob_id": "104179188090621400863723924430556410812964186266837870443864986937448938661611",
+          "ciphertext_sha256": [
+            149,
+            9,
+            95,
+            207,
+            32,
+            12,
+            64,
+            81,
+            104,
+            248,
+            188,
+            64,
+            86,
+            25,
+            161,
+            51,
+            131,
+            52,
+            194,
+            212,
+            16,
+            61,
+            57,
+            52,
+            214,
+            108,
+            75,
+            185,
+            162,
+            26,
+            223,
+            114
+          ],
+          "signer": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+          "at_ms": "1792784680790",
+          "end_epoch": 563,
+          "key_epoch": "0",
+          "index": 1
+        }
+      ]
+    }
+  ],
+  "read_only_reverification": {
+    "date": "2026-10-23",
+    "model": "gpt-6.1-sol",
+    "transactions": [
+      {
+        "label": "register_0",
+        "digest": "C7Q66Xjhc89MBNQD5TFQRrCKq1BZiWNQ4xKNHrxTsBHX",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "126935200",
+          "storageRebate": "118722927",
+          "nonRefundableStorageFee": "11873"
+        }
+      },
+      {
+        "label": "certify_0",
+        "digest": "Fdmhx7tqefS2saCHy8tdum8N6jraSYkR4VrkWJh3P4P9",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4613200",
+          "storageRebate": "4582342",
+          "nonRefundableStorageFee": "458"
+        }
+      },
+      {
+        "label": "anchor_0",
+        "digest": "6SHgBQmtLswXPsdioivwkzzeL1RmYmbibGKGC74ixZDm",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7607600",
+          "storageRebate": "3989601",
+          "nonRefundableStorageFee": "399"
+        }
+      },
+      {
+        "label": "register_1",
+        "digest": "3BMtgy1g2Y1vyTnSc8gZpQhYCc5DtdzqtmyKDC1JeZfm",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "126570400",
+          "storageRebate": "118722927",
+          "nonRefundableStorageFee": "11873"
+        }
+      },
+      {
+        "label": "certify_1",
+        "digest": "E2ephjZC1DaBJMLpTeMHMZuyshqh2LKGKSGrvw2sKhwL",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4248400",
+          "storageRebate": "4217578",
+          "nonRefundableStorageFee": "422"
+        }
+      },
+      {
+        "label": "anchor_1",
+        "digest": "FeKnXWeAAocVdQHCT3yVrhQQuKCbi8UZQK3pVMfyKqXQ",
+        "effects_status": "success",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7911600",
+          "storageRebate": "7606839",
+          "nonRefundableStorageFee": "761"
+        }
+      }
+    ],
+    "current_root_seq": "2",
+    "current_root_discoverable": true
+  },
+  "limits": [
+    "Synthetic 2 KiB payloads, not signed Seal-encrypted Quilt acceptance.",
+    "Public probe used isolated @mysten/walrus 1.2.36 and @mysten/sui 2.37.0; application remains pinned to 1.2.35 and 2.36.0. This is not pinned-SDK Quilt roundtrip evidence.",
+    "Published compact package predates immutable-to-mutable TxContext lint repair; no current-head upgrade compatibility result claimed.",
+    "No new mutations, faucet request or reset allowance during read-only reconciliation.",
+    "Quilt formation, pending multi-item recovery and full economics acceptance remain outstanding."
+  ]
 }
