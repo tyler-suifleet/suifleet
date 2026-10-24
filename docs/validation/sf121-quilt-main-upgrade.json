@@ -1,0 +1,92 @@
+{
+  "result": "PASS",
+  "chain": "2bd65f8d",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+  "head": "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b",
+  "origins": {
+    "FleetData": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "DeviceKey": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "DeviceData": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "AnchorKey": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "Anchor": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "CompactHeadKey": "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b",
+    "CompactHead": "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b",
+    "HealthUpdated": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "DataAnchored": "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb",
+    "DiagnosticKey": "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b",
+    "DiagnosticRequest": "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b"
+  },
+  "digests": {
+    "publish core": "3vwFhwLGWXao5yxQrdgSfrQXzfnkQGBfLUWMwEZSou5v",
+    "publish WAL": "FywKZbjtawwUBTxDfPDYno2q71JPgskV6DmXS8Lueupq",
+    "publish Walrus": "7RWxP2SpjFvCKDVZrPSXupWbXcL9ugRg2WnPZrYB28yP",
+    "publish storage": "2zZBA2NagyWmiSo1bPSbDN3Uf1qdSk4UB4LfNvKzuqLA",
+    "publish base data": "HozXKkLYGHbC6MZNu7MY4Hu7LAnfxKNFrmG6LFFFgYTu",
+    "register existing device": "GmE57LJvaGv8RFw18x9mcHoUTZCrraPnjEBhpWbYg7ef",
+    "create budget": "DepsdywTYxYsEzEK6XCDwi3oUtRi54Ps2ANbat1o1fh4",
+    "enroll account": "52TctU6vrd68AotaNKks9CpJe4D1jcffnpomzH495txd",
+    "create actual storage": "85He44aW4tcKhkX9gf81M2ZhBCQPz6toC8WKMaVM45HL",
+    "create base fleet": "2m3NLGvgebUfBnByjwmPt6hhy4DkFac7XRY4QpFKVkFn",
+    "create base writer": "Cokb3s7rQfC9VhLWYWtn3zoM4tEubfjSJLTXrg51x1en",
+    "upgrade data": "E8zednoX4nuui9ZrhqtdMWMh7DRme7SmHVtR8V4q75wk",
+    "diagnostics on existing writer": "CMJVjbdVZZn11yM3UjuDViYfpVY6YVyGWypw8XuqV9CR",
+    "serverless signed services health": "BQaH6cWz7JvrNYk5U6rCdjLsjgLHVRw9um26M4T1qbco",
+    "revoke device": "Cqb3EfGJncnwyeBSWPgZoD1stxJCAPVtAJ7axnPGAG1U"
+  },
+  "attacks": {
+    "0x13ce5d1d8880c0e43449219ba09f8865aa2db35b75db8d983dc03e78a8eb30cb": {
+      "digest": "7oWnheryvWwVS57TkPN6oP1RXeKscf7ZiQ3xYkDhnYYH",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xe3a226f9c81344c2ef8b32e4695f5c6c8fa9b1fcef10390d38182f874aea4287::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xe3a226f9c81344c2ef8b32e4695f5c6c8fa9b1fcef10390d38182f874aea4287",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0xdac9dc8e95ec1897a0f6b16c8cb65e9c6eefd2ea55f97ccfb49cb5c06806b80b": {
+      "digest": "27LcCcM2FrA8yP5BJoQeTEKvnFo3CeBEBL628vHSHJ9a",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xe3a226f9c81344c2ef8b32e4695f5c6c8fa9b1fcef10390d38182f874aea4287::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xe3a226f9c81344c2ef8b32e4695f5c6c8fa9b1fcef10390d38182f874aea4287",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ],
+  "source_revision": "222bc2338eb48e5e1eb15af66b9c3cc8d1b3c3ce",
+  "integrated_main": "b9e8053f4f034ca725686d19870cde6f3f756d63",
+  "scope": "Disposable network-none current-main upgrade with actual pinned dependencies; existing objects/type origins, diagnostics and revoked old/new entry points. Also passed current main direct-chain CLI checks. No hardware/mainnet acceptance.",
+  "command": "python3 scripts/test_protocol_localnet.py --fleet-data-upgrade inside pinned suifleet-dev:sf035 container with --network none, pinned local helpers, cache and read-only Git metadata mounts"
+}
