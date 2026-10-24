@@ -11,7 +11,7 @@ import { useBudgets, useFleetStorage } from "@/hooks/useFleetStorage";
 import {
   DEFAULT_LIMITS, DEFAULT_QUOTA, budgetAlerts, budgetSupported, buildCreateBudgetTx, buildCreateStorageTx, buildDepositTx,
   buildDepositWalTx, buildEnrollDeviceTx, buildFundDeviceTx, buildFundReserveTx, buildReclaimReserveTx, buildRefillPoolTx, buildRemoveDeviceTx,
-  buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount,
+  buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount, fetchAccounts,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
 import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
@@ -102,7 +102,7 @@ export function CardFunding({ asset, amount }: { asset: OnrampAsset; amount: str
   const balance = useQuery({
     queryKey: ["onramp-balance", NETWORK, account?.address, pending?.asset],
     enabled: !!account && !!pending,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     queryFn: async () => BigInt((await client.getBalance({ owner: account!.address, coinType: coinType(pending!.asset) })).balance.balance),
   });
   if (!account) return null;
@@ -202,8 +202,8 @@ export function BudgetManager() {
   const accounts = useQuery<(AccountView | undefined)[]>({
     queryKey: ["fleet-budget-accounts", NETWORK, budget?.id, activated.map((d) => d.objectId).join()],
     enabled: !!budget && devices.isSuccess,
-    refetchInterval: 15_000,
-    queryFn: () => Promise.all(activated.map((device) => fetchAccount(client, budget!.id, device.objectId))),
+    refetchInterval: 60_000,
+    queryFn: () => fetchAccounts(client, budget!.id, activated.map((device) => device.objectId)),
   });
   if (!account || !budget) return isLoading ? <p className="text-xs">Loading…</p> : readError ? <p role="alert" className="text-xs">{readError.message}</p> : null;
   async function enrollAll() {
@@ -228,6 +228,7 @@ export function BudgetManager() {
         cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] })]);
     }
   }
+  const accountsReady = !accounts.error && accounts.data !== undefined && devices.isSuccess;
   const now = BigInt(Date.now());
   const enrolled = (accounts.data ?? []).filter((a): a is AccountView => !!a);
   const spent = enrolled.reduce((sum, a) => sum + periodUsage(a, now).drawn, BigInt(0));
@@ -235,9 +236,9 @@ export function BudgetManager() {
   const runway = runwayDays(budget.balance + reserves, spent, Number(budget.defaultLimits.periodMs) / 86_400_000);
   const alerts = budgetAlerts(budget, enrolled, now, runway);
   return <div className="space-y-3 text-xs">
-    <p>Unallocated {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0) and {sui(reserves)} in device reserves. Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid straight to devices {sui(budget.totalPaid)}, allocated to reserves {sui(budget.totalAllocated)}, reclaimed {sui(budget.totalReclaimed)}. {runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`}</p>
+    <p>Unallocated {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0) {accountsReady && <>and {sui(reserves)} in device reserves.</>} Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid straight to devices {sui(budget.totalPaid)}, allocated to reserves {sui(budget.totalAllocated)}, reclaimed {sui(budget.totalReclaimed)}. {accountsReady && (runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`)}</p>
     <p>Each device draws only from its own reserve, through its own on-chain account, so devices never wait on each other or on the fleet budget. Refill reserves from the budget; reclaim unused reserves before withdrawing.</p>
-    {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
+    {accountsReady && alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
       <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.deviceId ? `Device ${alert.deviceId.slice(0, 10)}…: ` : ""}{alert.text}</li>)}</ul>}
     <div className="flex gap-2 items-center flex-wrap">
       <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildSetPausedTx(budget.id, budget.capId, !budget.paused))}>{budget.paused ? "Resume all devices" : "Pause all devices"}</button>
@@ -246,7 +247,7 @@ export function BudgetManager() {
     </div>
     <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period, never more than its reserve, until you suspend or remove it here, pause the budget or revoke its key on the Devices page.</p>
     <div className="space-y-1">
-      <button type="button" className="border rounded px-2 py-1" disabled={pending || !devices.isSuccess || !accounts.isSuccess || !activated.length} onClick={() => void enrollAll()}>
+      <button type="button" className="border rounded px-2 py-1" disabled={pending || !accountsReady || !activated.length} onClick={() => void enrollAll()}>
         {batchProgress?.phase === "stopped" ? "Resume enrollment" : "Enroll all unenrolled devices"}
       </button>
       <p>Up to 200 devices per approval (5 approvals for 1,000 new devices). Each chunk is checked for size and gas before signing. Initial floats and up to two period allowances per device come from the budget; limited reserves are shared evenly.</p>
@@ -257,7 +258,9 @@ export function BudgetManager() {
       </div>}
       {batchError && <p role="alert">{batchError}</p>}
     </div>
-    <table className="w-full border">
+    {accounts.error ? <p role="alert">Budget accounts unavailable: {accounts.error.message}</p>
+      : devices.error ? <p role="alert">Budget devices unavailable: {devices.error.message}</p>
+      : !accountsReady ? <p>Loading budget accounts…</p> : <table className="w-full border">
       <thead><tr className="text-left"><th className="p-1">Device</th><th className="p-1">Reserve</th><th className="p-1">This period</th><th className="p-1">Draws</th><th className="p-1">Total paid</th><th className="p-1">Actions</th></tr></thead>
       <tbody>{activated.map((device, index) => {
         const a = accounts.data?.[index];
@@ -279,8 +282,8 @@ export function BudgetManager() {
             defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;
       })}</tbody>
-    </table>
-    {accounts.error && <p role="alert">Usage unavailable: {accounts.error.message}</p>}
+    </table>}
+
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
@@ -408,9 +411,9 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');
   const [blob, setBlob] = useState(''), [target, setTarget] = useState(0), [maxFee, setMaxFee] = useState('1');
   const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
-  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
-  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 30000,
+  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
     queryFn: () => fetchDeviceRetention(client, config, storage) });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];

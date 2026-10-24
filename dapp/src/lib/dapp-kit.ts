@@ -1,5 +1,7 @@
 "use client";
 
+import { fleetFetch } from "./rpc-budget";
+
 import { createDAppKit } from "@mysten/dapp-kit-react";
 import { enokiWalletsInitializer } from "@mysten/enoki";
 import { onboardingConfig } from "./onboarding";
@@ -16,6 +18,7 @@ export const dAppKit = createDAppKit({
   defaultNetwork: NETWORK,
   createClient: (network) => new SuiGrpcClient({
     network,
+    fetch: fleetFetch,
     baseUrl: RPC_URL ?? (network === "localnet" ? "http://127.0.0.1:9000" : `https://fullnode.${network}.sui.io:443`),
   }),
   autoConnect: true,

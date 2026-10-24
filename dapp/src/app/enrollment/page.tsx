@@ -46,7 +46,7 @@ export default function EnrollmentPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selected], queryFn: () => fetchPolicies(client, account!.address, selected ? [selected] : []),
-    enabled: !!account?.address, refetchInterval: 30_000 });
+    enabled: !!account?.address, refetchInterval: 60_000 });
   const policy = policies.data?.find((p) => p.id === selected);
 
   async function run(transaction: Transaction) {
@@ -137,7 +137,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
   const chain = useQuery({
     queryKey: ["enrollment-job", NETWORK, policy.id, job.entries.length],
     queryFn: () => snapshot(client, jobRef.current),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
   const views = useMemo(() => chain.data ? entryStatuses(job, chain.data) : [], [job, chain.data]);
   const steps = chain.data ? plan(job, views, chain.data) : [];

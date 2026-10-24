@@ -1,11 +1,11 @@
 // Prepaid fleet network costs (SF-083): transaction builders and reads for the
 // on-chain fleet budget (sui_edge::fleet_budget) and, when configured, the
 // owner-prepaid Walrus storage (fleet_storage). See docs/FLEET_BUDGET.md.
-import { bcs } from "@mysten/sui/bcs";
+import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
 import { Transaction, coinWithBalance } from "@mysten/sui/transactions";
-import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
+import { normalizeStructTag, normalizeSuiAddress, deriveDynamicFieldID } from "@mysten/sui/utils";
 import { BUDGET_TYPES, MANIFEST, moveType, requireManifest, verifyDeployment } from "./deployment-manifest";
 import { calls, fleet_budget_BudgetOwnerCapBcs, fleet_budget_DeviceKeyBcs, fleet_budget_FleetBudgetBcs,
   fleet_budget_GasAccountBcs, fleet_budget_GasDrawnBcs } from "./fleet-protocol";
@@ -290,6 +290,49 @@ export async function fetchAccount(client: Pick<SuiGrpcClient, "getDynamicField"
     suspended: value.suspended, periodStartMs: BigInt(value.period_start_ms), drawnInPeriod: BigInt(value.drawn_in_period),
     drawsInPeriod: BigInt(value.draws_in_period), lastDrawMs: BigInt(value.last_draw_ms),
     totalDrawn: BigInt(value.total_drawn), enrolledAtMs: BigInt(value.enrolled_at_ms) };
+}
+
+/** Batch both deterministic DeviceKey fields and their shared GasAccounts. */
+export async function fetchAccounts(client: Pick<SuiGrpcClient, "getObjects">, budgetId: string, deviceIds: string[]): Promise<(AccountView | undefined)[]> {
+  const keyType = moveType("fleet_budget::DeviceKey");
+  const fieldType = `0x2::dynamic_field::Field<${keyType},0x2::object::ID>`;
+  const Field = bcs.struct("DeviceAccountField", { id: bcs.Address, name: fleet_budget_DeviceKeyBcs, value: bcs.Address });
+  const fieldIds = deviceIds.map(device_id => deriveDynamicFieldID(budgetId, TypeTagSerializer.parseFromStr(keyType), fleet_budget_DeviceKeyBcs.serialize({ device_id }).toBytes()));
+  async function batches(ids: string[]) {
+    const result = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const { objects } = await client.getObjects({ objectIds: ids.slice(i, i + 50), include: { content: true } });
+      if (objects.length !== Math.min(50, ids.length - i)) throw Error("Incomplete account batch");
+      result.push(...objects);
+    }
+    return result;
+  }
+  const fields = await batches(fieldIds);
+  const indexes = fields.map((object, index) => {
+    if (object instanceof ObjectError && object.reason === "notFound") return undefined;
+    if (object instanceof Error) throw object;
+    if (normalizeStructTag(object.type) !== normalizeStructTag(fieldType)) throw Error("Unexpected device index type");
+    const field = Field.parse(object.content);
+    if (field.id !== fieldIds[index] || normalizeSuiAddress(field.name.device_id) !== normalizeSuiAddress(deviceIds[index])) throw Error("Device index mismatch");
+    return field.value;
+  });
+  const ids = indexes.filter((id): id is string => !!id);
+  const objects = await batches(ids);
+  const accounts = new Map(objects.map((object, index) => {
+    // A dangling index is an error, never an unenrolled device.
+    if (object instanceof Error) throw object;
+    if (normalizeSuiAddress(object.objectId) !== normalizeSuiAddress(ids[index]) || normalizeStructTag(object.type) !== normalizeStructTag(moveType("fleet_budget::GasAccount"))) throw Error("Unexpected GasAccount type or ID");
+    return [ids[index], fleet_budget_GasAccountBcs.parse(object.content)];
+  }));
+  return indexes.map((accountId, index) => {
+    if (!accountId) return undefined;
+    const value = accounts.get(accountId)!;
+    const deviceId = deviceIds[index];
+    if (normalizeSuiAddress(value.budget_id) !== normalizeSuiAddress(budgetId) || normalizeSuiAddress(value.device_id) !== normalizeSuiAddress(deviceId)) throw Error("The gas account belongs to another budget or device");
+    return { accountId, deviceId, ownerCapId: value.owner_cap_id, reserve: BigInt(value.reserve.value), limits: limitsOf(value.limits),
+      suspended: value.suspended, periodStartMs: BigInt(value.period_start_ms), drawnInPeriod: BigInt(value.drawn_in_period),
+      drawsInPeriod: BigInt(value.draws_in_period), lastDrawMs: BigInt(value.last_draw_ms), totalDrawn: BigInt(value.total_drawn), enrolledAtMs: BigInt(value.enrolled_at_ms) };
+  });
 }
 
 export interface DrawEvent {
