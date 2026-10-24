@@ -1,9 +1,10 @@
 // SF-131 Fleet settings page in a real browser: every option shows its network
 // cost and SuiFleet price per device and per fleet, the quotes show their
 // source and date, the deposit follows the chosen settings, and saving without
-// enough deposit warns before anything is signed. The wallet, chain reads,
-// budget and the SF-130 settings transaction are controlled
-// (scripts/browser/fleet-settings-fakes.js); pricing and estimates are real.
+// enough deposit warns before anything is signed. The wallet, chain reads and
+// budget are controlled (scripts/browser/fleet-settings-fakes.js); pricing,
+// estimates, the deployment manifest gate and the SF-130 fleet_settings::set
+// transaction the page builds are real, and the wallet fake decodes it.
 //   CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell node scripts/test_fleet_settings_browser.cjs
 const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), http = require("node:http");
 const assert = require("node:assert/strict");
@@ -12,10 +13,19 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
 const src = path.resolve(__dirname, "../dapp/src"), fakes = path.resolve(__dirname, "browser/fleet-settings-fakes.js");
 const importers = new Set([path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
-const faked = new Set(["@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction", "@/lib/fleet-settings-tx"]);
+const faked = new Set(["@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);
 const fakeDependencies = { name: "fleet-settings-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => importers.has(args.importer) && faked.has(args.path) ? { path: fakes } : undefined);
 } };
+// A Testnet deployment with SF-130 settings, and one without them.
+const root = path.resolve(__dirname, "..");
+const protocol = JSON.parse(require("node:fs").readFileSync(path.join(root, "interfaces/fleet-v1.json"), "utf8"));
+const withoutSettings = { ...JSON.parse(require("node:fs").readFileSync(path.join(root, "manifests/fixture.localnet.json"), "utf8")), network: "testnet", chain_identifier: "4c78adac" };
+const withSettings = structuredClone(withoutSettings);
+for (const name of protocol.optional_type_origins.fleet_settings) withSettings.type_origins[name] = withSettings.call_package_id;
+const PACKAGE = "0x" + withSettings.call_package_id.slice(2).padStart(64, "0");
+const BUDGET = "0x" + "b1".repeat(32), CAP = "0x" + "c1".repeat(32), CLOCK = "0x" + "0".repeat(63) + "6";
+const setCall = (values) => ({ target: `${PACKAGE}::fleet_settings::set`, objects: [BUDGET, CAP, CLOCK], values });
 const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd: 0.05, last_updated_at: 1792900060 } };
 
 (async () => {
@@ -24,12 +34,14 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
   try {
     const bundle = path.join(dir, "app.js");
     await build({ entryPoints: [path.resolve(__dirname, "browser/fleet-settings.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic",
-      banner: { js: "var process = { env: {} };" }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": src },
+      banner: { js: "var process = { env: { NEXT_PUBLIC_DEPLOYMENT_MANIFEST: JSON.stringify(window.__SF_MANIFEST_OBJECT) } };" }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": src },
       define: { "process.env.NODE_ENV": '"development"' }, plugins: [fakeDependencies], logLevel: "warning" });
     server = http.createServer(async (req, res) => {
       const js = req.url === "/app.js";
+      const manifest = new URL(req.url, "http://x").searchParams.get("scenario") === "unsupported" ? withoutSettings : withSettings;
       res.setHeader("Content-Type", js ? "text/javascript" : "text/html");
-      res.end(js ? await fs.readFile(bundle) : '<!doctype html><html><head><title>Fleet settings</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
+      res.end(js ? await fs.readFile(bundle) : `<!doctype html><html><head><title>Fleet settings</title></head><body><div id="root"></div>
+        <script>window.__SF_MANIFEST_OBJECT = ${JSON.stringify(manifest)};</script><script src="/app.js"></script></body></html>`);
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
@@ -106,7 +118,9 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       await page.getByRole("button", { name: "Save settings" }).click();
       await waitText("Not enough deposit for these settings");
       assert.match(await page.getByRole("alert").first().textContent(), /Nothing has been signed/);
-      assert.deepEqual([(await control()).built.length, (await control()).signed.length], [0, 0]);
+      assert.equal((await control()).signed.length, 0);
+      assert.match(await text("saved"), /No settings saved yet/);
+      assert.deepEqual((await control()).settingsReads.slice(0, 1), [BUDGET], "the saved record is read from the fleet budget");
       // Changing a choice withdraws the warning; it must be checked again.
       await page.locator("#archiveIntervalMs-86400000").check();
       await page.waitForFunction(() => !document.body.textContent.includes("Not enough deposit for these settings"));
@@ -115,9 +129,9 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       // Saving anyway signs exactly the chosen settings, once.
       await page.getByRole("button", { name: "Save anyway" }).click();
       await waitText("Settings saved in FAKEDIGEST1");
-      const { built, signed } = await control();
-      assert.equal(signed.length, 1);
-      assert.deepEqual(built, [{ checkIntervalMs: 1_800_000, rolloutCheckIntervalMs: 60_000, healthIntervalMs: 3_600_000, archiveIntervalMs: 86_400_000, archiveRetentionEpochs: 42 }]);
+      const { signed } = await control();
+      assert.deepEqual(signed, [{ sender: "0x" + "a".repeat(64), calls: [setCall(["1800000", "60000", "3600000", "86400000", 42])] }],
+        "one fleet_settings::set with the budget, its owner cap, the clock and exactly the chosen values");
       // The budget page's estimate uses the same live quote and settles: no render loop.
       await page.getByTestId("budget-estimate").getByText(/Suggested [\d.]+ SUI/).waitFor();
       assert.match(await text("budget-estimate"), /rescaled to 1000 MIST gas \(testnet reference gas price \(live\)/);
@@ -136,25 +150,55 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       await page.locator("#checkIntervalMs-900000").check();
       await page.getByRole("button", { name: "Save settings" }).click();
       await waitText("Settings saved in FAKEDIGEST1");
-      const { built, signed } = await control();
+      const { signed } = await control();
       assert.ok(!(await page.textContent("body")).includes("Not enough deposit"));
-      assert.equal(signed.length, 1); assert.equal(built[0].checkIntervalMs, 900_000);
+      assert.deepEqual(signed.map((s) => s.calls), [[setCall(["900000", "60000", "86400000", "604800000", 42])]]);
       assert.deepEqual(errors, []);
       await page.close();
     }
 
-    // ── No on-chain settings API (SF-130 not deployed): prices shown, saving disabled ──
+    // ── Saved settings preselect their options and price from them ──
+    {
+      const { page, errors, waitText, control, text } = await open("saved");
+      await waitText("Saved on chain: checks every 15 min, rollout fast checks off, health every 1 h, archives every 24 h kept 42 epoch(s).");
+      for (const id of ["checkIntervalMs-900000", "rolloutCheckIntervalMs-0", "healthIntervalMs-3600000", "archiveIntervalMs-86400000", "archiveRetentionDays-42"]) {
+        assert.ok(await page.locator(`#${id}`).isChecked(), `${id} is the saved choice`);
+      }
+      assert.match(await text("suifleet-price"), /add-ons \$0\.63/, "hourly health, daily archives and 15-minute checks for 3 devices");
+      await page.locator("#healthIntervalMs-86400000").check();
+      await waitText("add-ons $0.27");
+      assert.ok(await page.getByRole("button", { name: "Save settings" }).isEnabled());
+      assert.equal((await control()).signed.length, 0);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+
+    // ── The wallet refuses: nothing is reported saved ──
+    {
+      const { page, errors, waitText, control } = await open("rejected");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await waitText("Not enough deposit for these settings");
+      await page.getByRole("button", { name: "Save anyway" }).click();
+      await waitText("User rejected the request. Nothing changed unless the transaction confirms; refresh before retrying.");
+      assert.ok(!(await page.textContent("body")).includes("Settings saved in"));
+      assert.equal((await control()).signed.length, 1);
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+
+    // ── A deployment without SF-130's settings type origins: prices shown, saving disabled, nothing read ──
     {
       const { page, errors, waitText, control } = await open("unsupported");
-      await waitText("no on-chain fleet settings yet (SF-130)");
+      await waitText("no on-chain fleet settings (SF-130)");
       assert.ok(await page.getByRole("button", { name: "Save settings" }).isDisabled());
-      assert.equal((await control()).built.length, 0);
+      assert.deepEqual([(await control()).signed.length, (await control()).settingsReads.length], [0, 0]);
       assert.deepEqual(errors, []);
       await page.close();
     }
     console.log("PASS: real browser Fleet settings page: per-option network cost and SuiFleet price per device and per fleet, dated live gas/Walrus quotes and "
       + "on-request USD quote, deposit follows settings, an underfunded save warns before signing and signs only the chosen settings after confirmation, "
-      + "funded save signs directly, saving disabled without the SF-130 API");
+      + "funded save signs directly, each save is the real SF-130 fleet_settings::set with the budget/cap/clock and chosen values, saved settings "
+      + "preselect their options, a wallet refusal reports nothing saved, saving disabled when the manifest lacks the SF-130 type origins");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));
