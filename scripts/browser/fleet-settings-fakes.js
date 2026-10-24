@@ -15,6 +15,8 @@ const client = {
 };
 export const useCurrentAccount = () => account;
 export const useCurrentClient = () => client;
+// Used only by budget enrollment, which this page does not render.
+export const useDAppKit = () => ({});
 
 // @mysten/walrus, as the quote hook uses it.
 export const walrus = () => ({});

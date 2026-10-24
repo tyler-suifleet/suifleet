@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Operator-configured durable Kinesis/S3 exporter. Run under suifleet_aws.py."""
+"""Durable device-to-customer HTTP/S3 and scoped AWS stream exporter."""
 import argparse
 import base64
 import fcntl
@@ -8,6 +8,8 @@ import json
 import os
 from pathlib import Path
 import stat
+import ssl
+import urllib.request
 import time
 from urllib.parse import urlparse
 
@@ -37,9 +39,9 @@ def validate(config):
     required = {'service', 'region', 'stream', 'component', 'socket', 'state_dir',
                 'destination', 'source_id', 'batch_messages', 'batch_bytes', 'bytes_per_second',
                 'poll_seconds', 'max_backoff_seconds'}
-    if not required <= config.keys() or config.keys() - required - {'endpoint', 'part_bytes'}:
+    if not required <= config.keys() or config.keys() - required - {'endpoint', 'part_bytes', 'credentials_file', 'bearer_token_file'}:
         raise ValueError('invalid exporter configuration fields')
-    if config['service'] not in ('kinesis', 's3'):
+    if config['service'] not in ('kinesis', 's3', 'customer_s3', 'http'):
         raise ValueError('unsupported exporter service')
     for key in ('region', 'stream', 'component', 'destination', 'source_id'):
         if not isinstance(config[key], str) or not config[key] or len(config[key]) > 255:
@@ -54,7 +56,7 @@ def validate(config):
             raise ValueError('invalid exporter limit')
     if config['service'] == 'kinesis' and config['batch_bytes'] > 5 << 20:
         raise ValueError('Kinesis batch limit is conservatively 5 MiB')
-    if config['service'] == 's3':
+    if config['service'] in ('s3', 'customer_s3'):
         # destination is bucket/prefix. Prefix must be exclusive to this exporter.
         bucket, separator, prefix = config['destination'].partition('/')
         if not separator or not bucket or not prefix or not prefix.endswith('/'):
@@ -62,11 +64,44 @@ def validate(config):
         part = config.get('part_bytes', 5 << 20)
         if type(part) is not int or not 5 << 20 <= part <= 16 << 20:
             raise ValueError('part_bytes must be 5..16 MiB')
+    customer = config['service'] in ('customer_s3', 'http')
+    if config['service'] == 'customer_s3' and not config.get('credentials_file'):
+        raise ValueError('customer S3 requires a private credentials_file')
+    if customer and not config.get('endpoint'):
+        raise ValueError('customer export requires an explicit endpoint')
+    for key in ('credentials_file', 'bearer_token_file'):
+        if key in config and (not customer or not isinstance(config[key], str)
+                              or not Path(config[key]).is_absolute()):
+            raise ValueError('customer secret paths must be absolute')
+    if 'credentials_file' in config and config['service'] != 'customer_s3':
+        raise ValueError('credentials_file is only for customer S3')
+    if 'bearer_token_file' in config and config['service'] != 'http':
+        raise ValueError('bearer_token_file is only for HTTP')
     if 'endpoint' in config:
         url = urlparse(config['endpoint'])
         if (url.username or url.password or url.query or url.fragment or
-            url.scheme != 'http' or url.hostname not in ('127.0.0.1', 'localhost', '::1')):
-            raise ValueError('endpoint overrides are restricted to loopback HTTP emulators')
+            not url.hostname or not ((url.scheme == 'http' and url.hostname in ('127.0.0.1', 'localhost', '::1'))
+                                     or (customer and url.scheme == 'https'))):
+            raise ValueError('endpoint must use HTTPS (HTTP only on loopback); no userinfo/query/fragment')
+
+
+def private_secret(path):
+    """Read bounded device-local secrets without following the final symlink."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        info = os.fstat(source.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid not in (0, os.getuid())
+                or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 16384):
+            raise ValueError('secret file must be private, regular and owned by root or exporter')
+        value = source.read(16385)
+        if len(value) > 16384:
+            raise ValueError('secret too large')
+        return value
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 class Exporter:
@@ -89,15 +124,32 @@ class Exporter:
                 'schema': 1, 'binding': binding, 'next': 0, 'pending': None}
             if self.state['schema'] != 1 or self.state['binding'] != binding:
                 raise ValueError('checkpoint/config mismatch; drain before reconfiguration')
-            # No SDK default credential-chain fallback: this service requires SF-057.
-            if aws is None:
+            # No SDK default credential fallback: use scoped SF-057 or explicit customer secrets.
+            if aws is None and config['service'] != 'http':
+                # botocore's TLS context honors this debugging variable. Customer
+                # credentials/data must never enable inherited session-key logs.
+                if config['service'] == 'customer_s3':
+                    os.environ.pop('SSLKEYLOGFILE', None)
                 import boto3
                 from botocore.config import Config
                 session = boto3.Session(region_name=config['region'])
-                credentials = session.get_credentials()
-                if credentials is None or credentials.method != 'container-role':
-                    raise ValueError('scoped container credentials required')
-                aws = session.client(config['service'], endpoint_url=config.get('endpoint'),
+                supplied = {}
+                if config['service'] == 'customer_s3':
+                    secret = json.loads(private_secret(config['credentials_file']))
+                    if (not isinstance(secret, dict) or not {'access_key_id', 'secret_access_key'} <= secret.keys()
+                            or secret.keys() - {'access_key_id', 'secret_access_key', 'session_token'}
+                            or any(not isinstance(v, str) or not v or len(v) > 8192 for v in secret.values())):
+                        raise ValueError('invalid customer credential file')
+                    supplied = dict(aws_access_key_id=secret['access_key_id'],
+                                    aws_secret_access_key=secret['secret_access_key'])
+                    if 'session_token' in secret:
+                        supplied['aws_session_token'] = secret['session_token']
+                else:
+                    credentials = session.get_credentials()
+                    if credentials is None or credentials.method != 'container-role':
+                        raise ValueError('scoped container credentials required')
+                aws = session.client('s3' if config['service'] == 'customer_s3' else config['service'],
+                                     endpoint_url=config.get('endpoint'), **supplied,
                                      config=Config(connect_timeout=5, read_timeout=30,
                                                    retries={'total_max_attempts': 1},
                                                    proxies={}, ignore_configured_endpoint_urls=True, s3={'addressing_style': 'path'},
@@ -249,9 +301,51 @@ class Exporter:
         if not self.object_exists(bucket, key, body, digest):
             raise RuntimeError('S3 completion not visible')
 
+    def http(self, pending):
+        body = b''.join(base64.b64decode(record['body']) + b'\n' for record in pending['records'])
+        identity = hashlib.sha256(encode([self.config['source_id'], self.config['stream']]) + body).hexdigest()
+        headers = {'Content-Type': 'application/x-ndjson', 'Idempotency-Key': identity,
+                   'X-SuiFleet-SHA256': hashlib.sha256(body).hexdigest()}
+        if self.config.get('bearer_token_file'):
+            token = private_secret(self.config['bearer_token_file']).decode().strip()
+            if not token or any(ord(c) < 33 or ord(c) > 126 for c in token):
+                raise ValueError('invalid HTTP bearer token')
+            headers['Authorization'] = 'Bearer ' + token
+        self.throttle(len(body))
+        request = urllib.request.Request(self.config['endpoint'], data=body, headers=headers, method='POST')
+        # Never forward credentials to a redirect or an inherited proxy.
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_default_certs()
+        # SSLContext construction avoids create_default_context's inherited
+        # SSLKEYLOGFILE behavior in a credential-bearing service.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect(),
+                                            urllib.request.HTTPSHandler(context=context))
+        with opener.open(request, timeout=30) as response:
+            if not 200 <= response.status < 300:
+                raise RuntimeError('HTTP export unconfirmed')
+        # A 2xx is the customer's durable-acceptance contract. Ambiguous replies
+        # replay the identical snapshot/idempotency key; receiver must deduplicate.
+
+    def report(self, failed, delivered=False):
+        # Idle polls neither change health counters nor need durable flash writes.
+        # A successful poll after failure still clears and reports degraded health.
+        if not failed and not delivered and not self.state.get('status', {}).get('consecutive_failures', 0):
+            return
+        status = self.state.setdefault('status', {'batches': 0, 'failures': 0,
+                                                  'consecutive_failures': 0})
+        if failed:
+            status['failures'] += 1
+            status['consecutive_failures'] += 1
+        else:
+            status['consecutive_failures'] = 0
+        status['last_success_ms'] = int(time.time() * 1000) if delivered else status.get('last_success_ms')
+        self.save()
+        self.source.request('stream_export_status', topic=self.config['stream'], payload=status)
+
     def abort(self):
         pending = self.state['pending']
-        if pending and self.config['service'] == 's3':
+        if pending and self.config['service'] in ('s3', 'customer_s3'):
             bucket, key, _, _ = self.s3_key_body(pending)
             self.cleanup(bucket, key)
             pending.pop('upload', None)
@@ -269,6 +363,8 @@ class Exporter:
         if not pending['delivered']:
             if self.config['service'] == 'kinesis':
                 self.kinesis(pending)
+            elif self.config['service'] == 'http':
+                self.http(pending)
             else:
                 self.s3(pending)
             pending['delivered'] = True
@@ -287,11 +383,20 @@ class Exporter:
         while True:
             try:
                 delivered = self.step()
+                if delivered:
+                    self.state.setdefault('status', {'batches': 0, 'failures': 0, 'consecutive_failures': 0})['batches'] += 1
+                if self.config['service'] in ('customer_s3', 'http'):
+                    self.report(False, delivered)
                 backoff = 1
                 if not delivered:
                     self.sleep(self.config['poll_seconds'])
             except Exception:
                 # No SDK exceptions/URLs/payloads/credential strings in logs.
+                if self.config['service'] in ('customer_s3', 'http'):
+                    try:
+                        self.report(True)
+                    except Exception:
+                        pass  # Failed health IPC cannot discard or acknowledge data.
                 print('stream export failed; pending data retained', flush=True)
                 self.sleep(backoff)
                 backoff = min(backoff * 2, self.config['max_backoff_seconds'])

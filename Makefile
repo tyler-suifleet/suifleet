@@ -82,7 +82,9 @@ test-ota:
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
+	$(RUN) python3 scripts/test_cadence_ota.py
 	$(RUN) python3 scripts/test_budget_ota.py
+	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
 
@@ -164,6 +166,13 @@ test-handover-upgrade-localnet:
 test-budget-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
+
+# SF-130 on a disposable localnet (network none): settings added by upgrade to
+# an existing budget, owner-only changes and events, refusals, daemon/dApp reads.
+.PHONY: test-settings-localnet
+test-settings-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --settings-upgrade
 
 .PHONY: test-catalog-live
 test-catalog-live:
@@ -325,6 +334,8 @@ test-manifest:
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_fleet_settings.cjs
+	$(RUN) node scripts/test_budget_enrollment.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_incremental_history.cjs
@@ -335,6 +346,7 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_fleet_recovery.cjs
@@ -361,7 +373,8 @@ test-desired-state-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
 
-# SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
+# Optional customer-hosted reference integration, not a product runtime.
+# Product chain CLI: node scripts/suifleet_ops.cjs (docs/SERVERLESS_PRODUCT.md).
 .PHONY: indexer-build indexer-test test-indexer-localnet
 indexer-build:
 	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
@@ -681,6 +694,7 @@ test-retention:
 test-fleet-settings:
 	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_fleet_settings.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_settings_browser.cjs
 
 # Run inside a disposable network-none dev container with Git history and warm Move cache.
@@ -712,3 +726,14 @@ pilot-localnet:
 pilot-public-read:
 	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
 	$(RUN) node scripts/pilot_public_read.cjs "$(PILOT_EVIDENCE_DIR)/public-read.json"
+
+# SF-128: real populated-object v1/v2 upgrades and 10->10000 protected blob gas.
+# Run only in a disposable --network none container (same as retention-upgrade).
+.PHONY: test-retention-scale-upgrade
+test-retention-scale-upgrade:
+	$(RUN) python3 scripts/test_protocol_localnet.py --retention-scale-upgrade
+
+# SF-132: use a disposable network-none container with the pinned network CLI.
+.PHONY: test-budget-enrollment-localnet
+test-budget-enrollment-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment

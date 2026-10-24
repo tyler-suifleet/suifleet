@@ -1,180 +1,105 @@
-// SF-131: per-fleet cost settings, their network cost per device and per fleet,
-// and the fleet-budget deposit they need. Fields and bounds follow the SF-130
-// proposal on #265 (check_interval_ms, rollout_check_interval_ms,
-// health_interval_ms, archive_interval_ms, archive_retention_epochs); switch to
-// SF-130's generated interfaces once it merges. Network cost is computed from
-// lib/network-costs.ts at a dated quote; the SuiFleet price comes only from
-// lib/fleet-pricing.ts. The two are never added together.
-import { DEFAULT_LIMITS } from "@/lib/fleet-budget";
-import { blobCostFrost, estimate, rescaled, type CostQuote, type Estimate, type EstimateInput } from "@/lib/network-costs";
-import { SETTING_KEYS, defaultOption, type PriceTable, type SettingKey } from "@/lib/fleet-pricing";
+// Per-fleet cost settings (SF-130): reads, validation and the owner's change
+// transaction for sui_edge::fleet_settings, the record kept in a dynamic
+// field of the fleet's FleetBudget. See docs/FLEET_SETTINGS.md.
+import type { SuiGrpcClient } from "@mysten/sui/grpc";
+import { ObjectError } from "@mysten/sui/client";
+import { Transaction } from "@mysten/sui/transactions";
+import { normalizeStructTag } from "@mysten/sui/utils";
+import { MANIFEST, SETTINGS_TYPES, moveType, requireManifest } from "./deployment-manifest";
+import { calls, fleet_settings_SettingsBcs, fleet_settings_SettingsKeyBcs } from "./fleet-protocol";
+import { FLEET_SETTINGS } from "./protocol-version";
+import { PACKAGE_ID } from "./constants";
 
-const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
-/** An average calendar month. */
-export const MONTH_MS = 365.25 / 12 * DAY;
+const CLOCK = "0x6";
+/** The record version this client understands. */
+export const SETTINGS_VERSION = 1;
 
-/** The on-chain settings, in SF-130's units. */
 export interface FleetSettings {
   checkIntervalMs: number;
-  /** 0 = off. */
+  /** 0 turns rollout fast checks off. */
   rolloutCheckIntervalMs: number;
   healthIntervalMs: number;
   archiveIntervalMs: number;
   archiveRetentionEpochs: number;
 }
 
-/** SF-130's proposed contract bounds (#265). */
-export const SETTINGS_BOUNDS = {
-  checkIntervalMs: { min: 5 * MINUTE, max: 6 * HOUR },
-  rolloutCheckIntervalMs: { min: 30_000, max: 10 * MINUTE, off: 0 },
-  healthIntervalMs: { min: MINUTE, max: DAY },
-  archiveIntervalMs: { min: HOUR, max: 7 * DAY },
-  archiveRetentionEpochs: { min: 1, max: 53 },
-} as const;
+type Field = keyof typeof FLEET_SETTINGS.bounds;
+const FIELDS: [keyof FleetSettings, Field][] = [
+  ["checkIntervalMs", "check_interval_ms"],
+  ["rolloutCheckIntervalMs", "rollout_check_interval_ms"],
+  ["healthIntervalMs", "health_interval_ms"],
+  ["archiveIntervalMs", "archive_interval_ms"],
+  ["archiveRetentionEpochs", "archive_retention_epochs"],
+];
 
-/** Days per Walrus epoch on this network: two weeks on Mainnet, one day elsewhere. */
-export function epochDays(network: string): number {
-  return network === "mainnet" ? 14 : 1;
+/** The business-plan defaults the contract also returns from `defaults()`. */
+export const DEFAULT_SETTINGS: FleetSettings = Object.fromEntries(
+  FIELDS.map(([name, field]) => [name, FLEET_SETTINGS.defaults[field]])) as unknown as FleetSettings;
+
+/** Inclusive bounds, as enforced by the contract. */
+export const SETTINGS_BOUNDS = Object.fromEntries(
+  FIELDS.map(([name, field]) => [name, FLEET_SETTINGS.bounds[field]])) as unknown as Record<keyof FleetSettings, readonly [number, number]>;
+
+/** Whether this deployment's package has the settings (all their type origins). */
+export function settingsSupported(manifest = MANIFEST): boolean {
+  return !!manifest && SETTINGS_TYPES.every((name) => name in manifest.type_origins);
 }
 
-/** Retention days to whole Walrus epochs, rounded up so archives are never kept shorter than chosen. */
-export function retentionEpochs(days: number, network: string): number {
-  return Math.ceil(days / epochDays(network));
-}
-
-/** Refuse a value outside SF-130's bounds before anything is priced or signed. */
-export function validateSettings(s: FleetSettings): FleetSettings {
-  const within = (name: keyof FleetSettings, value: number, min: number, max: number) => {
-    if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(`${name} must be a whole number from ${min} to ${max}`);
-  };
-  within("checkIntervalMs", s.checkIntervalMs, SETTINGS_BOUNDS.checkIntervalMs.min, SETTINGS_BOUNDS.checkIntervalMs.max);
-  if (s.rolloutCheckIntervalMs !== SETTINGS_BOUNDS.rolloutCheckIntervalMs.off)
-    within("rolloutCheckIntervalMs", s.rolloutCheckIntervalMs, SETTINGS_BOUNDS.rolloutCheckIntervalMs.min, SETTINGS_BOUNDS.rolloutCheckIntervalMs.max);
-  within("healthIntervalMs", s.healthIntervalMs, SETTINGS_BOUNDS.healthIntervalMs.min, SETTINGS_BOUNDS.healthIntervalMs.max);
-  within("archiveIntervalMs", s.archiveIntervalMs, SETTINGS_BOUNDS.archiveIntervalMs.min, SETTINGS_BOUNDS.archiveIntervalMs.max);
-  within("archiveRetentionEpochs", s.archiveRetentionEpochs, SETTINGS_BOUNDS.archiveRetentionEpochs.min, SETTINGS_BOUNDS.archiveRetentionEpochs.max);
-  return s;
-}
-
-/** Price-table option values (retention in days) to on-chain settings for `network`. */
-export function toSettings(values: Record<SettingKey, number>, network: string): FleetSettings {
-  return validateSettings({
-    checkIntervalMs: values.checkIntervalMs, rolloutCheckIntervalMs: values.rolloutCheckIntervalMs, healthIntervalMs: values.healthIntervalMs,
-    archiveIntervalMs: values.archiveIntervalMs, archiveRetentionEpochs: retentionEpochs(values.archiveRetentionDays, network),
-  });
-}
-
-/** The price table's defaults (they match the business plan's base product). */
-export function defaultValues(table: PriceTable): Record<SettingKey, number> {
-  return Object.fromEntries(SETTING_KEYS.map((key) => [key, defaultOption(table, key).value])) as Record<SettingKey, number>;
-}
-
-/** What the fleet does each month besides its settings. */
-export interface Workload {
-  devices: number;
-  /** Deployments each device reports a receipt for, per month. */
-  deploymentsPerMonth: number;
-  /** Device log data archived per device per month. */
-  logBytesPerDeviceMonth: number;
-  releasesPerMonth: number;
-  artifactBytes: number;
-}
-
-/** The business plan's typical fleet: four 50 MiB releases and 10 MiB of logs per device a month. */
-export const DEFAULT_WORKLOAD: Workload = { devices: 100, deploymentsPerMonth: 4, logBytesPerDeviceMonth: 10 * 1024 * 1024, releasesPerMonth: 4, artifactBytes: 50 * 1024 * 1024 };
-
-export interface NetworkCost {
-  /** Sui gas, MIST, and Walrus fees, FROST, per device per month. */
-  mistPerDevice: number;
-  frostPerDevice: number;
-  usdPerDevice: number;
-  usdPerFleet: number;
-  /** What the line counts per device per month, for display. */
-  detail: string;
-}
-
-const cost = (mist: number, frost: number, quote: CostQuote, devices: number, detail: string): NetworkCost => {
-  const usd = mist / 1e9 * quote.usd.SUI + frost / 1e9 * quote.usd.WAL;
-  return { mistPerDevice: mist, frostPerDevice: frost, usdPerDevice: usd, usdPerFleet: usd * devices, detail };
-};
-
-/**
- * The monthly network cost one setting adds, per device and per fleet, at
- * `quote`. Update and rollout checks are chain reads: no network fee. Health
- * reports and archives are device transactions; retention is the Walrus
- * storage those archives keep.
- */
-export function settingNetworkCost(key: SettingKey, settings: FleetSettings, workload: Workload, quote: CostQuote): NetworkCost {
-  const fee = rescaled(quote), devices = workload.devices;
-  const prices = { storage: quote.walrusStoragePrice, write: quote.walrusWritePrice };
-  const uploads = MONTH_MS / settings.archiveIntervalMs;
-  const perUpload = workload.logBytesPerDeviceMonth > 0 ? blobCostFrost(Math.ceil(workload.logBytesPerDeviceMonth / uploads), settings.archiveRetentionEpochs, prices) : undefined;
-  switch (key) {
-    case "checkIntervalMs": {
-      const checks = MONTH_MS / settings.checkIntervalMs;
-      return cost(0, 0, quote, devices, `${Math.round(checks).toLocaleString("en-US")} reads, no network fee`);
-    }
-    case "rolloutCheckIntervalMs":
-      return cost(0, 0, quote, devices, settings.rolloutCheckIntervalMs ? `${Math.round(HOUR / settings.rolloutCheckIntervalMs)} reads per rollout hour, no network fee` : "off");
-    case "healthIntervalMs": {
-      const reports = MONTH_MS / settings.healthIntervalMs;
-      return cost(reports * Number(fee.recurringHealthNetMist), 0, quote, devices, `${trim(reports)} signed health reports`);
-    }
-    case "archiveIntervalMs":
-      if (!perUpload) return cost(0, 0, quote, devices, "no log data");
-      return cost(uploads * Number(fee.archiveNetMist), uploads * Number(perUpload.write), quote, devices, `${trim(uploads)} archives (3 transactions and a Walrus write each)`);
-    case "archiveRetentionDays":
-      if (!perUpload) return cost(0, 0, quote, devices, "no log data");
-      return cost(0, uploads * Number(perUpload.storage), quote, devices, `${settings.archiveRetentionEpochs} Walrus epoch(s) of storage per archive`);
+/** Every reason the contract would refuse `settings`; empty when it would accept them. */
+export function settingsErrors(settings: FleetSettings): string[] {
+  const errors: string[] = [];
+  for (const [name] of FIELDS) {
+    const value = settings[name], [low, high] = SETTINGS_BOUNDS[name];
+    if (!Number.isSafeInteger(value)) { errors.push(`${name} must be a whole number`); continue; }
+    if (name === "rolloutCheckIntervalMs" && value === FLEET_SETTINGS.rollout_check_off) continue;
+    if (value < low || value > high) errors.push(`${name} must be between ${low} and ${high}`);
   }
-}
-
-/** Network cost outside the settings: device receipts per device, and owner release uploads per fleet. */
-export function baseNetworkCost(workload: Workload, quote: CostQuote, retention: number) {
-  const fee = rescaled(quote), prices = { storage: quote.walrusStoragePrice, write: quote.walrusWritePrice };
-  const receipts = cost(workload.deploymentsPerMonth * Number(fee.receiptNetMist), 0, quote, workload.devices, `${workload.deploymentsPerMonth} deployment receipts`);
-  const artifact = workload.releasesPerMonth ? blobCostFrost(workload.artifactBytes, retention, prices) : undefined;
-  const releaseFrost = artifact ? workload.releasesPerMonth * Number(artifact.storage + artifact.write) : 0;
-  return { receipts, releasesUsdPerFleet: releaseFrost / 1e9 * quote.usd.WAL, releasesFrostPerFleet: releaseFrost };
-}
-
-/** Network cost of every setting plus the base, per device and per fleet. */
-export function fleetNetworkCost(settings: FleetSettings, workload: Workload, quote: CostQuote) {
-  const lines = SETTING_KEYS.map((key) => ({ key, ...settingNetworkCost(key, settings, workload, quote) }));
-  const base = baseNetworkCost(workload, quote, settings.archiveRetentionEpochs);
-  const perDevice = lines.reduce((sum, l) => sum + l.usdPerDevice, base.receipts.usdPerDevice);
-  const perFleet = perDevice * workload.devices + base.releasesUsdPerFleet;
-  return { lines, base, usdPerDevice: perDevice, usdPerFleet: perFleet };
+  if (settings.rolloutCheckIntervalMs !== FLEET_SETTINGS.rollout_check_off && settings.rolloutCheckIntervalMs > settings.checkIntervalMs) {
+    errors.push("rolloutCheckIntervalMs must not exceed checkIntervalMs");
+  }
+  return errors;
 }
 
 /**
- * The estimator input for prepaying `months` of these settings. Per-month
- * counts round up to whole reports/archives, so the deposit never undershoots
- * the displayed rate. Releases keep the archive retention.
+ * Create or replace the fleet's settings. Only the holder of the budget's
+ * owner cap can; every change emits FleetSettingsChanged with the previous values.
  */
-export function depositInput(settings: FleetSettings, workload: Workload, months: number): EstimateInput {
-  const archives = workload.logBytesPerDeviceMonth > 0 ? Math.ceil(MONTH_MS / settings.archiveIntervalMs) : 0;
-  return {
-    devices: workload.devices, months, receiptsPerDeviceMonth: workload.deploymentsPerMonth, anchorsPerDeviceMonth: 0,
-    healthSummariesPerDeviceMonth: Math.ceil(MONTH_MS / settings.healthIntervalMs), serverlessData: archives > 0,
-    releasesPerMonth: workload.releasesPerMonth, artifactBytes: workload.artifactBytes,
-    dataUploadsPerDeviceMonth: archives, dataBytesPerDeviceMonth: workload.logBytesPerDeviceMonth, storageEpochs: settings.archiveRetentionEpochs,
-    floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
+export function buildSetFleetSettingsTx(budgetId: string, capId: string, settings: FleetSettings): Transaction {
+  requireManifest();
+  if (!settingsSupported()) throw new Error("This deployment's package has no fleet settings; upgrade the contracts first");
+  const errors = settingsErrors(settings);
+  if (errors.length) throw new Error(`Invalid fleet settings: ${errors.join("; ")}`);
+  const tx = new Transaction();
+  calls.fleet_settings_set(tx, PACKAGE_ID, budgetId, capId, settings.checkIntervalMs, settings.rolloutCheckIntervalMs,
+    settings.healthIntervalMs, settings.archiveIntervalMs, settings.archiveRetentionEpochs, CLOCK);
+  return tx;
+}
+
+/**
+ * The fleet's settings record, or undefined when the owner has not created
+ * one (devices then keep their local configuration). Reads one dynamic field.
+ */
+export async function fetchFleetSettings(client: Pick<SuiGrpcClient, "getDynamicField">, budgetId: string): Promise<FleetSettings | undefined> {
+  if (!settingsSupported()) return undefined;
+  let field;
+  try {
+    field = await client.getDynamicField({ parentId: budgetId,
+      name: { type: moveType("fleet_settings::SettingsKey"), bcs: fleet_settings_SettingsKeyBcs.serialize({ dummy_field: false }).toBytes() } });
+  } catch (error) {
+    if (error instanceof ObjectError && error.reason === "notFound") return undefined;
+    throw error;
+  }
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(moveType("fleet_settings::Settings"))) {
+    throw new Error("Unexpected fleet settings type");
+  }
+  const value = fleet_settings_SettingsBcs.parse(field.dynamicField.value.bcs);
+  if (Number(value.version) !== SETTINGS_VERSION) throw new Error(`Fleet settings version ${value.version} needs a newer dashboard`);
+  const settings: FleetSettings = {
+    checkIntervalMs: Number(value.check_interval_ms), rolloutCheckIntervalMs: Number(value.rollout_check_interval_ms),
+    healthIntervalMs: Number(value.health_interval_ms), archiveIntervalMs: Number(value.archive_interval_ms),
+    archiveRetentionEpochs: value.archive_retention_epochs,
   };
-}
-
-/** The recommended deposit for these settings, fleet size and prepaid months. */
-export function recommendDeposit(settings: FleetSettings, workload: Workload, months: number, quote: CostQuote): Estimate {
-  return estimate(depositInput(validateSettings(settings), workload, months), quote);
-}
-
-/** How far the current budget and fleet storage fall short of the recommendation (zero when enough). */
-export function depositShortfall(recommended: Pick<Estimate, "suiDepositMist" | "walDepositFrost">, suiBalanceMist: bigint | undefined, walBalanceFrost: bigint | undefined) {
-  const zero = BigInt(0), short = (want: bigint, have: bigint | undefined) => want > (have ?? zero) ? want - (have ?? zero) : zero;
-  const sui = short(recommended.suiDepositMist, suiBalanceMist), wal = short(recommended.walDepositFrost, walBalanceFrost);
-  return { suiMist: sui, walFrost: wal, enough: sui === zero && wal === zero };
-}
-
-function trim(n: number): string {
-  return n >= 100 ? Math.round(n).toLocaleString("en-US") : n.toFixed(1).replace(/\.0$/, "");
+  const errors = settingsErrors(settings);
+  if (errors.length) throw new Error(`Fleet settings outside the contract bounds: ${errors.join("; ")}`);
+  return settings;
 }

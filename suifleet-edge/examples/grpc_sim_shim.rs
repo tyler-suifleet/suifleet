@@ -51,18 +51,23 @@ impl Shim {
         if let Some(error) = reply.get("error") {
             // The simulator reports an unavailable service (and failed
             // assertions) as errors; the daemon must treat both as failures.
-            return Err(Status::unavailable(error["message"].as_str().unwrap_or("error").to_owned()));
+            let message = error["message"].as_str().unwrap_or("error").to_owned();
+            return Err(match error["code"].as_i64() {
+                Some(429) => Status::resource_exhausted(message),
+                Some(408) => Status::deadline_exceeded(message),
+                _ => Status::unavailable(message),
+            });
         }
         Ok(reply["result"].clone())
     }
 
-    /// Dynamic fields the simulator knows, as (parent, key type, key BCS hex),
-    /// matched by their derived object IDs.
+    /// Dynamic fields the simulator knows, as (parent, key type, key BCS hex
+    /// [, value type]), matched by their derived object IDs.
     async fn dynamic_field(&self, id: Address) -> Result<Option<proto::Object>, Status> {
         let fields = self.call("shim_fields", json!([])).await?;
         for field in fields.as_array().into_iter().flatten() {
-            let (Some(parent), Some(key), Some(key_hex)) =
-                (field[0].as_str(), field[1].as_str(), field[2].as_str())
+            let (Some(parent), Some(key), Some(key_hex), value_type) =
+                (field[0].as_str(), field[1].as_str(), field[2].as_str(), field[3].as_str().unwrap_or("unknown"))
             else {
                 return Err(Status::internal("malformed simulator field"));
             };
@@ -81,7 +86,7 @@ impl Shim {
                 return Err(Status::not_found(format!("dynamic field {id} not found")));
             }
             let mut object = proto::Object::default();
-            object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
+            object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, {value_type}>"));
             object.json = Some(Box::new(to_proto(&json!({"value": value}))));
             return Ok(Some(object));
         }

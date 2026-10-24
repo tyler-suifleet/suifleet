@@ -11,9 +11,9 @@ import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { quoteDate } from "@/lib/cost-quote";
 import { SETTING_KEYS, fleetPrice, loadPriceTable, type PriceTable, type SettingKey } from "@/lib/fleet-pricing";
 import {
-  DEFAULT_WORKLOAD, SETTINGS_BOUNDS, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings,
-  type FleetSettings, type Workload,
-} from "@/lib/fleet-settings";
+  DEFAULT_WORKLOAD, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings, type Workload,
+} from "@/lib/fleet-settings-cost";
+import { SETTINGS_BOUNDS, type FleetSettings } from "@/lib/fleet-settings";
 import { settingsSaver } from "@/lib/fleet-settings-tx";
 import { MEASURED, formatToken, rescaled } from "@/lib/network-costs";
 
@@ -81,7 +81,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     try { return { settings: toSettings({ ...values, [key]: value }, NETWORK) }; }
     catch (cause) {
       if (key !== "archiveRetentionDays") return { reason: (cause as Error).message };
-      return { reason: `Unavailable here: needs ${retentionEpochs(value, NETWORK)} Walrus epochs of ${epochDays(NETWORK)} day(s); the limit is ${SETTINGS_BOUNDS.archiveRetentionEpochs.max}` };
+      return { reason: `Unavailable here: needs ${retentionEpochs(value, NETWORK)} Walrus epochs of ${epochDays(NETWORK)} day(s); the limit is ${SETTINGS_BOUNDS.archiveRetentionEpochs[1]}` };
     }
   };
   const walCounted = !!config;

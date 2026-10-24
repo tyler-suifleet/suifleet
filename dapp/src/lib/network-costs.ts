@@ -101,19 +101,16 @@ export function rescaled(quote: CostQuote = MAINNET_QUOTE) {
 /** Mainnet-rescaled measured constants, at the recorded Mainnet reference gas price. */
 export const MAINNET = rescaled(MAINNET_QUOTE);
 
-/** Fleet-wide protected index; shared by releases and device archives. */
-export const PROTECTED_BLOB_LIMIT = 1024;
+/** Archive growth projection; v3 keyed protection has no fleet-wide slot cap. */
 
 export function protectedArchiveCapacity(existing: number, devices: number, uploadsPerDeviceMonth: number, months: number) {
-  checked("existing protected blobs", existing, PROTECTED_BLOB_LIMIT);
+  checked("existing protected blobs", existing, Number.MAX_SAFE_INTEGER);
   checked("devices", devices, 1_000_000);
   checked("device archive uploads", uploadsPerDeviceMonth, 100_000);
   checked("months", months, 120);
   const monthlyUploads = devices * uploadsPerDeviceMonth;
-  const remaining = PROTECTED_BLOB_LIMIT - existing;
   const planned = monthlyUploads * months;
-  return { remaining, planned, exceedsCapacity: planned > remaining,
-    daysToCapacity: monthlyUploads ? remaining * 30 / monthlyUploads : null };
+  return { existing, planned };
 }
 
 const MIB = BigInt(1024 * 1024);

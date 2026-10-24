@@ -3714,6 +3714,207 @@ export const MOVE_ABI = {
       }
     }
   },
+  "fleet_settings": {
+    "functions": {
+      "archive_interval_ms": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "archive_retention_epochs": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u32"
+        ]
+      },
+      "check_interval_ms": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "defaults": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [],
+        "returns": [
+          "sui_edge::fleet_settings::Settings"
+        ]
+      },
+      "health_interval_ms": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "new": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u32"
+        ],
+        "returns": [
+          "sui_edge::fleet_settings::Settings"
+        ]
+      },
+      "rollout_check_interval_ms": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "set": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::fleet_budget::FleetBudget",
+          "&sui_edge::fleet_budget::BudgetOwnerCap",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "u32",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "settings": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_budget::FleetBudget"
+        ],
+        "returns": [
+          "std::option::Option<sui_edge::fleet_settings::Settings>"
+        ]
+      },
+      "version": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::fleet_settings::Settings"
+        ],
+        "returns": [
+          "u64"
+        ]
+      }
+    },
+    "structs": {
+      "FleetSettingsChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "budget_id",
+            "sui::object::ID"
+          ],
+          [
+            "changed_by",
+            "address"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "previous",
+            "std::option::Option<sui_edge::fleet_settings::Settings>"
+          ],
+          [
+            "settings",
+            "sui_edge::fleet_settings::Settings"
+          ]
+        ]
+      },
+      "Settings": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "version",
+            "u64"
+          ],
+          [
+            "check_interval_ms",
+            "u64"
+          ],
+          [
+            "rollout_check_interval_ms",
+            "u64"
+          ],
+          [
+            "health_interval_ms",
+            "u64"
+          ],
+          [
+            "archive_interval_ms",
+            "u64"
+          ],
+          [
+            "archive_retention_epochs",
+            "u32"
+          ]
+        ]
+      },
+      "SettingsKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      }
+    }
+  },
   "roles": {
     "functions": {
       "allow_group": {

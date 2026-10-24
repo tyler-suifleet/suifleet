@@ -8,6 +8,7 @@ mod tunneling;
 mod clientdevices;
 mod client_gateway;
 mod control;
+mod cadence;
 mod apply;
 mod oci;
 mod bridge;
@@ -19,6 +20,7 @@ mod deps;
 mod firmware;
 mod funding;
 mod fleet_data;
+mod fleet_settings;
 mod fleet_archive;
 mod handoff;
 mod identity;
@@ -373,13 +375,16 @@ async fn main() -> anyhow::Result<()> {
             .run(),
         )),
         None => {
-            info!("No [telemetry] configured; device health is not reported");
+            if cfg.fleet_data.is_none() {
+                info!("Configure [fleet_data] for on-chain health and Walrus archives");
+            }
             None
         }
     };
-    // Redacted remote logs beside it (validated to have [telemetry]).
+    // Archives own the log cursor when enabled. HTTP health may coexist, but
+    // never start a competing HTTP collector on that same durable cursor.
     let shipper = match (&cfg.logs, &cfg.telemetry) {
-        (Some(settings), Some(telemetry)) => Some(tokio::spawn(
+        (Some(settings), Some(telemetry)) if cfg.http_logs_enabled() => Some(tokio::spawn(
             logs::Task {
                 binding: logs::Binding {
                     chain_identifier: sui.manifest().chain_identifier.clone(),
@@ -453,8 +458,19 @@ async fn main() -> anyhow::Result<()> {
             address = sui.address(),
             "Daemon started with durable deployment polling"
         );
+        let mut cadence = cadence::Cadence::default();
+        let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
-            let cycle = poll(&cfg, &sui, &walrus, &runner, store.as_ref(), &configs, &mut supervisor, &mut journal);
+            let cycle = poll(
+                &cfg,
+                &sui,
+                &walrus,
+                &runner,
+                store.as_ref(),
+                &configs,
+                &mut supervisor,
+                &mut journal,
+            );
             tokio::select! {
                 result = cycle => match result {
                     Err(error) if error.downcast_ref::<handoff::Requested>().is_some() => {
@@ -468,13 +484,28 @@ async fn main() -> anyhow::Result<()> {
                         break;
                     }
                     result => {
+                        cadence.record(result.is_ok());
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            // The fleet's settings (SF-130) bound when to check next, so an
+            // owner's change applies within one interval.
+            if let Some(budget) = fleet_settings::budget_id(&cfg) {
+                tokio::select! {
+                    read = fleet_settings::read(&sui, budget) => { fleet_settings.update(read); }
+                    _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+                }
+            }
+            let checks = fleet_settings::runtime(&cfg.runtime, fleet_settings.current());
+            let delay = tokio::time::sleep(cadence.delay(
+                &checks,
+                journal.state.deferred.values(),
+                telemetry::now_ms(),
+                journal.state.check_window,
+            ));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -501,7 +532,18 @@ async fn main() -> anyhow::Result<()> {
                             break;
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
+                        let needs_report = pending.request.operation == "install" && result.is_ok()
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && !o.reported);
                         let _ = pending.reply.send(ipc::response(result));
+                        // A local request can discover a scheduled record while
+                        // the normal check sleeps. Only shorten the wakeup;
+                        // unrelated IPC traffic must never postpone a check.
+                        let next = tokio::time::Instant::now() + if needs_report {
+                            Duration::ZERO
+                        } else {
+                            cadence.delay(&checks, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
+                        };
+                        if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
                     Some(control) = async {
                         match console_server.as_mut() {
@@ -769,26 +811,9 @@ async fn poll(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
         }
     }
-    // Reports remain queued across network failures and daemon restarts.
-    let pending: Vec<_> = journal
-        .state
-        .deployments
-        .iter()
-        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
-        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
-        .collect();
-    for (id, status) in pending {
-        match sui
-            .report_status(&id, &cfg.device.device_cap_id, status)
-            .await
-        {
-            Ok(_) => {
-                journal.state.deployments.get_mut(&id).unwrap().reported = true;
-                journal.save()?;
-            }
-            Err(error) => warn!(%id, %error, "Status report remains queued"),
-        }
-    }
+    // A later page/control read can fail repeatedly. Retry existing receipts
+    // first, while still allowing discovery during temporary reporting outages.
+    flush_reports(sui, journal, &cfg.device.device_cap_id).await?;
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
         for (event, cursor) in page.events {
@@ -844,7 +869,41 @@ async fn poll(
             execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
         }
     }
-    reconcile(cfg, sui, walrus, runner, store, configs, supervisor, journal).await
+    reconcile(
+        cfg, sui, walrus, runner, store, configs, supervisor, journal,
+    )
+    .await?;
+    // Report new outcomes before the long normal sleep.
+    flush_reports(sui, journal, &cfg.device.device_cap_id).await
+}
+/// Keep durable receipt retries independent of later discovery/reconciliation.
+/// Report failures remain queued without poisoning discovery cadence: a deleted
+/// deployment or lost targeting can make a receipt permanently undeliverable.
+/// Journal I/O failures still abort the cycle immediately.
+async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str)
+    -> anyhow::Result<()> {
+    let pending: Vec<_> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
+        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
+        .collect();
+    for (id, status) in pending {
+        match sui
+            .report_status(&id, cap, status)
+            .await
+        {
+            Ok(_) => {
+                journal.state.deployments.get_mut(&id).unwrap().reported = true;
+                journal.save()?;
+            }
+            Err(error) => {
+                warn!(%id, %error, "Status report remains queued");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished
@@ -1031,7 +1090,9 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -
     let notified = journal.state.deferred.get(id)
         .filter(|d| d.control == control && d.notified_ms <= now)
         .map(|d| d.notified_ms).unwrap_or(now);
-    let reason = match control.reason(now, notified)? {
+    let policy_reason = control.reason(now, notified)?;
+    cadence::Window::remember(&mut journal.state.check_window, &control, now);
+    let reason = match policy_reason {
         Some(reason) => Some(reason),
         None => sui.rollout_admission(id, device).await?,
     };

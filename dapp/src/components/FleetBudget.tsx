@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useCurrentAccount, useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
@@ -14,14 +14,16 @@ import {
   buildSetDeviceSuspendedTx, buildSetPausedTx, buildSwapAndDepositWalTx, buildWithdrawTx, buildWithdrawWalTx, defaultReserve, fetchAccount, fetchAccounts,
   minWalOut, periodUsage, planRefill, readExchange, storageAlerts, storageConfig, swapRoute, type AccountView, type StorageConfig,
 } from "@/lib/fleet-budget";
-import { MEASURED, PROTECTED_BLOB_LIMIT, encodedBlobLength, estimate, formatToken, parseToken, rescaled, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
+import { MEASURED, encodedBlobLength, estimate, formatToken, parseToken, rescaled, runwayDays, type Estimate, type EstimateInput } from "@/lib/network-costs";
 import { DEFAULT_PRICE_TABLE } from "@/lib/fleet-pricing";
-import { DEFAULT_WORKLOAD, defaultValues, depositInput, toSettings } from "@/lib/fleet-settings";
+import { DEFAULT_WORKLOAD, defaultValues, depositInput, toSettings } from "@/lib/fleet-settings-cost";
 import { quoteDate } from "@/lib/cost-quote";
 import { useCostQuote } from "@/hooks/useCostQuote";
 import {
   FEE_NOTES, checkoutUrl, clearPurchase, loadPurchase, onrampProvider, purchaseStatus, savePurchase, type OnrampAsset, type PendingPurchase,
 } from "@/lib/onramp";
+
+import { enrollBudgetDevices, enrollmentReads, prepareEnrollment, type EnrollmentProgress } from "@/lib/budget-enrollment";
 
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
@@ -65,8 +67,8 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health, weekly archives kept six weeks); the Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Protected registration scans every retained blob; gas grows with history and protocol object/gas limits may stop writes before the index fills. No measured maximum at fleet scale is available.</p>}
-    {result.estimate?.protectedCapacity && <p role="status">If protected retention is enabled: {result.estimate.protectedCapacity.planned} planned archives; {result.estimate.protectedCapacity.remaining} of {PROTECTED_BLOB_LIMIT} fleet-wide slots remain from the entered count. {result.estimate.protectedCapacity.daysToCapacity === null ? "No archive uploads are planned." : `At this rate the index fills in ${result.estimate.protectedCapacity.daysToCapacity.toFixed(1)} days without owner releases.`} Additional releases/diagnostics/crashes consume more slots. {result.estimate.protectedCapacity.exceedsCapacity ? "Planned archives exceed capacity: this deposit cannot make that retention plan feasible." : "Capacity does not guarantee admission."} All new device archives share one absolute target epoch; any expired protected blob halts new registrations until owner maintenance. Reconcile the live retention panel before funding.</p>}
+    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health, weekly archives kept six weeks); the Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
+    {result.estimate?.protectedCapacity && <p role="status">Projected archives: {result.estimate.protectedCapacity.planned}; existing covered blobs entered: {result.estimate.protectedCapacity.existing}. Migrated v3 storage has no fleet-wide protection slot cap. Archives purchased through their full owner-approved target need no renewal reserve. Releases and recipes still require finite renewal authorization. Check actual coverage, reserves and per-blob expiry before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">
       <tbody>
@@ -191,7 +193,13 @@ export function BudgetManager() {
   const account = useCurrentAccount(), client = useCurrentClient();
   const { budget, isLoading, error: readError } = useFleetBudget();
   const devices = useDevices();
-  const { submit, message, error, pending } = useSubmit();
+  const { submit, message, error, pending: singlePending } = useSubmit();
+  const batchMutation = useFleetTransaction(), cache = useQueryClient(), wallet = useDAppKit();
+  const batchBusy = useRef(false);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<EnrollmentProgress>();
+  const [batchError, setBatchError] = useState("");
+  const pending = singlePending || batchRunning;
   const [withdraw, setWithdraw] = useState("");
   const activated = (devices.data ?? []).filter((device) => device.ownerCapId);
   const accounts = useQuery<(AccountView | undefined)[]>({
@@ -201,6 +209,28 @@ export function BudgetManager() {
     queryFn: () => fetchAccounts(client, budget!.id, activated.map((device) => device.objectId)),
   });
   if (!account || !budget) return isLoading ? <p className="text-xs">Loading…</p> : readError ? <p role="alert" className="text-xs">{readError.message}</p> : null;
+  async function enrollAll() {
+    if (batchBusy.current || singlePending || !account || !budget) return;
+    batchBusy.current = true; setBatchRunning(true); setBatchError("");
+    try {
+      await enrollBudgetDevices({
+        devices: activated.map(d => ({ objectId: d.objectId, ownerCapId: d.ownerCapId! })),
+        ...enrollmentReads(client, account.address, budget.id),
+        prepare: tx => prepareEnrollment(tx, client, account.address),
+        execute: tx => {
+          if (wallet.stores.$connection.get().account?.address !== account.address) throw new Error("Wallet account changed; stop and resume with the original owner");
+          return batchMutation.mutateAsync({ transaction: tx });
+        },
+        onProgress: setBatchProgress,
+      });
+    } catch (cause) {
+      setBatchError(`${cause instanceof Error ? cause.message : "Enrollment stopped"}. Confirmed chunks remain enrolled. Resume rechecks every device on chain; an uncertain submission may require waiting for indexing before retrying.`);
+    } finally {
+      batchBusy.current = false; setBatchRunning(false);
+      await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-budgets"] }),
+        cache.invalidateQueries({ queryKey: ["fleet-budget-accounts"] })]);
+    }
+  }
   const accountsReady = !accounts.error && accounts.data !== undefined && devices.isSuccess;
   const now = BigInt(Date.now());
   const enrolled = (accounts.data ?? []).filter((a): a is AccountView => !!a);
@@ -219,6 +249,18 @@ export function BudgetManager() {
       <button type="button" className="border rounded px-2 py-1" disabled={pending} onClick={() => void submit(() => buildWithdrawTx(budget.id, budget.capId, parseToken(withdraw), account.address))}>Withdraw unallocated funds</button>
     </div>
     <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period, never more than its reserve, until you suspend or remove it here, pause the budget or revoke its key on the Devices page.</p>
+    <div className="space-y-1">
+      <button type="button" className="border rounded px-2 py-1" disabled={pending || !accountsReady || !activated.length} onClick={() => void enrollAll()}>
+        {batchProgress?.phase === "stopped" ? "Resume enrollment" : "Enroll all unenrolled devices"}
+      </button>
+      <p>Up to 200 devices per approval (5 approvals for 1,000 new devices). Each chunk is checked for size and gas before signing. Initial floats and up to two period allowances per device come from the budget; limited reserves are shared evenly.</p>
+      {batchProgress && <div role="status">
+        <p>{batchProgress.confirmed} of {batchProgress.total} confirmed this run; {batchProgress.skipped} already enrolled; {batchProgress.excluded.length} excluded. {batchProgress.phase === "approval" ? `Approve chunk ${batchProgress.chunk} (gas budget ${sui(BigInt(batchProgress.estimatedGas!))}).` : batchProgress.phase}.</p>
+        {batchProgress.excluded.map(item => <p key={item.deviceId}>Excluded {item.deviceId}: {item.reason}</p>)}
+        {batchProgress.digests.map(digest => <p key={digest}>Confirmed {digest}</p>)}
+      </div>}
+      {batchError && <p role="alert">{batchError}</p>}
+    </div>
     {accounts.error ? <p role="alert">Budget accounts unavailable: {accounts.error.message}</p>
       : devices.error ? <p role="alert">Budget devices unavailable: {devices.error.message}</p>
       : !accountsReady ? <p>Loading budget accounts…</p> : <table className="w-full border">
@@ -239,7 +281,7 @@ export function BudgetManager() {
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, a.accountId, a.limits.floatCap))}>Send float</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, a.accountId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId))}>Remove</button>
-          </> : <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
+          </> : <button type="button" className="underline" disabled={pending || !accounts.isSuccess} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
             defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;
       })}</tbody>
@@ -372,17 +414,17 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const [walFunds, setWalFunds] = useState('1'), [gasFunds, setGasFunds] = useState('0.1');
   const [blob, setBlob] = useState(''), [target, setTarget] = useState(0), [maxFee, setMaxFee] = useState('1');
   const [withdrawConfirmed, setWithdrawConfirmed] = useState(false);
-  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
+  const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
-  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(2), refetchInterval: 60_000,
+  const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
     queryFn: () => fetchDeviceRetention(client, config, storage) });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
     <legend>Protected retention</legend>
-    <p role="status">{view.isSuccess ? `${blobs.filter((item) => item.policy).length}/${PROTECTED_BLOB_LIMIT} protected slots used across the entire fleet.` : "Protected slot usage unavailable; do not assume empty storage."} Only owner release frees slots; renewal does not. Every registration scans retained blobs, so gas grows with history and chain limits can halt admission earlier. New archives share one absolute target epoch. Any expired protected blob blocks all new registrations. Apply prepaid renewals before expiry or deliberately release obsolete references with verified backups; changing the new-archive target does not renew old blobs.</p>
+    <p role="status">{view.isSuccess ? `${blobs.filter((item) => item.policy).length} renewal policies across the fleet.` : "Renewal usage unavailable."} Migrated v3 storage uses keyed records with no fleet-wide slot cap or registration expiry scan. An expired blob needs its own restore/reference review; unrelated registrations continue when coverage and reserves are adequate. Changing the new-archive target does not renew old blobs.</p>
     <p>Renewal executor rewards and gas use these separate protected reserves. They are additional to device health/archive transaction estimates; match the estimate storage horizon to the finite target.</p>
-    {version < BigInt(2) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v2 (retires old mutation calls)</button> : <>
+    {version < BigInt(3) ? <button type="button" onClick={() => void submit(() => buildMigrateRetentionTx(config, storage, budget, cap))}>Migrate storage to retention v3 (retires old mutation calls)</button> : <>
       {retentionFacts(policy, blobs, epoch).map((fact) => <p key={fact} role="status">{fact}</p>)}
       <p>Run the owner-configured renewal worker separately from this browser. Check its private status file for persistent failures and notifier delivery acknowledgments. No running notifier means no alert guarantee.</p>
       {policy && <p>Discretionary WAL is separate from protected reserves: {wal(BigInt(policy.wal.value))} and {sui(BigInt(policy.gas.value))}. Unpaid renewal ceilings (zero after capacity purchase): {wal(BigInt(policy.pending_wal))}. Executor {policy.executor}; policy revision {policy.revision}. Funds are prepaid; no recurring card debit.</p>}
@@ -396,7 +438,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
       </div>
       <p>Protect every fleet blob, including recipes, configuration, dependencies, rollback/recovery, site/manifest and history. External blobs are not protected by this storage; retain verified backups and import/re-upload them with owner-authorized references. Newly registered blobs pause further discretionary writes until authorized.</p>
       <table><thead><tr><th>Blob</th><th>Exclusive expiry epoch</th><th>Projected exclusive expiry / runway</th><th>Authorized target</th><th>Last successful renewal epoch</th></tr></thead><tbody>
-        {blobs.map((item) => <tr key={item.id}><td><button type="button" onClick={() => { setBlob(item.id); setTarget(item.end + 1); }}>{item.id}</button></td><td>{item.end}</td><td>{schedule ? new Date(schedule.firstEpochStartMs + item.end * schedule.epochDurationMs).toISOString() : 'schedule unavailable'}; {epoch === undefined ? '?' : Math.max(0, item.end - epoch)} epoch(s). Projection assumes unchanged epoch duration.</td><td>{item.policy?.target ?? 'unprotected'}{item.policy && item.policy.last_success_epoch === null && item.policy.max_fee === '0' ? ' (capacity prepaid)' : ''}</td><td>{item.policy?.last_success_epoch ?? 'none'}</td></tr>)}
+        {blobs.map((item) => <tr key={item.id}><td><button type="button" onClick={() => { setBlob(item.id); setTarget(item.end + 1); }}>{item.id}</button></td><td>{item.end}</td><td>{schedule ? new Date(schedule.firstEpochStartMs + item.end * schedule.epochDurationMs).toISOString() : 'schedule unavailable'}; {epoch === undefined ? '?' : Math.max(0, item.end - epoch)} epoch(s). Projection assumes unchanged epoch duration.</td><td>{item.policy?.target ?? 'no renewal policy; check coverage'}{item.policy && item.policy.last_success_epoch === null && item.policy.max_fee === '0' ? ' (capacity prepaid)' : ''}</td><td>{item.policy?.last_success_epoch ?? 'none'}</td></tr>)}
       </tbody></table>
       <label>Blob object ID <input className="border" value={blob} onChange={(e) => setBlob(e.target.value)} /></label>
       <label>Finite target epoch <input className="border w-16" type="number" value={target} onChange={(e) => setTarget(Number(e.target.value))} /></label>
