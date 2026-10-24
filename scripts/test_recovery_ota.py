@@ -262,7 +262,14 @@ def run(binary, receipt):
                     print(f"PASS: daemon restart restored the installed version in {measured['restart_recovery_seconds']}s without replaying one-shot work")
 
                     # Compromised-device response: the owner revokes the identity.
+                    # Fence the prior in-flight poll before publishing new work.
+                    # A simulated revocation cannot retroactively invalidate a
+                    # read that already returned the previous identity.
+                    diagnostic = "device identity is revoked"
+                    failures = (root / "daemon.log").read_text().count(diagnostic)
                     sim.identity = dict(sim.identity, revoked=True)
+                    ota.wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
+                                 "daemon did not reject the revoked identity", process)
                     reports = len(sim.reports)
                     sim.add("0x308")
                     time.sleep(3)
