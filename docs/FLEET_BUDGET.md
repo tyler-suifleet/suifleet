@@ -292,6 +292,14 @@ saving:
   storage the archives keep. The workload (fleet size, deployments, log data,
   releases and artifact size) is editable; the fleet size starts from the
   enrolled devices.
+- **Log uploads off by default.** New plans default to disabled log uploads
+  ([BUSINESS_PLAN.md](BUSINESS_PLAN.md), 2026-10-23). Until the owner ticks
+  "Estimate with device log uploads", the archive cadence and retention show
+  "log uploads off": no network cost, no deposit and no SuiFleet add-on
+  charge. Ticking it estimates 10 MiB of logs per device a month (editable).
+  SF-130's settings have no "archives off" value, so a saved cadence and
+  retention stay within the contract bounds and do not by themselves turn
+  device uploads on.
 - **Network cost and price kept apart.** One panel shows the monthly network
   cost at cost, paid from the fleet budget. A separate panel shows the
   SuiFleet price: graduated base tiers, add-ons, the monthly minimum, the
@@ -320,9 +328,10 @@ saving:
   part shows its source and date; whatever is not read live keeps the
   recorded Mainnet snapshot, labelled "recorded". The Network budget
   estimate uses the same quote, and its defaults now follow the default
-  settings: daily health and four receipts a month, with log archives
-  disabled as new fleets default. The Fleet settings page sizes archives
-  from the chosen cadence and retention.
+  settings: daily health and four receipts a month, with log uploads off
+  as new fleets default. The Fleet settings page starts from the same
+  default and sizes archives from the chosen cadence and retention only once
+  log uploads are on.
 - **Deposit sized from the settings.** The recommended SUI and WAL deposit
   covers the chosen settings, fleet size and prepaid months. Per-month counts
   round up to whole reports and archives, with 20% headroom. It is compared
@@ -342,7 +351,8 @@ saving:
 
 Until deposit reclaim
 ([SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264)), a
-weekly archive's Walrus storage deposit dominates the default network cost.
+weekly archive's Walrus storage deposit dominates the network cost once log
+uploads are on.
 That is about $0.10 per device a month at the recorded quote, above the
 proposed $0.08 first-tier base price, as the business plan notes.
 
