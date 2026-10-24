@@ -43,11 +43,29 @@ desires a record. It has no abilities, so it cannot outlive that transaction.
    managed) can make a record desired.
 2. `confirm_not_desired(retirement, group)` for each target group: aborts with
    `EStillDesired` (7) while the group's current desired state references the
-   record.
+   record. It records the confirmed record on the group, with the transaction
+   digest, in a `RetirementCheck` dynamic field.
 3. `retire(retirement, record)`: aborts with `EUnconfirmed` (8) if a group is
    still unchecked. Catalog records remove their binding through
    `component_catalog::delete_deployment` first; staged rollouts use
    `delete_rollout`. Devices already refuse deleted records.
+
+The proof stays valid until the record is deleted, whatever else the
+transaction calls:
+
+- A confirmed group's `commit` in the same transaction aborts with `ERetiring`
+  (10) if the new revision references the record. This also covers a
+  `RevisionPlan` prepared before `begin_retirement`.
+- `retire` aborts with `ERetiring` if the record became managed after
+  `begin_retirement`, because its groups were never checked.
+- The group's next commit in a later transaction removes the stale check and
+  returns its deposit. Until then the check holds about 2.8M MIST per confirmed
+  group (measured below).
+
+Earlier package versions of `desired_state` remain callable and do not see the
+check. That leaves the creator the same reach as the unchanged creator-only
+`delete_deployment`: the checked path protects the dApp and composed calls
+through the current package, not a creator deliberately using old entry points.
 
 The additive `deployment_manager::schema_version` getter selects the deletion
 path. The existing creator-only `delete_deployment` calls are unchanged. A
@@ -118,9 +136,11 @@ fees per blob, because reclaim also refunds deposits that owner and
 shared-object writes paid earlier.
 
 An unanchored blob returns 7,729,733 MIST. Retiring two finished deployment
-records in one transaction returned 30,643,137 MIST, about 15.3M each. This is
-consistent with the historical 11,751,525 MIST single deletion in the
-[cost model](business/FLEET_COST_MODEL.md).
+records in one transaction returned 27,808,156 MIST net, about 13.9M each. That
+figure already pays for the `RetirementCheck` on the one confirmed group,
+2,834,981 MIST less than without it; the group's next commit returns that
+deposit. It is consistent with the historical 11,751,525 MIST single deletion
+in the [cost model](business/FLEET_COST_MODEL.md).
 
 ### Locked deposit per device at the default retention
 
@@ -146,7 +166,7 @@ sizes and storage-unit price are protocol constants.
 | Check | Command | Result |
 |---|---|---|
 | Move unit tests (`fleet_data`) | `sui move test --path contracts/fleet_data --build-env testnet` | 28/28 PASS: expiry, atomic batch, released blob, owner, double prune, re-anchor refusal |
-| Move unit tests (core) | `sui move test --path contracts` | 177/177 PASS: still desired, unconfirmed or untargeted group, non-creator, mismatched record, catalog and rollout paths |
+| Move unit tests (core) | `sui move test --path contracts` | 181/181 PASS: still desired, unconfirmed or untargeted group, non-creator, mismatched record, catalog and rollout paths; same-transaction reassignment after confirmation, a plan prepared before retirement, and assignment after `begin_retirement` all abort |
 | Move security gate | `python3 scripts/check_move_security.py` | PASS |
 | Interfaces | `make check-interfaces` | PASS |
 | dApp unit tests | `node scripts/test_storage_reclaim.cjs` | PASS |
@@ -201,7 +221,9 @@ was the only faucet request, and it does not replenish the allowance.
 
 **Not yet run on Testnet:** the two SF-082 archives' storage ends at Walrus
 epoch 563, and the run happened at epoch 559. No Testnet archive was expired,
-so no successful Testnet prune or rebate is claimed. Once the Walrus epoch
+so no successful Testnet prune or rebate is claimed. A read-only planner check
+on 2026-10-23 (`scripts/reclaim_plan.cjs`) found Walrus epoch 560 and no
+expired archive. Once the Walrus epoch
 reaches 563, rerun the same script with `--reclaim` while holding
 `network:suifleet-testnet`. It reuses the cached, re-verified upgrade and
 records the executed rebate.
