@@ -46,7 +46,7 @@ NEGATIVES = [
     ("identity-revoked", "identity", "is_active_signer_spec", "Check", "ensures(result == (!device_registry::identity_revoked(&identity)"),
     ("identity-signer", "identity", "is_active_signer_spec", "Check", "ensures(result == (!device_registry::identity_revoked(&identity)"),
     ("cap-authority", "device_cap", "assert_signer_security_spec", "Assume", "prover::prover::asserts(ctx.sender() == signer);"),
-    ("receipts-future", "deployment_manager", "receipts_mut_security_spec", "Assume", "prover::prover::asserts(old_version <= RECEIPTS_VERSION);"),
+    ("receipts-future", "deployment_manager", "receipts_mut_security_spec", "Assume", "prover::prover::asserts(old_version <= LEGACY_RECEIPTS_VERSION);"),
     ("receipts-clear", "deployment_manager", "receipts_mut_security_spec", "Check", "prover::prover::ensures(result.statuses.is_empty());"),
     ("role-authority", "roles", "revoke_security_spec", "Assume", "prover::prover::asserts(ctx.sender() == operator);"),
     ("role-remove", "roles", "revoke_security_spec", "Check", "prover::prover::ensures(!df::exists_with_type<RoleKey, address>"),

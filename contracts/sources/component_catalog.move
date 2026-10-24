@@ -35,6 +35,7 @@ module sui_edge::component_catalog {
     public struct VersionPublished has copy, drop {
         catalog_id: ID, version_id: ID, publisher: address, component_name: String, version: String,
     }
+    public struct ShardedCatalogBindingKey has copy, drop, store {}
     public struct CatalogBindingKey has copy, drop, store {}
     public struct CatalogBinding has store, drop { version_id: ID }
 
@@ -93,8 +94,17 @@ module sui_edge::component_catalog {
     }
     #[allow(lint(prefer_mut_tx_context))]
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
-        deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
+        if (deployment_manager::receipt_schema(&deployment) == 2 &&
+            deployment_manager::receipts_version(&deployment) == 3) {
+            deployment_manager::remove_catalog_binding<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
+        } else {
+            deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
+        };
         deployment_manager::delete_deployment(deployment, ctx);
+    }
+    public fun begin_sharded_receipts(d: &mut DeploymentRecord, ctx: &mut TxContext) {
+        deployment_manager::begin_catalog_receipts<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(
+            d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, ctx);
     }
     public fun versions(catalog: &ComponentCatalog): &VecMap<String, ID> { &catalog.versions }
     public fun publisher(catalog: &ComponentCatalog): address { catalog.publisher }

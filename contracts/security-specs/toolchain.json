@@ -38,7 +38,7 @@
     "registry-spec-helpers.move": "49ddffaf2377b35c3e81834803dd0b531f47c47f4ee644c22a9c9a6f80dd85b3",
     "dof-spec-helpers.move": "098bdcbd995453a09f77e2b54f6051449665a194bb8f3d9a2e3060429bc9fa44",
     "roles-spec-helpers.move": "da1e9f29509351788a451ab7279bb22cc1ff8b400ed273d85d1e4c0840e82a49",
-    "deployment-spec-helpers.move": "b8f9c445577bcc910f68bbeb88e9d62294db3b33f13076da4e426e88c403280b",
+    "deployment-spec-helpers.move": "2056a65fa903be02e3bad54d896f040ff69f0508760c5093f1011e2b01bdf45a",
     "cap-spec-helpers.move": "e9d84071f8e15197ffadedee373f06638106b6b357c4e11624a6457d80a66c98",
     "registry-custody-pending.move": "1636d8ec76c280c18fade7284691c3936c5699ae92dc6bb6794e3d71fa62ac21",
     "enrollment-spec-helpers.move": "99d58edbfd2a4934c2347305565a2905ef6080667e5386ae0d99ce4317e4411a",
