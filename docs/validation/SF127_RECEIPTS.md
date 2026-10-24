@@ -298,3 +298,29 @@ push; this worker did not watch or poll hosted checks. Fresh independent review
 and successful coordinator gates are still required. No public-chain mutations,
 physical programming or deployment occurred. Deferred acceptance in #32/#159
 remains unrun; the 120k storage-layout target is not a measured concurrency bound.
+
+
+### Current-base synchronization after superseded testnet preflight
+
+Automatic run [40136045525](https://github.com/tyler-suifleet/suifleet/actions/runs/40136045525)
+failed at `Recheck head and base immediately before spending`: the controller
+reported `superseded head/base: no testnet mutation submitted`. This is an
+intentional stale-base refusal, not a receipt execution failure or successful
+testnet acceptance. Its recorded base was `c7548c4325a1a600bece25c8485af35faadd5361`.
+
+Merged snapshot/current main `233f4605e6d6e7c7c9f5c646e27d5528f001b948`
+in `dfde18becc50d55549300d48ee8dcfc98360f09e`. The automatic merge changes only
+coordinator dashboard/tests, coordinator documentation and tracking records;
+receipt runtime, contracts, client code and testnet spending controls are unchanged.
+The latest independent review reported no actionable source/security defect.
+
+On the merged tree, dashboard regressions passed (45 tests),
+offline testnet regressions passed (81 tests, one existing
+skip), live-common regressions passed (37 tests), and tracking tests passed (10).
+Synthetic connection-reset/cleanup diagnostics in live-common are expected
+failure-path fixtures; no public-network transaction was submitted by these tests.
+The previous broader receipt feature evidence above is historical and was not
+rerun for this coordinator-only base synchronization. Hosted checks and automatic
+testnet must run against the new head/current base; no pending check is approval.
+Physical acceptance (#32), mainnet and final provider/manual-wallet acceptance
+(#159) remain deferred and unrun. No deployment or hardware operation occurred.
