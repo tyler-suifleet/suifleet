@@ -300,7 +300,7 @@ module sui_edge::deployment_manager {
     ) {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
         let _: V = df::remove(&mut deployment.id, key);
-        if (deployment.schema_version == 4) {
+        if (df::exists(&deployment.id, ReceiptShardKey {})) {
             let directory: &mut ReceiptDirectory = df::borrow_mut(&mut deployment.id, ReceiptShardKey {});
             directory.original_schema = SCHEMA_VERSION;
         } else { deployment.schema_version = SCHEMA_VERSION; };
@@ -507,8 +507,18 @@ module sui_edge::deployment_manager {
         d.creator = recipient;
     }
 
+    // Verbatim pre-sharding handover guard/body for unit regression; the
+    // localnet harness also executes the actual published base bytecode.
+    #[test_only]
+    public(package) fun legacy_handover_for_testing(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        assert!(d.schema_version != 2, EPackageOutdated);
+        d.creator = recipient;
+    }
+
     // SF-127: the legacy Receipts layout remains unchanged. Version 3 is a
-    // barrier: v2 entry points abort, schema 4 also blocks old deletion paths.
+    // barrier: v2 entry points abort. Ordinary/rollout schema 4 blocks old
+    // deletion paths; catalogs retain schema 2 to block old handover too.
     // Ordinary creation stays v2 for mixed clients; explicitly opt in using
     // begin_sharded_receipts, then migrate each root and finish the barrier.
     public struct ReceiptLayoutChanged has copy, drop { deployment_id: ID }
@@ -543,7 +553,7 @@ module sui_edge::deployment_manager {
     }
     public fun receipt_roots(d: &DeploymentRecord): &vector<ID> { &receipt_directory(d).roots }
     public fun receipt_schema(d: &DeploymentRecord): u64 {
-        if (d.schema_version == 4) receipt_directory(d).original_schema else d.schema_version
+        if (df::exists(&d.id, ReceiptShardKey {})) receipt_directory(d).original_schema else d.schema_version
     }
     /// Creator opt-in; repeated starts do nothing. No authority can report while
     /// the snapshot is copied, and stale pre-v2 history is never promoted.
@@ -577,7 +587,7 @@ module sui_edge::deployment_manager {
         event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
     }
     /// Relocate catalog authority out of the key understood by old deletion
-    /// paths before enabling schema 4. Called only by the binding's module.
+    /// paths before enabling shards. Called only by the binding's module.
     public(package) fun begin_catalog_receipts<K: copy + drop + store, N: copy + drop + store, V: store>(
         d: &mut DeploymentRecord, old_key: K, new_key: N, ctx: &mut TxContext,
     ) {
@@ -590,6 +600,9 @@ module sui_edge::deployment_manager {
         begin_sharded_receipts(d, ctx);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         directory.original_schema = 2;
+        // Previously published handover checks the inline schema, not this
+        // directory. Preserve its catalog rejection across every old package.
+        d.schema_version = 2;
     }
     fun assert_bound(d: &DeploymentRecord, shard: &ReceiptShard) {
         assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
@@ -751,7 +764,7 @@ module sui_edge::deployment_manager {
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun target_groups(d: &DeploymentRecord): &vector<ID> {
-        if (d.schema_version == 4) df::borrow(&d.id, ShardedTargetGroupsKey {})
+        if (df::exists(&d.id, ReceiptShardKey {})) df::borrow(&d.id, ShardedTargetGroupsKey {})
         else df::borrow(&d.id, TargetGroupsKey {})
     }
 

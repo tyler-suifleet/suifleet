@@ -211,7 +211,7 @@ pub async fn resolve(
         );
     }
     let binding = sui
-        .dynamic_field(&event.deployment_id, if fields["schema_version"] == "4" || fields["schema_version"] == 4 { "component_catalog::ShardedCatalogBindingKey" } else { "component_catalog::CatalogBindingKey" })
+        .dynamic_field(&event.deployment_id, if sui.has_receipt_shards(&event.deployment_id).await? { "component_catalog::ShardedCatalogBindingKey" } else { "component_catalog::CatalogBindingKey" })
         .await?
         .ok_or_else(|| anyhow::anyhow!("missing catalog binding"))?;
     let id = binding["version_id"]

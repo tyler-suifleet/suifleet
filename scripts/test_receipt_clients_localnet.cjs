@@ -1,10 +1,6 @@
-// SF-130 on an isolated localnet: per-fleet cost settings introduced by a
-// compatible base->head upgrade and stored on a FleetBudget created before
-// it; owner-only changes with auditable FleetSettingsChanged events carrying
-// the previous values; real on-chain refusals for another fleet's cap and
-// out-of-bounds values; base-package budget operations still working beside
-// the record; and the real daemon and the dApp reading the record over gRPC.
-// Run through scripts/test_protocol_localnet.py --settings-upgrade (network none).
+// SF-127: real pre-identity upgrade/deletion attack and daemon/indexer
+// interoperability for ordinary and schema-2 catalog sharded receipts.
+// Run through scripts/test_protocol_localnet.py --receipt-clients (network none).
 const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), assert = require("node:assert/strict");
 const { execFileSync, spawn } = require("node:child_process");
 const { appRequire, loader } = require("./frontend_test_utils.cjs");
@@ -120,15 +116,34 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     await waitFor(async()=>(await journal()).deployments?.[deployment]?.reported,'real daemon v3 effects-checked report');
     await waitFor(async()=>{try{return (await app.readReceipts(client,deployment)).statuses[device.objectId]===2;}catch{return false;}},'checkpointed v3 receipt');
     assert.deepEqual((await app.readReceipts(client,deployment)).statuses,{[device.objectId]:2},JSON.stringify((await journal()).deployments[deployment]));
+    // Schema-2 catalog shards must use relocated bindings and the v3 signer,
+    // not fall back to old catalog resolution or the mutable v2 report path.
+    t=new Transaction();t.moveCall({target:`${head}::component_catalog::create_catalog`});
+    const catalog=created(await execute('create catalog client probe',t),'::component_catalog::ComponentCatalog');
+    t=new Transaction();t.moveCall({target:`${head}::component_catalog::publish_version`,arguments:[t.object(catalog),t.pure.string('catalog.probe'),t.pure.string('1.0.0'),t.pure.vector('string',['linux']),t.pure.vector('string',['x86_64']),t.pure.vector('string',['missing-recipe']),t.pure.vector('string',['ab'.repeat(32)]),t.pure.vector('string',['cd'.repeat(32)]),t.object('0x6')]});
+    const version=created(await execute('publish catalog client probe',t),'::component_catalog::ComponentVersion');
+    t=new Transaction();t.moveCall({target:`${head}::component_catalog::create_deployment_paused`,arguments:[t.object(version),t.pure.vector('id',[]),t.pure.vector('id',[device.objectId]),t.object('0x6')]});
+    const catalogDeployment=created(await execute('create paused catalog client probe',t),'::deployment_manager::DeploymentRecord');
+    t=new Transaction();t.moveCall({target:`${head}::component_catalog::begin_sharded_receipts`,arguments:[t.object(catalogDeployment)]});await execute('shard catalog client probe',t);
+    t=new Transaction();p.calls.deployment_manager_set_control(t,head,catalogDeployment,0,0,0,0,0,0);await execute('unpause catalog client probe',t);
+    await waitFor(async()=>(await journal()).deployments?.[catalogDeployment]?.reported,'real daemon schema-2 catalog v3 report');
+    await waitFor(async()=>{try{return (await app.readReceipts(client,catalogDeployment)).statuses[device.objectId]===2;}catch{return false;}},'checkpointed catalog v3 receipt');
+    const catalogOutcome=(await journal()).deployments[catalogDeployment];
+    assert.match(catalogOutcome.error,/http|recipe mirror|Walrus/i,'catalog authority must resolve before the deliberate missing-recipe failure');
+    assert.equal((await app.fetchDeploymentEvents(client,owner.toSuiAddress())).find(d=>d.deploymentId===catalogDeployment).schemaVersion,'2');
     daemon.kill('SIGINT');await new Promise(resolve=>daemon.once('exit',resolve));daemon=undefined;await log.close();
     // An independent production indexer reads the exact same root/field layout.
     const indexer=path.join(root,'suifleet-indexer/target/debug/suifleet-indexer'),db=path.join(tmp,'fleet.db');
     execFileSync(indexer,['index','--manifest',path.join(tmp,'deployment.json'),'--db',db],{encoding:'utf8',timeout:120000,stdio:['ignore','pipe','pipe']});
     const indexed=JSON.parse(execFileSync('python3',['-c','import sqlite3,json,sys; print(json.dumps(sqlite3.connect(sys.argv[1]).execute("SELECT device_id,status FROM receipts WHERE deployment_id=?",(sys.argv[2],)).fetchall()))',db,deployment],{encoding:'utf8'}));
     assert.deepEqual(indexed,[[device.objectId,2]]);
+    const catalogIndexed=JSON.parse(execFileSync('python3',['-c','import sqlite3,json,sys; c=sqlite3.connect(sys.argv[1]); print(json.dumps([c.execute("SELECT device_id,status FROM receipts WHERE deployment_id=?",(sys.argv[2],)).fetchall(),c.execute("SELECT schema_version,catalog_version FROM deployments WHERE id=?",(sys.argv[2],)).fetchone()]))',db,catalogDeployment],{encoding:'utf8'}));
+    assert.deepEqual(catalogIndexed,[[[device.objectId,2]],[2,version]]);
+    await require('./receipt_test_helpers.cjs').deleteDeployment(client,tx=>execute('bounded catalog probe cleanup '+Object.keys(digests).length,tx),catalogDeployment,'2');
+
     await require('./receipt_test_helpers.cjs').deleteDeployment(client,tx=>execute('bounded probe cleanup '+Object.keys(digests).length,tx),deployment);
-    const evidence={result:'PASS',network:'isolated network-none localnet',base,old,head,digests,failures,daemon:'actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path',indexer:'actual production index command independently materialized v3 Failed receipt',limits:['No successful artifact installation in this probe; existing OTA simulator covers successful apply','No public-network, hardware, mainnet or manual wallet acceptance']};
+    const evidence={result:'PASS',network:'isolated network-none localnet',base,old,head,digests,failures,daemon:'actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records',indexer:'actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding',catalog_probe:{deployment:catalogDeployment,version,error:catalogOutcome.error},limits:['No successful artifact installation in this probe; existing OTA simulator covers successful apply','No public-network, hardware, mainnet or manual wallet acceptance']};
     await fs.writeFile(path.join(root,'docs/validation/sf127-clients-localnet.json'),JSON.stringify(evidence,null,2)+'\n');
-    console.log('PASS: pre-identity old-package deletion rejected, actual daemon v3 report effects and independent indexer receipt read, bounded cleanup');
+    console.log('PASS: pre-identity old-package deletion rejected, actual daemon ordinary/catalog v3 report effects and independent indexer receipt/binding read, bounded cleanup');
   } finally {if(daemon){daemon.kill('SIGKILL');await new Promise(resolve=>daemon.once('exit',resolve));}await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});

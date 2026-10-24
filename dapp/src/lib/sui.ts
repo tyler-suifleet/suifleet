@@ -326,11 +326,13 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
     const record = live.get(event.deployment_id);
     return record && (!owner || record.creator === owner);
   });
+  const directories = new Map(await Promise.all(liveEvents.map(async event =>
+    [event.deployment_id, await readReceiptDirectory(client, event.deployment_id)] as const)));
   // Persisted events discover IDs only. Targets must be re-read from objects:
   // browser storage is neither a current target list nor an authority source.
   const targetValues = await batchFields(client, liveEvents.flatMap(event =>
     (["TargetGroupsKey", "TargetDevicesKey"] as const).map(name => ({ parent: event.deployment_id,
-      keyType: name === "TargetGroupsKey" && live.get(event.deployment_id)!.schema_version === "4" ? moveType("deployment_manager::ShardedTargetGroupsKey") : moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
+      keyType: name === "TargetGroupsKey" && !!directories.get(event.deployment_id) ? moveType("deployment_manager::ShardedTargetGroupsKey") : moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
       valueType: "vector<0x2::object::ID>" }))));
   const currentEvents = liveEvents.map((event, index) => {
     const groups = targetValues[index * 2], devices = targetValues[index * 2 + 1];
@@ -348,7 +350,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
       return group && group.admin === record.creator ? group.device_ids : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
-    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, receiptCleanup: record.schema_version === "4" ? (await readReceiptDirectory(client, event.deployment_id))?.retiring : undefined, schemaVersion: record.schema_version === "4" ? (await readReceiptDirectory(client, event.deployment_id))!.original_schema : record.schema_version, componentName: record.component_name, version: record.version,
+    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, receiptCleanup: directories.get(event.deployment_id)?.retiring, schemaVersion: directories.get(event.deployment_id)?.original_schema ?? record.schema_version, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
       targetGroups: event.target_groups, targetDevices: event.target_devices,
       creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,

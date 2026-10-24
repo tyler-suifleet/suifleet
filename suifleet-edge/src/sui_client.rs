@@ -900,7 +900,7 @@ impl SuiClient {
             "{id} is not a DeploymentRecord"
         );
         let field = |name: &str| record.fields[name].as_str().unwrap_or_default().to_owned();
-        let groups = self.dynamic_field(id, if number(&record.fields["schema_version"]) == Some(4) { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" }).await?;
+        let groups = self.dynamic_field(id, if self.has_receipt_shards(id).await? { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" }).await?;
         let devices = self.dynamic_field(id, "deployment_manager::TargetDevicesKey").await?;
         let event = DeploymentCreatedEvent {
             deployment_id: id.to_owned(),
@@ -926,11 +926,17 @@ impl SuiClient {
         }
     }
 
-    /// Schema 4 is the old-package deletion barrier. Payload schema and
+    pub(crate) async fn has_receipt_shards(&self, deployment: &str) -> anyhow::Result<bool> {
+        if !self.manifest().type_origins.contains_key("deployment_manager::ReceiptShardKey") { return Ok(false); }
+        Ok(self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.is_some())
+    }
+
+    /// Ordinary/rollout records use schema 4 as the old-package deletion barrier.
+    /// Catalog records retain schema 2 so old handover remains forbidden. Payload schema and
     /// rollout admission remain explicit in the introduction-origin directory.
     pub async fn deployment_schema(&self, deployment: &str, fields: &Value) -> anyhow::Result<u64> {
         let schema = number(&fields["schema_version"]).filter(|s| (1..=4).contains(s)).ok_or_else(|| anyhow::anyhow!("unsupported DeploymentRecord schema version"))?;
-        if schema != 4 { return Ok(schema); }
+        if schema != 4 && !self.has_receipt_shards(deployment).await? { return Ok(schema); }
         anyhow::ensure!(protocol::SHARD_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "missing receipt shard type origins");
         let receipts = self.dynamic_field(deployment, "deployment_manager::ReceiptsKey").await?
             .ok_or_else(|| anyhow::anyhow!("missing v3 receipt authority"))?;
@@ -946,7 +952,7 @@ impl SuiClient {
     pub async fn rollout_admission(&self, deployment: &str, device: &str) -> anyhow::Result<Option<&'static str>> {
         let record = self.object(deployment).await?;
         let schema = match number(&record.fields["schema_version"]) {
-            Some(4) => match self.deployment_schema(deployment, &record.fields).await {
+            Some(schema) if schema == 4 || self.has_receipt_shards(deployment).await? => match self.deployment_schema(deployment, &record.fields).await {
                 Ok(schema) => schema,
                 Err(_) => return Ok(Some("receipt authority unavailable; migration or retirement in progress")),
             },
@@ -1095,7 +1101,7 @@ impl SuiClient {
         let mut function = protocol::deployment_manager::REPORT_VERIFIED_STATUS;
         if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
             let groups = self
-                .dynamic_field(deployment, if number(&record.fields["schema_version"]) == Some(4) { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" })
+                .dynamic_field(deployment, if self.has_receipt_shards(deployment).await? { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" })
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("missing target groups"))?;
             let creator = record.fields["creator"].as_str().unwrap_or("").to_owned();
@@ -1110,7 +1116,7 @@ impl SuiClient {
             function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
         }
         let mut args: Vec<Arg> = objects.into_iter().map(Arg::Object).collect();
-        if number(&record.fields["schema_version"]) == Some(4) {
+        if self.has_receipt_shards(deployment).await? {
             self.deployment_schema(deployment, &record.fields).await?;
             let directory = self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.unwrap();
             let device = Address::from_str(&device_id)?;

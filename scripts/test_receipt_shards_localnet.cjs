@@ -1,10 +1,6 @@
-// SF-130 on an isolated localnet: per-fleet cost settings introduced by a
-// compatible base->head upgrade and stored on a FleetBudget created before
-// it; owner-only changes with auditable FleetSettingsChanged events carrying
-// the previous values; real on-chain refusals for another fleet's cap and
-// out-of-bounds values; base-package budget operations still working beside
-// the record; and the real daemon and the dApp reading the record over gRPC.
-// Run through scripts/test_protocol_localnet.py --settings-upgrade (network none).
+// SF-127: existing-object receipt migration, real old-package attacks (including
+// catalog handover), 1000-target storage measurement and bounded cleanup.
+// Run through scripts/test_protocol_localnet.py --receipt-shards (network none).
 const fs = require("node:fs/promises"), path = require("node:path"), os = require("node:os"), assert = require("node:assert/strict");
 const { execFileSync, spawn } = require("node:child_process");
 const { appRequire, loader } = require("./frontend_test_utils.cjs");
@@ -110,6 +106,19 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
       for (let n = start; n < start + 10; n++) tx.moveCall({ target: `${old}::deployment_manager::report_verified_status`, arguments: [tx.object(deployment), tx.object(registry), tx.object(caps[n]), tx.pure.u8(1)] });
       await execute(`seed v2 ${start}`, tx);
     }
+    // Create catalog authority and confirmed handover under the actual base.
+    tx = new Transaction(); tx.moveCall({target:`${old}::component_catalog::create_catalog`});
+    const catalog = created(await execute("create base catalog", tx), "::component_catalog::ComponentCatalog");
+    tx = new Transaction(); tx.moveCall({target:`${old}::component_catalog::publish_version`, arguments:[tx.object(catalog), tx.pure.string("catalog.app"), tx.pure.string("1.0.0"), tx.pure.vector("string",["linux"]), tx.pure.vector("string",["aarch64"]), tx.pure.vector("string",["recipe"]), tx.pure.vector("string",["aa".repeat(32)]), tx.pure.vector("string",["bb".repeat(32)]), tx.object("0x6")]});
+    const version = created(await execute("publish base catalog version", tx), "::component_catalog::ComponentVersion");
+    tx = new Transaction(); tx.moveCall({target:`${old}::component_catalog::create_deployment`, arguments:[tx.object(version), tx.pure.vector("id",[]), tx.pure.vector("id",[devices[0]]), tx.object("0x6")]});
+    const catalogDeployment = created(await execute("create base catalog deployment", tx), "::deployment_manager::DeploymentRecord");
+    tx = new Transaction(); tx.moveCall({target:`${old}::deployment_manager::report_verified_status`,arguments:[tx.object(catalogDeployment),tx.object(registry),tx.object(caps[0]),tx.pure.u8(1)]});await execute("seed base catalog receipt",tx);
+    tx = new Transaction(); tx.moveCall({target:`${old}::fleet_handover::propose`, arguments:[tx.pure.address(stranger.toSuiAddress()),tx.pure.vector("id",[catalogDeployment]),tx.pure.vector("u64",[2]),tx.pure.u64(Date.now()+3600000),tx.object("0x6")]});
+    const handover = created(await execute("propose base catalog handover",tx),"::fleet_handover::Handover");
+    tx = new Transaction();tx.moveCall({target:`${old}::fleet_handover::confirm`,arguments:[tx.object(handover),tx.object("0x6")]});await execute("confirm base catalog handover",tx,stranger);
+    const oldHandover = async t => t.moveCall({target:`${old}::fleet_handover::deployment`,arguments:[await shared(t,handover,true),await shared(t,catalogDeployment,true),await shared(t,"0x6",false)]});
+    await attack("unsharded catalog rejects old handover",owner,oldHandover,code(5,"handover"));
     const tree = path.join(tmp, "head"); await fs.mkdir(tree);
     await fs.cp(path.join(root, "contracts/sources"), path.join(tree, "sources"), { recursive: true });
     for (const name of ["Move.toml", "Move.lock"]) await fs.copyFile(path.join(root, "contracts", name), path.join(tree, name));
@@ -123,7 +132,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     assert.equal(origins['deployment_manager::Receipts'], old);
     assert.equal(origins['deployment_manager::ReceiptShard'], head);
     const manifest = {
-      schema_version: 1, protocol_version: 1, network: "localnet", chain_identifier: "00000000", rpc_url: rpc,
+      schema_version: 1, protocol_version: 1, network: "localnet", chain_identifier: appRequire("@mysten/sui/utils").toHex(appRequire("@mysten/sui/utils").fromBase58((await client.ledgerService.getServiceInfo({})).response.chainId).slice(0,4)), rpc_url: rpc,
       call_package_id: head, upgrade_cap_id: upgradeCap, package_version: pkg.version, type_origins: origins,
       shared_objects: { registry: { id: registry, initial_shared_version: (await client.getObject({ objectId: registry })).object.owner.Shared.initialSharedVersion } },
       supported_clients: { dapp: { min: "0.1.0", max_exclusive: "0.2.0" }, edge: { min: "0.2.1", max_exclusive: "0.3.0" } },
@@ -133,6 +142,25 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const load = loader(), app = load("lib/sui.ts"), shards = load("lib/receipt-shards.ts");
     const protocol = load("lib/fleet-protocol.ts");
     const call = (t, fn, args) => t.moveCall({ target: `${head}::deployment_manager::${fn}`, arguments: args });
+    tx = new Transaction(); tx.moveCall({target:`${head}::component_catalog::begin_sharded_receipts`,arguments:[tx.object(catalogDeployment)]});await execute("shard catalog with inline schema 2",tx);
+    await attack("sharded catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    await attack("sharded catalog rejects old catalog delete",owner,async t => t.moveCall({target:`${old}::component_catalog::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),/dynamic_field/);
+    await attack("sharded catalog rejects old ordinary delete",owner,async t => t.moveCall({target:`${old}::deployment_manager::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),code(5,"delete_deployment"));
+    await attack("sharded catalog rejects old reports",owner,async t => t.moveCall({target:`${old}::deployment_manager::report_verified_status`,arguments:[await shared(t,catalogDeployment,true),await shared(t,registry,false),await owned(t,caps[0]),t.pure.u8(1)]}),code(5,"receipts_mut"));
+    const catalogDirectory = await shards.readReceiptDirectory(client,catalogDeployment);
+    assert.equal(catalogDirectory.original_schema,"2");assert.equal(catalogDirectory.ready,false);
+    assert.equal((await app.readReceipts(client,catalogDeployment)).verified,false);
+    tx = new Transaction();for (const root of catalogDirectory.roots) call(tx,"migrate_receipt_chunk",[tx.object(catalogDeployment),tx.object(root),tx.pure.u64(64)]);
+    call(tx,"finish_receipt_migration",[tx.object(catalogDeployment)]);await execute("finish populated catalog migration",tx);
+    await attack("ready catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    const listed = (await app.fetchDeploymentEvents(client,owner.toSuiAddress())).find(d=>d.deploymentId===catalogDeployment);
+    assert.equal(listed.schemaVersion,"2");assert.deepEqual(listed.targetDevices,[devices[0]]);assert.deepEqual(listed.targetGroups,[]);assert.equal(listed.receiptsVerified,true);
+    tx = new Transaction();call(tx,"report_status_v3",[tx.object(catalogDeployment),tx.object(catalogDirectory.roots[shards.receiptShardIndex(devices[0])]),tx.object(registry),tx.object(caps[0]),tx.pure.u8(1)]);await execute("catalog v3 report",tx);
+    assert.equal((await app.readReceipts(client,catalogDeployment)).statuses[devices[0]],1);
+    tx = new Transaction();call(tx,"begin_receipt_cleanup",[tx.object(catalogDeployment)]);await execute("retire catalog barrier",tx);
+    await attack("retiring catalog rejects old handover",owner,oldHandover,code(5,"handover"));
+    tx = new Transaction();for (const root of catalogDirectory.roots) {call(tx,"cleanup_receipt_chunk",[tx.object(catalogDeployment),tx.object(root),tx.pure.u64(64)]);call(tx,"retire_receipt_shard",[tx.object(catalogDeployment),tx.object(root)]);}
+    tx.moveCall({target:`${head}::component_catalog::delete_deployment`,arguments:[tx.object(catalogDeployment)]});await execute("delete catalog after bounded retirement",tx);
     tx = new Transaction(); call(tx, "begin_sharded_receipts", [tx.object(deployment)]); await execute("begin v3 barrier", tx);
     const directory = await shards.readReceiptDirectory(client, deployment), roots = directory.roots;
     assert.equal(roots.length, 16); assert.equal(directory.ready, false);

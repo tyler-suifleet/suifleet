@@ -77,6 +77,56 @@ module sui_edge::fleet_handover_tests {
         ts::end(s);
     }
 
+    public struct ShardedTestBinding has copy, drop, store {}
+
+    fun sharded_catalog(s: &mut ts::Scenario): DeploymentRecord {
+        let clock = clock::create_for_testing(ts::ctx(s));
+        let mut record = deployment_manager::new_catalog_deployment(string::utf8(b"app"),
+            string::utf8(b"1.0.0"), vector[], vector[object::id_from_address(STRANGER)],
+            TestBinding {}, true, &clock, ts::ctx(s));
+        deployment_manager::begin_catalog_receipts<TestBinding, ShardedTestBinding, bool>(
+            &mut record, TestBinding {}, ShardedTestBinding {}, ts::ctx(s));
+        assert!(deployment_manager::receipt_schema(&record) == 2);
+        assert!(deployment_manager::target_groups(&record).is_empty());
+        clock::destroy_for_testing(clock);
+        record
+    }
+
+    #[test, expected_failure(abort_code = deployment_manager::EPackageOutdated)]
+    fun sharded_catalog_rejects_old_handover() {
+        let mut s = ts::begin(SOURCE);
+        let mut record = sharded_catalog(&mut s);
+        deployment_manager::legacy_handover_for_testing(&mut record, RECIPIENT, ts::ctx(&mut s));
+        deployment_manager::share_deployment(record); ts::end(s);
+    }
+
+    #[test, expected_failure(abort_code = deployment_manager::EPackageOutdated)]
+    fun sharded_catalog_rejects_current_handover() {
+        let mut s = ts::begin(SOURCE);
+        let mut record = sharded_catalog(&mut s);
+        deployment_manager::handover(&mut record, RECIPIENT, ts::ctx(&mut s));
+        deployment_manager::share_deployment(record); ts::end(s);
+    }
+
+    #[test]
+    fun sharded_catalog_cleanup_preserves_schema_until_parent_deletion() {
+        let mut s = ts::begin(SOURCE);
+        let record = sharded_catalog(&mut s);
+        deployment_manager::share_deployment(record);
+        ts::next_tx(&mut s, SOURCE);
+        let mut record = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::begin_receipt_cleanup(&mut record, ts::ctx(&mut s));
+        let roots = *deployment_manager::receipt_roots(&record);
+        let mut i = 0;
+        while (i < roots.length()) {
+            let root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s, roots[i]);
+            deployment_manager::retire_receipt_shard(&mut record, root); i = i + 1;
+        };
+        deployment_manager::remove_catalog_binding<ShardedTestBinding, bool>(&mut record, ShardedTestBinding {}, ts::ctx(&mut s));
+        deployment_manager::delete_deployment(record, ts::ctx(&mut s));
+        ts::end(s);
+    }
+
     #[test]
     #[expected_failure(abort_code = handover::EExpired)]
     fun expiry_gates_each_step_even_after_confirmation() {

@@ -370,10 +370,11 @@ impl Indexer {
             "{id} is not a DeploymentRecord"
         );
         let f = &object.fields;
+        let sharded = self.field(id, "deployment_manager::ReceiptShardKey").await?.is_some();
         let groups = self
             .field(
                 id,
-                if chain::number(&f["schema_version"]) == Some(4) {
+                if sharded {
                     "deployment_manager::ShardedTargetGroupsKey"
                 } else {
                     "deployment_manager::TargetGroupsKey"
@@ -389,7 +390,7 @@ impl Indexer {
         let binding = self
             .field(
                 id,
-                if chain::number(&f["schema_version"]) == Some(4) {
+                if sharded {
                     "component_catalog::ShardedCatalogBindingKey"
                 } else {
                     "component_catalog::CatalogBindingKey"
