@@ -7,7 +7,10 @@ const abi = JSON.parse(fs.readFileSync('interfaces/fleet-v1.json'));
 for (const name of abi.optional_type_origins.fleet_budget) manifest.type_origins[name] = manifest.call_package_id;
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
 const load = loader(), { buildEnrollDevicesTx } = load('lib/fleet-budget.ts');
-const { enrollBudgetDevices, prepareEnrollment, enrollmentReads } = load('lib/budget-enrollment.ts');
+const { enrollBudgetDevices: enrollReal, prepareEnrollment, enrollmentReads } = load('lib/budget-enrollment.ts');
+// Adapt controlled per-device test scenarios to the production batch boundary.
+const enrollBudgetDevices = options => enrollReal({ ...options, readStates: async group =>
+  Promise.all(group.map(async d => await options.isEnrolled(d) ? 'enrolled' : options.ineligibleReason(d))) });
 const id = n => '0x' + n.toString(16).padStart(64, '0');
 const devices = Array.from({ length: 1000 }, (_, i) => ({ objectId: id(i + 10), ownerCapId: id(i + 2000) }));
 const budget = { id: id(1), capId: id(2), balance: 1000000n, defaultLimits: { floatCap: 10n, periodAllowance: 20n } };
@@ -23,21 +26,58 @@ assert.throws(() => buildEnrollDevicesTx(budget.id, budget.capId, [{ ...batch[0]
   const { device_registry_IdentityBcs } = load('lib/fleet-protocol.ts');
   const { ObjectError } = require('./frontend_test_utils.cjs').appRequire('@mysten/sui/client');
   let revoked = false, ownerCap = devices[0].ownerCapId, missing = false, missingCustody = false, readFailure = false;
-  const reader = enrollmentReads({ getDynamicField: async ({ name }) => {
+  const { bcs, TypeTagSerializer } = require('./frontend_test_utils.cjs').appRequire('@mysten/sui/bcs');
+  const { deriveDynamicFieldID, normalizeStructTag } = require('./frontend_test_utils.cjs').appRequire('@mysten/sui/utils');
+  const { moveType } = load('lib/deployment-manifest.ts');
+  const identityKey = moveType('device_registry::IdentityKey');
+  const custodyKey = `0x2::dynamic_object_field::Wrapper<${moveType('device_registry::CustodyKey')}>`;
+  const IdentityField = bcs.struct('TestIdentityField', { id: bcs.Address, name: bcs.Address, value: device_registry_IdentityBcs });
+  const CustodyField = bcs.struct('TestCustodyField', { id: bcs.Address, name: bcs.Address, value: bcs.Address });
+  const fixture = new Map();
+  for (const device of devices) for (const key of [identityKey, custodyKey]) {
+    const fieldId = deriveDynamicFieldID(manifest.shared_objects.registry.id, TypeTagSerializer.parseFromStr(key), bcs.Address.serialize(device.objectId).toBytes());
+    fixture.set(fieldId, { device, key });
+  }
+  let calls = 0, wrongType = false, wrongName = false, incomplete = false, transportObject = false;
+  const client = { getObjects: async ({ objectIds }) => {
+    calls++; assert(objectIds.length <= 50);
     if (readFailure) throw Error('registry unavailable');
-    if (missing || (missingCustody && name.type.includes('Wrapper'))) throw new ObjectError('notFound', 'missing', { reason: 'notFound' });
-    if (name.type.includes('Wrapper')) return {};
-    return { dynamicField: { value: { type: `${manifest.type_origins['device_registry::Identity']}::device_registry::Identity`,
-      bcs: device_registry_IdentityBcs.serialize({ signer: id(99), revoked, owner_cap: ownerCap }).toBytes() } } };
-  } }, id(1), budget.id);
-  assert.equal(await reader.ineligibleReason(devices[0]), undefined);
-  revoked = true; assert.match(await reader.ineligibleReason(devices[0]), /revoked/);
-  revoked = false; ownerCap = id(9999); assert.match(await reader.ineligibleReason(devices[0]), /cap changed/);
-  missing = true; assert.match(await reader.ineligibleReason(devices[0]), /No active/);
+    const objects = objectIds.map(objectId => {
+      const f = fixture.get(objectId);
+      if (transportObject) return Error('field unavailable');
+      if (!f || missing || (missingCustody && f.key === custodyKey)) return new ObjectError('notFound', 'missing', { reason: 'notFound' });
+      const identity = f.key === identityKey;
+      return { objectId, type: wrongType ? '0x2::object::ID' : normalizeStructTag(`0x2::dynamic_field::Field<${f.key},${identity ? moveType('device_registry::Identity') : '0x2::object::ID'}>`),
+        content: (identity ? IdentityField : CustodyField).serialize({ id: objectId, name: wrongName ? id(9999) : f.device.objectId,
+          value: identity ? { signer: id(99), revoked, owner_cap: ownerCap === devices[0].ownerCapId ? f.device.ownerCapId : ownerCap } : f.device.objectId }).toBytes() };
+    });
+    return { objects: incomplete ? objects.slice(1) : objects };
+  } };
+  const reader = enrollmentReads(client, id(1), budget.id);
+  const reason = async () => (await reader.readStates([devices[0]]))[0];
+  assert.equal(await reason(), undefined);
+  revoked = true; assert.match(await reason(), /revoked/);
+  revoked = false; ownerCap = id(9999); assert.match(await reason(), /cap changed/);
+  missing = true; assert.match(await reason(), /No active/);
   missing = false; ownerCap = devices[0].ownerCapId; missingCustody = true;
-  assert.match(await reader.ineligibleReason(devices[0]), /custody/);
+  assert.match(await reason(), /custody/);
   missingCustody = false; readFailure = true;
-  await assert.rejects(reader.ineligibleReason(devices[0]), /registry unavailable/);
+  await assert.rejects(reason(), /registry unavailable/); readFailure = false;
+  wrongType = true; await assert.rejects(reason(), /field type/); wrongType = false;
+  wrongName = true; await assert.rejects(reason(), /field mismatch/); wrongName = false;
+  incomplete = true; await assert.rejects(reason(), /Incomplete/); incomplete = false;
+  transportObject = true; await assert.rejects(reason(), /field unavailable/); transportObject = false;
+  // Real orchestration + real batched readers: count requests entering the tab queue.
+  calls = 0; let beforeApproval, measuredApprovals = 0;
+  const measured = await enrollReal({ devices, ...reader, readBudget: async () => budget,
+    prepare: async () => '10000000', execute: async () => {
+      if (beforeApproval === undefined) beforeApproval = calls;
+      measuredApprovals++; return { digest: `measured-${measuredApprovals}` };
+    }, onProgress() {},
+  });
+  assert.equal(measured.confirmed, 1000); assert.equal(measuredApprovals, 5);
+  assert.equal(beforeApproval, 72); assert.equal(calls, 120);
+  console.log(`PASS: 1000-device enrollment: ${calls} batched reads, ${beforeApproval} before approval 1; queue spacing 42s total / 25.2s before approval (excluding build, budget refresh and polling)`);
   const enrolled = new Set(), approvals = [], progress = [];
   let fail = true, uncertain = false;
   const options = {

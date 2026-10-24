@@ -514,6 +514,19 @@ contract's 1,000 SUI reserve ceiling). If funds are limited, the reserve availab
 beyond the floats is distributed evenly. Insufficient funds for the floats stop
 the run before requesting approval; deposit and resume.
 
+Enrollment status and eligibility use deterministic dynamic-field IDs and batches
+of at most 50 objects per request, with one request outstanding at a time. The
+offline 1,000-device request-count regression exercises the real orchestration
+and readers: **120 batched account/registry reads**, **72 before approval one**,
+including the full scan and every per-chunk eligibility recheck. At the browser's
+350 ms queue spacing these reads account for about **42 seconds total** and
+**25.2 seconds before the first approval**, rather than 35 and 21 minutes.
+These are calculated queue contributions, not measured wall-clock completion:
+network latency, budget refreshes, dashboard polling, transaction build/simulation
+and wallet interaction add time. Existing-account resumes also batch the account
+objects; malformed fields and transport failures stop the run rather than being
+reported as unenrolled or ineligible devices.
+
 The [isolated localnet measurement](validation/sf132-localnet.json) enrolled
 1,000 devices in **five** 200-device transactions: 36,036 bytes each, estimated
 gas budget 1,523,193,571 MIST and actual net gas 1,522,193,670 MIST per chunk

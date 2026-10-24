@@ -1,11 +1,11 @@
 {
   "network": "disposable network-none localnet",
-  "recorded_at": "2026-10-23T23:36:08.108Z",
+  "recorded_at": "2026-10-24T01:25:10.009Z",
   "compiler": "sui 1.81.1-e04cf9aa915c",
   "node": "sui 1.82.1-987123842623 (checksum-verified by localnet wrapper)",
   "chunks": [
     {
-      "digest": "9M6CwXUFcv5QyuF2ipKaZHM64kPSf7uHWEhBHSGioNdf",
+      "digest": "EaZajAfH4H6SwdGjRiPW42rCQGdUqbHFPrcJZW3QiDAK",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -15,7 +15,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "ATD9JbkdbyCQHA5pwskryUt5DUkrpNcWZymd9X2cAuJj",
+      "digest": "9Bxct5pKkv75CvNsUq3cgr4mAMSv9QTNucDhfc6Bnf9S",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -25,7 +25,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "6t8Z1whLTP6AxfENHT9Ut67ibX6MNSmCKDNpa9s2mcRs",
+      "digest": "FFJS3aTF2RBQusYqaSpXVVeLyvUNzaWLY42rzFU4wDkx",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -35,7 +35,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "966f2cMPUyG685Aw5e8RcErK4UxuMBHJt9G5uQPWbbEs",
+      "digest": "EP4qqPnUj8rLvpBwjf2YCSDajGkx313QxMSLvTNMXF8r",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
@@ -45,7 +45,7 @@
       "net_gas_mist": "1522193670"
     },
     {
-      "digest": "8nDHrw2RcWp3YrEUjPHGJhxH1zNCQcmdoyhQSYgxfir",
+      "digest": "435HQKSTT7wNKWhCakWKcmXAqL8EemztxwK3cpi61P2q",
       "devices": 200,
       "bytes": 36036,
       "gas_budget_mist": "1523193571",
