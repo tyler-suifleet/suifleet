@@ -13,7 +13,7 @@ import type { Transaction } from "@mysten/sui/transactions";
 
 const defaults: RolloutInput = { component: "", version: "", recipe: "", artifactSha256: "", recipeSha256: "",
   cohorts: [], concurrency: 1, rateCount: 1, rateWindowMs: 60000, bakeMs: 300000,
-  minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 600000 };
+  minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 3600000 };
 export default function RolloutsPage() {
   const client = useCurrentClient(); const account = useCurrentAccount();
   const { data: deployments = [] } = useDeployments();
@@ -32,7 +32,7 @@ export default function RolloutsPage() {
   }
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Canary cohorts, bounded admission and audited health gates" />
-    <p>Advance after devices publish their signed post-apply health on chain. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
+    <p>Advance to admit the first cohort. After devices publish their signed post-apply health on chain, advance again to evaluate the gate. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
     <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
