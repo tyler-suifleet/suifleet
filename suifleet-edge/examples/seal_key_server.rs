@@ -11,7 +11,8 @@
 //!   calls into one package that upgrades the namespace package, identity
 //!   first), then the calls simulated on the chain with the certificate's
 //!   user as sender. Only a successful simulation releases keys, each
-//!   ElGamal-encrypted to the request's key.
+//!   ElGamal-encrypted to the request's key. Each key request is logged
+//!   (`fetch_key OBJECT_ID` on stderr) so tests can count them.
 //!
 //! Usage:
 //!   seal_key_server public-key MASTER_SEED_HEX        (prints the G2 public key)
@@ -254,7 +255,13 @@ async fn handle(server: Arc<Server>, mut socket: tokio::net::TcpStream) {
         match (method, target.split_once('?').map(|(p, q)| (p, q)).unwrap_or((target, ""))) {
             ("GET", ("/v1/service", query)) => server.service(query),
             ("POST", ("/v1/fetch_key", _)) => match serde_json::from_slice::<Value>(&body) {
-                Ok(body) => server.fetch_key(&body).await,
+                Ok(body) => {
+                    // Counted by the harness: requests are billed per server.
+                    // One write, so concurrent servers' lines never interleave.
+                    let line = format!("fetch_key 0x{}\n", hex::encode(server.object_id));
+                    let _ = std::io::Write::write_all(&mut std::io::stderr(), line.as_bytes());
+                    server.fetch_key(&body).await
+                }
                 Err(_) => refuse(400, "invalid JSON"),
             },
             _ => refuse(404, "not found"),

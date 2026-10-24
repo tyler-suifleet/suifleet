@@ -729,6 +729,76 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn device_deployment_history_excludes_foreign_direct_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(dir.path(), false);
+        let mut db = store::open(&dir.path().join("fleet.db")).unwrap();
+        let device = fixture::device(&fixture::address(&fixture::KEY));
+        let operator = device.owner.clone().unwrap();
+        let id = |n: u32| format!("0x{n:064x}");
+        let tx = db.transaction().unwrap();
+        store::put_group(&tx, &store::Group {
+            id: id(50), name: "authorized".into(), description: String::new(),
+            admin: operator.clone(), created_at: 1, deleted: false,
+            devices: vec![device.id.clone()],
+        }, None).unwrap();
+        let direct = store::Deployment {
+            id: id(70), creator: operator.clone(), component_name: "fw".into(),
+            version: "1".into(), recipe_blob_id: "recipe".into(),
+            artifact_sha256: "a".repeat(64), recipe_sha256: Some("b".repeat(64)),
+            created_at: 1, schema_version: 1, catalog_version: None, deleted: false,
+            target_devices: vec![device.id.clone()], target_groups: vec![],
+        };
+        store::put_deployment(&tx, &direct, None).unwrap();
+        // Delegated records store the role's operator as creator, with only
+        // group targets (deployment_manager::create_delegated).
+        let delegated = store::Deployment {
+            id: id(71), target_devices: vec![], target_groups: vec![id(50)],
+            ..direct.clone()
+        };
+        store::put_deployment(&tx, &delegated, None).unwrap();
+        let foreign = store::Deployment {
+            id: id(69), creator: id(999), ..direct.clone()
+        };
+        store::put_deployment(&tx, &foreign, None).unwrap();
+        let foreign_group = store::Deployment {
+            id: id(72), creator: id(999), ..delegated.clone()
+        };
+        store::put_deployment(&tx, &foreign_group, None).unwrap();
+        tx.commit().unwrap();
+        let bearer = format!("Bearer {READ}");
+        let headers = [("authorization", bearer.as_str())];
+        let uri = format!("/v1/deployments?device={}&limit=1", device.id);
+        let (status, _, page) = call(&app, "GET", &uri, &headers, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["id"], direct.id);
+        let next = page["next"].as_str().unwrap();
+        let (status, _, page) = call(&app, "GET", &format!("{uri}&cursor={next}"), &headers, None).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(page["items"].as_array().unwrap().len(), 1);
+        assert_eq!(page["items"][0]["id"], delegated.id);
+        assert!(page["next"].is_null());
+        // Filtering is per-device; the fleet-wide inventory retains all records.
+        let (_, _, all) = call(&app, "GET", "/v1/deployments", &headers, None).await;
+        assert_eq!(all["items"].as_array().unwrap().len(), 4);
+        // Operator transfer immediately changes direct-target authorization.
+        let tx = db.transaction().unwrap();
+        let transferred = store::Device { owner: Some(id(999)), ..device.clone() };
+        store::put_device(&tx, &transferred, None).unwrap();
+        tx.commit().unwrap();
+        let (_, _, page) = call(&app, "GET", &format!("/v1/deployments?device={}", device.id), &headers, None).await;
+        let ids: Vec<_> = page["items"].as_array().unwrap().iter()
+            .map(|item| item["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec![foreign.id.as_str()], "old-operator groups also lose authority");
+        let tx = db.transaction().unwrap();
+        store::put_device(&tx, &store::Device { owner: None, ..device }, None).unwrap();
+        tx.commit().unwrap();
+        let (_, _, page) = call(&app, "GET", &uri, &headers, None).await;
+        assert!(page["items"].as_array().unwrap().is_empty(), "unknown operator fails closed");
+    }
+
+    #[tokio::test]
     async fn telemetry_routes_authenticate_by_signature_and_token() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(dir.path(), true);

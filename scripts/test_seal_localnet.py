@@ -19,6 +19,7 @@ Judged from on-chain receipts and the daemon's journal:
   - ciphertext for another package (wrong network/namespace) -> Failed
   - key epoch rotated -> old release Failed; a fresh release Applied
   - one of three key servers down (threshold 2) -> Applied; two down -> Failed
+  - healthy servers: only two of three (the threshold) receive key requests
   - a key server refusing the session lifetime -> its keys withheld
   - accounts: an ungranted account is refused by key servers, a granted one
     decrypts with its own key through the official SDK
@@ -231,13 +232,19 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 result = transaction("--move-call", f"{key_server_package}::key_server::register", f'"test-{index}"',
                                      f'"http://127.0.0.1:{port}"', "vector[" + ",".join(f"{b}u8" for b in bytes.fromhex(public_key)) + "]")
                 servers.append(dict(seed=seed, port=port, object_id=created(result, "::key_server::KeyServer")[0], name=f"test-{index}"))
-            key_server_log = (root / "key-servers.log").open("w")
+            # Append mode: each server's writes land whole at the end.
+            key_server_log = (root / "key-servers.log").open("a")
 
             def start_server(server, *extra):
                 process = subprocess.Popen([str(KEY_SERVER), "serve", rpc_url, namespace, server["object_id"], server["seed"],
                                             str(server["port"]), *extra], stdout=subprocess.PIPE, stderr=key_server_log, text=True)
                 assert process.stdout.readline().startswith("listening"), "key server did not start"
                 processes[server["name"]] = process
+
+            def key_requests():
+                """Key servers asked so far, one entry per fetch_key request."""
+                return [line.split()[1] for line in (root / "key-servers.log").read_text().splitlines()
+                        if line.startswith("fetch_key ")]
 
             def stop_server(server):
                 process = processes.pop(server["name"])
@@ -390,11 +397,15 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 print("PASS: device outside the policy: deployment Failed with an on-chain receipt, nothing decrypted")
 
                 policy_call("grant_device", f"@{registry}", f"@{device}")
+                asked_before = len(key_requests())
                 granted, artifact, _ = release("1.1.0")
                 settles(granted, 1)
                 assert installed(artifact)
+                asked = key_requests()[asked_before:]
+                assert asked and len(set(asked)) == 2, f"threshold 2 of 3 should ask two key servers, asked {asked}"
                 print("PASS: granted device: dapp-encrypted recipe and artifact fetched, decrypted with its own "
                       "signing-service session, verified and applied; Applied on chain")
+                print(f"PASS: threshold-first key requests: {len(asked)} fetch_key requests to only 2 of 3 key servers")
 
                 # Authentic but malformed confidential recipes: serde and
                 # validation messages would quote their values.
@@ -442,8 +453,11 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 print("PASS: key epoch rotation retires earlier identities; a fresh release under the new epoch Applied")
 
                 # Uploaders verify every key server, so encrypt first, then fail servers.
+                asked_before = len(key_requests())
                 one_down, _, _ = release("4.0.0", before_deploy=lambda: stop_server(servers[0]))
                 settles(one_down, 1)
+                asked = key_requests()[asked_before:]
+                assert len(set(asked)) == 2, f"the two live key servers should cover the threshold, asked {asked}"
                 start_server(servers[0])
                 two_down, _, _ = release("4.1.0", before_deploy=lambda: (stop_server(servers[0]), stop_server(servers[1])))
                 settles(two_down, 2, "Seal keys unavailable")
