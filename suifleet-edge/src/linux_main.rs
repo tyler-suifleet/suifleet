@@ -799,9 +799,7 @@ async fn poll(
     }
     // A later page/control read can fail repeatedly. Retry existing receipts
     // first, while still allowing discovery during temporary reporting outages.
-    if let Some(error) = flush_reports(sui, journal, &cfg.device.device_cap_id).await? {
-        warn!(%error, "Reports queued; discovery continues before the final retry");
-    }
+    flush_reports(sui, journal, &cfg.device.device_cap_id).await?;
     loop {
         let page = sui.deployments(&journal.state.cursor).await?;
         for (event, cursor) in page.events {
@@ -862,15 +860,14 @@ async fn poll(
     )
     .await?;
     // Report new outcomes before the long normal sleep.
-    match flush_reports(sui, journal, &cfg.device.device_cap_id).await? {
-        Some(error) => Err(error.context("Status report remains queued")),
-        None => Ok(()),
-    }
+    flush_reports(sui, journal, &cfg.device.device_cap_id).await
 }
 /// Keep durable receipt retries independent of later discovery/reconciliation.
-/// Report failures remain queued; journal I/O failures abort the cycle immediately.
+/// Report failures remain queued without poisoning discovery cadence: a deleted
+/// deployment or lost targeting can make a receipt permanently undeliverable.
+/// Journal I/O failures still abort the cycle immediately.
 async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str)
-    -> anyhow::Result<Option<anyhow::Error>> {
+    -> anyhow::Result<()> {
     let pending: Vec<_> = journal
         .state
         .deployments
@@ -878,7 +875,6 @@ async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str)
         .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
         .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
         .collect();
-    let mut report_error = None;
     for (id, status) in pending {
         match sui
             .report_status(&id, cap, status)
@@ -890,11 +886,10 @@ async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str)
             }
             Err(error) => {
                 warn!(%id, %error, "Status report remains queued");
-                report_error = Some(error);
             }
         }
     }
-    Ok(report_error)
+    Ok(())
 }
 
 /// Commit, keep or discard the configuration each interrupted or finished

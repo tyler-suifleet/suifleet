@@ -14,7 +14,7 @@ from test_desired_state import manifest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-window')):
+def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-window', 'receipt-outage')):
     for fault in faults:
         sim = Simulator()
         sim.allow_reports = True
@@ -30,6 +30,8 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
         if fault == 'completed-window':
             sim.controls['0x901']['window_end_ms'] = now + 180000
         applied = None
+        if fault == 'receipt-outage':
+            sim.add('0x900')
         if fault == 'discovery-outage':
             sim.add('0x902')
             sim.controls['0x902'] = dict(revision=1, state=0, not_before_ms=now+86400000,
@@ -50,7 +52,11 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
                 def do_POST(self):
                     req = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                     counts[0 if primary else 1] += 1
-                    if (fault == 'discovery-outage' and applied is not None and applied.exists()
+                    if (fault == 'receipt-outage' and req['method'] == 'unsafe_moveCall'
+                            and int(req['params'][5][0], 16) == 0x900):
+                        outages[0] += 1
+                        reply = {'error': {'message': 'device is no longer targeted'}}
+                    elif (fault == 'discovery-outage' and applied is not None and applied.exists()
                             and req['method'] == 'sui_getObject'
                             and int(req['params'][0], 16) == 0x902):
                         outages[0] += 1
@@ -125,6 +131,10 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
                         # Reconstruct the timer from the persisted record on restart.
                         process.terminate()
                         process.wait(timeout=10)
+                        if fault == 'receipt-outage':
+                            saved = state()
+                            saved.setdefault('deployments', {})['0x900'] = dict(status=1, reported=False)
+                            (root/'state/state.json').write_text(json.dumps(saved))
                         process = subprocess.Popen([str(ROOT/'suifleet-edge/target/debug/suifleet')],
                             env={**os.environ, 'EDGE_CONFIG': str(cfg)}, stdout=log, stderr=log)
                         try:
@@ -151,6 +161,10 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
                                 print((root/'daemon.log').read_text(), flush=True)
                                 print(state(), flush=True)
                                 raise
+                        if fault == 'receipt-outage':
+                            assert outages[0] >= 2, 'receipt must remain queued across retries'
+                            assert not state()['deployments']['0x900']['reported']
+                            assert 'Sync failed' not in (root/'daemon.log').read_text()
                         if fault == 'discovery-outage':
                             assert outages[0] > 0, 'report must survive a later read failure'
                     print(f'PASS: endpoint {fault}; chain rejection or default-cadence timer/restart/apply/report')

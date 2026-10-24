@@ -581,7 +581,10 @@ controls and grants; a timer grants no authority. Paused, terminal and impossibl
 windows do not cause a tight loop. Failures use exponential equal jitter with
 millisecond randomness (initially 1–2 seconds, capped at one hour or twice the
 configured check interval, whichever is lower); a successful check resets it.
-Failure backoff takes precedence over control wakeups during an outage.
+Discovery/reconciliation failure backoff takes precedence over control wakeups
+during an outage. Receipt-delivery failures stay queued and logged independently;
+they do not fail an otherwise successful check or suppress local timers, even
+when a deleted deployment or lost targeting makes delivery permanently impossible.
 
 The manifest may include `rpc_urls`, an ordered list of at most eight gRPC v2
 endpoints. `[sui] rpc_urls` is an optional local override. An empty or omitted
