@@ -3048,6 +3048,30 @@
       "merge_depends_on": [
         "SF-083"
       ]
+    },
+    {
+      "key": "SF-147",
+      "title": "Show current GitHub CI states and honest evidence freshness in fleet-status",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/dashboard.py",
+        "tools/pr-coordinator/tests/test_dashboard.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User asks why CI labels are stale and requests a fix. Explicit --refresh-github currently refreshes issue/PR counts only, but CI labels derive from worker launch snapshots; failed current testnet statuses incorrectly remain ci-pending for hours. Installed dashboard also predates merged quota support.",
+      "evidence": "2026-10-24 root audit: refresh_github fetches REST issues/pulls, no current check results; collect uses latest job snapshot.json (immutable). All five ready PRs have failed testnet statuses while CLI reports ci-pending. Reviews source age reflects database/job modification rather than current coordinator polling; do not label that coordinator inactivity. Preserve normal offline dashboard refresh and account scoping.",
+      "acceptance": [
+        "Explicit --refresh-github fetches bounded current check/status evidence for the exact open PR head/base, including testnet/package-upgrade, and atomically caches it with freshness/provenance. Batch requests where possible, bound pagination, preserve credentials privately. Ordinary live refresh stays offline.",
+        "Prefer newer authoritative matching-head/base GitHub evidence over old launch snapshots; mismatched head/base, failed/partial fetch, missing or stale evidence must show unknown/stale explicitly, never fresh pending or success. Distinguish source evidence age from service heartbeat and active jobs.",
+        "Mark historical-only CI as stale, include last-known result and observed time, and remove obsolete retry notices for verified merged/superseded PR jobs without mutating coordinator ownership. Keep GitHub/local ticket discrepancy reporting honest.",
+        "Regression tests for current testnet failure replacing old pending, head changes, stale base testnet success, partial GraphQL data/pagination, cached offline mode, bad credentials/no secret output, closed PR stale retry suppression and freshness rendering. Install only tested/reviewed dashboard scope without touching workers/services/config."
+      ],
+      "validation": "Dashboard/unit regressions, offline CLI fixtures, actual --refresh-github snapshot versus gh pr checks and offline rerender. Use reviewed merged-only activation or the explicitly scoped dashboard installer; report any unmerged local preview separately."
     }
   ]
 }
