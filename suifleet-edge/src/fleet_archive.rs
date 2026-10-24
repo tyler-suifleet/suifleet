@@ -127,6 +127,21 @@ fn string(v: &Value, field: &str) -> anyhow::Result<String> {
     Ok(v[field].as_str().ok_or_else(|| anyhow::anyhow!("invalid codec field {field}"))?.to_owned())
 }
 
+// Validate the complete response before changing retry-persisted state. A codec
+// error must leave encoding_fresh true so the next attempt can prepare again.
+fn accept_encoding(pending: &mut Pending, encoded: &Value) -> anyhow::Result<()> {
+    let blob_id = string(encoded, "blob_id")?;
+    let root_hash = string(encoded, "root_hash")?;
+    let size = encoded["size"].as_u64();
+    anyhow::ensure!(pending.items.is_empty() || size.is_some(), "Quilt codec omitted encoded size");
+    anyhow::ensure!(size.is_none_or(|n| n > 0 && n <= crate::fleet_data::MAX_ARCHIVE as u64), "invalid encoded archive size");
+    anyhow::ensure!(!blob_id.is_empty() && !root_hash.is_empty(), "empty codec encoding identity");
+    pending.blob_id = blob_id;
+    pending.root_hash = root_hash;
+    pending.size = size;
+    Ok(())
+}
+
 fn quilt_arguments(dir: &Path, items: &[crate::fleet_data::QuiltItem]) -> Value {
     if items.is_empty() { return json!({}); }
     json!({"items": items.iter().map(|item| json!({"identifier":item.identifier,
@@ -154,6 +169,41 @@ fn quilt_retry_delay(attempts: u32) -> u64 {
 #[cfg(test)]
 mod quilt_tests {
     use super::*;
+    #[test]
+    fn malformed_prepare_remains_fresh_across_failure_persistence_and_restart() {
+        let initial = json!({"seq":1,"kind":0,"request_seq":0,"fingerprint":"", "anchor_index":0,
+            "logs":[1],"blob_id":"","root_hash":"","ciphertext_sha256":[1,2],
+            "items":[{"identifier":"item-00","size":10,"sha256":"ab"}]});
+        let dir = std::env::temp_dir().join(format!("sf121-encoding-{}", rand::random::<u128>()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("pending.json");
+        for malformed in [
+            json!({"blob_id":"blob","root_hash":"root"}),
+            json!({"blob_id":"blob","size":100}),
+            json!({"blob_id":"blob","root_hash":42,"size":100}),
+            json!({"blob_id":"blob","root_hash":"","size":100}),
+            json!({"blob_id":"blob","root_hash":"root","size":0}),
+            json!({"blob_id":"blob","root_hash":"root","size":u64::MAX}),
+        ] {
+            let mut pending: Pending = serde_json::from_value(initial.clone()).unwrap();
+            assert!(accept_encoding(&mut pending, &malformed).is_err());
+            // The publication error handler persists this in-memory value.
+            pending.attempts += 1;
+            pending.retry_at_ms = 1000;
+            atomic(&path, &serde_json::to_vec(&pending).unwrap()).unwrap();
+            let mut restarted: Pending = load(&path).unwrap().unwrap();
+            assert!(restarted.blob_id.is_empty());
+            assert!(restarted.root_hash.is_empty());
+            assert_eq!(restarted.size, None);
+            assert_eq!(restarted.logs, vec![1]);
+            assert!(restarted.registration.is_none());
+            accept_encoding(&mut restarted, &json!({"blob_id":"blob","root_hash":"root","size":100})).unwrap();
+            assert_eq!(restarted.blob_id, "blob");
+            assert_eq!(restarted.root_hash, "root");
+            assert_eq!(restarted.size, Some(100));
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn retry_rate_stays_bounded_after_long_outages() {
         assert_eq!(quilt_retry_delay(0), 1000);
@@ -340,9 +390,7 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
     if encoding_fresh {
         anyhow::ensure!(pending.registration.is_none(), "registered archive lost encoding identity");
         let encoded = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &pending.items)).await?;
-        pending.blob_id = string(&encoded,"blob_id")?; pending.root_hash = string(&encoded,"root_hash")?;
-        pending.size = encoded["size"].as_u64();
-        anyhow::ensure!(pending.items.is_empty() || pending.size.is_some(), "Quilt codec omitted encoded size");
+        accept_encoding(&mut pending, &encoded)?;
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
     anyhow::ensure!(crate::seal::parse(&std::fs::read(dir.join("ciphertext.bin"))?)?.key_epoch() == Some(fleet.key_epoch), "pending archive key epoch was revoked; owner recovery required");
