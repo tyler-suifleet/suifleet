@@ -18,7 +18,7 @@ from urllib.parse import quote
 import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
-                         failed_checks, repair_feedback)
+                         failed_checks, repair_feedback, CI_HANDOFF)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -1958,7 +1958,8 @@ Lock shared build/port/hardware resources only during actual use, renew while us
 Do not create any new issues, start model workers, merge PRs or relax test/review gates. Report newly discovered work in this issue.
 If genuine external acceptance is unavailable, record it honestly and retain/block your claim; do not claim the next ticket yourself.
 If blocked ONLY until prerequisite tickets merge, block the ticket with that explanation and add "dependency_wait": {{"tickets": ["SF-NNN"], "integration": "merged_main"}} to a blocked result; the dispatcher then resumes this claim once after they merge. Never use dependency_wait for failures, hardware, production or authorization blockers.
-When implementation acceptance is ready, wait for current-head CI, mark PR Ready and ticket Review with complete evidence, release resources.
+When local implementation acceptance is ready, push, mark PR Ready and ticket Review with complete evidence, release resources.
+{CI_HANDOFF}
 Write {directory/'result.json'} as JSON with verdict review_ready, actual model, and nonempty evidence including PR/head/tests/limits.
 Then EXIT: the existing PR coordinator handles independent review/feedback/merge, and this dispatcher assigns your successor.
 On a real blocker write verdict blocked with evidence and leave the claim reserved; do not silently return success.

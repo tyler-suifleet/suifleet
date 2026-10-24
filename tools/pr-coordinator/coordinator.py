@@ -14,6 +14,11 @@ import time
 from urllib.parse import quote
 
 MARKER = '<!-- pr-coordinator -->'
+# SF-145: hosted CI is the coordinator's job; a model polling it only burns quota.
+CI_HANDOFF = ('Do NOT wait for, watch or poll hosted CI (no sleep/watch loops, monitors or background watchers): '
+              'record the pushed head and that hosted CI is pending in your evidence, then hand off. Pending CI is never '
+              'approval: the coordinator enforces exact-head/base checks, independent review and merge gates, and '
+              'dispatches CI repair if a check fails.')
 FAMILIES = {'Codex', 'Claude'}
 
 
@@ -724,7 +729,7 @@ Do not edit the coordinator database or forge another model's review. Only this 
         if pr.get('_ci_repair'):
             common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required.\n'
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
-The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
+The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the current base and that the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
 
     def collect(self, project, owners):
