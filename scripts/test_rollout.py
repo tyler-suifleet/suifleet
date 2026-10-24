@@ -2,6 +2,7 @@
 """Three real daemons against shared rollout-grant simulator views.
 Move tests/localnet cover coordinator transitions; this exercises device enforcement.
 """
+from contextlib import ExitStack
 import json
 import base64
 import os
@@ -36,8 +37,21 @@ def run():
                 return {'data':{'content':{'fields':{'value':{**rollout,'outcomes':base64.b64encode(bytes(rollout['outcomes'])).decode()}}}}}
             return super().rpc(method, params)
     handles = []
+    def cleanup_workers():
+        for h in handles:
+            for key in ('process','shim'):
+                process=h[key]
+                if process:
+                    if process.poll() is None:process.terminate()
+                    try:process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:process.kill();process.wait(timeout=10)
+                    h[key]=None
+            if h['server']:
+                h['server'].shutdown();h['server'].server_close();h['server']=None
+            h['log'].close()
     try:
-        with tempfile.TemporaryDirectory(prefix='suifleet-rollout-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='suifleet-rollout-') as tmp, ExitStack() as workers:
+            workers.callback(cleanup_workers)
             root = Path(tmp)
             for i, device in enumerate(MEMBERS):
                 sim = View(device, f'0xc{i+2}')
@@ -124,9 +138,6 @@ def run():
             assert all(not h['sim'].errors for h in handles),[h['sim'].errors for h in handles]
             print('PASS: three daemon cohorts, canary-only grants, offline member, crash/restart, pause/resume, fail-closed reads, final operator recheck and durable abort; apply counts 1/1/0')
     finally:
-        for h in handles:
-            if h['process']:
-                h['process'].terminate(); h['process'].wait(timeout=10)
-            h['shim'].terminate(); h['shim'].wait(timeout=10); h['server'].shutdown(); h['log'].close()
+        cleanup_workers()
 
 if __name__=='__main__': run()
