@@ -19,7 +19,7 @@ Each client checks the manifest against the chain at startup and refuses a stale
 | `type_origins` | For each type the clients use, the package that **introduced** it. Types keep their introduction package across upgrades, so newer types such as `RecipeDigestKey` and `DeviceAddressKey` have later origins than `DeviceRegistry`. |
 | `shared_objects.registry` | The shared `DeviceRegistry` ID and its initial shared version. |
 | `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
-| `walrus` | Publisher and aggregator URLs. |
+| `walrus` | Publisher and legacy aggregator URL, plus optional ordered device `aggregator_urls`; see [public delivery](WALRUS_DELIVERY.md). |
 
 Optional type-origin groups are all-or-none: the component catalog, the Seal policy,
 the SF-083 fleet budget (`fleet_budget::*`) and the SF-125 device inboxes and member
