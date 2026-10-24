@@ -276,10 +276,15 @@ class WalrusUploadTests(unittest.TestCase):
         server = urllib.error.HTTPError("u", 503, "busy", {}, None)
         blob, attempts = self.upload(TimeoutError("read timed out"), server, self.STORED)
         self.assertEqual((blob, attempts), ("blob1", ["PUT"] * 3))
+        # A publisher outage spanning several backoffs (CI run 40134467479
+        # saw three consecutive 500s) is still absorbed within the bound.
+        failures = [urllib.error.HTTPError("u", 500, "internal", {}, None)] * (live_common.WALRUS_ATTEMPTS - 1)
+        blob, attempts = self.upload(*failures, self.STORED)
+        self.assertEqual((blob, len(attempts)), ("blob1", live_common.WALRUS_ATTEMPTS))
 
     def test_retries_are_bounded_and_client_errors_are_not_retried(self):
         import urllib.error
-        error, attempts = self.upload(*[TimeoutError("read timed out")] * 3, self.STORED)
+        error, attempts = self.upload(*[TimeoutError("read timed out")] * live_common.WALRUS_ATTEMPTS, self.STORED)
         self.assertIsInstance(error, TimeoutError)
         self.assertEqual(len(attempts), live_common.WALRUS_ATTEMPTS)
         error, attempts = self.upload(urllib.error.HTTPError("u", 413, "too large", {}, None), self.STORED)
