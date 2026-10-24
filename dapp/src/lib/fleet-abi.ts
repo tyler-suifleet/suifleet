@@ -289,7 +289,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Fleet",
           "&mut sui_edge::enrollment::EnrollmentPolicy",
           "vector<address>",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -302,7 +302,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::device_group::DeviceGroup",
           "sui::object::ID",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -327,7 +327,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::deployment_manager::DeploymentRecord",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -354,7 +354,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::device_group::DeviceGroup",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -367,7 +367,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "&sui_edge::seal_policy::AccessPolicy",
           "sui_edge::seal_policy::AccessAdminCap",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -383,7 +383,7 @@ export const MOVE_ABI = {
           "vector<sui::object::ID>",
           "vector<sui::object::ID>",
           "&sui::clock::Clock",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -393,7 +393,7 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::customer::Customer",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -413,7 +413,7 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::customer::Customer",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -425,7 +425,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&sui_edge::customer::Fleet",
           "&sui_edge::device_group::DeviceGroup",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": [
           "sui_edge::desired_state::RevisionPlan"
@@ -442,7 +442,7 @@ export const MOVE_ABI = {
           "sui::object::ID",
           "std::string::String",
           "std::string::String",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -453,7 +453,7 @@ export const MOVE_ABI = {
         "parameters": [
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": [
           "sui_edge::fleet_budget::BudgetOwnerCap",
@@ -470,7 +470,7 @@ export const MOVE_ABI = {
           "sui_edge::desired_state::RevisionPlan",
           "&mut sui_edge::device_group::DeviceGroup",
           "&sui::clock::Clock",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -489,7 +489,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Customer",
           "&sui_edge::device_registry::DeviceRegistry",
           "W",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -504,7 +504,7 @@ export const MOVE_ABI = {
           "u64",
           "u64",
           "bool",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -520,7 +520,7 @@ export const MOVE_ABI = {
           "vector<sui::object::ID>",
           "std::string::String",
           "&sui::clock::Clock",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -614,7 +614,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
           "sui_edge::deployment_manager::DeploymentRecord",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -626,7 +626,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
           "sui_edge::device_group::DeviceGroup",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -641,7 +641,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::fleet_budget::GasAccount",
           "&mut sui_edge::device_registry::DeviceRegistry",
           "sui::object::ID",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -804,7 +804,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::seal_policy::AccessPolicy",
           "address",
           "bool",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -819,7 +819,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_registry::DeviceRegistry",
           "sui::object::ID",
           "bool",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -833,7 +833,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::seal_policy::AccessPolicy",
           "&sui_edge::device_group::DeviceGroup",
           "bool",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -901,9 +901,11 @@ export const MOVE_ABI = {
           "&mut sui_edge::fleet_budget::FleetBudget",
           "&mut sui_edge::fleet_budget::GasAccount",
           "sui::object::ID",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
-        "returns": []
+        "returns": [
+          "sui_edge::device_registry::DeviceOwnerCap"
+        ]
       },
       "remove_from_group": {
         "visibility": "Public",
@@ -914,7 +916,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::device_group::DeviceGroup",
           "sui::object::ID",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -926,7 +928,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&mut sui_edge::customer::Fleet",
           "std::string::String",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -942,7 +944,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_cap::DeviceCap",
           "&sui_edge::device_group::DeviceGroup",
           "u8",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -957,7 +959,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_cap::DeviceCap",
           "u8",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -969,7 +971,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Customer",
           "&sui_edge::customer::Fleet",
           "u64",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -993,7 +995,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_cap::DeviceCap",
           "u64",
           "W",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1017,7 +1019,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Fleet",
           "&mut sui_edge::enrollment::EnrollmentPolicy",
           "address",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1030,7 +1032,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Fleet",
           "&mut sui_edge::seal_policy::AccessPolicy",
           "sui::object::ID",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1056,7 +1058,7 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&sui_edge::customer::Fleet",
           "&mut sui_edge::seal_policy::AccessPolicy",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1074,7 +1076,7 @@ export const MOVE_ABI = {
           "u64",
           "u64",
           "u64",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1098,7 +1100,7 @@ export const MOVE_ABI = {
         "parameters": [
           "&mut sui_edge::customer::Customer",
           "&sui_edge::customer::Fleet",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1112,7 +1114,7 @@ export const MOVE_ABI = {
           "&mut sui_edge::device_registry::DeviceRegistry",
           "sui::object::ID",
           "bool",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -1126,7 +1128,7 @@ export const MOVE_ABI = {
           "u64",
           "u64",
           "u64",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -2924,7 +2926,7 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::device_registry::DeviceRegistry",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },

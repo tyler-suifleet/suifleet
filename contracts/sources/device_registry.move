@@ -317,7 +317,7 @@ module sui_edge::device_registry {
     }
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
 
-    public fun assert_admin(registry: &DeviceRegistry, ctx: &TxContext) {
+    public fun assert_admin(registry: &DeviceRegistry, ctx: &mut TxContext) {
         assert!(registry.admin == ctx.sender(), EWrongDevice);
     }
 

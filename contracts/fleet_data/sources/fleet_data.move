@@ -253,7 +253,7 @@ module fleet_data::fleet_data {
     /// borrow/mutate capabilities in an approval PTB: key servers accept only
     /// seal_approve calls with read-only shared inputs.
     entry fun seal_approve_customer(id: vector<u8>, fleet: &FleetData,
-        budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &TxContext) {
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &mut TxContext) {
         customer::assert_admin(customer, ctx);
         customer::assert_fleet(customer, managed);
         assert!(fleet.version == VERSION && object::id(budget) == fleet.budget_id
@@ -300,7 +300,7 @@ module fleet_data::fleet_data {
         prefix.append(bcs::to_bytes(&fleet.key_epoch)); prefix
     }
     #[test_only]
-    public fun approve_customer_for_testing(id: vector<u8>, fleet: &FleetData, budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &TxContext) {
+    public fun approve_customer_for_testing(id: vector<u8>, fleet: &FleetData, budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &mut TxContext) {
         seal_approve_customer(id, fleet, budget, customer, managed, ctx)
     }
     #[test_only]

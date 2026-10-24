@@ -282,7 +282,7 @@ export function BudgetManager() {
             <button type="button" className="underline" disabled={pending || a.reserve === BigInt(0)} onClick={() => void submit(() => buildReclaimReserveTx(budget.id, budget.capId, a.accountId, a.reserve))}>Reclaim reserve</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, a.accountId, a.limits.floatCap))}>Send float</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, a.accountId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
-            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId, selectedFleet, device.objectId))}>Remove</button>
+            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId, selectedFleet, device.objectId, account.address))}>Remove</button>
           </> : <button type="button" className="underline" disabled={pending || !accounts.isSuccess} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
             defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;

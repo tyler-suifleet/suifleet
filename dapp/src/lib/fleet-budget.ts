@@ -153,12 +153,14 @@ export function buildReclaimReserveTx(budgetId: string, capId: string, accountId
 }
 
 /** Close a device's account for good; its reserve returns to the budget. */
-export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: string, fleet?: NamedFleet, deviceId?: string): Transaction {
+export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: string, fleet?: NamedFleet, deviceId?: string, ownerAddress?: string): Transaction {
   requireBudget();
   const tx = new Transaction();
   if (fleet) {
     if (!deviceId) throw Error("Choose the device to remove from this fleet");
-    tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_device`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(budgetId), tx.object(accountId), tx.pure.id(deviceId)] });
+    if (!ownerAddress) throw Error("Connect the wallet receiving the device owner capability");
+    const cap = tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_device`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(budgetId), tx.object(accountId), tx.pure.id(deviceId)] });
+    tx.transferObjects([cap], tx.pure.address(ownerAddress));
   } else calls.fleet_budget_remove_device(tx, PACKAGE_ID, budgetId, capId, accountId);
   return tx;
 }

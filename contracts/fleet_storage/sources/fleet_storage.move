@@ -708,7 +708,7 @@ module fleet_storage::fleet_storage {
 
     /// Issuer configuration, idempotent for this producer type origin. The
     /// witness is never returned or publicly constructible by a device.
-    public fun configure_customer_charging(customer: &mut Customer, registry: &DeviceRegistry, ctx: &TxContext) {
+    public fun configure_customer_charging(customer: &mut Customer, registry: &DeviceRegistry, ctx: &mut TxContext) {
         customer::configure_charging(customer, registry, CustomerCharge {}, ctx);
     }
 

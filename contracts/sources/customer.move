@@ -108,7 +108,7 @@ module sui_edge::customer {
     /// Entitlement administration is separate from customer/wallet ownership.
     /// Periods advance monotonically; changing credentials/fleets cannot reset usage.
     public fun set_entitlement(customer: &mut Customer, registry: &DeviceRegistry,
-        device_limit: u64, allowance: u64, period: u64, ctx: &TxContext) {
+        device_limit: u64, allowance: u64, period: u64, ctx: &mut TxContext) {
         assert!(customer.version == 1 && customer.registry_id == object::id(registry), EBinding);
         device_registry::assert_admin(registry, ctx);
         assert!(period >= customer.period, EPeriod);
@@ -156,7 +156,7 @@ module sui_edge::customer {
     /// Transaction-scoped capability lending supports the reviewed settings/storage/data
     /// APIs. Enrollment is separately sealed at budget version 2; caps never leave
     /// custody, so revoked wallets cannot retain write authority.
-    public fun borrow_budget_cap(customer: &Customer, fleet: &mut Fleet, ctx: &TxContext): (BudgetOwnerCap, BudgetLoan) {
+    public fun borrow_budget_cap(customer: &Customer, fleet: &mut Fleet, ctx: &mut TxContext): (BudgetOwnerCap, BudgetLoan) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0, EBinding);
@@ -190,10 +190,10 @@ module sui_edge::customer {
         let cap = device_registry::activate_device(registry, device, ctx);
         enroll(customer, fleet, budget, registry, cap, float, reserve, clock, ctx);
     }
-    public fun rename_fleet(customer: &Customer, fleet: &mut Fleet, name: String, ctx: &TxContext) {
+    public fun rename_fleet(customer: &Customer, fleet: &mut Fleet, name: String, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_name(&name); fleet.name = name;
     }
-    public fun set_default_fleet(customer: &mut Customer, fleet: &Fleet, ctx: &TxContext) {
+    public fun set_default_fleet(customer: &mut Customer, fleet: &Fleet, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); customer.default_fleet = option::some(object::id(fleet));
     }
     /// Explicit atomic reassignment: retire the old gas account, keep identity
@@ -237,15 +237,15 @@ module sui_edge::customer {
         let policy_id = enrollment::create_managed(registry, object::id(fleet).to_address(), quota, expires_at_ms, ctx);
         fleet.enrollment_policies.push_back(policy_id);
     }
-    public fun add_claims(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &TxContext) {
+    public fun add_claims(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
         enrollment::add_claims_as(policy, claims, object::id(fleet).to_address());
     }
-    public fun revoke_claim(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, ctx: &TxContext) {
+    public fun revoke_claim(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
         enrollment::revoke_claim_as(policy, claim, object::id(fleet).to_address());
     }
-    public fun configure_enrollment(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, ctx: &TxContext) {
+    public fun configure_enrollment(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
         enrollment::configure_managed(policy, quota, expires_at_ms, close, object::id(fleet).to_address());
     }
@@ -259,7 +259,7 @@ module sui_edge::customer {
         assert_fleet(customer, fleet);
         assert!(fleet.enrollment_policies.contains(&object::id(policy)) && enrollment::operator(policy) == object::id(fleet).to_address(), EBinding);
     }
-    public fun bind_device_metadata(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, alias: String, serial: String, ctx: &TxContext) {
+    public fun bind_device_metadata(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, alias: String, serial: String, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, DeviceKey { device_id });
@@ -268,7 +268,7 @@ module sui_edge::customer {
         device_registry::set_meta(&mut device, std::string::utf8(b"suifleet.serial"), serial, ctx);
         device_registry::return_device(registry, device, loan);
     }
-    public fun set_device_revoked(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, revoked: bool, ctx: &TxContext) {
+    public fun set_device_revoked(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, revoked: bool, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, DeviceKey { device_id });
@@ -310,7 +310,7 @@ module sui_edge::customer {
 
     /// Adopt a legacy group only after every member is assigned to this fleet.
     /// Updating its stored admin defeats old package mutation entry points too.
-    public fun adopt_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup, ctx: &TxContext) {
+    public fun adopt_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0, EBinding);
@@ -328,20 +328,20 @@ module sui_edge::customer {
 
     /// Explicit departure retires the gas account and releases capacity once.
     /// Clear group memberships first; historical deployments/archives stay put.
+    /// Return custody to the caller for explicit PTB transfer or composition.
     public fun remove_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
-        account: &mut GasAccount, device_id: ID, ctx: &TxContext) {
-        let cap = release_device(customer, fleet, budget, account, device_id, ctx);
-        transfer::public_transfer(cap, ctx.sender());
+        account: &mut GasAccount, device_id: ID, ctx: &mut TxContext): DeviceOwnerCap {
+        release_device(customer, fleet, budget, account, device_id, ctx)
     }
     public fun deregister_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
-        account: &mut GasAccount, registry: &mut DeviceRegistry, device_id: ID, ctx: &TxContext) {
+        account: &mut GasAccount, registry: &mut DeviceRegistry, device_id: ID, ctx: &mut TxContext) {
         assert!(object::id(registry) == customer.registry_id, EBinding);
         let cap = release_device(customer, fleet, budget, account, device_id, ctx);
         device_registry::deregister_activated_device(registry, cap, ctx);
     }
 
     fun release_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
-        account: &mut GasAccount, device_id: ID, ctx: &TxContext): DeviceOwnerCap {
+        account: &mut GasAccount, device_id: ID, ctx: &mut TxContext): DeviceOwnerCap {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert!(object::id(budget) == fleet.budget_id && fleet_budget::account_device_id(account) == device_id, EBinding);
@@ -371,7 +371,7 @@ module sui_edge::customer {
     }
 
     public fun add_to_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
-        device_id: ID, ctx: &TxContext) {
+        device_id: ID, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, group);
@@ -382,7 +382,7 @@ module sui_edge::customer {
     }
 
     public fun remove_from_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
-        device_id: ID, ctx: &TxContext) {
+        device_id: ID, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, group);
@@ -391,7 +391,7 @@ module sui_edge::customer {
         *count = *count - 1;
     }
 
-    public fun delete_group(customer: &Customer, fleet: &mut Fleet, group: DeviceGroup, ctx: &TxContext) {
+    public fun delete_group(customer: &Customer, fleet: &mut Fleet, group: DeviceGroup, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, &group);
@@ -433,7 +433,7 @@ module sui_edge::customer {
         fleet.policies.insert(policy_id, object::id(&cap));
         dof::add(&mut fleet.id, PolicyKey { policy_id }, cap);
     }
-    public fun adopt_policy(customer: &Customer, fleet: &mut Fleet, policy: &AccessPolicy, cap: AccessAdminCap, ctx: &TxContext) {
+    public fun adopt_policy(customer: &Customer, fleet: &mut Fleet, policy: &AccessPolicy, cap: AccessAdminCap, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let policy_id = object::id(policy);
         assert!(seal_policy::cap_policy(&cap) == policy_id, EBinding);
@@ -446,12 +446,12 @@ module sui_edge::customer {
         fleet.policies.insert(policy_id, object::id(&cap));
         dof::add(&mut fleet.id, PolicyKey { policy_id }, cap);
     }
-    public fun policy_account(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, account: address, grant: bool, ctx: &TxContext) {
+    public fun policy_account(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, account: address, grant: bool, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         if (grant) seal_policy::grant_account(policy, cap, account) else seal_policy::revoke_account(policy, cap, account);
     }
-    public fun policy_device(customer: &Customer, fleet: &mut Fleet, policy: &mut AccessPolicy, registry: &DeviceRegistry, device_id: ID, grant: bool, ctx: &TxContext) {
+    public fun policy_device(customer: &Customer, fleet: &mut Fleet, policy: &mut AccessPolicy, registry: &DeviceRegistry, device_id: ID, grant: bool, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
@@ -459,12 +459,12 @@ module sui_edge::customer {
         let count: &mut u64 = df::borrow_mut(&mut fleet.id, GroupCountKey { device_id });
         if (grant) *count = *count + 1 else *count = *count - 1;
     }
-    public fun policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group: &DeviceGroup, grant: bool, ctx: &TxContext) {
+    public fun policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group: &DeviceGroup, grant: bool, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         if (grant) seal_policy::grant_managed_group(policy, cap, group) else seal_policy::revoke_group(policy, cap, object::id(group));
     }
-    public fun rotate_policy(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, ctx: &TxContext) {
+    public fun rotate_policy(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         seal_policy::rotate_key_epoch(policy, cap);
@@ -489,64 +489,64 @@ module sui_edge::customer {
         fleet.deployments.push_back(object::id(&record)); record
     }
     public fun advance_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, online: vector<ID>,
-        healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &TxContext) {
+        healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::advance_rollout_as(record, online, healthy, unhealthy, clock, object::id(fleet).to_address());
     }
-    public fun control_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, ctx: &TxContext) {
+    public fun control_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::control_rollout_as(record, state, skip, reason, clock, object::id(fleet).to_address());
     }
 
-    public fun adopt_deployment(customer: &Customer, fleet: &mut Fleet, record: &mut DeploymentRecord, ctx: &TxContext) {
+    public fun adopt_deployment(customer: &Customer, fleet: &mut Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert_targets(fleet, deployment_manager::target_groups(record), deployment_manager::target_devices(record));
         deployment_manager::handover(record, object::id(fleet).to_address(), ctx);
         deployment_manager::bind_customer(record, object::id(fleet));
         fleet.deployments.push_back(object::id(record));
     }
-    public fun delete_deployment(customer: &Customer, fleet: &mut Fleet, mut record: DeploymentRecord, ctx: &TxContext) {
+    public fun delete_deployment(customer: &Customer, fleet: &mut Fleet, mut record: DeploymentRecord, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let (found, index) = fleet.deployments.index_of(&object::id(&record)); assert!(found, EBinding);
         fleet.deployments.swap_remove(index);
         if (deployment_manager::schema_version(&record) == 2) component_catalog::remove_for_customer(&mut record, object::id(fleet).to_address());
         deployment_manager::delete_for_customer(record, object::id(fleet).to_address());
     }
-    public fun report_status(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, status: u8, ctx: &TxContext) {
+    public fun report_status(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
         assert_reporter(customer, fleet, record, registry, cap, ctx);
         assert!(deployment_manager::target_devices(record).contains(&device_cap::device_id(cap)), EBinding);
         deployment_manager::record_customer_status(record, object::id(fleet), cap, status, ctx);
     }
-    public fun report_group_status(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &TxContext) {
+    public fun report_group_status(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &mut TxContext) {
         assert_reporter(customer, fleet, record, registry, cap, ctx); assert_group(fleet, group);
         assert!(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
         deployment_manager::record_customer_status(record, object::id(fleet), cap, status, ctx);
     }
-    fun assert_reporter(customer: &Customer, fleet: &Fleet, record: &DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, ctx: &TxContext) {
+    fun assert_reporter(customer: &Customer, fleet: &Fleet, record: &DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, ctx: &mut TxContext) {
         assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_cap::device_id(cap))
             && fleet.deployments.contains(&object::id(record)) && deployment_manager::creator(record) == object::id(fleet).to_address(), EBinding);
         device_cap::assert_active(cap, registry, ctx);
     }
-    public fun revoke_policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group_id: ID, ctx: &TxContext) {
+    public fun revoke_policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group_id: ID, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         seal_policy::revoke_group(policy, cap, group_id);
     }
 
     public fun set_control(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8,
-        not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, ctx: &TxContext) {
+        not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::set_control_as(record, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, object::id(fleet).to_address());
     }
-    public fun begin_revision(customer: &Customer, fleet: &Fleet, group: &DeviceGroup, ctx: &TxContext): RevisionPlan {
+    public fun begin_revision(customer: &Customer, fleet: &Fleet, group: &DeviceGroup, ctx: &mut TxContext): RevisionPlan {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         desired_state::begin_as(group, object::id(fleet).to_address())
     }
-    public fun commit_revision(customer: &Customer, fleet: &Fleet, plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
+    public fun commit_revision(customer: &Customer, fleet: &Fleet, plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         desired_state::commit_as(plan, group, clock, object::id(fleet).to_address());
     }
@@ -563,7 +563,7 @@ module sui_edge::customer {
 
     /// Reserve customer allowance before fleet diagnostics/log work. The receipt
     /// is an on-chain counter, never a reset per credential.
-    public fun reserve_allowance(customer: &mut Customer, fleet: &Fleet, amount: u64, ctx: &TxContext) {
+    public fun reserve_allowance(customer: &mut Customer, fleet: &Fleet, amount: u64, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert!(amount <= customer.allowance - customer.used, ELimit);
@@ -573,7 +573,7 @@ module sui_edge::customer {
     /// Device writes consume the same customer ledger as administrator writes.
     /// The charge is serialized on Customer; storage validates its budget first.
     public fun reserve_device_allowance<W: drop>(customer: &mut Customer, fleet: &Fleet, budget: &FleetBudget,
-        account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap, amount: u64, _witness: W, ctx: &TxContext) {
+        account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap, amount: u64, _witness: W, ctx: &mut TxContext) {
         assert!(customer.charge_type == std::type_name::with_original_ids<W>().into_string().into_bytes(), EAccess);
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0 && object::id(budget) == fleet.budget_id, EBinding);
@@ -586,7 +586,7 @@ module sui_edge::customer {
     /// Only entitlement authority can authorize an external storage producer.
     /// A non-store, non-publicly-constructible witness then keeps devices from
     /// exhausting the customer ledger by calling its charge function directly.
-    public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &TxContext) {
+    public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &mut TxContext) {
         assert!(customer.version == 1 && object::id(registry) == customer.registry_id, EBinding);
         device_registry::assert_admin(registry, ctx);
         let name = std::type_name::with_original_ids<W>().into_string().into_bytes();
@@ -594,10 +594,10 @@ module sui_edge::customer {
         customer.charge_type = name;
     }
 
-    public fun assert_member(customer: &Customer, ctx: &TxContext) {
+    public fun assert_member(customer: &Customer, ctx: &mut TxContext) {
         assert!(customer.version == 1 && customer.credentials.contains(&ctx.sender()), EAccess);
     }
-    public fun assert_admin(customer: &Customer, ctx: &TxContext) {
+    public fun assert_admin(customer: &Customer, ctx: &mut TxContext) {
         assert_member(customer, ctx);
         assert!(*customer.credentials.get(&ctx.sender()), EAccess);
     }

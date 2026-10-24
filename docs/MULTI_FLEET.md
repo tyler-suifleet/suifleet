@@ -80,8 +80,13 @@ trusting browser input, a wallet address or a budget deposit as payment proof.
 
 `active_devices` counts assigned/enrolled devices, including suspended or revoked
 ones until explicit removal. Adoption reserves the existing budget count before
-any cap is reconciled. Registration, sponsored claims, removal and atomic
-reassignment update customer and fleet accounting together. Each fleet has its
+any cap is reconciled. Managed `customer::remove_device` returns the released
+`DeviceOwnerCap`; a PTB must consume or explicitly transfer that result. The
+wallet builder transfers it to the connected administrator. Removing a device
+releases customer capacity and leaves historical deployments and archives in place.
+The new customer API uses mutable transaction contexts for future upgrade
+compatibility. Registration, sponsored claims, removal and atomic reassignment
+update customer and fleet accounting together. Each fleet has its
 own gas/storage balances, per-device quotas, settings and retention funding.
 
 The customer upload allowance is measured in Walrus **encoded bytes**, shared

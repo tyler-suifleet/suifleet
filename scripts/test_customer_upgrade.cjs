@@ -144,6 +144,15 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   await reject("reassigned device cannot report source receipt",call("report_status",t=>[t.object(customer),t.object(fleet),t.object(deployment),t.object(registry),t.object(deviceCap),t.pure.u8(1)]),device);
   const after=await read.fetchCustomerFleets(client,owner.toSuiAddress());assert.equal(after.find(f=>f.id===second).activeDevices,1n);assert.ok(after.find(f=>f.id===second).devices.includes(deviceId));assert.ok(!after.find(f=>f.id===fleet).devices.includes(deviceId));
   const operatorAfter=execFileSync("suifleet-edge/target/debug/suifleet",["--check-operator",cfg],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});assert.ok(operatorAfter.includes(second));
+  const budgetUi=load("lib/fleet-budget.ts");
+  const destinationAccount=await client.getDynamicField({parentId:secondView.budgetId,name:{type:`${old}::fleet_budget::DeviceKey`,bcs:bcs.Address.serialize(deviceId).toBytes()}});
+  const destinationAccountId=bcs.Address.parse(destinationAccount.dynamicField.value.bcs);
+  const removalResult=await execute("managed removal returns custody",budgetUi.buildRemoveDeviceTx(secondView.budgetId,cap,destinationAccountId,secondView,deviceId,owner.toSuiAddress()));
+  const released=await client.getObject({objectId:created(removalResult,"::device_registry::DeviceOwnerCap")});
+  assert.equal(released.object.owner.AddressOwner,owner.toSuiAddress());
+  const removed=await read.fetchCustomerFleets(client,owner.toSuiAddress());
+  assert.equal(removed.find(f=>f.id===second).activeDevices,0n);
+  assert.ok(!removed.find(f=>f.id===second).devices.includes(deviceId));
   console.log(JSON.stringify({result:"PASS",base,old_package:old,head_package:head,customer,fleet,digests,failures,daemon_operator:JSON.parse(operator.trim().split("\n").at(-1)).operator,operator_after_reassignment:second,managed_receipt:reported}));
 
  } finally {await stopDaemon();await fs.rm(tmp,{recursive:true,force:true});}

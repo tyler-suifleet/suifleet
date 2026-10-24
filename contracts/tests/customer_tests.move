@@ -212,6 +212,25 @@ module sui_edge::customer_tests {
         sui::clock::destroy_for_testing(clock); ts::return_shared(p); ts::return_shared(r); s.end();
     }
     #[test]
+    fun removal_returns_custody_and_releases_aggregate_capacity() {
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1);
+        let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let mut b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f));
+        let mut account = s.take_shared<sui_edge::fleet_budget::GasAccount>();
+        let cap = customer::remove_device(&mut c, &mut f, &mut b, &mut account, did, s.ctx());
+        assert!(device_registry::owner_cap_device_id(&cap) == did);
+        assert!(customer::active_devices(&c) == 0 && customer::devices(&f).is_empty());
+        assert!(fleet_budget::device_count(&b) == 0);
+        // The PTB can explicitly choose custody after the authoritative release.
+        sui::transfer::public_transfer(cap, OWNER);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(account);
+        s.next_tx(OWNER);
+        let cap = s.take_from_sender<sui_edge::device_registry::DeviceOwnerCap>();
+        assert!(device_registry::owner_cap_device_id(&cap) == did);
+        ts::return_to_address(OWNER, cap); s.end();
+    }
+    #[test]
     fun explicit_reassignment_keeps_identity_and_aggregate_count() {
         let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s); allow_devices(&mut s, 1);
         let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
