@@ -238,5 +238,207 @@ class Implementation(Recovery):
                          'review repair owns the claim recovery')
 
 
+SCRIPT = '''import os,pathlib,sys,time
+marker=pathlib.Path(os.environ["QUOTA_MARKER"])
+if not marker.exists():
+    marker.write_text("stopped once")
+    print("Pushed a partial fix.\\n", flush=True)
+    print(os.environ["QUOTA_MESSAGE"], flush=True)
+    sys.exit(1)
+pathlib.Path(os.environ["QUOTA_MARKER"]+".resumed").write_text(os.environ.get("PR_COORDINATOR_CLAIM_TOKEN",""))
+time.sleep(300)
+'''
+
+
+class Repair(Fixture):
+    """Coordinator review-feedback/CI repair workers on a resumed Review claim."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = uuid.uuid4().hex
+        self.owner.update(token=self.token, status='in_progress')
+        script = Path(self.temp.name)/'quota_cli.py'
+        script.write_text(SCRIPT)
+        self.marker = Path(self.temp.name)/'quota-marker'
+        self.coordinator_config = dict(projects=[self.project],
+                                       workers={'Codex': [sys.executable, str(script)], 'Claude': ['unused']})
+        self.engine = self.coordinator()
+        self.calls = []
+
+    def coordinator(self):
+        engine = c.Coordinator(self.coordinator_config, self.state)
+        engine.ticket = self.coordinator_ticket
+        engine.gh = lambda project, args: json.dumps(dict(state='OPEN', isCrossRepository=False, headRefName='work/test'))
+        return engine
+
+    def coordinator_ticket(self, project, *args, timeout=None):
+        self.calls.append(args[0])
+        if args[0] == 'show':
+            return json.dumps(self.owner)
+        if args[0] == 'locks':
+            return json.dumps(self.locks)
+        if args[0] in ('heartbeat', 'assert'):
+            if args[2:] != ('--token', self.owner['token']):
+                raise AssertionError('wrong claim token')
+            return json.dumps(self.owner)
+        raise AssertionError(f'unexpected ticket command {args}')
+
+    def kill_processes(self):
+        super().kill_processes()
+        for engine in [self.engine, *getattr(self, 'engines', [])]:
+            for child in engine.children.values():
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=5)
+
+    def stopped_repair(self, reset=None, stopped=None):
+        self.reset_at = time.time()+2*3600 if reset is None else reset
+        directory = self.state/'suifleet'/'pr-7-fix'
+        directory.mkdir(parents=True)
+        (directory/'snapshot.json').write_text(json.dumps({**self.pr, 'ticket': {k: self.owner[k] for k in ('key', 'agent', 'model')}}))
+        (directory/'command.json').write_text(json.dumps(self.coordinator_config['workers']['Codex']))
+        (directory/'prompt.txt').write_text('repair feedback')
+        env = {**os.environ, 'QUOTA_MARKER': str(self.marker), 'QUOTA_MESSAGE': session_limit(self.reset_at),
+               'PR_COORDINATOR_CLAIM_TOKEN': self.token}
+        child = subprocess.Popen([sys.executable, str(ROOT/'worker.py'), str(directory)], cwd=self.worktree, env=env,
+                                 start_new_session=True)
+        child.wait(timeout=10)
+        if stopped is not None:
+            os.utime(directory/'exit.json', (stopped, stopped))
+        identity = json.loads((directory/'process.json').read_text())
+        intent = dict(claim=hashlib.sha256(self.token.encode()).hexdigest(), key='SF-099', branch='work/test',
+                      worktree=str(self.worktree), head=self.head)
+        self.job = self.engine.store.db.execute(
+            "INSERT INTO jobs(project,pr,family,kind,head,feedback,status,directory,pid,started,created,repair_claim) "
+            "VALUES('suifleet',7,'Codex','fix',?,'f'||?,'running',?,?,?,?,?)",
+            (self.head, uuid.uuid4().hex, str(directory), identity['pid'], identity['started'], time.time(),
+             json.dumps(intent))).lastrowid
+        os.environ.update(QUOTA_MARKER=str(self.marker), QUOTA_MESSAGE=session_limit(self.reset_at))
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ('QUOTA_MARKER', 'QUOTA_MESSAGE')])
+        return directory
+
+    def collect(self):
+        def fake(argv, **kwargs):
+            return 'private-gh-token' if argv[:3] == ['gh', 'auth', 'token'] else REAL_RUN(argv, **kwargs)
+        with patch.object(c, 'run', side_effect=fake):
+            self.engine.collect(self.project, [self.owner])
+
+    def job_row(self):
+        return self.engine.store.db.execute('SELECT * FROM jobs WHERE id=?', (self.job,)).fetchone()
+
+    def due(self):
+        self.engine.store.db.execute('UPDATE jobs SET retry_after=0 WHERE id=?', (self.job,))
+
+    def test_observed_stop_waits_for_reset_then_resumes_same_claim_once(self):
+        source = self.stopped_repair()
+        (self.worktree/'feature.txt').write_text('dirty repair work\n')
+        snapshot = git('status', '--porcelain=v1', cwd=self.worktree)
+        self.collect()
+        row = self.job_row()
+        self.assertEqual(row['status'], 'quota_wait')
+        self.assertEqual(row['retry_after'], int(self.reset_at//60)*60 + c.QUOTA_GRACE)
+        self.assertIn('same-claim repair retry 1/', row['error'])
+        # No retry before the reset; the retained claim stays alive; the PR stays reserved.
+        self.engine = self.coordinator()
+        self.calls.clear(); self.collect()
+        self.assertEqual(self.job_row()['status'], 'quota_wait')
+        self.assertIn('heartbeat', self.calls)
+        self.assertFalse(Path(str(self.marker)+'.resumed').exists())
+        self.assertIsNone(self.engine.store.reserve('suifleet', self.pr, 'Claude', 'review', self.state/'other'))
+        self.due(); self.collect()
+        row = self.job_row()
+        self.assertEqual(row['status'], 'running')
+        self.assertEqual(row['directory'], str(source/'quota-1'))
+        deadline = time.time()+10
+        resumed = Path(str(self.marker)+'.resumed')
+        while not resumed.exists():
+            self.assertLess(time.time(), deadline); time.sleep(.02)
+        self.assertEqual(resumed.read_text(), self.token, 'the same claim token is inherited')
+        self.assertEqual(git('status', '--porcelain=v1', cwd=self.worktree), snapshot)
+        prompt = (source/'quota-1'/'prompt.txt').read_text()
+        self.assertIn('explicit provider quota limit', prompt)
+        self.assertIn(c.CI_HANDOFF, prompt)
+        self.assertTrue((source/'worker.log').exists(), 'original evidence retained')
+        self.collect()
+        self.assertEqual(len(self.engine.children), 1, 'never a duplicate')
+        record = self.engine.store.db.execute('SELECT state FROM quota_recoveries').fetchone()[0]
+        self.assertEqual(record, 'launched')
+
+    def test_past_reset_is_due_immediately(self):
+        now = time.time()
+        self.stopped_repair(reset=now-600, stopped=now-3600)
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'quota_wait')
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'running')
+
+    def test_fences_lock_live_claim_process_and_changed_ownership(self):
+        self.stopped_repair(); self.collect(); self.due()
+        self.locks.append(dict(resource='network:suifleet-testnet', session='other', ticket='suifleet::SF-099',
+                               expires=time.time()+500))
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'quota_wait')
+        self.assertEqual(self.engine.store.db.execute('SELECT reason FROM quota_recoveries').fetchone()[0],
+                         'the claim still holds a shared-resource lease')
+        self.locks.clear()
+        child = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(300)'],
+                                 env={**os.environ, 'PR_COORDINATOR_CLAIM_TOKEN': self.token}, start_new_session=True)
+        self.addCleanup(lambda: (child.kill(), child.wait()))
+        self.collect()
+        self.assertEqual(self.engine.store.db.execute('SELECT reason FROM quota_recoveries').fetchone()[0],
+                         'a live process still carries the claim token')
+        child.kill(); child.wait()
+        self.owner.update(status='review')
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'quarantined')
+        self.assertEqual(self.engine.store.db.execute('SELECT state FROM quota_recoveries').fetchone()[0], 'cancelled')
+        self.assertFalse(Path(str(self.marker)+'.resumed').exists())
+
+    def test_uncertain_launch_is_held_and_never_replayed(self):
+        self.stopped_repair(); self.collect(); self.due()
+        original = subprocess.Popen
+        def popen(argv, **kwargs):
+            if str(ROOT/'worker.py') in argv:
+                raise OSError('ambiguous spawn')
+            return original(argv, **kwargs)
+        with patch.object(c.subprocess, 'Popen', side_effect=popen):
+            self.collect()
+        row = self.job_row()
+        self.assertEqual((row['status'], row['pid']), ('orphaned', None))
+        self.engine = self.coordinator()
+        self.collect(); self.collect()
+        self.assertEqual(self.job_row()['status'], 'orphaned', 'held for explicit recovery, never quarantined or replayed')
+        self.assertEqual(self.engine.store.db.execute('SELECT state FROM quota_recoveries').fetchone()[0], 'uncertain')
+
+    def test_interrupted_intent_after_restart_is_held(self):
+        self.stopped_repair(); self.collect(); self.due()
+        self.engine.store.db.execute("UPDATE jobs SET status='quota_launch' WHERE id=?", (self.job,))
+        self.engine.store.db.execute("UPDATE quota_recoveries SET state='launch_intent',replacement=?",
+                                     (str(self.state/'never-started'),))
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'orphaned')
+        self.assertFalse(Path(str(self.marker)+'.resumed').exists())
+
+    def test_budget_exhaustion_requires_explicit_recovery(self):
+        self.stopped_repair()
+        for attempt in range(c.QUOTA_RETRIES):
+            self.engine.store.db.execute("INSERT INTO quota_recoveries VALUES(?,?,?,?,?,?,?,?)",
+                                         (self.job, attempt+1, 'old', 0, 'launched', None, 'old', 0))
+        self.collect()
+        row = self.job_row()
+        self.assertEqual(row['status'], 'orphaned')
+        self.assertIn('quota retry budget exhausted', row['error'])
+        self.collect()
+        self.assertEqual(self.job_row()['status'], 'quarantined')
+
+    def test_review_quota_retry_waits_for_the_reset(self):
+        self.stopped_repair()
+        self.engine.store.db.execute("UPDATE jobs SET kind='review',repair_claim=NULL WHERE id=?", (self.job,))
+        self.collect()
+        row = self.job_row()
+        self.assertEqual(row['status'], 'retry')
+        self.assertGreaterEqual(row['retry_after'], self.reset_at)
+
+
 if __name__ == '__main__':
     unittest.main()

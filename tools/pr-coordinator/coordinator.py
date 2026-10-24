@@ -314,6 +314,9 @@ class Store:
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
+          CREATE TABLE IF NOT EXISTS quota_recoveries (
+            job INTEGER, attempt INTEGER, source TEXT, reset REAL, state TEXT, replacement TEXT,
+            reason TEXT, updated REAL, PRIMARY KEY(job,attempt));
         ''')
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
@@ -354,8 +357,8 @@ class Store:
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined') AND project=? AND pr=?", (project, pr['number'])).fetchone()
-            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned') AND family=? AND kind=?", (family, kind)).fetchone()[0]
+            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch') AND project=? AND pr=?", (project, pr['number'])).fetchone()
+            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned','quota_launch') AND family=? AND kind=?", (family, kind)).fetchone()[0]
             limit = self.worker_limits.get(family, {}).get(kind, 1)
             quarantine_count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status='quarantined' AND family=? AND kind=?", (family,kind)).fetchone()[0]
             pause = self.db.execute('SELECT retry_after FROM quarantine_backoff WHERE family=? AND kind=?', (family,kind)).fetchone()
@@ -846,10 +849,189 @@ Do not edit the coordinator database or forge another model's review. Only this 
 The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the current base and that the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
 
+    def record_quota(self, project, row, reset):
+        """Defer a verified-stopped repair to its provider quota reset under the same claim."""
+        attempt = self.store.db.execute('SELECT COUNT(*)+1 FROM quota_recoveries WHERE job=?', (row['id'],)).fetchone()[0]
+        if attempt > QUOTA_RETRIES:
+            return False
+        now = time.time()
+        retry_after = max(now, reset+QUOTA_GRACE)
+        when = datetime.fromtimestamp(reset).astimezone().isoformat(timespec='minutes')
+        reason = f'provider quota limit; same-claim repair retry {attempt}/{QUOTA_RETRIES} after reset at {when}'
+        self.store.db.execute('BEGIN IMMEDIATE')
+        try:
+            self.store.db.execute('INSERT INTO quota_recoveries VALUES(?,?,?,?,?,?,?,?)',
+                                  (row['id'], attempt, row['directory'], reset, 'waiting', None, reason, now))
+            self.store.db.execute("UPDATE jobs SET status='quota_wait',error=?,retry_after=? WHERE id=?",
+                                  (reason, retry_after, row['id']))
+            self.store.db.execute('COMMIT')
+        except BaseException:
+            self.store.db.execute('ROLLBACK'); raise
+        print(f"{project['id']} PR#{row['pr']}: repair stopped on provider quota; {reason}", flush=True)
+        return True
+
+    def adopt_quota_launch(self, row):
+        """A launch intent interrupted by a service crash is adopted or held, never replayed."""
+        record = self.store.db.execute("SELECT * FROM quota_recoveries WHERE job=? AND state='launch_intent'",
+                                       (row['id'],)).fetchone()
+        process = Path(record['replacement'])/'process.json' if record and record['replacement'] else None
+        if process is not None and process.exists():
+            identity = json.loads(process.read_text())
+            self.store.db.execute("UPDATE jobs SET status='running',directory=?,pid=?,started=?,error=NULL WHERE id=?",
+                                  (record['replacement'], identity['pid'], identity['started'], row['id']))
+            state, reason = 'launched', 'replacement adopted from its process receipt after restart'
+        else:
+            self.store.db.execute("UPDATE jobs SET status='orphaned',pid=NULL,started=NULL,error=? WHERE id=?",
+                                  ('quota recovery launch uncertain; explicit recovery required', row['id']))
+            state, reason = 'uncertain', 'interrupted launch without a process receipt; never replayed'
+        if record:
+            self.store.db.execute('UPDATE quota_recoveries SET state=?,reason=?,updated=? WHERE job=? AND attempt=?',
+                                  (state, reason, time.time(), row['id'], record['attempt']))
+
+    def quota_fence(self, project, row, intent, source):
+        """(owner, reason): read-only same-claim fences checked immediately before relaunch."""
+        owner = json.loads(self.ticket(project, 'show', intent['key']))
+        snapshot = json.loads((source/'snapshot.json').read_text()).get('ticket') or {}
+        token = owner.get('token')
+        if (owner.get('status') != 'in_progress' or owner.get('publish_pending')
+                or not isinstance(token, str) or not token
+                or hashlib.sha256(token.encode()).hexdigest() != intent['claim']
+                or owner.get('agent') != row['family'] or owner.get('agent') != snapshot.get('agent')
+                or owner.get('model') != snapshot.get('model')
+                or any(owner.get(k) != intent[k] for k in ('key', 'branch', 'worktree'))):
+            return None, 'ownership changed'
+        self.ticket(project, 'assert', intent['key'], '--token', token)
+        if json.loads((source/'command.json').read_text()) != self.config['workers'][row['family']]:
+            return owner, 'configured worker command changed'
+        if (not worker_stopped(row['pid'], row['started'])
+                or json.loads((source/'process.json').read_text()) != dict(pid=row['pid'], started=row['started'])):
+            return owner, 'original repair process identity not verified stopped'
+        if claim_processes(token, row['started']):
+            return owner, 'a live process still carries the claim token'
+        now = time.time()
+        for lock in json.loads(self.ticket(project, 'locks')):
+            if lock.get('expired') or (lock.get('expires') or 0) <= now:
+                continue
+            named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+', f"{lock.get('session') or ''} {lock.get('purpose') or ''}".upper())
+            if (lock.get('session') == owner.get('session') or str(lock.get('ticket') or '').split('::')[-1] == intent['key']
+                    or intent['key'] in named):
+                return owner, 'the claim still holds a shared-resource lease'
+        worktree = Path(intent['worktree'])
+        if run(['git', 'branch', '--show-current'], cwd=worktree).strip() != intent['branch']:
+            return owner, 'worktree left the repair branch'
+        for operation in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer', 'index.lock'):
+            path = Path(run(['git', 'rev-parse', '--git-path', operation], cwd=worktree).strip())
+            if (path if path.is_absolute() else worktree/path).exists():
+                return owner, 'worktree has an unfinished git operation'
+        pr = json.loads(self.gh(project, ['pr', 'view', str(row['pr']), '--repo', project['repository'],
+                                          '--json', 'state,isCrossRepository,headRefName']))
+        if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr.get('headRefName') != intent['branch']:
+            return owner, 'PR is no longer the open same-repository repair branch'
+        busy = self.store.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned','quota_launch') "
+                                     "AND family=? AND kind='fix' AND id!=?", (row['family'], row['id'])).fetchone()[0]
+        if busy >= self.store.worker_limits.get(row['family'], {}).get('fix', 1):
+            return owner, 'waiting for configured repair capacity'
+        return owner, None
+
+    def resume_quota(self, project, row):
+        """Relaunch one same-family repair under the unchanged claim once the reset passed.
+
+        Dirty/staged/untracked work and pushed commits are preserved; the new
+        worker continues them. Any doubt keeps the job waiting or retained."""
+        intent = json.loads(row['repair_claim'])
+        record = self.store.db.execute("SELECT * FROM quota_recoveries WHERE job=? AND state='waiting' ORDER BY attempt DESC",
+                                       (row['id'],)).fetchone()
+        if record is None or record['source'] != row['directory']:
+            self.store.db.execute("UPDATE jobs SET status='orphaned',error=? WHERE id=?",
+                                  ('quota recovery record missing; explicit recovery required', row['id']))
+            return
+        source = Path(row['directory'])
+        if row['retry_after'] > time.time():
+            # Before the reset only keep the unchanged retained claim alive; no remote PR reads.
+            try:
+                owner = json.loads(self.ticket(project, 'show', intent['key']))
+                token = owner.get('token')
+                if (owner.get('status') == 'in_progress' and isinstance(token, str) and token
+                        and hashlib.sha256(token.encode()).hexdigest() == intent['claim']):
+                    self.ticket(project, 'assert', intent['key'], '--token', token)
+                    self.ticket(project, 'heartbeat', intent['key'], '--token', token)
+            except (OSError, ValueError, subprocess.CalledProcessError):
+                pass  # An expired or unavailable claim is never renewed here; the fence decides at the reset.
+            return
+        try:
+            owner, reason = self.quota_fence(project, row, intent, source)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.CalledProcessError) as error:
+            owner, reason = True, f'verification unavailable ({type(error).__name__}); nothing launched'
+        if owner is None:
+            # Authoritative ownership transition: stop waiting; the stopped receipt stays for inspection.
+            self.store.db.execute("UPDATE jobs SET status='quarantined',error=? WHERE id=?",
+                                  ('quota recovery cancelled: ownership/status changed; inspect receipt', row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='cancelled',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  ('ownership/status changed', time.time(), row['id'], record['attempt']))
+            return
+        if reason:
+            if owner is not True:
+                self.ticket(project, 'heartbeat', intent['key'], '--token', owner['token'])
+            self.store.db.execute('UPDATE quota_recoveries SET reason=?,updated=? WHERE job=? AND attempt=?',
+                                  (reason, time.time(), row['id'], record['attempt']))
+            return
+        self.ticket(project, 'heartbeat', intent['key'], '--token', owner['token'])
+        base = source.parent if source.name.startswith('quota-') else source
+        directory = base/f"quota-{record['attempt']}"
+        self.store.db.execute('BEGIN IMMEDIATE')
+        try:
+            changed = self.store.db.execute("UPDATE jobs SET status='quota_launch' WHERE id=? AND status='quota_wait'",
+                                            (row['id'],)).rowcount
+            if changed:
+                self.store.db.execute("UPDATE quota_recoveries SET state='launch_intent',replacement=?,updated=? "
+                                      "WHERE job=? AND attempt=? AND state='waiting'",
+                                      (str(directory), time.time(), row['id'], record['attempt']))
+            self.store.db.execute('COMMIT')
+        except BaseException:
+            self.store.db.execute('ROLLBACK'); raise
+        if not changed:
+            return
+        # Crossing the intent makes any failure ambiguous: never automatically replay it.
+        try:
+            directory.mkdir(mode=0o700)
+            snapshot = json.loads((source/'snapshot.json').read_text())
+            (directory/'snapshot.json').write_text(json.dumps(snapshot, indent=2))
+            preface = (f"Your previous repair worker stopped on an explicit provider quota limit whose stated reset has now passed. "
+                       f"Original evidence: {source}.\nContinue the SAME retained claim on the existing branch/worktree. Inspect git status, "
+                       "git log and the current PR first: earlier commits may already be pushed and staged, dirty or untracked work must be "
+                       "preserved. Do not claim, recover, release, reset, clean or switch models. Snapshot facts may be stale; revalidate them.\n")
+            prompt = preface + self.prompt(project, snapshot, owner, 'fix', row['family'], directory, directory/'result.json')
+            command = self.config['workers'][row['family']]
+            token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+            env = {**os.environ, 'PR_COORDINATOR_ACTIVE': '1', 'GH_TOKEN': token, 'PR_COORDINATOR_CLAIM_TOKEN': owner['token']}
+            (directory/'command.json').write_text(json.dumps(command))
+            (directory/'prompt.txt').write_text(prompt)
+            child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                     cwd=intent['worktree'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+            self.children[row['id']] = child
+            self.store.db.execute("UPDATE jobs SET status='running',directory=?,pid=?,started=?,error=NULL WHERE id=?",
+                                  (str(directory), child.pid, process_identity(child.pid), row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='launched',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  ('same family/model repair resumed under unchanged claim', time.time(), row['id'], record['attempt']))
+            print(f"{project['id']} PR#{row['pr']}: resumed {row['family']} repair after provider quota reset", flush=True)
+        except Exception as error:
+            # Clearing the stopped original identity keeps the possible replacement held, never auto-quarantined.
+            self.store.db.execute("UPDATE jobs SET status='orphaned',pid=NULL,started=NULL,error=? WHERE id=?",
+                                  ('quota recovery launch uncertain; explicit recovery required', row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='uncertain',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  (f'replacement launch uncertain ({type(error).__name__}); never replayed', time.time(), row['id'], record['attempt']))
+
     def collect(self, project, owners):
-        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned')", (project['id'],)).fetchall()
+        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned','quota_wait','quota_launch')", (project['id'],)).fetchall()
         for row in rows:
             try:
+                if row['status'] == 'quota_launch':
+                    self.adopt_quota_launch(row)
+                    continue
+                if row['status'] == 'quota_wait':
+                    self.resume_quota(project, row)
+                    continue
                 if row['status'] == 'orphaned':
                     if worker_stopped(row['pid'], row['started']):
                         self.store.quarantine(row)
@@ -913,6 +1095,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
                     delay = min(3600,300*(2**min(row['attempts'],4)))
+                    # SF-145: an explicit provider quota reset is never retried before that time.
+                    reset = quota_reset(row['directory']) if receipt_path.exists() else None
+                    if reset is not None and retry:
+                        delay = max(delay, reset+QUOTA_GRACE-time.time())
+                    elif reset is not None and row['kind'] == 'fix' and row['repair_claim']:
+                        if self.record_quota(project, row, reset):
+                            continue
+                        error = RuntimeError('provider quota retry budget exhausted; claim retained for explicit recovery')
                     self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
                     print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
             except Exception as error:
