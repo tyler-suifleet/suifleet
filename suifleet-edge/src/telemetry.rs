@@ -170,9 +170,9 @@ pub struct Inventory {
 
 /// A post-apply sample must include this exact installed deployment and all
 /// known runtime health checks. Missing/unreadable state fails closed.
-pub fn rollout_healthy(inventory: &Inventory, deployment: &str) -> bool {
+pub fn rollout_healthy(inventory: &Inventory, deployment: &str, component: &str, version: &str) -> bool {
     inventory.reasons.is_empty()
-        && inventory.components.iter().any(|c| c.deployment_id == deployment && c.installed)
+        && inventory.components.iter().any(|c| c.deployment_id == deployment && c.name == component && c.version == version && c.installed)
         && inventory.components.iter().all(|c| !c.supervised || c.phase.as_deref() == Some("running"))
 }
 
@@ -786,21 +786,23 @@ mod tests {
     #[test]
     fn rollout_health_requires_exact_install_and_known_runtime() {
         let mut inventory = Inventory::default();
-        assert!(!rollout_healthy(&inventory, "0xd"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
         inventory.components.push(ComponentHealth { name: "app".into(), version: "1".into(),
             deployment_id: "0xd".into(), installed: true, supervised: false, phase: None,
             restarts: None, last_exit: None, since_ms: None });
-        assert!(rollout_healthy(&inventory, "0xd"));
-        assert!(!rollout_healthy(&inventory, "0xother"));
+        assert!(rollout_healthy(&inventory, "0xd", "app", "1"));
+        assert!(!rollout_healthy(&inventory, "0xother", "app", "1"));
+        assert!(!rollout_healthy(&inventory, "0xd", "dependency", "1"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "2"));
         inventory.components[0].installed = false;
-        assert!(!rollout_healthy(&inventory, "0xd"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
         inventory.components[0].installed = true;
         inventory.components[0].supervised = true;
-        assert!(!rollout_healthy(&inventory, "0xd"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
         inventory.components[0].phase = Some("running".into());
-        assert!(rollout_healthy(&inventory, "0xd"));
+        assert!(rollout_healthy(&inventory, "0xd", "app", "1"));
         inventory.reasons.push("bridge unavailable".into());
-        assert!(!rollout_healthy(&inventory, "0xd"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
     }
 
     #[test]

@@ -861,8 +861,7 @@ async fn report_pending(cfg: &Config, sui: &SuiClient, journal: &mut Journal) ->
                         inventory.reasons.extend(service_health::reasons(&services, 60, now));
                     }
                 }
-                let healthy = status == protocol::STATUS_APPLIED && telemetry::rollout_healthy(&inventory, &id);
-                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, healthy).await {
+                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, status == protocol::STATUS_APPLIED, &inventory).await {
                     warn!(%id, %error, "Post-apply health remains queued");
                     continue;
                 }
