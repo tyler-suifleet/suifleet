@@ -1,11 +1,6 @@
-// Device heartbeat, inventory and health (SF-019, docs/TELEMETRY.md).
-//
-// Devices sign telemetry snapshots and send them to the fleet indexer, never
-// to the chain. The dApp reads each device's newest snapshot from the
-// indexer, then verifies its signature itself against the device's identity
-// read from the chain: the indexer can withhold or delay reports, but cannot
-// invent a device's health. Only `received_ms` (the indexer's clock) is taken
-// on trust; it decides online/offline.
+import { batchFields } from "./batch-fields";
+// Device health is read from signed on-chain summaries. Explicit HTTP reader
+// arguments remain available for customer-owned reference integrations only.
 import { bcs } from "@mysten/sui/bcs";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
@@ -14,8 +9,8 @@ import { isValidPersonalMessageSignature } from "@mysten/sui/verify";
 import { device_registry_IdentityBcs as IdentityBcs } from "./fleet-protocol";
 import { moveType, requireManifest } from "./deployment-manifest";
 
-/** Fleet indexer base URL with telemetry enabled; empty when not configured. */
-export const TELEMETRY_URL = process.env.NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL ?? "";
+/** Product reads never select an HTTP indexer from build environment. */
+export const TELEMETRY_URL = "";
 export const TELEMETRY_SCHEMA = 1;
 /** A snapshot with a services section (SF-085); without one it stays schema 1. */
 export const TELEMETRY_SCHEMA_SERVICES = 2;
@@ -308,6 +303,16 @@ export async function readIdentity(client: Pick<SuiGrpcClient, "getDynamicField"
   return { signer: normalizeSuiAddress(identity.signer), revoked: identity.revoked };
 }
 
+export async function readIdentities(client: Pick<SuiGrpcClient, "getObjects">, deviceIds: string[]): Promise<(Identity | undefined)[]> {
+  const values = await batchFields(client, deviceIds.map(device => ({ parent: requireManifest().shared_objects.registry.id,
+    keyType: moveType("device_registry::IdentityKey"), key: bcs.Address.serialize(device).toBytes(), valueType: moveType("device_registry::Identity") })));
+  return values.map(value => {
+    if (!value) return undefined;
+    const identity = IdentityBcs.parse(value);
+    return { signer: normalizeSuiAddress(identity.signer), revoked: identity.revoked };
+  });
+}
+
 /**
  * The snapshot of a report, only if its signature verifies for `signer` and
  * it is bound to this deployment and device; otherwise why not.
@@ -402,19 +407,19 @@ const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavaila
  * cannot be checked, is `unavailable` on its own; this never rejects, so a
  * failed refresh cannot leave an earlier result on screen.
  */
-export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "ledgerService">>, deviceIds: string[], owner: string,
+export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "getObjects" | "ledgerService">>, deviceIds: string[], owner: string,
   url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
   const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
-  if (process.env.NEXT_PUBLIC_FLEET_DATA) {
+  if (!url || process.env.NEXT_PUBLIC_FLEET_DATA) {
     try {
       const { DATA_CONFIG, fetchChainHealth } = await import("./fleet-data");
       const getObject = client.getObject?.bind(client);
       const ledgerService = client.ledgerService;
-      if (!DATA_CONFIG || !getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
-      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
+      if (!DATA_CONFIG) return unavailable("Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health");
+      if (!getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
+      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), getObjects: client.getObjects?.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
     } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }
   }
-  if (!url) return unavailable("no telemetry service configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)");
   let indexed;
   try {
     indexed = await fetchIndexedHealth(url, token, owner, fetcher);
@@ -422,10 +427,13 @@ export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicFi
     return unavailable(`telemetry service unavailable: ${message(error)}`);
   }
   const byId = new Map(indexed.items.map((item) => [normalizeSuiAddress(item.device_id), item]));
-  const entries = await Promise.all(deviceIds.map(async (id): Promise<[string, DeviceHealth]> => {
+  let identities: (Identity | undefined)[] | undefined;
+  try { if (client.getObjects) identities = await readIdentities({ getObjects: client.getObjects.bind(client) }, deviceIds); }
+  catch (error) { return unavailable(`device identities cannot be read from the chain: ${message(error)}`); }
+  const entries = await Promise.all(deviceIds.map(async (id, index): Promise<[string, DeviceHealth]> => {
     let identity;
     try {
-      identity = await readIdentity(client, id);
+      identity = identities ? identities[index] : await readIdentity(client, id);
     } catch (error) {
       return [id, unavailableHealth(`device identity cannot be read from the chain: ${message(error)}`)];
     }
@@ -439,7 +447,7 @@ export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicFi
 }
 
 /** How often the dApp refreshes fleet health. */
-export const HEALTH_REFRESH_MS = 15_000;
+export const HEALTH_REFRESH_MS = 60_000;
 /** How long a verified result may be shown without a successful refresh. */
 export const HEALTH_STALE_MS = 2 * HEALTH_REFRESH_MS;
 

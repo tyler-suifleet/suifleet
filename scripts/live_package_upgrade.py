@@ -210,6 +210,42 @@ def plain(value):
     return value
 
 
+def daemon_progress(journal, log):
+    """Bounded public diagnostics: no raw log, configuration, cursor or error text."""
+    try:
+        state = json.loads(journal.read_text())
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    outcomes = state.get('deployments', {})
+    public = {}
+    if isinstance(outcomes, dict):
+        for id, outcome in list(outcomes.items())[:32]:
+            try:
+                id = dm.object_id(id)
+            except ValueError:
+                continue
+            if not isinstance(outcome, dict):
+                continue
+            status = outcome.get('status')
+            public[id] = dict(status=status if type(status) is int and status in (0, 1, 2) else None,
+                              reported=outcome.get('reported') is True, has_error=bool(outcome.get('error')))
+    try:
+        with log.open('rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 65536))
+            text = stream.read(65536).decode('utf8', errors='replace')
+    except OSError:
+        text = ''
+    categories = ('Sync failed', 'Deployment finished', 'Apply admitted',
+                  'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
+                  'chain identifier mismatch', 'event stream', 'not owned by device key',
+                  'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
+    return dict(initialized=state.get('initialized') is True, outcomes=public,
+                log_counts={name: text.count(name) for name in categories})
+
+
 def wait_for(condition, message, process=None, timeout=240):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -484,8 +520,13 @@ def run(args):
                 return {}
 
             def settled(deployment, status):
-                wait_for(lambda: receipts(deployment) == {dm.object_id(device): status},
-                         f"receipt for {deployment} never became {status}", process)
+                try:
+                    wait_for(lambda: receipts(deployment) == {dm.object_id(device): status},
+                             f"receipt for {deployment} never became {status}", process)
+                except Exception:
+                    log.flush()
+                    evidence['daemon_progress'] = daemon_progress(journal, root / 'daemon.log')
+                    raise
 
             def history():
                 path = components / component.DEFAULT_COMPONENT / "history.jsonl"

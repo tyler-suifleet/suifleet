@@ -161,7 +161,8 @@ fn ensure_retained(position: Option<u64>, lowest: Option<u64>) -> anyhow::Result
 pub struct SuiClient {
     config: SuiConfig,
     signer: std::sync::Arc<dyn identity::TxSigner>,
-    rpc: sui_rpc::Client,
+    rpc: Vec<sui_rpc::Client>,
+    verified: std::sync::Arc<Vec<std::sync::atomic::AtomicBool>>,
     mutations: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -203,6 +204,31 @@ pub fn chain_identifier(genesis_digest: &str) -> anyhow::Result<String> {
     Ok(hex::encode(&digest.inner()[..4]))
 }
 
+fn retryable(error: &tonic::Status) -> bool {
+    matches!(
+        error.code(),
+        tonic::Code::Unavailable | tonic::Code::ResourceExhausted | tonic::Code::DeadlineExceeded
+    ) || (error.code() == tonic::Code::Unknown && error.message().contains("429"))
+}
+
+// The pinned builder flattens tonic errors into Error::Input. Match only
+// its exact simulation-error prefix and tonic code, never a Move failure or
+// arbitrary message containing a retry word.
+fn builder_status(error: sui_transaction_builder::Error) -> tonic::Status {
+    if let sui_transaction_builder::Error::Input(message) = &error {
+        for code in [
+            tonic::Code::Unavailable,
+            tonic::Code::ResourceExhausted,
+            tonic::Code::DeadlineExceeded,
+        ] {
+            if message.starts_with(&format!("error simulating transaction: code: '{}'", code)) {
+                return tonic::Status::new(code, "transaction simulation transport failure");
+            }
+        }
+    }
+    tonic::Status::failed_precondition(format!("transaction simulation failed: {error}"))
+}
+
 fn status(error: tonic::Status) -> anyhow::Error {
     anyhow::anyhow!("{}: {}", error.code(), error.message())
 }
@@ -228,6 +254,9 @@ fn to_json(value: &prost_types::Value) -> Value {
         ),
     }
 }
+
+/// A Move integer as the node renders it (string, or exact safe JSON number).
+pub fn json_u64(value: &Value) -> Option<u64> { number(value) }
 
 fn number(value: &Value) -> Option<u64> {
     value
@@ -263,15 +292,126 @@ impl SuiClient {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("deployment manifest required"))?;
         manifest.validate()?;
-        let rpc = sui_rpc::Client::new(manifest.rpc_url.as_str())
-            .map_err(|e| anyhow::anyhow!("invalid gRPC endpoint {}: {e}", manifest.rpc_url))?
-            .with_response_headers_timeout(Duration::from_secs(30));
+        let urls = if config.rpc_urls.is_empty() {
+            vec![manifest.rpc_url.clone()]
+        } else {
+            config.rpc_urls.clone()
+        };
+        let rpc = urls
+            .iter()
+            .map(|url| {
+                sui_rpc::Client::new(url.as_str())
+                    .map(|c| c.with_response_headers_timeout(Duration::from_secs(30)))
+                    .map_err(|_| anyhow::anyhow!("invalid gRPC endpoint"))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
         Ok(Self {
             config,
             signer,
+            verified: std::sync::Arc::new(
+                (0..rpc.len())
+                    .map(|_| std::sync::atomic::AtomicBool::new(false))
+                    .collect(),
+            ),
             rpc,
             mutations: Default::default(),
         })
+    }
+    /// Validate candidates before any reads/signing. A wrong chain is a hard
+    /// error, even when another candidate would have matched.
+    async fn check_rpc(&self, mut rpc: sui_rpc::Client) -> Result<sui_rpc::Client, tonic::Status> {
+        let info = tokio::time::timeout(
+            Duration::from_secs(30),
+            rpc.ledger_client()
+                .get_service_info(proto::GetServiceInfoRequest::default()),
+        )
+        .await
+        .map_err(|_| tonic::Status::deadline_exceeded("RPC identity timeout"))??
+        .into_inner();
+        let chain = chain_identifier(info.chain_id.as_deref().unwrap_or_default())
+            .map_err(|_| tonic::Status::failed_precondition("invalid chain identity"))?;
+        if chain != self.manifest().chain_identifier {
+            return Err(tonic::Status::failed_precondition(
+                "chain identifier mismatch",
+            ));
+        }
+        Ok(rpc)
+    }
+    async fn rpc_call<T, F, Fut>(&self, call: F) -> Result<T, tonic::Status>
+    where
+        F: FnMut(sui_rpc::Client) -> Fut,
+        Fut: std::future::Future<Output = Result<T, tonic::Status>>,
+    {
+        self.rpc_call_inner(true, call).await
+    }
+    async fn rpc_call_inner<T, F, Fut>(&self, verify: bool, mut call: F) -> Result<T, tonic::Status>
+    where
+        F: FnMut(sui_rpc::Client) -> Fut,
+        Fut: std::future::Future<Output = Result<T, tonic::Status>>,
+    {
+        let mut last = tonic::Status::unavailable("no RPC endpoints");
+        for (index, rpc) in self.rpc.iter().enumerate() {
+            let result = async {
+                let rpc =
+                    if verify && !self.verified[index].load(std::sync::atomic::Ordering::Acquire) {
+                        let rpc = self.check_rpc(rpc.clone()).await?;
+                        self.verified[index].store(true, std::sync::atomic::Ordering::Release);
+                        rpc
+                    } else {
+                        rpc.clone()
+                    };
+                tokio::time::timeout(Duration::from_secs(30), call(rpc))
+                    .await
+                    .map_err(|_| tonic::Status::deadline_exceeded("RPC request timeout"))?
+            }
+            .await;
+            match result {
+                Ok(value) => {
+                    self.verified[index].store(true, std::sync::atomic::Ordering::Release);
+                    return Ok(value);
+                }
+                Err(error) if retryable(&error) => last = error,
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last)
+    }
+    // One identity probe per candidate per validation cycle. Service-info
+    // reads themselves always check identity, including enrollment/cursor reads.
+    async fn service_info(
+        &self,
+    ) -> Result<tonic::Response<proto::GetServiceInfoResponse>, tonic::Status> {
+        self.rpc_call_inner(false, |mut rpc| async move {
+            let response = rpc
+                .ledger_client()
+                .get_service_info(proto::GetServiceInfoRequest::default())
+                .await?;
+            let chain =
+                chain_identifier(response.get_ref().chain_id.as_deref().unwrap_or_default())
+                    .map_err(|_| tonic::Status::failed_precondition("invalid chain identity"))?;
+            if chain != self.manifest().chain_identifier {
+                return Err(tonic::Status::failed_precondition(
+                    "chain identifier mismatch",
+                ));
+            }
+            Ok(response)
+        })
+        .await
+    }
+    async fn build_rpc(
+        &self,
+        factory: impl Fn() -> anyhow::Result<sui_transaction_builder::TransactionBuilder>,
+    ) -> anyhow::Result<Transaction> {
+        self.rpc_call(|mut rpc| {
+            let builder = factory();
+            async move {
+                let builder =
+                    builder.map_err(|e| tonic::Status::invalid_argument(e.to_string()))?;
+                builder.build(&mut rpc).await.map_err(builder_status)
+            }
+        })
+        .await
+        .map_err(status)
     }
     pub fn address(&self) -> String {
         self.signer.address()
@@ -287,15 +427,11 @@ impl SuiClient {
     }
 
     pub async fn validate_deployment(&self) -> anyhow::Result<()> {
+        for verified in self.verified.iter() {
+            verified.store(false, std::sync::atomic::Ordering::Release);
+        }
         let manifest = self.manifest();
-        let info = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .get_service_info(proto::GetServiceInfoRequest::default())
-            .await
-            .map_err(status)?
-            .into_inner();
+        let info = self.service_info().await.map_err(status)?.into_inner();
         anyhow::ensure!(
             chain_identifier(info.chain_id.as_deref().unwrap_or_default())?
                 == manifest.chain_identifier,
@@ -351,10 +487,10 @@ impl SuiClient {
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["bcs"]));
         let bytes = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .get_object(request)
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.ledger_client().get_object(request).await }
+            })
             .await
             .map_err(status)?
             .into_inner()
@@ -373,14 +509,20 @@ impl SuiClient {
     /// A Move object's type, owner and BCS contents, decoded from the node's
     /// object BCS rather than its JSON rendering.
     pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
+        let (object_type, owner, _, contents) = self.versioned_move_object(id).await?;
+        Ok((object_type, owner, contents))
+    }
+
+    /// `move_object` with the object's version (its last mutation).
+    pub async fn versioned_move_object(&self, id: &str) -> anyhow::Result<(String, Owner, u64, Vec<u8>)> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["bcs"]));
         let bytes = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .get_object(request)
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.ledger_client().get_object(request).await }
+            })
             .await
             .map_err(|e| status(e).context(format!("object {id}")))?
             .into_inner()
@@ -402,6 +544,7 @@ impl SuiClient {
             sui_sdk_types::ObjectData::Struct(value) => Ok((
                 value.object_type().to_string(),
                 owner,
+                object.version(),
                 value.contents().to_vec(),
             )),
             _ => anyhow::bail!("{id} is not a Move object"),
@@ -412,7 +555,13 @@ impl SuiClient {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["owner", "object_type", "json"]));
-        let object = match self.rpc.clone().ledger_client().get_object(request).await {
+        let object = match self
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.ledger_client().get_object(request).await }
+            })
+            .await
+        {
             Ok(response) => response.into_inner().object,
             // Deleted, wrapped or never created.
             Err(e) if e.code() == tonic::Code::NotFound => return Ok(None),
@@ -449,6 +598,26 @@ impl SuiClient {
         self.keyed_field(parent, name, &[0]).await
     }
 
+    /// The fleet's SF-130 settings record (`fleet_settings::Settings` in a
+    /// dynamic field of its `FleetBudget`), or None when the deployment has
+    /// no settings types or the owner has not created one. The derived ID
+    /// binds the parent and key type; the value type is checked as well.
+    pub async fn fleet_settings(&self, budget_id: &str) -> anyhow::Result<Option<Value>> {
+        let manifest = self.manifest();
+        if !protocol::SETTINGS_TYPES.iter().all(|name| manifest.type_origins.contains_key(*name)) {
+            return Ok(None);
+        }
+        let key = self.move_type(protocol::fleet_settings::SettingsKey::MOVE_TYPE);
+        let value = self.move_type(protocol::fleet_settings::Settings::MOVE_TYPE);
+        let parent = Address::from_str(budget_id)
+            .map_err(|e| anyhow::anyhow!("invalid budget ID {budget_id}: {e}"))?;
+        let id = parent.derive_dynamic_child_id(&TypeTag::Struct(Box::new(StructTag::from_str(&key)?)), &[0]);
+        let Some(field) = self.optional_object(&id.to_string()).await? else { return Ok(None) };
+        let expected = StructTag::from_str(&format!("0x2::dynamic_field::Field<{key}, {value}>"))?;
+        anyhow::ensure!(StructTag::from_str(&field.object_type).ok() == Some(expected), "unexpected fleet settings type {}", field.object_type);
+        Ok(Some(field.fields["value"].clone()))
+    }
+
     /// A dynamic field whose key struct has fields, given as their BCS.
     async fn keyed_field(&self, parent: &str, name: &str, key_bcs: &[u8]) -> anyhow::Result<Option<Value>> {
         let key = TypeTag::Struct(Box::new(
@@ -466,14 +635,7 @@ impl SuiClient {
 
     /// Enrollment baseline: deployments created before now are never applied.
     pub async fn latest_cursor(&self) -> anyhow::Result<Option<Value>> {
-        let info = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .get_service_info(proto::GetServiceInfoRequest::default())
-            .await
-            .map_err(status)?
-            .into_inner();
+        let info = self.service_info().await.map_err(status)?.into_inner();
         let tip = info
             .checkpoint_height
             .ok_or_else(|| anyhow::anyhow!("node reported no checkpoint height"))?;
@@ -508,14 +670,7 @@ impl SuiClient {
         if position.is_none() {
             return Ok(());
         }
-        let info = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .get_service_info(proto::GetServiceInfoRequest::default())
-            .await
-            .map_err(status)?
-            .into_inner();
+        let info = self.service_info().await.map_err(status)?.into_inner();
         ensure_retained(position, info.lowest_available_checkpoint)
     }
 
@@ -575,60 +730,69 @@ impl SuiClient {
             Start::Checkpoint(checkpoint) => request.start_checkpoint = Some(checkpoint),
         }
         request.options = Some(options);
-        let mut stream = self
-            .rpc
-            .clone()
-            .ledger_client()
-            .list_events(request)
-            .await
-            .map_err(status)?
-            .into_inner();
         let expected = self.move_type(event_type);
-        let mut events = Vec::new();
-        while let Some(frame) = stream.next().await {
-            let frame = frame.map_err(status)?;
-            let watermark = after(
-                frame
-                    .watermark
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("event stream frame without a watermark"))?,
-            )?;
-            if let Some(event) = frame.event {
-                anyhow::ensure!(
-                    same_type(event.event_type.as_deref().unwrap_or(""), &expected),
-                    "node returned an event outside the requested type"
-                );
-                events.push((event, watermark.clone()));
+        // Retry the entire page, discarding partial frames. The journal advances
+        // only after a complete page, so interrupted streams cannot skip events.
+        self.rpc_call(|mut rpc| {
+            let request = request.clone();
+            let expected = expected.clone();
+            async move {
+                let mut stream = rpc.ledger_client().list_events(request).await?.into_inner();
+                let mut events = Vec::new();
+                while let Some(frame) = stream.next().await {
+                    let frame = frame?;
+                    let watermark = frame.watermark.as_ref().ok_or_else(|| {
+                        tonic::Status::failed_precondition("event frame without watermark")
+                    })?;
+                    let watermark = after(watermark)
+                        .map_err(|e| tonic::Status::failed_precondition(e.to_string()))?;
+                    if let Some(event) = frame.event {
+                        if !same_type(event.event_type.as_deref().unwrap_or(""), &expected) {
+                            return Err(tonic::Status::failed_precondition(
+                                "event outside requested type",
+                            ));
+                        }
+                        events.push((event, watermark.clone()));
+                    }
+                    if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
+                        let has_more = matches!(
+                            proto::QueryEndReason::try_from(reason),
+                            Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
+                        );
+                        return Ok(RawPage {
+                            events,
+                            end: watermark,
+                            has_more,
+                        });
+                    }
+                }
+                Err(tonic::Status::unavailable(
+                    "event stream ended without completion",
+                ))
             }
-            if let Some(reason) = frame.end.as_ref().and_then(|e| e.reason) {
-                // Item or scan limits mean more may follow; ledger tip or end
-                // of range means this scan is complete for now.
-                let has_more = matches!(
-                    proto::QueryEndReason::try_from(reason),
-                    Ok(proto::QueryEndReason::ItemLimit | proto::QueryEndReason::ScanLimit)
-                );
-                return Ok(RawPage { events, end: watermark, has_more });
-            }
-        }
-        anyhow::bail!("event stream ended without completion")
+        })
+        .await
+        .map_err(status)
     }
 
     async fn transaction_checkpoint(&self, digest: &str) -> anyhow::Result<u64> {
         let mut request = proto::GetTransactionRequest::default();
         request.digest = Some(digest.to_owned());
         request.read_mask = Some(mask(&["checkpoint"]));
-        self.rpc
-            .clone()
-            .ledger_client()
-            .get_transaction(request)
-            .await
-            .map_err(status)?
-            .into_inner()
-            .transaction
-            .and_then(|t| t.checkpoint)
-            .ok_or_else(|| {
-                anyhow::anyhow!("cannot locate legacy event cursor {digest}; the node may have pruned it")
-            })
+        self.rpc_call(|mut rpc| {
+            let request = request.clone();
+            async move { rpc.ledger_client().get_transaction(request).await }
+        })
+        .await
+        .map_err(status)?
+        .into_inner()
+        .transaction
+        .and_then(|t| t.checkpoint)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "cannot locate legacy event cursor {digest}; the node may have pruned it"
+            )
+        })
     }
 
     /// The next page of DeviceAddedToGroup events after `cursor` (from
@@ -935,10 +1099,10 @@ impl SuiClient {
         request.owner = Some(self.address());
         request.coin_type = Some("0x2::sui::SUI".into());
         let balance = self
-            .rpc
-            .clone()
-            .state_client()
-            .get_balance(request)
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.state_client().get_balance(request).await }
+            })
             .await
             .map_err(status)?
             .into_inner()
@@ -1035,30 +1199,69 @@ impl SuiClient {
         // for the archive again.
         if let Ok(bytes) = std::fs::read(path) {
             let old: Transaction = bcs::from_bytes(&bytes)?;
-            check_transaction(&old,call,Address::from_str(package)?,Address::from_str(&self.address())?)?;
+            check_transaction(
+                &old,
+                call,
+                Address::from_str(package)?,
+                Address::from_str(&self.address())?,
+            )?;
             let digest = old.digest().to_string();
-            let mut request = proto::GetTransactionRequest::default(); request.digest=Some(digest.clone());
-            request.read_mask=Some(mask(&["digest","effects.status"]));
-            match self.rpc.clone().ledger_client().get_transaction(request).await {
+            let mut request = proto::GetTransactionRequest::default();
+            request.digest = Some(digest.clone());
+            request.read_mask = Some(mask(&["digest", "effects.status"]));
+            match self
+                .rpc_call(|mut rpc| {
+                    let request = request.clone();
+                    async move { rpc.ledger_client().get_transaction(request).await }
+                })
+                .await
+            {
                 Ok(response) => {
-                    let executed=response.into_inner().transaction.ok_or_else(||anyhow::anyhow!("missing durable transaction effects"))?;
-                    anyhow::ensure!(executed.digest.as_deref()==Some(digest.as_str()),"durable transaction digest mismatch");
+                    let executed = response
+                        .into_inner()
+                        .transaction
+                        .ok_or_else(|| anyhow::anyhow!("missing durable transaction effects"))?;
+                    anyhow::ensure!(
+                        executed.digest.as_deref() == Some(digest.as_str()),
+                        "durable transaction digest mismatch"
+                    );
                     match execution_digest(&executed) {
-                        Err(error) if error.downcast_ref::<FailedExecution>().is_some()=>{
-                            std::fs::remove_file(path)?; std::fs::File::open(path.parent().unwrap())?.sync_all()?;
+                        Err(error) if error.downcast_ref::<FailedExecution>().is_some() => {
+                            std::fs::remove_file(path)?;
+                            std::fs::File::open(path.parent().unwrap())?.sync_all()?;
                         }
                         result=>return result,
                     }
                 }
-                Err(error) if error.code()==tonic::Code::NotFound=>{
-                    let checkpoint:u64=std::fs::read_to_string(path.with_extension("checkpoint"))?.parse()?;
-                    let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
-                    anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest|lowest<=checkpoint),"durable transaction history unavailable; owner reconciliation required");
-                    let mut stale=false;
+                Err(error) if error.code() == tonic::Code::NotFound => {
+                    let checkpoint: u64 =
+                        std::fs::read_to_string(path.with_extension("checkpoint"))?.parse()?;
+                    let info = self.service_info().await?.into_inner();
+                    anyhow::ensure!(
+                        info.lowest_available_checkpoint
+                            .is_some_and(|lowest| lowest <= checkpoint),
+                        "durable transaction history unavailable; owner reconciliation required"
+                    );
+                    let mut stale = false;
                     for coin in &old.gas_payment.objects {
-                        let mut request=proto::GetObjectRequest::default();request.object_id=Some(coin.object_id().to_string());request.read_mask=Some(mask(&["version"]));
-                        let version=self.rpc.clone().ledger_client().get_object(request).await?.into_inner().object.and_then(|o|o.version).ok_or_else(||anyhow::anyhow!("gas object version unavailable"))?;
-                        anyhow::ensure!(version>=coin.version(),"fullnode is behind the persisted transaction");stale|=version>coin.version();
+                        let mut request = proto::GetObjectRequest::default();
+                        request.object_id = Some(coin.object_id().to_string());
+                        request.read_mask = Some(mask(&["version"]));
+                        let version = self
+                            .rpc_call(|mut rpc| {
+                                let request = request.clone();
+                                async move { rpc.ledger_client().get_object(request).await }
+                            })
+                            .await?
+                            .into_inner()
+                            .object
+                            .and_then(|o| o.version)
+                            .ok_or_else(|| anyhow::anyhow!("gas object version unavailable"))?;
+                        anyhow::ensure!(
+                            version >= coin.version(),
+                            "fullnode is behind the persisted transaction"
+                        );
+                        stale |= version > coin.version();
                     }
                     if stale {
                         // The old transaction could have committed between the
@@ -1066,18 +1269,40 @@ impl SuiClient {
                         // stale it cannot execute anew: resolve effects again,
                         // then recheck retention before concluding it is absent.
                         let mut request = proto::GetTransactionRequest::default();
-                        request.digest = Some(digest.clone()); request.read_mask = Some(mask(&["digest", "effects.status"]));
-                        match self.rpc.clone().ledger_client().get_transaction(request).await {
+                        request.digest = Some(digest.clone());
+                        request.read_mask = Some(mask(&["digest", "effects.status"]));
+                        match self
+                            .rpc_call(|mut rpc| {
+                                let request = request.clone();
+                                async move { rpc.ledger_client().get_transaction(request).await }
+                            })
+                            .await
+                        {
                             Ok(response) => {
-                                let executed = response.into_inner().transaction.ok_or_else(|| anyhow::anyhow!("missing durable effects after gas reconciliation"))?;
-                                anyhow::ensure!(executed.digest.as_deref() == Some(digest.as_str()), "durable transaction digest mismatch");
+                                let executed =
+                                    response.into_inner().transaction.ok_or_else(|| {
+                                        anyhow::anyhow!(
+                                            "missing durable effects after gas reconciliation"
+                                        )
+                                    })?;
+                                anyhow::ensure!(
+                                    executed.digest.as_deref() == Some(digest.as_str()),
+                                    "durable transaction digest mismatch"
+                                );
                                 match execution_digest(&executed) {
-                                    Err(error) if error.downcast_ref::<FailedExecution>().is_some() => (),
+                                    Err(error)
+                                        if error.downcast_ref::<FailedExecution>().is_some() =>
+                                    {
+                                        ()
+                                    }
                                     result => return result,
                                 }
                             }
                             Err(error) if error.code() == tonic::Code::NotFound => {
-                                let info = self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
+                                let info = self
+                                    .service_info()
+                                    .await?
+                                    .into_inner();
                                 anyhow::ensure!(info.lowest_available_checkpoint.is_some_and(|lowest| lowest <= checkpoint), "durable transaction history became unavailable; owner reconciliation required");
                             }
                             Err(error) => return Err(error.into()),
@@ -1091,12 +1316,22 @@ impl SuiClient {
         let transaction = match std::fs::read(path) {
             Ok(bytes) => bcs::from_bytes(&bytes)?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
-                let checkpoint=info.checkpoint_height.ok_or_else(||anyhow::anyhow!("durable creation checkpoint unavailable"))?;
+                let info = self.service_info().await?.into_inner();
+                let checkpoint = info
+                    .checkpoint_height
+                    .ok_or_else(|| anyhow::anyhow!("durable creation checkpoint unavailable"))?;
                 let transaction = self.build_package(package, call).await?;
-                let marker=path.with_extension("checkpoint");let temporary=marker.with_extension("tmp");
-                let mut f=std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
-                f.write_all(checkpoint.to_string().as_bytes())?;f.sync_all()?;std::fs::rename(temporary,marker)?;
+                let marker = path.with_extension("checkpoint");
+                let temporary = marker.with_extension("tmp");
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .mode(0o600)
+                    .open(&temporary)?;
+                f.write_all(checkpoint.to_string().as_bytes())?;
+                f.sync_all()?;
+                std::fs::rename(temporary, marker)?;
                 std::fs::File::open(path.parent().unwrap())?.sync_all()?;
                 let temporary = path.with_extension("tmp");
                 let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
@@ -1176,30 +1411,32 @@ impl SuiClient {
         let package = Address::from_str(package_id)
             .map_err(|e| anyhow::anyhow!("invalid package ID: {e}"))?;
         let sender = Address::from_str(&self.address())?;
-        let mut builder = sui_transaction_builder::TransactionBuilder::new();
-        let mut arguments = Vec::new();
-        for arg in &call.args {
-            arguments.push(match arg {
-                Arg::Object(id) | Arg::SharedRead(id) => {
-                    let id = Address::from_str(id).map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
-                    builder.object(sui_transaction_builder::ObjectInput::new(id))
+        let transaction = self
+            .build_rpc(|| {
+                let mut builder = sui_transaction_builder::TransactionBuilder::new();
+                let mut arguments = Vec::new();
+                for arg in &call.args {
+                    arguments.push(match arg {
+                        Arg::Object(id) | Arg::SharedRead(id) => {
+                            let id = Address::from_str(id)
+                                .map_err(|e| anyhow::anyhow!("invalid object ID {id}: {e}"))?;
+                            builder.object(sui_transaction_builder::ObjectInput::new(id))
+                        }
+                        Arg::Pure(bytes) => builder.pure_bytes(bytes.clone()),
+                    });
                 }
-                Arg::Pure(bytes) => builder.pure_bytes(bytes.clone()),
-            });
-        }
-        builder.move_call(
-            sui_transaction_builder::Function::new(
-                package,
-                call.module.parse()?,
-                call.function.parse()?,
-            ),
-            arguments,
-        );
-        builder.set_sender(sender);
-        let transaction = builder
-            .build(&mut self.rpc.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("transaction simulation failed: {e}"))?;
+                builder.move_call(
+                    sui_transaction_builder::Function::new(
+                        package,
+                        call.module.parse()?,
+                        call.function.parse()?,
+                    ),
+                    arguments,
+                );
+                builder.set_sender(sender);
+                Ok(builder)
+            })
+            .await?;
         check_transaction(&transaction, call, package, sender)?;
         Ok(transaction)
     }
@@ -1218,30 +1455,53 @@ impl SuiClient {
         let package = Address::from_str(&self.config.package_id)?;
         let sender = Address::from_str(&self.address())?;
         let sponsor = Address::from_str(&claim.address())?;
-        anyhow::ensure!(sender != sponsor, "the claim key must differ from the device key");
-        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)?;
-        let mut builder = sui_transaction_builder::TransactionBuilder::new();
-        let arguments = vec![
-            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str(policy)?)),
-            builder.object(sui_transaction_builder::ObjectInput::new(registry)),
-            builder.pure(&name.to_owned()),
-            builder.pure(&arch.to_owned()),
-            builder.object(sui_transaction_builder::ObjectInput::new(Address::from_str("0x6")?)),
-        ];
-        builder.move_call(
-            sui_transaction_builder::Function::new(package, protocol::enrollment::MODULE.parse()?, protocol::enrollment::ENROLL.parse()?),
-            arguments,
+        anyhow::ensure!(
+            sender != sponsor,
+            "the claim key must differ from the device key"
         );
-        builder.set_sender(sender);
-        builder.set_sponsor(sponsor);
-        let transaction = builder
-            .build(&mut self.rpc.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!("enrollment simulation failed: {e}"))?;
-        anyhow::ensure!(transaction.sender == sender, "simulated transaction has another sender");
-        anyhow::ensure!(transaction.gas_payment.owner == sponsor, "gas is not paid by the claim key");
-        anyhow::ensure!(transaction.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget {} exceeds the enrollment ceiling", transaction.gas_payment.budget);
-        let sui_sdk_types::TransactionKind::ProgrammableTransaction(program) = &transaction.kind else {
+        let registry = Address::from_str(&self.manifest().shared_objects.registry.id)?;
+        let transaction = self
+            .build_rpc(|| {
+                let mut builder = sui_transaction_builder::TransactionBuilder::new();
+                let arguments = vec![
+                    builder.object(sui_transaction_builder::ObjectInput::new(
+                        Address::from_str(policy)?,
+                    )),
+                    builder.object(sui_transaction_builder::ObjectInput::new(registry)),
+                    builder.pure(&name.to_owned()),
+                    builder.pure(&arch.to_owned()),
+                    builder.object(sui_transaction_builder::ObjectInput::new(
+                        Address::from_str("0x6")?,
+                    )),
+                ];
+                builder.move_call(
+                    sui_transaction_builder::Function::new(
+                        package,
+                        protocol::enrollment::MODULE.parse()?,
+                        protocol::enrollment::ENROLL.parse()?,
+                    ),
+                    arguments,
+                );
+                builder.set_sender(sender);
+                builder.set_sponsor(sponsor);
+                Ok(builder)
+            })
+            .await?;
+        anyhow::ensure!(
+            transaction.sender == sender,
+            "simulated transaction has another sender"
+        );
+        anyhow::ensure!(
+            transaction.gas_payment.owner == sponsor,
+            "gas is not paid by the claim key"
+        );
+        anyhow::ensure!(
+            transaction.gas_payment.budget <= MAX_ENROLL_BUDGET,
+            "gas budget {} exceeds the enrollment ceiling",
+            transaction.gas_payment.budget
+        );
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(program) = &transaction.kind
+        else {
             anyhow::bail!("not a programmable transaction");
         };
         anyhow::ensure!(
@@ -1264,13 +1524,16 @@ impl SuiClient {
         tx_bcs.value = Some(bytes.clone().into());
         tx.bcs = Some(tx_bcs);
         request.transaction = Some(tx);
-        request.signatures = vec![signature(self.signer.sign(&bytes)?), signature(claim.sign(&bytes)?)];
+        request.signatures = vec![
+            signature(self.signer.sign(&bytes)?),
+            signature(claim.sign(&bytes)?),
+        ];
         request.read_mask = Some(mask(&["digest", "effects.status", "events"]));
         let executed = self
-            .rpc
-            .clone()
-            .execution_client()
-            .execute_transaction(request)
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.execution_client().execute_transaction(request).await }
+            })
             .await
             .map_err(status)?
             .into_inner()
@@ -1306,10 +1569,10 @@ impl SuiClient {
         request.signatures = vec![signature];
         request.read_mask = Some(mask(&["digest", "effects.status"]));
         let executed = self
-            .rpc
-            .clone()
-            .execution_client()
-            .execute_transaction(request)
+            .rpc_call(|mut rpc| {
+                let request = request.clone();
+                async move { rpc.execution_client().execute_transaction(request).await }
+            })
             .await
             .map_err(status)?
             .into_inner()
@@ -1454,6 +1717,33 @@ fn execution_digest(executed: &proto::ExecutedTransaction) -> anyhow::Result<Str
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn fallback_only_retries_transport_failures() {
+        for code in [
+            tonic::Code::Unavailable,
+            tonic::Code::ResourceExhausted,
+            tonic::Code::DeadlineExceeded,
+        ] {
+            assert!(retryable(&tonic::Status::new(code, "injected")));
+            let flattened = sui_transaction_builder::Error::Input(format!(
+                "error simulating transaction: {}",
+                tonic::Status::new(code, "injected")
+            ));
+            assert_eq!(builder_status(flattened).code(), code);
+        }
+        assert!(retryable(&tonic::Status::unknown("HTTP status 429")));
+        for code in [
+            tonic::Code::FailedPrecondition,
+            tonic::Code::PermissionDenied,
+            tonic::Code::InvalidArgument,
+            tonic::Code::NotFound,
+        ] {
+            assert!(!retryable(&tonic::Status::new(code, "unavailable 429")));
+        }
+        assert!(!retryable(&builder_status(
+            sui_transaction_builder::Error::Input("unavailable 429".into())
+        )));
+    }
     #[test]
     fn protobuf_byte_vectors_are_base64_or_exact_bytes() {
         assert_eq!(super::byte_vector(&serde_json::json!("AAEC")).unwrap(), vec![0,1,2]);

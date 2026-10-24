@@ -12,17 +12,20 @@ Each client checks the manifest against the chain at startup and refuses a stale
 |---|---|
 | `schema_version`, `protocol_version` | Both `1`. Clients reject other values. |
 | `network`, `chain_identifier` | `localnet`/`devnet`/`testnet`/`mainnet`, plus the first four bytes of the genesis digest (8 hex). testnet must be `4c78adac` and mainnet `35834a8a`. |
-| `rpc_url` | Sui fullnode serving gRPC v2. |
+| `rpc_url` | Legacy/default Sui fullnode serving gRPC v2. |
+| `rpc_urls` | Optional ordered daemon endpoint list (1–8 URLs when populated); empty/omitted uses `rpc_url`. Local `[sui] rpc_urls` overrides it. Every candidate must match `chain_identifier`. |
 | `call_package_id`, `package_version` | The latest package. Every call goes here. |
 | `upgrade_cap_id` | Must still name `call_package_id` at `package_version`. After a further upgrade, every client rejects this manifest as stale. |
 | `type_origins` | For each type the clients use, the package that **introduced** it. Types keep their introduction package across upgrades, so newer types such as `RecipeDigestKey` and `DeviceAddressKey` have later origins than `DeviceRegistry`. |
 | `shared_objects.registry` | The shared `DeviceRegistry` ID and its initial shared version. |
 | `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
-| `walrus` | Publisher and aggregator URLs. |
+| `walrus` | Publisher and legacy aggregator URL, plus optional ordered device `aggregator_urls`; see [public delivery](WALRUS_DELIVERY.md). |
 
-Optional type-origin groups are all-or-none: the component catalog, the Seal policy
-and the SF-083 fleet budget (`fleet_budget::*`). A device template may add a
-`[budget]` section ([FLEET_BUDGET.md](FLEET_BUDGET.md)).
+Optional type-origin groups are all-or-none: the component catalog, the Seal policy,
+the SF-083 fleet budget (`fleet_budget::*`) and the SF-130 fleet settings
+(`fleet_settings::*`). A device template may add a `[budget]` section
+([FLEET_BUDGET.md](FLEET_BUDGET.md)); its fleet's settings then apply
+([FLEET_SETTINGS.md](FLEET_SETTINGS.md)).
 
 `manifests/fixture.localnet.json` is a test fixture, not a deployment.
 

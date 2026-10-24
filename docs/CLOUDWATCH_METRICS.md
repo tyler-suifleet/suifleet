@@ -94,7 +94,16 @@ schema-1 snapshot to the same socket. Run it as a dedicated granted publisher UI
 with read access only to an operator-exported snapshot. Do not grant shared daemon
 UID access, expose the daemon state directory, or feed unverified remote messages.
 The sender performs schema/counter bounds checks, not signature authentication;
-remote exports must first pass the indexer signature/identity verification.
+remote exports must first pass exact signature verification against current
+on-chain registry identity and deployment binding (the direct-chain reader
+does this). A customer-operated verifier, including the optional reference
+indexer, can also perform these checks; SuiFleet operates no hosted verification
+service. A device-local adapter may consume an operator-exported snapshot from
+its own trusted daemon without a remote hop; never treat a downloaded JSON file
+as trusted merely because this mapper accepts its schema. AWS export is
+customer-owned. Customers exporting measurements/data directly may instead use
+[customer S3-compatible or HTTP streams](STREAM_EXPORTERS.md#customer-owned-storage-no-suifleet-server),
+which require no indexer.
 
 ```sh
 python3 /opt/suifleet/scripts/cloudwatch_telemetry.py \

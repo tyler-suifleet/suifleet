@@ -1,5 +1,13 @@
 # Remote logs, diagnostics and alerts (SF-020)
 
+> Product policy (SF-137): SuiFleet hosts no application servers. Product health
+> and receipts come from Sui, encrypted logs/diagnostics from Walrus, and alerts
+> are derived in the browser. See [inventory/migration](SERVERLESS_PRODUCT.md)
+> and [setup](SERVERLESS_FLEET_DATA.md). HTTP configuration, API tokens, indexer
+> commands, webhooks and HTTP evidence below describe the optional
+> **customer-hosted reference integration**, not product requirements.
+> The product dApp uses no indexer URL or read token.
+
 Devices ship their logs, redacted and signed, to the fleet indexer, next to telemetry ([TELEMETRY.md](TELEMETRY.md)). Support staff search them and download diagnostic bundles with a separate `support` token, and every such access is audited. The indexer derives actionable alerts from verified telemetry and the indexed on-chain receipts, serves them to the dApp and the CLI, and can post them to a webhook. Keys, recovery phrases and confidential component configuration are never exported.
 
 ## On the device

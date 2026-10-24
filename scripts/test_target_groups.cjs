@@ -21,8 +21,20 @@ function client(target, creators = [owner, owner], shared = false) {
     artifact_sha256:e.artifact_sha256,created_at:456,schema_version:1,
   }).toBytes()}]));
   c.listEvents = async () => ({events:events.map(e => ({bcs:schema.DeploymentCreatedBcs.serialize(e).toBytes()})),hasNextPage:false});
+  const {bcs, TypeTagSerializer} = appRequire("@mysten/sui/bcs");
+  const {deriveDynamicFieldID} = appRequire("@mysten/sui/utils");
+  for (const event of events) for (const name of ["TargetGroupsKey", "TargetDevicesKey"]) {
+    const keyType = `${m.type_origins[`deployment_manager::${name}`]}::deployment_manager::${name}`;
+    const key = bcs.bool().serialize(false).toBytes();
+    const objectId = deriveDynamicFieldID(event.deployment_id, TypeTagSerializer.parseFromStr(keyType), key);
+    records.set(objectId, {objectId,type:`0x2::dynamic_field::Field<${keyType},vector<0x2::object::ID>>`,
+      content:bcs.struct('Field',{id:bcs.Address,name:bcs.bool(),value:bcs.vector(bcs.Address)}).serialize({id:objectId,name:false,value:name==='TargetGroupsKey'?event.target_groups:event.target_devices}).toBytes()});
+  }
   c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId => objectId === groupId ? target : records.get(objectId))});
-  c.getDynamicField = async () => { throw new ObjectError("missing", "not found", {reason:"notFound"}); };
+  c.getDynamicField = async ({parentId,name}) => {
+    if (name.type.endsWith("::TargetGroupsKey") || name.type.endsWith("::TargetDevicesKey")) throw Error('unbatched target read');
+    throw new ObjectError("missing", "not found", {reason:"notFound"});
+  };
   return c;
 }
 (async () => {

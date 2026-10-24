@@ -16,6 +16,6 @@ export function useAccessPolicies() {
     queryKey: ["access-policies", NETWORK, account?.address],
     queryFn: () => fetchAdministeredPolicies(client, account!.address),
     enabled: !!account?.address && POLICIES_ENABLED,
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 }

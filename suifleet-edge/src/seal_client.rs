@@ -15,11 +15,15 @@
 //! - Returned keys are ElGamal-encrypted to a fresh per-request key, checked
 //!   against the server's public key, and kept only in memory for at most
 //!   `key_cache_seconds`.
+//! - Key servers bill per request, so keys are requested from only as many
+//!   servers as the threshold needs, in the ciphertext's order, and from the
+//!   next ones only to replace a failed server's shares (SF-133). The access
+//!   policy and its groups are read once per poll, not once per decrypt.
 use crate::{
     config::{SealConfig, SealMode},
     identity::TxSigner,
     seal::{self, Kind, Object},
-    sui_client::{same_id, same_type, SuiClient},
+    sui_client::{same_id, same_type, Owner, SuiClient},
 };
 use ark_bls12_381::{G1Affine, G2Affine};
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -27,6 +31,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
+    future::Future,
     ops::Range,
     str::FromStr,
     sync::{Arc, Mutex},
@@ -44,6 +49,8 @@ const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 const POLICY_MODULE: &str = "seal_policy";
 /// Key servers older than this lack the request format implemented here.
 const MIN_SERVER_VERSION: (u64, u64, u64) = (0, 4, 1);
+/// Policy and group snapshots older than this are reread, even within a poll.
+const MAX_SNAPSHOT_AGE: Duration = Duration::from_secs(60);
 
 // ── Session certificates ─────────────────────────────────────────────────────
 
@@ -433,6 +440,95 @@ impl KeyServer {
     }
 }
 
+/// Fetch keys from servers in `order` (each with its share weight) until the
+/// fetched weight reaches `threshold`: first only as many servers as needed,
+/// then, after failures, the next ones in order to replace the missing
+/// weight. A round's servers are asked concurrently; none is asked twice.
+/// Returns each failed server's error.
+async fn fetch_threshold<K, F, Fut>(
+    order: &[([u8; 32], usize)],
+    threshold: usize,
+    keys: &mut HashMap<[u8; 32], K>,
+    mut fetch: F,
+) -> Vec<([u8; 32], anyhow::Error)>
+where
+    F: FnMut([u8; 32]) -> Fut,
+    Fut: Future<Output = anyhow::Result<K>>,
+{
+    let weight = |keys: &HashMap<[u8; 32], K>| order.iter().filter(|(id, _)| keys.contains_key(id)).map(|(_, w)| w).sum::<usize>();
+    let mut pending = order.iter().filter(|(id, _)| !keys.contains_key(id)).copied().collect::<Vec<_>>().into_iter();
+    let mut errors = Vec::new();
+    loop {
+        let missing = threshold.saturating_sub(weight(keys));
+        let (mut round, mut added) = (Vec::new(), 0);
+        while added < missing {
+            let Some((id, w)) = pending.next() else { break };
+            round.push(id);
+            added += w;
+        }
+        if round.is_empty() {
+            return errors;
+        }
+        let results = futures_util::future::join_all(round.iter().map(|id| fetch(*id))).await;
+        for (id, result) in round.into_iter().zip(results) {
+            match result {
+                Ok(key) => {
+                    keys.insert(id, key);
+                }
+                Err(error) => errors.push((id, error)),
+            }
+        }
+    }
+}
+
+// ── Per-poll chain reads ─────────────────────────────────────────────────────
+
+/// A Move object as read from chain.
+#[derive(Debug, Clone)]
+struct Snapshot {
+    object_type: String,
+    owner: Owner,
+    version: u64,
+    contents: Vec<u8>,
+}
+
+/// Access-policy and group reads shared by the decrypts of one poll. An entry
+/// serves only the poll that read it, for at most `MAX_SNAPSHOT_AGE`. A
+/// reread never replaces a snapshot with an older object version (a lagging
+/// node), and versions are remembered across polls for that check.
+#[derive(Default)]
+struct Snapshots {
+    poll: u64,
+    entries: HashMap<String, (u64, Instant, Snapshot)>,
+}
+
+impl Snapshots {
+    fn current(&self, id: &str) -> Option<Snapshot> {
+        self.entries
+            .get(id)
+            .filter(|(poll, at, _)| *poll == self.poll && at.elapsed() < MAX_SNAPSHOT_AGE)
+            .map(|(_, _, snapshot)| snapshot.clone())
+    }
+
+    /// Record a fresh read; returns it, or the newer version already seen.
+    fn record(&mut self, id: &str, read: Snapshot) -> Snapshot {
+        let snapshot = match self.entries.get(id) {
+            Some((_, _, known)) if known.version > read.version => {
+                warn!(object = id, read = read.version, known = known.version, "Node returned an older object version; keeping the newer one");
+                known.clone()
+            }
+            _ => read,
+        };
+        self.entries.insert(id.to_owned(), (self.poll, Instant::now(), snapshot.clone()));
+        snapshot
+    }
+
+    /// Make every snapshot stale; later reads go to the chain.
+    fn expire(&mut self) {
+        self.poll += 1;
+    }
+}
+
 // ── Confidential blobs ───────────────────────────────────────────────────────
 
 /// The daemon's view of an access policy.
@@ -454,6 +550,8 @@ pub struct Seal {
     /// Key servers that passed their proof of possession in this process.
     verified: Mutex<std::collections::HashSet<[u8; 32]>>,
     keys: Mutex<HashMap<(Vec<u8>, [u8; 32]), (G1Affine, Instant)>>,
+    /// This poll's access-policy and group reads.
+    snapshots: Mutex<Snapshots>,
 }
 
 impl Seal {
@@ -473,7 +571,13 @@ impl Seal {
             servers: OnceCell::new(),
             verified: Mutex::new(std::collections::HashSet::new()),
             keys: Mutex::new(HashMap::new()),
+            snapshots: Mutex::new(Snapshots::default()),
         })
+    }
+
+    /// Start a poll: access policies and groups are read afresh, once.
+    pub fn begin_poll(&self) {
+        self.snapshots.lock().unwrap().expire();
     }
 
     pub fn required(&self) -> bool {
@@ -511,22 +615,46 @@ impl Seal {
         server.fetch(&self.http, request, enc_secret).await
     }
 
-    async fn policy(&self, id: &[u8; 32]) -> anyhow::Result<Policy> {
+    /// An object from this poll's snapshot, or (with `refresh`, or none yet)
+    /// read from chain. The flag reports whether the snapshot was reused.
+    async fn snapshot(&self, id: &str, refresh: bool) -> anyhow::Result<(Snapshot, bool)> {
+        if !refresh {
+            if let Some(snapshot) = self.snapshots.lock().unwrap().current(id) {
+                return Ok((snapshot, true));
+            }
+        }
+        let (object_type, owner, version, contents) = self.sui.versioned_move_object(id).await?;
+        Ok((self.snapshots.lock().unwrap().record(id, Snapshot { object_type, owner, version, contents }), false))
+    }
+
+    async fn policy(&self, id: &[u8; 32], refresh: bool) -> anyhow::Result<(Policy, bool)> {
         let id = format!("0x{}", hex::encode(id));
-        let (object_type, owner, contents) = self.sui.move_object(&id).await?;
+        let (Snapshot { object_type, owner, contents, .. }, reused) = self.snapshot(&id, refresh).await?;
         anyhow::ensure!(
             same_type(&object_type, &self.sui.move_type("seal_policy::AccessPolicy")),
             "{id} is not a SuiFleet access policy"
         );
-        let crate::sui_client::Owner::Shared { initial_version } = owner else { anyhow::bail!("access policy {id} is not shared") };
+        let Owner::Shared { initial_version } = owner else { anyhow::bail!("access policy {id} is not shared") };
         let value: crate::protocol::seal_policy::AccessPolicy = bcs::from_bytes(&contents)?;
-        Ok(Policy { key_epoch: value.key_epoch, devices: value.devices, groups: value.groups, initial_version })
+        Ok((Policy { key_epoch: value.key_epoch, devices: value.devices, groups: value.groups, initial_version }, reused))
     }
 
-    /// The approval for this device: directly granted, or through the first
-    /// granted group that currently contains it.
+    /// The approval for this device. A grant may come from this poll's
+    /// snapshots; a refusal built on any reused snapshot is confirmed against
+    /// fresh reads before it stands.
     async fn approval(&self, object: &Object, policy_id: [u8; 32]) -> anyhow::Result<ProgrammableTransaction> {
-        let policy = self.policy(&policy_id).await?;
+        let mut reused = false;
+        match self.approval_from(object, policy_id, false, &mut reused).await {
+            Err(_) if reused => self.approval_from(object, policy_id, true, &mut false).await,
+            result => result,
+        }
+    }
+
+    /// The approval: directly granted, or through the first granted group that
+    /// contains the device. Sets `reused` if any snapshot was reused.
+    async fn approval_from(&self, object: &Object, policy_id: [u8; 32], refresh: bool, reused: &mut bool) -> anyhow::Result<ProgrammableTransaction> {
+        let (policy, cached) = self.policy(&policy_id, refresh).await?;
+        *reused |= cached;
         let epoch = object.key_epoch().unwrap_or_default();
         anyhow::ensure!(
             epoch == policy.key_epoch,
@@ -538,7 +666,8 @@ impl Seal {
         if !policy.devices.contains(&device) {
             for id in &policy.groups {
                 let id = format!("0x{}", hex::encode(id));
-                let Ok((object_type, crate::sui_client::Owner::Shared { initial_version }, contents)) = self.sui.move_object(&id).await else { continue };
+                let Ok((Snapshot { object_type, owner: Owner::Shared { initial_version }, contents, .. }, cached)) = self.snapshot(&id, refresh).await else { continue };
+                *reused |= cached;
                 if !same_type(&object_type, &self.sui.move_type("device_group::DeviceGroup")) {
                     continue;
                 }
@@ -581,7 +710,8 @@ impl Seal {
         servers.iter().filter_map(|s| keys.get(&(full_id.to_vec(), s.object_id)).map(|(k, _)| (s.object_id, *k))).collect()
     }
 
-    /// Ask every needed key server concurrently; enough weight must answer.
+    /// Ask just enough key servers for the threshold, concurrently, and the
+    /// next ones in order to replace failures; enough weight must answer.
     async fn fetch_keys(&self, object: &Object, servers: &[KeyServer], ptb: &ProgrammableTransaction) -> anyhow::Result<HashMap<[u8; 32], G1Affine>> {
         let full_id = object.full_id();
         let mut keys = self.cached(&full_id, servers);
@@ -605,24 +735,30 @@ impl Seal {
             "request_signature": STANDARD.encode(&signature),
             "certificate": certificate.to_json(),
         });
-        let pending: Vec<_> = servers.iter().filter(|s| !keys.contains_key(&s.object_id)).collect();
-        let results = futures_util::future::join_all(pending.iter().map(|s| self.fetch_from(s, &request, &enc_secret))).await;
-        let mut errors = Vec::new();
-        for (server, result) in pending.iter().zip(results) {
-            match result.and_then(|found| {
-                found.into_iter().find(|(id, _)| *id == full_id).map(|(_, key)| key).ok_or_else(|| anyhow::anyhow!("no key for this identity"))
-            }) {
-                Ok(key) => {
-                    keys.insert(server.object_id, key);
-                    if self.config.key_cache_seconds > 0 {
-                        self.keys.lock().unwrap().insert((full_id.clone(), server.object_id), (key, Instant::now()));
-                    }
-                }
-                Err(error) => {
-                    warn!(server = server.name, "Seal key request refused or failed: {error:#}");
-                    errors.push(format!("{}: {error:#}", server.name));
-                }
+        // In the ciphertext's order, each server weighted by its shares.
+        let order: Vec<_> = servers.iter().map(|s| (s.object_id, object.services.iter().filter(|(id, _)| *id == s.object_id).count())).collect();
+        let server = |id: [u8; 32]| servers.iter().find(|s| s.object_id == id).expect("ordered from these servers");
+        let (request, enc_secret, full_id) = (&request, &enc_secret, &full_id);
+        let failures = fetch_threshold(&order, usize::from(object.threshold), &mut keys, |id| async move {
+            let server = server(id);
+            let key = self
+                .fetch_from(server, request, enc_secret)
+                .await?
+                .into_iter()
+                .find(|(found, _)| found == full_id)
+                .map(|(_, key)| key)
+                .ok_or_else(|| anyhow::anyhow!("no key for this identity"))?;
+            if self.config.key_cache_seconds > 0 {
+                self.keys.lock().unwrap().insert((full_id.clone(), id), (key, Instant::now()));
             }
+            Ok(key)
+        })
+        .await;
+        let mut errors = Vec::new();
+        for (id, error) in failures {
+            let server = server(id);
+            warn!(server = server.name, "Seal key request refused or failed: {error:#}");
+            errors.push(format!("{}: {error:#}", server.name));
         }
         anyhow::ensure!(
             weight(&keys) >= usize::from(object.threshold),
@@ -660,7 +796,10 @@ impl Seal {
         anyhow::ensure!(object.threshold >= self.config.min_threshold, "threshold {} is below the configured minimum {}", object.threshold, self.config.min_threshold);
         let ptb = self.approval(&object, policy_id).await?;
         check_approval(&ptb, &Address::from_str(&self.sui.manifest().call_package_id)?)?;
-        let keys = self.fetch_keys(&object, &servers, &ptb).await?;
+        let keys = self.fetch_keys(&object, &servers, &ptb).await.inspect_err(|_| {
+            // Key servers judge the current chain: read it afresh next time.
+            self.snapshots.lock().unwrap().expire();
+        })?;
         let public: HashMap<_, _> = servers.iter().map(|s| (s.object_id, s.public_key)).collect();
         let key = seal::dem_key(&object, &keys, &public)?;
         seal::decrypt_in_place(&object, &key, buffer)
@@ -801,6 +940,103 @@ mod tests {
         assert!(transport("http://seal.example").is_err(), "plain HTTP off-host");
         assert!(transport("https://user:pass@seal.example").is_err());
         assert!(transport("ftp://seal.example").is_err());
+    }
+
+    /// Runs `fetch_threshold` against fake servers: those in `failing`
+    /// refuse. Returns the servers asked, round by round, and the outcome.
+    async fn threshold_run(order: &[([u8; 32], usize)], threshold: usize, cached: &[[u8; 32]], failing: &[[u8; 32]]) -> (Vec<Vec<[u8; 32]>>, HashMap<[u8; 32], u8>, Vec<[u8; 32]>) {
+        let calls = Mutex::new(Vec::<[u8; 32]>::new());
+        let rounds = Mutex::new(Vec::<Vec<[u8; 32]>>::new());
+        let mut keys: HashMap<[u8; 32], u8> = cached.iter().map(|id| (*id, 0)).collect();
+        let failures = fetch_threshold(order, threshold, &mut keys, |id| {
+            calls.lock().unwrap().push(id);
+            let (calls, rounds) = (&calls, &rounds);
+            async move {
+                // Every request of a round starts before any of them finishes.
+                let started = std::mem::take(&mut *calls.lock().unwrap());
+                if !started.is_empty() {
+                    rounds.lock().unwrap().push(started);
+                }
+                tokio::task::yield_now().await;
+                anyhow::ensure!(!failing.contains(&id), "refused");
+                Ok(id[0])
+            }
+        })
+        .await;
+        let errors = failures.iter().map(|(id, error)| {
+            assert_eq!(error.to_string(), "refused");
+            *id
+        });
+        (rounds.into_inner().unwrap(), keys, errors.collect())
+    }
+
+    #[tokio::test]
+    async fn keys_come_from_a_threshold_of_servers_with_ordered_fallback() {
+        let (a, b, c, d) = ([1; 32], [2; 32], [3; 32], [4; 32]);
+        let even = [(a, 1), (b, 1), (c, 1)];
+        // Only as many servers as the threshold needs are asked.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[]).await;
+        assert_eq!(rounds, vec![vec![a, b]]);
+        assert_eq!((keys.len(), errors.len()), (2, 0));
+        // A failure is replaced by the next server in order, and only it.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[a]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        assert!(keys.contains_key(&b) && keys.contains_key(&c) && !keys.contains_key(&a));
+        assert_eq!(errors, vec![a]);
+        let (rounds, _, errors) = threshold_run(&even, 2, &[], &[b]).await;
+        assert_eq!((rounds, errors), (vec![vec![a, b], vec![c]], vec![b]));
+        // Too many failures: every server is asked once, then the shortfall shows.
+        let (rounds, keys, errors) = threshold_run(&even, 2, &[], &[a, c]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        assert_eq!((keys.len(), errors), (1, vec![a, c]));
+        // The threshold equals the server count: all are needed at once.
+        let (rounds, keys, _) = threshold_run(&even, 3, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a, b, c]], 3));
+        // A threshold beyond every server's weight asks each once and fails.
+        let (rounds, keys, _) = threshold_run(&even, 4, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a, b, c]], 3));
+        // Threshold 1: one server; failures fall through one at a time.
+        let (rounds, _, _) = threshold_run(&even, 1, &[], &[a, b]).await;
+        assert_eq!(rounds, vec![vec![a], vec![b], vec![c]]);
+        // Cached keys count: only the missing weight is requested.
+        let (rounds, keys, _) = threshold_run(&even, 2, &[b], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a]], 2));
+        let (rounds, _, _) = threshold_run(&even, 2, &[a, c], &[]).await;
+        assert!(rounds.is_empty(), "the cache already meets the threshold");
+        // Weight is the number of shares a server holds.
+        let weighted = [(a, 2), (b, 1), (c, 1), (d, 1)];
+        let (rounds, keys, _) = threshold_run(&weighted, 2, &[], &[]).await;
+        assert_eq!((rounds, keys.len()), (vec![vec![a]], 1));
+        let (rounds, _, _) = threshold_run(&weighted, 2, &[], &[a]).await;
+        assert_eq!(rounds, vec![vec![a], vec![b, c]]);
+        let (rounds, _, _) = threshold_run(&weighted, 3, &[], &[b]).await;
+        assert_eq!(rounds, vec![vec![a, b], vec![c]]);
+        let (rounds, _, _) = threshold_run(&[(b, 1), (a, 2)], 2, &[], &[]).await;
+        assert_eq!(rounds, vec![vec![b, a]], "the ciphertext's order decides, not weight");
+    }
+
+    #[test]
+    fn group_and_policy_snapshots_serve_one_poll_and_never_regress() {
+        let read = |version: u64| Snapshot { object_type: "t".into(), owner: Owner::Shared { initial_version: 1 }, version, contents: vec![version as u8] };
+        let mut snapshots = Snapshots::default();
+        assert!(snapshots.current("0x1").is_none());
+        assert_eq!(snapshots.record("0x1", read(5)).version, 5);
+        assert_eq!(snapshots.current("0x1").unwrap().contents, vec![5]);
+        assert!(snapshots.current("0x2").is_none());
+        // A new poll reads again.
+        snapshots.expire();
+        assert!(snapshots.current("0x1").is_none());
+        // A lagging node's older version does not replace a newer one.
+        let kept = snapshots.record("0x1", read(4));
+        assert_eq!((kept.version, kept.contents), (5, vec![5]));
+        assert_eq!(snapshots.current("0x1").unwrap().version, 5);
+        assert_eq!(snapshots.record("0x1", read(6)).version, 6);
+        assert_eq!(snapshots.current("0x1").unwrap().contents, vec![6]);
+        // Snapshots age out even within a poll.
+        let poll = snapshots.poll;
+        snapshots.entries.get_mut("0x1").unwrap().1 = Instant::now() - MAX_SNAPSHOT_AGE;
+        assert_eq!(snapshots.poll, poll);
+        assert!(snapshots.current("0x1").is_none());
     }
 
     /// A provider redirect is refused on both the proof-of-possession and the

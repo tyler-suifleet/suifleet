@@ -106,7 +106,8 @@ async function signed(value, signer = key) {
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads(), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive);
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads({endEpoch:110}), walrus(105), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'owner extension remains readable after original anchor expiry');
  assert.deepEqual(await bulk.fetchVerifiedArchive(reads({storageVersion:'2'}), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'migrated v2 storage preserves existing archive reads');
- await assert.rejects(bulk.fetchVerifiedArchive(reads({storageVersion:'3'}), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), /Foreign fleet storage/);
+ assert.deepEqual(await bulk.fetchVerifiedArchive(reads({storageVersion:'3'}), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), archive, 'migrated v3 storage preserves existing archive reads');
+ await assert.rejects(bulk.fetchVerifiedArchive(reads({storageVersion:'4'}), walrus(99), config, device, 0, 'https://fixture.invalid', decrypt, request), /Foreign fleet storage/);
  for (const [name, source, storage] of [
   ['foreign storage budget', reads({foreignStorage:true}), walrus(99)], ['foreign record type', reads({badRecordType:true}), walrus(99)], ['foreign blob binding', reads({foreignBlob:true}), walrus(99)],
   ['released before original expiry', reads({released:true}), walrus(99)], ['foreign record', reads({foreignRecord:true}), walrus(99)], ['shortened record', reads({endEpoch:90}), walrus(89)], ['released during download', reads({shorten:true}), walrus(99)],
