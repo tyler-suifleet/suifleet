@@ -19,7 +19,8 @@ from urllib.parse import quote
 
 ACTIVE_RUN = ('claiming', 'launching', 'running')
 RETAINED = ('orphaned', 'quarantined', 'parked')
-JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined')
+QUOTA_RETRIES = 4  # Same bound as coordinator.QUOTA_RETRIES (asserted by tests).
+JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined', 'quota_wait', 'quota_launch')
 ROLE = {'review': 'review', 'fix': 'repair'}
 # Dispatcher CI repair-first redirects (SF-116) that pause a live implementation.
 REDIRECT_PAUSING = ('guarding', 'interrupting', 'releasing')
@@ -447,7 +448,11 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                                          'reason,repair_dir,resumed_as,updated FROM ci_redirects ORDER BY id')]
             capacities = []
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='capacity_retries'").fetchone():
-                capacities = [dict(r) for r in db.execute('SELECT source,state,attempt,retry_after,reason,replacement,updated FROM capacity_retries')]
+                kinds = db.execute("SELECT 1 FROM sqlite_master WHERE name='capacity_kinds'").fetchone()
+                capacities = [dict(r) for r in db.execute(
+                    "SELECT c.source,c.state,c.attempt,c.retry_after,c.reason,c.replacement,c.updated,"
+                    + ("COALESCE(k.kind,'capacity') AS kind FROM capacity_retries c LEFT JOIN capacity_kinds k ON k.source=c.source"
+                       if kinds else "'capacity' AS kind FROM capacity_retries c"))]
             return runs, backoff, redirects, capacities
         finally:
             db.close()
@@ -638,9 +643,11 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         capacity = capacity_for.get(run['session'])
         if run['status'] == 'capacity_wait':
             count['retained' if process == 'exited' else 'held'] += 1
-            item('attention', **base, state='capacity-backoff', since=capacity.get('updated') if capacity else since,
+            quota = bool(capacity) and capacity.get('kind') == 'quota'
+            item('attention', **base, state='quota-wait' if quota else 'capacity-backoff',
+                 since=capacity.get('updated') if capacity else since,
                  retry_after=capacity.get('retry_after') if capacity else None,
-                 summary=(f"provider capacity retry {capacity['attempt']}/3; next retry "
+                 summary=(f"provider {'quota' if quota else 'capacity'} retry {capacity['attempt']}/{QUOTA_RETRIES if quota else 3}; next retry "
                           f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(capacity['retry_after']))}: "
                           f"{safe_text(capacity['reason'])}" if capacity else 'capacity wait without retry receipt; inspect dispatcher'))
             continue
@@ -706,7 +713,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         count = job_counts.setdefault((job['family'], role), dict(active=0, held=0, retained=0))
         snapshot = cache.get(job['directory']) or {}
         key = snapshot.get('ticket')
-        if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined'):
+        if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined', 'quota_wait', 'quota_launch'):
             open_by_pr.setdefault((job['project'], job['pr']), []).append(job['id'])
         process = processes.state(job['pid'], job['started']) if job['status'] == 'running' else None
         if role == 'repair' and key and job['status'] in ('reserved', 'running'):
@@ -735,6 +742,14 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         elif job['status'] == 'retry':
             item('attention', **base, state='retry', since=since, retry_after=job['retry_after'],
                  summary=f"{task}: {safe_text(job['error'], 90) or 'retry scheduled'}")
+        elif job['status'] == 'quota_wait':
+            # Verified stopped; resumes under the same claim after the provider's stated reset.
+            count['retained'] += 1
+            item('attention', **base, state='quota-wait', since=since, retry_after=job['retry_after'],
+                 summary=f"{task}: {safe_text(job['error'], 90) or 'waiting for provider quota reset'}")
+        elif job['status'] == 'quota_launch':
+            count['held'] += 1
+            item('attention', **base, state='waiting', since=since, summary=f'{task}: quota recovery launch in progress')
         elif job['status'] == 'orphaned':
             count['held'] += 1
             item('attention', **base, state='orphaned', since=since, summary=f"{task}: {safe_text(job['error'], 90) or 'requires explicit recovery'}")
@@ -826,7 +841,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
-    order = {s: i for i, s in enumerate(['ci-failed', 'ci-repair-requested', 'uncertain', 'retry', 'stale', 'lingering',
+    order = {s: i for i, s in enumerate(['ci-failed', 'ci-repair-requested', 'uncertain', 'retry', 'quota-wait', 'stale', 'lingering',
                                           'unverified', 'orphaned', 'manual', 'pausing', 'paused', 'waiting', 'ci-pending',
                                           'awaiting-review', 'review', 'blocked', 'failed', 'quarantined', 'parked'])}
     model['attention'].sort(key=lambda x: (order.get(x['state'], 99), x['project'], str(x.get('ticket') or ''), x.get('pr') or 0))
@@ -952,7 +967,7 @@ def render(model, width=100, delta=None, interval=None):
         lines.append('  Nothing waiting.' if model['sources'].get('tickets', {}).get('state') == 'ok' else '  Unknown: ticket store unavailable.')
     for a in attention:
         when = f" for {fmt_age(now - a['since'])}" if a.get('since') else ''
-        if a['state'] == 'retry':
+        if a['state'] in ('retry', 'quota-wait'):
             due = a.get('retry_after')
             when += f' · retry in {fmt_age(due - now)}' if due and due > now else ' · retry due'
         head = ' '.join(x for x in (f"[{a['state']}]", a.get('family') or '', a['role'], a.get('ticket') or '',
