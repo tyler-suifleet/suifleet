@@ -88,7 +88,9 @@ configuration.
 `dapp/src/lib/fleet-settings.ts` provides `DEFAULT_SETTINGS`,
 `SETTINGS_BOUNDS`, `settingsErrors` (the contract's rules, checked before
 signing), `buildSetFleetSettingsTx` and `fetchFleetSettings` (one dynamic-field
-read). The settings page with live cost and prepaid deposit is SF-131.
+read). The `/settings` page (SF-131) prices each setting, sizes the prepaid
+deposit from them and saves them with `buildSetFleetSettingsTx`; see
+[FLEET_BUDGET.md](FLEET_BUDGET.md).
 
 ## Verification
 
