@@ -89,6 +89,13 @@ impl WalrusClient {
         self
     }
 
+    /// Start a poll: Seal rereads access policies and groups once for it.
+    pub fn begin_poll(&self) {
+        if let Some(seal) = &self.seal {
+            seal.begin_poll();
+        }
+    }
+
     /// Whether only Seal-encrypted recipes and artifacts may be applied.
     pub fn confidential_only(&self) -> bool {
         self.seal.as_ref().is_some_and(|seal| seal.required())
