@@ -15,7 +15,7 @@ fn full<T>() -> anyhow::Result<T> {
 #[serde(deny_unknown_fields)]
 pub struct Metadata {
     pub stream: String, pub key: String, pub content_type: String,
-    pub metadata: std::collections::BTreeMap<String,String>,
+    #[serde(default)] pub metadata: std::collections::BTreeMap<String,String>,
     pub upload: String, pub chunk: u32, pub chunks: u32, pub total_size: u64,
     pub size: u64, pub sha256: Vec<u8>,
 }
@@ -136,6 +136,14 @@ impl Message {
         let error=q.submit(m,&[1],None).unwrap_err();assert_eq!(error.downcast_ref::<crate::streams::StreamError>().unwrap().code,"full");
         assert_eq!(q.state.next,next);drop(q);
         let q=Queue::open(&dir).unwrap();assert_eq!(q.items().len(),MAX_ITEMS);drop(q);std::fs::remove_dir_all(dir).unwrap();
+    }
+    #[test] fn intake_metadata_is_optional_and_defaults_durably() {
+        let dir=std::env::temp_dir().join(format!("sf139-default-{}",rand::random::<u128>()));
+        let mut descriptor=serde_json::to_value(metadata(&[0])).unwrap();descriptor.as_object_mut().unwrap().remove("metadata");
+        let receipt=handle(&dir,"sensor",&serde_json::json!({"descriptor":descriptor,"data_base64":"AA=="})).unwrap();
+        assert_eq!(receipt["storage_acknowledged"],false);
+        {let queue=Queue::open(&dir).unwrap();assert!(queue.items()[0].descriptor.metadata.is_empty());}
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test] fn authorized_topic_cannot_be_substituted() {
         assert!(handle(Path::new("/unused"),"other",&serde_json::json!({"descriptor":metadata(&[0]),"data_base64":"AA=="})).is_err());
