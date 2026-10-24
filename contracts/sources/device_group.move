@@ -124,6 +124,28 @@ module sui_edge::device_group {
         group.admin = recipient;
     }
 
+    /// Managed groups use an object address as admin. No wallet can sign as
+    /// that address, sealing legacy add/remove/handover entry points.
+    public(package) fun new_managed(name: String, description: String, admin: address,
+        clock: &Clock, ctx: &mut TxContext): DeviceGroup {
+        let group = DeviceGroup { id: object::new(ctx), name, description, admin,
+            device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: SCHEMA_VERSION };
+        event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
+        group
+    }
+    public(package) fun share_managed(group: DeviceGroup) { transfer::share_object(group); }
+    public(package) fun add_managed(group: &mut DeviceGroup, device_id: ID) {
+        assert!(!group.device_ids.contains(&device_id), EDeviceAlreadyInGroup);
+        group.device_ids.push_back(device_id);
+        event::emit(DeviceAddedToGroup { group_id: object::id(group), device_id });
+    }
+    public(package) fun remove_managed(group: &mut DeviceGroup, device_id: ID) {
+        let (found, idx) = group.device_ids.index_of(&device_id);
+        assert!(found, EDeviceNotInGroup);
+        group.device_ids.swap_remove(idx);
+        event::emit(DeviceRemovedFromGroup { group_id: object::id(group), device_id });
+    }
+
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun contains_device(group: &DeviceGroup, device_id: ID): bool {

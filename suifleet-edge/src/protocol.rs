@@ -106,6 +106,132 @@ pub mod component_catalog {
     }
     impl VersionPublished { pub const MOVE_TYPE: &'static str = "component_catalog::VersionPublished"; }
 }
+pub mod customer {
+    use super::*;
+    pub const MODULE: &str = "customer";
+    pub const ACTIVE_DEVICES: &str = "active_devices";
+    pub const ADD_TO_GROUP: &str = "add_to_group";
+    pub const ADOPT_BUDGET: &str = "adopt_budget";
+    pub const ASSERT_ADMIN: &str = "assert_admin";
+    pub const ASSERT_FLEET: &str = "assert_fleet";
+    pub const ASSERT_MEMBER: &str = "assert_member";
+    pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
+    pub const CREATE: &str = "create";
+    pub const CREATE_DEPLOYMENT: &str = "create_deployment";
+    pub const CREATE_FLEET: &str = "create_fleet";
+    pub const CREATE_GROUP: &str = "create_group";
+    pub const ENROLL: &str = "enroll";
+    pub const FLEET_BUDGET: &str = "fleet_budget";
+    pub const FLEET_CUSTOMER: &str = "fleet_customer";
+    pub const FLEETS: &str = "fleets";
+    pub const REMOVE_DEVICE: &str = "remove_device";
+    pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
+    pub const RESERVE_ALLOWANCE: &str = "reserve_allowance";
+    pub const RETURN_BUDGET_CAP: &str = "return_budget_cap";
+    pub const SET_CREDENTIAL: &str = "set_credential";
+    pub const SET_ENTITLEMENT: &str = "set_entitlement";
+    pub const USED: &str = "used";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct AssignmentKey {
+        pub device_id: [u8; 32],
+    }
+    impl AssignmentKey { pub const MOVE_TYPE: &'static str = "customer::AssignmentKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetKey {
+        pub dummy_field: bool,
+    }
+    impl BudgetKey { pub const MOVE_TYPE: &'static str = "customer::BudgetKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct BudgetLoan {
+        pub fleet_id: [u8; 32],
+        pub cap_id: [u8; 32],
+    }
+    impl BudgetLoan { pub const MOVE_TYPE: &'static str = "customer::BudgetLoan"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CredentialChanged {
+        pub customer_id: [u8; 32],
+        pub wallet: [u8; 32],
+        pub active: bool,
+        pub administrator: bool,
+    }
+    impl CredentialChanged { pub const MOVE_TYPE: &'static str = "customer::CredentialChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Customer {
+        pub id: [u8; 32],
+        pub registry_id: [u8; 32],
+        pub name: String,
+        pub credentials: super::VecMap<[u8; 32], bool>,
+        pub administrators: u64,
+        pub fleets: Vec<[u8; 32]>,
+        pub default_fleet: Option<[u8; 32]>,
+        pub active_devices: u64,
+        pub device_limit: u64,
+        pub allowance: u64,
+        pub used: u64,
+        pub period: u64,
+    }
+    impl Customer { pub const MOVE_TYPE: &'static str = "customer::Customer"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CustomerCreated {
+        pub customer_id: [u8; 32],
+        pub wallet: [u8; 32],
+    }
+    impl CustomerCreated { pub const MOVE_TYPE: &'static str = "customer::CustomerCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CustomerKey {
+        pub wallet: [u8; 32],
+    }
+    impl CustomerKey { pub const MOVE_TYPE: &'static str = "customer::CustomerKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceAssigned {
+        pub customer_id: [u8; 32],
+        pub fleet_id: [u8; 32],
+        pub device_id: [u8; 32],
+    }
+    impl DeviceAssigned { pub const MOVE_TYPE: &'static str = "customer::DeviceAssigned"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceKey {
+        pub device_id: [u8; 32],
+    }
+    impl DeviceKey { pub const MOVE_TYPE: &'static str = "customer::DeviceKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceReleased {
+        pub customer_id: [u8; 32],
+        pub fleet_id: [u8; 32],
+        pub device_id: [u8; 32],
+    }
+    impl DeviceReleased { pub const MOVE_TYPE: &'static str = "customer::DeviceReleased"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Fleet {
+        pub id: [u8; 32],
+        pub customer_id: [u8; 32],
+        pub name: String,
+        pub budget_id: [u8; 32],
+        pub devices: Vec<[u8; 32]>,
+        pub groups: Vec<[u8; 32]>,
+        pub deployments: Vec<[u8; 32]>,
+    }
+    impl Fleet { pub const MOVE_TYPE: &'static str = "customer::Fleet"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct FleetCreated {
+        pub customer_id: [u8; 32],
+        pub fleet_id: [u8; 32],
+        pub name: String,
+        pub budget_id: [u8; 32],
+    }
+    impl FleetCreated { pub const MOVE_TYPE: &'static str = "customer::FleetCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupCountKey {
+        pub device_id: [u8; 32],
+    }
+    impl GroupCountKey { pub const MOVE_TYPE: &'static str = "customer::GroupCountKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Membership {
+        pub id: [u8; 32],
+        pub customer_id: [u8; 32],
+    }
+    impl Membership { pub const MOVE_TYPE: &'static str = "customer::Membership"; }
+}
 pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
@@ -404,6 +530,7 @@ pub mod device_registry {
     use super::*;
     pub const MODULE: &str = "device_registry";
     pub const ACTIVATE_DEVICE: &str = "activate_device";
+    pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const BORROW_DEVICE: &str = "borrow_device";
     pub const CUSTODIED_DEVICE: &str = "custodied_device";
     pub const DEREGISTER_ACTIVATED_DEVICE: &str = "deregister_activated_device";
@@ -646,6 +773,11 @@ pub mod fleet_budget {
         pub paused: bool,
     }
     impl BudgetPaused { pub const MOVE_TYPE: &'static str = "fleet_budget::BudgetPaused"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CustomerManagedKey {
+        pub dummy_field: bool,
+    }
+    impl CustomerManagedKey { pub const MOVE_TYPE: &'static str = "fleet_budget::CustomerManagedKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Deposited {
         pub budget_id: [u8; 32],

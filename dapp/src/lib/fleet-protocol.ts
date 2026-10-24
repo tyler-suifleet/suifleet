@@ -9,6 +9,20 @@ export const component_catalog_CatalogCreatedBcs = bcs.struct("CatalogCreated", 
 export const component_catalog_ComponentCatalogBcs = bcs.struct("ComponentCatalog", { id: bcs.Address, publisher: bcs.Address, versions: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
 export const component_catalog_ComponentVersionBcs = bcs.struct("ComponentVersion", { id: bcs.Address, catalog_id: bcs.Address, publisher: bcs.Address, component_name: bcs.string(), version: bcs.string(), schema_version: bcs.u64(), created_at: bcs.u64(), platform_os: bcs.vector(bcs.string()), platform_arch: bcs.vector(bcs.string()), recipe_blob_ids: bcs.vector(bcs.string()), recipe_sha256s: bcs.vector(bcs.string()), artifact_sha256s: bcs.vector(bcs.string()) });
 export const component_catalog_VersionPublishedBcs = bcs.struct("VersionPublished", { catalog_id: bcs.Address, version_id: bcs.Address, publisher: bcs.Address, component_name: bcs.string(), version: bcs.string() });
+export const customer_AssignmentKeyBcs = bcs.struct("AssignmentKey", { device_id: bcs.Address });
+export const customer_BudgetKeyBcs = bcs.struct("BudgetKey", { dummy_field: bcs.bool() });
+export const customer_BudgetLoanBcs = bcs.struct("BudgetLoan", { fleet_id: bcs.Address, cap_id: bcs.Address });
+export const customer_CredentialChangedBcs = bcs.struct("CredentialChanged", { customer_id: bcs.Address, wallet: bcs.Address, active: bcs.bool(), administrator: bcs.bool() });
+export const customer_CustomerBcs = bcs.struct("Customer", { id: bcs.Address, registry_id: bcs.Address, name: bcs.string(), credentials: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.Address, value: bcs.bool() })) }), administrators: bcs.u64(), fleets: bcs.vector(bcs.Address), default_fleet: bcs.option(bcs.Address), active_devices: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), used: bcs.u64(), period: bcs.u64() });
+export const customer_CustomerCreatedBcs = bcs.struct("CustomerCreated", { customer_id: bcs.Address, wallet: bcs.Address });
+export const customer_CustomerKeyBcs = bcs.struct("CustomerKey", { wallet: bcs.Address });
+export const customer_DeviceAssignedBcs = bcs.struct("DeviceAssigned", { customer_id: bcs.Address, fleet_id: bcs.Address, device_id: bcs.Address });
+export const customer_DeviceKeyBcs = bcs.struct("DeviceKey", { device_id: bcs.Address });
+export const customer_DeviceReleasedBcs = bcs.struct("DeviceReleased", { customer_id: bcs.Address, fleet_id: bcs.Address, device_id: bcs.Address });
+export const customer_FleetBcs = bcs.struct("Fleet", { id: bcs.Address, customer_id: bcs.Address, name: bcs.string(), budget_id: bcs.Address, devices: bcs.vector(bcs.Address), groups: bcs.vector(bcs.Address), deployments: bcs.vector(bcs.Address) });
+export const customer_FleetCreatedBcs = bcs.struct("FleetCreated", { customer_id: bcs.Address, fleet_id: bcs.Address, name: bcs.string(), budget_id: bcs.Address });
+export const customer_GroupCountKeyBcs = bcs.struct("GroupCountKey", { device_id: bcs.Address });
+export const customer_MembershipBcs = bcs.struct("Membership", { id: bcs.Address, customer_id: bcs.Address });
 export const deployment_manager_ControlBcs = bcs.struct("Control", { revision: bcs.u64(), state: bcs.u8(), not_before_ms: bcs.u64(), expires_ms: bcs.u64(), window_start_ms: bcs.u64(), window_end_ms: bcs.u64(), notice_ms: bcs.u64() });
 export const deployment_manager_ControlKeyBcs = bcs.struct("ControlKey", { dummy_field: bcs.bool() });
 export const deployment_manager_DelegateKeyBcs = bcs.struct("DelegateKey", { dummy_field: bcs.bool() });
@@ -59,6 +73,7 @@ export const fleet_budget_BudgetCreatedBcs = bcs.struct("BudgetCreated", { budge
 export const fleet_budget_BudgetLowBcs = bcs.struct("BudgetLow", { budget_id: bcs.Address, balance: bcs.u64(), threshold: bcs.u64() });
 export const fleet_budget_BudgetOwnerCapBcs = bcs.struct("BudgetOwnerCap", { id: bcs.Address, budget_id: bcs.Address });
 export const fleet_budget_BudgetPausedBcs = bcs.struct("BudgetPaused", { budget_id: bcs.Address, paused: bcs.bool() });
+export const fleet_budget_CustomerManagedKeyBcs = bcs.struct("CustomerManagedKey", { dummy_field: bcs.bool() });
 export const fleet_budget_DepositedBcs = bcs.struct("Deposited", { budget_id: bcs.Address, amount: bcs.u64(), balance: bcs.u64() });
 export const fleet_budget_DeviceFundedBcs = bcs.struct("DeviceFunded", { budget_id: bcs.Address, device_id: bcs.Address, device_address: bcs.Address, amount: bcs.u64(), balance: bcs.u64() });
 export const fleet_budget_DeviceKeyBcs = bcs.struct("DeviceKey", { device_id: bcs.Address });
@@ -97,6 +112,27 @@ export const calls = {
   component_catalog_validate_hash: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_hash`, arguments: [tx.pure.string(a0)] }),
   component_catalog_validate_name: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_name`, arguments: [tx.pure.string(a0)] }),
   component_catalog_validate_version: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_version`, arguments: [tx.pure.string(a0)] }),
+  customer_active_devices: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::active_devices`, arguments: [tx.object(a0)] }),
+  customer_add_to_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::customer::add_to_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.address(a3)] }),
+  customer_adopt_budget: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::customer::adopt_budget`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.string(a3)] }),
+  customer_assert_admin: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::assert_admin`, arguments: [tx.object(a0)] }),
+  customer_assert_fleet: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::assert_fleet`, arguments: [tx.object(a0), tx.object(a1)] }),
+  customer_assert_member: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::assert_member`, arguments: [tx.object(a0)] }),
+  customer_borrow_budget_cap: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::borrow_budget_cap`, arguments: [tx.object(a0), tx.object(a1)] }),
+  customer_create: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::customer::create`, arguments: [tx.object(a0), tx.pure.string(a1)] }),
+  customer_create_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: string, a4: string, a5: string, a6: string, a7: string[], a8: string[], a9: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::create_deployment`, arguments: [tx.object(a0), tx.object(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure.string(a5), tx.pure.string(a6), tx.pure(bcs.vector(bcs.Address).serialize(a7)), tx.pure(bcs.vector(bcs.Address).serialize(a8)), tx.object(a9)] }),
+  customer_create_fleet: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::customer::create_fleet`, arguments: [tx.object(a0), tx.object(a1), tx.pure.string(a2)] }),
+  customer_create_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::create_group`, arguments: [tx.object(a0), tx.object(a1), tx.pure.string(a2), tx.pure.string(a3), tx.object(a4)] }),
+  customer_enroll: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: Parameters<Transaction["object"]>[0], a5: number | bigint | string, a6: number | bigint | string, a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::enroll`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.object(a4), tx.pure.u64(a5), tx.pure.u64(a6), tx.object(a7)] }),
+  customer_fleet_budget: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::fleet_budget`, arguments: [tx.object(a0)] }),
+  customer_fleet_customer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::fleet_customer`, arguments: [tx.object(a0)] }),
+  customer_remove_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: string) => tx.moveCall({ target: `${packageId}::customer::remove_device`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.pure.address(a4)] }),
+  customer_remove_from_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::customer::remove_from_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.address(a3)] }),
+  customer_reserve_allowance: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: number | bigint | string) => tx.moveCall({ target: `${packageId}::customer::reserve_allowance`, arguments: [tx.object(a0), tx.object(a1), tx.pure.u64(a2)] }),
+  customer_return_budget_cap: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::return_budget_cap`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  customer_set_credential: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: boolean, a3: boolean) => tx.moveCall({ target: `${packageId}::customer::set_credential`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.bool(a2), tx.pure.bool(a3)] }),
+  customer_set_entitlement: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string) => tx.moveCall({ target: `${packageId}::customer::set_entitlement`, arguments: [tx.object(a0), tx.object(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4)] }),
+  customer_used: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::used`, arguments: [tx.object(a0)] }),
   deployment_manager_advance_rollout: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: string[], a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::advance_rollout`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.pure(bcs.vector(bcs.Address).serialize(a3)), tx.object(a4)] }),
   deployment_manager_control: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::control`, arguments: [tx.object(a0)] }),
   deployment_manager_control_rollout: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number, a2: string[], a3: string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::control_rollout`, arguments: [tx.object(a0), tx.pure.u8(a1), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.pure.string(a3), tx.object(a4)] }),
@@ -147,6 +183,7 @@ export const calls = {
   device_group_name: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::name`, arguments: [tx.object(a0)] }),
   device_group_remove_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::device_group::remove_device`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   device_registry_activate_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::activate_device`, arguments: [tx.object(a0), tx.object(a1)] }),
+  device_registry_assert_admin: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::assert_admin`, arguments: [tx.object(a0)] }),
   device_registry_borrow_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::borrow_device`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_registry_deregister_activated_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::deregister_activated_device`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_registry_deregister_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::deregister_device`, arguments: [tx.object(a0), tx.object(a1)] }),
@@ -290,6 +327,20 @@ export const TYPES = {
   component_catalog_ComponentCatalog: "component_catalog::ComponentCatalog",
   component_catalog_ComponentVersion: "component_catalog::ComponentVersion",
   component_catalog_VersionPublished: "component_catalog::VersionPublished",
+  customer_AssignmentKey: "customer::AssignmentKey",
+  customer_BudgetKey: "customer::BudgetKey",
+  customer_BudgetLoan: "customer::BudgetLoan",
+  customer_CredentialChanged: "customer::CredentialChanged",
+  customer_Customer: "customer::Customer",
+  customer_CustomerCreated: "customer::CustomerCreated",
+  customer_CustomerKey: "customer::CustomerKey",
+  customer_DeviceAssigned: "customer::DeviceAssigned",
+  customer_DeviceKey: "customer::DeviceKey",
+  customer_DeviceReleased: "customer::DeviceReleased",
+  customer_Fleet: "customer::Fleet",
+  customer_FleetCreated: "customer::FleetCreated",
+  customer_GroupCountKey: "customer::GroupCountKey",
+  customer_Membership: "customer::Membership",
   deployment_manager_Control: "deployment_manager::Control",
   deployment_manager_ControlKey: "deployment_manager::ControlKey",
   deployment_manager_DelegateKey: "deployment_manager::DelegateKey",
@@ -340,6 +391,7 @@ export const TYPES = {
   fleet_budget_BudgetLow: "fleet_budget::BudgetLow",
   fleet_budget_BudgetOwnerCap: "fleet_budget::BudgetOwnerCap",
   fleet_budget_BudgetPaused: "fleet_budget::BudgetPaused",
+  fleet_budget_CustomerManagedKey: "fleet_budget::CustomerManagedKey",
   fleet_budget_Deposited: "fleet_budget::Deposited",
   fleet_budget_DeviceFunded: "fleet_budget::DeviceFunded",
   fleet_budget_DeviceKey: "fleet_budget::DeviceKey",

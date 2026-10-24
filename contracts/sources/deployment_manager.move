@@ -264,6 +264,18 @@ module sui_edge::deployment_manager {
         id
     }
 
+    /// Caller has validated the complete managed fleet target inventory.
+    public(package) fun new_customer_deployment(creator: address, component_name: String,
+        version: String, recipe_blob_id: String, artifact_sha256: String,
+        recipe_sha256: String, groups: vector<ID>, devices: vector<ID>,
+        clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
+        assert_recipe_hash(&recipe_sha256);
+        let mut record = make_deployment(creator, component_name, version, recipe_blob_id,
+            artifact_sha256, groups, devices, clock, ctx);
+        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        record
+    }
+
     fun assert_recipe_hash(recipe_sha256: &String) {
         let bytes = recipe_sha256.as_bytes();
         assert!(bytes.length() == 64, EInvalidRecipeHash);
