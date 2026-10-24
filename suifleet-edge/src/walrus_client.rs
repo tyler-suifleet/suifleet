@@ -263,18 +263,21 @@ impl WalrusClient {
     }
 
     async fn transfer(&self, blob_id: &str, partial: &Path) -> Result<(), Failure> {
+        let mut first_request = true;
         loop {
             let local = |e: std::io::Error| Failure::Permanent(e.into());
             let mut offset = std::fs::metadata(partial).map(|m| m.len()).unwrap_or(0);
             let response = match self.get(blob_id, Some(offset)).await {
-                // Some servers reject a range starting at the exact end; restart cleanly.
-                Err(Failure::Permanent(_)) if offset > 0 => {
+                // A persisted partial may already end at EOF. Restart at most
+                // once, before any chunk has succeeded in this transfer.
+                Err(Failure::Permanent(_)) if first_request && offset > 0 => {
                     offset = 0;
                     std::fs::remove_file(partial).map_err(local)?;
                     self.get(blob_id, Some(0)).await?
                 }
                 other => other?,
             };
+            first_request = false;
             let resumed = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
             if offset > 0 && !resumed {
                 offset = 0; // Range ignored: the body is the whole blob.
@@ -631,6 +634,58 @@ mod tests {
             *seen.lock().unwrap(),
             vec![Some(5), Some(13), Some(21), Some(29)]
         );
+    }
+
+    #[tokio::test]
+    async fn mid_transfer_permanent_errors_fail_fast_and_fall_back() {
+        for code in ["403 Forbidden", "404 Not Found", "410 Gone", "416 Range Not Satisfiable"] {
+            let (bad, bad_seen) = server(move |_, offset| {
+                if offset == Some(0) {
+                    let mut response = b"HTTP/1.1 206 Partial Content\r\nContent-Length: 8\r\nContent-Range: bytes 0-7/36\r\nConnection: close\r\n\r\n".to_vec();
+                    response.extend_from_slice(&BLOB[..8]);
+                    response
+                } else {
+                    status(code)
+                }
+            }).await;
+            let (good, good_seen) = server(|_, offset| {
+                let start = offset.unwrap() as usize;
+                let end = (start + 8).min(BLOB.len());
+                let mut response = format!("HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {start}-{}/{}\r\nConnection: close\r\n\r\n", end-start, end-1, BLOB.len()).into_bytes();
+                response.extend_from_slice(&BLOB[start..end]);
+                response
+            }).await;
+            let mut client = client(bad.clone(), 1 << 20, 0);
+            client.range_chunk_bytes = 8;
+            let dest = dest(&format!("mid-transfer-{}", &code[..3]));
+            let error = tokio::time::timeout(Duration::from_secs(2), client.download("blob", &dest))
+                .await.expect("permanent error must fail before the mirror deadline").unwrap_err();
+            assert!(error.to_string().contains(&code[..3]), "{error:#}");
+            assert_eq!(*bad_seen.lock().unwrap(), vec![Some(0), Some(8)]);
+            bad_seen.lock().unwrap().clear();
+            std::fs::remove_file(partial_path(&dest)).unwrap();
+            client.aggregator_urls = vec![bad, good];
+            tokio::time::timeout(Duration::from_secs(2), crate::components::artifact(&client, None, "blob", &expected(), &dest))
+                .await.expect("fallback must not wait for the mirror deadline").unwrap();
+            assert_eq!(*bad_seen.lock().unwrap(), vec![Some(0), Some(8)]);
+            assert_eq!(*good_seen.lock().unwrap(), vec![Some(0), Some(8), Some(16), Some(24), Some(32)]);
+            assert_eq!(std::fs::read(&dest).unwrap(), BLOB);
+        }
+    }
+
+    #[tokio::test]
+    async fn completed_persisted_partial_can_restart_once() {
+        let (url, seen) = server(|_, offset| {
+            if offset == Some(BLOB.len() as u64) {
+                status("416 Range Not Satisfiable")
+            } else {
+                ok(BLOB)
+            }
+        }).await;
+        let dest = dest("persisted-eof");
+        std::fs::write(partial_path(&dest), BLOB).unwrap();
+        assert_eq!(client(url, 1 << 20, 0).download("blob", &dest).await.unwrap(), expected());
+        assert_eq!(*seen.lock().unwrap(), vec![Some(BLOB.len() as u64), Some(0)]);
     }
 
     #[tokio::test]
