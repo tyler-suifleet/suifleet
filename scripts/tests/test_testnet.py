@@ -468,17 +468,20 @@ class BytecodeFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
             ledger=SimpleNamespace(evidence=[])
-            def interrupted():raise RuntimeError('transport outcome unknown')
+            def interrupted(persist):
+                persist({'digest':'retained','tx_bytes':'AAAA'})  # Durable before signing.
+                raise RuntimeError('transport outcome unknown')
             with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish base',interrupted,ledger)
-            self.assertEqual(json.loads(path.read_text())['publications']['pair']['pending_operation'],'publish base')
+            marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+            self.assertEqual((marker['label'],marker['tx']),('publish base',{'digest':'retained','tx_bytes':'AAAA'}))
             refused=Mock()
             with self.assertRaises(RuntimeError):live.checkpoint_setup(path,state,p,'publish again',refused,ledger)
             refused.assert_not_called()
             p.clear()
-            def not_sent():raise live.toolchain.NotSubmitted('refused before sign')
+            def not_sent(persist):raise live.toolchain.NotSubmitted('refused before sign')
             with self.assertRaises(live.toolchain.NotSubmitted):live.checkpoint_setup(path,state,p,'publish base',not_sent,ledger)
             self.assertNotIn('pending_operation',json.loads(path.read_text())['publications']['pair'])
-            self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda:{'id':'known'},ledger),{'id':'known'})
+            self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda persist:{'id':'known'},ledger),{'id':'known'})
             self.assertNotIn('pending_operation',p)
             self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
     def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):

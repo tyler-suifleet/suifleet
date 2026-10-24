@@ -163,6 +163,37 @@ def checks_blocker(pr):
     return None
 
 
+TESTNET_CONTEXT = 'testnet/package-upgrade'
+# Classes the trusted testnet controller reports that no source change can fix:
+# they stay visible (observed, dashboard, responsibility) but launch no repair.
+TRANSIENT_CI = ('infrastructure', 'funding', 'uncertain')
+RUN_URL = re.compile(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+')
+TESTNET_DESCRIPTION = re.compile(r'base:([0-9a-f]{40})(?: class:([a-z]{1,20}))?')
+
+
+def testnet_failure(pr):
+    """The exact-head automatic testnet failure for the current base, or None.
+
+    Commit statuses are per head and the combined status keeps only the newest
+    per context, so a queued/running rerun (pending), a cancelled run (error),
+    a stale base or a status without a durable Actions run never qualifies."""
+    status = pr.get('_testnet_status') or {}
+    if status.get('state') != 'failure':
+        return None
+    match = TESTNET_DESCRIPTION.fullmatch(status.get('description') or '')
+    url = status.get('target_url') or ''
+    if not match or match.group(1) != pr.get('baseRefOid') or not RUN_URL.fullmatch(url):
+        return None
+    return {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
+            'detailsUrl': url, 'startedAt': status.get('created_at'), 'completedAt': status.get('updated_at'),
+            'classification': match.group(2) or 'source'}
+
+
+def repairable(failures):
+    """Failures a source repair could address; transient testnet classes excluded."""
+    return [row for row in failures if row.get('classification') not in TRANSIENT_CI]
+
+
 def failed_checks(pr):
     """Only actionable completed runs with a durable evidence link can start repair.
 
@@ -197,6 +228,9 @@ def failed_checks(pr):
                 and check.get('detailsUrl')):
             failures.append({key: check.get(key) for key in
                              ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+    testnet = testnet_failure(pr)
+    if testnet:
+        failures.append(testnet)
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
@@ -212,6 +246,9 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     """Name who actually repairs current-head failures, independent of readiness."""
     if not failures:
         return None
+    if not repairable(failures):
+        return ('transient testnet ' + '/'.join(sorted({row['classification'] for row in failures}))
+                + ' failure: no source repair launched; a rerun reconciles or operator funding/infrastructure action is needed')
     if pr.get('isCrossRepository') or pr.get('state') != 'OPEN':
         return 'no automatic repair: not an open same-repository PR'
     if not owner:
@@ -1213,7 +1250,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute('DELETE FROM ci_repair_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
-                repair = {**pr, '_ci_repair': failures} if failures else None
+                # Every failure stays in the repair snapshot, but only a source-repairable one launches it.
+                repair = {**pr, '_ci_repair': failures} if repairable(failures) else None
                 repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
                 responsibility = ci_responsibility(pr, owner, failures, repair_blocker)
                 if execute:
