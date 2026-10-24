@@ -23,7 +23,7 @@ export default function RolloutsPage() {
   const [error, setError] = useState(""); const [preparing, setPreparing] = useState(false);
   const { mutateAsync, isPending } = useFleetTransaction();
   const { data: rollout, refetch, error: readError } = useQuery({ queryKey: ["rollout", account?.address, selected],
-    queryFn: () => readRollout(client, selected), enabled: !!selected, refetchInterval: 10000 });
+    queryFn: () => readRollout(client, selected), enabled: !!selected, refetchInterval: 60_000 });
   const pending = isPending || preparing;
   async function submit(build: () => Transaction | Promise<Transaction>) {
     setError(""); setPreparing(true);
@@ -71,7 +71,7 @@ const STAGE = { done: "Done", current: "Current", pending: "Pending" } as const;
 function RolloutOverview({ deployments, select }: { deployments: DeploymentEvent[]; select: (id: string) => void }) {
   const client = useCurrentClient();
   const ids = deployments.map(d => d.deploymentId);
-  const { data, error } = useQuery({ queryKey: ["rollout-overview", ...ids], enabled: ids.length > 0, refetchInterval: 15000,
+  const { data, error } = useQuery({ queryKey: ["rollout-overview", ...ids], enabled: ids.length > 0, refetchInterval: 60_000,
     queryFn: () => Promise.all(ids.map(async id => { try { return progressOf(await readRollout(client, id)); }
       catch (e) { return `Rollout record unavailable: ${e instanceof Error ? e.message : String(e)}`; } })) });
   if (!ids.length) return <p>No staged rollouts created by this account.</p>;

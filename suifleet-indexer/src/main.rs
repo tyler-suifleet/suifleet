@@ -2,7 +2,7 @@
 //!
 //!   suifleet-indexer serve --manifest deployment.json --db fleet.db
 //!                          [--listen 127.0.0.1:8650] (--tokens FILE | --public-read)
-//!                          [--interval-seconds 2] [--reconcile-batch 500] [--reset]
+//!                          [--interval-seconds 60] [--reconcile-batch 500] [--reconcile-interval-seconds 600] [--reset]
 //!                          [--telemetry-db telemetry.db [--telemetry-retain 1000]]
 //!                          [--cors-origin https://dapp.example]
 //!   suifleet-indexer index --manifest deployment.json --db fleet.db [--reconcile-batch 500]
@@ -87,6 +87,11 @@ async fn main() -> anyhow::Result<()> {
     let db = store::open(&db_path)?;
     let mut indexer =
         indexer::Indexer::open(&manifest, db, flags.iter().any(|f| f == "--reset")).await?;
+    if let Some(seconds) = values.get("--reconcile-interval-seconds") {
+        let seconds: u64 = seconds.parse()?;
+        anyhow::ensure!(seconds > 0, "--reconcile-interval-seconds must be positive");
+        indexer.reconcile_interval = std::time::Duration::from_secs(seconds);
+    }
     if let Some(batch) = values.get("--reconcile-batch") {
         indexer.reconcile_batch = batch.parse()?;
         anyhow::ensure!(indexer.reconcile_batch > 0, "--reconcile-batch must be positive");
@@ -164,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
                     .get("--interval-seconds")
                     .map(|s| s.parse())
                     .transpose()?
-                    .unwrap_or(2),
+                    .unwrap_or(60),
             );
             // Catch up (and re-read every device) before serving, so the API
             // never answers from an empty or pre-restart index.

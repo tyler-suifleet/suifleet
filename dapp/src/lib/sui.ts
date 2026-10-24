@@ -1,3 +1,5 @@
+import { batchFields } from './batch-fields';
+import { incrementalEvents as allEvents } from "./event-history";
 import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
 import { calls } from "./fleet-protocol";
 import { SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS } from "./protocol-version";
@@ -284,6 +286,7 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
 
 export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise<DeviceGroup[]> {
   await verifyDeployment(client);
+  // Creation sender is not the current admin after recipient-confirmed handover.
   const events = await allEvents(client, moveType("device_group::GroupCreated"));
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
     .map((event) => event.group_id);
@@ -299,19 +302,7 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
     : group));
 }
 
-export async function allEvents(client: SuiGrpcClient, type: string) {
-  let page = await client.listEvents({ filter: { eventType: type }, order: "descending", limit: 50 });
-  const events = [...page.events];
-  // A scan-limited gRPC page may be empty and still have more history.
-  while (page.hasNextPage) {
-    if (!page.endCursor) throw new Error("Event pagination returned no cursor");
-    const before = page.endCursor;
-    page = await client.listEvents({ filter: { eventType: type }, before, limit: 50 });
-    if (page.hasNextPage && page.endCursor === before) throw new Error("Event pagination made no progress");
-    events.push(...page.events);
-  }
-  return events;
-}
+export { incrementalEvents as allEvents } from "./event-history";
 
 export async function objectsInBatches(client: SuiGrpcClient, ids: string[]) {
   const objects = [];
@@ -340,6 +331,7 @@ function supportedTargetGroup(group: { type: string; content: Uint8Array }) {
 
 export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: string): Promise<DeploymentEvent[]> {
   await verifyDeployment(client);
+  // Delegated creation and handover can make creator differ from event sender.
   const events = (await allEvents(client, DEPLOYMENT_CREATED_EVENT)).map((event) => DeploymentCreatedBcs.parse(event.bcs));
   const objects = await objectsInBatches(client, [...new Set(events.map((event) => event.deployment_id))]);
   const live = new Map(objects.map((object) => [object.objectId, DeploymentBcs.parse(object.content)]));
@@ -347,12 +339,24 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
     const record = live.get(event.deployment_id);
     return record && (!owner || record.creator === owner);
   });
-  const groups = await objectsInBatches(client, [...new Set(liveEvents.flatMap((event) => event.target_groups))]);
+  // Persisted events discover IDs only. Targets must be re-read from objects:
+  // browser storage is neither a current target list nor an authority source.
+  const targetValues = await batchFields(client, liveEvents.flatMap(event =>
+    (["TargetGroupsKey", "TargetDevicesKey"] as const).map(name => ({ parent: event.deployment_id,
+      keyType: moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
+      valueType: "vector<0x2::object::ID>" }))));
+  const currentEvents = liveEvents.map((event, index) => {
+    const groups = targetValues[index * 2], devices = targetValues[index * 2 + 1];
+    if (!groups) throw Error("Missing deployment target groups");
+    return { ...event, target_groups: bcs.vector(bcs.Address).parse(groups),
+      target_devices: devices ? bcs.vector(bcs.Address).parse(devices) : [] };
+  });
+  const groups = await objectsInBatches(client, [...new Set(currentEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
   // Indexed members (SF-125) are dynamic fields, not `device_ids`.
   const indexed = new Map(inboxSupported() ? await Promise.all([...groupsById].filter(([, group]) => group)
     .map(async ([id]) => [id, await indexedMembers(client, id)] as const)) : []);
-  return Promise.all(liveEvents.map(async (event) => {
+  return Promise.all(currentEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
     if (!SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS.some(v => BigInt(v) === BigInt(record.schema_version))) throw new Error("Unsupported DeploymentRecord schema");
     const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {

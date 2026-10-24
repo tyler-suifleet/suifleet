@@ -11,6 +11,15 @@ const custodiedBytes = schema.DeviceBcs.serialize({ id: custodied, name: "Pi 2",
 const groupBytes = schema.GroupBcs.serialize({ id: group, name: "Lab", description: "Test fleet", admin: owner, device_ids: [device], created_at: 123, schema_version: 1 }).toBytes();
 const event = { deployment_id: deployment, component_name: "app", version: "1", recipe_blob_id: "recipe", artifact_sha256: "a".repeat(64), target_groups: [group], target_devices: [device], creator: owner };
 const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1", recipe_blob_id: "recipe", artifact_sha256: "a".repeat(64), created_at: 456, schema_version: 1 }).toBytes();
+const targetFields = new Map();
+{
+  const {bcs,TypeTagSerializer}=appRequire('@mysten/sui/bcs'), {deriveDynamicFieldID}=appRequire('@mysten/sui/utils');
+  for (const [name,value] of [['TargetGroupsKey',[group]],['TargetDevicesKey',[device]]]) {
+    const keyType=`${m.type_origins[`deployment_manager::${name}`]}::deployment_manager::${name}`;
+    const objectId=deriveDynamicFieldID(deployment,TypeTagSerializer.parseFromStr(keyType),bcs.bool().serialize(false).toBytes());
+    targetFields.set(objectId,{objectId,type:`0x2::dynamic_field::Field<${keyType},vector<0x2::object::ID>>`,content:bcs.struct('Field',{id:bcs.Address,name:bcs.bool(),value:bcs.vector(bcs.Address)}).serialize({id:objectId,name:false,value}).toBytes()});
+  }
+}
 (async () => {
   const c = manifestClient(m), ownedCursors = [], eventCursors = [];
   c.listOwnedObjects = async (args) => {
@@ -27,15 +36,17 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.deepEqual(devices.map((d) => [d.objectId, d.ownerCapId, d.registeredAt]), [[custodied, ownerCap, 124], [device, undefined, 123]]);
   assert.deepEqual(ownedCursors, [undefined, "owned-next"]);
   c.listEvents = async (args) => {
+    assert.equal(args.filter.sender, undefined, "mutable admin/creator discovery must include other senders");
     eventCursors.push(args.before);
     if (!args.before) return { events: [], hasNextPage: true, endCursor: "scanned-next" };
     const bytes = args.filter.eventType.endsWith("GroupCreated") ? schema.GroupCreatedBcs.serialize({ group_id: group, name: "Lab", admin: owner }).toBytes() : schema.DeploymentCreatedBcs.serialize(event).toBytes();
     return { events: [{ bcs: bytes, json: null }], hasNextPage: false };
   };
-  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
+  c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((objectId) => targetFields.get(objectId) ?? ({ objectId, type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : deploymentBytes })) });
   assert.deepEqual((await sui.fetchGroups(c, owner))[0].deviceIds, [device]);
   assert.deepEqual(eventCursors, [undefined, "scanned-next"]);
   c.getDynamicField = async ({name}) => {
+    if (name.type.endsWith("::TargetGroupsKey") || name.type.endsWith("::TargetDevicesKey")) return {dynamicField:{value:{type:"vector<0x2::object::ID>", bcs:appRequire("@mysten/sui/bcs").bcs.vector(appRequire("@mysten/sui/bcs").bcs.Address).serialize(name.type.endsWith("::TargetGroupsKey") ? [group] : [device]).toBytes()}}};
     if (name.type.endsWith("::ControlKey")) throw new ObjectError("missing", "missing", {reason:"notFound"});
     return ({ dynamicField: { value: { type: `${m.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs: schema.ReceiptsBcs.serialize({ version: 2, statuses: { contents: [{ key: device, value: 1 }] } }).toBytes() } } });
   };
@@ -43,12 +54,22 @@ const deploymentBytes = schema.DeploymentBcs.serialize({ id: deployment, creator
   assert.equal(deployments[0].timestampMs, 456); assert.equal(deployments[0].receiptsVerified, true);
   assert.deepEqual(deployments[0].resolvedDeviceIds, [device]);
   assert.deepEqual(deployments[0].statuses, { [device]: 1 });
+  // A handed-over group/deployment is still discovered from its original
+  // creation event, even though its current admin/creator is another owner.
+  const readObjects = c.getObjects, recipient = id("0xb");
+  c.getObjects = async ({objectIds}) => ({objects:objectIds.map(objectId=>targetFields.get(objectId) ?? ({objectId,
+    type:`${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content:objectId===group
+      ? schema.GroupBcs.serialize({...schema.GroupBcs.parse(groupBytes),admin:recipient}).toBytes()
+      : schema.DeploymentBcs.serialize({...schema.DeploymentBcs.parse(deploymentBytes),creator:recipient}).toBytes()}))});
+  assert.equal((await sui.fetchGroups(c,recipient))[0].admin,recipient);
+  assert.equal((await sui.fetchDeploymentEvents(c,recipient))[0].creator,recipient);
+  c.getObjects = readObjects;
   // Empty recipe bytes are valid in legacy records; only the authenticated schema
   // selects catalog cleanup. Exercise both queries and actual generated Move calls.
   for (const schemaVersion of ["1", "2", "3"]) {
     const emptyBlob = schema.DeploymentBcs.serialize({ id: deployment, creator: owner, component_name: "app", version: "1",
       recipe_blob_id: "", artifact_sha256: "", created_at: 456, schema_version: schemaVersion }).toBytes();
-    c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => ({ objectId,
+    c.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(objectId => targetFields.get(objectId) ?? ({ objectId,
       type: `${m.type_origins["device_group::DeviceGroup"]}::device_group::DeviceGroup`, content: objectId === group ? groupBytes : emptyBlob })) });
     const [record] = await sui.fetchDeploymentEvents(c, owner);
     assert.equal(record.schemaVersion, schemaVersion);

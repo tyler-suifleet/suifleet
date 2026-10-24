@@ -8,6 +8,8 @@ import { usePathname } from "next/navigation";
 import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import Link from "next/link";
+import { useSyncExternalStore } from "react";
+import { historySnapshot, subscribeHistory } from "@/lib/event-history";
 
 // dApp Kit UI registers custom elements and must only load in the browser.
 const ConnectButton = dynamic(() => import("@mysten/dapp-kit-react/ui").then((ui) => ui.ConnectButton), { ssr: false });
@@ -63,6 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="flex flex-1 overflow-hidden">
                 <Sidebar />
                 <main className="flex-1 min-w-0 overflow-auto p-4 md:p-8">
+                  <HistoryNotice />
                   {children}
                 </main>
               </div>
@@ -127,4 +130,9 @@ function Sidebar() {
       </div>
     </aside>
   );
+}
+
+function HistoryNotice() {
+  const message = useSyncExternalStore(subscribeHistory, historySnapshot, () => "");
+  return message ? <p role="alert" className="mb-4 rounded border border-amber-400 bg-amber-50 p-3 text-sm">{message}</p> : null;
 }

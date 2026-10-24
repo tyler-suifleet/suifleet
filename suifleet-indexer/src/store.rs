@@ -618,11 +618,12 @@ pub fn list_deployments(
            AND (?4 IS NULL OR component_name = ?4)
            AND (?5 IS NULL OR EXISTS (SELECT 1 FROM deployment_targets t
                  WHERE t.deployment_id = d.id AND t.kind = 'group' AND t.target_id = ?5))
-           AND (?6 IS NULL OR EXISTS (SELECT 1 FROM deployment_targets t
+           AND (?6 IS NULL OR (EXISTS (SELECT 1 FROM devices device WHERE device.id = ?6 AND device.owner = d.creator)
+               AND (EXISTS (SELECT 1 FROM deployment_targets t
                  WHERE t.deployment_id = d.id AND t.kind = 'device' AND t.target_id = ?6)
                OR EXISTS (SELECT 1 FROM deployment_targets t JOIN group_members m ON m.group_id = t.target_id
                  JOIN groups g ON g.id = t.target_id
-                 WHERE t.deployment_id = d.id AND t.kind = 'group' AND m.device_id = ?6 AND g.admin = d.creator))
+                 WHERE t.deployment_id = d.id AND t.kind = 'group' AND m.device_id = ?6 AND g.admin = d.creator))))
            AND (?7 OR deleted = 0)
          ORDER BY id LIMIT ?2",
         after.unwrap_or(""), limit(size),
@@ -877,6 +878,9 @@ mod tests {
             devices: vec![id(2)],
             ..mine.clone()
         };
+        for n in 1..=3 {
+            put_device(&tx, &device(n, 100), None).unwrap();
+        }
         put_group(&tx, &mine, None).unwrap();
         put_group(&tx, &foreign, None).unwrap();
         let deployment = Deployment {

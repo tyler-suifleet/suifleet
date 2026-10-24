@@ -12,7 +12,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await build({ entryPoints: [entry], outfile: path.join(directory, 'app.js'), bundle: true, platform: 'browser', jsx: 'automatic',
       alias: { '@': path.resolve(__dirname, '../dapp/src') }, nodePaths: [path.resolve(__dirname, '../dapp/node_modules')],
       plugins: [{ name: 'acceptance-hooks', setup(builder) {
-        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies))$/ }, () => ({ path: entry }));
+        builder.onResolve({ filter: /(^@mysten\/dapp-kit-react$|(?:^|\/)(useFleetTransaction|useDevices|useGroups|useAccessPolicies)$)/ }, () => ({ path: entry }));
       } }],
       define: { 'process.env': '{}', 'process.env.NODE_ENV': '"development"', 'process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST': JSON.stringify(fixture), 'process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS': 'undefined', 'process.env.NEXT_PUBLIC_SEAL_THRESHOLD': 'undefined', 'process.env.NEXT_PUBLIC_WALRUS_EPOCHS': '"5"', 'process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST': 'undefined' }, logLevel: 'warning' });
     server = http.createServer(async (request, response) => {

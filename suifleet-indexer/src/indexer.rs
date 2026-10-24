@@ -84,6 +84,8 @@ pub struct Indexer {
     registry: String,
     /// Devices the reconciliation sweep re-reads per pass.
     pub reconcile_batch: usize,
+    last_reconcile: std::time::Instant,
+    pub reconcile_interval: std::time::Duration,
 }
 
 /// Receipts authority version of the contracts this indexer targets (as the
@@ -91,8 +93,9 @@ pub struct Indexer {
 /// packages that accept reports from revoked or rotated-out keys.
 pub const RECEIPTS_AUTHORITY_VERSION: u64 = 2;
 
-/// Default devices re-read per pass (at a 2 s interval, ~15k devices/minute).
+/// Bounded device batch, independently scheduled every ten minutes.
 pub const RECONCILE_BATCH: usize = 500;
+pub const RECONCILE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
 /// Meta keys: the sweep's position (last device ID read; "" = start) and when
 /// it last completed a full pass over every indexed device.
 const SWEEP_AFTER: &str = "reconcile_devices_after";
@@ -126,6 +129,8 @@ impl Indexer {
             types,
             registry,
             reconcile_batch: RECONCILE_BATCH,
+            last_reconcile: std::time::Instant::now(),
+            reconcile_interval: RECONCILE_INTERVAL,
         })
     }
 
@@ -136,14 +141,24 @@ impl Indexer {
             .ok_or_else(|| anyhow::anyhow!("package has no type {name}"))
     }
 
-    /// Catch every stream up to the chain tip once, then advance the device
-    /// sweep by one batch. Returns rows changed.
+    /// Catch every stream up to the chain tip once; reconcile devices only
+    /// when their independent ten-minute timer is due. Returns rows changed.
     pub async fn sync(&mut self) -> anyhow::Result<usize> {
         let mut changed = 0;
         for (event, field, kind) in STREAMS {
             changed += self.sync_stream(event, field, *kind).await?;
         }
-        Ok(changed + self.reconcile_devices(self.reconcile_batch).await?.0)
+        if self.last_reconcile.elapsed() >= self.reconcile_interval {
+            loop {
+                let (more, wrapped) = self.reconcile_devices(self.reconcile_batch).await?;
+                changed += more;
+                if wrapped {
+                    break;
+                }
+            }
+            self.last_reconcile = std::time::Instant::now();
+        }
+        Ok(changed)
     }
 
     /// Catch up, then re-read every indexed device from the start: after a
@@ -158,6 +173,7 @@ impl Indexer {
             let (more, wrapped) = self.reconcile_devices(self.reconcile_batch).await?;
             changed += more;
             if wrapped {
+                self.last_reconcile = std::time::Instant::now();
                 return Ok(changed);
             }
         }

@@ -207,7 +207,7 @@ def run(rpc_url, faucet_url):
 
         def serve(*extra):
             process = subprocess.Popen([str(INDEXER), "serve", *common, "--tokens", str(root / "tokens"),
-                                        "--interval-seconds", "1", "--telemetry-db", str(root / "telemetry.db"), *extra],
+                                        "--interval-seconds", "1", "--reconcile-interval-seconds", "1", "--telemetry-db", str(root / "telemetry.db"), *extra],
                                        stdout=log, stderr=log)
             wait_for(lambda: process.poll() is None and http("GET", "/v1/status", read_token)[0] == 200, "API did not start")
             return process

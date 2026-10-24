@@ -79,7 +79,7 @@ export default function FleetDataPage() {
       if(current===generation.current){setEntries(anchors.map((anchor,i)=>({index:start+i,anchor})).reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
-  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),30_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
   function note(index:number,kind:number,authority:'owner'|'support'|undefined,outcome:'opened'|'refused') {
     if(!account || !authority)return;
     setAccess(log=>recordAccess(log,{atMs:Date.now(),account:account.address,authority,device,index,kind:(['logs','diagnostics','crash'] as const)[kind] ?? 'logs',outcome}));
