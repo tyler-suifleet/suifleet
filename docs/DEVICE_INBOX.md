@@ -114,8 +114,10 @@ upgrade: records created while the device was offline still apply. The daemon
 first scans events to the tip and starts heads at the chain time taken before
 the scan (or the scanned checkpoint's time, if earlier). If that history is
 pruned, it starts heads at the time of the checkpoint before the cursor's
-(`GetCheckpoint`; a JSON-RPC-era cursor is located through its transaction).
-When neither is available the poll fails with an explicit error instead of
+(`GetCheckpoint`; a JSON-RPC-era cursor is located through its transaction),
+and moves the cursor to the tip in the same journal write that stores the
+heads. A journal therefore never holds the moved cursor without the baseline
+taken from the old one, so an interruption cannot shift that baseline. When neither is available the poll fails with an explicit error instead of
 skipping or replaying records.
 
 If the node has pruned the history at the device's cursor (or rejects the
@@ -147,7 +149,8 @@ entries this feature adds; until SF-122 merges they are direct reads.
   and indexed-group deployments without events, a group joined while the
   daemon was stopped, an on-time scheduled start
   with a 60 s poll, resync after pruned history, a journal without heads
-  resuming from its event boundary (history pruned and retained), the event
+  resuming from its event boundary (history pruned, also killed after the
+  migration, and retained), the event
   safety net.
 - dApp: `scripts/test_inbox.cjs` (in `make check-interfaces`).
 - Indexer: `txbuild` unit test of announced call shapes.
