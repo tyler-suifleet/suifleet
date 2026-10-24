@@ -817,3 +817,22 @@ heartbeats**. A coordinator can scan without changing job records. Historical
 retry notices for verified merged PRs are hidden without editing the review DB.
 The dashboard-only installer replaces only the CLI and its launchers, leaving
 running workers, services and their configuration untouched.
+
+### Testnet failures retain repair ownership
+
+Automatic testnet reports `testnet/package-upgrade` as a commit status, separately
+from ordinary CI check runs. The coordinator recognizes a failed status only for
+the exact PR head and current base, with a durable GitHub Actions run URL. It
+reserves an owner repair through the same deduplication, backoff and three-attempt
+failure-episode limit as other CI failures. Infrastructure, funding and uncertain
+transaction classifications retain that owner; they are not silently excluded
+from dispatch. Repairs must diagnose the linked run, preserve uncertainty and
+spending limits, and coordinate shared harness fixes rather than blindly replaying
+transactions or increasing retry counts indefinitely.
+
+Pending, cancelled, malformed, unlinked and stale-base statuses do not start a
+repair. They still cannot satisfy the merge gate. The dispatcher re-reads the
+exact-head testnet status before redirecting an existing implementation. Successful
+checks invalidate an earlier source-only review and request a final evidence
+review; failure never becomes approval. A repair-limit or ownership blocker stays
+visible with its responsible owner and requires a concrete recovery decision.
