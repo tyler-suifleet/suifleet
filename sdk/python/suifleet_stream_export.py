@@ -311,6 +311,7 @@ class Exporter:
         request = urllib.request.Request(self.config['endpoint'], data=body, headers=headers, method='POST')
         # Never forward credentials to a redirect or an inherited proxy.
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_default_certs()
         # SSLContext construction avoids create_default_context's inherited
         # SSLKEYLOGFILE behavior in a credential-bearing service.
