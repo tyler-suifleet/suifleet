@@ -157,6 +157,11 @@ export async function readAnchorAt(client: SuiGrpcClient, config: FleetDataConfi
   if (!Number.isSafeInteger(index) || index < 0) throw Error('Invalid archive index');
   const writer = await readDeviceData(client, config, deviceId);
   if (!writer || BigInt(index) >= BigInt(writer.anchor_count)) return undefined;
+  const compact = await readCompactHead(client, config, writer.id);
+  if (compact && BigInt(compact.index) === BigInt(index)) {
+    if (BigInt(compact.anchor.seq) > BigInt(writer.batch_seq)) throw Error('Compact archive root sequence mismatch');
+    return { ...compact.anchor, index };
+  }
   const anchor = await readAnchorField(client, config, writer.id, BigInt(index));
   if (anchor && BigInt(anchor.seq) > BigInt(writer.batch_seq)) throw Error('Archive index sequence mismatch');
   return anchor;

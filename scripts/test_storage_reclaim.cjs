@@ -13,7 +13,7 @@ const load = loader();
 const reclaim = load('lib/storage-reclaim.ts'), bulk = load('lib/fleet-bulk.ts'), data = load('lib/fleet-data.ts');
 const protocol = load('lib/fleet-protocol.ts'), retention = load('lib/retention.ts');
 
-const origin = id('0x81'), storageOrigin = id('0x5a'), system = id('0x5e');
+const origin = id('0x81'), compactOrigin = id('0x83'), storageOrigin = id('0x5a'), system = id('0x5e');
 const config = { schema: 1, chainIdentifier: '4c78adac', registryId: id(manifest.shared_objects.registry.id), packageId: id('0x82'),
   typeOrigin: origin, fleetId: id('0xf1'), budgetId: id('0xb1'), storageId: id('0x51') };
 const device = id('0xd1'), writerId = id('0xe1'), other = id('0xd2');
@@ -23,7 +23,7 @@ const anchor = (seq, blob, end) => ({ seq: String(seq), kind: 0, blob_object_id:
 const record = (end, owner = device) => ({ device_id: owner, blob_id: '1', size: '10', encoded_size: '100', end_epoch: end, uploaded_at_ms: '1' });
 
 /** A fleet with one writer. `anchors` maps index → anchor; absent indices are pruned. */
-function world({ anchors, records, count = 6 }) {
+function world({ anchors, records, count = 6, compact }) {
   const fleet = { id: config.fleetId, version: '1', budget_id: config.budgetId, storage_id: config.storageId, registry_id: config.registryId,
     chain_identifier: config.chainIdentifier, key_epoch: '0', support: [], health_interval_ms: '86400000', batch_interval_ms: '86400000', emergency_interval_ms: '300000', device_count: '1' };
   const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: device, account_id: id('0xa1'), health_seq: '0', health_at_ms: '0',
@@ -36,10 +36,16 @@ function world({ anchors, records, count = 6 }) {
     { order: (Number(index) * 7919) % 1009, name: { type: `${origin}::fleet_data::AnchorKey`, bcs: bcs.u64().serialize(index).toBytes() },
       valueType: `${origin}::fleet_data::Anchor`, value: { bcs: data.AnchorBcs.serialize(a).toBytes() } },
     { order: (Number(index) * 7919 + 500) % 1009, name: { type: '0x2::object::ID', bcs: bcs.Address.serialize(a.blob_object_id).toBytes() }, valueType: 'bool', value: { bcs: bcs.bool().serialize(true).toBytes() } });
+  // SF-121 compact history: one CompactHeadKey field, no per-index anchors.
+  if (compact) fields.push({ order: 1, name: { type: `${compactOrigin}::fleet_data::CompactHeadKey`, bcs: new Uint8Array([0]) },
+    valueType: `${compactOrigin}::fleet_data::CompactHead`, value: { bcs: bulk.CompactHeadBcs.serialize(compact).toBytes() } });
   fields.sort((x, y) => (x.order ?? -1) - (y.order ?? -1));
   return { reads, lists,
     ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(config.chainIdentifier + '00'.repeat(28), 'hex')) } }; } },
     async getObject({ objectId }) {
+      if (objectId === config.packageId) return { object: { objectBcs: bcs.Object.serialize({ data: { Package: { id: config.packageId, version: '2', moduleMap: new Map(),
+        typeOriginTable: ['CompactHeadKey', 'CompactHead'].map((datatypeName) => ({ moduleName: 'fleet_data', datatypeName, package: compactOrigin })), linkageTable: new Map() } },
+        owner: { Immutable: true }, previousTransaction: '11111111111111111111111111111111', storageRebate: '0' }).toBytes() } };
       const isFleet = objectId === config.fleetId;
       return { object: { owner: { $kind: 'Shared' }, type: `${origin}::fleet_data::${isFleet ? 'FleetData' : 'DeviceData'}`,
         content: (isFleet ? data.FleetDataBcs : data.DeviceDataBcs).serialize(isFleet ? fleet : writer).toBytes() } };
@@ -48,6 +54,10 @@ function world({ anchors, records, count = 6 }) {
       if (parentId === config.fleetId) {
         if (id(bcs.Address.parse(name.bcs)) !== device) throw missing();
         return { dynamicField: { value: { type: '0x2::object::ID', bcs: bcs.Address.serialize(writerId).toBytes() } } };
+      }
+      if (parentId === writerId && name.type === `${compactOrigin}::fleet_data::CompactHeadKey`) {
+        if (!compact) throw missing();
+        return { dynamicField: { value: { type: `${compactOrigin}::fleet_data::CompactHead`, bcs: bulk.CompactHeadBcs.serialize(compact).toBytes() } } };
       }
       if (parentId === writerId) {
         const index = Number(bcs.u64().parse(name.bcs)); reads.push(index);
@@ -100,6 +110,23 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   // Sequence order still binds the remaining history.
   chain = world({ anchors: { 0: anchor(5, b(1), 1), 2: anchor(4, b(2), 1) }, records: {} });
   await assert.rejects(bulk.readAnchorEntries(chain, config, device, 0, 8), /sequence mismatch/);
+  // SF-121 compact history after a pruned legacy prefix: indices 3..5 hold one
+  // CompactHead at 5; pruned 0 and compact-covered 3..4 have no anchor fields.
+  const compactConfig = { ...config, compactHistoryOrigin: compactOrigin };
+  const head = { first_index: '3', index: '5', anchor: anchor(9, b(8), 4), previous_hash: Array(32).fill(1) };
+  chain = world({ anchors: { 1: anchor(2, b(1), 5), 2: anchor(3, b(2), 5) }, records: { [b(8)]: record(4) }, compact: head });
+  const compactPage = await bulk.readAnchorEntries(chain, compactConfig, device, 0, 64);
+  assert.deepEqual(compactPage.entries.map((e) => [e.index, e.anchor.seq, e.anchor.index]), [[1, '2', 1], [2, '3', 2], [5, '9', 5]]);
+  assert.equal(compactPage.next, 6);
+  assert.equal((await bulk.readAnchorAt(chain, compactConfig, device, 5)).seq, '9', 'compact head index resolves exactly');
+  assert.equal(await bulk.readAnchorAt(chain, compactConfig, device, 4), undefined);
+  assert.equal(await bulk.readAnchorAt(chain, compactConfig, device, 0), undefined);
+  // The planner skips the CompactHead field; its expired held blob is only burned loose.
+  const compactPlan = await reclaim.planArchiveReclaim(chain, compactConfig, storageOrigin, [device], 10);
+  assert.deepEqual(compactPlan.anchors.map((c) => c.index), [1, 2]);
+  assert.deepEqual(compactPlan.loose, [b(8)]);
+  chain = world({ anchors: {}, records: {}, compact: { ...head, anchor: anchor(100, b(8), 4) } });
+  await assert.rejects(bulk.readAnchorEntries(chain, compactConfig, device, 0, 8), /Compact archive root sequence mismatch/);
 
   // Archive plan at Walrus epoch 10.
   const held = b(1), extended = b(2), released = b(3), releasedLate = b(4), loose = b(5), ownerBlob = b(6), fresh = b(7);
