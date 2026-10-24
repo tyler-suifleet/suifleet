@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sqlite3
@@ -833,6 +834,25 @@ class GitHubInventory(unittest.TestCase):
         self.assertIn('GitHub; observed 10s ago', alert['summary'])
         stale = dash.collect(self.f.paths, now=NOW+1000, proc=self.f.proc)
         self.assertEqual(next(a for a in stale['attention'] if a.get('ticket') == 'SF-001')['state'], 'ci-stale')
+
+    def test_check_refresh_batches_requests_and_newer_head_invalidates_old_evidence(self):
+        calls = []
+        def run(args, env, **kwargs):
+            query = json.loads(kwargs['input'])['query']; calls.append(query)
+            repository = {'testnet': None}
+            for number in re.findall(r'p([0-9]+):pullRequest', query):
+                repository.update(self.ci_response(int(number))['data']['repository'])
+            return json.dumps({'data': {'repository': repository}})
+        ci = dash.fetch_ci('owner/suifleet', [dict(number=n) for n in range(1, 52)], run, {})
+        self.assertEqual((len(ci), len(calls)), (51, 3))
+        self.ticket(1, 'review')
+        folder = self.f.job(2, status='done', checks=('PENDING',))
+        os.utime(folder/'snapshot.json', (NOW-5, NOW-5))
+        ci['2']['mtime'] = NOW-10
+        path = self.snapshot(prs=[dict(number=2, title='SF-001')]); raw=json.loads(path.read_text())
+        raw['ci']={'2': ci['2']}; path.write_text(json.dumps(raw))
+        alert=next(a for a in self.f.collect()['attention'] if a.get('ticket')=='SF-001')
+        self.assertEqual(alert['state'], 'ci-unknown')
 
     def test_unmatched_base_missing_checks_and_partial_responses_are_not_success(self):
         check = dict(context='testnet/package-upgrade', state='SUCCESS', description='base:'+'f'*40)
