@@ -31,7 +31,7 @@ export interface FleetAlert {
 
 export type AlertsResult = { status: "ok"; items: FleetAlert[]; serverNowMs: number } | { status: "unavailable"; reason: string };
 
-export const ALERTS_REFRESH_MS = 30_000;
+export const ALERTS_REFRESH_MS = 60_000;
 export const ALERTS_STALE_MS = 2 * ALERTS_REFRESH_MS;
 const MAX_ALERTS = 1000;
 
