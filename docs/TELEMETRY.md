@@ -1,5 +1,13 @@
 # Device heartbeat, inventory and health (SF-019)
 
+> Product policy (SF-137): SuiFleet hosts no application servers. Product health
+> and receipts come from Sui, encrypted logs/diagnostics from Walrus, and alerts
+> are derived in the browser. See [inventory/migration](SERVERLESS_PRODUCT.md)
+> and [setup](SERVERLESS_FLEET_DATA.md). HTTP configuration, API tokens, indexer
+> commands, webhooks and HTTP evidence below describe the optional
+> **customer-hosted reference integration**, not product requirements.
+> The product dApp uses no indexer URL or read token.
+
 This page describes the existing HTTP-indexer mode. The optional direct-chain browser reader and separate data package are an incomplete [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md); the daemon still uses this HTTP path. No complete serverless backend or external acceptance is claimed.
 
 Redacted remote logs, diagnostic bundles and alerts build on this path: see [LOGS.md](LOGS.md) (SF-020).
@@ -155,19 +163,12 @@ Only the newest report from the device's **current** signer counts. A report sig
 
 ## dApp
 
-Set `NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL` to the indexer's base URL and rebuild. Start the indexer with `--cors-origin` set to the dApp's origin. The operator enters a `read` token on the Devices page. It is kept for that browser tab only (`sessionStorage`), never in the build.
-
-**What the dApp checks.** The dApp does not take the indexer's word for health:
-- It reads each activated device's identity (signer and revocation) from the registry on chain.
-- It verifies the newest report's signature against that signer with Mysten's SDK. Only ed25519 and P-256 signature flags are allowed.
-- It checks that the report is bound to this manifest's chain and registry, and to the device.
-- It then applies the status rules itself.
-
-A report that fails any check is shown as **Unverified**. A compromised indexer can withhold or delay reports, or misstate when it received them, which decides online versus offline. It cannot invent a device's health.
-
-**Display.** The Devices page shows the status, the last report's age (by the indexer's clock) and the reasons. Expanding a device shows its installed components, versions, runtime phases, restarts and last exits, and the services summary of a verified schema-2 report. A services section that is not exactly version 1 or 2 within its bounds makes the report Unverified. The dashboard keeps three things apart: current device health (how many devices are healthy), active incidents (the indexer's alerts) and historical deployment failures (the count of Failed receipts in the on-chain deployment history). A failed deployment that the device later recovered (SF-098, [LOGS.md](LOGS.md#indexer)) is no longer an active incident, but it stays in the history.
-
-If no telemetry URL is configured, or the service is unreachable or refuses the token, health is shown as unavailable. Unactivated devices cannot sign telemetry. A device whose chain identity cannot be read, or whose report cannot be checked, is unavailable on its own. The dApp refreshes health every 15 s. If a refresh fails, or no refresh has succeeded for 30 s, every device is shown as unavailable instead of its earlier result, so an indexer or chain outage never freezes an earlier healthy status.
+Product views read signed on-chain FleetData summaries and verify current
+registry identity and exact device signatures, with chain-cadence freshness.
+Services and alerts use the same path. NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL does
+not select HTTP health; no read-token UI remains. Configure NEXT_PUBLIC_FLEET_DATA;
+see [setup](SERVERLESS_FLEET_DATA.md) and [views](DASHBOARD_VIEWS.md). Customer
+integration code may still explicitly read the optional reference HTTP API.
 
 ## Verification
 
@@ -177,7 +178,7 @@ If no telemetry URL is configured, or the service is unreachable or refuses the 
 | `make indexer-test` | Ingress verification, identity, binding, bounds, clock, replay and retention, the shared vectors (schema 1 and 2) and status cases, services section bounds and versions, unknown service fields refused, the service-health alert rules, store binding and reset, and the HTTP routes: no token on ingress, tokens on reads, batch limit, CORS, telemetry disabled |
 | `node scripts/test_telemetry.cjs` (in `make test-manifest`) | The dApp verifier on the shared vectors, with schema-2 services sections refused when they carry unknown (a topic, an export URL), missing or oversized fields and on tampered, foreign, multisig and P-256 reports; the binding checks; the shared status cases; identity reads; paginated fleet health with forged, revoked, unactivated and unreported devices; an unavailable service; a chain identity outage, a failed refresh and a stalled refresh after a healthy result, with the real TanStack Query cache |
 | `python3 scripts/test_telemetry.py` (in `make test-ota`) | The real daemon against the chain simulator and a stand-in ingress: bounded offline spooling with drops counted, the spool across a restart, `retry` resent in order, `rejected` dropped, a running supervised component reported healthy, a crash past the restart budget reported degraded, the daemon signing through the real signing service (development caller rule) while arbitrary and non-canonical messages are refused, one compact on-chain receipt, and every envelope verified by the dApp's verifier |
-| `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_health_browser.cjs` | The actual Devices page in a real browser, against a real CORS-enabled HTTP health service serving reports signed with Mysten's SDK. Without a token it shows health unavailable. With the token it shows Healthy, Degraded, Offline, Unverified (forged) and Unreported per device, verified against the chain identities, plus not activated, last seen, reasons and installed components. A forged report's inventory is hidden, and forgetting the token claims nothing again. The wallet and chain reads are fixtures |
+| `CHROME_EXECUTABLE=… node scripts/test_health_browser.cjs` | Direct-chain product acceptance (same suite as test_dashboard_browser.cjs): Devices health without a token, browser-derived dashboard/service alerts, forged report refusal, rollouts and archive role/search/session checks. Fullnode and wallet are fixtures; no HTTP indexer URL |
 | `make test-service-health` | The real daemon as root with real component UIDs, the chain simulator, a stand-in ingress, a minimal MQTT broker, an export destination and a shadow service, without network. A healthy baseline raises nothing. A subscriber's QoS 1 queue fills and a publication is refused; the broker stops; the export answers 503 while an overwrite stream retires unexported messages; the shadow service is down, then a key changed on both sides is settled. The real indexer (`suifleet-indexer telemetry-alerts`) derives all eight service alerts from the signed reports, and the sustained ones degrade the device. After recovery the alerts resolve and the device is healthy. No snapshot contains a payload, topic, export path, token or shadow value, and the dApp verifies them all |
 | `make test-indexer-localnet` | Real daemons against a real localnet and the real indexer. The activated device is served healthy, and its stored reports are verified again by the dApp's verifier. The revoked device's snapshots are rejected. Telemetry survives an indexer restart |
 

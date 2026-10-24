@@ -86,9 +86,8 @@ replay_history = false
 # max_start_attempts = 3
 # preflight_timeout_seconds = 60
 
-# Heartbeat, installed inventory and health (SF-019; docs/TELEMETRY.md):
-# signed snapshots to the fleet indexer, spooled under state_dir/telemetry
-# while it is unreachable. Off-chain; on-chain receipts are unchanged.
+# Product health/logs use [fleet_data] and [fleet_data.archives] below.
+# HTTP [telemetry] is an optional customer-owned integration only.
 # Local support console (docs/LOCAL_CONSOLE.md): loopback only, authenticated,
 # audited. Tokens come from `suifleet --console-token`; store only the hash.
 # [console]
@@ -99,7 +98,7 @@ replay_history = false
 # grants = ["inventory", "health", "deployments", "logs", "configuration", "audit", "restart"]
 
 # [telemetry]
-# url = "https://fleet.example"   # indexer base URL (POST {url}/v1/telemetry)
+# url = "https://customer.example" # customer-owned ingress, never SuiFleet hosted
 # interval_seconds = 60           # 10..=3600
 # buffer_max = 1024               # snapshots kept offline; oldest dropped beyond
 
@@ -158,7 +157,7 @@ replay_history = false
 # certificate_validity_seconds = 604800
 # rotation_grace_seconds = 300
 
-# Redacted remote logs to the fleet indexer (needs [telemetry]; docs/LOGS.md).
+# Redacted logs for Walrus archives (or optional customer HTTP integration).
 # [logs]
 # interval_seconds = 60
 # max_lines_per_interval = 512
@@ -191,7 +190,8 @@ replay_history = false
 # desired_conflict = "cloud"        # who wins a key both sides changed
 # reported_conflict = "device"
 
-# Direct Sui/Walrus fleet backend (alternative to [telemetry], no HTTP indexer).
+# Product Sui/Walrus fleet backend (no HTTP indexer).
+# Optional customer HTTP health may coexist; archives exclusively collect logs.
 # Owner creates/enrolls these objects first; use their actual introduction origin.
 # [fleet_data]
 # package_id = "0x<FleetData call package>"
