@@ -310,3 +310,10 @@ Mainnet write, physical hardware, actual extension wallet, renewal, blob deletio
 or new full encrypted device end-to-end run is claimed. Existing SF-022 encrypted
 device execution evidence remains separately linked. Independent review and
 current-head CI/testnet checks remain required for the implementation PR.
+
+## Follow-up archive economics
+
+The [SF-121 controlled experiment](SF121_ARCHIVE_COSTS.md) separates recurring
+fees, refundable storage capital, equal retention and owner cleanup. It does not
+replace the distinct release-delivery workload above or establish a full monthly
+production bill.

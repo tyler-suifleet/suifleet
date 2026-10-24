@@ -1,0 +1,91 @@
+{
+  "result": "PASS",
+  "chain": "9dd26ddd",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+  "head": "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a",
+  "origins": {
+    "FleetData": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "DeviceKey": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "DeviceData": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "AnchorKey": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "Anchor": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "CompactHeadKey": "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a",
+    "CompactHead": "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a",
+    "HealthUpdated": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "DataAnchored": "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213",
+    "DiagnosticKey": "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a",
+    "DiagnosticRequest": "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a"
+  },
+  "digests": {
+    "publish core": "EQzn65SatiJTeyU6UeKyQyh7TptCvnfnidFpKYcggUeF",
+    "publish WAL": "31oYyXPz7wvB3NYVjGUxkBsnKjVVa72JDyyDwM5Gh4aW",
+    "publish Walrus": "CrE84QJj5PgJEff2ec3yN2dpbuMYWAGqpmhBEquWYUF1",
+    "publish storage": "9DJnsAfLxAHDXftYRYEVQb8j1hU7kmcrWNfEn575RWRw",
+    "publish base data": "HRZPSd4iBFiyJTf7opsFYT1T1pDCR2NZhBcePnPGiFRb",
+    "register existing device": "HsasWVWMVG9rn716sZoKTbmBwKHQoxJbTNxzvd6WNcH4",
+    "create budget": "GvpdgBD9xPcN4hBwNLVqwfBRVJtuPV1uoWQ3eSd278iW",
+    "enroll account": "BP4NG6jXhxhd2QR6bNTBiKLrNKLA6K3q6arX4Go9aLd7",
+    "create actual storage": "92MKES21dGGYLDbYFAiHBnkhzsYEAjAjaeX2zfc5mpgM",
+    "create base fleet": "BY5mKfyquBMnUA124fegTziRgnGLX5iYzTfN5xgNveag",
+    "create base writer": "9Jhw41WtpwbAxCKPsnPZ1F9fT7PUoQY2Yd5hs8YU2yrM",
+    "upgrade data": "EgkiZYwA6SxPUz48WvjA9yQFmFtVicPu5BqkjFJUUaFx",
+    "diagnostics on existing writer": "tm4r3Tm1bpi2aX7m8jpNs3TmByFm2cR67wGDVH7Uff2",
+    "serverless signed services health": "JBNUHkFFJoWDh3styXpELpjcjD7SZhnLdAoFfGTaU1ox",
+    "revoke device": "9fpr1fEcH47V5GLzwxseVbsbHRVWU3zCmSDem2RAZqpN"
+  },
+  "attacks": {
+    "0xe2db4da69c8a7d1861996341461d3ea46d3694a700521e2e74aa5f375a4a5213": {
+      "digest": "41To37igaJ25WnRXzJgMVtMVCeoowEPxqz5AwqS2gHVb",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x434062df56c09e16a68aa92d43673684d1aeb6c1ba108b3a58aa9e5b13f26d69::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x434062df56c09e16a68aa92d43673684d1aeb6c1ba108b3a58aa9e5b13f26d69",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0xf3803830f04e283de7feed059b61b0f807123a19c952f46a6c0ab08904276b0a": {
+      "digest": "5PAZpQziJ6LyYzSaqigpwQGfmcRm5UwHnWjZjvQq8s1J",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x434062df56c09e16a68aa92d43673684d1aeb6c1ba108b3a58aa9e5b13f26d69::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x434062df56c09e16a68aa92d43673684d1aeb6c1ba108b3a58aa9e5b13f26d69",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ],
+  "evidence_scope": "SF-121 PR #253 feedback repair; isolated disposable network-none chain, not public testnet",
+  "reviewed_head": "f3f3963b8917064a3aaa8c6f2a70c24a2ce52595",
+  "integrated_main": "b9e8053f4f034ca725686d19870cde6f3f756d63"
+}
