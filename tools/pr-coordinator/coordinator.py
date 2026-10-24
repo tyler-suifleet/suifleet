@@ -163,11 +163,34 @@ def checks_blocker(pr):
     return None
 
 
+TESTNET_CONTEXT = 'testnet/package-upgrade'
+RUN_URL = re.compile(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+')
+TESTNET_DESCRIPTION = re.compile(r'base:([0-9a-f]{40})(?: class:([a-z]{1,20}))?')
+
+
+def testnet_failure(pr):
+    """The exact-head automatic testnet failure for the current base, or None.
+
+    Commit statuses are per head and the combined status keeps only the newest
+    per context, so a queued/running rerun (pending), a cancelled run (error),
+    a stale base or a status without a durable Actions run never qualifies."""
+    status = pr.get('_testnet_status') or {}
+    if status.get('state') != 'failure':
+        return None
+    match = TESTNET_DESCRIPTION.fullmatch(status.get('description') or '')
+    url = status.get('target_url') or ''
+    if not match or match.group(1) != pr.get('baseRefOid') or not RUN_URL.fullmatch(url):
+        return None
+    return {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
+            'detailsUrl': url, 'startedAt': status.get('created_at'), 'completedAt': status.get('updated_at'),
+            'classification': match.group(2) or 'source'}
+
+
 def failed_checks(pr):
     """Only actionable completed runs with a durable evidence link can start repair.
 
     Every reported check is a merge requirement under this coordinator's policy.
-    Status errors, cancelled runs and missing infrastructure evidence stay blockers,
+    Status errors, cancelled runs and unlinked failures stay blockers,
     but cannot safely identify a source repair. Rollups can contain old reruns:
     select the newest observation per workflow/name before considering failures.
     """
@@ -197,6 +220,9 @@ def failed_checks(pr):
                 and check.get('detailsUrl')):
             failures.append({key: check.get(key) for key in
                              ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+    testnet = testnet_failure(pr)
+    if testnet:
+        failures.append(testnet)
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
@@ -868,7 +894,7 @@ Do not edit the coordinator database or forge another model's review. Only this 
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
         if pr.get('_ci_repair'):
-            common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required.\n'
+            common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required. Infrastructure, funding and uncertain-transaction classifications still have a repair owner: diagnose/reconcile them within the existing authorization and strict spend limits; do not erase uncertain state, blindly replay mutations, increase retries forever, fabricate success or park merely because the failure came from a service. Coordinate shared harness fixes in the existing PRs.\n'
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
 The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the current base and that the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
