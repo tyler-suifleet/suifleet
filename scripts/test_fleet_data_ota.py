@@ -4,13 +4,15 @@
 This is simulator evidence. Move unit tests and isolated/public-chain evidence
 remain separate; the simulator never pretends to verify a Walrus certificate.
 """
-import argparse, base64, copy, hashlib, json, os, signal, struct, subprocess, sys, tempfile, threading, time
+import argparse, base64, copy, hashlib, json, os, re, signal, struct, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import test_budget_ota as budget
 import test_ota as ota
-from deployment_manifest import object_id
+from deployment_manifest import object_id, SETTINGS_TYPES
 FLEET, WRITER, STORAGE, PACKAGE = '0xf1','0xf2','0xf3','0xf0'
+for _name in SETTINGS_TYPES: ota.TYPE_ORIGINS[_name]=ota.PACKAGE
+SETTINGS_KEY,SETTINGS_VALUE=f'{ota.PACKAGE}::fleet_settings::SettingsKey',f'{ota.PACKAGE}::fleet_settings::Settings'
 def addr(v): return bytes.fromhex(object_id(v)[2:])
 def u64(v): return struct.pack('<Q',v)
 def vec(v):
@@ -30,7 +32,7 @@ def raw(id,kind,fields,contents):
         'bcs':{'dataType':'moveObject','type':kind,'bcsBytes':contents.hex()}}}
 class Simulator(budget.BudgetSimulator):
     def __init__(self):
-        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0
+        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0;self.settings=None
     def fleet(self):
         return dict(id=object_id(FLEET),version='1',budget_id=object_id(budget.BUDGET),storage_id=object_id(STORAGE),registry_id=object_id(ota.REGISTRY),
             chain_identifier=self.chain,key_epoch='0',support=[],health_interval_ms='60000',batch_interval_ms='86400000',emergency_interval_ms='60000',device_count='1')
@@ -49,8 +51,10 @@ class Simulator(budget.BudgetSimulator):
         if id in self.key_objects:return self.key_objects[id]
         return super().obj(id)
     def rpc(self,method,params):
+        if method=='suix_getDynamicFieldObject' and params[1]['type']==SETTINGS_KEY:
+            assert params[0]==budget.BUDGET;return {'data':{'content':{'fields':{'value':self.settings}}}}
         if method=='shim_height':return {'height':1 if self.history_pruned else 0,'lowest':1 if self.history_pruned else 0}
-        if method=='shim_fields':return super().rpc(method,params)+[[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
+        if method=='shim_fields':return super().rpc(method,params)+[[budget.BUDGET,SETTINGS_KEY,'00',SETTINGS_VALUE],[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
             [WRITER,'0xf8::fleet_data::DiagnosticKey','00']]+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
         if method=='suix_getDynamicFieldObject' and params[0]==WRITER:
             value=({'seq':str(self.request_seq),'at_ms':str(self.clock)} if self.request_seq else None) if params[1]['type'].endswith('::DiagnosticKey') else self.anchors[struct.unpack('<Q',bytes.fromhex(params[1]['value']))[0]]
@@ -248,9 +252,23 @@ def run(binary,shim_binary,idle_reads=False):
                     'anchors':sim.anchors,'ciphertexts':{a['blob_object_id']:base64.b64encode((sim.upload_dir/(a['blob_object_id']+'.bin')).read_bytes()).decode() for a in sim.anchors},'device':object_id(ota.DEVICE),'signer':ota.ADDRESS,'fleet':sim.fleet(),'writer':sim.writer(),'now':max(sim.clock,int(time.time()*1000)),
                     'shadows':[{'':2,'cfg':5}]*3+[{'':3,'cfg':5}]}))
                 subprocess.run(['node','scripts/verify_native_fleet.cjs',str(fixture)],check=True)
+                # SF-130: the fleet's settings slow health and routine archives
+                # beyond the fleet_data minimum, never below it.
+                sim.settings=dict(version='1',check_interval_ms='300000',rollout_check_interval_ms='0',health_interval_ms='3600000',
+                    archive_interval_ms='604800000',archive_retention_epochs=3)
+                seq,batch=sim.seq,sim.batch_at;sim.clock=sim.at+120000
+                assert sim.clock>=batch+86400000,'past both fleet_data minimums'
+                shadow('',4,{'desired':{'mode':'eco','fan':{'speed':3}},'reported':{'mode':'eco','fan':{'speed':2}}})
+                process=start();wait(lambda:'scope="fleet data" check_interval_ms=300000' in re.sub(r'\x1b\[[0-9;]*m','',(root/'daemon.log').read_text()))
+                time.sleep(3);assert sim.seq==seq and len(sim.anchors)==4,'fleet settings must slow health and routine archives'
+                stop();sim.clock=batch+604800000;process=start()
+                # The anchor acknowledges the archive; local cleanup follows at the next round.
+                wait(lambda:sim.seq==seq+1 and len(sim.anchors)==5);assert sim.anchors[-1]['kind']==0
+                stop()
                 assert not sim.errors,sim.errors
                 print('PASS real daemon signed health -> simulated Sui -> browser verification; health/bulk retry, exhaustion, cadence, restart, revocation and diagnostics; '
-                      'SF-084 encrypted shadow documents archived on change and decrypted/verified in the browser library')
+                      'SF-084 encrypted shadow documents archived on change and decrypted/verified in the browser library; '
+                      'SF-130 fleet settings slowed health and routine archives beyond the fleet_data minimum')
     finally:
         if process:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()

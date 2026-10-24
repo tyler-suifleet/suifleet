@@ -143,7 +143,7 @@ impl Schedule {
     }
 }
 
-pub async fn tick(task: &Task, schedule: &mut Schedule) -> anyhow::Result<()> {
+pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
     let Some(config) = &task.config.archives else {
         return Ok(());
     };
@@ -225,7 +225,7 @@ pub async fn tick(task: &Task, schedule: &mut Schedule) -> anyhow::Result<()> {
         let interval = if kind != 0 {
             fleet.emergency_interval_ms
         } else {
-            fleet.batch_interval_ms
+            crate::fleet_settings::archive_interval_ms(fleet.batch_interval_ms, fleet_settings)
         };
         if let Some(at) = last.filter(|at| now < at.saturating_add(interval)) {
             schedule.next_due = tokio::time::Instant::now()

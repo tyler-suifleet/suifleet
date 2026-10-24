@@ -20,6 +20,7 @@ mod deps;
 mod firmware;
 mod funding;
 mod fleet_data;
+mod fleet_settings;
 mod fleet_archive;
 mod handoff;
 mod identity;
@@ -475,6 +476,7 @@ async fn main() -> anyhow::Result<()> {
         );
         let mut reads_before = sui.read_stats();
         let mut cadence = cadence::Cadence::default();
+        let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
             let cycle = poll(
                 &cfg,
@@ -510,8 +512,17 @@ async fn main() -> anyhow::Result<()> {
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
+            // The fleet's settings (SF-130) bound when to check next, so an
+            // owner's change applies within one interval.
+            if let Some(budget) = fleet_settings::budget_id(&cfg) {
+                tokio::select! {
+                    _ = fleet_settings.refresh(&sui, budget) => {}
+                    _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+                }
+            }
+            let checks = fleet_settings::runtime(&cfg.runtime, fleet_settings.current());
             let delay = tokio::time::sleep(cadence.delay(
-                &cfg.runtime,
+                &checks,
                 journal.state.deferred.iter().filter_map(|(id, d)|
                     (!journal.state.deployments.contains_key(id)).then_some(d)),
                 telemetry::now_ms(),
@@ -552,7 +563,7 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.delay(&cfg.runtime, journal.state.deferred.iter().filter_map(|(id, d)|
+                            cadence.delay(&checks, journal.state.deferred.iter().filter_map(|(id, d)|
                     (!journal.state.deployments.contains_key(id)).then_some(d)), telemetry::now_ms(), journal.state.check_window)
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
@@ -819,7 +830,7 @@ async fn poll(
     watch_roots.extend(journal.state.deferred.iter().filter_map(|(id, notice)| {
         (!notice.terminal && !journal.state.deployments.contains_key(id)).then(|| id.clone())
     }));
-    let sleeping_roots = cfg
+    let mut sleeping_roots = cfg
         .fleet_data
         .as_ref()
         .map(|data| {
@@ -831,6 +842,9 @@ async fn poll(
             ]
         })
         .unwrap_or_default();
+    if let Some(budget) = fleet_settings::budget_id(cfg) {
+        sleeping_roots.push(budget.to_owned());
+    }
     watch_roots.extend(sleeping_roots.iter().cloned());
     let changed = sui
         .poll_changed(

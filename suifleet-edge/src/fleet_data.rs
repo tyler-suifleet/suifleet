@@ -165,7 +165,7 @@ impl Task {
         }
         Ok(())
     }
-    async fn beat(&self, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<Duration> {
+    async fn beat(&self, tracker: &mut crate::service_health::Tracker, settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<Duration> {
         self.sui.validate_deployment().await?;
         self.sui.validate_cap(&self.cap, &self.device_id).await?;
         let (fleet, writer) = self.config.read(&self.sui, &self.device_id).await?;
@@ -176,11 +176,12 @@ impl Task {
             .and_then(|s| s.parse::<u64>().ok())
             .or_else(|| clock.fields["timestamp_ms"].as_u64())
             .ok_or_else(|| anyhow::anyhow!("invalid chain clock"))?;
+        let interval = crate::fleet_settings::health_interval_ms(fleet.health_interval_ms, settings);
         if writer.health_seq != 0
-            && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms)
+            && now < writer.health_at_ms.saturating_add(interval)
         {
             return Ok(Duration::from_millis(
-                writer.health_at_ms.saturating_add(fleet.health_interval_ms) - now,
+                writer.health_at_ms.saturating_add(interval) - now,
             ));
         }
         let seq = writer
@@ -215,14 +216,17 @@ impl Task {
             .report_health(&self.config, &self.cap, seq, message, signature)
             .await?;
         crate::fleet_archive::health_receipt(&self.state_dir, seq, &digest)?;
-        Ok(Duration::from_millis(fleet.health_interval_ms))
+        Ok(Duration::from_millis(interval))
     }
     pub async fn run(self) {
         let mut tracker = crate::service_health::Tracker::default();
+        let mut applied = crate::fleet_settings::Applied::new("fleet data");
         let mut next_health = tokio::time::Instant::now();
         let mut archive = crate::fleet_archive::Schedule::default();
         let mut generation = self.sui.watch_generation();
         loop {
+            applied.refresh(&self.sui, &self.config.budget_id).await;
+            let settings = applied.current().copied();
             let current = self.sui.watch_generation();
             if generation != current {
                 generation = current;
@@ -230,7 +234,7 @@ impl Task {
                 archive.wake();
             }
             if tokio::time::Instant::now() >= next_health {
-                let delay = match self.beat(&mut tracker).await {
+                let delay = match self.beat(&mut tracker, settings.as_ref()).await {
                     Ok(delay) => delay,
                     Err(error) => {
                         tracing::warn!(%error, "Direct-chain health pending; will re-read authority/cadence before retry");
@@ -240,7 +244,7 @@ impl Task {
                 next_health = tokio::time::Instant::now() + delay;
             }
             if self.config.archives.is_some() {
-                let result = crate::fleet_archive::tick(&self, &mut archive).await;
+                let result = crate::fleet_archive::tick(&self, &mut archive, settings.as_ref()).await;
                 if let Err(error) = &result {
                     archive.next_due = tokio::time::Instant::now()
                         + Duration::from_secs(self.poll_seconds.clamp(1, 60));
@@ -250,7 +254,8 @@ impl Task {
                     tracing::warn!(%error, "Archive publication status could not be persisted");
                 }
             }
-            tokio::time::sleep(Duration::from_secs(self.poll_seconds.clamp(1,60))).await;
+            let wait = Duration::from_secs(self.poll_seconds.clamp(1, 60));
+            tokio::time::sleep(wait).await;
         }
     }
 }
