@@ -215,6 +215,7 @@ async fn main() -> anyhow::Result<()> {
         sui.address()
     );
     let mut journal = Journal::open(&cfg.runtime.state_dir, binding)?;
+    *sui.funding.lock().await = journal.state.funding.clone().unwrap_or_default();
     // Before anything else reads the journal: a firmware update that may still
     // finish, or already did, must not be settled as Failed.
     let spool = cfg.apply.firmware_spool.clone();
@@ -369,6 +370,7 @@ async fn main() -> anyhow::Result<()> {
     let reporter = match &cfg.telemetry {
         Some(settings) => Some(tokio::spawn(
             telemetry::Task {
+                funding: cfg.budget.as_ref().map(|_| sui.funding.clone()),
                 binding: telemetry::Binding {
                     chain_identifier: sui.manifest().chain_identifier.clone(),
                     registry: sui.manifest().shared_objects.registry.id.clone(),
@@ -771,6 +773,9 @@ async fn poll(
     journal: &mut Journal,
 ) -> anyhow::Result<()> {
     walrus.begin_poll();
+    if cfg.budget.is_some() {
+        journal.state.funding = Some(sui.funding.lock().await.clone());
+    }
     supervisor.recover_broken(runner, |name| journal.state.components.get(name).is_some_and(|c| c.confirmed)).await?;
     // A recovery receipt and the retained identity reconcile even when the
     // daemon stopped between supervisor commit and journal save.
@@ -1018,7 +1023,7 @@ async fn flush_funded_reports(
         .await
         {
             Ok(changed) => {
-                if changed || journal.state.funding.is_none() {
+                if changed || journal.state.funding.as_ref() != Some(&funding) {
                     journal.state.funding = Some(funding);
                     journal.save()?;
                 }

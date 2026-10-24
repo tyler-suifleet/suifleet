@@ -151,14 +151,7 @@ pub struct Task {
 impl Task {
     pub async fn before_write(&self) -> anyhow::Result<()> {
         if let Some(budget) = &self.budget {
-            let dir = self.state_dir.join("fleet-data");
-            std::fs::create_dir_all(&dir)?;
-            let path = dir.join("funding.json");
-            let mut funding: crate::funding::Funding = match std::fs::read(&path) {
-                Ok(bytes) => serde_json::from_slice(&bytes)?,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Default::default(),
-                Err(e) => return Err(e.into()),
-            };
+            let mut funding = crate::funding::Funding::default();
             crate::funding::top_up(
                 budget,
                 &self.sui,
@@ -168,7 +161,7 @@ impl Task {
                 telemetry::now_ms(),
             )
             .await?;
-            crate::fleet_archive::atomic(&path, &serde_json::to_vec(&funding)?)?;
+            // The main poll persists this shared record in the journal and telemetry.
         }
         Ok(())
     }
@@ -204,7 +197,8 @@ impl Task {
             started_ms: self.started_ms,
             boot_id: telemetry::boot_id(),
         };
-        let mut inventory = telemetry::inventory(&self.state_dir);
+        let funding = self.sui.funding.lock().await.clone();
+        let mut inventory = telemetry::inventory_with_funding(&self.state_dir, self.budget.as_ref().map(|_| &funding));
         let sources = self.services.lock().unwrap().health_sources();
         inventory.services = crate::service_health::collect(&sources, tracker, self.started_ms, telemetry::now_ms());
         let snapshot = telemetry::snapshot_limit(&binding, &self.signer.address(), seq, 0,

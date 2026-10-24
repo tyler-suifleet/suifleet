@@ -232,19 +232,39 @@ pub fn decide(config: &BudgetConfig, balance: u64, budget: &Budget, account: Opt
     Decision::Draw(amount)
 }
 
+/// Funding operations share one record and lock across all write producers.
+/// Keep the whole balance/decision/draw sequence inside this lock.
+pub trait Source {
+    fn funding(&self) -> &tokio::sync::Mutex<Funding>;
+    async fn gas_balance(&self) -> anyhow::Result<u64>;
+    async fn budget(&self, budget: &str, device: &str) -> anyhow::Result<(Budget, Option<(String, Account)>)>;
+    async fn draw_gas(&self, budget: &str, account: &str, cap: &str, amount: u64) -> anyhow::Result<String>;
+}
+impl Source for crate::sui_client::SuiClient {
+    fn funding(&self) -> &tokio::sync::Mutex<Funding> { &self.funding }
+    async fn gas_balance(&self) -> anyhow::Result<u64> { self.gas_balance().await }
+    async fn budget(&self, budget: &str, device: &str) -> anyhow::Result<(Budget, Option<(String, Account)>)> { self.budget(budget, device).await }
+    async fn draw_gas(&self, budget: &str, account: &str, cap: &str, amount: u64) -> anyhow::Result<String> { self.draw_gas(budget, account, cap, amount).await }
+}
+
 /// One top-up check: read the balance, the budget and this device's account;
 /// draw if the contract would allow it, otherwise record why not. Returns
 /// whether `funding` changed. Errors (node unavailable, failed execution)
-/// leave the previous record and are retried next poll.
-pub async fn top_up(
+/// leave the previous record and are retried with the caller's next write attempt.
+pub async fn top_up<S: Source>(
     config: &BudgetConfig,
-    sui: &crate::sui_client::SuiClient,
+    sui: &S,
     device_id: &str,
     cap: &str,
-    funding: &mut Funding,
+    funding_out: &mut Funding,
     now_ms: u64,
 ) -> anyhow::Result<bool> {
-    let before = funding.clone();
+    // Shared by all SuiClient clones: serialize the complete read/decide/draw,
+    // not just transaction submission. The next caller re-reads the balance.
+    let mut shared = sui.funding().lock().await;
+    let before = shared.clone();
+    let mut next = before.clone();
+    let funding = &mut next;
     let balance = sui.gas_balance().await?;
     funding.balance_mist = Some(balance);
     let (budget, account) = sui.budget(&config.budget_id, device_id).await?;
@@ -266,7 +286,10 @@ pub async fn top_up(
             funding.draws = funding.draws.saturating_add(1);
         }
     }
-    Ok(*funding != before)
+    let changed = *funding != before;
+    *shared = funding.clone();
+    *funding_out = funding.clone();
+    Ok(changed)
 }
 
 /// Inventory reason for telemetry: blocked funding, with the queued receipts.
@@ -304,6 +327,56 @@ mod tests {
             draws_in_period: 0,
             last_draw_ms: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn concurrent_producers_recheck_balance_and_share_the_funding_record() {
+        use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+        struct Node {
+            funding: tokio::sync::Mutex<Funding>,
+            balance: AtomicU64,
+            draws: AtomicUsize,
+            reads: AtomicUsize,
+            paused: AtomicBool,
+        }
+        impl Source for Node {
+            fn funding(&self) -> &tokio::sync::Mutex<Funding> { &self.funding }
+            async fn gas_balance(&self) -> anyhow::Result<u64> {
+                let balance = self.balance.load(Ordering::SeqCst);
+                self.reads.fetch_add(1, Ordering::SeqCst);
+                // Without the shared lock both callers observe zero here.
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                Ok(balance)
+            }
+            async fn budget(&self, _: &str, _: &str) -> anyhow::Result<(Budget, Option<(String, Account)>)> {
+                Ok((Budget { paused: self.paused.load(Ordering::SeqCst), ..budget() }, Some(("account".into(), account()))))
+            }
+            async fn draw_gas(&self, _: &str, _: &str, _: &str, amount: u64) -> anyhow::Result<String> {
+                self.draws.fetch_add(1, Ordering::SeqCst);
+                self.balance.fetch_add(amount, Ordering::SeqCst);
+                Ok("draw-digest".into())
+            }
+        }
+        let node = Node { funding: Default::default(), balance: AtomicU64::new(0), draws: AtomicUsize::new(0), reads: AtomicUsize::new(0), paused: AtomicBool::new(false) };
+        let (mut receipt, mut fleet) = (Funding::default(), Funding::default());
+        let config = config();
+        let (a, b) = tokio::join!(
+            top_up(&config, &node, "device", "cap", &mut receipt, 5),
+            top_up(&config, &node, "device", "cap", &mut fleet, 5),
+        );
+        a.unwrap(); b.unwrap();
+        assert_eq!(node.reads.load(Ordering::SeqCst), 2);
+        assert_eq!(node.draws.load(Ordering::SeqCst), 1);
+        assert_eq!(node.balance.load(Ordering::SeqCst), 40);
+        assert_eq!(fleet.draws, 1);
+        assert_eq!(fleet.last_draw_digest.as_deref(), Some("draw-digest"));
+        assert_eq!(*node.funding.lock().await, fleet);
+        // Either producer's refusal is the same record used by telemetry.
+        node.balance.store(0, Ordering::SeqCst);
+        node.paused.store(true, Ordering::SeqCst);
+        top_up(&config, &node, "device", "cap", &mut fleet, 6).await.unwrap();
+        assert_eq!(*node.funding.lock().await, fleet);
+        assert!(reason(&*node.funding.lock().await, 1).unwrap().contains("paused"));
     }
 
     #[test]
