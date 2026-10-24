@@ -1,3 +1,5 @@
+import type { NamedFleet } from "./customer-fleets";
+import type { FleetDataConfig } from "./fleet-data";
 import { bcs } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -25,11 +27,17 @@ export function validateRollout(input: RolloutInput) {
   }
   if (!input.component || !input.version || !input.recipe || !/^[a-f0-9]{64}$/.test(input.artifactSha256) || !/^[a-f0-9]{64}$/.test(input.recipeSha256)) throw new Error("Provide component, version, recipe blob and SHA-256 digests");
 }
-export function buildRolloutTx(input: RolloutInput) {
+export function buildRolloutTx(input: RolloutInput, fleet?: NamedFleet) {
   requireManifest(); validateRollout(input);
   const tx = new Transaction();
   const [policy] = calls.deployment_manager_rollout_policy(tx, PACKAGE_ID, input.concurrency, input.rateCount,
     input.rateWindowMs, input.bakeMs, input.minimumSamples, input.failureBps, input.offlineTimeoutMs);
+  if (fleet) {
+    const [record] = tx.moveCall({ target: `${PACKAGE_ID}::customer::new_rollout`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id),
+      tx.pure.string(input.component), tx.pure.string(input.version), tx.pure.string(input.recipe), tx.pure.string(input.artifactSha256), tx.pure.string(input.recipeSha256),
+      tx.pure.vector("id", input.cohorts.flat()), tx.pure.vector("u64", input.cohorts.flatMap((cohort, i) => cohort.map(() => i))), policy, tx.object("0x6")] });
+    calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record); return tx;
+  }
   const [record] = calls.deployment_manager_new_rollout_verified(tx, PACKAGE_ID, input.component, input.version,
     input.recipe, input.artifactSha256, input.recipeSha256, [], input.cohorts.flat(),
     input.cohorts.flatMap((cohort, i) => cohort.map(() => i)), policy, "0x6");
@@ -69,20 +77,22 @@ export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">
     normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
   return { componentName: record.component_name, version: record.version };
 }
-export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, token = "") {
+export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, token = "", scope?: { fleet: NamedFleet; config?: FleetDataConfig }) {
   requireManifest();
-  const [r, target] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, owner)]);
-  const health = await fetchFleetHealth(client, r.members, owner, undefined, token);
+  const [r, target] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, scope?.fleet.id ?? owner)]);
+  const health = await fetchFleetHealth(client, r.members, owner, undefined, token, undefined, scope ? { config: scope.config } : undefined);
   const a = rolloutHealth(r, id, target, health);
   const tx = new Transaction();
-  calls.deployment_manager_advance_rollout(tx, PACKAGE_ID, id, a.online, a.healthy, a.unhealthy, "0x6");
+  if (scope) tx.moveCall({ target: `${PACKAGE_ID}::customer::advance_rollout`, arguments: [tx.object(scope.fleet.customerId), tx.object(scope.fleet.id), tx.object(id), tx.pure.vector("id", a.online), tx.pure.vector("id", a.healthy), tx.pure.vector("id", a.unhealthy), tx.object("0x6")] });
+  else calls.deployment_manager_advance_rollout(tx, PACKAGE_ID, id, a.online, a.healthy, a.unhealthy, "0x6");
   return tx;
 }
-export function buildRolloutControlTx(id: string, state: number, skip: string[], reason: string) {
+export function buildRolloutControlTx(id: string, state: number, skip: string[], reason: string, fleet?: NamedFleet) {
   requireManifest();
   if (!Number.isInteger(state) || state < 0 || state > 2) throw new Error("Invalid rollout control state");
   if (!reason.trim() || new TextEncoder().encode(reason).length > 256) throw new Error("Provide an audit reason (1–256 bytes)");
   const tx = new Transaction();
-  calls.deployment_manager_control_rollout(tx, PACKAGE_ID, id, state, skip, reason, "0x6");
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::control_rollout`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(id), tx.pure.u8(state), tx.pure.vector("id", skip), tx.pure.string(reason), tx.object("0x6")] });
+  else calls.deployment_manager_control_rollout(tx, PACKAGE_ID, id, state, skip, reason, "0x6");
   return tx;
 }

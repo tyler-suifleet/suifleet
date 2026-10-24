@@ -50,6 +50,13 @@ export function parseDataConfig(raw: string): FleetDataConfig {
 }
 
 export const DATA_CONFIG = process.env.NEXT_PUBLIC_FLEET_DATA ? parseDataConfig(process.env.NEXT_PUBLIC_FLEET_DATA) : undefined;
+/** Public locators for independent explicit support grants as well as owners. */
+export function configuredDataFleets(): FleetDataConfig[] {
+  if (!process.env.NEXT_PUBLIC_FLEET_DATA_CONFIGS) return DATA_CONFIG ? [DATA_CONFIG] : [];
+  const values: unknown = JSON.parse(process.env.NEXT_PUBLIC_FLEET_DATA_CONFIGS);
+  if (!Array.isArray(values)) throw Error("Fleet data configurations must be an array");
+  return values.map(value => parseDataConfig(JSON.stringify(value)));
+}
 type Reads = Pick<SuiGrpcClient, "getObject" | "getDynamicField" | "ledgerService"> & Partial<Pick<SuiGrpcClient, "getObjects">>;
 const unavailable = (reason: string): DeviceHealth => ({ status: "unavailable", codes: ["unavailable"], reasons: [reason], components: [] });
 const type = (config: FleetDataConfig, name: string) => normalizeStructTag(`${config.typeOrigin}::fleet_data::${name}`);

@@ -1,4 +1,7 @@
 "use client";
+
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 import { useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +18,8 @@ const defaults: RolloutInput = { component: "", version: "", recipe: "", artifac
   cohorts: [], concurrency: 1, rateCount: 1, rateWindowMs: 60000, bakeMs: 300000,
   minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 600000 };
 export default function RolloutsPage() {
+  const { fleet } = useFleetSelection();
+  const dataConfig = useFleetDataConfig();
   const client = useCurrentClient(); const account = useCurrentAccount();
   const { data: deployments = [] } = useDeployments();
   const [input, setInput] = useState(defaults); const [cohorts, setCohorts] = useState("");
@@ -37,7 +42,7 @@ export default function RolloutsPage() {
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
       <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(() => buildRolloutTx({ ...input,
-        cohorts: cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean)) })); }}>
+        cohorts: cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean)) }, fleet)); }}>
         <p>Use a recipe and its exact digests from the firmware upload. One cohort per line, with device IDs separated by spaces. Cohorts are an immutable snapshot of direct targets; adding group members never expands it.</p>
         {(["component", "version", "recipe", "artifactSha256", "recipeSha256"] as const).map(key => <label className="block" key={key}>{key}<input required className="border ml-2 p-1" value={input[key]} onChange={e => setInput({ ...input, [key]: e.target.value })} /></label>)}
         <label className="block">Cohorts<textarea required className="border block w-full" value={cohorts} onChange={e => setCohorts(e.target.value)} /></label>
@@ -50,10 +55,10 @@ export default function RolloutsPage() {
     {rollout && <div className="space-y-3 border p-4">
       <p role="status">{["Active", "Paused", "Aborted permanently", "Complete"][rollout.state]} · cohort {Number(rollout.cohort) + 1} · decision {rollout.revision}</p>
       <RolloutDetail id={selected} rollout={rollout} />
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address))}>Verify current health and advance</button>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, undefined, fleet ? { fleet, config: dataConfig } : undefined))}>Verify current health and advance</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
-      {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason))}>{label}</button>)}
+      {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason, fleet))}>{label}</button>)}
     </div>}
   </div>;
 }

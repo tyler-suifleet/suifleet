@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
@@ -15,6 +15,8 @@ import {
   buildCreateGroupTx, buildAddDeviceToGroupTx, buildRemoveDeviceFromGroupTx, buildDeleteGroupTx,
 } from "@/lib/sui";
 import Link from "next/link";
+import { buildDeregisterManagedDeviceTx } from "@/lib/customer-fleets";
+import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
 import { PageHeader, HealthBadge } from "@/components/ui";
@@ -48,6 +50,8 @@ export default function DevicesPage() {
 // ── Devices tab ───────────────────────────────────────────────────────────────
 
 function DevicesTab() {
+  const client = useCurrentClient();
+  const { fleet } = useFleetSelection();
   const account = useCurrentAccount();
   const { data: devices = [], isLoading, refetch } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
@@ -61,7 +65,7 @@ function DevicesTab() {
     select(); window.addEventListener("popstate", select);
     return () => window.removeEventListener("popstate", select);
   }, []);
-  const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
+  const { data: health = {} } = useFleetHealth(devices.filter((d) => (d.ownerCapId || d.managed)).map((d) => d.objectId));
 
   function handleRegister(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -70,7 +74,7 @@ function DevicesTab() {
       fd.get("name") as string,
       fd.get("deviceAddress") as string,
       fd.get("arch") as string,
-      account!.address,
+      account!.address, fleet,
     );
     signAndExecute(
       { transaction: tx },
@@ -119,7 +123,7 @@ function DevicesTab() {
                 <Fragment key={d.objectId}>
                 <tr className="hover:bg-gray-50">
                   <td className="py-3 px-4">
-                    {d.ownerCapId ? (
+                    {(d.ownerCapId || d.managed) ? (
                       <button onClick={() => setExpanded(expanded === d.objectId ? null : d.objectId)} className="text-left" title="Show installed components and health">
                         <HealthBadge health={health[d.objectId]} />
                       </button>
@@ -142,13 +146,13 @@ function DevicesTab() {
                   </td>
                   <td className="py-3 pr-4 text-gray-500">{d.serial ?? "—"}</td>
                   <td className="py-3 pr-4 text-gray-500">{d.arch}</td>
-                  <td className="py-3 pr-4 text-xs text-gray-500">{d.ownerCapId ? lastSeenLabel(health[d.objectId]) : "—"}</td>
+                  <td className="py-3 pr-4 text-xs text-gray-500">{(d.ownerCapId || d.managed) ? lastSeenLabel(health[d.objectId]) : "—"}</td>
                   {technical && <>
                     <td className="py-3 pr-4 font-mono text-xs text-gray-400 max-w-[160px] truncate">{d.deviceAddress}</td>
                     <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   </>}
                   <td className="py-3 flex items-center gap-3">
-                    {!d.ownerCapId && (
+                    {!d.ownerCapId && !d.managed && (
                       <button
                         disabled={isPending}
                         onClick={() => {
@@ -167,10 +171,10 @@ function DevicesTab() {
                     )}
                     <button
                       disabled={isPending}
-                      onClick={() => {
+                      onClick={async () => {
                         if (!confirm(`Remove "${d.name}"? This cannot be undone.`)) return;
                         signAndExecute(
-                          { transaction: buildDeregisterDeviceTx(d) },
+                          { transaction: fleet ? await buildDeregisterManagedDeviceTx(client, fleet, d.objectId) : buildDeregisterDeviceTx(d) },
                           {
                             onSuccess: () => setTimeout(() => refetch(), 3000),
                             onError: (err) => alert(`Failed: ${err.message}`),
@@ -233,6 +237,7 @@ function DevicesTab() {
 // ── Groups tab ────────────────────────────────────────────────────────────────
 
 function GroupsTab() {
+  const { fleet } = useFleetSelection();
   const account = useCurrentAccount();
   const { data: groups = [], isLoading, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
@@ -250,7 +255,7 @@ function GroupsTab() {
   function handleStopDesiring(groupId: string, component: string) {
     if (!confirm(`Stop desiring "${component}" in this group? Devices retire it from management; it is not uninstalled.`)) return;
     signAndExecute(
-      { transaction: buildDesiredRevisionTx([groupId], undefined, [component]) },
+      { transaction: buildDesiredRevisionTx([groupId], undefined, [component], fleet) },
       {
         onSuccess: () => { setTimeout(() => refetchDesired(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -262,7 +267,7 @@ function GroupsTab() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     signAndExecute(
-      { transaction: buildCreateGroupTx(fd.get("name") as string, fd.get("description") as string) },
+      { transaction: buildCreateGroupTx(fd.get("name") as string, fd.get("description") as string, fleet) },
       {
         onSuccess: () => { setShowCreate(false); setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -272,7 +277,7 @@ function GroupsTab() {
 
   function handleAddDevice(groupId: string, device: DeviceRef) {
     signAndExecute(
-      { transaction: buildAddDeviceToGroupTx(groupId, device) },
+      { transaction: buildAddDeviceToGroupTx(groupId, device, fleet) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -282,7 +287,7 @@ function GroupsTab() {
 
   function handleRemoveDevice(groupId: string, deviceId: string) {
     signAndExecute(
-      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId) },
+      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId, fleet) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -353,7 +358,7 @@ function GroupsTab() {
                       onClick={() => {
                         if (!confirm(`Delete group "${g.name}"? This cannot be undone.`)) return;
                         signAndExecute(
-                          { transaction: buildDeleteGroupTx(g.objectId) },
+                          { transaction: buildDeleteGroupTx(g.objectId, fleet) },
                           {
                             onSuccess: () => setTimeout(() => refetch(), 3000),
                             onError: (err) => alert(`Failed: ${err.message}`),

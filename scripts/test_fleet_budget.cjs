@@ -416,7 +416,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     { data: undefined },
   ]) {
     const sandbox = { exports: {}, require: appRequire, ...budget, runwayDays: costs.runwayDays, NETWORK: 'fixture',
-      useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
+      useFleetSelection: () => ({}), useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
       useFleetBudget: () => ({ budget: { ...view, paused } }),
       useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
       useSubmit: () => ({ submit: () => {}, pending: false }), useState: () => ['', () => {}],

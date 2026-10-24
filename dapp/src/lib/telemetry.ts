@@ -408,16 +408,17 @@ const unavailableHealth = (reason: string): DeviceHealth => ({ status: "unavaila
  * failed refresh cannot leave an earlier result on screen.
  */
 export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicField"> & Partial<Pick<SuiGrpcClient, "getObject" | "getObjects" | "ledgerService">>, deviceIds: string[], owner: string,
-  url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<Record<string, DeviceHealth>> {
+  url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch, scope?: { config?: import("./fleet-data").FleetDataConfig }): Promise<Record<string, DeviceHealth>> {
   const unavailable = (reason: string): Record<string, DeviceHealth> => Object.fromEntries(deviceIds.map((id) => [id, unavailableHealth(reason)]));
-  if (!url || process.env.NEXT_PUBLIC_FLEET_DATA) {
+  if (scope || !url || process.env.NEXT_PUBLIC_FLEET_DATA) {
     try {
       const { DATA_CONFIG, fetchChainHealth } = await import("./fleet-data");
       const getObject = client.getObject?.bind(client);
       const ledgerService = client.ledgerService;
-      if (!DATA_CONFIG) return unavailable("Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health");
+      const config = scope ? scope.config : DATA_CONFIG;
+      if (!config) return unavailable("Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health");
       if (!getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
-      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), getObjects: client.getObjects?.bind(client), ledgerService }, DATA_CONFIG, deviceIds);
+      return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), getObjects: client.getObjects?.bind(client), ledgerService }, config, deviceIds);
     } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }
   }
   let indexed;

@@ -1,3 +1,4 @@
+import type { NamedFleet } from "./customer-fleets";
 // Prepaid fleet network costs (SF-083): transaction builders and reads for the
 // on-chain fleet budget (sui_edge::fleet_budget) and, when configured, the
 // owner-prepaid Walrus storage (fleet_storage). See docs/FLEET_BUDGET.md.
@@ -152,10 +153,13 @@ export function buildReclaimReserveTx(budgetId: string, capId: string, accountId
 }
 
 /** Close a device's account for good; its reserve returns to the budget. */
-export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: string): Transaction {
+export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: string, fleet?: NamedFleet, deviceId?: string): Transaction {
   requireBudget();
   const tx = new Transaction();
-  calls.fleet_budget_remove_device(tx, PACKAGE_ID, budgetId, capId, accountId);
+  if (fleet) {
+    if (!deviceId) throw Error("Choose the device to remove from this fleet");
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_device`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(budgetId), tx.object(accountId), tx.pure.id(deviceId)] });
+  } else calls.fleet_budget_remove_device(tx, PACKAGE_ID, budgetId, capId, accountId);
   return tx;
 }
 
@@ -185,9 +189,13 @@ export function buildEnrollDevicesTx(budgetId: string, capId: string,
  * atomic PTB. The owner cap goes to `sender`.
  */
 export function buildRegisterAndEnrollTx(name: string, deviceAddress: string, arch: string, sender: string,
-  budget?: { budgetId: string; capId: string; floatMist: bigint; reserveMist: bigint }): Transaction {
+  budget?: { budgetId: string; capId: string; floatMist: bigint; reserveMist: bigint }, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::register_funded_device`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(fleet.budgetId), tx.object(REGISTRY_ID), tx.pure.string(name), tx.pure.address(deviceAddress), tx.pure.string(arch), tx.pure.u64(budget?.floatMist ?? 0), tx.pure.u64(budget?.reserveMist ?? 0), tx.object(CLOCK)] });
+    return tx;
+  }
   const [device] = calls.device_registry_register_device(tx, PACKAGE_ID, REGISTRY_ID, name, deviceAddress, arch, CLOCK);
   calls.device_cap_issue_cap(tx, PACKAGE_ID, device);
   const [owner] = calls.device_registry_activate_device(tx, PACKAGE_ID, REGISTRY_ID, device);
@@ -639,4 +647,16 @@ export async function readExchange(client: SuiGrpcClient, config: StorageConfig,
     rate: bcs.struct("ExchangeRate", { wal: bcs.u64(), sui: bcs.u64() }), admin: bcs.Address });
   const value = Exchange.parse(object.content);
   return { walAvailable: BigInt(value.wal), rate: { wal: BigInt(value.rate.wal), sui: BigInt(value.rate.sui) } };
+}
+
+/** Read one verified managed budget; its cap is held by the selected fleet. */
+export async function fetchManagedBudget(client: SuiGrpcClient, budgetId: string): Promise<BudgetView> {
+  const { object } = await client.getObject({ objectId: budgetId, include: { content: true } });
+  if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("fleet_budget::FleetBudget"))) throw Error("Unexpected managed budget type");
+  const f = fleet_budget_FleetBudgetBcs.parse(object.content);
+  if (normalizeSuiAddress(f.registry_id) !== normalizeSuiAddress(REGISTRY_ID) || BigInt(f.version) !== BigInt(2)) throw Error("Managed budget binding/version mismatch");
+  return { id: object.objectId, capId: f.owner_cap_id, version: BigInt(f.version), balance: BigInt(f.balance.value),
+    paused: f.paused, defaultLimits: limitsOf(f.default_limits), lowBalanceThreshold: BigInt(f.low_balance_threshold),
+    deviceCount: BigInt(f.device_count), totalDeposited: BigInt(f.total_deposited), totalWithdrawn: BigInt(f.total_withdrawn),
+    totalPaid: BigInt(f.total_paid), totalAllocated: BigInt(f.total_allocated), totalReclaimed: BigInt(f.total_reclaimed) };
 }
