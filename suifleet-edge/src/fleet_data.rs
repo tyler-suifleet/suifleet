@@ -186,7 +186,7 @@ impl Task {
             }
             // Without fleet settings, at least every minute; with them, at the fleet's check interval.
             let wait = match &settings {
-                Some(s) => crate::fleet_settings::schedule(self.poll_seconds, Some(s)).check,
+                Some(s) => Duration::from_secs(crate::fleet_settings::check_seconds(self.poll_seconds, s)),
                 None => Duration::from_secs(self.poll_seconds.clamp(1, 60)),
             };
             tokio::time::sleep(wait).await;

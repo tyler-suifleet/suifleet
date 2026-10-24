@@ -313,6 +313,8 @@ impl Default for ComponentsConfig {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct SuiConfig {
+    #[serde(default)]
+    pub rpc_urls: Vec<String>,
     pub manifest_path: PathBuf,
     #[serde(skip)]
     pub rpc_url: String,
@@ -331,6 +333,8 @@ pub struct DeploymentManifest {
     pub network: String,
     pub chain_identifier: String,
     pub rpc_url: String,
+    #[serde(default)]
+    pub rpc_urls: Vec<String>,
     pub call_package_id: String,
     pub upgrade_cap_id: String,
     pub package_version: String,
@@ -355,6 +359,8 @@ pub struct ClientRange {
 }
 #[derive(Deserialize, Debug, Clone)]
 pub struct ManifestWalrus {
+    #[serde(default)]
+    pub aggregator_urls: Vec<String>,
     pub publisher_url: String,
     pub aggregator_url: String,
 }
@@ -413,8 +419,15 @@ impl DeploymentManifest {
         );
         anyhow::ensure!(positive(&self.package_version), "invalid package version");
         endpoint(&self.rpc_url)?;
+        anyhow::ensure!(self.rpc_urls.len() <= 8, "at most 8 RPC endpoints");
+        for url in &self.rpc_urls {
+            endpoint(url)?;
+        }
         endpoint(&self.walrus.publisher_url)?;
         endpoint(&self.walrus.aggregator_url)?;
+        for url in &self.walrus.aggregator_urls {
+            endpoint(url)?;
+        }
         anyhow::ensure!(
             crate::sui_client::same_id(&self.call_package_id, &self.call_package_id),
             "invalid call package ID"
@@ -515,6 +528,7 @@ impl EnrollConfig {
         manifest.validate()?;
         let sui = SuiConfig {
             manifest_path: cfg.manifest_path.clone(),
+            rpc_urls: manifest.rpc_urls.clone(),
             rpc_url: manifest.rpc_url.clone(),
             package_id: manifest.call_package_id.clone(),
             manifest: Some(manifest),
@@ -672,6 +686,12 @@ pub fn read_secret(path: &Path) -> anyhow::Result<String> {
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct WalrusConfig {
+    /// Ordered mirrors; empty uses the legacy aggregator_url. Manifest-pinned.
+    #[serde(default)]
+    pub aggregator_urls: Vec<String>,
+    /// Maximum bytes requested per HTTP Range (1..=10 MiB).
+    #[serde(default = "default_range_chunk_bytes")]
+    pub range_chunk_bytes: u64,
     /// Taken from the deployment manifest; a configured value must match it.
     #[serde(default)]
     pub aggregator_url: String,
@@ -696,12 +716,18 @@ impl Default for WalrusConfig {
     fn default() -> Self {
         Self {
             aggregator_url: String::new(),
+            aggregator_urls: Vec::new(),
+            range_chunk_bytes: default_range_chunk_bytes(),
             max_artifact_bytes: default_max_artifact_bytes(),
             min_free_bytes: default_min_free_bytes(),
             download_attempts: default_download_attempts(),
             download_timeout_seconds: default_download_timeout_seconds(),
         }
     }
+}
+
+fn default_range_chunk_bytes() -> u64 {
+    4 * 1024 * 1024
 }
 
 fn default_max_artifact_bytes() -> u64 {
@@ -834,7 +860,24 @@ impl Config {
                 || cfg.walrus.aggregator_url == manifest.walrus.aggregator_url,
             "stale Walrus configuration"
         );
+        anyhow::ensure!(
+            cfg.walrus.aggregator_urls.is_empty()
+                || cfg.walrus.aggregator_urls == manifest.walrus.aggregator_urls,
+            "stale Walrus mirror configuration"
+        );
+        cfg.walrus.aggregator_urls = manifest.walrus.aggregator_urls.clone();
+        anyhow::ensure!(
+            (1..=10 * 1024 * 1024).contains(&cfg.walrus.range_chunk_bytes),
+            "walrus.range_chunk_bytes must be between 1 and 10 MiB"
+        );
         cfg.walrus.aggregator_url = manifest.walrus.aggregator_url.clone();
+        anyhow::ensure!(cfg.sui.rpc_urls.len() <= 8, "at most 8 RPC endpoints");
+        for url in &cfg.sui.rpc_urls {
+            endpoint(url)?;
+        }
+        if cfg.sui.rpc_urls.is_empty() {
+            cfg.sui.rpc_urls = manifest.rpc_urls.clone();
+        }
         cfg.sui.rpc_url = manifest.rpc_url.clone();
         cfg.sui.package_id = manifest.call_package_id.clone();
         cfg.sui.manifest = Some(manifest);
@@ -843,8 +886,9 @@ impl Config {
             "[device] needs keypair_path or a [device.signer]"
         );
         anyhow::ensure!(
-            cfg.runtime.poll_seconds > 0,
-            "runtime.poll_seconds must be positive"
+            (1..=86_400).contains(&cfg.runtime.poll_seconds)
+                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds),
+            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400"
         );
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
@@ -973,6 +1017,7 @@ impl TelemetryConfig {
 pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
+    pub rollout_poll_seconds: u64,
     pub replay_history: bool,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
@@ -992,7 +1037,8 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             state_dir: "/var/lib/suifleet".into(),
-            poll_seconds: 10,
+            poll_seconds: 1800,
+            rollout_poll_seconds: 60,
             replay_history: false,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,
@@ -1095,6 +1141,42 @@ mod tests {
         let cfg: Config = toml::from_str(&format!("{base}[pubsub]\n{iot}")).unwrap();
         assert!(unsupported_on("macos", &cfg).is_some_and(|r| r.contains("AWS IoT Core")));
         assert!(unsupported_on("linux", &cfg).is_none());
+    }
+    #[test]
+    fn walrus_mirrors_are_manifest_pinned_and_chunk_size_bounded() {
+        let dir =
+            std::env::temp_dir().join(format!("suifleet-config-mirrors-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        manifest["walrus"]["aggregator_urls"] =
+            serde_json::json!(["https://one.example", "https://two.example"]);
+        std::fs::write(
+            dir.join("deployment.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n[walrus]\n";
+        let path = dir.join("config.toml");
+        std::fs::write(&path, base).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert_eq!(
+            config.walrus.aggregator_urls,
+            ["https://one.example", "https://two.example"]
+        );
+        assert_eq!(config.walrus.range_chunk_bytes, 4 * 1024 * 1024);
+        for extra in [
+            "range_chunk_bytes=0",
+            "range_chunk_bytes=10485761",
+            "aggregator_urls=['https://stale.example']",
+        ] {
+            std::fs::write(&path, format!("{base}{extra}\n")).unwrap();
+            assert!(Config::load(&path).is_err(), "{extra}");
+        }
+        let mut bad = fixture();
+        bad.walrus.aggregator_urls = vec!["file:///tmp/blob".into()];
+        assert!(bad.validate().is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn walrus_limits_default_when_omitted_or_partial() {

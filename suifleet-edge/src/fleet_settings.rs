@@ -7,27 +7,24 @@
 //! (cheaper), never faster than the fleet allows:
 //!
 //! - checks every `max(runtime.poll_seconds, check_interval_ms)`;
-//! - while a deployment awaits rollout eligibility or its advance notice,
-//!   every `max(runtime.poll_seconds, rollout_check_interval_ms)`, unless the
-//!   fleet turned fast checks off (0);
+//! - where the check cadence (`cadence::Cadence`, SF-123) uses fast checks
+//!   (rollout eligibility, admission, an open maintenance window), every
+//!   `max(runtime.rollout_poll_seconds, rollout_check_interval_ms)`, or the
+//!   routine interval when the fleet turned fast checks off (0). Single
+//!   wakeups at a known admission or window start are kept;
 //! - health and routine archives at the slower of the `fleet_data` cadence
 //!   (the contract-enforced minimum) and the fleet's chosen cadence.
 //!
 //! A fleet without a record, or a deployment without the settings types,
 //! leaves the local configuration in force. A record the daemon cannot use
 //! (unreadable, out of bounds or a newer version) keeps the last applied one.
-use std::time::Duration;
 use serde::Serialize;
+use crate::config::RuntimeConfig;
 use serde_json::Value;
 use crate::protocol::fleet_settings_values as bounds;
 
 /// The record version this daemon understands.
 pub const VERSION: u64 = 1;
-
-/// Deferral reasons that mean a rollout or announced start is imminent.
-/// Paused, scheduled, out-of-window and terminal deployments wait at the
-/// routine cadence.
-const FAST_REASONS: &[&str] = &["waiting for rollout eligibility", "advance notice"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Settings {
@@ -74,40 +71,23 @@ impl Settings {
     }
 }
 
-/// When the daemon checks the chain.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Schedule {
-    pub check: Duration,
-    /// None: no fast checks (fleet turned them off, or no fleet record).
-    pub rollout_check: Option<Duration>,
-}
-
-pub fn schedule(local_poll_seconds: u64, settings: Option<&Settings>) -> Schedule {
-    let local = Duration::from_secs(local_poll_seconds);
-    match settings {
-        None => Schedule { check: local, rollout_check: None },
-        Some(s) => Schedule {
-            check: local.max(Duration::from_millis(s.check_interval_ms)),
-            rollout_check: (s.rollout_check_interval_ms != 0)
-                .then(|| local.max(Duration::from_millis(s.rollout_check_interval_ms))),
-        },
+/// The local runtime with the fleet's intervals as floors, for the check
+/// cadence. Without a record the local configuration is unchanged.
+pub fn runtime(local: &RuntimeConfig, settings: Option<&Settings>) -> RuntimeConfig {
+    let mut runtime = local.clone();
+    if let Some(s) = settings {
+        runtime.poll_seconds = check_seconds(local.poll_seconds, s);
+        runtime.rollout_poll_seconds = match s.rollout_check_interval_ms {
+            0 => runtime.poll_seconds,
+            fast => local.rollout_poll_seconds.max(fast.div_ceil(1000)),
+        };
     }
+    runtime
 }
 
-impl Schedule {
-    pub fn next(&self, rollout_active: bool) -> Duration {
-        match self.rollout_check {
-            Some(fast) if rollout_active => fast.min(self.check),
-            _ => self.check,
-        }
-    }
-}
-
-/// A deployment for this device is waiting on a rollout wave or its advance
-/// notice, so admission may arrive before the next routine check.
-pub fn rollout_active(state: &crate::state::State) -> bool {
-    state.deferred.iter().any(|(id, d)| !d.terminal && !state.deployments.contains_key(id)
-        && FAST_REASONS.contains(&d.reason.as_str()))
+/// The routine check interval in seconds: never faster than the fleet's.
+pub fn check_seconds(local_poll_seconds: u64, settings: &Settings) -> u64 {
+    local_poll_seconds.max(settings.check_interval_ms.div_ceil(1000))
 }
 
 /// The slower of the contract-enforced `fleet_data` cadence and the fleet's choice.
@@ -222,46 +202,32 @@ mod tests {
     #[test]
     fn local_configuration_only_slows_the_device() {
         let s = defaults();
+        let local = |poll_seconds, rollout_poll_seconds| RuntimeConfig { poll_seconds, rollout_poll_seconds, ..RuntimeConfig::default() };
+        let intervals = |r: RuntimeConfig| (r.poll_seconds, r.rollout_poll_seconds);
         // Faster local polling never exceeds the fleet's cadence.
-        let fast_local = schedule(10, Some(&s));
-        assert_eq!(fast_local, Schedule { check: Duration::from_secs(1800), rollout_check: Some(Duration::from_secs(60)) });
-        assert_eq!(fast_local.next(false), Duration::from_secs(1800));
-        assert_eq!(fast_local.next(true), Duration::from_secs(60));
+        assert_eq!(intervals(runtime(&local(10, 1), Some(&s))), (1800, 60));
         // A slower local cadence wins for both.
-        let slow_local = schedule(3600, Some(&s));
-        assert_eq!(slow_local.next(false), Duration::from_secs(3600));
-        assert_eq!(slow_local.next(true), Duration::from_secs(3600));
-        // Fast checks off.
-        let off = schedule(10, Some(&Settings { rollout_check_interval_ms: 0, ..s }));
-        assert_eq!(off.next(true), Duration::from_secs(1800));
-        // No record: the local configuration, with no fast checks.
-        assert_eq!(schedule(10, None).next(true), Duration::from_secs(10));
+        assert_eq!(intervals(runtime(&local(3600, 120), Some(&s))), (3600, 120));
+        // Fast checks off: the routine interval everywhere.
+        assert_eq!(intervals(runtime(&local(10, 1), Some(&Settings { rollout_check_interval_ms: 0, ..s }))), (1800, 1800));
+        // Sub-second record values round up, never down.
+        let odd = Settings { check_interval_ms: 300_001, rollout_check_interval_ms: 30_500, ..s };
+        assert_eq!(intervals(runtime(&local(1, 1), Some(&odd))), (301, 31));
+        // No record: the local configuration.
+        assert_eq!(intervals(runtime(&local(10, 1), None)), (10, 1));
+        // The check cadence uses the bounded values.
+        let cadence = crate::cadence::Cadence::default();
+        assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&s)), [].iter(), 0, None).as_secs(), 1800);
+        let waiting = Deferred { control: Control::default(), notified_ms: 0, reason: "waiting for rollout eligibility".into(), terminal: false };
+        assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&s)), [&waiting].into_iter(), 0, None).as_secs(), 60);
+        assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&Settings { rollout_check_interval_ms: 0, ..s })),
+            [&waiting].into_iter(), 0, None).as_secs(), 1800);
         // Health and archives: the fleet_data floor still applies.
         assert_eq!(health_interval_ms(3_600_000, Some(&s)), 86_400_000);
         assert_eq!(health_interval_ms(3_600_000, Some(&Settings { health_interval_ms: 60_000, ..s })), 3_600_000);
         assert_eq!(health_interval_ms(3_600_000, None), 3_600_000);
         assert_eq!(archive_interval_ms(86_400_000, Some(&s)), 604_800_000);
         assert_eq!(archive_interval_ms(86_400_000, None), 86_400_000);
-    }
-
-    #[test]
-    fn fast_checks_only_while_a_rollout_or_notice_is_pending() {
-        let mut state = crate::state::State::default();
-        assert!(!rollout_active(&state));
-        let deferred = |reason: &str, terminal| Deferred { control: Control::default(), notified_ms: 0, reason: reason.into(), terminal };
-        for reason in ["paused", "not yet scheduled", "outside maintenance window", "rollout paused", "ready for admission"] {
-            state.deferred.insert("0x1".into(), deferred(reason, false));
-            assert!(!rollout_active(&state), "{reason}");
-        }
-        state.deferred.insert("0x1".into(), deferred("rollout complete", true));
-        assert!(!rollout_active(&state));
-        for reason in FAST_REASONS {
-            state.deferred.insert("0x1".into(), deferred(reason, false));
-            assert!(rollout_active(&state), "{reason}");
-        }
-        // Already applied (an outcome exists): no longer waiting.
-        state.deployments.insert("0x1".into(), Default::default());
-        assert!(!rollout_active(&state));
     }
 
     #[test]
