@@ -9,7 +9,7 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 
 const page_ = path.resolve(__dirname, "../dapp/src/app/data/page.tsx"), fakes = path.resolve(__dirname, "browser/data-session-fakes.js");
-const faked = new Set(["@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/lib/fleet-data",
+const faked = new Set(["@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/hooks/useFleetDataConfig", "@/hooks/useFleetSelection", "@/lib/fleet-data",
   "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
 const fakeDependencies = { name: "data-session-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => args.importer === page_ && faked.has(args.path) ? { path: fakes } : undefined);
