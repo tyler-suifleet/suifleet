@@ -6,6 +6,7 @@ module fleet_data::fleet_data_tests {
     use sui::coin;
     use sui::sui::SUI;
     use sui::test_scenario::{Self as ts};
+    use sui_edge::customer::{Self, Customer, Fleet as ManagedFleet};
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::{Self, DeviceRegistry, DeviceOwnerCap};
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
@@ -259,6 +260,44 @@ module fleet_data::fleet_data_tests {
         assert!(fleet_data::anchor_count(&writer) == 0);
         ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(budget); ts::return_shared(account);
         ts::return_to_address(OWNER, cap); ts::return_to_address(DEVICE, identity_cap); destroy(system); ts::end(s);
+    }
+
+    fun managed_setup(): (ts::Scenario, System, ID, ID) {
+        let (mut s, system) = setup();
+        s.next_tx(OWNER);
+        let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
+        transfer::public_transfer(cap, OWNER);
+        let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
+        ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
+        let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
+        customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
+        ts::return_shared(c); ts::return_shared(r); ts::return_shared(b); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<ManagedFleet>(); let fid = object::id(&f);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut r = s.take_shared<DeviceRegistry>();
+        let mut a = s.take_shared<GasAccount>(); let cap = s.take_from_sender<DeviceOwnerCap>();
+        customer::adopt_device(&mut c, &mut f, &b, &mut a, &mut r, cap, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r); ts::return_shared(a);
+        (s, system, fid, bid)
+    }
+    #[test]
+    fun customer_approval_preserves_original_archive_identity_after_adoption() {
+        let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
+        let fleet = s.take_shared<FleetData>(); let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut id = fleet_data::identity_prefix(&fleet); id.append(zeros(16));
+        fleet_data::approve_customer_for_testing(id, &fleet, &b, &c, &f, s.ctx());
+        ts::return_shared(fleet); ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun customer_membership_does_not_give_read_only_credentials_archive_keys() {
+        let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); customer::set_credential(&mut c, SUPPORT, true, false, s.ctx());
+        ts::return_shared(c); s.next_tx(SUPPORT);
+        let fleet = s.take_shared<FleetData>(); let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut id = fleet_data::identity_prefix(&fleet); id.append(zeros(16));
+        fleet_data::approve_customer_for_testing(id, &fleet, &b, &c, &f, s.ctx());
+        ts::return_shared(fleet); ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); finish(s, system);
     }
 
 }
