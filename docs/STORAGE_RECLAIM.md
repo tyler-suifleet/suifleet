@@ -225,8 +225,17 @@ so no successful Testnet prune or rebate is claimed. A read-only planner check
 on 2026-10-23 (`scripts/reclaim_plan.cjs`) found Walrus epoch 560 and no
 expired archive; repeats on 2026-10-24 at 04:10 and 05:23 UTC found the same. Once the Walrus epoch
 reaches 563, rerun the same script with `--reclaim` while holding
-`network:suifleet-testnet`. It reuses the cached, re-verified upgrade and
-records the executed rebate.
+`network:suifleet-testnet`, and record the executed rebate.
+
+The UpgradeCap decides what the rerun does, not the source-keyed cache. If
+the cap's latest version already carries this source's bytecode, the run
+reuses it. Otherwise it upgrades compatibly from that latest version. This
+happens, for example, after the SF-121 merge changed `fleet_data` following
+the version-2 upgrade above. Base types must keep the base origin. Every
+later type, including the two reclaim events, must keep the origin of the
+version that introduced it. Only types new in this upgrade may originate in
+it. `scripts/tests/test_live_fleet_reclaim.py` checks these rules offline
+against the committed receipt.
 
 ## Limits
 
