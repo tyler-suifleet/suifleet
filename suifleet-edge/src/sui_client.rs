@@ -376,6 +376,12 @@ impl SuiClient {
     /// A Move object's type, owner and BCS contents, decoded from the node's
     /// object BCS rather than its JSON rendering.
     pub async fn move_object(&self, id: &str) -> anyhow::Result<(String, Owner, Vec<u8>)> {
+        let (object_type, owner, _, contents) = self.versioned_move_object(id).await?;
+        Ok((object_type, owner, contents))
+    }
+
+    /// `move_object` with the object's version (its last mutation).
+    pub async fn versioned_move_object(&self, id: &str) -> anyhow::Result<(String, Owner, u64, Vec<u8>)> {
         let mut request = proto::GetObjectRequest::default();
         request.object_id = Some(id.to_owned());
         request.read_mask = Some(mask(&["bcs"]));
@@ -405,6 +411,7 @@ impl SuiClient {
             sui_sdk_types::ObjectData::Struct(value) => Ok((
                 value.object_type().to_string(),
                 owner,
+                object.version(),
                 value.contents().to_vec(),
             )),
             _ => anyhow::bail!("{id} is not a Move object"),
