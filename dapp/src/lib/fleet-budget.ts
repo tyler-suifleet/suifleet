@@ -161,9 +161,21 @@ export function buildRemoveDeviceTx(budgetId: string, capId: string, accountId: 
 
 /** Enroll an already activated device the owner holds (its owner cap). */
 export function buildEnrollDeviceTx(budgetId: string, capId: string, ownerCapId: string, floatMist: bigint, reserveMist: bigint): Transaction {
+  return buildEnrollDevicesTx(budgetId, capId, [{ ownerCapId, floatMist, reserveMist }]);
+}
+
+/** Atomic enrollment of up to 200 activated devices with distinct owner caps. */
+export function buildEnrollDevicesTx(budgetId: string, capId: string,
+  devices: { ownerCapId: string; floatMist: bigint; reserveMist: bigint }[]): Transaction {
   requireBudget();
+  if (!devices.length || devices.length > 200) throw new Error("Enroll between 1 and 200 devices per transaction");
+  const caps = new Set(devices.map(d => normalizeSuiAddress(d.ownerCapId)));
+  if (caps.size !== devices.length) throw new Error("Duplicate device owner cap");
   const tx = new Transaction();
-  calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, ownerCapId, floatMist, reserveMist, CLOCK);
+  for (const device of devices) {
+    if (device.floatMist < BigInt(0) || device.reserveMist < BigInt(0)) throw new Error("Enrollment funding cannot be negative");
+    calls.fleet_budget_enroll_device(tx, PACKAGE_ID, budgetId, capId, REGISTRY_ID, device.ownerCapId, device.floatMist, device.reserveMist, CLOCK);
+  }
   return tx;
 }
 
