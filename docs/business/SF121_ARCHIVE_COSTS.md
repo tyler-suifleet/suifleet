@@ -96,6 +96,18 @@ published package also predates the TxContext lint repair. Full SF-121 acceptanc
 including device-local quilting, remains outstanding; this evidence must not
 close the issue or establish subscription viability.
 
+The resumed [disposable-chain upgrade harness](../validation/sf121-localnet-upgrade.json)
+passed with current Move source: existing-object bytes were preserved, later
+introduction origins remained distinct, diagnostics worked on an existing writer,
+and both old/new calls refused a revoked device. This closes that specific local
+compatibility check, not pinned Quilt or public current-head acceptance.
+
+A fresh [read-only reference gas observation](../validation/sf121-reference-gas.json)
+verified Mainnet chain `35834a8a` at 100 MIST and Testnet chain `4c78adac` at
+1,000 MIST per gas unit. This is not a mainnet transaction quote: storage charges,
+rebates, WAL and provider charges do not scale by that ratio. No mainnet write or
+subscription-margin conclusion follows.
+
 ## Pinned device-local Quilt geometry
 
 `node scripts/measure_quilt_geometry.cjs` uses the application's exact Walrus
