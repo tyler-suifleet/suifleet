@@ -128,6 +128,17 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     for (const expected of ["#3", "#2", "#1", "granted 2", "2 settled, 1 failed (50%); failure threshold reached"]) assert.ok(detail.includes(expected), `detail lacks ${expected}: ${detail}`);
     await page.close();
 
+    // Active advance reaches the wallet using only chain state: no indexer
+    // token, 120-second telemetry snapshot or periodic fleet-data read exists.
+    page = await open("/rollouts#onchain");
+    await page.getByRole("button", { name: "app 2.0.0" }).click();
+    await page.getByRole("button", { name: "Verify on-chain health and advance" }).click();
+    await waitText(page, "Fixture wallet stopped before signing");
+    const submitted = await page.evaluate(() => window.rolloutTransaction);
+    assert.deepEqual(submitted.commands.map(c => c.MoveCall.function), ["advance_rollout_onchain"]);
+    assert.equal(await page.evaluate(() => sessionStorage.getItem("suifleet.telemetryToken")), null);
+    await page.close();
+
     // Grant and decision times beyond the Date range render raw instead of crashing the page.
     page = await open("/rollouts#far-future");
     await page.getByRole("button", { name: "app 2.0.0" }).click();
@@ -154,7 +165,9 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await page.waitForFunction(() => document.querySelector('[data-testid="search-count"]')?.textContent === "2 of 4 records match.");
     assert.ok((await text(page, "archive-view")).includes("4\t[daemon] shutdown"));
     assert.ok((await text(page, "access-record")).includes(`opened · support ${operator} · device ${d1} archive #3 (diagnostics)`));
-    assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+    const archivePersisted = await page.evaluate(() => Object.values(localStorage).join("\n"));
+    for (const secret of ["Shadow state snapshot", '"speed":1', '"mode":"eco"']) assert.ok(!archivePersisted.includes(secret), "no decrypted archive persisted; public event history may be cached");
     await page.getByRole("button", { name: "Close and discard" }).click();
     await waitText(page, "Archive closed.");
     assert.ok(!(await page.textContent("body")).includes("ERROR disk full"));
@@ -169,7 +182,9 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
       "Shadow big", "integers beyond the exact range", "1 more shadows did not fit"]) assert.ok(docs.includes(expected), `shadow documents lack ${expected}: ${docs}`);
     assert.ok(!docs.includes("18446744073709552000"), "a rounded integer must not be shown");
     assert.equal(await page.locator('[data-testid="shadow-documents"] b').count(), 0, "document strings render as text, never markup");
-    assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    assert.equal(await page.evaluate(() => sessionStorage.length), 0);
+    const shadowPersisted = await page.evaluate(() => Object.values(localStorage).join("\n"));
+    for (const secret of ["Shadow state snapshot", '"speed":1', '"mode":"eco"']) assert.ok(!shadowPersisted.includes(secret), "no decrypted archive persisted; public event history may be cached");
     await page.close();
     page = await open("/shadows#history");
     await waitText(page, "History: archive #2 (sequence 9)");
@@ -180,7 +195,7 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await page.close();
     assert.deepEqual(errors, []);
     console.log("PASS: real browser SF-084 dashboard: verified shadows/streams/messaging/bridge views with stream sequence ranges and export checkpoints, "
-      + "signed encrypted-archive shadow documents (current/history/imprecise/tampered, text-only), alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit (out-of-range times shown raw), archive role gating, literal search, access record and discard");
+      + "signed encrypted-archive shadow documents (current/history/imprecise/tampered, text-only), alert drill-down, forged report hidden and alerts unavailable, aborted rollout overview/stages/audit (out-of-range times shown raw), active on-chain advance without indexer token or daily health reads, archive role gating, literal search, access record and discard");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

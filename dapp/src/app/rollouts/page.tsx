@@ -4,7 +4,6 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDeployments } from "@/hooks/useDeployments";
-import { useTelemetryToken } from "@/hooks/useFleetHealth";
 import { buildRolloutTx, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
 import { PageHeader } from "@/components/ui";
 import { bpsLabel, fetchRolloutDecisions, rolloutProgress, type RolloutProgress } from "@/lib/rollout-progress";
@@ -16,7 +15,7 @@ const defaults: RolloutInput = { component: "", version: "", recipe: "", artifac
   cohorts: [], concurrency: 1, rateCount: 1, rateWindowMs: 60000, bakeMs: 300000,
   minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 600000 };
 export default function RolloutsPage() {
-  const client = useCurrentClient(); const account = useCurrentAccount(); const token = useTelemetryToken();
+  const client = useCurrentClient(); const account = useCurrentAccount();
   const { data: deployments = [] } = useDeployments();
   const [input, setInput] = useState(defaults); const [cohorts, setCohorts] = useState("");
   const [selected, setSelected] = useState(""); const [reason, setReason] = useState(""); const [skip, setSkip] = useState("");
@@ -33,8 +32,8 @@ export default function RolloutsPage() {
   }
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Canary cohorts, bounded admission and audited health gates" />
-    <p>Keep this page available and advance after fresh telemetry arrives. Coordinator state lives on chain and survives browser restarts. No background service submits transactions. Set the telemetry read token on Devices first.</p>
-    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Health is sampled when you advance, with a fresh signed report of this deployment installed.</p>
+    <p>Advance after devices publish their signed post-apply health on chain. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
+    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
       <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(() => buildRolloutTx({ ...input,
@@ -51,7 +50,7 @@ export default function RolloutsPage() {
     {rollout && <div className="space-y-3 border p-4">
       <p role="status">{["Active", "Paused", "Aborted permanently", "Complete"][rollout.state]} · cohort {Number(rollout.cohort) + 1} · decision {rollout.revision}</p>
       <RolloutDetail id={selected} rollout={rollout} />
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, token))}>Verify current health and advance</button>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address))}>Verify on-chain health and advance</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
       {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason))}>{label}</button>)}

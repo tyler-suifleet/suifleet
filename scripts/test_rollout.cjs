@@ -11,18 +11,6 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   const {normalizeSuiAddress:n} = appRequire('@mysten/sui/utils');
   const state = {policy:{concurrency:'1',rate_count:'1',rate_window_ms:'1000',bake_ms:'100',minimum_samples:'1',failure_bps:'5000',offline_timeout_ms:'2000'},members:[n('0x1'),n('0x2')],cohorts:['0','1'],admitted_at:['100','0'],outcomes:[1,0],skipped:[false,false],cohort:'0',state:0,bake_started_ms:'0',progress_ms:'100',revision:'1'};
   const target = {componentName:'app',version:'1'};
-  const health = {[n('0x1')]:{status:'healthy',observedMs:150,components:[{name:'app',version:'1',deployment_id:'0x42',installed:true}]}};
-  assert.deepEqual(r.rolloutHealth(state,'0x42',target,health,200),{online:[n('0x1')],healthy:[n('0x1')],unhealthy:[]});
-  for (const change of [{status:'unverified'},{status:'offline'},{observedMs:99},{observedMs:201},{observedMs:0}]) {
-    assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],...change}},200).healthy.length,0);
-  }
-  assert.equal(r.rolloutHealth(state,'0x43',target,health,200).healthy.length,0);
-  for (const component of [
-    {name:'dependency',version:'1',deployment_id:'0x42',installed:true},
-    {name:'app',version:'2',deployment_id:'0x42',installed:true},
-    {name:'app',version:'1',deployment_id:'0x42',installed:false},
-  ]) assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],components:[component]}},200).healthy.length,0);
-  assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],components:[{name:'dependency',version:'1',deployment_id:'0x42',installed:true},...health[n('0x1')].components]}},200).healthy.length,1);
   const record={id:n('0x42'),creator:n('0xad'),component_name:'app',version:'1',recipe_blob_id:'blob',artifact_sha256:'a'.repeat(64),created_at:'1',schema_version:'3'};
   const object={type:`${m.type_origins['deployment_manager::DeploymentRecord']}::deployment_manager::DeploymentRecord`,content:p.deployment_manager_DeploymentRecordBcs.serialize(record).toBytes()};
   assert.deepEqual(await r.readRolloutTarget({getObject:async()=>({object})},'0x42','0xad'),target);
@@ -33,5 +21,11 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   assert.deepEqual(await r.readRollout({getDynamicField:async args=>{key=args.name.type;return result;}},'0x42'),state);
   assert.equal(key,`${m.type_origins['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey`);
   await assert.rejects(r.readRollout({getDynamicField:async()=>{throw Error('offline');}},'0x42'),/offline/);
-  console.log('PASS: rollout encoders, bounds, duplicate cohorts, mixed-origin BCS, health freshness/deployment binding and fail-closed reads');
+  const client = {getObject:async()=>({object}),getDynamicField:async()=>result};
+  const advance = await r.buildAdvanceRolloutTx(client,'0x42','0xad');
+  const commands = advance.getData().commands;
+  assert.deepEqual(commands.map(c=>c.MoveCall.function), ['advance_rollout_onchain']);
+  assert.equal(commands[0].MoveCall.arguments.length, 4);
+  await assert.rejects(r.buildAdvanceRolloutTx({...client,getDynamicField:async()=>{throw Error('chain offline');}},'0x42','0xad'),/chain offline/);
+  console.log('PASS: rollout encoders, policy bounds, mixed-origin BCS, serverless on-chain advance, creator/type binding and fail-closed reads');
 })().catch(e=>{console.error(e);process.exitCode=1;});
