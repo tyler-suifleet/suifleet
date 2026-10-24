@@ -54,8 +54,8 @@ storage deposits outstanding; it is not a permanent-fee estimate.
 
 The additive `anchor_compact` API and native/browser schema-3 history chain are
 implemented; see [configuration and limitations](../SERVERLESS_FLEET_DATA.md#opt-in-bounded-archive-history-sf-121).
-This bounds the data-history index, not per-blob storage objects. No transaction
-consolidation or Quilt aggregation is included in this change. Health defaults
+This bounds the data-history index, not per-blob storage objects. The original root experiment did not include transaction consolidation or Quilt
+aggregation; the subsequent device-local runtime is documented below. Health defaults
 to daily for new fleets; existing fleets keep their configured cadence. Logs
 remain opt-in, with zero uploads in the default budget estimate.
 
@@ -92,9 +92,9 @@ This public probe used an isolated audit installation of Walrus SDK **1.2.36**
 and Sui SDK **2.37.0**. The application remains pinned to **1.2.35 / 2.36.0**.
 The synthetic roundtrip does not establish the required pinned-SDK Quilt path,
 confidential owner/support access, or current-head upgrade compatibility. The
-published package also predates the TxContext lint repair. Full SF-121 acceptance,
-including device-local quilting, remains outstanding; this evidence must not
-close the issue or establish subscription viability.
+published package also predates the TxContext lint repair. That probe alone did not establish device-local quilting or subscription viability.
+The subsequent pinned encrypted Quilt evidence below closes the runtime gap;
+it still does not establish a subscription margin.
 
 The resumed [disposable-chain upgrade harness](../validation/sf121-localnet-upgrade.json)
 passed with current Move source: existing-object bytes were preserved, later
@@ -182,3 +182,107 @@ computation, storage deposits, WAL, setup and provider costs must stay separate.
 No final subscription price, payment implementation or numerical margin is
 established. The agreed product direction is a device-tier platform subscription
 with purchased status cadence, bounded optional logs and diagnostics allowances.
+
+
+## Implemented pinned encrypted Quilt runtime and operating envelope
+
+The existing daemon now has an opt-in device-local multi-item scheduler, durable
+formation/publication journal, schema-4 signed encrypted item manifest, independent
+patch authentication, browser retrieval and bounded retry/restart recovery.
+[Configuration, bounds and recovery](../SERVERLESS_FLEET_DATA.md#device-local-encrypted-quilts-sf-121).
+It uses one device's existing fleet storage and authority, with no extra server.
+
+[Public effects and independent readback](../validation/sf121-quilt-runtime.json)
+record the actual **Walrus 1.2.35 / Sui 2.36.0** codec and reader roundtrip with
+Node 22.22.2. Two independently signed/Seal-encrypted public synthetic items plus
+an encrypted manifest were certified and compact-anchored. Actual browser reads
+verified owner and support access. Revoking support made a fresh signed support
+session fail with `NoAccessError`, while owner reads still worked; restoring the
+role restored support. Wrong-digest and missing-patch controls were refused through
+the actual storage-node SDK reader. The daemon's native signing/encryption,
+corrupted spool, interrupted formation, offline restart and uncertain-submit
+recovery were tested separately by the real-daemon simulator, not relabeled a
+public native-daemon execution. Local negative tests also cover signature,
+chain/fleet/device/sequence/replay, key epoch, revocation and manifest bounds.
+
+No package was republished and no faucet request was made. The original 500-million
+MIST non-replenishing operator allowance ended at **393,465,439 MIST**, including
+prior failures/reservations, setup, the positive roundtrip and role transitions.
+All eight new effects were independently re-read; the network lock was released.
+
+| Actual public synthetic batch | Bytes / units |
+|---|---:|
+| Signed JSON messages: manifest + two items | 719 + 522 + 532 B |
+| Signed plaintext envelopes, no compression | 1,121 + 857 + 873 B |
+| Seal ciphertexts including manifest | 4,327 B |
+| Quilt blob, including index/padding | 445,556 B |
+| Walrus encoded allocation | 66,034,000 B |
+| Current observed per-upload write fee | 363,951 FROST |
+
+This is a deliberately small authentication fixture, not a typical customer's log
+volume. The separate 8×2-KiB and 8×64-KiB geometry samples above quantify larger
+ciphertext workloads without pretending that synthetic geometry measures a fleet.
+The earlier 2-KiB regular blobs also allocated 66,034,000 encoded bytes. The
+previous write fee of 341,523 FROST was observed at a different time; the price
+change is not evidence of a Quilt premium or saving. Pool storage was prepaid,
+and its purchased epochs are separate from the write fee. The public sample ends
+at Walrus epoch 562; it does not prove six weeks of production retention.
+
+The Quilt's registration/certification/first compact anchor cost **0.014861130
+ testSUI** (0.009212273 + 0.001030858 + 0.004617999). This matches the earlier
+small regular-blob first compact sample. **Quilting an already packed archive
+saves zero transactions and did not lower these measured Sui effects.** Its value
+is independently authenticated items within one lifecycle, including future
+SF-139 opaque streams. There is no cross-device pooling claim.
+
+The [reproducible 28-day operating-envelope arithmetic](../validation/sf121-operating-envelope.json)
+separates explicit cadence choices from Quilt adoption. Reference cash uses the
+measured first compact upload above, earlier second compact upload 0.011183056
+ testSUI, and one observed recurring health report 0.001001469 testSUI. It is
+scenario arithmetic from real effects, **not a constant-cost guarantee, mainnet
+invoice or 1,000-device load test**. First/second archive kinds differed; health
+size/refunds vary. These limitations prevent an unsupported blanket saving.
+
+| 1,000 devices, 28 days, zero retries | Log transactions | Health transactions | Reference Sui subtotal |
+|---|---:|---:|---:|
+| Daily archives, previous hourly health cadence | 84,000 | 672,000 | 989.790810 testSUI |
+| Daily archives, explicitly daily health | 84,000 | 28,000 | 344.844774 testSUI |
+| Weekly archives, explicitly daily health | 12,000 | 28,000 | 76.451430 testSUI |
+
+Packed blobs and Quilts have the **same counts at each cadence**. Moving daily
+archives to weekly removes 72,000 log transactions in this 28-day scenario by
+accepting up to a week of routine-log publication latency. Changing an explicitly
+selected hourly health cadence to daily removes 644,000 health transactions by
+accepting daily health freshness; authentication is preserved. Existing fleets
+are never silently reconfigured. Emergency diagnostics/crashes, deployment
+receipts, setup, pool capacity/retention/renewal, cleanup, providers and operations
+are additional costs. A charged extra computation-only attempt per weekly batch
+adds 4 testSUI across 1,000 devices; real failures can cost more. Lost responses
+reuse the original transaction and never justify buying again.
+
+A concrete bounded software operating envelope is low-volume optional logs,
+owner-configured weekly routine publication, daily authenticated health, a
+2-MiB/4,096-record selected batch, at most 16 encrypted data items, a 4-MiB Quilt,
+and explicit fleet quotas/owner capacity maintenance. The bounded local log ring
+must cover the intended offline window; higher volume needs a larger approved
+allowance or returns backpressure/loss counters, not imaginary free aggregation.
+Six retained weekly archives per device means 6,000 live blob records and
+396,204,000,000 encoded bytes for 1,000 devices at this small-blob geometry;
+daily archives over 42 days mean 42,000 records and 2,773,428,000,000 encoded bytes.
+The whole Quilt shares expiry/deletion/renewal. Protected retention's existing
+1,024-blob ceiling/scanning costs still apply per storage object; finite storage
+still needs funded capacity and owner cleanup. No unattended expiry cleanup or
+infinite capacity is claimed.
+
+The earlier owner-release/burn experiment measured refundable deposits separately.
+It cannot be counted as automatic monthly savings before a real retention-end
+cleanup schedule exists, and the new public Quilt remains retained for readback.
+The cash reference above includes deposits and excludes hypothetical cleanup
+rebates. The lower-cadence envelope is measurable software behavior with explicit
+freshness/volume/maintenance limits, not proof that an illustrative $100/month
+subscription is profitable. Mainnet gas/storage/WAL prices, exchange rates,
+production providers and operations remain separate; no final price or margin is
+approved. Physical/mainnet/final provider/manual-wallet acceptance stays in
+[#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159). Current-head CI and
+independent review remain merge gates.
