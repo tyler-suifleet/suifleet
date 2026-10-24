@@ -46,6 +46,13 @@ poll_seconds = 10
 # Enable only if explicitly replaying old one-shot deployments is safe.
 replay_history = false
 
+# With device inboxes and group heads (SF-125, docs/SHARED_INTERFACES.md) the
+# daemon reads announced deployments from objects every poll and scans events
+# only this often, as a safety net for unannounced deployments. Without them
+# it scans every poll. Event history the node has pruned is then skipped and
+# the device resynchronizes from its inbox and group heads.
+# event_scan_seconds = 60
+
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under
 # state_dir/components for reuse and offline resolution.

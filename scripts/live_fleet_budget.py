@@ -321,7 +321,7 @@ def run(args):
         template = root / "daemon-template.toml"
         template.write_text(f'[device]\nkeypair_path = {json.dumps(str(root / "device/test.key"))}\ndevice_object_id = "{device_id}"\n'
                             f'device_cap_id = "{device_cap}"\n[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\n'
-                            f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 3\n'
+                            f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 3\nevent_scan_seconds = 0\n'
                             f'[budget]\nbudget_id = "{budget}"\nlow_water_mist = 1000000000000\ndraw_mist = {DAEMON_DRAW}\n')
         release = root / "release"
         dm.generate(manifest, release, template)

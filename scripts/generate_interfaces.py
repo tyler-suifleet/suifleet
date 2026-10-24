@@ -98,6 +98,8 @@ def bcs_type(value):
     base, args = generic(value)
     if base == "vector":
         return f"bcs.vector({bcs_type(args[0])})"
+    if base == "std::option::Option":
+        return f"bcs.option({bcs_type(args[0])})"
     if base in ["address", "sui::object::ID", "sui::object::UID"]:
         return "bcs.Address"
     if base == "std::string::String":
@@ -122,6 +124,8 @@ def rust_type(value):
     base, args = generic(value)
     if base == "vector":
         return f"Vec<{rust_type(args[0])}>"
+    if base == "std::option::Option":
+        return f"Option<{rust_type(args[0])}>"
     if base in ["address", "sui::object::ID", "sui::object::UID"]:
         return "[u8; 32]"
     if base == "std::string::String":
@@ -317,6 +321,7 @@ def generate(catalog, recipe):
           f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
+          f'export const INBOX_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_inbox"])} as const;',
           f'export const SETTINGS_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_settings"])} as const;',
           '/** SF-130 per-fleet cost settings: defaults and inclusive bounds, in Move field units. */',
           f'export const FLEET_SETTINGS = {json.dumps(catalog["fleet_settings"])} as const;',
@@ -335,6 +340,7 @@ def generate(catalog, recipe):
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
             'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
             'pub const BUDGET_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_budget"]) + '];',
+            'pub const INBOX_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_inbox"]) + '];',
             'pub const SETTINGS_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_settings"]) + '];',
             *settings_rust(catalog["fleet_settings"]),
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',

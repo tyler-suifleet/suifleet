@@ -329,7 +329,7 @@ def run(rpc_url, faucet_url, upgrade_from=None):
                 f'[device.signer]\nkind = "service"\nsocket = {json.dumps(str(socket_path))}\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components_dir}")}\n'
                 f'timeout_seconds = 30\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_scan_seconds = 0\n'
                 f'[seal]\nmode = "required"\nkey_server_package = "{key_server_package}"\nkey_servers = [{servers_toml}]\n'
                 f'min_threshold = 2\nkey_cache_seconds = 0\nrequest_timeout_seconds = 5\n')
             bundle = root / "release"

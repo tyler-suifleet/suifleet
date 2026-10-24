@@ -66,6 +66,10 @@ pub struct State {
     /// up now, and its last draw. Absent without `[budget]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub funding: Option<crate::funding::Funding>,
+    /// Device inbox and group heads last acted on (SF-125). Absent until the
+    /// deployment manifest has inbox types.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heads: Option<crate::heads::Heads>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Step {

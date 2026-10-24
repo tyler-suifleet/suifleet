@@ -92,7 +92,7 @@ def run(rpc, faucet):
         config.write_text('[sui]\nmanifest_path="deployment.json"\n'
             f'[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{device}"\ndevice_cap_id="{device_cap}"\n'
             f'[apply]\ncommand={json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds=30\n'
-            f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\nreplay_history=true\n')
+            f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\nevent_scan_seconds=0\nreplay_history=true\n')
         def state():
             path = root / "state/state.json"
             return json.loads(path.read_text()) if path.exists() else {}
