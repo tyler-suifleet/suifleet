@@ -71,6 +71,10 @@ the creator can still delete them individually after review.
   confirmed net amount is read back from executed effects.
 - **Batching.** At most 64 entries per call and 256 removals per transaction.
   Larger histories are reclaimed in successive transactions.
+- **Scanning.** The planner lists only the index entries that still exist, so
+  pruned history costs no reads and never blocks later archives. Each device
+  lists at most 1,024 fields per scan, about 512 live archives. Past that,
+  *Continue scan* resumes from the device's listing cursor.
 - **Readers.** `readAnchorEntries` and the public export skip pruned indices.
   `readAnchorAt` reads exactly one index, so a pruned index never resolves to
   the next archive.
