@@ -299,7 +299,7 @@
             "&sui_edge::device_registry::DeviceRegistry",
             "vector<sui::object::ID>",
             "&sui::clock::Clock",
-            "&sui::tx_context::TxContext"
+            "&mut sui::tx_context::TxContext"
           ],
           "returns": []
         },
@@ -584,7 +584,7 @@
             "&sui_edge::device_cap::DeviceCap",
             "bool",
             "&sui::clock::Clock",
-            "&sui::tx_context::TxContext"
+            "&mut sui::tx_context::TxContext"
           ],
           "returns": []
         },
@@ -4479,9 +4479,7 @@
     "deployment_manager::RolloutKey",
     "deployment_manager::Rollout",
     "deployment_manager::RolloutPolicy",
-    "deployment_manager::RolloutDecision",
-    "deployment_manager::RolloutHealthKey",
-    "deployment_manager::RolloutHealth"
+    "deployment_manager::RolloutDecision"
   ],
   "manifest_schema_version": 1,
   "optional_type_origins": {
@@ -4520,6 +4518,10 @@
       "fleet_budget::DeviceStateChanged",
       "fleet_budget::BudgetPaused",
       "fleet_budget::BudgetConfigured"
+    ],
+    "rollout_health": [
+      "deployment_manager::RolloutHealthKey",
+      "deployment_manager::RolloutHealth"
     ]
   },
   "supported_deployment_schema_versions": [

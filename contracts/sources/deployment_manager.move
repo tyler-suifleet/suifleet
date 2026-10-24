@@ -648,9 +648,8 @@ module sui_edge::deployment_manager {
         devices: vector<ID>, healthy: vector<bool>, at_ms: vector<u64>, signers: vector<address>,
     }
 
-    #[allow(lint(prefer_mut_tx_context))]
     public fun report_rollout_health(d: &mut DeploymentRecord, registry: &DeviceRegistry,
-        cap: &DeviceCap, healthy: bool, clock: &Clock, ctx: &TxContext) {
+        cap: &DeviceCap, healthy: bool, clock: &Clock, ctx: &mut TxContext) {
         device_cap::assert_active(cap, registry, ctx);
         let device = device_cap::device_id(cap);
         let r = rollout(d);
@@ -759,7 +758,7 @@ module sui_edge::deployment_manager {
     /// attempted under the existing concurrency/rate/stall limits; a grant is
     /// permission, not evidence that an offline device has started work.
     public fun advance_rollout_onchain(d: &mut DeploymentRecord, registry: &DeviceRegistry,
-        candidates: vector<ID>, clock: &Clock, ctx: &TxContext) {
+        candidates: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
         let r = rollout(d);
         let mut healthy = vector[]; let mut unhealthy = vector[];
         if (df::exists(&d.id, RolloutHealthKey {})) {

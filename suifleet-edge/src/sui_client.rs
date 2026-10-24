@@ -942,6 +942,7 @@ impl SuiClient {
         // outage still propagates and retains the pending journal marker.
         let Some(record) = self.optional_object(deployment).await? else { return Ok(()); };
         if record.fields["schema_version"].as_str() != Some("3") && record.fields["schema_version"].as_u64() != Some(3) { return Ok(()); }
+        anyhow::ensure!(protocol::ROLLOUT_HEALTH_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "rollout health requires an upgraded package and regenerated manifest");
         let component = record.fields["component_name"].as_str().ok_or_else(|| anyhow::anyhow!("missing rollout component name"))?;
         let version = record.fields["version"].as_str().ok_or_else(|| anyhow::anyhow!("missing rollout component version"))?;
         let healthy = applied && crate::telemetry::rollout_healthy(inventory, deployment, component, version);

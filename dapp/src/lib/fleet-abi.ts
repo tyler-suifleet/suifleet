@@ -292,7 +292,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_registry::DeviceRegistry",
           "vector<sui::object::ID>",
           "&sui::clock::Clock",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -577,7 +577,7 @@ export const MOVE_ABI = {
           "&sui_edge::device_cap::DeviceCap",
           "bool",
           "&sui::clock::Clock",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },

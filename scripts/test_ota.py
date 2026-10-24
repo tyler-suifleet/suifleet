@@ -32,6 +32,7 @@ RECIPE_ORIGIN = object_id("0x2")
 REGISTRY = "0xbe"
 UPGRADE_CAP = "0xc0"
 TYPE_ORIGINS = {name: ORIGIN for name in REQUIRED_TYPES}
+TYPE_ORIGINS.update({name: PACKAGE for name in json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())["optional_type_origins"]["rollout_health"]})
 TYPE_ORIGINS["deployment_manager::RecipeDigestKey"] = RECIPE_ORIGIN
 TYPE_ORIGINS["device_cap::DeviceAddressKey"] = PACKAGE
 for _name in ("device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged",

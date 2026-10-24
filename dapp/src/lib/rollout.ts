@@ -4,6 +4,7 @@ import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
 import { calls, deployment_manager_DeploymentRecordBcs, deployment_manager_RolloutBcs } from "./fleet-protocol";
 import { PACKAGE_ID } from "./constants";
+import { ROLLOUT_HEALTH_TYPES } from "./protocol-version";
 import { moveType, requireManifest } from "./deployment-manifest";
 
 export type Rollout = ReturnType<typeof deployment_manager_RolloutBcs.parse>;
@@ -51,6 +52,7 @@ export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">
 }
 export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string) {
   const manifest = requireManifest();
+  if (!ROLLOUT_HEALTH_TYPES.every(name => manifest.type_origins[name])) throw new Error("On-chain rollout health requires an upgraded package and regenerated manifest");
   const [r] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, owner)]);
   const tx = new Transaction();
   calls.deployment_manager_advance_rollout_onchain(tx, PACKAGE_ID, id,

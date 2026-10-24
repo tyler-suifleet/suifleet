@@ -6,11 +6,11 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
-import { BUDGET_TYPES, CATALOG_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES } from "./protocol-version";
+import { BUDGET_TYPES, CATALOG_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES } from "./protocol-version";
 export { BUDGET_TYPES, CATALOG_TYPES, SEAL_POLICY_TYPES } from "./protocol-version";
 function manifestTypes(m: DeploymentManifest): string[] {
   const types: string[] = [...REQUIRED_TYPES];
-  for (const [label, group] of [["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES]] as const) {
+  for (const [label, group] of [["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES], ["rollout health", ROLLOUT_HEALTH_TYPES]] as const) {
     const present = group.filter(name => name in m.type_origins);
     if (present.length && present.length !== group.length) fail(`partial ${label} type origins`);
     types.push(...present);

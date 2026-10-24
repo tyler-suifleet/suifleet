@@ -27,5 +27,15 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   assert.deepEqual(commands.map(c=>c.MoveCall.function), ['advance_rollout_onchain']);
   assert.equal(commands[0].MoveCall.arguments.length, 4);
   await assert.rejects(r.buildAdvanceRolloutTx({...client,getDynamicField:async()=>{throw Error('chain offline');}},'0x42','0xad'),/chain offline/);
+  const legacy = structuredClone(m);
+  delete legacy.type_origins['deployment_manager::RolloutHealthKey'];
+  delete legacy.type_origins['deployment_manager::RolloutHealth'];
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(legacy);
+  const legacyRollout = loader()('lib/rollout.ts');
+  legacyRollout.buildRolloutTx(input); // Existing manifests retain existing APIs.
+  await assert.rejects(legacyRollout.buildAdvanceRolloutTx(client,'0x42','0xad'), /upgraded package/);
+  legacy.type_origins['deployment_manager::RolloutHealthKey'] = m.call_package_id;
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(legacy);
+  assert.throws(()=>loader()('lib/rollout.ts'), /partial rollout health/);
   console.log('PASS: rollout encoders, policy bounds, mixed-origin BCS, serverless on-chain advance, creator/type binding and fail-closed reads');
 })().catch(e=>{console.error(e);process.exitCode=1;});
