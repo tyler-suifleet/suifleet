@@ -44,6 +44,17 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
 (async () => {
  const now = snapshot.observed_ms + 1000;
  async function result(c) { return (await data.fetchChainHealth(c, config, [deviceId], now))[deviceId]; }
+ const {Ed25519Keypair}=appRequire('@mysten/sui/keypairs/ed25519');
+ const key=Ed25519Keypair.fromSecretKey(new Uint8Array(32).fill(7));
+ const daily={...snapshot,interval_seconds:86400};
+ const message=Buffer.from(JSON.stringify(daily));const signed=await key.signPersonalMessage(message);
+ const dailyWriter={...writer,message:[...message],signature:bytes(signed.signature)};
+ const dailyClient=client({f:{...fleet,health_interval_ms:'86400000'},w:dailyWriter});
+ const day=86400000;
+ assert.notEqual((await data.fetchChainHealth(dailyClient,config,[deviceId],snapshot.observed_ms+day/2))[deviceId].status,'unavailable');
+ assert.notEqual((await data.fetchChainHealth(dailyClient,config,[deviceId],snapshot.observed_ms+day/2))[deviceId].status,'offline');
+ assert.equal((await data.fetchChainHealth(dailyClient,config,[deviceId],snapshot.observed_ms+day*4))[deviceId].status,'offline');
+ assert.throws(()=>data.validateHealthSnapshot({...daily,interval_seconds:86401},86400));
  const valid = await result(client());
  assert.notEqual(valid.status, 'unavailable', JSON.stringify(valid));
  assert.equal(valid.observedMs, snapshot.observed_ms);
