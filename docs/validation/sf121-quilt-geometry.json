@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "scope": "offline synthetic ciphertext-length geometry only",
+  "sdk_version": "1.2.35",
+  "num_shards": 1000,
+  "encoding": "RS2",
+  "local_patch_roundtrip": true,
+  "network_roundtrip": false,
+  "source_sha256": "1849b271f0d2c035827c3bbd78e0b88bce5aaaeef01deaec862e90e423893126",
+  "cases": [
+    {
+      "items": 2,
+      "item_bytes": 256,
+      "total_ciphertext_bytes": 512,
+      "packed_blob_bytes": 512,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 445044,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 8,
+      "item_bytes": 256,
+      "total_ciphertext_bytes": 2048,
+      "packed_blob_bytes": 2048,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 443508,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 64,
+      "item_bytes": 256,
+      "total_ciphertext_bytes": 16384,
+      "packed_blob_bytes": 16384,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 429172,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 2,
+      "item_bytes": 2048,
+      "total_ciphertext_bytes": 4096,
+      "packed_blob_bytes": 4096,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 441460,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 8,
+      "item_bytes": 2048,
+      "total_ciphertext_bytes": 16384,
+      "packed_blob_bytes": 16384,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 429172,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 64,
+      "item_bytes": 2048,
+      "total_ciphertext_bytes": 131072,
+      "packed_blob_bytes": 131072,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 314484,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 2,
+      "item_bytes": 65536,
+      "total_ciphertext_bytes": 131072,
+      "packed_blob_bytes": 131072,
+      "quilt_blob_bytes": 445556,
+      "quilt_overhead_bytes": 314484,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 8,
+      "item_bytes": 65536,
+      "total_ciphertext_bytes": 524288,
+      "packed_blob_bytes": 524288,
+      "quilt_blob_bytes": 891112,
+      "quilt_overhead_bytes": 366824,
+      "fits_current_4mib_archive_limit": true,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    },
+    {
+      "items": 666,
+      "item_bytes": 256,
+      "total_ciphertext_bytes": 170496,
+      "packed_blob_bytes": 170496,
+      "quilt_blob_bytes": 7128896,
+      "quilt_overhead_bytes": 6958400,
+      "fits_current_4mib_archive_limit": false,
+      "current_packed_transactions": 3,
+      "quilt_transactions": 3,
+      "health_transactions_removed": 0
+    }
+  ],
+  "limits": [
+    "No actual encryption/compression/erasure-coded sliver measurement or network writes.",
+    "Packed bytes omit application framing; quilting includes SDK index and padding.",
+    "One already-packed archive and one quilt both require three current runtime transactions.",
+    "Cross-device aggregation, gas savings, WAL quotes and a subscription margin are not established."
+  ]
+}

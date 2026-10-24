@@ -96,6 +96,60 @@ published package also predates the TxContext lint repair. Full SF-121 acceptanc
 including device-local quilting, remains outstanding; this evidence must not
 close the issue or establish subscription viability.
 
+## Pinned device-local Quilt geometry
+
+`node scripts/measure_quilt_geometry.cjs` uses the application's exact Walrus
+1.2.35 encoder and Quilt patch reader, with an explicit in-memory byte source.
+It roundtrips every item by patch ID, covers 2 through 666 items, and rejects
+667 items at 1,000 shards. [Machine-readable results](../validation/sf121-quilt-geometry.json)
+include the experiment source hash. This establishes local encoding/patch
+geometry, **not** a storage-node/certification or confidential archive roundtrip.
+
+| Synthetic ciphertext items | Packed payload bytes | Quilt blob bytes |
+|---|---:|---:|
+| 2 × 256 B | 512 | 445,556 |
+| 8 × 2 KiB | 16,384 | 445,556 |
+| 64 × 2 KiB | 131,072 | 445,556 |
+| 8 × 64 KiB | 524,288 | 891,112 |
+
+These are blob bytes before erasure-coded sliver expansion. The packed column
+omits application framing and is a geometry comparison, not a complete encrypted
+archive invoice. Random bytes model ciphertext lengths; this experiment neither
+compresses nor encrypts data. The minimum quilt padding is substantial for small
+device-local batches. The 666-item × 256-byte case produces 7,128,896 blob
+bytes, exceeding the current 4 MiB archive limit; item count alone is not
+a sufficient bound. Splitting an existing packed archive into Quilt patches
+adds per-item framing/encryption overhead and does not itself remove a transaction.
+The current daemon already packs many log records before encrypting one archive.
+
+For an explicit 28-day, 1,000-device comparison with no retries and one health
+write per device per day:
+
+| Archive cadence/design | Registration | Certification | Data anchor | Health | Total transactions |
+|---|---:|---:|---:|---:|---:|
+| Daily current packed archives | 28,000 | 28,000 | 28,000 | 28,000 | 112,000 |
+| Daily per-device quilts | 28,000 | 28,000 | 28,000 | 28,000 | 112,000 |
+| Weekly packed archives | 4,000 | 4,000 | 4,000 | 28,000 | 40,000 |
+| Weekly per-device quilts | 4,000 | 4,000 | 4,000 | 28,000 | 40,000 |
+
+This count excludes setup, renewal, cleanup and deployment receipts, which remain
+separate. It assumes one resulting blob per device per archive interval, not an
+unbounded patch queue. Retaining six weekly archives requires 6,000 live blobs
+for 1,000 devices before cleanup; the existing protected-blob capacity and expiry
+cleanup limits must be accounted for (tracked separately in SF-128/#258 and
+SF-129/#264). Longer batching reduces freshness; retaining health authentication
+keeps all 28,000 health writes. Retrying a node transfer does not require another
+registration; a failed executed transaction still incurs its actual gas and is
+not free. Neither a cross-device quilt nor shared upload transactions are
+implemented or assumed: those need a data rendezvous outside this design.
+
+The geometry therefore supplies no evidence that substituting device-local
+quilts for the existing packed archive improves the measured operating envelope.
+It does not waive the required runtime implementation or demonstrate the example
+subscription price is viable. Prices/profitability need the complete measured
+workload, cleanup and current production quotes; no testnet-to-mainnet divisor
+or fixed subsidy is applied here.
+
 ## Reproduction and spending controls
 
 `scripts/measure_archive_costs.py --help` describes the dedicated testnet probe.
