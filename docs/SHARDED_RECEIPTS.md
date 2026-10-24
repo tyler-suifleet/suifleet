@@ -40,10 +40,12 @@ v3; they cannot represent independently shared objects. Use `receipt_roots`,
 versions fail closed in updated clients. `has_current_receipts` denotes the
 legacy v2 view only. Do not infer a v3 authoritative view from that legacy flag.
 
-`ReceiptDirectory` is attached under `ReceiptShardKey`. Schema 4 is an additive
-barrier; `original_schema` preserves ordinary/catalog/rollout semantics (1/2/3).
-The daemon, dApp and indexer resolve that boundary explicitly. The verified
-manifest records every new type's actual introduction origin. The resolver sets
+`ReceiptDirectory` is attached under `ReceiptShardKey`; its presence identifies
+the shard barrier. Ordinary/rollout records use inline schema 4, while catalog
+records retain inline schema 2 so every previously published handover continues
+to reject them. `original_schema` preserves ordinary/catalog/rollout semantics
+(1/2/3). The daemon, dApp and indexer resolve the directory and relocated fields
+independently of the inline schema. The verified manifest records every new type's actual introduction origin. The resolver sets
 minimum dApp/edge versions to 0.1.1/0.2.2 when the shard types are present, so
 older clients cannot interpret the empty legacy map as the fleet's full result.
 
@@ -52,8 +54,11 @@ writes. **Early deletion APIs do not check schema version**, so migration also
 relocates `TargetGroupsKey` to `ShardedTargetGroupsKey`. Their unconditional old
 field removal then aborts instead of deleting the deployment and orphaning roots.
 Catalog migration similarly removes the binding key understood by old catalog
-deletion. The final current-package deletion restores and removes group targets
-in the same transaction after every root has been retired; there is no externally
+deletion. Keeping inline schema 2 also rejects old ordinary deletion and old
+handover throughout migration, reporting and retirement; the old publisher must
+never remain an authority after a creator-only handover. Supersede catalog
+records under a recipient-owned catalog instead. The final current-package
+deletion restores and removes group targets in the same transaction after every root has been retired; there is no externally
 visible interval in which old deletion is re-enabled with live roots.
 
 ## Resumable migration and deletion

@@ -126,3 +126,72 @@ performed. The normal automatic public-testnet gates remain mandatory on the
 pushed head/current base. Deferred final external acceptance remains in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## PR #301 independent-review repair — 2026-10-24
+
+The reviewer reproduced an old-package handover bypass after catalog sharding:
+inline schema 4 passed the published `schema_version != 2` guard. Catalog records
+now retain inline schema 2 throughout the shard lifecycle. Directory presence
+selects relocated group/binding fields and original payload semantics in Move,
+the dApp, daemon (including final admission) and indexer. Ordinary/rollout records
+continue using schema 4. Removal of catalog authority and final deletion remain
+atomic after all roots have retired.
+
+The snapshot base `b9e8053f4f034ca725686d19870cde6f3f756d63` was already an
+ancestor; `git fetch origin main` and `git merge --no-edit origin/main` reported
+`Already up to date.` No unrelated changes were integrated.
+
+Repair verification (all listed final commands passed):
+
+- `sui move test --path contracts`: **207 passed**, including verbatim legacy
+  handover rejection, current handover rejection and full catalog-root cleanup.
+- `python3 scripts/check_move_security.py`: pinned strict compiler/linters,
+  unchanged diagnostic baseline, all package suites and deliberate bypass
+  negative controls passed.
+- `INSIDE_DEV_CONTAINER=1 make check-interfaces`: compiled ABI/layout and generated
+  client consistency, independent wire vectors and frontend protocol/catalog/
+  control/rollout/shard tests passed.
+- `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml`:
+  **414 passed**, four existing OCI integration tests ignored.
+- `cargo +1.94.0 test --locked --manifest-path suifleet-indexer/Cargo.toml`:
+  **47 passed**.
+- `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`
+  and `cargo +1.94.0 build --locked --manifest-path suifleet-indexer/Cargo.toml`:
+  passed; these rebuilt binaries were used in the client probe.
+- `pnpm typecheck && pnpm build` in `dapp/`: passed, including static export.
+- `python3 scripts/test_protocol_localnet.py --receipt-shards`: compatible
+  base-to-head upgrade; actual published old-package catalog handover rejected
+  before sharding, during populated migration, after readiness and during
+  retirement; old catalog deletion, ordinary deletion and reporting rejected;
+  frontend schema-2 relocated targets/receipts verified; 70 ordinary v2 receipts
+  preserved; 1,000 targets reported with float-sized budgets; all roots cleaned.
+  [Effects, aborts, digests and gas](sf127-localnet.json) record the final run.
+- `python3 scripts/test_protocol_localnet.py --receipt-clients`: pre-identity
+  deletion attack rejected; real daemon reported ordinary and schema-2 catalog
+  v3 failures. The catalog journal error explicitly reached the configured
+  missing-recipe HTTP endpoint, proving catalog authority resolution succeeded
+  before the intentional download failure. The production indexer independently
+  verified both receipts and the relocated catalog version binding. Full bounded
+  cleanup passed. [Client evidence](sf127-clients-localnet.json).
+- `python3 scripts/test_ota.py`, `python3 scripts/test_catalog_ota.py` and
+  `python3 scripts/test_handover_ota.py`: all passed in one disposable root
+  container with its own PID namespace. The handover fixture printed a transient
+  HTTP BrokenPipe diagnostic during interrupted transfer and exited successfully.
+- `git diff --check`: passed.
+
+Move/frontend/localnet checks used `suifleet-dev:sf010-chrome`, pinned Sui 1.81.1,
+Node 22.22.2 and pnpm 11.0.8, with network disabled. The Move dependency cache was
+copied to `/tmp/sf127-fix-move-cache` and mounted writable for package locks;
+Git history was mounted read-only for real base compilation. Initial invocations
+with a read-only or absent Move cache failed setup and were corrected; the host
+has no `pnpm`, so frontend verification used the pinned container. Rust commands
+ran on the host with the locked dependencies and Rust 1.94.0. No public wallet
+was mounted and no public-network writes were performed.
+
+This repair reran the scoped checks above, not every historical check in the
+initial evidence table. Hosted CI/public-testnet results remain pending and are
+not assessed or claimed passed. The coordinator must obtain fresh independent
+review and enforce exact-head/current-base CI before merging. No full 120,000-
+device concurrency benchmark or physical/mainnet/provider/manual-wallet result
+is claimed. Deferred acceptance remains in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
