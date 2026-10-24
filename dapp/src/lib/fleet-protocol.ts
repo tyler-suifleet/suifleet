@@ -74,6 +74,9 @@ export const fleet_handover_HandoverBcs = bcs.struct("Handover", { id: bcs.Addre
 export const fleet_handover_ProgressBcs = bcs.struct("Progress", { handover_id: bcs.Address, object_id: bcs.Address, kind: bcs.u64() });
 export const fleet_handover_ProposedBcs = bcs.struct("Proposed", { handover_id: bcs.Address, source: bcs.Address, recipient: bcs.Address, objects: bcs.vector(bcs.Address), kinds: bcs.vector(bcs.u64()), expires_ms: bcs.u64() });
 export const fleet_handover_StateChangedBcs = bcs.struct("StateChanged", { handover_id: bcs.Address, state: bcs.u8() });
+export const fleet_settings_SettingsBcs = bcs.struct("Settings", { version: bcs.u64(), check_interval_ms: bcs.u64(), rollout_check_interval_ms: bcs.u64(), health_interval_ms: bcs.u64(), archive_interval_ms: bcs.u64(), archive_retention_epochs: bcs.u32() });
+export const fleet_settings_FleetSettingsChangedBcs = bcs.struct("FleetSettingsChanged", { budget_id: bcs.Address, changed_by: bcs.Address, at_ms: bcs.u64(), previous: bcs.option(fleet_settings_SettingsBcs), settings: fleet_settings_SettingsBcs });
+export const fleet_settings_SettingsKeyBcs = bcs.struct("SettingsKey", { dummy_field: bcs.bool() });
 export const roles_DelegatedDeploymentBcs = bcs.struct("DelegatedDeployment", { deployment_id: bcs.Address, role_id: bcs.Address, operator: bcs.Address, delegate: bcs.Address });
 export const roles_DeployerRoleBcs = bcs.struct("DeployerRole", { id: bcs.Address, operator: bcs.Address, groups: bcs.vector(bcs.Address) });
 export const roles_RoleBuilderBcs = bcs.struct("RoleBuilder", { operator: bcs.Address, groups: bcs.vector(bcs.Address) });
@@ -244,6 +247,16 @@ export const calls = {
   fleet_handover_propose: (tx: Transaction, packageId: string, a0: string, a1: string[], a2: (number | bigint | string)[], a3: number | bigint | string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::propose`, arguments: [tx.pure.address(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.u64()).serialize(a2)), tx.pure.u64(a3), tx.object(a4)] }),
   fleet_handover_revoke_role: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::revoke_role`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2), tx.object(a3)] }),
   fleet_handover_state: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::state`, arguments: [tx.object(a0)] }),
+  fleet_settings_archive_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::archive_interval_ms`, arguments: [tx.object(a0)] }),
+  fleet_settings_archive_retention_epochs: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::archive_retention_epochs`, arguments: [tx.object(a0)] }),
+  fleet_settings_check_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::check_interval_ms`, arguments: [tx.object(a0)] }),
+  fleet_settings_defaults: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::fleet_settings::defaults`, arguments: [] }),
+  fleet_settings_health_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::health_interval_ms`, arguments: [tx.object(a0)] }),
+  fleet_settings_new: (tx: Transaction, packageId: string, a0: number | bigint | string, a1: number | bigint | string, a2: number | bigint | string, a3: number | bigint | string, a4: number) => tx.moveCall({ target: `${packageId}::fleet_settings::new`, arguments: [tx.pure.u64(a0), tx.pure.u64(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u32(a4)] }),
+  fleet_settings_rollout_check_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::rollout_check_interval_ms`, arguments: [tx.object(a0)] }),
+  fleet_settings_set: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string, a5: number | bigint | string, a6: number, a7: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::set`, arguments: [tx.object(a0), tx.object(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4), tx.pure.u64(a5), tx.pure.u32(a6), tx.object(a7)] }),
+  fleet_settings_settings: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::settings`, arguments: [tx.object(a0)] }),
+  fleet_settings_version: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::version`, arguments: [tx.object(a0)] }),
   roles_allow_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::roles::allow_group`, arguments: [tx.object(a0), tx.object(a1)] }),
   roles_create_deployment_as: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: string, a4: string, a5: string, a6: string, a7: string[], a8: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::roles::create_deployment_as`, arguments: [tx.object(a0), tx.object(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure.string(a5), tx.pure.string(a6), tx.pure(bcs.vector(bcs.Address).serialize(a7)), tx.object(a8)] }),
   roles_grant: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::roles::grant`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
@@ -346,6 +359,9 @@ export const TYPES = {
   fleet_handover_Progress: "fleet_handover::Progress",
   fleet_handover_Proposed: "fleet_handover::Proposed",
   fleet_handover_StateChanged: "fleet_handover::StateChanged",
+  fleet_settings_Settings: "fleet_settings::Settings",
+  fleet_settings_FleetSettingsChanged: "fleet_settings::FleetSettingsChanged",
+  fleet_settings_SettingsKey: "fleet_settings::SettingsKey",
   roles_DelegatedDeployment: "roles::DelegatedDeployment",
   roles_DeployerRole: "roles::DeployerRole",
   roles_RoleBuilder: "roles::RoleBuilder",

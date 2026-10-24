@@ -20,6 +20,7 @@ mod deps;
 mod firmware;
 mod funding;
 mod fleet_data;
+mod fleet_settings;
 mod fleet_archive;
 mod handoff;
 mod identity;
@@ -458,6 +459,7 @@ async fn main() -> anyhow::Result<()> {
             "Daemon started with durable deployment polling"
         );
         let mut cadence = cadence::Cadence::default();
+        let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
             cadence.begin_poll(telemetry::now_ms());
             let cycle = poll(
@@ -490,8 +492,17 @@ async fn main() -> anyhow::Result<()> {
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(cadence.post_apply_delay(&cfg.runtime, cadence.delay(
-                &cfg.runtime,
+            // The fleet's settings (SF-130) bound when to check next, so an
+            // owner's change applies within one interval.
+            if let Some(budget) = fleet_settings::budget_id(&cfg) {
+                tokio::select! {
+                    read = fleet_settings::read(&sui, budget) => { fleet_settings.update(read); }
+                    _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
+                }
+            }
+            let checks = fleet_settings::runtime(&cfg.runtime, fleet_settings.current());
+            let delay = tokio::time::sleep(cadence.post_apply_delay(&checks, cadence.delay(
+                &checks,
                 journal.state.deferred.values(),
                 telemetry::now_ms(),
                 journal.state.check_window,
@@ -531,7 +542,7 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.post_apply_delay(&cfg.runtime, cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window), pending_rollout_health(&cfg, &journal))
+                            cadence.post_apply_delay(&checks, cadence.delay(&checks, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window), pending_rollout_health(&cfg, &journal))
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }

@@ -255,6 +255,9 @@ fn to_json(value: &prost_types::Value) -> Value {
     }
 }
 
+/// A Move integer as the node renders it (string, or exact safe JSON number).
+pub fn json_u64(value: &Value) -> Option<u64> { number(value) }
+
 fn number(value: &Value) -> Option<u64> {
     value
         .as_str()
@@ -593,6 +596,26 @@ impl SuiClient {
     /// (the implicit dummy_field).
     pub async fn dynamic_field(&self, parent: &str, name: &str) -> anyhow::Result<Option<Value>> {
         self.keyed_field(parent, name, &[0]).await
+    }
+
+    /// The fleet's SF-130 settings record (`fleet_settings::Settings` in a
+    /// dynamic field of its `FleetBudget`), or None when the deployment has
+    /// no settings types or the owner has not created one. The derived ID
+    /// binds the parent and key type; the value type is checked as well.
+    pub async fn fleet_settings(&self, budget_id: &str) -> anyhow::Result<Option<Value>> {
+        let manifest = self.manifest();
+        if !protocol::SETTINGS_TYPES.iter().all(|name| manifest.type_origins.contains_key(*name)) {
+            return Ok(None);
+        }
+        let key = self.move_type(protocol::fleet_settings::SettingsKey::MOVE_TYPE);
+        let value = self.move_type(protocol::fleet_settings::Settings::MOVE_TYPE);
+        let parent = Address::from_str(budget_id)
+            .map_err(|e| anyhow::anyhow!("invalid budget ID {budget_id}: {e}"))?;
+        let id = parent.derive_dynamic_child_id(&TypeTag::Struct(Box::new(StructTag::from_str(&key)?)), &[0]);
+        let Some(field) = self.optional_object(&id.to_string()).await? else { return Ok(None) };
+        let expected = StructTag::from_str(&format!("0x2::dynamic_field::Field<{key}, {value}>"))?;
+        anyhow::ensure!(StructTag::from_str(&field.object_type).ok() == Some(expected), "unexpected fleet settings type {}", field.object_type);
+        Ok(Some(field.fields["value"].clone()))
     }
 
     /// A dynamic field whose key struct has fields, given as their BCS.

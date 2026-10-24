@@ -10,6 +10,25 @@ pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "com
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
+pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
+/// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
+pub mod fleet_settings_values {
+    pub const DEFAULT_CHECK_INTERVAL_MS: u64 = 1800000;
+    pub const MIN_CHECK_INTERVAL_MS: u64 = 300000;
+    pub const MAX_CHECK_INTERVAL_MS: u64 = 21600000;
+    pub const DEFAULT_ROLLOUT_CHECK_INTERVAL_MS: u64 = 60000;
+    pub const MIN_ROLLOUT_CHECK_INTERVAL_MS: u64 = 30000;
+    pub const MAX_ROLLOUT_CHECK_INTERVAL_MS: u64 = 600000;
+    pub const DEFAULT_HEALTH_INTERVAL_MS: u64 = 86400000;
+    pub const MIN_HEALTH_INTERVAL_MS: u64 = 60000;
+    pub const MAX_HEALTH_INTERVAL_MS: u64 = 86400000;
+    pub const DEFAULT_ARCHIVE_INTERVAL_MS: u64 = 604800000;
+    pub const MIN_ARCHIVE_INTERVAL_MS: u64 = 3600000;
+    pub const MAX_ARCHIVE_INTERVAL_MS: u64 = 604800000;
+    pub const DEFAULT_ARCHIVE_RETENTION_EPOCHS: u32 = 3;
+    pub const MIN_ARCHIVE_RETENTION_EPOCHS: u32 = 1;
+    pub const MAX_ARCHIVE_RETENTION_EPOCHS: u32 = 53;
+}
 pub const RECIPE_VERSION: &str = "1.0";
 pub const RECIPE_VERSIONS: &[&str] = &["1.0", "1.1", "1.2", "1.3"];
 pub const STATUS_APPLIED: u8 = 1;
@@ -793,6 +812,44 @@ pub mod fleet_handover {
         pub state: u8,
     }
     impl StateChanged { pub const MOVE_TYPE: &'static str = "fleet_handover::StateChanged"; }
+}
+pub mod fleet_settings {
+    use super::*;
+    pub const MODULE: &str = "fleet_settings";
+    pub const ARCHIVE_INTERVAL_MS: &str = "archive_interval_ms";
+    pub const ARCHIVE_RETENTION_EPOCHS: &str = "archive_retention_epochs";
+    pub const CHECK_INTERVAL_MS: &str = "check_interval_ms";
+    pub const DEFAULTS: &str = "defaults";
+    pub const HEALTH_INTERVAL_MS: &str = "health_interval_ms";
+    pub const NEW: &str = "new";
+    pub const ROLLOUT_CHECK_INTERVAL_MS: &str = "rollout_check_interval_ms";
+    pub const SET: &str = "set";
+    pub const SETTINGS: &str = "settings";
+    pub const VERSION: &str = "version";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Settings {
+        pub version: u64,
+        pub check_interval_ms: u64,
+        pub rollout_check_interval_ms: u64,
+        pub health_interval_ms: u64,
+        pub archive_interval_ms: u64,
+        pub archive_retention_epochs: u32,
+    }
+    impl Settings { pub const MOVE_TYPE: &'static str = "fleet_settings::Settings"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct FleetSettingsChanged {
+        pub budget_id: [u8; 32],
+        pub changed_by: [u8; 32],
+        pub at_ms: u64,
+        pub previous: Option<super::fleet_settings::Settings>,
+        pub settings: super::fleet_settings::Settings,
+    }
+    impl FleetSettingsChanged { pub const MOVE_TYPE: &'static str = "fleet_settings::FleetSettingsChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct SettingsKey {
+        pub dummy_field: bool,
+    }
+    impl SettingsKey { pub const MOVE_TYPE: &'static str = "fleet_settings::SettingsKey"; }
 }
 pub mod roles {
     use super::*;
