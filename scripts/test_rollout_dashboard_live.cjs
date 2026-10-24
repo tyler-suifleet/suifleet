@@ -33,7 +33,7 @@ module.exports = async ({ client, execute, operator, deviceSigner, device, cap, 
   assert.equal(p.state, 'Active'); assert.equal(p.stages[1].skipped, 1);
   const advance = (online) => {
     const tx = new Transaction();
-    protocol.calls.deployment_manager_advance_rollout(tx, packageId, record, online, [], [], '0x6'); return tx; };
+    protocol.calls.deployment_manager_advance_rollout_onchain(tx, packageId, record, registryId, online, '0x6'); return tx; };
   await execute(advance([members[0]]));
   p = await view();
   assert.deepEqual([p.stages[0].granted, p.stages[0].inflight, p.members[0].status], [1, 1, 'granted']);
@@ -49,7 +49,7 @@ module.exports = async ({ client, execute, operator, deviceSigner, device, cap, 
   const { decisions, complete } = await progress.fetchRolloutDecisions(client, record, p.revision);
   assert.equal(complete, true);
   assert.deepEqual(decisions.map(d => [d.revision, d.state, d.reason]), [
-    [5n, 'Aborted', 'failure threshold reached; permanently aborted'], [4n, 'Active', 'admitted online cohort members'],
+    [5n, 'Aborted', 'failure threshold reached; permanently aborted'], [4n, 'Active', 'admitted cohort members'],
     [3n, 'Active', 'retire canary-c'], [2n, 'Paused', 'hold for review'], [1n, 'Active', 'created; no members admitted']]);
   assert.deepEqual(decisions[1].admitted, [id(members[0])]);
   // An aborted rollout cannot be resumed through the dApp's control builder.

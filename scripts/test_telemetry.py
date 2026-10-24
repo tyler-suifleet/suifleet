@@ -190,6 +190,10 @@ def run(binary):
                                                             lifecycle={"run": "exec sleep 300"})
                 wait_for(lambda: outcome("0x401").get("status") == 1 and status().get("phase") == "running",
                          "svc v1 was not applied and running", process)
+                # This test restarts telemetry after a settled receipt. Killing
+                # between submission and its journal save permits an idempotent
+                # receipt retry and does not test spool persistence.
+                wait_for(lambda: outcome("0x401").get("reported"), "svc receipt was not settled", process)
 
                 # Restart while still offline: the spool survives, sequence continues.
                 before = spooled()

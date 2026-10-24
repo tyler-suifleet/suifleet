@@ -94,6 +94,18 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
 
+    def test_optional_rollout_health_origin_group(self):
+        manifest = fixture()
+        manifest["type_origins"][dm.ROLLOUT_HEALTH_TYPES[0]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "partial rollout health"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n: dm.object_id("0x4") for n in dm.ROLLOUT_HEALTH_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.ROLLOUT_HEALTH_TYPES[-1]] = dm.object_id("0x3")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+
     def test_optional_fleet_settings_origin_group(self):
         manifest = fixture()
         manifest["type_origins"][dm.SETTINGS_TYPES[0]] = dm.object_id("0x4")

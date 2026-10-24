@@ -79,3 +79,9 @@ without handover to keep working. Manifest resolution records the new type's own
 introduction package; the dApp verifies that origin before reading a handover.
 Existing DeviceGroup/DeploymentRecord/DeviceOwnerCap origins and layouts remain
 unchanged. See [fleet authority migration](FLEET_HANDOVER.md).
+
+SF-138 adds the all-or-none optional `rollout_health` origin group for
+`deployment_manager::RolloutHealthKey` and `RolloutHealth`. Historical manifests
+and their recovery receipts remain valid without it. The new staged-rollout gate
+requires an upgraded package and regenerated manifest containing the group; it
+never falls back to HTTP or the legacy creator-attested gate.
