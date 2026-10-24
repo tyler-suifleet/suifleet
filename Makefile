@@ -64,6 +64,7 @@ test-native-seal:
 # example (suifleet-edge/examples/grpc_sim_shim.rs).
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
@@ -338,6 +339,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_compact_archives.cjs
 	$(RUN) node scripts/test_archive_quilt.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_archive_envelope.py
 	$(RUN) node scripts/measure_quilt_geometry.cjs --check
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
