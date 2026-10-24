@@ -78,6 +78,8 @@ let stage = "startup";
     assert.equal(groups.length, 1);
     stage = "group membership"; await execute(sui.buildAddDeviceToGroupTx(groups[0].objectId, devices[0]));
     groups = await sui.fetchGroups(client, operator.toSuiAddress()); assert.deepEqual(groups[0].deviceIds, [devices[0].objectId]);
+    stage = "serverless ops CLI";
+    await require("./test_serverless_ops_live.cjs")({ manifest, temporary, operator, group: groups[0].objectId, device: devices[0], execute });
     stage = "reissue cap"; await execute(sui.buildIssueCapTx(devices[0]));
     const caps = await client.listOwnedObjects({ owner: deviceSigner.toSuiAddress(), type: `${packageId}::device_cap::DeviceCap` });
     assert.equal(caps.objects.length, 2);

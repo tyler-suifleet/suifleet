@@ -1,5 +1,9 @@
 # Protected prepaid retention (SF-092)
 
+SuiFleet hosts no retention scheduler. Browser actions and prepaid on-chain
+policies are the product path. Worker examples below are optional customer-run
+automation; funding alone does not promise execution. See [ownership](SERVERLESS_PRODUCT.md).
+
 SF-083 is merged and integrated. This guide describes the finite prepaid policy,
 independent executor and failure behavior implemented by PR #232. Verification
 and its limits are recorded in [the validation receipt](validation/sf092-local.json);

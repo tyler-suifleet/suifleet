@@ -83,7 +83,7 @@ export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">
     normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
   return { componentName: record.component_name, version: record.version };
 }
-export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, token: string) {
+export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, id: string, owner: string, token = "") {
   requireManifest();
   const [r, target] = await Promise.all([readRollout(client, id), readRolloutTarget(client, id, owner)]);
   const health = await fetchFleetHealth(client, r.members, owner, undefined, token);
