@@ -38,7 +38,7 @@ class Worker:
         if self.state['version'] != 1 or self.state['binding'] != self.binding():
             self.lock.close()
             raise ValueError('state belongs to another executor configuration')
-        if len(self.state['pending']) > 1024 or self.path.exists() and self.path.stat().st_size > 4 * 1024 * 1024:
+        if len(self.state['pending']) > 100_000 or self.path.exists() and self.path.stat().st_size > 128 * 1024 * 1024:
             raise ValueError('state exceeds disk limit; preserve and inspect it')
         self.transport = transport or self.call
 
@@ -48,7 +48,7 @@ class Worker:
 
     def save(self):
         data = json.dumps(self.state, sort_keys=True).encode()
-        if len(data) > 4 * 1024 * 1024:
+        if len(data) > 128 * 1024 * 1024:
             raise ValueError('retention state full; backpressure, no entries discarded')
         temp = self.path.with_suffix('.tmp')
         fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -70,7 +70,7 @@ class Worker:
         if result.returncode:
             # Transport output can contain provider details; keep diagnostics local/minimal.
             raise RuntimeError('retention transport failed')
-        if len(result.stdout) > 2 * 1024 * 1024:
+        if len(result.stdout) > 64 * 1024 * 1024:
             raise RuntimeError('transport response exceeds limit')
         return json.loads(result.stdout)
 
@@ -141,7 +141,7 @@ class Worker:
         now = time.time() if now is None else now
         snapshot = self.transport('snapshot')
         blobs = snapshot['blobs']
-        if len(blobs) > 1024:
+        if len(blobs) > 100_000:
             raise ValueError('blob limit exceeded; no work discarded')
         self.state.pop('worker_error', None)
         self.state['snapshot'] = snapshot

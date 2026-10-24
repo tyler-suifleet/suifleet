@@ -70,12 +70,16 @@ def main(script="scripts/test_protocol_live.cjs"):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--handover-upgrade", action="store_true")
+    parser.add_argument("--retention-keyed-upgrade", action="store_true", help="SF128 populated upgrade, expiry and device checks without repeating the scale population")
+    parser.add_argument("--retention-scale-upgrade", action="store_true")
     parser.add_argument("--retention-upgrade", action="store_true")
     parser.add_argument("--device-retention-upgrade", action="store_true")
     parser.add_argument("--budget-upgrade", action="store_true", help="SF-083 fleet budget upgrade, attacks and daemon draws")
     parser.add_argument("--fleet-data-upgrade", action="store_true", help="SF-082 existing-object/data-package upgrade with real pinned Walrus dependencies")
     parser.add_argument("--budget-enrollment", action="store_true", help="SF-132 1000-device gas-account batching and measurements")
     args = parser.parse_args()
+    if args.retention_keyed_upgrade: os.environ["SF128_UPGRADE_ONLY"] = "1"
+    if args.retention_scale_upgrade or args.retention_keyed_upgrade: os.environ["SF128_SCALE_UPGRADE"] = "1"
     if args.device_retention_upgrade: os.environ["SF082_DEVICE_POLICY_UPGRADE"] = "1"
-    main("scripts/test_budget_enrollment_localnet.cjs" if args.budget_enrollment else "scripts/test_fleet_data_upgrade.cjs" if args.fleet_data_upgrade else "scripts/test_retention_upgrade.cjs" if args.retention_upgrade or args.device_retention_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
+    main("scripts/test_budget_enrollment_localnet.cjs" if args.budget_enrollment else "scripts/test_fleet_data_upgrade.cjs" if args.fleet_data_upgrade else "scripts/test_retention_upgrade.cjs" if args.retention_upgrade or args.device_retention_upgrade or args.retention_scale_upgrade or args.retention_keyed_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
          else "scripts/test_budget_upgrade.cjs" if args.budget_upgrade else "scripts/test_protocol_live.cjs")
