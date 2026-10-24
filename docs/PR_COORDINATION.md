@@ -761,7 +761,10 @@ it rechecks the following:
 - a stopped original PID/start identity and session;
 - no live process carrying the claim token. A same-user process whose environment
   cannot be read (for example a nondumpable helper) counts as carrying it, so the
-  wait continues;
+  wait continues. This includes unrelated nondumpable processes such as `ssh` or
+  `gpg-agent` started after the worker. The wait reason names each PID and command
+  so an operator can stop it or recover explicitly. The dispatcher's
+  implementation fence applies the same rule;
 - no live lock naming the claim's session or ticket;
 - no unfinished git operation;
 - an open same-repository PR on the branch;

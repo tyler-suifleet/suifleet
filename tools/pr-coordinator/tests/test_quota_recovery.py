@@ -137,6 +137,10 @@ def nondumpable(test, token):
     test.skipTest('nondumpable process environ remains readable (privileged test runner)')
 
 
+def comm(child):
+    return Path(f'/proc/{child.pid}/comm').read_text().strip()
+
+
 class Inspection(unittest.TestCase):
     def test_denied_inspection_is_reported_never_skipped(self):
         token = uuid.uuid4().hex
@@ -263,7 +267,8 @@ class Implementation(Recovery):
         child = nondumpable(self, self.claim['token'])
         self.run_retry(); self.run_retry()
         self.assertEqual(tuple(self.worker.db.execute('SELECT state,reason FROM capacity_retries').fetchone()),
-                         ('waiting', 'original worker, session descendant or detached claim helper not verified stopped'))
+                         ('waiting', f'an uninspectable same-user process may carry the claim token (pid {child.pid} {comm(child)}); '
+                                     'stop it or recover explicitly'))
         self.assertEqual(self.worker.db.execute('SELECT count(*) FROM runs').fetchone()[0], 1, 'no replacement')
         child.kill(); child.wait()
         self.run_retry()
@@ -442,7 +447,8 @@ class Repair(Fixture):
         self.collect(); self.collect()
         self.assertEqual(self.job_row()['status'], 'quota_wait')
         self.assertEqual(self.engine.store.db.execute('SELECT reason FROM quota_recoveries').fetchone()[0],
-                         'a live process still carries the claim token')
+                         f'an uninspectable same-user process may carry the claim token (pid {child.pid} {comm(child)}); '
+                         'stop it or recover explicitly')
         self.assertEqual(self.engine.children, {}, 'no replacement')
         self.assertFalse(Path(str(self.marker)+'.resumed').exists())
         child.kill(); child.wait()

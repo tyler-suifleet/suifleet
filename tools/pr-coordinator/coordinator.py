@@ -573,6 +573,22 @@ def claim_processes(token, started):
     return found
 
 
+def uninspectable_reason(found):
+    """Name denied-inspection processes so an operator can stop one or recover explicitly."""
+    hidden = []
+    for process in found:
+        if process.get('uninspectable'):
+            try:
+                name = Path(f"/proc/{process['pid']}/comm").read_text().strip()
+            except OSError:
+                name = '?'
+            hidden.append(f"{process['pid']} {name}")
+    if hidden:
+        return ('an uninspectable same-user process may carry the claim token (pid '+', '.join(hidden)
+                +'); stop it or recover explicitly')
+    return None
+
+
 class Coordinator:
     def __init__(self, config, state):
         if set(config['workers']) != FAMILIES or any(not isinstance(c,list) or not c or not all(isinstance(v,str) for v in c) for c in config['workers'].values()):
@@ -914,8 +930,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         if (not worker_stopped(row['pid'], row['started'])
                 or json.loads((source/'process.json').read_text()) != dict(pid=row['pid'], started=row['started'])):
             return owner, 'original repair process identity not verified stopped'
-        if claim_processes(token, row['started']):
-            return owner, 'a live process still carries the claim token'
+        if found := claim_processes(token, row['started']):
+            return owner, uninspectable_reason(found) or 'a live process still carries the claim token'
         now = time.time()
         for lock in json.loads(self.ticket(project, 'locks')):
             if lock.get('expired') or (lock.get('expires') or 0) <= now:

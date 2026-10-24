@@ -18,7 +18,7 @@ from urllib.parse import quote
 import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
-                         failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes,
+                         failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
                          QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
@@ -1660,8 +1660,10 @@ First inspect git status/log and the current-head CI, then continue the unfinish
         identity = self.stopped_identity(row)
         if identity != dict(pid=row['pid'], started=row['started']):
             return 'original process identity changed or unavailable'
-        if identity is None or self.claim_helpers(claim) or self.capacity_helpers(claim, identity['started']):
+        if identity is None or self.claim_helpers(claim):
             return 'original worker, session descendant or detached claim helper not verified stopped'
+        if found := self.capacity_helpers(claim, identity['started']):
+            return uninspectable_reason(found) or 'original worker, session descendant or detached claim helper not verified stopped'
         if self.owner_locks(project, claim):
             return 'owner still holds a shared-resource lease'
         if run(['git', 'branch', '--show-current'], cwd=claim['worktree']).strip() != claim['branch']:
