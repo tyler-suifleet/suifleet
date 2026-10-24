@@ -11,7 +11,7 @@ import shutil
 import subprocess
 import tempfile
 from urllib.request import Request, urlopen
-from test_desired_state_localnet import wait_for
+from test_desired_state_localnet import base_contracts, wait_for
 import deployment_manifest as dm
 from types import SimpleNamespace
 from test_ota import Simulator, ARTIFACT
