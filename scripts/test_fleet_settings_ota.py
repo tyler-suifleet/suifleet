@@ -10,9 +10,10 @@ daemon's settings reads and event scans:
 - with no record the device checks at its local poll interval;
 - a newer-version record and an out-of-bounds record are refused and the
   settings in force (here the local configuration) stay applied;
-- while a deployment is in its advance-notice period, a valid record's fast
-  checks apply from the next check: the following check comes after the
-  fleet's 30 s fast interval, not the local 1 s;
+- while a deployment is in its advance-notice period inside an open
+  maintenance window (a fast-check state of the SF-123 check cadence), a
+  valid record's fast checks apply from the next check: the following check
+  comes after the fleet's 30 s fast interval, not the local 1 s;
 - the owner then turns fast checks off; the daemon picks that up at its next
   check (within one interval) and then waits for the 5-minute routine
   interval, making no chain requests meanwhile;
@@ -128,7 +129,7 @@ def run(binary):
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{ota.DEVICE}"\ndevice_cap_id = "{ota.CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 2\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nrollout_poll_seconds = 1\n'
                 f'[budget]\nbudget_id = "{budget.BUDGET}"\nlow_water_mist = {budget.LOW_WATER}\n')
             log_path = root / "daemon.log"
 
@@ -166,10 +167,13 @@ def run(binary):
                     assert "Fleet settings applied" not in log()
                     print("PASS: newer-version and out-of-bounds records were refused; the settings in force stayed applied")
 
-                    # A deployment in its advance-notice period: admission may come before a routine check.
+                    # A deployment in its advance-notice period inside an open
+                    # maintenance window: the check cadence uses fast checks.
                     sim.settings = None
+                    now_ms = int(time.time() * 1000)
                     sim.controls["0x300"] = {"revision": 1, "state": 0, "not_before_ms": 0, "expires_ms": 0,
-                                             "window_start_ms": 0, "window_end_ms": 0, "notice_ms": 600_000}
+                                             "window_start_ms": now_ms - 3_600_000, "window_end_ms": now_ms + 86_400_000,
+                                             "notice_ms": 600_000}
                     sim.add("0x300")
                     ota.wait_for(lambda: state().get("deferred", {}).get("0x300", {}).get("reason") == "advance notice",
                                  "notice not observed", process)
