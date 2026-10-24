@@ -856,7 +856,7 @@ impl SuiClient {
                 let parent = self.object(parent_id).await?;
                 let expected = format!("0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<{origin}::customer::DeviceKey>,0x2::object::ID>");
                 anyhow::ensure!(
-                    same_type(&parent.object_type, &expected),
+                    StructTag::from_str(&parent.object_type).ok() == Some(StructTag::from_str(&expected)?),
                     "wrong managed custody field type"
                 );
                 let Owner::Object(fleet_id) = &parent.owner else {
