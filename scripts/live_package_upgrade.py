@@ -39,12 +39,15 @@ signing. A run that finds such a marker reconciles it against executed effects
 (adopt, clear a failed or provably dead transaction, or resubmit the identical
 bytes) instead of refusing forever or republishing. The whole selected suite
 sequence (--required-balance-mist) is funded and gas-pool-checked up front.
+One user-authorized historical incident (QUARANTINE_INCIDENTS) is instead
+quarantined once, with its reservation held, and a fresh isolated fixture used.
 
 Usage (make live-gate-package-upgrade sets these from the environment):
   live_package_upgrade.py --wallet CLIENT_YAML [--network testnet] [--base-ref REF]
                           [--max-spend-mist N] [--evidence FILE]
 """
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -79,6 +82,27 @@ PACKAGE_GAS = 400_000_000  # Publish/upgrade budget: the largest single gas rese
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
                      "chain facts unavailable", "transport error", "error trying to connect")
+
+
+# User-authorized (2026-10-24) one-time abandonment of ONE poisoned disposable CI
+# fixture: run 40095854988 (PR275) timed out submitting 'publish base' for base
+# b9e8053, before transaction identities were retained, so its historical marker
+# could still execute through epoch 1263. Rather than wait for expiry, the marker,
+# its provenance and its conservative reservation move to a durable quarantine
+# record, and a fresh isolated fixture is published once. The old transaction is
+# never resubmitted or declared failed; a late execution can only create
+# unreferenced disposable test objects. Not a general bypass: never extend this
+# to skip normal reconciliation or identical-code reuse.
+QUARANTINE_INCIDENTS = {
+    "sf146-run40095854988": {
+        "operator": "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac",
+        "fixture_key": "bytecode-v1:e832d92e945fd7c91511541d0d113abc2a3c4dd37f70a6f276c246c3271afb50@1.81.1-e04cf9aa915c",
+        "label": "publish base",
+        "reserved_mist": 400_000_000,  # Charged as unknown by the source run; never released here.
+        "source": {"run": 40095854988, "head": "c50d39902848278b550717a29cd044e73485afd2",
+                   "base": "b9e8053f4f034ca725686d19870cde6f3f756d63", "epoch": 1262, "checkpoint": 398674879},
+    },
+}
 
 
 class FundingShortfall(RuntimeError):
@@ -138,6 +162,76 @@ def matching_fixture(state, base_digest, head_digest, tools, framework):
                 and proof.get("framework") == framework):
             return fixture
     return None
+
+
+def incidents_for(operator):
+    return {name: spec for name, spec in QUARANTINE_INCIDENTS.items()
+            if dm.object_id(spec["operator"]) == dm.object_id(operator)}
+
+
+def held_reservations(state, operator):
+    """Gas a historical uncertain transaction of this wallet may still charge, held
+    back from funding until its outcome is known."""
+    held = 0
+    for name, spec in incidents_for(operator).items():
+        record = state.get("quarantine", {}).get(name)
+        if record is None:
+            pending = state.get("publications", {}).get(spec["fixture_key"], {}).get("pending_operation")
+            outstanding = pending is not None
+        else:
+            outstanding = record["status"] == "unresolved"
+        held += spec["reserved_mist"] if outstanding else 0
+    return held
+
+
+def quarantine_incident(state, key_name, operator, publication, error, now):
+    """Move the one authorized historical publication aside, at most once.
+    Only an unexpired legacy marker with no recorded objects qualifies."""
+    for name, spec in incidents_for(operator).items():
+        if spec["fixture_key"] != key_name:
+            continue
+        if name in state.setdefault("quarantine", {}):
+            return None  # One time only: a later uncertainty is reconciled normally.
+        marker = publication.get("pending_operation")
+        if not (isinstance(error, reconciler.Unexpired) and isinstance(marker, dict) and marker.get("legacy")
+                and marker.get("label") == spec["label"] and "base_package" not in publication):
+            return None
+        record = state["quarantine"][name] = {
+            "fixture_key": key_name, "label": spec["label"], "status": "unresolved", "quarantined": now,
+            "reserved_mist": spec["reserved_mist"], "source": spec["source"], "reason": str(error),
+            "publication": copy.deepcopy(publication)}
+        del state["publications"][key_name]
+        return record
+    return None
+
+
+def observe_quarantine(state, key_name, operator, chain, built, now):
+    """Read-only: record how each quarantined historical transaction eventually
+    ended. Its effects are never adopted; a late execution created only isolated
+    disposable objects. Its reservation stays held while unresolved."""
+    for record in state.get("quarantine", {}).values():
+        # The fresh fixture's UpgradeCap must be recorded, or the scan could mistake it for the old one.
+        if record["status"] != "unresolved" or record["fixture_key"] != key_name or key_name not in state["fixtures"]:
+            continue
+        marker = record["publication"]["pending_operation"]
+        try:
+            outcome, value = reconciler.legacy_publication(
+                marker, chain=chain, operator=operator, built=built, known=reconciler.known_objects(state), now=now)
+        except reconciler.Uncertain as error:
+            record["last_observation"] = {"at": now, "reason": str(error)}
+            continue
+        if outcome == "executed":
+            record.update(status="executed_late", digest=value["digest"], gas_mist=value["gas_mist"],
+                          isolated_objects=[c.get("packageId") or c["objectId"] for c in value["objectChanges"]])
+        else:
+            record.update(status="never_executed", reason=value)
+        record["resolved"] = now
+
+
+def quarantine_summary(state):
+    return {name: {k: record.get(k) for k in ("status", "reserved_mist", "source", "quarantined", "resolved",
+                                              "digest", "gas_mist", "isolated_objects", "reason")}
+            for name, record in state.get("quarantine", {}).items()}
 
 
 def checkpoint_setup(state_path, state, publication, label, action, ledger, now=time.time):
@@ -374,11 +468,15 @@ def run(args):
             '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965',
             '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac',
         }, 'wallet is outside dedicated testnet grant'
-    # Fund the whole selected suite sequence up front, never one suite at a time.
-    required = max(args.max_spend_mist, getattr(args, "required_balance_mist", None) or 0)
+    state_path = Path(args.state) if args.state else wallet.parent / "live-state.json"
+    state = load_state(state_path, chain, operator)
+    # Fund the whole selected suite sequence up front, never one suite at a time,
+    # holding back what a quarantined historical transaction may still charge.
+    held = held_reservations(state, operator)
+    required = max(args.max_spend_mist, getattr(args, "required_balance_mist", None) or 0) + held
     pools = gas_pools(client("gas"))
     start_balance, shortfall = sum(pools), funding_shortfall(pools, required)
-    evidence["funding"] = {"required_mist": required, "address_mist": pools[0], "coin_mist": pools[1]}
+    evidence["funding"] = {"required_mist": required, "held_mist": held, "address_mist": pools[0], "coin_mist": pools[1]}
     if shortfall and args.faucet_tool:
         assert args.network == 'testnet', 'faucet only on testnet'
         # Only the verified, checksum-pinned transaction CLI requests funds.
@@ -446,8 +544,10 @@ def run(args):
             evidence["toolchain"]["framework"] = {
                 "base": toolchain.framework_pins(staging / "contracts/Move.lock"),
                 "head": toolchain.framework_pins(ROOT / "contracts/Move.lock")}
-            state_path = Path(args.state) if args.state else wallet.parent / "live-state.json"
-            state = load_state(state_path, chain, operator)
+            if state.get("quarantine"):
+                observe_quarantine(state, key_name, operator, reconciler.Chain(rpc_url), base_built, time.time())
+                save_state(state_path, state)
+                evidence["quarantine"] = quarantine_summary(state)
             common = ["--build-env", "testnet", "--pubfile-path", pubfile, "--silence-warnings"]
             key = root / "device.key"
             fixture = state["fixtures"].get(key_name) or matching_fixture(
@@ -530,14 +630,30 @@ def run(args):
                     publication["built"] = built
                     save_state(state_path, state)
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
-                if "base_package" not in publication:
-                    first = step("publish base", lambda persist: mutate("publish base", toolchain.package_submitter(
+                def publish_base():
+                    return step("publish base", lambda persist: mutate("publish base", toolchain.package_submitter(
                         client, tools["build"]["path"], package_dir, common, sender=operator,
                         record=built.setdefault("base", {}), persist=persist), gas=PACKAGE_GAS),
                         lambda data, tx: toolchain.verify_package_transaction(data, base_built, sender=operator, budget=tx["gas_budget"]),
                         legacy=lambda marker: reconciler.legacy_publication(
                             marker, chain=facts_reader, operator=operator, built=base_built,
                             known=reconciler.known_objects(state), now=time.time()))
+                if "base_package" not in publication:
+                    try:
+                        first = publish_base()
+                    except reconciler.Unexpired as error:
+                        record = quarantine_incident(state, key_name, operator, publication, error, time.time())
+                        if record is None:
+                            raise
+                        # Durable before anything new is built or signed: never quarantined twice.
+                        publication = state["publications"][key_name] = {
+                            "source_pair": [base_tree, head_tree], "compiler": tools["build"]["version"], "built": {}}
+                        built = publication["built"]
+                        save_state(state_path, state)
+                        evidence["quarantine"] = quarantine_summary(state)
+                        check(f"quarantined historical uncertain 'publish base' (held {record['reserved_mist']} MIST, "
+                              f"source run {record['source']['run']}); publishing one fresh isolated fixture")
+                        first = publish_base()
                     built["base"] = package_proof(base_built, "publish")  # The verified bytes are exactly base_built.
                     save_publication(base_package=published(first), registry=created(first, "::device_registry::DeviceRegistry")[0],
                                      upgrade_cap=created(first, "::package::UpgradeCap")[0])

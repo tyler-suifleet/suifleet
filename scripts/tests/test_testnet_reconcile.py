@@ -608,6 +608,161 @@ class RunFlow(unittest.TestCase):
             self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))
 
 
+class Quarantine(unittest.TestCase):
+    """User-authorized one-time abandonment of one historical uncertain fixture."""
+    INCIDENT = 'sf146-test-incident'
+
+    def incident(self, key, operator=ADDRESS):
+        return patch.dict(live.QUARANTINE_INCIDENTS, {self.INCIDENT: {
+            'operator': operator, 'fixture_key': key, 'label': 'publish base', 'reserved_mist': 400_000_000,
+            'source': {'run': 40095854988, 'epoch': 1262}}}, clear=True)
+
+    def published(self):
+        return {'digest': 'N1', 'effects': {'status': {'status': 'success'}, 'gasUsed': {
+            'computationCost': '3000000', 'storageCost': '86000000', 'storageRebate': '0'}},
+            'objectChanges': [{'type': 'published', 'packageId': HEAD},
+                              {'type': 'created', 'objectType': HEAD + '::device_registry::DeviceRegistry', 'objectId': REGISTRY},
+                              {'type': 'created', 'objectType': '0x2::package::UpgradeCap', 'objectId': CAP}]}
+
+    def submitter(self, calls, persisted):
+        def submitter(*args, persist, record, **kwargs):
+            def command(budget):
+                calls.append(budget)
+                persisted.append(json.loads((self.root / 'state.json').read_text()))
+                persist({'tx_bytes': 'NEW', 'digest': 'N1', 'sender': tc.normal(ADDRESS), 'gas_budget': budget,
+                         'gas_payment': [], 'expiration': {'kind': 'ValidDuring', 'max_epoch': '1263'}})
+                return self.published()
+            return command
+        return submitter
+
+    def flow(self, state, *, incident=True, key_override=None, balance='2000000000'):
+        flow = RunFlow()
+        args, key, patches, commands = flow.harness(self.root, state, balance=balance)
+        calls, persisted = [], []
+        extra = [patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=1262)),
+                 patch.object(live.toolchain, 'package_submitter', side_effect=self.submitter(calls, persisted)),
+                 patch.object(live, 'verify_publication', side_effect=RuntimeError('stop at publication verification'))]
+        if incident:
+            extra.append(self.incident(key_override or key))
+        error = None
+        try:
+            flow.run_flow(args, patches, extra)
+        except Exception as raised:
+            error = raised
+        saved = json.loads((self.root / 'state.json').read_text())
+        evidence = json.loads((self.root / 'evidence.json').read_text())
+        return key, error, saved, evidence, calls, persisted
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def test_authorized_incident_is_quarantined_once_and_one_fresh_fixture_published(self):
+        key, error, saved, evidence, calls, persisted = self.flow(RunFlow().state_with('publish base'))
+        self.assertRegex(str(error), 'stop at publication verification')
+        record = saved['quarantine'][self.INCIDENT]
+        self.assertEqual(record['status'], 'unresolved')
+        self.assertEqual(record['reserved_mist'], 400_000_000)
+        self.assertEqual(record['source']['run'], 40095854988)
+        historical = record['publication']['pending_operation']  # Complete provenance kept, never cleared.
+        self.assertTrue(historical['legacy'])
+        self.assertEqual((historical['label'], historical['observed']['epoch']), ('publish base', 1262))
+        self.assertEqual(len(calls), 1)  # Exactly one fresh publication.
+        self.assertIn(self.INCIDENT, persisted[0]['quarantine'])  # Durable before the fresh one is signed.
+        fresh = saved['publications'][key]
+        self.assertEqual(fresh['base_package'], HEAD)
+        self.assertNotIn('pending_operation', fresh)
+        # The old reservation and this run's cost are accounted separately.
+        self.assertEqual(evidence['funding']['held_mist'], 400_000_000)
+        self.assertEqual(evidence['funding']['required_mist'], 1_200_000_000)
+        self.assertEqual([t['label'] for t in evidence['transactions']], ['publish base'])
+        self.assertEqual(evidence['allowance_used_mist'], 89_000_000)
+        self.assertEqual(evidence['quarantine'][self.INCIDENT]['reserved_mist'], 400_000_000)
+        self.assertNotIn('publication', evidence['quarantine'][self.INCIDENT])
+
+    def test_quarantine_is_one_time_even_if_the_historical_marker_returns(self):
+        def state(key, digest, tools):
+            value = RunFlow().state_with('publish base')(key, digest, tools)
+            value['quarantine'] = {self.INCIDENT: {'fixture_key': key, 'status': 'unresolved', 'reserved_mist': 400_000_000,
+                                                   'publication': {'pending_operation': 'publish base'}}}
+            return value
+        key, error, saved, evidence, calls, _ = self.flow(state)
+        self.assertIsInstance(error, rc.Unexpired)
+        self.assertEqual(calls, [])
+        self.assertTrue(saved['publications'][key]['pending_operation']['legacy'])
+
+    def test_unlisted_fixture_wallet_or_retained_identity_is_never_quarantined(self):
+        for incident, key_override in ((False, None), (True, 'bytecode-v1:other@1.81.1')):
+            with self.subTest(incident=incident, key=key_override):
+                key, error, saved, _, calls, _ = self.flow(RunFlow().state_with('publish base'),
+                                                           incident=incident, key_override=key_override)
+                self.assertIsInstance(error, rc.Unexpired)
+                self.assertEqual(calls, [])
+                self.assertNotIn('quarantine', saved)
+                self.assertTrue(saved['publications'][key]['pending_operation']['legacy'])
+        publication = {'pending_operation': {'label': 'publish base', 'legacy': True}}
+        with self.incident('K', operator=OPERATOR):
+            state = {'publications': {'K': publication}}
+            self.assertIsNone(live.quarantine_incident(state, 'K', ADDRESS, publication, rc.Unexpired('x'), 1.0))
+        with self.incident('K'):
+            retained = {'pending_operation': pending()}
+            for value, error in ((publication, rc.Uncertain('ambiguous')), (retained, rc.Unexpired('x')),
+                                 (dict(publication, base_package=PACKAGE), rc.Unexpired('x'))):
+                state = {'publications': {'K': value}}
+                self.assertIsNone(live.quarantine_incident(state, 'K', ADDRESS, value, error, 1.0))
+                self.assertEqual(state['publications'], {'K': value})
+
+    def test_funding_holds_the_historical_reservation_until_resolved(self):
+        with self.incident('K'):
+            pending_state = {'publications': {'K': {'pending_operation': 'publish base'}}}
+            self.assertEqual(live.held_reservations(pending_state, ADDRESS), 400_000_000)
+            self.assertEqual(live.held_reservations(pending_state, OPERATOR), 0)  # Other wallet.
+            self.assertEqual(live.held_reservations({'publications': {}}, ADDRESS), 0)
+            for status, held in (('unresolved', 400_000_000), ('never_executed', 0), ('executed_late', 0)):
+                state = {'publications': {}, 'quarantine': {self.INCIDENT: {'status': status}}}
+                self.assertEqual(live.held_reservations(state, ADDRESS), held)
+        key, error, _, evidence, calls, _ = self.flow(RunFlow().state_with('publish base'), balance='1100000000')
+        self.assertIsInstance(error, live.FundingShortfall)
+        self.assertEqual(calls, [])
+        self.assertEqual(evidence['funding']['required_mist'], 1_200_000_000)
+
+    def test_observation_records_the_eventual_outcome_without_adopting_it(self):
+        coin = tc.normal('0x' + 'c0' * 32)
+        late = tc.normal('0x' + 'cb' * 32)
+
+        def state(observed_coins):
+            marker = {'label': 'publish base', 'legacy': True,
+                      'observed': {'epoch': 1262, 'at': 1.0, 'coins': observed_coins}}
+            return {'fixtures': {'K': {'upgrade_cap': CAP}}, 'publications': {},
+                    'quarantine': {self.INCIDENT: {'fixture_key': 'K', 'status': 'unresolved',
+                                                   'publication': {'pending_operation': marker}}}}
+        cap = {'objectId': late, 'version': '1', 'package': PACKAGE, 'cap_version': '1', 'previous_transaction': 'OLD'}
+        executed = state({})
+        live.observe_quarantine(executed, 'K', OPERATOR, FakeChain(epoch=1263, transactions={'OLD': facts(digest='OLD')},
+                                                                     caps=[cap]), BUILT, 5.0)
+        record = executed['quarantine'][self.INCIDENT]
+        self.assertEqual((record['status'], record['digest'], record['gas_mist']), ('executed_late', 'OLD', 341_000_000))
+        self.assertIn(PACKAGE, record['isolated_objects'])
+        self.assertEqual(executed['fixtures']['K'], {'upgrade_cap': CAP})  # Never adopted.
+
+        waiting = state({coin: '3'})
+        live.observe_quarantine(waiting, 'K', OPERATOR, FakeChain(epoch=1263), BUILT, 5.0)
+        self.assertEqual(waiting['quarantine'][self.INCIDENT]['status'], 'unresolved')
+        self.assertIn('could still execute', waiting['quarantine'][self.INCIDENT]['last_observation']['reason'])
+
+        expired = state({coin: '3'})
+        live.observe_quarantine(expired, 'K', OPERATOR, FakeChain(epoch=1264, versions={coin: '4'}), BUILT, 5.0)
+        self.assertEqual(expired['quarantine'][self.INCIDENT]['status'], 'never_executed')
+
+        unrecorded = state({})
+        unrecorded['fixtures'] = {}  # The fresh fixture's own cap could be mistaken for the old one.
+        live.observe_quarantine(unrecorded, 'K', OPERATOR, FakeChain(epoch=1264), BUILT, 5.0)
+        self.assertNotIn('last_observation', unrecorded['quarantine'][self.INCIDENT])
+
+
 class ClassifiedStatus(unittest.TestCase):
     def evidence(self, root, *values):
         for index, value in enumerate(values):

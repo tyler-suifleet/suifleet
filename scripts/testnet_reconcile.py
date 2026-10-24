@@ -37,6 +37,10 @@ class Uncertain(RuntimeError):
     """The outcome cannot be decided yet; the durable marker is retained."""
 
 
+class Unexpired(Uncertain):
+    """A historical transaction without identity shows no executed effects but may still execute."""
+
+
 def normal_pending(value):
     if isinstance(value, str) and value:
         return {'label': value, 'legacy': True}
@@ -251,12 +255,12 @@ def legacy_publication(pending, *, chain, operator, built, known, now, upgrade=N
     if facts:
         return 'executed', cli_result(facts)
     if epoch < int(observed['epoch']) + 2:
-        raise Uncertain(f'historical {label!r} without transaction identity has no executed effects yet; '
+        raise Unexpired(f'historical {label!r} without transaction identity has no executed effects yet; '
                         f'it could still execute through epoch {int(observed["epoch"]) + 1} (now {epoch})')
     current = chain.versions(list(observed['coins']))
     unmoved = [c for c, v in observed['coins'].items() if current.get(c) is not None and int(current[c]) <= int(v)]
     if unmoved:
-        raise Uncertain(f'gas coins observed with the historical marker are unchanged: {unmoved[:5]}')
+        raise Unexpired(f'gas coins observed with the historical marker are unchanged: {unmoved[:5]}')
     facts = executed()  # Final scan once every candidate transaction is dead.
     if facts:
         return 'executed', cli_result(facts)
