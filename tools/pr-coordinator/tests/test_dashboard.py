@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import sqlite3
@@ -774,12 +775,22 @@ class GitHubInventory(unittest.TestCase):
             self.assertEqual(model['inventory']['suifleet']['state'], 'unavailable')
             self.assertIn('open PRs ? (no usable snapshot)', '\n'.join(dash.render(model, 200)))
 
+    @staticmethod
+    def ci_response(number=2, checks=None, testnet=False, head='a'*40, base='b'*40, more=False):
+        return {'data': {'repository': {'testnet': {'oid': 'c'*40} if testnet else None,
+            'p'+str(number): dict(number=number, state='OPEN', headRefOid=head, baseRefOid=base,
+                headRefName='work/sf-001', isDraft=False, title='SF-001',
+                commits={'nodes': [{'commit': {'oid': head, 'statusCheckRollup': {'contexts': {
+                    'nodes': checks or [], 'pageInfo': {'hasNextPage': more}}}}}]})}}}
+
     def test_explicit_refresh_paginates_filters_prs_and_uses_project_account(self):
         calls = []
         def run(args, **kwargs):
             calls.append((args, kwargs))
             if args[1] == 'auth':
                 return subprocess.CompletedProcess(args, 0, stdout='private-token\n')
+            if args[2] == 'graphql':
+                return subprocess.CompletedProcess(args, 0, stdout=json.dumps(self.ci_response()))
             if '/issues?' in args[2]:
                 rows = [[dict(number=1, title='issue', state='open')],
                         [dict(number=2, title='PR', state='open', pull_request={})]]
@@ -789,9 +800,10 @@ class GitHubInventory(unittest.TestCase):
         with patch.object(subprocess, 'run', side_effect=run):
             dash.refresh_github(self.f.paths, 'suifleet')
         self.assertEqual(calls[0][0][-1], 'account-suifleet')
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
         for args, options in calls[1:]:
-            self.assertIn('--paginate', args)
+            if args[2] != 'graphql':
+                self.assertIn('--paginate', args)
             self.assertEqual(options['env']['GH_TOKEN'], 'private-token')
             self.assertEqual(options['timeout'], 60)
         raw = dash.inventory_path(self.f.paths['inventory'], 'suifleet').read_text()
@@ -801,6 +813,68 @@ class GitHubInventory(unittest.TestCase):
         self.assertTrue(data['prs'][0]['draft'])
         for secret in ['private-token', 'COMMENT-SECRET', SECRETS[-1]]:
             self.assertNotIn(secret, raw)
+
+    def test_live_failure_replaces_worker_pending_and_offline_view_stays_offline(self):
+        self.ticket(1, 'review')
+        folder = self.f.job(7, status='done', ticket='SF-001', checks=('PENDING',))
+        os.utime(folder/'snapshot.json', (NOW-7200, NOW-7200))
+        checks = [dict(__typename='CheckRun', name='check', status='COMPLETED', conclusion='SUCCESS'),
+                  dict(__typename='StatusContext', context='testnet/package-upgrade', state='FAILURE',
+                       description='base:'+'b'*40+' class:uncertain')]
+        with patch.object(dash.time, 'time', return_value=NOW-10):
+            ci = dash.fetch_ci('owner/suifleet', [dict(number=7)],
+                lambda *a, **kw: json.dumps(self.ci_response(7, checks, True)), {})
+        path = self.snapshot(prs=[dict(number=7, title='SF-001')])
+        raw = json.loads(path.read_text()); raw['ci'] = ci; path.write_text(json.dumps(raw))
+        with patch.object(subprocess, 'run', side_effect=AssertionError('offline collect made a network call')):
+            model = self.f.collect()
+        alert = next(a for a in model['attention'] if a.get('ticket') == 'SF-001')
+        self.assertEqual(alert['state'], 'ci-failed')
+        self.assertIn('testnet failure', alert['summary'])
+        self.assertIn('GitHub; observed 10s ago', alert['summary'])
+        stale = dash.collect(self.f.paths, now=NOW+1000, proc=self.f.proc)
+        self.assertEqual(next(a for a in stale['attention'] if a.get('ticket') == 'SF-001')['state'], 'ci-stale')
+
+    def test_check_refresh_batches_requests_and_newer_head_invalidates_old_evidence(self):
+        calls = []
+        def run(args, env, **kwargs):
+            query = json.loads(kwargs['input'])['query']; calls.append(query)
+            repository = {'testnet': None}
+            for number in re.findall(r'p([0-9]+):pullRequest', query):
+                repository.update(self.ci_response(int(number))['data']['repository'])
+            return json.dumps({'data': {'repository': repository}})
+        ci = dash.fetch_ci('owner/suifleet', [dict(number=n) for n in range(1, 52)], run, {})
+        self.assertEqual((len(ci), len(calls)), (51, 3))
+        self.ticket(1, 'review')
+        folder = self.f.job(2, status='done', checks=('PENDING',))
+        os.utime(folder/'snapshot.json', (NOW-5, NOW-5))
+        ci['2']['mtime'] = NOW-10
+        path = self.snapshot(prs=[dict(number=2, title='SF-001')]); raw=json.loads(path.read_text())
+        raw['ci']={'2': ci['2']}; path.write_text(json.dumps(raw))
+        alert=next(a for a in self.f.collect()['attention'] if a.get('ticket')=='SF-001')
+        self.assertEqual(alert['state'], 'ci-unknown')
+
+    def test_unmatched_base_missing_checks_and_partial_responses_are_not_success(self):
+        check = dict(context='testnet/package-upgrade', state='SUCCESS', description='base:'+'f'*40)
+        response = self.ci_response(2, [check], True)
+        ci = dash.fetch_ci('owner/suifleet', [dict(number=2)], lambda *a, **kw: json.dumps(response), {})
+        self.assertEqual(dash.ci_state(ci['2']), 'ci-unknown')
+        for response in [dict(errors=[dict(message='private error')]), self.ci_response(more=True),
+                         self.ci_response(head='bad'), {'data': {'repository': {'p2': None}}}]:
+            with self.subTest(response=response), self.assertRaises((ValueError, KeyError)):
+                dash.fetch_ci('owner/suifleet', [dict(number=2)], lambda *a, **kw: json.dumps(response), {})
+
+    def test_old_worker_evidence_is_marked_stale_and_merged_retry_is_hidden(self):
+        self.ticket(1, 'review')
+        folder = self.f.job(7, status='done', checks=('PENDING',))
+        os.utime(folder/'snapshot.json', (NOW-4000, NOW-4000))
+        alert = next(a for a in self.f.collect()['attention'] if a.get('ticket') == 'SF-001')
+        self.assertEqual(alert['state'], 'ci-stale')
+        self.assertIn('worker-start snapshot', alert['summary'])
+        self.f.job(8, status='retry', retry_after=NOW-1)
+        with sqlite3.connect(self.f.paths['reviews']) as db:
+            db.execute("INSERT INTO integrations VALUES('suifleet',8,'head','commit',1)")
+        self.assertFalse(any(a['state'] == 'retry' and a.get('pr') == 8 for a in self.f.collect()['attention']))
 
     def test_failed_refresh_preserves_previous_snapshot_and_redacts_errors(self):
         path = self.snapshot(issues=[dict(number=1, title='old')])
@@ -815,7 +889,9 @@ class GitHubInventory(unittest.TestCase):
         path = self.snapshot(issues=[dict(number=1, title='old')])
         before = path.read_bytes()
         response = subprocess.CompletedProcess(['gh'], 0, stdout='[[{"number":1,"title":"one","state":"open"}]]')
-        with patch.object(subprocess, 'run', return_value=response), patch.object(dash.json, 'dump', side_effect=OSError('disk full')):
+        def run(args, **kwargs):
+            return subprocess.CompletedProcess(args, 0, stdout=json.dumps(self.ci_response(1))) if args[2] == 'graphql' else response
+        with patch.object(subprocess, 'run', side_effect=run), patch.object(dash.json, 'dump', side_effect=OSError('disk full')):
             with self.assertRaises(dash.Unavailable):
                 dash.refresh_github(self.f.paths, 'suifleet')
         self.assertEqual(path.read_bytes(), before)
