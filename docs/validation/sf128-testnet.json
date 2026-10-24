@@ -1,0 +1,315 @@
+{
+  "started": "2026-10-23T20:51:48Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "publish v2 storage fixture",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "9vdJdV93n482DearRuE1GwAAQjexbhfaXcZS6Dd6fFxx",
+      "gas_mist": 121388000,
+      "allowance_used_mist": 121388000
+    },
+    {
+      "label": "create isolated budget",
+      "gas_budget_mist": 200000000,
+      "funding_mist": 1000000,
+      "status": "success",
+      "digest": "BM7pURN9wMZopFjfUV89YCqQ5gtNxUiKHnU4Ncghmpu9",
+      "gas_mist": 5347200,
+      "allowance_used_mist": 127735200,
+      "recorded_funding_mist": 0,
+      "recorded_allowance_used_mist": 126735200
+    },
+    {
+      "label": "create v2 storage",
+      "gas_budget_mist": 200000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4on9EvyTWvBD6JvgWVY2412sVZ3RBoKZGqveZZAv4SKM",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 130977363,
+      "recorded_allowance_used_mist": 129977363
+    },
+    {
+      "label": "configure legacy vector on v2 object",
+      "gas_budget_mist": 200000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "A5XzvaeZGVTo7RS569R1vLwsaiUJfW6afhbN1kTx8SwG",
+      "gas_mist": 8296388,
+      "allowance_used_mist": 139273751,
+      "recorded_allowance_used_mist": 138273751
+    },
+    {
+      "label": "compatible v2 to v3 storage upgrade",
+      "gas_budget_mist": 200000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "DuahTNBgYjuZa7gLEZ7bdSBo61aEhN6hZdvKM12qWmi1",
+      "gas_mist": 118994163,
+      "allowance_used_mist": 258267914,
+      "recorded_allowance_used_mist": 257267914
+    },
+    {
+      "label": "migrate existing v2 retention storage",
+      "gas_budget_mist": 92732086,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2Fgs9sDP7ZdoCTtQb4anxUcpDrEUJTHvnigycNUg98Pz",
+      "gas_mist": 0,
+      "allowance_used_mist": 258267914,
+      "recorded_allowance_used_mist": 257267914
+    },
+    {
+      "label": "v2 owner mutation rejected after migration",
+      "gas_budget_mist": 50000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "H2LN7fApm8vDF9pBYeS48rFUjZpPnRGhTL9rUriybXpr",
+      "gas_mist": 1000388,
+      "allowance_used_mist": 259268302,
+      "abort": [
+        "fleet_storage",
+        "assert_owner",
+        "0"
+      ],
+      "recorded_allowance_used_mist": 258268302
+    }
+  ],
+  "checks": [
+    "compatible v2/v3 upgrade, existing-object migration, independent type origins and retired old entry point"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf121-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf121-tools/network-sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1261,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 378581230,
+  "max_spend_mist": 350000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "dbea5d2517e62eec12d8442dd382bd9fee1ebc60",
+  "verified_package_transactions": {
+    "publish v2 storage fixture": {
+      "kind": "publish",
+      "modules": 1,
+      "digest": "65f869ba9b10e0fa40baf42c969388d6e64ca39efdd681af8f71cf36557b550a",
+      "dependencies": [
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "0x0000000000000000000000000000000000000000000000000000000000000002",
+        "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+        "0x8270feb7375eee355e64fdb69c50abb6b5f9393a722883c1cf45f8e26048810a",
+        "0x7d3b2086808a62bbc44d18c6b1d407973d77dd26946735873092c2f5650b4611"
+      ]
+    },
+    "upgrade storage": {
+      "kind": "upgrade",
+      "modules": 1,
+      "policy": "00"
+    }
+  },
+  "source_sha256": "d5d9bf95028a68bc1879fb5b34370a6deef7ba75625c606d6e992f5b7ddafc45",
+  "compiled_digest": "99f3a103b8ca78ca09811ef90ce7f20ad7d2bf9cfd6b951ebb66ddb57bec99af",
+  "fixture": {
+    "core": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+    "core_cap": "0x400dda2c3b0788a08841c0a81a4bdc444c6e399268d60f352eb37f04066d0983",
+    "registry": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+    "base": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "cap": "0x738996236779d654890bbde1ec1c5819bd912d8f14310fd243975ec8902335fe",
+    "budget": "0x78454f3d07d921d938f59d4729ea059aeafe28b74ce34283b97168695d5bdb18",
+    "owner": "0xf4dafc5d7eebe3df925a7f5da118b68fd219b1e12117236e25d072ceb6c0d3bd",
+    "storage": "0x0bf0418bc6c319569f7d6461117486e56eb5204e7d5756b62e67af5c05e91589",
+    "configured": true,
+    "head": "0x74b4c9f985dbf2b03fecd56484b5700c4187b8e6f45798e4a2f56cd651eb8434"
+  },
+  "source_pair": "511275766427a00af1db00672698aae3193df6bc18997c565e682f0ec32d7e3c",
+  "origins": {
+    "fleet_storage::Quota": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::FleetStorage": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::UsageKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::Usage": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::BlobKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RecordKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::BlobRecord": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::StorageCreated": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::StorageDeposited": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::StorageWithdrawn": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::StoragePurchased": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::PoolRefilled": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::WalDeposited": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::WalWithdrawn": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::UploadRegistered": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::FleetUploadRegistered": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::BlobReleased": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::BlobExtended": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::QuotaChanged": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RetentionKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RenewalKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::Retention": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::DeviceRetentionKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::DeviceRetention": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::DeviceRetentionConfigured": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::FullyPaidArchiveKey": "0x74b4c9f985dbf2b03fecd56484b5700c4187b8e6f45798e4a2f56cd651eb8434",
+    "fleet_storage::ProtectedBlobsKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::PrepaidKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::PrepaidCountKey": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RenewalPrepaid": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::Renewal": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RetentionConfigured": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RetentionRisk": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60",
+    "fleet_storage::RenewalCompleted": "0x08ccad90f13de04198dc2f4945b9fa2021a92e5cfc2ce41ed8ed72650900ca60"
+  },
+  "end_balance_mist": 120501122,
+  "spent_mist": 258080108,
+  "allowance_used_mist": 259268302,
+  "finished": "2026-10-23T20:52:36Z",
+  "final_source_sha256": "d5d9bf95028a68bc1879fb5b34370a6deef7ba75625c606d6e992f5b7ddafc45",
+  "final_module_sha256": [
+    "c237b9c862a6a38b14544a97204926081eb21229e53fc9d68a275880903619c0"
+  ],
+  "final_bytecode_verified_read_only": true,
+  "prior_revision_run": {
+    "started": "2026-10-23T20:47:27Z",
+    "finished": "2026-10-23T20:48:05Z",
+    "spent_mist": 257849708,
+    "allowance_used_mist": 259037902,
+    "max_spend_mist": 500000000,
+    "transactions": [
+      {
+        "label": "publish v2 storage fixture",
+        "gas_budget_mist": 300000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "GGgFpTn2M1ATbC5wXzGQmusaaRiiEusGjrBQGMCXfHSd",
+        "gas_mist": 121388000,
+        "allowance_used_mist": 121388000
+      },
+      {
+        "label": "create isolated budget and v2 storage",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 1000000,
+        "status": "success",
+        "digest": "67nMWZeNEaaDE8eMPEDCRdmSu3vfx74iV4hGek4K9RGB",
+        "gas_mist": 5347200,
+        "allowance_used_mist": 127735200,
+        "recorded_funding_mist": 0,
+        "recorded_allowance_used_mist": 126735200
+      },
+      {
+        "label": "create v2 storage",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "DyzAqYMgQn9iie3sQ3ghBBz855fmvTSCg83GSYweaFKE",
+        "gas_mist": 3242163,
+        "allowance_used_mist": 130977363,
+        "recorded_allowance_used_mist": 129977363
+      },
+      {
+        "label": "configure legacy vector on v2 object",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "51Jhe3JYqFBsaWrM52DaQisp8HCQv5PVjaqEd5c4pijk",
+        "gas_mist": 8296388,
+        "allowance_used_mist": 139273751,
+        "recorded_allowance_used_mist": 138273751
+      },
+      {
+        "label": "compatible v2 to v3 storage upgrade",
+        "gas_budget_mist": 361726249,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "44wpnZfQjm1ekP7PmLeKNxAQquA33rxrNa6wiakUJz24",
+        "gas_mist": 118763763,
+        "allowance_used_mist": 258037514,
+        "recorded_allowance_used_mist": 257037514
+      },
+      {
+        "label": "migrate existing v2 retention storage",
+        "gas_budget_mist": 200000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "2JE6ynruE7xuVL7eDxEqej23sv3WsZX9SaVLdbFkenTn",
+        "gas_mist": 0,
+        "allowance_used_mist": 258037514,
+        "recorded_allowance_used_mist": 257037514
+      },
+      {
+        "label": "v2 owner mutation rejected after migration",
+        "gas_budget_mist": 50000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "2UkFW9ktPvBytuamPhgjaDi7SUJy5GWDxPaFi3WZ15kp",
+        "gas_mist": 1000388,
+        "allowance_used_mist": 259037902,
+        "abort": [
+          "fleet_storage",
+          "assert_owner",
+          "0"
+        ],
+        "recorded_allowance_used_mist": 258037902
+      }
+    ],
+    "fixture": {
+      "core": "0x34978350b5be61a60b51f45edd0b7f3f29e267399cc56a60e16aa6bfecb2bec2",
+      "core_cap": "0x400dda2c3b0788a08841c0a81a4bdc444c6e399268d60f352eb37f04066d0983",
+      "registry": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+      "base": "0xe7f3091a174f062cebedb711180ea8ac8179a0976effb9543dc7aef7b81dccd0",
+      "cap": "0x0c6979e8e407d44902d61e24511c87f6596901803c1745b492a381defccc6270",
+      "budget": "0xc51c00c90f6d189a6ad065327d29ef01c7006aec4b0bbf547071874a0512f4d7",
+      "owner": "0x67d849e391e6da6a57f2e7845f76bf0e666279b33feda3c3dacd1527e34a1c1a",
+      "storage": "0x2debe75b3205d93f6ae74de63dcc4599208f9a38cbcd3400373943e0a3e0e90d",
+      "configured": true,
+      "head": "0xf02f94ef20be6171bde6f00f70f0688f3b27a9006b2da59dc06979df2e492b54"
+    },
+    "final_source_sha256": "5b8dbbb40d4569d5f179ccb104a4a7e8ad20cdd0a9b66c60a198fe01a530d22a",
+    "recorded_allowance_used_mist": 258037902,
+    "funding_reconciliation": {
+      "omitted_retained_budget_deposit_mist": 1000000,
+      "verified_budget_object": "0xc51c00c90f6d189a6ad065327d29ef01c7006aec4b0bbf547071874a0512f4d7",
+      "balance_mist": 1000000,
+      "method": "Read-only current object balance and original signed PTB deposit; add funding without crediting storage rebates or resetting the run ceiling."
+    }
+  },
+  "limits": [
+    "Existing configured v2 object had an empty legacy protection vector on public Testnet; populated real-blob/prepaid migration and 10000-record gas are isolated-chain tests.",
+    "No production wallet, physical, mainnet or production-provider acceptance."
+  ],
+  "recorded_allowance_used_mist": 258268302,
+  "funding_reconciliation": {
+    "omitted_retained_budget_deposit_mist": 1000000,
+    "verified_budget_object": "0x78454f3d07d921d938f59d4729ea059aeafe28b74ce34283b97168695d5bdb18",
+    "balance_mist": 1000000,
+    "method": "Read-only current object balance and original signed PTB deposit; add funding without crediting storage rebates or resetting the run ceiling."
+  }
+}
