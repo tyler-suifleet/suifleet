@@ -183,6 +183,35 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(len(model['workers']),1)
         self.assertFalse(any(a['state']=='capacity-backoff' for a in model['attention']))
 
+    def test_quota_waits_are_visible_for_implementation_and_repair(self):
+        source = importlib.util.spec_from_file_location('coordinator_for_dashboard', ROOT/'coordinator.py')
+        coordinator = importlib.util.module_from_spec(source)
+        source.loader.exec_module(coordinator)
+        self.assertEqual(dash.QUOTA_RETRIES, coordinator.QUOTA_RETRIES)
+        f=self.f
+        f.ticket('SF-001');f.run('sess-impl','SF-001',status='capacity_wait',pid=101)
+        with sqlite3.connect(f.paths['dispatch']) as db:
+            db.execute('CREATE TABLE capacity_retries (source TEXT,claim TEXT,state TEXT,attempt INTEGER,retry_after REAL,reason TEXT,replacement TEXT,updated REAL)')
+            db.execute('CREATE TABLE capacity_kinds (source TEXT PRIMARY KEY, kind TEXT NOT NULL)')
+            db.execute('INSERT INTO capacity_retries VALUES(?,?,?,?,?,?,?,?)',
+                       ('sess-impl',TOKEN,'waiting',1,NOW+3600,'provider quota limit; after reset',None,NOW-5))
+            db.execute("INSERT INTO capacity_kinds VALUES('sess-impl','quota')")
+        f.ticket('SF-002')
+        f.job(8, kind='fix', ticket='SF-002', status='quota_wait', pid=102, retry_after=NOW+600,
+              error='provider quota limit; same-claim repair retry 1/4 after reset')
+        model=f.collect()
+        alerts={a['ticket']:a for a in model['attention'] if a['state']=='quota-wait'}
+        self.assertEqual(set(alerts),{'SF-001','SF-002'})
+        self.assertIn('provider quota retry 1/4',alerts['SF-001']['summary'])
+        self.assertEqual(alerts['SF-002']['retry_after'],NOW+600)
+        self.assertEqual(alerts['SF-002']['role'],'repair')
+        self.assertEqual(model['workers'],[])
+        text='\n'.join(dash.render(model,140))
+        self.assertIn('[quota-wait]',text)
+        self.assertIn('retry in',text)
+        for secret in SECRETS:
+            self.assertNotIn(secret,json.dumps(model))
+
     def test_only_pid_and_start_time_verified_processes_are_active(self):
         f = self.f
         f.ticket('SF-001'); f.run('sess-impl', 'SF-001', pid=101, start=500); f.process(101, start=500)
