@@ -274,17 +274,16 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         }
         let ciphertext = encrypt_archive(task, config, &fleet, kind, &archive, &servers)?;
         atomic(&dir.join("ciphertext.bin"), &ciphertext)?;
-        let encoded = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &items)).await?;
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
-            blob_id: string(&encoded,"blob_id")?, root_hash: string(&encoded,"root_hash")?, ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
-            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: encoded["size"].as_u64(),
+            blob_id: String::new(), root_hash: String::new(), ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
+            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: None,
             attempts: 0, created_ms: telemetry::now_ms(), retry_at_ms: 0 };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
     // Never regenerate ciphertext or purchase again after an uncertain submit.
     anyhow::ensure!(pending.size.is_none_or(|size| size > 0 && size <= crate::fleet_data::MAX_ARCHIVE as u64), "invalid pending archive size");
     anyhow::ensure!(Sha256::digest(std::fs::read(dir.join("ciphertext.bin"))?).as_slice() == pending.ciphertext_sha256, "pending ciphertext changed");
-    anyhow::ensure!(pending.items.is_empty() || ((2..=16).contains(&pending.items.len()) && pending.size.is_some()), "invalid pending Quilt item count");
+    anyhow::ensure!(pending.items.is_empty() || (2..=16).contains(&pending.items.len()), "invalid pending Quilt item count");
     let mut item_bytes = 0u64;
     for item in &pending.items {
         item.validate()?;
@@ -325,9 +324,20 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
     pending.retry_at_ms = now.saturating_add(if pending.attempts <= 8 { 1000 } else { (1000u64 << (pending.attempts - 8).min(22)).min(3_600_000) });
     atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
+    // Formation itself is durable: a timeout/oversize result here retains
+    // the selected source mapping and exact encrypted items, not just logs.
+    let encoding_fresh = pending.blob_id.is_empty();
+    if encoding_fresh {
+        anyhow::ensure!(pending.registration.is_none(), "registered archive lost encoding identity");
+        let encoded = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &pending.items)).await?;
+        pending.blob_id = string(&encoded,"blob_id")?; pending.root_hash = string(&encoded,"root_hash")?;
+        pending.size = encoded["size"].as_u64();
+        anyhow::ensure!(pending.items.is_empty() || pending.size.is_some(), "Quilt codec omitted encoded size");
+        atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
+    }
     anyhow::ensure!(crate::seal::parse(&std::fs::read(dir.join("ciphertext.bin"))?)?.key_epoch() == Some(fleet.key_epoch), "pending archive key epoch was revoked; owner recovery required");
     if pending.registration.is_none() {
-        if !pending.items.is_empty() {
+        if !pending.items.is_empty() && !encoding_fresh {
             let prepared = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &pending.items)).await?;
             anyhow::ensure!(string(&prepared, "blob_id")? == pending.blob_id && string(&prepared,"root_hash")? == pending.root_hash
                 && prepared["size"].as_u64() == pending.size, "pending Quilt encoding changed before purchase");
