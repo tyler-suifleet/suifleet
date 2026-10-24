@@ -12,6 +12,8 @@ import { ObjectError } from "@mysten/sui/client";
 import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
 import { Transaction } from "@mysten/sui/transactions";
 import { deriveDynamicFieldID, normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils";
+import DevicesPage from "@/app/devices/page";
+import DashboardPage from "@/app/page";
 import ServicesPage from "@/app/services/page";
 import RolloutsPage from "@/app/rollouts/page";
 import DataPage from "@/app/data/page";
@@ -62,6 +64,8 @@ const deployment = { id: rollout.id, creator: f.operator, component_name: "app",
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });
 const responses = manifestClient(m);
 client.ledgerService.getServiceInfo = responses.ledgerService.getServiceInfo;
+responses.listEvents = (request) => client.listEvents(request);
+client.ledgerService.listEvents = responses.ledgerService.listEvents;
 client.getObject = async ({ objectId }) => {
   objectId = id(objectId);
   if (objectId === rollout.id) return { object: { objectId, type: type("deployment_manager::DeploymentRecord"), content: DeploymentBcs.serialize(deployment).toBytes() } };
@@ -130,6 +134,9 @@ client.getDynamicField = async ({ parentId, name }) => {
     if (!d) throw notFound();
     return { dynamicField: { value: { type: type("device_registry::Identity"), bcs: IdentityBcs.serialize({ signer: f.signer, revoked: false, owner_cap: d.cap }).toBytes() } } };
   }
+  if (id(parentId) === id(rollout.id) && [type("deployment_manager::TargetGroupsKey"), type("deployment_manager::TargetDevicesKey")].includes(key)) {
+    return { dynamicField: { value: { type: "vector<0x2::object::ID>", bcs: bcs.vector(bcs.Address).serialize(key.endsWith("::TargetGroupsKey") ? [] : rollout.members).toBytes() } } };
+  }
   if (id(parentId) === id(rollout.id) && key === type("deployment_manager::ReceiptsKey")) {
     return { dynamicField: { value: { type: type("deployment_manager::Receipts"), bcs: ReceiptsBcs.serialize({ version: "2",
       statuses: { contents: rollout.receipts } }).toBytes() } } };
@@ -164,6 +171,6 @@ function ShadowFixture() {
 const kit = createDAppKit({ networks: [m.network], createClient: () => client, autoConnect: false, slushWalletConfig: null, storage: null });
 window.addEventListener("wallet-standard:app-ready", (event) => event.detail.register(wallet));
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
-const Page = { "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture, "/shadows": ShadowFixture }[location.pathname];
+const Page = { "/": DashboardPage, "/devices": DevicesPage, "/services": ServicesPage, "/rollouts": RolloutsPage, "/data": DataPage, "/archive": ArchiveFixture, "/shadows": ShadowFixture }[location.pathname];
 createRoot(document.getElementById("root")).render(
   <QueryClientProvider client={new QueryClient()}><DAppKitProvider dAppKit={kit}><ConnectButton /><Page /></DAppKitProvider></QueryClientProvider>);

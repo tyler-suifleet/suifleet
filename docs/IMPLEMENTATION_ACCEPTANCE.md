@@ -1,5 +1,11 @@
 # Implementation and integration acceptance
 
+SF-137 makes Sui/Walrus reads and browser-derived alerts the product path.
+Historical hosted-indexer acceptance references below now apply only to optional
+customer integrations; SuiFleet hosts no application server. This does not waive
+software, security, localnet, CI, automatic testnet or independent-review gates.
+See [the product inventory and migration](SERVERLESS_PRODUCT.md).
+
 The user authorizes merging independently reviewed implementations before physical
 Pi, real extension-wallet, public Sui-network and provisioned production-release
 integration acceptance. These external checks remain required in the linked tickets;

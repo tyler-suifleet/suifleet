@@ -1,12 +1,8 @@
 import { TELEMETRY_URL } from "@/lib/telemetry";
 
-/**
- * Fleet alerts (SF-020) as the indexer derives them from verified telemetry
- * and indexed receipts. Unlike device health, the dApp cannot re-derive these
- * from the chain alone, so they are shown as reported by the indexer. They are
- * active incidents: a failed deployment that a later applied deployment of the
- * same component demonstrably recovered (SF-098) is no longer one, but its
- * Failed receipt stays in the deployment history.
+/** Alert shapes and freshness shared by the product's browser-derived chain
+ * alerts and the optional customer-hosted reference HTTP integration.
+ * Failed receipts remain history after a verified later recovery.
  */
 export type AlertKind = "component-broken" | "deployment-failed" | "device-offline" | "device-degraded" | "deployment-pending"
   // Service health (SF-085): pub/sub, MQTT bridge, streams and shadow sync.
