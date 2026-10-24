@@ -277,9 +277,11 @@ settings that drive the fleet's cost and sees each option's cost before
 saving:
 
 - **Settings.** Update check, rollout fast-check, on-chain health, log
-  archive cadence and log retention: the fields proposed for SF-130
-  ([#265](https://github.com/tyler-suifleet/suifleet/issues/265)), within its
-  proposed bounds. Retention is chosen in days and saved as whole Walrus
+  archive cadence and log retention: SF-130's fields
+  ([#265](https://github.com/tyler-suifleet/suifleet/issues/265),
+  [FLEET_SETTINGS.md](FLEET_SETTINGS.md)), within the contract's bounds. The
+  page starts from the fleet's saved settings when every saved value is one of
+  the listed options, and shows the saved values either way. Retention is chosen in days and saved as whole Walrus
   epochs, rounded up: six weeks is 3 Mainnet epochs and 42 Testnet epochs. An
   option beyond the 53-epoch bound on the connected network (a year on
   Testnet) is disabled.
@@ -329,10 +331,13 @@ saving:
   first, with the shortfall and a link to deposit; nothing is signed. "Save
   anyway" then signs only the chosen settings. Changing a choice withdraws
   the warning, so it is checked again.
-- **Saving needs SF-130.** No deployment has the on-chain settings API yet,
-  so `lib/fleet-settings-tx.ts` reports that and the Save button stays
-  disabled; prices and the deposit still work. When SF-130 merges, build its
-  generated settings call there.
+- **Saving on chain.** Save signs one SF-130 `fleet_settings::set` call
+  with the fleet budget, its owner cap, the clock and the chosen values
+  (`lib/fleet-settings-tx.ts`, via `buildSetFleetSettingsTx`). It is offered
+  only when the deployment manifest records the settings type origins and
+  the wallet holds a budget's owner cap; otherwise the page says why, the
+  Save button stays disabled and prices and the deposit still work. A wallet
+  refusal or failed transaction reports that nothing was saved.
 
 Until deposit reclaim
 ([SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264)), a
@@ -447,7 +452,7 @@ make edge-test                                    # funding, exact-draw check (i
 python3 scripts/test_budget_ota.py                # in make test-ota: real daemon vs simulator
 node scripts/test_fleet_budget.cjs                # in make test-manifest: estimate vs SF-054, on-ramp, builders, alerts, fleet-paid upload flow
 node scripts/test_fleet_settings_cost.cjs         # in make test-manifest: Mainnet rescaling vs quote snapshot, price table, per-setting cost, deposit, live quotes
-make test-fleet-settings                          # in make ci: both of the above plus the real-browser settings page (scripts/test_fleet_settings_browser.cjs)
+make test-fleet-settings                          # in make ci: the above, SF-130's test_fleet_settings.cjs and the real-browser settings page (scripts/test_fleet_settings_browser.cjs)
 make test-budget-localnet                         # network none: upgrade, read-only budget, parallel draws, refusals, version gate, daemon draws
 make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated agent wallet, lock required
 ```
@@ -544,8 +549,10 @@ epoch needs a pool at least one Walrus epoch (one Testnet day) old.
 
 ## Outstanding acceptance
 
-Saving fleet settings on chain waits for SF-130's Move API; its browser test
-uses a controlled transaction. Real card checkout and real wallet sessions
+The settings page's browser test signs through a controlled wallet that
+decodes the real `fleet_settings::set` transaction; SF-130's localnet test
+executes that call on chain. Signing it from a real wallet session is final
+external acceptance. Real card checkout and real wallet sessions
 are deferred to final external acceptance in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159)
 and [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32). So
 are Mainnet deposits, swaps and uploads, and physical devices. None of them
