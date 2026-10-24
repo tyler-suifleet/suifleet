@@ -2,7 +2,10 @@
 // The wallet, chain reads and fleet budget are controlled; the page's pricing,
 // estimate, deposit logic and the SF-130 settings transaction it builds are
 // real. The "wallet" records the transaction it is asked to sign, decoded.
-// The scenario comes from the URL: ?scenario=short|funded|saved|rejected|unsupported.
+// The scenario comes from the URL: ?scenario=short|funded|saved|rejected|unsupported|switch|delayed.
+// window.__switchFleet() moves the page to a second account and budget without remounting it;
+// window.__releaseSaved() answers a saved-settings read held back in the "delayed" scenario.
+import { useSyncExternalStore } from "react";
 import { bcs } from "@mysten/sui/bcs";
 import { ObjectError } from "@mysten/sui/client";
 import { fleet_settings_SettingsBcs } from "@/lib/fleet-protocol";
@@ -12,21 +15,43 @@ const control = { scenario, signed: [], settingsReads: [], gasReads: 0, walrusRe
 window.__control = control;
 const SUI = BigInt(1_000_000_000);
 
-const account = { address: "0x" + "a".repeat(64), chains: ["sui:testnet"] };
+// The saved settings record of each fleet budget, in the scenarios that have one.
+const SAVED = {
+  ["0x" + "b1".repeat(32)]: { version: 1, check_interval_ms: 900_000, rollout_check_interval_ms: 0,
+    health_interval_ms: 3_600_000, archive_interval_ms: 86_400_000, archive_retention_epochs: 42 },
+  ["0x" + "b2".repeat(32)]: { version: 1, check_interval_ms: 300_000, rollout_check_interval_ms: 60_000,
+    health_interval_ms: 86_400_000, archive_interval_ms: 86_400_000, archive_retention_epochs: 42 },
+};
+let release;
+const held = new Promise((resolve) => { release = resolve; });
+window.__releaseSaved = () => release();
 const client = {
   getReferenceGasPrice: async () => { control.gasReads++; return { referenceGasPrice: "1000" }; },
   $extend: () => ({ walrus: { systemState: async () => { control.walrusReads++;
     return { storage_price_per_unit_size: "11000", write_price_per_unit_size: "20000", committee: { epoch: 7 } }; } } }),
-  // The fleet's saved settings record: present only in the "saved" scenario.
   getDynamicField: async ({ parentId }) => {
     control.settingsReads.push(parentId);
-    if (scenario !== "saved") throw new ObjectError("notFound", "missing field", { reason: "notFound" });
-    const bytes = fleet_settings_SettingsBcs.serialize({ version: 1, check_interval_ms: 900_000, rollout_check_interval_ms: 0,
-      health_interval_ms: 3_600_000, archive_interval_ms: 86_400_000, archive_retention_epochs: 42 }).toBytes();
+    if (scenario === "delayed") await held;
+    if (!["saved", "switch", "delayed"].includes(scenario) || !SAVED[parentId]) throw new ObjectError("notFound", "missing field", { reason: "notFound" });
+    const bytes = fleet_settings_SettingsBcs.serialize(SAVED[parentId]).toBytes();
     return { dynamicField: { value: { type: `${window.__SF_MANIFEST_OBJECT.call_package_id}::fleet_settings::Settings`, bcs: bytes } } };
   },
 };
-export const useCurrentAccount = () => account;
+
+// Two fleets: each its own account, budget, owner cap, storage and enrolled devices.
+const funded = scenario === "funded";
+const fleets = [["a", "b1", "c1", 3], ["e", "b2", "c2", 5]].map(([owner, b, c, count]) => ({
+  account: { address: "0x" + owner.repeat(64), chains: ["sui:testnet"] },
+  budget: { id: "0x" + b.repeat(32), capId: "0x" + c.repeat(32), balance: funded ? BigInt(100_000) * SUI : SUI / BigInt(100) },
+  storage: { id: "0x51", walBalance: funded ? BigInt(100_000) * SUI : BigInt(0) },
+  devices: Array.from({ length: count }, (_, n) => ({ objectId: `0xd${b}${n}`, name: `pi-${n}` })),
+})).map((fleet) => ({ ...fleet, budgets: [fleet.budget] }));
+let active = 0;
+const listeners = new Set();
+window.__switchFleet = () => { active = 1; listeners.forEach((listener) => listener()); };
+const useFleet = () => fleets[useSyncExternalStore((listener) => { listeners.add(listener); return () => listeners.delete(listener); }, () => active)];
+
+export const useCurrentAccount = () => useFleet().account;
 export const useCurrentClient = () => client;
 // Used only by budget enrollment, which this page does not render.
 export const useDAppKit = () => ({});
@@ -36,14 +61,9 @@ export const walrus = () => ({});
 export const MAINNET_WALRUS_PACKAGE_CONFIG = { name: "mainnet" };
 export const TESTNET_WALRUS_PACKAGE_CONFIG = { name: "testnet" };
 
-const devices = [1, 2, 3].map((n) => ({ objectId: `0xd${n}`, name: `pi-${n}` }));
-export const useDevices = () => ({ data: devices, isSuccess: true });
-
-const funded = scenario === "funded";
-const budget = { id: "0x" + "b1".repeat(32), capId: "0x" + "c1".repeat(32), balance: funded ? BigInt(100_000) * SUI : SUI / BigInt(100) };
-const storage = { id: "0x51", walBalance: funded ? BigInt(100_000) * SUI : BigInt(0) };
-export const useFleetStorage = () => ({ budget, storage, config: { packageId: "0x81" } });
-export const useBudgets = () => ({ data: [budget], isLoading: false });
+export const useDevices = () => ({ data: useFleet().devices, isSuccess: true });
+export const useFleetStorage = () => { const { budget, storage } = useFleet(); return { budget, storage, config: { packageId: "0x81" } }; };
+export const useBudgets = () => ({ data: useFleet().budgets, isLoading: false });
 
 // The signed transaction, decoded: its Move call, object inputs and pure values.
 function decode(transaction) {

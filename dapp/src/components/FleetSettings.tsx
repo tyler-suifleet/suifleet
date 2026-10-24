@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NETWORK } from "@/lib/constants";
@@ -71,24 +71,40 @@ function SettingsForm({ table }: { table: PriceTable }) {
     queryFn: async () => (await fetchFleetSettings(client, budget!.id)) ?? null,
   });
   const [values, setValues] = useState(() => defaultValues(table));
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(false), [touched, setTouched] = useState(false);
   const [workload, setWorkload] = useState<Workload>(DEFAULT_WORKLOAD);
   const [sized, setSized] = useState(false);
   const [months, setMonths] = useState(3);
   const [encrypted, setEncrypted] = useState(false), [annual, setAnnual] = useState(false);
   const [warning, setWarning] = useState(false);
   const [message, setMessage] = useState<string>(), [error, setError] = useState<string>();
+  // The form belongs to one fleet: another account or budget starts over from that fleet's
+  // size and saved settings, with no confirmation or result carried across. A budget that
+  // only finishes loading for the same account keeps the owner's edits.
+  const fleet = { account: account?.address, budget: budget?.id };
+  const [scope, setScope] = useState(fleet);
+  if (scope.account !== fleet.account || scope.budget !== fleet.budget) {
+    setScope(fleet);
+    if (scope.account !== fleet.account || scope.budget !== undefined) {
+      setValues(defaultValues(table)); setLoaded(false); setTouched(false);
+      setWorkload(DEFAULT_WORKLOAD); setSized(false);
+      setWarning(false); setMessage(undefined); setError(undefined);
+    }
+  }
+  const fleetKey = `${fleet.account}:${fleet.budget}`, current = useRef(fleetKey);
+  useEffect(() => { current.current = fleetKey; }, [fleetKey]);
   // Size the fleet from the enrolled devices once they load; the owner can still change it.
   useEffect(() => {
     if (!sized && devices.data?.length) { setWorkload((w) => ({ ...w, devices: devices.data!.length })); setSized(true); }
   }, [devices.data, sized]);
-  // Start from the fleet's saved settings once they load, when the table offers them.
+  // Start from the fleet's saved settings once they load, when the table offers them,
+  // unless the owner has already chosen while they were loading.
   useEffect(() => {
     if (loaded || saved.data === undefined) return;
     const fromChain = saved.data && savedValues(table, saved.data);
-    if (fromChain) setValues(fromChain);
+    if (fromChain && !touched) setValues(fromChain);
     setLoaded(true);
-  }, [saved.data, loaded, table]);
+  }, [saved.data, loaded, touched, table]);
   // A changed choice needs a fresh deposit check before signing.
   useEffect(() => setWarning(false), [values, workload, months]);
 
@@ -120,14 +136,16 @@ function SettingsForm({ table }: { table: PriceTable }) {
     if (!saver.build || !result.settings || !shortfall || !account) return;
     if (!shortfall.enough && !confirmed) { setWarning(true); return; }
     setWarning(false);
+    // A result that arrives after the owner switched fleets is not this form's to report.
+    const at = current.current;
     try {
       const tx = await saver.build(result.settings);
       tx.setSender(account.address);
       const done = await mutation.mutateAsync({ transaction: tx });
-      setMessage(`Settings saved in ${done.digest}. Devices apply them at their next check.`);
+      if (current.current === at) setMessage(`Settings saved in ${done.digest}. Devices apply them at their next check.`);
       await cache.invalidateQueries({ queryKey: ["fleet-settings"] });
     } catch (cause) {
-      setError(`${cause instanceof Error ? cause.message : "Wallet request failed"}. Nothing changed unless the transaction confirms; refresh before retrying.`);
+      if (current.current === at) setError(`${cause instanceof Error ? cause.message : "Wallet request failed"}. Nothing changed unless the transaction confirms; refresh before retrying.`);
     }
   }
 
@@ -157,7 +175,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
           const id = `${key}-${o.value}`;
           return <tr key={o.value} className="border-t" data-testid={id}>
             <td className="p-1"><label htmlFor={id} className="flex gap-1 items-center">
-              <input id={id} type="radio" name={key} checked={values[key] === o.value} disabled={!settings} onChange={() => setValues({ ...values, [key]: o.value })} />
+              <input id={id} type="radio" name={key} checked={values[key] === o.value} disabled={!settings} onChange={() => { setValues({ ...values, [key]: o.value }); setTouched(true); }} />
               {o.label}{o.default ? " (default)" : ""}</label></td>
             <td className="p-1">{network?.detail ?? reason}</td>
             <td className="p-1 text-right">{network ? usd(network.usdPerDevice) : "–"}</td>

@@ -25,7 +25,8 @@ const withSettings = structuredClone(withoutSettings);
 for (const name of protocol.optional_type_origins.fleet_settings) withSettings.type_origins[name] = withSettings.call_package_id;
 const PACKAGE = "0x" + withSettings.call_package_id.slice(2).padStart(64, "0");
 const BUDGET = "0x" + "b1".repeat(32), CAP = "0x" + "c1".repeat(32), CLOCK = "0x" + "0".repeat(63) + "6";
-const setCall = (values) => ({ target: `${PACKAGE}::fleet_settings::set`, objects: [BUDGET, CAP, CLOCK], values });
+const BUDGET2 = "0x" + "b2".repeat(32), CAP2 = "0x" + "c2".repeat(32);
+const setCall = (values, budget = BUDGET, cap = CAP) => ({ target: `${PACKAGE}::fleet_settings::set`, objects: [budget, cap, CLOCK], values });
 const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd: 0.05, last_updated_at: 1792900060 } };
 
 (async () => {
@@ -173,6 +174,45 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       await page.close();
     }
 
+    // ── Another fleet without remounting: its size, saved settings and a fresh confirmation ──
+    {
+      const { page, errors, waitText, control } = await open("switch");
+      await waitText("Saved on chain: checks every 15 min");
+      await page.locator("#healthIntervalMs-86400000").check();
+      await page.getByLabel("Devices", { exact: true }).first().fill("1000");
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await waitText("Not enough deposit for these settings");
+      await page.evaluate(() => window.__switchFleet());
+      await waitText("Saved on chain: checks every 5 min, rollout fast checks every 60 s, health every 24 h, archives every 24 h kept 42 epoch(s).");
+      for (const id of ["checkIntervalMs-300000", "rolloutCheckIntervalMs-60000", "healthIntervalMs-86400000", "archiveIntervalMs-86400000", "archiveRetentionDays-42"]) {
+        assert.ok(await page.locator(`#${id}`).isChecked(), `${id} is the second fleet's saved choice`);
+      }
+      assert.equal(await page.getByLabel("Devices", { exact: true }).first().inputValue(), "5", "sized from the second fleet's devices");
+      assert.ok(!(await page.textContent("body")).includes("Not enough deposit"), "the first fleet's warning is withdrawn");
+      assert.deepEqual((await control()).settingsReads.slice(-1), [BUDGET2]);
+      await page.getByRole("button", { name: "Save settings" }).click();
+      await waitText("Not enough deposit for these settings");
+      await page.getByRole("button", { name: "Save anyway" }).click();
+      await waitText("Settings saved in FAKEDIGEST1");
+      assert.deepEqual((await control()).signed, [{ sender: "0x" + "e".repeat(64), calls: [setCall(["300000", "60000", "86400000", "86400000", 42], BUDGET2, CAP2)] }],
+        "the second fleet's budget, cap and saved values; nothing carried over from the first");
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+
+    // ── A saved record that arrives after the owner chose does not overwrite the choice ──
+    {
+      const { page, errors, waitText } = await open("delayed");
+      await page.locator("#healthIntervalMs-3600000").check();
+      await page.evaluate(() => window.__releaseSaved());
+      await waitText("Saved on chain: checks every 15 min");
+      for (const id of ["healthIntervalMs-3600000", "checkIntervalMs-1800000"]) {
+        assert.ok(await page.locator(`#${id}`).isChecked(), `${id} stays as the owner left it`);
+      }
+      assert.deepEqual(errors, []);
+      await page.close();
+    }
+
     // ── The wallet refuses: nothing is reported saved ──
     {
       const { page, errors, waitText, control } = await open("rejected");
@@ -198,7 +238,8 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
     console.log("PASS: real browser Fleet settings page: per-option network cost and SuiFleet price per device and per fleet, dated live gas/Walrus quotes and "
       + "on-request USD quote, deposit follows settings, an underfunded save warns before signing and signs only the chosen settings after confirmation, "
       + "funded save signs directly, each save is the real SF-130 fleet_settings::set with the budget/cap/clock and chosen values, saved settings "
-      + "preselect their options, a wallet refusal reports nothing saved, saving disabled when the manifest lacks the SF-130 type origins");
+      + "preselect their options, switching fleets resets the form to the new fleet's size and saved settings and signs only its budget/cap, "
+      + "a late saved-settings read keeps the owner's choice, a wallet refusal reports nothing saved, saving disabled when the manifest lacks the SF-130 type origins");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));
