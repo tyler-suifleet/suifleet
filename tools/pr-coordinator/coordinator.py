@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Persistent local reciprocal PR reviews. GitHub is never a model identity oracle."""
 import argparse
+from datetime import date, datetime
 import fcntl
 import hashlib
 import json
@@ -12,6 +13,7 @@ import sqlite3
 import subprocess
 import time
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 MARKER = '<!-- pr-coordinator -->'
 # SF-145: hosted CI is the coordinator's job; a model polling it only burns quota.
@@ -446,6 +448,118 @@ def worker_stopped(pid, started):
         return True
     except (OSError, ValueError, IndexError):
         return False
+
+
+TERMINAL_LOG_BYTES = 32768
+QUOTA_GRACE = 120          # seconds after the provider's stated reset before a same-claim retry
+QUOTA_RETRIES = 4          # quota recoveries per claim (implementation) or per repair job
+QUOTA_SKEW = 300           # a reset this far before the exit receipt still counts as that window
+QUOTA_SESSION_HORIZON = 6*3600     # session windows reset within five hours
+QUOTA_DATED_HORIZON = 8*86400      # weekly limits name a date within a week
+MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+# Observed Claude CLI terminal text (2026-10-23):
+#   You've hit your session limit · resets 4:30pm (America/Los_Angeles)
+# Weekly limits additionally name the day. Anything else (usage/auth/billing
+# text, unknown zones, missing times) is not a validated reset.
+QUOTA_LIMIT = re.compile("You've hit your (session|weekly|Opus weekly) limit · resets "
+                         "(?:(" + '|'.join(MONTHS) + ") ([1-9]|[12][0-9]|3[01]), )?"
+                         r"([1-9]|1[0-2])(?::([0-5][0-9]))?(am|pm) \(([A-Za-z]+(?:/[A-Za-z0-9_+-]+){1,2}|UTC)\)")
+
+
+def terminal_lines(directory):
+    """Nonblank lines of a stopped worker's bounded log tail, or None.
+
+    Only an actual nonzero, non-signal, non-timeout wrapper receipt without a
+    result qualifies. A truncated first line is never accepted as complete."""
+    directory = Path(directory)
+    receipt = directory/'exit.json'
+    if receipt.stat().st_size > 1024 or (directory/'result.json').exists():
+        return None
+    value = json.loads(receipt.read_text())
+    if (not isinstance(value, dict) or set(value) != {'returncode'}
+            or type(value['returncode']) is not int or not 1 <= value['returncode'] < 124):
+        return None
+    with (directory/'worker.log').open('rb') as stream:
+        size = stream.seek(0, 2)
+        stream.seek(max(0, size-TERMINAL_LOG_BYTES))
+        data = stream.read(TERMINAL_LOG_BYTES)
+    if size > TERMINAL_LOG_BYTES:
+        data = data.split(b'\n', 1)[-1]
+    return [line.rstrip() for line in data.decode('utf-8', errors='replace').splitlines() if line.strip()] or None
+
+
+def _quota_reset(directory, now):
+    lines = terminal_lines(directory)
+    if not lines:
+        return None
+    # Only the final terminal line: earlier assistant text, quoted logs or a
+    # later unrelated error never qualify.
+    match = QUOTA_LIMIT.fullmatch(lines[-1])
+    if match is None:
+        try:
+            terminal = json.loads(lines[-1])
+        except ValueError:
+            return None
+        if (not isinstance(terminal, dict) or terminal.get('type') != 'result' or terminal.get('is_error') is not True
+                or not isinstance(terminal.get('result'), str)):
+            return None
+        match = QUOTA_LIMIT.fullmatch(terminal['result'])
+        if match is None:
+            return None
+    kind, month, day, hour, minute, half, zone = match.groups()
+    # The message has no date or year: anchor it to the durable exit receipt.
+    stopped = (Path(directory)/'exit.json').stat().st_mtime
+    if stopped > now + QUOTA_SKEW:
+        return None
+    zone = ZoneInfo(zone)
+    local = datetime.fromtimestamp(stopped, zone)
+    hour, minute = int(hour) % 12 + (12 if half == 'pm' else 0), int(minute or 0)
+    if month is None:
+        if kind != 'session':
+            return None  # A weekly reset without its day is unknown.
+        days = [date.fromordinal(local.date().toordinal()+n) for n in (0, 1)]
+        horizon = QUOTA_SESSION_HORIZON
+    else:
+        days = []
+        for year in (local.year, local.year+1):
+            try:
+                days.append(date(year, MONTHS.index(month)+1, int(day)))
+            except ValueError:
+                continue
+        horizon = QUOTA_DATED_HORIZON
+    for candidate in days:
+        reset = datetime(candidate.year, candidate.month, candidate.day, hour, minute, tzinfo=zone).timestamp()
+        if -QUOTA_SKEW <= reset - stopped <= horizon:
+            return reset
+    return None
+
+
+def quota_reset(directory, now=None):
+    """Epoch of an explicit, bounded provider quota reset, or None (never guessed)."""
+    try:
+        return _quota_reset(directory, time.time() if now is None else now)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def claim_processes(token, started):
+    """Live same-user processes started after `started` that carry the claim token."""
+    found = []
+    marker = ('PR_COORDINATOR_CLAIM_TOKEN='+token).encode()
+    for path in Path('/proc').iterdir():
+        if not path.name.isdigit() or int(path.name) == os.getpid():
+            continue
+        try:
+            if path.stat().st_uid != os.getuid():
+                continue
+            fields = (path/'stat').read_text().rsplit(')', 1)[1].split()
+            if fields[0] in 'ZX' or int(fields[19]) < int(started):
+                continue
+            if marker in (path/'environ').read_bytes().split(b'\0') or token.encode() in (path/'cmdline').read_bytes():
+                found.append(dict(pid=int(path.name), started=fields[19]))
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+    return found
 
 
 class Coordinator:

@@ -18,7 +18,8 @@ from urllib.parse import quote
 import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
-                         failed_checks, repair_feedback, CI_HANDOFF)
+                         failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes,
+                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -48,7 +49,7 @@ TYLER = {'GIT_AUTHOR_NAME': 'Tyler Bush', 'GIT_AUTHOR_EMAIL': 'tyler.jonathan.bu
 
 CAPACITY_RETRIES = 3
 CAPACITY_DELAY = 60
-CAPACITY_LOG_BYTES = 32768
+QUOTA_PAUSE = 'provider quota reset wait'
 
 
 def _capacity_failure(directory):
@@ -57,22 +58,7 @@ def _capacity_failure(directory):
     Receipts and output are bounded; success, signals/timeouts, user handoffs,
     usage/auth failures and unknown trailing errors fail closed.
     """
-    directory = Path(directory)
-    receipt = directory/'exit.json'
-    if receipt.stat().st_size > 1024 or (directory/'result.json').exists():
-        return False
-    value = json.loads(receipt.read_text())
-    if (not isinstance(value, dict) or set(value) != {'returncode'}
-            or type(value['returncode']) is not int or not 1 <= value['returncode'] < 124):
-        return False
-    path = directory/'worker.log'
-    with path.open('rb') as stream:
-        size = stream.seek(0, 2)
-        stream.seek(max(0, size-CAPACITY_LOG_BYTES))
-        data = stream.read(CAPACITY_LOG_BYTES)
-    if size > CAPACITY_LOG_BYTES:
-        data = data.split(b'\n', 1)[-1]  # Never accept a truncated prefix as a full line.
-    lines = [line.rstrip() for line in data.decode('utf-8', errors='replace').splitlines() if line.strip()]
+    lines = terminal_lines(directory)
     if not lines:
         return False
     pattern = re.compile(r'(?:ERROR: )?Selected model is at capacity\. Please try a different model\.?')
@@ -161,6 +147,10 @@ class Dispatcher:
             source TEXT PRIMARY KEY, claim TEXT NOT NULL, project TEXT, family TEXT,
             state TEXT, attempt INTEGER, retry_after REAL, reason TEXT,
             replacement TEXT UNIQUE, updated REAL)""")
+        # SF-145: provider quota resets share the same fenced same-claim recovery,
+        # with their own per-claim budget. A side table keeps capacity_retries
+        # unchanged for an activation rollback; rows without a kind are capacity.
+        self.db.execute('CREATE TABLE IF NOT EXISTS capacity_kinds (source TEXT PRIMARY KEY, kind TEXT NOT NULL)')
         for project in config.get('projects', []):
             # Exhaustive shared-mutation resources fenced before any forced CI redirect.
             # Absent disables forced interruption; an inexact list is a configuration error.
@@ -236,6 +226,8 @@ class Dispatcher:
                                   (project['id'],)):
                 proof = json.loads(job['repair_claim'])
                 proof.pop('head', None)
+                if job['status'] in ('quota_wait', 'quota_launch') and proof.get('claim') == expected['claim']:
+                    return True  # SF-145: a deferred same-claim repair owns this claim's recovery.
                 if proof != expected or not job['pid'] or not job['started']:
                     continue
                 if int(job['started']) <= int(identity['started']):
@@ -1599,44 +1591,63 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                             (f'resume launch failed ({type(error).__name__}); claim retained, never relaunched', record['id']))
 
     def record_capacity(self, project, row, claim):
-        if row['status'] == 'orphaned' or not capacity_failure(row['directory']):
+        if row['status'] == 'orphaned':
             return False
+        reset = None
+        if capacity_failure(row['directory']):
+            kind = 'capacity'
+        else:
+            # Explicit provider quota reset with a validated time; unknown resets stay quarantined.
+            kind, reset = 'quota', quota_reset(row['directory'])
+            if reset is None:
+                return False
         digest = hashlib.sha256(claim['token'].encode()).hexdigest()
         prior = self.db.execute('SELECT * FROM capacity_retries WHERE source=?', (row['session'],)).fetchone()
         if prior:
             return True
-        attempt = self.db.execute('SELECT COALESCE(MAX(attempt),0)+1 FROM capacity_retries WHERE claim=?',
-                                  (digest,)).fetchone()[0]
-        exhausted = attempt > CAPACITY_RETRIES
+        attempt = self.db.execute('SELECT COALESCE(MAX(c.attempt),0)+1 FROM capacity_retries c LEFT JOIN capacity_kinds k '
+                                  "ON k.source=c.source WHERE c.claim=? AND COALESCE(k.kind,'capacity')=?",
+                                  (digest, kind)).fetchone()[0]
+        now = time.time()
+        if kind == 'capacity':
+            exhausted = attempt > CAPACITY_RETRIES
+            delay = CAPACITY_DELAY * 2**min(attempt-1, 4)
+            retry_after = now+delay
+            reason = ('provider capacity retry budget exhausted; claim retained for explicit recovery' if exhausted
+                      else f'provider model at capacity; same-claim retry {attempt}/{CAPACITY_RETRIES} in {delay}s')
+        else:
+            exhausted = attempt > QUOTA_RETRIES
+            # A reset already in the past (for example after downtime) is due now.
+            retry_after = max(now, reset+QUOTA_GRACE)
+            when = datetime.fromtimestamp(reset).astimezone().isoformat(timespec='minutes')
+            reason = ('provider quota retry budget exhausted; claim retained for explicit recovery' if exhausted
+                      else f'provider quota limit; same-claim retry {attempt}/{QUOTA_RETRIES} after reset at {when}')
         state = 'exhausted' if exhausted else 'waiting'
-        delay = CAPACITY_DELAY * 2**min(attempt-1, 4)
-        reason = ('provider capacity retry budget exhausted; claim retained for explicit recovery' if exhausted
-                  else f'provider model at capacity; same-claim retry {attempt}/{CAPACITY_RETRIES} in {delay}s')
-        self.db.execute('INSERT INTO capacity_retries VALUES(?,?,?,?,?,?,?,?,?,?)',
-                        (row['session'], digest, project['id'], row['family'], state, attempt,
-                         time.time()+delay, reason, None, time.time()))
-        self.update(row['session'], 'capacity_wait' if not exhausted else 'quarantined', reason)
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            self.db.execute('INSERT INTO capacity_retries VALUES(?,?,?,?,?,?,?,?,?,?)',
+                            (row['session'], digest, project['id'], row['family'], state, attempt,
+                             retry_after, reason, None, now))
+            self.db.execute('INSERT INTO capacity_kinds VALUES(?,?)', (row['session'], kind))
+            self.update(row['session'], 'capacity_wait' if not exhausted else 'quarantined', reason)
+            self.db.execute('COMMIT')
+        finally:
+            if self.db.in_transaction:
+                self.db.execute('ROLLBACK')
+        if kind == 'quota' and not exhausted:
+            # The account's quota is shared: new claims for this family would stop the
+            # same way. Pause them until the reset; due recoveries run first.
+            pause = self.db.execute('SELECT retry_after FROM backoff WHERE project=? AND family=?',
+                                    (project['id'], row['family'])).fetchone()
+            if not pause or pause[0] < retry_after:
+                self.db.execute('INSERT OR REPLACE INTO backoff VALUES(?,?,?,?,?)',
+                                (project['id'], row['family'], 0, retry_after, QUOTA_PAUSE))
         return True
 
     @staticmethod
     def capacity_helpers(claim, started):
         """Any live detached same-claim process, not only heartbeat helpers."""
-        found = []
-        marker = ('PR_COORDINATOR_CLAIM_TOKEN='+claim['token']).encode()
-        for path in Path('/proc').iterdir():
-            if not path.name.isdigit() or int(path.name) == os.getpid():
-                continue
-            try:
-                if path.stat().st_uid != os.getuid():
-                    continue
-                fields = (path/'stat').read_text().rsplit(')', 1)[1].split()
-                if fields[0] in 'ZX' or int(fields[19]) < int(started):
-                    continue
-                if marker in (path/'environ').read_bytes().split(b'\0') or claim['token'].encode() in (path/'cmdline').read_bytes():
-                    found.append(dict(pid=int(path.name), started=fields[19]))
-            except (FileNotFoundError, ProcessLookupError):
-                continue
-        return found
+        return claim_processes(claim['token'], started)
 
     def capacity_fence(self, project, row, claim):
         """Read-only stop/ownership/worktree fences, repeated immediately before intent."""
@@ -1675,8 +1686,9 @@ First inspect git status/log and the current-head CI, then continue the unfinish
 
     def retry_capacity(self, project, slots, owners):
         families = {slot['family']: slot for slot in slots}
-        records = self.db.execute("SELECT c.*,r.directory,r.claim AS original_claim,r.status AS run_status "
-                                  "FROM capacity_retries c JOIN runs r ON r.session=c.source "
+        records = self.db.execute("SELECT c.*,COALESCE(k.kind,'capacity') AS kind,r.directory,r.claim AS original_claim,"
+                                  "r.status AS run_status FROM capacity_retries c JOIN runs r ON r.session=c.source "
+                                  "LEFT JOIN capacity_kinds k ON k.source=c.source "
                                   "WHERE c.project=? AND c.state='waiting' ORDER BY c.retry_after,c.source",
                                   (project['id'],)).fetchall()
         for record in records:
@@ -1719,8 +1731,9 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                 # intent. Any crash after intent is uncertain, never an auto replay.
                 if self.capacity_fence(project, row, claim):
                     continue
-                session = record['source']+'-capacity-'+str(record['attempt'])
-                directory = Path(row['directory'])/('capacity-'+str(record['attempt']))
+                kind = 'quota' if record['kind'] == 'quota' else 'capacity'
+                session = record['source']+'-'+kind+'-'+str(record['attempt'])
+                directory = Path(row['directory'])/(kind+'-'+str(record['attempt']))
                 self.db.execute('BEGIN IMMEDIATE')
                 try:
                     changed = self.db.execute("UPDATE capacity_retries SET state='launch_intent',replacement=?,updated=? "
@@ -1729,12 +1742,12 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                     if not changed:
                         continue
                     self.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)',
-                                    (row['session'],row['status'],row['message'],'capacity recovery reserved as '+session,time.time()))
+                                    (row['session'],row['status'],row['message'],kind+' recovery reserved as '+session,time.time()))
                     self.db.execute("UPDATE runs SET status='finished',message=? WHERE session=?",
-                                    ('capacity recovery reserved as '+session, record['source']))
+                                    (kind+' recovery reserved as '+session, record['source']))
                     self.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
                                     (session, project['id'], record['family'], 'launching', str(directory),
-                                     record['original_claim'], None, None, 'same-claim capacity retry launch reserved'))
+                                     record['original_claim'], None, None, f'same-claim {kind} retry launch reserved'))
                     self.db.execute('COMMIT')
                 finally:
                     if self.db.in_transaction:
@@ -1745,7 +1758,8 @@ First inspect git status/log and the current-head CI, then continue the unfinish
                     env = {**os.environ, 'GH_TOKEN': token, 'PR_COORDINATOR_ACTIVE': '1',
                            'PR_COORDINATOR_CLAIM_TOKEN': claim['token']}
                     (directory/'command.json').write_text(json.dumps(self.config['workers'][record['family']]))
-                    preface = (f"Your previous worker stopped on an explicit provider capacity error. Original evidence: {row['directory']}.\n"
+                    cause = 'capacity error' if kind == 'capacity' else 'quota limit whose stated reset time has now passed'
+                    preface = (f"Your previous worker stopped on an explicit provider {cause}. Original evidence: {row['directory']}.\n"
                                "Continue the SAME retained implementation claim and existing branch/worktree. Inspect git status first; preserve all staged, dirty and untracked work. "
                                "Do not claim, recover, release, reset, clean or switch models. Review previous receipts and continue unfinished work.\n")
                     (directory/'prompt.txt').write_text(preface+self.prompt(project, claim, directory))
