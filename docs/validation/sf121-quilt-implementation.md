@@ -161,3 +161,38 @@ network write. Earlier public Quilt effects remain historical evidence above.
 Physical targets, actual mainnet and final production-provider/manual-wallet
 checks remain deferred and unrun in #32/#159. No deployment, hardware programming,
 production credentials or final subscription economics are claimed.
+
+### Follow-up: reject partial codec encoding before retry persistence
+
+The review of `dab4c4791fd7154608c0609a384fb53fea07622c` found that the
+publication failure handler could persist partially assigned encoding fields.
+Encoding response validation now completes before assigning any pending identity
+or size. Missing Quilt size, missing/non-string/empty root, and zero/oversize
+encoded length fail without changing those fields. The restart regression saves
+the failed attempt, reloads the journal, verifies that preparation is still fresh
+and source records remain pending, then accepts a corrected response. This avoids
+both the manifest-size purchase fallback and a permanently wedged partial root.
+No schema, chain API, source acknowledgement or signing-checkpoint change.
+
+Fresh repair checks (Rust 1.94.0, `CARGO_BUILD_JOBS=2`,
+`CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf121-build`):
+
+- `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml`:
+  **423 passed, 4 existing ignored, zero failed**, including the new malformed
+  preparation/persistence/restart regression.
+- `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed.
+
+Hosted CI and automatic testnet acceptance must be checked by the coordinator on
+the pushed head; this repair does not poll them or grant merge approval. Physical,
+mainnet and final production-provider/manual-wallet checks remain deferred and
+unrun in #32 and #159. Earlier evidence above is historical, not a fresh rerun.
+
+- Fresh repair simulator: `python3 scripts/test_fleet_data_ota.py --binary
+  /home/tyler/.local/state/suifleet/sf121-build/debug/suifleet --shim
+  /home/tyler/.local/state/suifleet/sf121-build/debug/examples/grpc_sim_shim
+  --compact-history --quilt`: **passed**, with real rebuilt daemon, native
+  encryption/signatures and browser verification; outage/backoff/restart,
+  certification recovery, tamper/replay, diagnostics, shadows and cadence controls.
+- `git diff --check`: passed. Fetched `origin/main` remains
+  `b9e8053f4f034ca725686d19870cde6f3f756d63`; merge reported already up to date.
