@@ -496,18 +496,23 @@ class ActualExporters(unittest.TestCase):
         with socket.socket() as reserve:
             reserve.bind(('127.0.0.1', 0))
             port = reserve.getsockname()[1]
+        certs = Path(self.temp.name) / 'certs'
+        certs.mkdir()
+        cert, key = certs / 'public.crt', certs / 'private.key'
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                        '-keyout', str(key), '-out', str(cert), '-subj', '/CN=localhost',
+                        '-addext', 'subjectAltName=IP:127.0.0.1'], check=True, capture_output=True)
+        keylog = Path(self.temp.name) / 's3-tls-keylog'
+        os.environ['SSLKEYLOGFILE'] = str(keylog)
+        os.environ['AWS_CA_BUNDLE'] = str(cert)
         log = (Path(self.temp.name) / 'minio.log').open('w')
         process = subprocess.Popen([str(binary), 'server', str(Path(self.temp.name) / 'objects'),
-                                    '--address', f'127.0.0.1:{port}', '--console-address', '127.0.0.1:0'],
+                                    '--certs-dir', str(certs), '--address', f'127.0.0.1:{port}', '--console-address', '127.0.0.1:0'],
                                    env={**os.environ, 'MINIO_ROOT_USER': 'LOCALACCESS',
                                         'MINIO_ROOT_PASSWORD': 'local-secret', 'MINIO_BROWSER': 'off'},
                                    stdout=log, stderr=log)
         try:
-            endpoint = f'http://127.0.0.1:{port}'
-            client = boto3.client('s3', endpoint_url=endpoint, region_name='us-east-1',
-                                  aws_access_key_id='LOCALACCESS', aws_secret_access_key='local-secret')
-            wait_for(lambda: self.minio_ready(client), 'MinIO did not start', process)
-            client.create_bucket(Bucket='bucket')
+            endpoint = f'https://127.0.0.1:{port}'
             self.config['endpoint'] = endpoint
             self.append([{'device-data': 'direct'}, {'binary': 'envelope'}])
             self.customer('customer_s3').lock.close()
@@ -515,6 +520,11 @@ class ActualExporters(unittest.TestCase):
             secret = Path(self.config['credentials_file'])
             secret.write_text(json.dumps(dict(access_key_id='LOCALACCESS', secret_access_key='local-secret')))
             exporter = self.open()
+            client = boto3.client('s3', endpoint_url=endpoint, region_name='us-east-1',
+                                  aws_access_key_id='LOCALACCESS', aws_secret_access_key='local-secret',
+                                  verify=str(cert))
+            wait_for(lambda: self.minio_ready(client), 'MinIO did not start', process)
+            client.create_bucket(Bucket='bucket')
             exporter.snapshot()
             exporter = self.open()  # restart after durable snapshot, before send
             exporter.step()
@@ -525,6 +535,7 @@ class ActualExporters(unittest.TestCase):
             self.assertEqual([json.loads(line)['payload'] for line in body.splitlines()],
                              [{'device-data': 'direct'}, {'binary': 'envelope'}])
             self.assertFalse(self.open().step(), 'restart must not export acknowledged data again')
+            self.assertFalse(keylog.exists(), 'customer S3 must disable inherited TLS key logging')
         finally:
             process.terminate()
             process.wait(timeout=30)

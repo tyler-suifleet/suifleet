@@ -126,6 +126,10 @@ class Exporter:
                 raise ValueError('checkpoint/config mismatch; drain before reconfiguration')
             # No SDK default credential fallback: use scoped SF-057 or explicit customer secrets.
             if aws is None and config['service'] != 'http':
+                # botocore's TLS context honors this debugging variable. Customer
+                # credentials/data must never enable inherited session-key logs.
+                if config['service'] == 'customer_s3':
+                    os.environ.pop('SSLKEYLOGFILE', None)
                 import boto3
                 from botocore.config import Config
                 session = boto3.Session(region_name=config['region'])

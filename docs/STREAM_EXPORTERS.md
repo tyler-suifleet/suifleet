@@ -87,7 +87,8 @@ after durable acceptance**, and deduplicate retries by idempotency key (or
 source_id/stream/sequence). A lost reply may repeat the identical body and key.
 3xx redirects are refused, including same-host redirects; 4xx/5xx retain the
 snapshot. TLS certificate validation is enabled; inherited proxies are disabled.
-Both customer transports require HTTPS except loopback HTTP for local fixtures.
+Both customer transports disable inherited TLS session-key logging and require
+HTTPS except loopback HTTP for local fixtures.
 Do not put authentication material in URLs; userinfo, query and fragment are refused.
 
 Both transports use the persisted snapshot/delivered marker/ack protocol below.
