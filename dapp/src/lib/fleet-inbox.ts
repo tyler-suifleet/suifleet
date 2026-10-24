@@ -16,7 +16,7 @@ import { ObjectError } from "@mysten/sui/client";
 import { deriveObjectID, normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
 import { PACKAGE_ID, REGISTRY_ID } from "./constants";
 import { MANIFEST, moveType, type DeploymentManifest } from "./deployment-manifest";
-import { calls } from "./fleet-protocol";
+import { calls, fleet_inbox_DeviceInboxBcs } from "./fleet-protocol";
 import { INBOX_TYPES } from "./protocol-version";
 
 type ObjectArg = Parameters<Transaction["object"]>[0];
@@ -52,6 +52,37 @@ export async function existingInboxes(client: Pick<SuiGrpcClient, "getObjects">,
 
 /** A device the sender operates: its owner cap proves it, the inbox may be new. */
 export interface InboxTarget { deviceId: string; ownerCapId: string; exists: boolean }
+
+/** Inbox listings per batch of the index migration. */
+export const LISTING_BATCH = 100;
+
+/**
+ * The operated members (of `members`) whose inbox does not list `groupId`
+ * yet, missing inboxes included. Listing them is what lets those devices
+ * find the group without event history, whatever the member vector holds.
+ */
+export async function unlistedMembers(
+  client: Pick<SuiGrpcClient, "getObjects">, groupId: string, members: { deviceId: string; ownerCapId: string }[],
+): Promise<InboxTarget[]> {
+  const group = normalizeSuiAddress(groupId);
+  const expected = normalizeStructTag(moveType("fleet_inbox::DeviceInbox"));
+  const unlisted: InboxTarget[] = [];
+  for (let index = 0; index < members.length; index += 50) {
+    const batch = members.slice(index, index + 50);
+    const { objects } = await client.getObjects({ objectIds: batch.map((m) => inboxId(m.deviceId)), include: { content: true } });
+    objects.forEach((object, i) => {
+      if (object instanceof ObjectError && (object.reason === "notFound" || object.reason === "deleted")) {
+        unlisted.push({ ...batch[i], exists: false });
+        return;
+      }
+      if (object instanceof Error) throw object;
+      if (normalizeStructTag(object.type) !== expected) throw new Error(`Unexpected object at inbox ${object.objectId}`);
+      const groups = fleet_inbox_DeviceInboxBcs.parse(object.content).groups.map((id) => normalizeSuiAddress(id));
+      if (!groups.includes(group)) unlisted.push({ ...batch[i], exists: true });
+    });
+  }
+  return unlisted;
+}
 
 /** Use the device's inbox, creating and sharing it in this transaction if needed. */
 export function withInbox(tx: Transaction, target: InboxTarget, use: (inbox: ObjectArg) => void) {
@@ -112,14 +143,18 @@ export async function indexedMembers(client: Pick<SuiGrpcClient, "listDynamicFie
 
 /**
  * Move up to INDEX_BATCH members of an unindexed (or partly indexed) group
- * into its index, and list the group in the inboxes of devices the sender
- * operates. Run again until `device_ids` is empty. Older clients see only
- * `device_ids`: index a group once its devices and tools run SF-125.
+ * into its index when `index` is set, and list the group in the inboxes of
+ * the given operated members (from `unlistedMembers`, at most
+ * LISTING_BATCH). Run again until `device_ids` is empty and no operated
+ * member is unlisted. Older clients see only `device_ids`: index a group
+ * once its devices and tools run SF-125.
  */
-export function buildIndexGroupTx(groupId: string, members: InboxTarget[]): Transaction {
+export function buildIndexGroupTx(groupId: string, members: InboxTarget[], index = true): Transaction {
   if (!inboxSupported()) throw new Error("This deployment has no group index");
+  if (members.length > LISTING_BATCH) throw new Error(`At most ${LISTING_BATCH} inbox listings per transaction`);
+  if (!index && members.length === 0) throw new Error("Nothing to index or list");
   const tx = new Transaction();
-  calls.device_group_index_members(tx, PACKAGE_ID, groupId, INDEX_BATCH);
+  if (index) calls.device_group_index_members(tx, PACKAGE_ID, groupId, INDEX_BATCH);
   for (const member of members) withInbox(tx, member, (inbox) => calls.fleet_inbox_follow_group(tx, PACKAGE_ID, inbox, groupId));
   return tx;
 }

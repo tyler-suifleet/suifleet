@@ -65,6 +65,11 @@ const load = loader(), sui = load('lib/sui.ts'), inbox = load('lib/fleet-inbox.t
   // Index migration: one bounded batch plus inbox listings.
   const index = inbox.buildIndexGroupTx('0x10', [{ deviceId: '0xde', ownerCapId: '0xc1', exists: true }, { deviceId: '0xdf', ownerCapId: '0xc2', exists: false }]);
   assert.deepEqual(fns(index), ['device_group::index_members', 'fleet_inbox::follow_group', 'fleet_inbox::new_inbox', 'fleet_inbox::follow_group', 'fleet_inbox::share_inbox']);
+  // A fully indexed group still lists remaining members, in bounded batches.
+  assert.deepEqual(fns(inbox.buildIndexGroupTx('0x10', [{ deviceId: '0xde', ownerCapId: '0xc1', exists: true }], false)), ['fleet_inbox::follow_group']);
+  assert.throws(() => inbox.buildIndexGroupTx('0x10', [], false), /Nothing to index/);
+  const many = Array.from({ length: inbox.LISTING_BATCH + 1 }, (_, i) => ({ deviceId: `0x${(i + 1).toString(16)}`, ownerCapId: '0xc1', exists: true }));
+  assert.throws(() => inbox.buildIndexGroupTx('0x10', many), /At most/);
 
   // Rollouts announce to members' existing inboxes only.
   const input = { component: 'app', version: '1', recipe: 'blob', artifactSha256: DIGEST, recipeSha256: DIGEST, cohorts: [['0xde'], ['0xdf']],
@@ -78,6 +83,27 @@ const load = loader(), sui = load('lib/sui.ts'), inbox = load('lib/fleet-inbox.t
     i === 0 ? { objectId: id, type: inboxType } : new ObjectError('notExists', 'absent', { reason: 'notFound' })) }) }, ['0xde', '0xdf']);
   assert.deepEqual([...found], ['0xde']);
   await assert.rejects(inbox.existingInboxes({ getObjects: async ({ objectIds }) => ({ objects: objectIds.map(id => ({ objectId: id, type: '0x2::coin::Coin' })) }) }, ['0xde']), /Unexpected object/);
+
+  // Unlisted members: a missing inbox, or one not listing the group, across
+  // batches; a member whose inbox lists it is done.
+  const content = (device, groups) => load('lib/fleet-protocol.ts').fleet_inbox_DeviceInboxBcs.serialize({ id: inbox.inboxId(device), device_id: device, version: 1,
+    head: { seq: 0, latest: null, next_start_ms: 0, components: { contents: [] } }, groups }).toBytes();
+  const members = Array.from({ length: 60 }, (_, i) => ({ deviceId: n(`0x${(i + 1).toString(16)}`), ownerCapId: '0xc1' }));
+  const listed = new Set(members.slice(0, 55).map((m) => inbox.inboxId(m.deviceId)));
+  const byInbox = new Map(members.map((m) => [inbox.inboxId(m.deviceId), m.deviceId]));
+  const reads = [];
+  const unlisted = await inbox.unlistedMembers({ getObjects: async ({ objectIds, include }) => {
+    reads.push(objectIds.length); assert.equal(include.content, true);
+    return { objects: objectIds.map((id) => {
+      const device = byInbox.get(id);
+      if (device === members[59].deviceId) return new ObjectError('notExists', 'absent', { reason: 'notFound' });
+      return { objectId: id, type: inboxType, content: content(device, listed.has(id) ? ['0x99', '0x10'] : ['0x99']) };
+    }) };
+  } }, '0x10', members);
+  assert.deepEqual(reads, [50, 10]);
+  assert.deepEqual(unlisted.map((m) => [m.deviceId, m.exists]),
+    [...members.slice(55, 59).map((m) => [m.deviceId, true]), [members[59].deviceId, false]]);
+  await assert.rejects(inbox.unlistedMembers({ getObjects: async ({ objectIds }) => ({ objects: objectIds.map(id => ({ objectId: id, type: '0x2::coin::Coin' })) }) }, '0x10', members.slice(0, 1)), /Unexpected object/);
 
   // Indexed members are MemberKey fields, read across pages.
   const key = (id) => ({ name: { type: `${ORIGIN}::device_group::MemberKey`, bcs: bcs.Address.serialize(id).toBytes() } });

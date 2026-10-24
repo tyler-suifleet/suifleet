@@ -73,8 +73,10 @@ checks reports as before.
   same transaction; staged rollouts announce to members' existing inboxes;
   adding an activated device to a group lists the group in its inbox,
   creating a missing inbox before the custody loan (`new_inbox` needs the
-  device in custody). The group panel's "Index members" runs one bounded batch and lists the group in
-  operated members' inboxes.
+  device in custody). The group panel's "Index members" runs one bounded
+  batch and lists the group in up to 100 operated members' inboxes that do
+  not list it yet; the panel stays, as "List group in inboxes", until every
+  operated member's inbox lists the group, even after the vector is empty.
 - Indexer API and `suifleet-indexer ctl`: create-deployment announces to
   every target group and activated target device; add/remove-devices use
   `add_member`/`remove_member`. `ctl` rebuilds the same calls from its own
