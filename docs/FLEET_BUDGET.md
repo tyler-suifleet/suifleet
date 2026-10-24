@@ -320,8 +320,9 @@ saving:
   part shows its source and date; whatever is not read live keeps the
   recorded Mainnet snapshot, labelled "recorded". The Network budget
   estimate uses the same quote, and its defaults now follow the default
-  settings: daily health, weekly archives kept six weeks and four receipts a
-  month, not hourly health and daily archives.
+  settings: daily health and four receipts a month, with log archives
+  disabled as new fleets default. The Fleet settings page sizes archives
+  from the chosen cadence and retention.
 - **Deposit sized from the settings.** The recommended SUI and WAL deposit
   covers the chosen settings, fleet size and prepaid months. Per-month counts
   round up to whole reports and archives, with 20% headroom. It is compared
