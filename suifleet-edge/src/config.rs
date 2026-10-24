@@ -69,10 +69,10 @@ pub struct Config {
     pub runtime: RuntimeConfig,
     #[serde(default)]
     pub components: ComponentsConfig,
-    /// Heartbeat and health telemetry (SF-019); none when omitted.
+    /// Optional customer-owned HTTP telemetry; no HTTP output when omitted.
     #[serde(default)]
     pub telemetry: Option<TelemetryConfig>,
-    /// Redacted remote logs (SF-020); needs `[telemetry]` for the indexer URL.
+    /// Redacted log collection for Walrus archives, or optional customer HTTP output.
     #[serde(default)]
     pub logs: Option<LogsConfig>,
     #[serde(default)]
@@ -804,6 +804,13 @@ impl FirmwareHelperConfig {
 }
 
 impl Config {
+    /// Walrus archives own the durable log cursor when enabled. HTTP and
+    /// on-chain health are mutually exclusive (their signed schema is shared).
+    pub fn http_logs_enabled(&self) -> bool {
+        self.logs.is_some() && self.telemetry.is_some()
+            && !self.fleet_data.as_ref().is_some_and(|d| d.archives.is_some())
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&raw)?;
@@ -917,9 +924,11 @@ impl Config {
         }
         validate_aws_iot(&cfg)?;
         if let Some(data) = &cfg.fleet_data {
+            // Both transports use the same signed snapshot schema but independent
+            // sequence counters. Never start both producers for one identity.
+            anyhow::ensure!(cfg.telemetry.is_none(), "configure fleet_data or HTTP telemetry, not both: health signatures share a sequence domain");
             data.validate()?;
             anyhow::ensure!(data.archives.is_none() || cfg.logs.is_some(), "fleet_data.archives needs [logs]");
-            anyhow::ensure!(cfg.telemetry.is_none(), "configure fleet_data or HTTP telemetry, not both");
         }
         if let Some(budget) = &cfg.budget {
             budget.validate(cfg.sui.manifest.as_ref().expect("validated manifest"))?;
@@ -1231,6 +1240,33 @@ mod tests {
         }
         assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
     }
+    #[test]
+    fn serverless_health_refuses_customer_http_health_replay_domain() {
+        let dir = std::env::temp_dir().join(format!("suifleet-config-serverless-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\ndevice_object_id='0x1'\ndevice_cap_id='0x2'\n[apply]\ncommand='true'\n";
+        let fleet = "[fleet_data]\npackage_id='0x3'\ntype_origin='0x3'\nfleet_id='0x4'\nbudget_id='0x5'\nstorage_id='0x6'\nwriter_id='0x7'\naccount_id='0x8'\n";
+        let path = dir.join("config.toml");
+        std::fs::write(&path, format!("{base}{fleet}")).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.fleet_data.is_some() && config.telemetry.is_none());
+        assert!(!config.http_logs_enabled());
+        // Refuse both transports before either task starts: a public chain
+        // snapshot must not enter a concurrently enabled HTTP sequence space.
+        for logs in ["", "[logs]\n"] {
+            std::fs::write(&path, format!("{base}{fleet}[telemetry]\nurl='https://customer.example'\n{logs}")).unwrap();
+            let error = Config::load(&path).unwrap_err();
+            assert!(error.to_string().contains("health signatures share a sequence domain"), "{error:#}");
+        }
+        // Customer-owned HTTP remains available as an explicit alternative.
+        std::fs::write(&path, format!("{base}[telemetry]\nurl='https://customer.example'\n[logs]\n")).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.fleet_data.is_none() && config.telemetry.is_some());
+        assert!(config.http_logs_enabled());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn logs_are_optional_bounded_and_need_telemetry() {
         let base = "[sui]\nmanifest_path='deployment.json'\n[device]\nkeypair_path='k'\n\

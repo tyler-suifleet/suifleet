@@ -134,7 +134,7 @@ If the merge differs from the cloud document, the adapter puts it with `expected
 - **Sync.** Three-way merge with per-section owners, against the SuiFleet HTTP(S) service or AWS IoT Device Shadow ([AWS_IOT.md](AWS_IOT.md)).
 - **Rate limits.** No per-shadow request rate limit; the IPC socket's own bounds apply.
 
-**Fleet visibility.** With `[telemetry]`, every heartbeat also reports each synchronized shadow's settled conflicts and sync failures, never documents or conflicting key paths. The documents reach authorized readers only through the encrypted fleet archive, and the indexer alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
+**Fleet visibility.** With `[fleet_data]`, every signed on-chain health summary also reports each synchronized shadow's settled conflicts and sync failures, never documents or conflicting key paths. The documents reach authorized readers only through the encrypted fleet archive, and the dApp derives alerts on them ([TELEMETRY.md](TELEMETRY.md#service-health-sf-085), SF-085).
 
 ## Evidence
 

@@ -3,7 +3,9 @@
 The daemon can publish signed health directly to Sui and encrypted, batched logs
 and diagnostics to fleet-prepaid Walrus storage. The static dApp discovers and
 verifies the chain index, decrypts authorized archives and derives alerts locally.
-An HTTP indexer is optional. Implementation and validation are distinct: see the
+This is the product data path. SuiFleet hosts no application servers; an HTTP
+indexer is only an optional customer-hosted reference integration (see
+[the complete inventory](SERVERLESS_PRODUCT.md)). Implementation and validation are distinct: see the
 validation section below for exact completed checks and outstanding gates.
 
 ## Dependency and package boundary

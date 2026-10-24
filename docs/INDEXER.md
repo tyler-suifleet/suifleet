@@ -1,5 +1,13 @@
 # Fleet indexer, API and CLI (SF-024)
 
+> Product policy (SF-137): SuiFleet hosts no application servers. Product health
+> and receipts come from Sui, encrypted logs/diagnostics from Walrus, and alerts
+> are derived in the browser. See [inventory/migration](SERVERLESS_PRODUCT.md)
+> and [setup](SERVERLESS_FLEET_DATA.md). HTTP configuration, API tokens, indexer
+> commands, webhooks and HTTP evidence below describe the optional
+> **customer-hosted reference integration**, not product requirements.
+> The product dApp uses no indexer URL or read token.
+
 `suifleet-indexer` keeps a queryable copy of the fleet: devices, groups, members, deployments, targets and authoritative receipts. It serves that copy over a versioned HTTP API, and its `ctl` subcommand is the operations CLI.
 
 The dApp keeps its own incremental discovery cache; the indexer supplies a durable queryable fleet history.

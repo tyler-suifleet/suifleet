@@ -86,6 +86,21 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
       await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
       return page;
     }
+    // Product pages must work without a telemetry URL or a read token.
+    for (const route of ["/devices", "/"]) {
+      const product = await open(route);
+      await product.waitForFunction(() => document.body.textContent.includes("pi-services"));
+      if (route === "/devices") {
+        await product.waitForFunction(() => document.body.textContent.includes("Healthy"));
+        assert.equal(await product.getByPlaceholder("Read token").count(), 0);
+      } else {
+        await product.waitForFunction(() => document.body.textContent.includes("export failed 3 times")).catch(async error => { throw Error(error.message + "; page: " + await product.textContent("body")); });
+      }
+      assert.ok(!(await product.textContent("body")).includes("indexer read token"));
+      assert.equal(await product.evaluate(() => sessionStorage.length), 0);
+      assert.ok(await product.evaluate(() => Object.keys(localStorage).every(k => k.startsWith("suifleet-history-v1:"))));
+      await product.close();
+    }
     const text = (page, testId) => page.getByTestId(testId).textContent();
     const waitText = (page, value) => page.waitForFunction((v) => document.body.textContent.includes(v), value, { timeout: 30_000 })
       .catch(async (error) => { throw new Error(`${error.message}; waiting for ${value}; page shows: ${await page.textContent("body")}`); });
@@ -154,7 +169,8 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await page.waitForFunction(() => document.querySelector('[data-testid="search-count"]')?.textContent === "2 of 4 records match.");
     assert.ok((await text(page, "archive-view")).includes("4\t[daemon] shutdown"));
     assert.ok((await text(page, "access-record")).includes(`opened · support ${operator} · device ${d1} archive #3 (diagnostics)`));
-    assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    assert.equal(await page.evaluate(() => sessionStorage.length), 0, "no session/plaintext persisted");
+    assert.ok(await page.evaluate(() => Object.keys(localStorage).every(k => k.startsWith("suifleet-history-v1:"))), "only public chain discovery may persist");
     await page.getByRole("button", { name: "Close and discard" }).click();
     await waitText(page, "Archive closed.");
     assert.ok(!(await page.textContent("body")).includes("ERROR disk full"));
@@ -169,7 +185,8 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
       "Shadow big", "integers beyond the exact range", "1 more shadows did not fit"]) assert.ok(docs.includes(expected), `shadow documents lack ${expected}: ${docs}`);
     assert.ok(!docs.includes("18446744073709552000"), "a rounded integer must not be shown");
     assert.equal(await page.locator('[data-testid="shadow-documents"] b').count(), 0, "document strings render as text, never markup");
-    assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    assert.equal(await page.evaluate(() => sessionStorage.length), 0, "no session/plaintext persisted");
+    assert.ok(await page.evaluate(() => Object.keys(localStorage).every(k => k.startsWith("suifleet-history-v1:"))), "only public chain discovery may persist");
     await page.close();
     page = await open("/shadows#history");
     await waitText(page, "History: archive #2 (sequence 9)");
