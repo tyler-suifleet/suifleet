@@ -108,13 +108,14 @@ class CiphertextVerified extends Error {}
  * Without `decrypt`, availability is checked up to key release: chain policy,
  * live record, ciphertext digest and Seal namespace/epoch/AAD binding.
  */
-export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>, config: FleetDataConfig,
+export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'> & Partial<Pick<WalrusClient, 'getBlob'>>, config: FleetDataConfig,
   deviceId: string, index: number, aggregator: string, decrypt?: (encrypted: Uint8Array) => Promise<Uint8Array>,
   fetcher: typeof fetch = fetch): Promise<ArchiveAssessment> {
   const rpc: unknown[] = [];
   let walrusError: unknown, aggregatorError: unknown, keyError: unknown;
   const reads = observed(client, rpc);
-  const committee = { async systemState() { try { return await walrus.systemState(); } catch (error) { walrusError = error; throw error; } } };
+  const committee = { async systemState() { try { return await walrus.systemState(); } catch (error) { walrusError = error; throw error; } },
+    ...(walrus.getBlob ? {getBlob: async (input: Parameters<WalrusClient['getBlob']>[0]) => { try { return await walrus.getBlob!(input); } catch (error) { walrusError = error; throw error; } }} : {}) };
   const download: typeof fetch = async (input, init) => {
     let response: Response;
     try { response = await fetcher(input, init); } catch (error) { aggregatorError = error; throw error; }

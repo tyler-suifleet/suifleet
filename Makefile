@@ -86,6 +86,7 @@ test-ota:
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
@@ -336,6 +337,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_compact_archives.cjs
+	$(RUN) node scripts/test_archive_quilt.cjs
 	$(RUN) node scripts/measure_quilt_geometry.cjs --check
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'

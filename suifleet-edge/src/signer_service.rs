@@ -438,7 +438,8 @@ pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
             anyhow::ensure!(message.len() <= crate::fleet_data::MAX_ARCHIVE, "archive too large");
             let archive: crate::fleet_data::Archive = serde_json::from_slice(message).map_err(|_| anyhow::anyhow!("invalid archive JSON"))?;
             archive.validate()?;
-            anyhow::ensure!(archive.schema != 3 || cfg.archives.as_ref().is_some_and(|a| a.compact_history), "compact archive signing disabled");
+            anyhow::ensure!(archive.previous_head.is_none() || cfg.archives.as_ref().is_some_and(|a| a.compact_history), "compact archive signing disabled");
+            anyhow::ensure!(archive.schema != 4 || cfg.archives.as_ref().is_some_and(|a| a.quilt), "Quilt archive signing disabled");
             anyhow::ensure!(serde_json::to_vec(&archive)? == message, "noncanonical archive");
             anyhow::ensure!(archive.chain_identifier == policy.chain_identifier
                 && Address::from_str(&archive.registry)? == policy.registry
@@ -1420,7 +1421,7 @@ mod fleet_intent_tests {
         p.fleet_data.as_mut().unwrap().archives=Some(crate::fleet_archive::Config {
             storage_package:"0xf6".into(), storage_type_origin:"0xf6".into(), system_id:"0xf4".into(), walrus_package:"0xf7".into(),
             key_server_package:"0xf5".into(), key_servers:vec![crate::config::KeyServerConfig { object_id:"0xf8".into(),weight:1,api_key_name:None,api_key_file:None }],
-            threshold:1,node:"/usr/bin/node".into(),codec:"/usr/lib/codec.cjs".into(),codec_sha256:"00".repeat(32),compact_history:false,
+            threshold:1,node:"/usr/bin/node".into(),codec:"/usr/lib/codec.cjs".into(),codec_sha256:"00".repeat(32),compact_history:false,quilt:false,
         });p
     }
     fn snapshot(p: &Policy) -> crate::telemetry::Snapshot {
@@ -1460,7 +1461,7 @@ mod fleet_intent_tests {
         let p = archive_policy();
         let mut archive = crate::fleet_data::Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: p.chain_identifier.clone(), registry: p.registry.to_string(),
             fleet_id: "0xf1".into(), device_id: "0xd0".into(), signer: p.device.to_string(), seq: 1, observed_ms: 100,
-            reason: "diagnostics".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: None };
+            reason: "diagnostics".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: None, items: None };
         let bytes = serde_json::to_vec(&archive).unwrap(); check_personal(&p,&bytes).unwrap();
         assert!(check_personal(&Policy { fleet_data: None, ..p.clone() },&bytes).is_err());
         for field in ["chain_identifier","registry","fleet_id","signer"] {
@@ -1470,6 +1471,18 @@ mod fleet_intent_tests {
         }
         archive.records.push(crate::fleet_data::Record { source: "component".into(), line: "x".repeat(4097) });
         assert!(check_personal(&p,&serde_json::to_vec(&archive).unwrap()).is_err());
+        archive.records.clear(); archive.schema = 4;
+        archive.items = Some(vec![crate::fleet_data::QuiltItem {identifier:"logs-1".into(),size:128,sha256:"aa".repeat(32)},
+            crate::fleet_data::QuiltItem {identifier:"diagnostic-2".into(),size:128,sha256:"bb".repeat(32)}]);
+        let bytes = serde_json::to_vec(&archive).unwrap();
+        assert!(check_personal(&p,&bytes).is_err());
+        let mut enabled = p.clone();
+        enabled.fleet_data.as_mut().unwrap().archives.as_mut().unwrap().quilt = true;
+        check_personal(&enabled,&bytes).unwrap();
+        archive.previous_head = Some(vec![]);
+        assert!(check_personal(&enabled,&serde_json::to_vec(&archive).unwrap()).is_err());
+        enabled.fleet_data.as_mut().unwrap().archives.as_mut().unwrap().compact_history = true;
+        check_personal(&enabled,&serde_json::to_vec(&archive).unwrap()).unwrap();
     }
     fn archive_transaction(kind:&str, change:Option<(usize,&str,bool)>,size:u64,package:&str)->Vec<u8> {
         let p=archive_policy();let mut b=TransactionBuilder::new();let mut args=Vec::new();

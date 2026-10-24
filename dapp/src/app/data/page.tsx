@@ -112,7 +112,7 @@ export default function FleetDataPage() {
       if(session.current!==reading || reading.isExpired()) {if(session.current===reading)expire();note(index,kind,allowed.kind,'refused');return;}
       if(wallet.stores.$connection.get().account?.address===account.address && wallet.stores.$currentNetwork.get()===manifest.network) {
         setArchive(opened);setOpened(index);note(index,kind,allowed.kind,'opened');
-        if(opened.schema===3 && opened.previous_head?.length){
+        if([3,4].includes(opened.schema) && opened.previous_head?.length){
           const previous=parseCompactHead(new Uint8Array(opened.previous_head));
           const previousIndex=Number(previous.index);
           if(Number.isSafeInteger(previousIndex))setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,{index:previousIndex,anchor:previous.anchor}]);

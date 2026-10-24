@@ -73,7 +73,7 @@ impl Config {
 }
 
 /// Archive schema shared with the browser. No arbitrary signing payloads.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record { pub source: String, pub line: String }
 /// Schema 2 (SF-084): the device's shadow documents when it archived, for the
@@ -133,7 +133,21 @@ impl CompactHead {
         Ok(head)
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuiltItem {
+    pub identifier: String, pub size: u64, pub sha256: String,
+}
+impl QuiltItem {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.identifier.is_empty() && self.identifier.len() <= 64
+            && self.identifier != "manifest" && self.identifier.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            && self.size > 0 && self.size <= MAX_ARCHIVE as u64
+            && self.sha256.len() == 64 && self.sha256.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)), "invalid Quilt item descriptor");
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
     pub schema: u8, pub kind: String, pub chain_identifier: String, pub registry: String,
@@ -146,15 +160,26 @@ pub struct Archive {
     /// Its hash is checked against the new head before history is trusted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_head: Option<Vec<u8>>,
+    /// Schema 4: independently signed/encrypted patches in the same Quilt.
+    /// Their identifiers are locators, SHA256 binds each exact ciphertext.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<QuiltItem>>,
 }
 impl Archive {
     pub fn validate(&self) -> anyhow::Result<()> {
         anyhow::ensure!(self.kind == "fleet-data" && match self.schema {
-            1 => self.shadows.is_none() && self.previous_head.is_none(),
-            2 => self.shadows.is_some() && self.previous_head.is_none(),
-            3 => self.previous_head.is_some(),
+            1 => self.shadows.is_none() && self.previous_head.is_none() && self.items.is_none(),
+            2 => self.shadows.is_some() && self.previous_head.is_none() && self.items.is_none(),
+            3 => self.previous_head.is_some() && self.items.is_none(),
+            4 => self.items.as_ref().is_some_and(|items| (2..=16).contains(&items.len())) && self.records.is_empty(),
             _ => false,
         }, "unsupported archive schema/kind");
+        if let Some(items) = &self.items {
+            let mut names = std::collections::HashSet::new();
+            let mut bytes = 0u64;
+            for item in items { item.validate()?; bytes += item.size; anyhow::ensure!(names.insert(&item.identifier), "duplicate Quilt item"); }
+            anyhow::ensure!(bytes <= MAX_ARCHIVE as u64, "Quilt ciphertext quota exceeded");
+        }
         if let Some(previous) = &self.previous_head {
             if !previous.is_empty() {
                 let head = CompactHead::parse(previous)?;
@@ -224,6 +249,27 @@ impl Task {
 mod tests {
     use super::*;
     #[test]
+    fn quilt_manifest_binds_bounded_unique_ciphertexts_and_history() {
+        let item = QuiltItem { identifier: "logs-1".into(), size: 128, sha256: "ab".repeat(32) };
+        let mut archive = Archive { schema: 4, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(),
+            registry: "0x1".into(), fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1,
+            observed_ms: 1, reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None,
+            previous_head: Some(vec![]), items: Some(vec![item.clone(), QuiltItem {identifier:"diagnostics-2".into(), ..item.clone()}]) };
+        archive.validate().unwrap();
+        let bytes = serde_json::to_vec(&archive).unwrap();
+        serde_json::from_slice::<Archive>(&bytes).unwrap().validate().unwrap();
+        archive.items.as_mut().unwrap()[1].identifier = item.identifier.clone();
+        assert!(archive.validate().is_err());
+        archive.items = Some(vec![item.clone()]); assert!(archive.validate().is_err());
+        for identifier in ["manifest", "../escape", ""] {
+            assert!(QuiltItem {identifier:identifier.into(), ..item.clone()}.validate().is_err());
+        }
+        for sha256 in ["AB".repeat(32), "aa".repeat(31)] {
+            assert!(QuiltItem {sha256, ..item.clone()}.validate().is_err());
+        }
+        assert!(QuiltItem {size:0, ..item}.validate().is_err());
+    }
+    #[test]
     fn compact_head_matches_browser_bcs_and_rejects_invalid_history() {
         let vector: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/compact-head.json")).unwrap();
         let bytes = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
@@ -243,7 +289,7 @@ mod tests {
         let previous = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
         let mut a = Archive { schema: 3, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 3, observed_ms: 1,
-            reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: Some(previous) };
+            reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: Some(previous), items: None };
         a.validate().unwrap();
         a.seq = 2; assert!(a.validate().is_err()); a.seq = 3;
         a.schema = 1; assert!(a.validate().is_err()); a.schema = 3;
@@ -254,7 +300,7 @@ mod tests {
     fn archive_shape_rejects_unsafe_integers_unknown_fields_and_oversized_records() {
         let mut a = Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
-            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None, previous_head: None };
+            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None, previous_head: None, items: None };
         a.validate().unwrap();
         a.seq = 9_007_199_254_740_992; assert!(a.validate().is_err()); a.seq = 1;
         a.records[0].line = "x".repeat(4097); assert!(a.validate().is_err()); a.records.clear();
@@ -274,7 +320,7 @@ mod tests {
         let mut a = Archive { schema: 2, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
             reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "Shadow state snapshot".into() }],
-            shadows: Some(snapshot.clone()), previous_head: None };
+            shadows: Some(snapshot.clone()), previous_head: None, items: None };
         a.validate().unwrap();
         // Round trip, and schema 1 bytes never mention shadows.
         let bytes = serde_json::to_vec(&a).unwrap();

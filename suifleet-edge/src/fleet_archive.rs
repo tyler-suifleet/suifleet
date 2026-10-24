@@ -26,6 +26,9 @@ pub struct Config {
     /// Disabled for existing deployments until they are explicitly upgraded.
     #[serde(default)]
     pub compact_history: bool,
+    /// Opt in to multi-item encrypted patches on the existing upload path.
+    #[serde(default)]
+    pub quilt: bool,
 }
 impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -55,6 +58,11 @@ struct Pending {
     #[serde(default)] shadows: String,
     /// None is a legacy journal; Some(empty) starts a compact history.
     #[serde(default)] previous_head: Option<Vec<u8>>,
+    #[serde(default)] items: Vec<crate::fleet_data::QuiltItem>,
+    #[serde(default)] size: Option<u64>,
+    #[serde(default)] attempts: u32,
+    #[serde(default)] created_ms: u64,
+    #[serde(default)] retry_at_ms: u64,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate { pub signature: String, pub bitmap: String, pub message: String }
@@ -84,6 +92,11 @@ async fn codec(task: &Task, config: &Config, dir: &Path, operation: &str, extra:
         "system_id": config.system_id, "walrus_package": config.walrus_package,
         "storage_package": config.storage_package, "storage_type_origin": config.storage_type_origin,
         "storage_id": task.config.storage_id, "device_id": task.device_id });
+    if operation != "prepare" {
+        if let Some(pending) = load::<Pending>(&dir.join("pending.json"))? {
+            if !pending.items.is_empty() { request["items"] = quilt_arguments(dir, &pending.items)["items"].clone(); }
+        }
+    }
     for (k,v) in extra.as_object().ok_or_else(|| anyhow::anyhow!("invalid codec arguments"))? { request[k] = v.clone(); }
     let mut command = tokio::process::Command::new(&config.node);
     command.arg(&config.codec);
@@ -112,6 +125,70 @@ async fn codec(task: &Task, config: &Config, dir: &Path, operation: &str, extra:
 }
 fn string(v: &Value, field: &str) -> anyhow::Result<String> {
     Ok(v[field].as_str().ok_or_else(|| anyhow::anyhow!("invalid codec field {field}"))?.to_owned())
+}
+
+fn quilt_arguments(dir: &Path, items: &[crate::fleet_data::QuiltItem]) -> Value {
+    if items.is_empty() { return json!({}); }
+    json!({"items": items.iter().map(|item| json!({"identifier":item.identifier,
+        "path":dir.join(format!("{}.bin",item.identifier)),"size":item.size,"sha256":item.sha256})).collect::<Vec<_>>()})
+}
+
+/// Keep useful archive granularity: source boundaries and 256-record chunks,
+/// at most 16 independently encrypted items. A lone chunk uses the old blob.
+fn quilt_record_groups(records: &[Record]) -> Vec<Vec<Record>> {
+    let mut groups: Vec<Vec<Record>> = Vec::new();
+    for record in records {
+        if groups.last().is_none_or(|group| group.len() >= 256 || group.last().is_some_and(|r| r.source != record.source)) && groups.len() < 16 {
+            groups.push(Vec::new());
+        }
+        groups.last_mut().unwrap().push(record.clone());
+    }
+    groups
+}
+
+#[cfg(test)]
+mod quilt_tests {
+    use super::*;
+    #[test]
+    fn source_and_record_windows_are_lossless_and_bounded() {
+        assert!(quilt_record_groups(&[]).is_empty());
+        let records = (0..4096).map(|n| Record { source: format!("component:source{}", n % 25), line: n.to_string() }).collect::<Vec<_>>();
+        let groups = quilt_record_groups(&records);
+        assert_eq!(groups.len(), 16);
+        assert_eq!(groups.iter().map(Vec::len).sum::<usize>(), records.len());
+        assert_eq!(groups.into_iter().flatten().map(|r|r.line).collect::<Vec<_>>(), records.iter().map(|r|r.line.clone()).collect::<Vec<_>>());
+        let one = vec![Record {source:"daemon".into(),line:"a".into()}; 257];
+        assert_eq!(quilt_record_groups(&one).iter().map(Vec::len).collect::<Vec<_>>(), vec![256,1]);
+        assert_eq!(quilt_record_groups(&one[..256]).len(), 1); // regular blob
+    }
+    #[test]
+    fn durable_descriptors_retain_ciphertext_identity_across_restart() {
+        let dir = std::env::temp_dir().join(format!("sf121-quilt-{}", rand::random::<u128>()));
+        std::fs::create_dir(&dir).unwrap();
+        let bytes = b"synthetic sealed ciphertext";
+        let item = crate::fleet_data::QuiltItem {identifier:"item-00".into(),size:bytes.len() as u64,sha256:hex::encode(Sha256::digest(bytes))};
+        atomic(&dir.as_path().join("item-00.bin"), bytes).unwrap();
+        atomic(&dir.as_path().join("items.json"), &serde_json::to_vec(&vec![item]).unwrap()).unwrap();
+        let restarted: Vec<crate::fleet_data::QuiltItem> = load(&dir.as_path().join("items.json")).unwrap().unwrap();
+        let arguments = quilt_arguments(dir.as_path(), &restarted);
+        assert_eq!(arguments["items"][0]["size"], bytes.len());
+        assert_eq!(arguments["items"][0]["sha256"], hex::encode(Sha256::digest(bytes)));
+        assert_eq!(std::fs::read(dir.as_path().join("item-00.bin")).unwrap(),bytes);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+fn encrypt_archive(task: &Task, config: &Config, fleet: &crate::fleet_data::Fleet, kind: u8,
+    archive: &Archive, servers: &[([u8; 32], ark_bls12_381::G2Affine)]) -> anyhow::Result<Vec<u8>> {
+    archive.validate()?;
+    let message = zeroize::Zeroizing::new(serde_json::to_vec(archive)?);
+    let signature = task.signer.sign_personal_message(&message)?;
+    let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(&telemetry::Envelope { message: STANDARD.encode(&message), signature: STANDARD.encode(signature) })?);
+    let mut id = fleet.id.inner().to_vec(); id.extend(fleet.key_epoch.to_le_bytes());
+    use rand::RngCore; let mut nonce = [0;16]; rand::rngs::OsRng.fill_bytes(&mut nonce); id.extend(nonce);
+    let aad = format!("suifleet/fleet-data/v1/{}/{}/{}/{}",fleet.chain_identifier,fleet.id,archive.seq,kind).into_bytes();
+    let ciphertext = crate::seal::encrypt(*Address::from_str(&task.config.type_origin)?.inner(), id, servers, config.threshold, aad, &plaintext)?;
+    anyhow::ensure!(ciphertext.len() <= crate::fleet_data::MAX_ARCHIVE, "encrypted archive too large");
+    Ok(ciphertext)
 }
 
 pub async fn tick(task: &Task) -> anyhow::Result<()> {
@@ -173,27 +250,49 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         let archive = Archive { kind: "fleet-data".into(), chain_identifier: fleet.chain_identifier.clone(),
             registry: fleet.registry_id.to_string(), fleet_id: fleet.id.to_string(), device_id: task.device_id.clone(), signer: task.signer.address(),
             seq, observed_ms: telemetry::now_ms(), reason: ["logs", "diagnostics", "crash"][kind as usize].into(), dropped_lines, records,
-            schema: if previous_head.is_some() { 3 } else if shadows.is_some() { 2 } else { 1 }, shadows, previous_head: previous_head.clone() };
-        archive.validate()?;
-        let message = zeroize::Zeroizing::new(serde_json::to_vec(&archive)?);
-        let signature = task.signer.sign_personal_message(&message)?;
-        let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(&telemetry::Envelope { message: STANDARD.encode(&message), signature: STANDARD.encode(signature) })?);
+            schema: if previous_head.is_some() { 3 } else if shadows.is_some() { 2 } else { 1 }, shadows, previous_head: previous_head.clone(), items: None };
         let mut servers = Vec::new();
         for s in &config.key_servers { let server = crate::seal_client::load_key_server(&task.sui, &config.key_server_package, s).await?; servers.push((server.object_id, server.public_key)); }
-        let mut id = fleet.id.inner().to_vec(); id.extend(fleet.key_epoch.to_le_bytes());
-        use rand::RngCore; let mut nonce = [0;16]; rand::rngs::OsRng.fill_bytes(&mut nonce); id.extend(nonce);
-        let aad = format!("suifleet/fleet-data/v1/{}/{}/{}/{}",fleet.chain_identifier,fleet.id,seq,kind).into_bytes();
-        let ciphertext = crate::seal::encrypt(*Address::from_str(&task.config.type_origin)?.inner(), id, &servers, config.threshold, aad, &plaintext)?;
-        anyhow::ensure!(ciphertext.len() <= crate::fleet_data::MAX_ARCHIVE, "encrypted archive too large");
+        let mut archive = archive;
+        let mut items = Vec::new();
+        let groups = quilt_record_groups(&archive.records);
+        if config.quilt && groups.len() >= 2 {
+            // Every patch is a complete, independently signed archive with the
+            // same chain sequence. Only the manifest carries history/shadows.
+            // The manifest's signed digest list prevents patch substitution.
+            for (n, records) in groups.into_iter().enumerate() {
+                let mut item = archive.clone();
+                item.schema = 1; item.previous_head = None; item.shadows = None;
+                item.records = records;
+                let ciphertext = encrypt_archive(task, config, &fleet, kind, &item, &servers)?;
+                let descriptor = crate::fleet_data::QuiltItem { identifier: format!("item-{n:02}"),
+                    size: ciphertext.len() as u64, sha256: hex::encode(Sha256::digest(&ciphertext)) };
+                atomic(&dir.join(format!("{}.bin", descriptor.identifier)), &ciphertext)?;
+                items.push(descriptor);
+            }
+            archive.schema = 4; archive.records.clear(); archive.items = Some(items.clone());
+        }
+        let ciphertext = encrypt_archive(task, config, &fleet, kind, &archive, &servers)?;
         atomic(&dir.join("ciphertext.bin"), &ciphertext)?;
-        let encoded = codec(task, config, &dir, "prepare", json!({})).await?;
+        let encoded = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &items)).await?;
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
             blob_id: string(&encoded,"blob_id")?, root_hash: string(&encoded,"root_hash")?, ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
-            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint };
+            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: encoded["size"].as_u64(),
+            attempts: 0, created_ms: telemetry::now_ms(), retry_at_ms: 0 };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
     // Never regenerate ciphertext or purchase again after an uncertain submit.
+    anyhow::ensure!(pending.size.is_none_or(|size| size > 0 && size <= crate::fleet_data::MAX_ARCHIVE as u64), "invalid pending archive size");
     anyhow::ensure!(Sha256::digest(std::fs::read(dir.join("ciphertext.bin"))?).as_slice() == pending.ciphertext_sha256, "pending ciphertext changed");
+    anyhow::ensure!(pending.items.is_empty() || ((2..=16).contains(&pending.items.len()) && pending.size.is_some()), "invalid pending Quilt item count");
+    let mut item_bytes = 0u64;
+    for item in &pending.items {
+        item.validate()?;
+        item_bytes += item.size;
+        anyhow::ensure!(item_bytes <= crate::fleet_data::MAX_ARCHIVE as u64, "pending Quilt quota exceeded");
+        let bytes = std::fs::read(dir.join(format!("{}.bin", item.identifier)))?;
+        anyhow::ensure!(bytes.len() as u64 == item.size && hex::encode(Sha256::digest(&bytes)) == item.sha256, "pending Quilt item changed");
+    }
     if writer.batch_seq >= pending.seq {
         // A chain anchor, not an execution response, acknowledges completion.
         if pending.previous_head.is_some() {
@@ -210,12 +309,31 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
         std::fs::File::open(&dir)?.sync_all()?;
         std::fs::remove_file(&pending_path)?; std::fs::File::open(&dir)?.sync_all()?;
         let _ = std::fs::remove_file(dir.join("ciphertext.bin"));
+        for item in &pending.items { let _ = std::fs::remove_file(dir.join(format!("{}.bin", item.identifier))); }
         return Ok(());
+    }
+    // Bounded automatic retries never discard or acknowledge a source item.
+    // Exhaustion/age suspends this one durable batch for explicit recovery;
+    // no fresh registration, replacement encryption or growing queue follows.
+    if !pending.items.is_empty() {
+    let now = telemetry::now_ms();
+    anyhow::ensure!(pending.attempts < 32 && (pending.created_ms == 0 || now.saturating_sub(pending.created_ms) <= 7*86_400_000), "archive retry/age limit; durable batch retained for operator recovery");
+    if now < pending.retry_at_ms { return Ok(()); }
+    pending.attempts += 1;
+    // Keep early transient recovery responsive; later attempts are capped at
+    // one per hour. The exact signed transaction remains the retry identity.
+    pending.retry_at_ms = now.saturating_add(if pending.attempts <= 8 { 1000 } else { (1000u64 << (pending.attempts - 8).min(22)).min(3_600_000) });
+    atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
     anyhow::ensure!(crate::seal::parse(&std::fs::read(dir.join("ciphertext.bin"))?)?.key_epoch() == Some(fleet.key_epoch), "pending archive key epoch was revoked; owner recovery required");
     if pending.registration.is_none() {
+        if !pending.items.is_empty() {
+            let prepared = codec(task, config, &dir, "prepare", quilt_arguments(&dir, &pending.items)).await?;
+            anyhow::ensure!(string(&prepared, "blob_id")? == pending.blob_id && string(&prepared,"root_hash")? == pending.root_hash
+                && prepared["size"].as_u64() == pending.size, "pending Quilt encoding changed before purchase");
+        }
         let digest = task.sui.register_archive(&task.config, config, &task.cap, &pending.blob_id, &pending.root_hash,
-            std::fs::metadata(dir.join("ciphertext.bin"))?.len(), &dir.join("register.bcs")).await?;
+            pending.size.unwrap_or(std::fs::metadata(dir.join("ciphertext.bin"))?.len()), &dir.join("register.bcs")).await?;
         pending.registration = Some(digest); atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
     if pending.blob_object_id.is_none() {
@@ -259,7 +377,10 @@ pub async fn tick(task: &Task) -> anyhow::Result<()> {
 /// Persistent categorical status only: errors can quote private upstream data.
 pub fn status(state_dir: &Path, blocked: bool) -> anyhow::Result<()> {
     let dir = state_dir.join("fleet-data"); std::fs::create_dir_all(&dir)?;
-    atomic(&dir.join("status.json"), &serde_json::to_vec(&json!({"schema":1,"blocked":blocked,"at_ms":telemetry::now_ms()}))?)
+    let pending: Option<Pending> = load(&dir.join("pending.json"))?;
+    atomic(&dir.join("status.json"), &serde_json::to_vec(&json!({"schema":1,"blocked":blocked,"at_ms":telemetry::now_ms(),
+        "pending":pending.is_some(),"items":pending.as_ref().map_or(0,|p|p.items.len()),
+        "attempts":pending.as_ref().map_or(0,|p|p.attempts),"retry_at_ms":pending.as_ref().map_or(0,|p|p.retry_at_ms)}))?)
 }
 
 pub fn health_receipt(state_dir: &Path, seq: u64, digest: &str) -> anyhow::Result<()> {

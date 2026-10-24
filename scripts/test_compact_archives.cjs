@@ -43,5 +43,20 @@ async function signed(a, signer) {const message=Buffer.from(JSON.stringify(a)); 
  const fs=require('node:fs');
  const vector=JSON.parse(fs.readFileSync('interfaces/compat/compact-head.json','utf8'));
  assert.equal(Buffer.from(bulk.CompactHeadBcs.serialize(vector.head).toBytes()).toString('hex'),vector.bcs_hex);
+ const descriptors=[{identifier:'logs-1',size:128,sha256:'ab'.repeat(32)},{identifier:'diagnostics-2',size:256,sha256:'cd'.repeat(32)}];
+ const manifest={...a,schema:4,records:[],items:descriptors};
+ const verifiedManifest=await bulk.verifyArchive(await signed(manifest,rotated),config,device,second.anchor);
+ assert.deepEqual(await bulk.previousCompactHead(verifiedManifest,second),bulk.parseCompactHead(encoded));
+ for(const items of [[],descriptors.slice(0,1),[descriptors[0],descriptors[0]],
+   [{...descriptors[0],identifier:'manifest'},descriptors[1]],
+   [{...descriptors[0],size:0},descriptors[1]],
+   [{...descriptors[0],sha256:'ff'},descriptors[1]],
+   [{...descriptors[0],identifier:'../escape'},descriptors[1]],
+   [{...descriptors[0],extra:true},descriptors[1]]]) {
+   await assert.rejects(bulk.verifyArchive(await signed({...manifest,items},rotated),config,device,second.anchor));
+ }
+ await assert.rejects(bulk.verifyArchive(await signed({...manifest,records:a.records},rotated),config,device,second.anchor));
+ await assert.rejects(bulk.verifyArchive(await signed({...manifest,seq:9},rotated),config,device,second.anchor));
+ await assert.rejects(bulk.verifyArchive(await signed(manifest,key),config,device,second.anchor));
  console.log('PASS: compact archive BCS, real device signatures/rotation, predecessor hash, truncation, replay, bounds, and shared native vector');
 })().catch(e=>{console.error(e);process.exitCode=1;});
