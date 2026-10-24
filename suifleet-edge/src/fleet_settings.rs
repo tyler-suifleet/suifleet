@@ -7,7 +7,7 @@
 //! (cheaper), never faster than the fleet allows:
 //!
 //! - checks every `max(runtime.poll_seconds, check_interval_ms)`;
-//! - where the check cadence (`cadence::Cadence`, SF-123) uses fast checks
+//! - where the SF-123 check cadence (`cadence.rs`) uses fast checks
 //!   (rollout eligibility, admission, an open maintenance window), every
 //!   `max(runtime.rollout_poll_seconds, rollout_check_interval_ms)`, or the
 //!   routine interval when the fleet turned fast checks off (0). Single
