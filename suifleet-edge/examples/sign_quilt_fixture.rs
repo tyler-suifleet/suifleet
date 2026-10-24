@@ -22,13 +22,19 @@ fn main() -> anyhow::Result<()> {
     anyhow::ensure!(message.len()<16384, "fixture message too large");
     if text.starts_with('{') {
         let a: serde_json::Value = serde_json::from_slice(&message)?;
-        anyhow::ensure!(a["kind"] == "fleet-data" && a["chain_identifier"] == "4c78adac"
+        anyhow::ensure!(matches!(a["kind"].as_str(),Some("fleet-data"|"fleet-opaque")) && a["chain_identifier"] == "4c78adac"
             && matches!(a["schema"].as_u64(),Some(1|4))
             && a["fleet_id"].as_str().and_then(|v|Address::from_str(v).ok()) == Some(Address::from_str(&r.fleet)?)
             && a["device_id"].as_str().and_then(|v|Address::from_str(v).ok()) == Some(Address::from_str(&r.device)?)
             && a["signer"].as_str().and_then(|v|Address::from_str(v).ok()) == Some(Address::from_str(&r.expected_address)?), "foreign fixture binding");
+        if a["kind"] == "fleet-opaque" {
+            anyhow::ensure!(a["schema"]==1,"unsupported opaque fixture schema");
+            let data=STANDARD.decode(a["item"]["data"].as_str().ok_or_else(||anyhow::anyhow!("missing synthetic data"))?)?;
+            anyhow::ensure!(data == b"public synthetic opaque text\n" || data == [0,255,128,0,10], "only synthetic opaque fixture bytes allowed");
+        } else {
         let records=a["records"].as_array().ok_or_else(||anyhow::anyhow!("missing records"))?;
         anyhow::ensure!(records.len()<=2 && records.iter().all(|v|v["line"].as_str().is_some_and(|s|s.starts_with("public synthetic Quilt item ") && s.len()<100)), "only synthetic fixture records allowed");
+        }
     } else {
         anyhow::ensure!(text.starts_with(&format!("Accessing keys of package {namespace} for 5 mins from ")), "not selected five-minute Seal session");
         let (_,session)=text.rsplit_once(", session key ").ok_or_else(||anyhow::anyhow!("missing session public key"))?;
