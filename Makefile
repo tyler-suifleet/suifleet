@@ -336,6 +336,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_compact_archives.cjs
+	$(RUN) node scripts/measure_quilt_geometry.cjs --check
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
 	$(RUN) node scripts/test_pilot_load.cjs

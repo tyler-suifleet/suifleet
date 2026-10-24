@@ -50,14 +50,18 @@ for (const [items, itemBytes] of [[2,256],[8,256],[64,256],[2,2048],[8,2048],[64
     current_packed_transactions:3,quilt_transactions:3,health_transactions_removed:0});
 }
 assert.throws(()=>encodeQuilt({blobs:Array.from({length:667},(_,n)=>({identifier:String(n),contents:new Uint8Array([1])})),numShards,encodingType:'RS2'}), /Too many blobs/);
-console.log(JSON.stringify({schema:1,scope:'offline synthetic ciphertext-length geometry only',
+const report = {schema:1,scope:'offline synthetic ciphertext-length geometry only',
   sdk_version:walrusPackage.version,num_shards:numShards,encoding:'RS2',
   local_patch_roundtrip:true,network_roundtrip:false,
   source_sha256:createHash('sha256').update(fs.readFileSync(__filename)).digest('hex'),cases,
   limits:['No actual encryption/compression/erasure-coded sliver measurement or network writes.',
     'Packed bytes omit application framing; quilting includes SDK index and padding.',
     'One already-packed archive and one quilt both require three current runtime transactions.',
-    'Cross-device aggregation, gas savings, WAL quotes and a subscription margin are not established.']},null,2));
+    'Cross-device aggregation, gas savings, WAL quotes and a subscription margin are not established.']};
+if (process.argv.includes('--check')) {
+  assert.deepEqual(report, JSON.parse(fs.readFileSync(require('node:path').join(__dirname, '../docs/validation/sf121-quilt-geometry.json'))));
+  console.log('PASS: pinned Quilt geometry, per-item local roundtrip, item/size limits and committed experiment');
+} else console.log(JSON.stringify(report,null,2));
 
 }
 main().catch(e=>{console.error(e);process.exitCode=1});
