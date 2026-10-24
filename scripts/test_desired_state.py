@@ -24,6 +24,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from test_ota import completed_polls
 from test_ota import (ARTIFACT, CAP, DEVICE, GROUP, OPERATOR, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP,
                       Simulator, start_grpc, wait_for)
 
@@ -125,10 +126,10 @@ def run(binary):
                 return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=log, stderr=log)
 
             def settle():
-                """Wait for two further complete polls (each re-checks the chain)."""
+                """Wait for two completed cycles, including reconciliation and logs."""
                 for _ in range(2):
-                    checks = sim.chain_checks
-                    wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                    polls = completed_polls(root / "daemon.log")
+                    wait_for(lambda: completed_polls(root / "daemon.log") > polls, "daemon stopped polling", process)
                 time.sleep(0.3)
 
             # 1. Offline through two revisions, then first start: only the latest
@@ -310,8 +311,8 @@ def run_helper(binary):
 
             def settle():
                 for _ in range(2):
-                    checks = sim.chain_checks
-                    wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                    polls = completed_polls(root / "daemon.log")
+                    wait_for(lambda: completed_polls(root / "daemon.log") > polls, "daemon stopped polling", process)
                 time.sleep(0.3)
 
             def deploy(id, component):

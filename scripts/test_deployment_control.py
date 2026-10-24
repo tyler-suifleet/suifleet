@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from test_ota import completed_polls
 from test_ota import ARTIFACT, CAP, DEVICE, GROUP, Simulator, start_grpc, wait_for
 from test_desired_state import manifest
 
@@ -78,8 +79,8 @@ def run(binary):
                     "not_before_ms": 0, "expires_ms": 0, "window_start_ms": 0, "window_end_ms": 0, "notice_ms": 0, **kw}
             def wait(predicate, message): wait_for(predicate, message, process)
             def settle():
-                baseline = sim.chain_checks
-                wait(lambda: sim.chain_checks >= baseline + 3, "daemon did not finish polls")
+                baseline = completed_polls(root / "daemon.log")
+                wait(lambda: completed_polls(root / "daemon.log") >= baseline + 3, "daemon did not finish polls")
                 time.sleep(.2)
             def add(id, **kw):
                 control(id, **kw); sim.add(id, recipe=dict(artifactBlobId=f"artifact-{id}"))

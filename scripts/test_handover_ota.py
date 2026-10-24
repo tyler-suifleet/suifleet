@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from test_ota import completed_polls
 from test_ota import Simulator, OWNER_CAP, OPERATOR, DEVICE, CAP, GROUP, wait_for
 from test_desired_state import serve, manifest
 from test_ota import start_grpc
@@ -60,8 +61,8 @@ def run(binary):
             def runs(): return len(applied.read_text().splitlines()) if applied.exists() else 0
             def settle():
                 for _ in range(3):
-                    checks=sim.chain_checks
-                    wait_for(lambda: sim.chain_checks>checks, 'daemon stopped polling', process)
+                    polls=completed_polls(root/'daemon.log')
+                    wait_for(lambda: completed_polls(root/'daemon.log')>polls, 'daemon stopped polling', process)
                 time.sleep(.3)
             def deploy(id, creator, managed=False):
                 sim.add(id,creator=creator,groups=[GROUP],direct=False,event={'component_name':'app'})

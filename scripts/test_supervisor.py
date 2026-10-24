@@ -35,6 +35,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import test_ota
+from test_ota import completed_polls
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 # The run records itself, keeps a child in its group, one that escapes it with
@@ -359,9 +360,9 @@ def run(binary):
                     pass
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
-                checks = sim.chain_checks
+                polls = completed_polls(root / "daemon.log")
                 process = start()
-                wait_for(lambda: sim.chain_checks >= checks + 3, "successor did not reach polling", process)
+                wait_for(lambda: completed_polls(root / "daemon.log") >= polls + 3, "successor did not reach polling", process)
                 wait_for(lambda: outcome("0x405").get("indeterminate"), "v5's interrupted outcome was not preserved", process)
                 assert outcome("0x405").get("firmware_request") is None
                 assert outcome("0x405").get("status") is None and not outcome("0x405").get("reported") and "interrupted" in outcome("0x405")["error"], outcome("0x405")

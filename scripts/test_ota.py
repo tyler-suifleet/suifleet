@@ -75,6 +75,11 @@ def wait_for(condition, message, process=None, timeout=25):
     raise AssertionError(message)
 
 
+def completed_polls(log_path):
+    """Completed daemon cycles; transport reads can occur many times per cycle."""
+    return Path(log_path).read_text().count("Chain reads this poll")
+
+
 class Simulator:
     def __init__(self, device=DEVICE, cap=CAP):
         self.device, self.cap = device, cap
@@ -527,8 +532,9 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
                          "daemon did not reject the revoked identity", process)
                 sim.add("0x10e")
-                checks = sim.chain_checks
-                wait_for(lambda: sim.chain_checks >= checks + 4, "daemon stopped polling after revocation", process)
+                polls = completed_polls(root / "daemon.log")
+                wait_for(lambda: completed_polls(root / "daemon.log") >= polls + 4,
+                         "daemon stopped polling after revocation", process)
                 assert count() == 3 and "0x10e" not in state()["deployments"], "revoked device applied an update"
                 assert len(sim.reports) == 10
                 stop(process)
