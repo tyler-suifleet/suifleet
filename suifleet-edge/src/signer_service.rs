@@ -302,6 +302,63 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             anyhow::ensure!(shared(args[5])? == Address::from_str("0x6")?, "not the Clock");
             Ok(Intent::Draw)
         }
+        ("customer", function @ ("report_status" | "report_group_status")) => {
+            anyhow::ensure!(
+                tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget,
+                "invalid report gas authority"
+            );
+            let group = function == "report_group_status";
+            anyhow::ensure!(
+                args.len() == if group { 7 } else { 6 },
+                "unexpected managed report arguments"
+            );
+            for index in [0, 1] {
+                anyhow::ensure!(
+                    matches!(args[index], Input::Shared(s) if !s.mutability().is_mutable()),
+                    "managed report authority inputs must be read-only"
+                );
+            }
+            shared(args[2])?;
+            anyhow::ensure!(shared(args[3])? == policy.registry, "wrong report registry");
+            anyhow::ensure!(
+                matches!(args[4], Input::ImmutableOrOwned(r) if *r.object_id() == policy.cap),
+                "not this device cap"
+            );
+            if group {
+                shared(args[5])?;
+            }
+            anyhow::ensure!(
+                matches!(args[args.len()-1], Input::Pure(value) if value.as_slice() == [1] || value.as_slice() == [2]),
+                "invalid report status"
+            );
+            Ok(Intent::Report)
+        }
+        ("customer", "enroll_claim") => {
+            anyhow::ensure!(
+                tx.gas_payment.owner != policy.device && tx.gas_payment.budget <= MAX_ENROLL_BUDGET,
+                "invalid enrollment sponsor/budget"
+            );
+            anyhow::ensure!(args.len() == 8, "unexpected managed enrollment arguments");
+            for index in 0..5 {
+                shared(args[index])?;
+            }
+            anyhow::ensure!(
+                shared(args[4])? == policy.registry
+                    && shared(args[7])? == Address::from_str("0x6")?,
+                "wrong managed enrollment registry/clock"
+            );
+            for index in [5, 6] {
+                let Input::Pure(bytes) = args[index] else {
+                    anyhow::bail!("enrollment name/arch must be pure");
+                };
+                let value: String = bcs::from_bytes(bytes)?;
+                anyhow::ensure!(
+                    !value.is_empty() && value.len() <= 256,
+                    "invalid enrollment name/arch"
+                );
+            }
+            Ok(Intent::Enroll)
+        }
         (enrollment::MODULE, enrollment::ENROLL) => {
             anyhow::ensure!(tx.gas_payment.owner != policy.device, "enrollment must be sponsored by the claim key");
             anyhow::ensure!(tx.gas_payment.budget <= MAX_ENROLL_BUDGET, "gas budget exceeds the enrollment ceiling");
@@ -353,17 +410,76 @@ fn check_fleet_transaction(policy: &Policy, tx: &Transaction,
     Ok(Intent::FleetData)
 }
 
-fn check_storage_transaction(policy: &Policy, tx: &Transaction,
-    ptb: &sui_sdk_types::ProgrammableTransaction, call: &sui_sdk_types::MoveCall) -> anyhow::Result<Intent> {
-    let data = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data disabled"))?;
-    let storage = data.archives.as_ref().ok_or_else(|| anyhow::anyhow!("archives disabled"))?;
-    anyhow::ensure!(call.package == Address::from_str(&storage.storage_package)? && call.type_arguments.is_empty(), "foreign storage package");
-    anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "wrong gas owner/budget");
-    let register = call.function.as_str() == "register_blob";
-    anyhow::ensure!(register || call.function.as_str() == "certify_blob", "unexpected storage intent");
-    let count = if register { 11 } else { 6 };
-    anyhow::ensure!(call.arguments.len() == count && ptb.inputs.len() == count, "unexpected storage inputs");
-    let args: Vec<_> = call.arguments.iter().map(|a| input(&ptb.inputs,a)).collect::<anyhow::Result<_>>()?;
+fn check_storage_transaction(
+    policy: &Policy,
+    tx: &Transaction,
+    ptb: &sui_sdk_types::ProgrammableTransaction,
+    call: &sui_sdk_types::MoveCall,
+) -> anyhow::Result<Intent> {
+    let data = policy
+        .fleet_data
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("fleet data disabled"))?;
+    let storage = data
+        .archives
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("archives disabled"))?;
+    anyhow::ensure!(
+        call.package == Address::from_str(&storage.storage_package)?
+            && call.type_arguments.is_empty(),
+        "foreign storage package"
+    );
+    anyhow::ensure!(
+        tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget,
+        "wrong gas owner/budget"
+    );
+    let register = matches!(
+        call.function.as_str(),
+        "register_blob" | "register_managed_blob"
+    );
+    let offset = if register && data.managed.is_some() {
+        2
+    } else {
+        0
+    };
+    if register {
+        anyhow::ensure!(
+            call.function.as_str()
+                == if offset == 2 {
+                    "register_managed_blob"
+                } else {
+                    "register_blob"
+                },
+            "wrong managed storage intent"
+        );
+    }
+    anyhow::ensure!(
+        register || call.function.as_str() == "certify_blob",
+        "unexpected storage intent"
+    );
+    let count = if register { 11 + offset } else { 6 };
+    anyhow::ensure!(
+        call.arguments.len() == count && ptb.inputs.len() == count,
+        "unexpected storage inputs"
+    );
+    let all_args: Vec<_> = call
+        .arguments
+        .iter()
+        .map(|a| input(&ptb.inputs, a))
+        .collect::<anyhow::Result<_>>()?;
+    if let Some(managed) = data.managed.as_ref().filter(|_| register) {
+        for (index, expected, mutable) in [
+            (0, &managed.customer_id, true),
+            (1, &managed.fleet_id, false),
+        ] {
+            let id = Address::from_str(expected)?;
+            anyhow::ensure!(
+                matches!(all_args[index], Input::Shared(s) if s.object_id() == id && s.mutability().is_mutable() == mutable),
+                "wrong managed authority object"
+            );
+        }
+    }
+    let args = &all_args[offset..];
     let mut objects = vec![(0, Address::from_str(&data.storage_id)?,true), (if register {5} else {1},Address::from_str(&storage.system_id)?,register)];
     if register { objects.extend([(1,Address::from_str(&data.budget_id)?,false),(2,Address::from_str(&data.account_id)?,false),(3,policy.registry,false),(10,Address::from_str("0x6")?,false)]); }
     for (index,id,mutable) in objects { anyhow::ensure!(matches!(args[index],Input::Shared(s) if s.object_id()==id && s.mutability().is_mutable()==mutable), "wrong storage object/mutability at {index}"); }
@@ -1009,6 +1125,61 @@ mod tests {
     }
 
     #[test]
+    fn managed_report_intent_keeps_authority_read_only_and_cap_registry_exact() {
+        let p = policy();
+        let mut tx: Transaction = bcs::from_bytes(&Tx::default().bytes()).unwrap();
+        let a = |s: &str| Address::from_str(s).unwrap();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut tx.kind else {
+            panic!()
+        };
+        ptb.inputs.insert(
+            0,
+            Input::Shared(sui_sdk_types::SharedInput::new(a("0xc0"), 1, false)),
+        );
+        ptb.inputs.insert(
+            1,
+            Input::Shared(sui_sdk_types::SharedInput::new(a("0xf0"), 1, false)),
+        );
+        let Command::MoveCall(call) = &mut ptb.commands[0] else {
+            panic!()
+        };
+        call.module = "customer".parse().unwrap();
+        call.function = "report_status".parse().unwrap();
+        for arg in &mut call.arguments {
+            if let Argument::Input(i) = arg {
+                *i += 2;
+            }
+        }
+        call.arguments
+            .splice(0..0, [Argument::Input(0), Argument::Input(1)]);
+        assert_eq!(
+            check(&p, &bcs::to_bytes(&tx).unwrap()).unwrap(),
+            Intent::Report
+        );
+        for index in [0, 1, 3] {
+            let mut wrong = tx.clone();
+            let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind
+            else {
+                panic!()
+            };
+            ptb.inputs[index] = Input::Shared(sui_sdk_types::SharedInput::new(a("0xbad"), 1, true));
+            assert!(check(&p, &bcs::to_bytes(&wrong).unwrap()).is_err());
+        }
+        let mut wrong = tx.clone();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind else {
+            panic!()
+        };
+        ptb.inputs[4] = Input::Pure(vec![0]);
+        assert!(check(&p, &bcs::to_bytes(&wrong).unwrap()).is_err());
+        let mut wrong = tx.clone();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind else {
+            panic!()
+        };
+        ptb.inputs[5] = Input::Pure(vec![3]);
+        assert!(check(&p, &bcs::to_bytes(&wrong).unwrap()).is_err());
+    }
+
+    #[test]
     fn signs_only_this_devices_status_reports() {
         let p = policy();
         assert_eq!(check(&p, &Tx::default().bytes()).unwrap(), Intent::Report);
@@ -1413,10 +1584,27 @@ mod fleet_intent_tests {
     use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
     fn a(s: &str) -> Address { s.parse().unwrap() }
     fn policy() -> Policy {
-        Policy { device: a("0xa0"), package: a("0x3"), namespace: a("0x3"), registry: a("0x13"),
-            cap: a("0x11"), max_budget: 50_000_000, chain_identifier: "4c78adac".into(), budget: None,
-            fleet_data: Some(crate::fleet_data::Config { package_id: "0xf0".into(), type_origin: "0xf0".into(),
-                fleet_id: "0xf1".into(), writer_id: "0xf2".into(), budget_id: "0xb0".into(), account_id: "0xac".into(), storage_id: "0x5".into(), archives: None }) }
+        Policy {
+            device: a("0xa0"),
+            package: a("0x3"),
+            namespace: a("0x3"),
+            registry: a("0x13"),
+            cap: a("0x11"),
+            max_budget: 50_000_000,
+            chain_identifier: "4c78adac".into(),
+            budget: None,
+            fleet_data: Some(crate::fleet_data::Config {
+                package_id: "0xf0".into(),
+                type_origin: "0xf0".into(),
+                fleet_id: "0xf1".into(),
+                writer_id: "0xf2".into(),
+                budget_id: "0xb0".into(),
+                account_id: "0xac".into(),
+                storage_id: "0x5".into(),
+                managed: None,
+                archives: None,
+            }),
+        }
     }
     fn archive_policy() -> Policy {
         let mut p=policy();
@@ -1494,6 +1682,59 @@ mod fleet_intent_tests {
         b.set_sender(p.device);b.set_gas_budget(10_000_000);b.set_gas_price(1000);b.add_gas_objects([ObjectInput::owned(a("0x12"),1,sui_sdk_types::Digest::ZERO)]);
         bcs::to_bytes(&b.try_build().unwrap()).unwrap()
     }
+    #[test]
+    fn managed_archive_signing_binds_customer_fleet_and_mutability() {
+        let mut p = archive_policy();
+        p.fleet_data.as_mut().unwrap().managed = Some(crate::fleet_data::ManagedFleet {
+            customer_id: "0xc1".into(),
+            fleet_id: "0xf9".into(),
+        });
+        let mut tx: Transaction =
+            bcs::from_bytes(&archive_transaction("register_blob", None, 2048, "0xf6")).unwrap();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut tx.kind else {
+            panic!()
+        };
+        ptb.inputs.insert(
+            0,
+            Input::Shared(sui_sdk_types::SharedInput::new(a("0xc1"), 1, true)),
+        );
+        ptb.inputs.insert(
+            1,
+            Input::Shared(sui_sdk_types::SharedInput::new(a("0xf9"), 1, false)),
+        );
+        let Command::MoveCall(call) = &mut ptb.commands[0] else {
+            panic!()
+        };
+        call.module = "fleet_storage".parse().unwrap();
+        call.function = "register_managed_blob".parse().unwrap();
+        for arg in &mut call.arguments {
+            if let Argument::Input(i) = arg {
+                *i += 2;
+            }
+        }
+        call.arguments
+            .splice(0..0, [Argument::Input(0), Argument::Input(1)]);
+        let bytes = bcs::to_bytes(&tx).unwrap();
+        assert!(check(&p, &bytes).is_ok());
+        for (index, id, mutable) in [
+            (0, "0xc2", true),
+            (0, "0xc1", false),
+            (1, "0xfa", false),
+            (1, "0xf9", true),
+        ] {
+            let mut wrong = tx.clone();
+            let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind
+            else {
+                panic!()
+            };
+            ptb.inputs[index] = Input::Shared(sui_sdk_types::SharedInput::new(a(id), 1, mutable));
+            assert!(check(&p, &bcs::to_bytes(&wrong).unwrap()).is_err());
+        }
+        let legacy = archive_transaction("register_blob", None, 2048, "0xf6");
+        assert!(check(&p, &legacy).is_err());
+        assert!(check(&archive_policy(), &bytes).is_err());
+    }
+
     #[test]
     fn archive_transactions_are_opt_in_and_cannot_replace_authority_or_storage() {
         let p=archive_policy();

@@ -42,6 +42,7 @@ pub struct Object {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Owner {
     Address(String),
+    Object(String),
     Shared { initial_version: u64 },
     Immutable,
     Other,
@@ -534,6 +535,7 @@ impl SuiClient {
             .map_err(|e| anyhow::anyhow!("undecodable object {id}: {e}"))?;
         let owner = match object.owner() {
             sui_sdk_types::Owner::Address(address) => Owner::Address(address.to_string()),
+            sui_sdk_types::Owner::Object(address) => Owner::Object(address.to_string()),
             sui_sdk_types::Owner::Shared(version) => Owner::Shared {
                 initial_version: *version,
             },
@@ -571,6 +573,9 @@ impl SuiClient {
         let owner = match object.owner.as_ref() {
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Address as i32) => {
                 Owner::Address(o.address.clone().unwrap_or_default())
+            }
+            Some(o) if o.kind == Some(proto::owner::OwnerKind::Object as i32) => {
+                Owner::Object(o.address.clone().unwrap_or_default())
             }
             Some(o) if o.kind == Some(proto::owner::OwnerKind::Shared as i32) => Owner::Shared {
                 initial_version: o.version.unwrap_or_default(),
@@ -838,14 +843,72 @@ impl SuiClient {
                 && same_id(owner_cap.fields["device_id"].as_str().unwrap_or(""), device),
             "identity names a wrong DeviceOwnerCap"
         );
-        let Owner::Address(owner) = &owner_cap.owner else {
-            anyhow::bail!("DeviceOwnerCap has no operator owner");
+        let owner = match &owner_cap.owner {
+            Owner::Address(owner) => owner.clone(),
+            Owner::Object(parent_id) => {
+                // A managed owner cap is a dynamic object field, not an owned
+                // wallet credential. Verify every link before attributing work.
+                let origin = self
+                    .manifest()
+                    .type_origins
+                    .get("customer::DeviceKey")
+                    .ok_or_else(|| anyhow::anyhow!("managed fleet type origins are missing"))?;
+                let parent = self.object(parent_id).await?;
+                let expected = format!("0x2::dynamic_field::Field<0x2::dynamic_object_field::Wrapper<{origin}::customer::DeviceKey>,0x2::object::ID>");
+                anyhow::ensure!(
+                    same_type(&parent.object_type, &expected),
+                    "wrong managed custody field type"
+                );
+                let Owner::Object(fleet_id) = &parent.owner else {
+                    anyhow::bail!("custody field has no fleet owner");
+                };
+                anyhow::ensure!(
+                    same_id(
+                        parent.fields["value"].as_str().unwrap_or(""),
+                        identity["owner_cap"].as_str().unwrap_or("")
+                    ) && same_id(
+                        parent.fields["name"]["name"]["device_id"]
+                            .as_str()
+                            .unwrap_or(""),
+                        device
+                    ),
+                    "managed custody binding mismatch"
+                );
+                let fleet = self.object(fleet_id).await?;
+                anyhow::ensure!(
+                    same_type(&fleet.object_type, &self.move_type("customer::Fleet"))
+                    && json_u64(&fleet.fields["version"]) == Some(1)
+                        && matches!(fleet.owner, Owner::Shared { .. })
+                        && fleet.fields["devices"].as_array().is_some_and(|ids| ids
+                            .iter()
+                            .any(|id| same_id(id.as_str().unwrap_or(""), device))),
+                    "managed fleet inventory mismatch"
+                );
+                let customer = self
+                    .object(fleet.fields["customer_id"].as_str().unwrap_or(""))
+                    .await?;
+                anyhow::ensure!(
+                    same_type(&customer.object_type, &self.move_type("customer::Customer"))
+                    && json_u64(&customer.fields["version"]) == Some(1)
+                        && matches!(customer.owner, Owner::Shared { .. })
+                        && same_id(
+                            customer.fields["registry_id"].as_str().unwrap_or(""),
+                            &self.manifest().shared_objects.registry.id
+                        )
+                        && customer.fields["fleets"].as_array().is_some_and(|ids| ids
+                            .iter()
+                            .any(|id| same_id(id.as_str().unwrap_or(""), fleet_id))),
+                    "managed customer binding mismatch"
+                );
+                fleet_id.clone()
+            }
+            _ => anyhow::bail!("DeviceOwnerCap has no operator owner"),
         };
         anyhow::ensure!(
             same_id(object.fields["device_address"].as_str().unwrap_or(""), &self.address()),
             "device key does not match registered address"
         );
-        Ok(owner.clone())
+        Ok(owner)
     }
 
     /// The group's current desired state, if this device must follow it:
@@ -1087,8 +1150,48 @@ impl SuiClient {
             function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
         }
         let mut args: Vec<Arg> = objects.into_iter().map(Arg::Object).collect();
+        let mut module = protocol::deployment_manager::MODULE;
+        if self
+            .manifest()
+            .type_origins
+            .contains_key("deployment_manager::CustomerFleetKey")
+        {
+            if let Some(value) = self
+                .dynamic_field(deployment, "deployment_manager::CustomerFleetKey")
+                .await?
+            {
+                let fleet_id = value
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("invalid managed deployment binding"))?;
+                anyhow::ensure!(
+                    same_id(&self.operator(&device_id).await?, fleet_id),
+                    "device no longer belongs to the deployment fleet"
+                );
+                let fleet = self.object(fleet_id).await?;
+                let customer = fleet.fields["customer_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("managed fleet has no customer"))?;
+                args.splice(
+                    0..0,
+                    [
+                        Arg::SharedRead(customer.into()),
+                        Arg::SharedRead(fleet_id.into()),
+                    ],
+                );
+                module = "customer";
+                function = if function == protocol::deployment_manager::REPORT_VERIFIED_STATUS {
+                    "report_status"
+                } else {
+                    "report_group_status"
+                };
+            }
+        }
         args.push(Arg::Pure(vec![status]));
-        let call = Call { module: protocol::deployment_manager::MODULE, function, args };
+        let call = Call {
+            module,
+            function,
+            args,
+        };
         let transaction = self.build(&call).await?;
         self.execute(&transaction).await
     }
@@ -1353,13 +1456,31 @@ impl SuiClient {
     }
     pub async fn register_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
         cap: &str, blob_id: &str, root_hash: &str, size: u64, path: &std::path::Path) -> anyhow::Result<String> {
-        let call = Call { module: "fleet_storage", function: "register_blob", args: vec![
+        let mut args = vec![
             Arg::Object(data.storage_id.clone()), Arg::SharedRead(data.budget_id.clone()), Arg::SharedRead(data.account_id.clone()),
             Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()), Arg::Object(storage.system_id.clone()),
             Arg::Pure(decimal_u256(blob_id)?), Arg::Pure(decimal_u256(root_hash)?), Arg::Pure(bcs::to_bytes(&size)?),
             Arg::Pure(vec![1]), Arg::SharedRead(CLOCK.into()),
-        ] };
-        self.durable_call(&storage.storage_package,&call,path).await
+        ];
+        let function = if let Some(managed) = &data.managed {
+            args.splice(
+                0..0,
+                [
+                    Arg::Object(managed.customer_id.clone()),
+                    Arg::SharedRead(managed.fleet_id.clone()),
+                ],
+            );
+            "register_managed_blob"
+        } else {
+            "register_blob"
+        };
+        let call = Call {
+            module: "fleet_storage",
+            function,
+            args,
+        };
+        self.durable_call(&storage.storage_package, &call, path)
+            .await
     }
     pub async fn certify_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
         blob: &str, cert: &crate::fleet_archive::Certificate, path: &std::path::Path) -> anyhow::Result<String> {
@@ -1451,6 +1572,7 @@ impl SuiClient {
         name: &str,
         arch: &str,
         claim: &dyn identity::TxSigner,
+        managed: Option<&crate::config::ManagedEnrollment>,
     ) -> anyhow::Result<Enrolled> {
         let package = Address::from_str(&self.config.package_id)?;
         let sender = Address::from_str(&self.address())?;
@@ -1460,25 +1582,48 @@ impl SuiClient {
             "the claim key must differ from the device key"
         );
         let registry = Address::from_str(&self.manifest().shared_objects.registry.id)?;
+        let mut args = vec![
+            Arg::Object(policy.into()),
+            Arg::Object(registry.to_string()),
+            Arg::Pure(bcs::to_bytes(&name.to_owned())?),
+            Arg::Pure(bcs::to_bytes(&arch.to_owned())?),
+            Arg::SharedRead(CLOCK.into()),
+        ];
+        let (module, function) = if let Some(binding) = managed {
+            args.splice(
+                0..0,
+                [
+                    Arg::Object(binding.customer_id.clone()),
+                    Arg::Object(binding.fleet_id.clone()),
+                    Arg::Object(binding.budget_id.clone()),
+                ],
+            );
+            ("customer", "enroll_claim")
+        } else {
+            (protocol::enrollment::MODULE, protocol::enrollment::ENROLL)
+        };
+        let call = Call {
+            module,
+            function,
+            args,
+        };
         let transaction = self
             .build_rpc(|| {
                 let mut builder = sui_transaction_builder::TransactionBuilder::new();
-                let arguments = vec![
-                    builder.object(sui_transaction_builder::ObjectInput::new(
-                        Address::from_str(policy)?,
-                    )),
-                    builder.object(sui_transaction_builder::ObjectInput::new(registry)),
-                    builder.pure(&name.to_owned()),
-                    builder.pure(&arch.to_owned()),
-                    builder.object(sui_transaction_builder::ObjectInput::new(
-                        Address::from_str("0x6")?,
-                    )),
-                ];
+                let mut arguments = Vec::new();
+                for arg in &call.args {
+                    arguments.push(match arg {
+                        Arg::Object(id) | Arg::SharedRead(id) => builder.object(
+                            sui_transaction_builder::ObjectInput::new(Address::from_str(id)?),
+                        ),
+                        Arg::Pure(bytes) => builder.pure_bytes(bytes.clone()),
+                    });
+                }
                 builder.move_call(
                     sui_transaction_builder::Function::new(
                         package,
-                        protocol::enrollment::MODULE.parse()?,
-                        protocol::enrollment::ENROLL.parse()?,
+                        module.parse()?,
+                        function.parse()?,
                     ),
                     arguments,
                 );
@@ -1487,29 +1632,12 @@ impl SuiClient {
                 Ok(builder)
             })
             .await?;
-        anyhow::ensure!(
-            transaction.sender == sender,
-            "simulated transaction has another sender"
-        );
-        anyhow::ensure!(
-            transaction.gas_payment.owner == sponsor,
-            "gas is not paid by the claim key"
-        );
+        check_call_transaction(&transaction, &call, package, sender, sponsor)?;
         anyhow::ensure!(
             transaction.gas_payment.budget <= MAX_ENROLL_BUDGET,
-            "gas budget {} exceeds the enrollment ceiling",
-            transaction.gas_payment.budget
+            "enrollment gas exceeds ceiling"
         );
-        let sui_sdk_types::TransactionKind::ProgrammableTransaction(program) = &transaction.kind
-        else {
-            anyhow::bail!("not a programmable transaction");
-        };
-        anyhow::ensure!(
-            matches!(program.commands.as_slice(), [Command::MoveCall(call)]
-                if call.package == package && call.module.as_str() == protocol::enrollment::MODULE
-                    && call.function.as_str() == protocol::enrollment::ENROLL && call.type_arguments.is_empty()),
-            "simulated transaction is not exactly enrollment::enroll"
-        );
+
         let bytes = bcs::to_bytes(&transaction)?;
         let signature = |value: Vec<u8>| {
             let mut out = proto::UserSignature::default();
@@ -1634,9 +1762,21 @@ fn check_transaction(
     package: Address,
     sender: Address,
 ) -> anyhow::Result<()> {
-    anyhow::ensure!(transaction.sender == sender, "simulated transaction has another sender");
+    check_call_transaction(transaction, call, package, sender, sender)
+}
+fn check_call_transaction(
+    transaction: &Transaction,
+    call: &Call,
+    package: Address,
+    sender: Address,
+    gas_owner: Address,
+) -> anyhow::Result<()> {
     anyhow::ensure!(
-        transaction.gas_payment.owner == sender,
+        transaction.sender == sender,
+        "simulated transaction has another sender"
+    );
+    anyhow::ensure!(
+        transaction.gas_payment.owner == gas_owner,
         "simulated transaction is paid by another address"
     );
     anyhow::ensure!(
@@ -1932,6 +2072,76 @@ mod tests {
         let mut args: Vec<Arg> = objects.iter().map(|id| Arg::Object((*id).into())).collect();
         args.push(Arg::Pure(vec![status]));
         args
+    }
+
+    #[test]
+    fn managed_claim_verifies_exact_objects_pure_values_and_sponsor_before_signing() {
+        use sui_transaction_builder::{Function, ObjectInput, TransactionBuilder};
+        let a = |value: &str| Address::from_str(value).unwrap();
+        let package = a("0x3");
+        let sender = a("0xa0");
+        let sponsor = a("0xcc");
+        let mut b = TransactionBuilder::new();
+        let mut arguments = Vec::new();
+        for id in ["0xc0", "0xf0", "0xb0", "0xe0", "0x13"] {
+            arguments.push(b.object(ObjectInput::shared(a(id), 1, true)));
+        }
+        arguments.push(b.pure(&"Pi".to_string()));
+        arguments.push(b.pure(&"x86_64".to_string()));
+        arguments.push(b.object(ObjectInput::shared(a("0x6"), 1, false)));
+        b.move_call(
+            Function::new(
+                package,
+                "customer".parse().unwrap(),
+                "enroll_claim".parse().unwrap(),
+            ),
+            arguments,
+        );
+        b.set_sender(sender);
+        b.set_sponsor(sponsor);
+        b.set_gas_budget(10_000_000);
+        b.set_gas_price(1000);
+        b.add_gas_objects([ObjectInput::owned(a("0x12"), 1, Digest::ZERO)]);
+        let tx = b.try_build().unwrap();
+        let mut args: Vec<_> = ["0xc0", "0xf0", "0xb0", "0xe0", "0x13"]
+            .into_iter()
+            .map(|id| Arg::Object(id.into()))
+            .collect();
+        args.extend([
+            Arg::Pure(bcs::to_bytes(&"Pi".to_string()).unwrap()),
+            Arg::Pure(bcs::to_bytes(&"x86_64".to_string()).unwrap()),
+            Arg::SharedRead("0x6".into()),
+        ]);
+        let call = Call {
+            module: "customer",
+            function: "enroll_claim",
+            args,
+        };
+        check_call_transaction(&tx, &call, package, sender, sponsor).unwrap();
+        for index in 0..5 {
+            let mut wrong = tx.clone();
+            let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind
+            else {
+                panic!()
+            };
+            ptb.inputs[index] = Input::Shared(sui_sdk_types::SharedInput::new(a("0xbad"), 1, true));
+            assert!(check_call_transaction(&wrong, &call, package, sender, sponsor).is_err());
+        }
+        let mut wrong = tx.clone();
+        wrong.gas_payment.owner = sender;
+        assert!(check_call_transaction(&wrong, &call, package, sender, sponsor).is_err());
+        let mut wrong = tx.clone();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind else {
+            panic!()
+        };
+        ptb.inputs[5] = Input::Pure(bcs::to_bytes(&"Substituted".to_string()).unwrap());
+        assert!(check_call_transaction(&wrong, &call, package, sender, sponsor).is_err());
+        let mut wrong = tx.clone();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind else {
+            panic!()
+        };
+        ptb.inputs[7] = Input::Shared(sui_sdk_types::SharedInput::new(a("0x6"), 1, true));
+        assert!(check_call_transaction(&wrong, &call, package, sender, sponsor).is_err());
     }
 
     #[test]

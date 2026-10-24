@@ -506,6 +506,8 @@ pub struct DeviceConfig {
 #[derive(Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct EnrollConfig {
+    #[serde(default)]
+    pub managed: Option<ManagedEnrollment>,
     /// The network deployment manifest (relative paths: to this file).
     pub manifest_path: PathBuf,
     pub policy_id: String,
@@ -521,6 +523,13 @@ pub struct EnrollConfig {
     pub signer: Option<SignerConfig>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedEnrollment {
+    pub customer_id: String,
+    pub fleet_id: String,
+    pub budget_id: String,
+}
 impl EnrollConfig {
     pub fn load(path: &Path) -> anyhow::Result<(Self, SuiConfig, DeviceConfig)> {
         let cfg: Self = toml::from_str(&std::fs::read_to_string(path)?)?;
@@ -535,7 +544,15 @@ impl EnrollConfig {
             package_id: manifest.call_package_id.clone(),
             manifest: Some(manifest),
         };
-        anyhow::ensure!(cfg.signer.is_some() || !cfg.keypair_path.as_os_str().is_empty(), "enrollment needs keypair_path or a [signer]");
+        anyhow::ensure!(
+            cfg.signer.is_some() || !cfg.keypair_path.as_os_str().is_empty(),
+            "enrollment needs keypair_path or a [signer]"
+        );
+        if let Some(managed) = &cfg.managed {
+            for id in [&managed.customer_id, &managed.fleet_id, &managed.budget_id] {
+                id.parse::<sui_sdk_types::Address>()?;
+            }
+        }
         let device = DeviceConfig {
             keypair_path: if cfg.keypair_path.as_os_str().is_empty() { PathBuf::new() } else { resolve(&cfg.keypair_path) },
             device_object_id: String::new(),
