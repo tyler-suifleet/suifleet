@@ -1,7 +1,7 @@
     #[mode(spec), ext(spec(prove, target = new_receipts))]
     fun new_receipts_security_spec(): Receipts {
         let receipts = new_receipts();
-        prover::prover::ensures(receipts.version == RECEIPTS_VERSION);
+        prover::prover::ensures(receipts.version == LEGACY_RECEIPTS_VERSION);
         prover::prover::ensures(receipts.statuses.is_empty());
         receipts
     }
@@ -11,10 +11,10 @@
         let present = df::exists(&deployment.id, ReceiptsKey {});
         prover::prover::asserts(!present || df::exists_with_type<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}));
         let old_version = if (present) df::borrow<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}).version else 0;
-        prover::prover::asserts(old_version <= RECEIPTS_VERSION);
+        prover::prover::asserts(old_version <= LEGACY_RECEIPTS_VERSION);
         let result = receipts_mut(deployment);
-        prover::prover::ensures(result.version == RECEIPTS_VERSION);
-        if (!present || old_version < RECEIPTS_VERSION) prover::prover::ensures(result.statuses.is_empty());
+        prover::prover::ensures(result.version == LEGACY_RECEIPTS_VERSION);
+        if (!present || old_version < LEGACY_RECEIPTS_VERSION) prover::prover::ensures(result.statuses.is_empty());
         result
     }
 
@@ -63,7 +63,12 @@
     #[mode(spec), ext(spec(prove, target = handover))]
     fun deployment_handover_security_spec(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
         prover::prover::asserts(ctx.sender() == d.creator);
-        prover::prover::asserts(d.schema_version != 2);
+        // Directory presence selects sharded storage, including schema-2 catalogs.
+        // A present field must have the expected value type before borrowing it.
+        if (df::exists(&d.id, ReceiptShardKey {})) {
+            prover::prover::asserts(df::exists_with_type<ReceiptShardKey, ReceiptDirectory>(&d.id, ReceiptShardKey {}));
+        };
+        prover::prover::asserts(receipt_schema(d) != 2);
         let artifact = d.artifact_sha256;
         let blob = d.recipe_blob_id;
         handover(d, recipient, ctx);

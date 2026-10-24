@@ -1,0 +1,57 @@
+{
+  "result": "PASS",
+  "network": "isolated network-none localnet",
+  "base": "14b351b9389c058117297343ced34f262db6f3c3",
+  "old": "0x35e4e6dc72e452ffb4154c8dec3773027470b01bfac2565fe29340f31ae85795",
+  "head": "0x586e88ce79aeb4eea791f2cffc4872dfdb35eab61d40a19f5deedf37ddb53f1c",
+  "digests": {
+    "publish pre-identity package": "7DK1EFZ4SuQkFjqTPr9Gnpk1TnQrtJsBSTHe3fu3cZap",
+    "create on old package": "6TbEKoJ5eiqgP1y3mzk7QYqiTuWFjVYjThVj8dZKMyNY",
+    "compatible pre-identity upgrade": "8ZHUsLChky657Et5vKu12rE6se9PPpPdMsvyx6WkjkyM",
+    "protect oldest deletion path": "4r6KnPqdwjYVi4djaUTy9QLcar7yNdASLQf8QHk6as3E",
+    "bounded legacy cleanup 4": "6A722YDuth7F47sDJJoUJ4cyPAnKVDBAsPEymjzKQCUo",
+    "bounded legacy cleanup 5": "8Vg42WLn41nQgdFi8x625hE2TQd1esuBm2RbDrzTqV59",
+    "bounded legacy cleanup 6": "5km61gCgqmFcgiH8ipEvv2W8kQZak2KbzEBUEScPQh7g",
+    "bounded legacy cleanup 7": "5u5Jp9Fvh75LzCVgL1zuNYHKYTcNu8S2g1N6oe9zCeN5",
+    "bounded legacy cleanup 8": "4uwjKdYaGQArAZBSgJC6kdTe8mo2eKA6pmfZ8QBkSjCJ",
+    "bounded legacy cleanup 9": "ECmbVGB8N3cQzDzzPY6XUKSNT9e4p3N6NutAtZJTEwK2",
+    "activate probe device": "6DDA7Q6u7qLoyFq97VvHmc8U5VetsHRuZPBFEAy3zdAD",
+    "new sharded failure probe": "4vEhDtjrwckDXXATvJKRL9bCeyknG8iiWLgqZhW4CRbs",
+    "create catalog client probe": "5A1Fb9oLBrcKZzJZc5dtDzxTPSYSqXQWs5SVkRGP7vMe",
+    "publish catalog client probe": "B6LVBjkcbSBHhqpq34zV3aoBjdTdospLuGPCh8SQQXd9",
+    "create paused catalog client probe": "C4LoeqxBJqNBbLhZxc1mGHVdnRR6CEvGKzYhaLAvXPb8",
+    "shard catalog client probe": "4Q9D1TrAWXxqnaUud7rWwaHzDjaBiV2y9ooHGSJTHixr",
+    "unpause catalog client probe": "79mHaeumo9zctTmVLhunhhJFXL5PJeG1NPX723whDnyU",
+    "bounded catalog probe cleanup 17": "2Wa2sjae4KK3NjQ6ZAQdC9waa85zPEbTrmbt5mBf5wR7",
+    "bounded catalog probe cleanup 18": "C8wKDuYdgMAxySinxMJ5NWNSS2YNFoyusagZ6HiZBx24",
+    "bounded catalog probe cleanup 19": "5MiqDcgERH6kVd9zZJgAt9vvR5v98Z5RnHLcC9snJeQp",
+    "bounded catalog probe cleanup 20": "HctsLdYKyKjX69qWCjRrVf5NZRr2HgwTk6NRz64TwssJ",
+    "bounded catalog probe cleanup 21": "FRB1UP5tCCFKCFyqcZTb9GqZ8Lr1qahQkyQ5MkDqWLGr",
+    "bounded catalog probe cleanup 22": "Gdf8ckLcXwAhLgxxYXCij22EQbnjmFPwmHyQW5ggANA1",
+    "bounded catalog probe cleanup 23": "3p2Ej8poHz5THbikf71wxPVzySgqwk66a8ttCECwt1sn",
+    "bounded probe cleanup 24": "3gYHiDPRZ7YuKve9BGXBJCojTAPRVKq5tRUwqntvmb6n",
+    "bounded probe cleanup 25": "GFJAnTRxu4PCLzRXuhUCLrgMKA8eBAJHD6qujHHfDk4J",
+    "bounded probe cleanup 26": "BVt9wwMjzAyjbHiKzEgWVV4jQYqEeh3M9cHytgy62iY",
+    "bounded probe cleanup 27": "2skJAsGSTCcJQFk1EPD371WUQEcuDKHgbnzSf5fVVyFC",
+    "bounded probe cleanup 28": "Hc1C9meQ2AZZdyKu5Ba1RvPedTQzqEs6D3qZCRKaNjBq",
+    "bounded probe cleanup 29": "35NKpBp4XkDzs98NLSUanbosjwqBHjV74LvgjRgtNtUG",
+    "bounded probe cleanup 30": "EsKSeQS1fd2kXySi8ysCLyBxxsbJbghFBivBLaZuFhgS"
+  },
+  "failures": {
+    "old no-schema-check delete blocked": {
+      "digest": "6JajCbdtdwT63EYSDeGJTkqDRBHTbdEfyvPeyXiEAUvT",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0x0000000000000000000000000000000000000000000000000000000000000002::dynamic_field::remove_child_object' (instruction 0)"
+    }
+  },
+  "daemon": "actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records",
+  "indexer": "actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding",
+  "catalog_probe": {
+    "deployment": "0xc1adb9337e27282cca95f82156dd9e2028e9874bf23d3259cf41240eac28852e",
+    "version": "0xb2a553f68bd203921eb9c3eb37696b5259c80f3022001c9ae7d29d703c4fd8c3",
+    "error": "blob missing-recipe: transfer failed after 1 attempts: error sending request for url (http://127.0.0.1:9/v1/blobs/missing-recipe): client error (Connect): tcp connect error: Connection refused (os error 111)"
+  },
+  "limits": [
+    "No successful artifact installation in this probe; existing OTA simulator covers successful apply",
+    "No public-network, hardware, mainnet or manual wallet acceptance"
+  ]
+}

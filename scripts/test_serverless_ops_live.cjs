@@ -3,7 +3,7 @@ const fs = require('node:fs/promises'), path = require('node:path'), assert = re
 const { execFileSync } = require('node:child_process');
 const { appRequire } = require('./frontend_test_utils.cjs');
 const { Transaction } = appRequire('@mysten/sui/transactions');
-module.exports = async ({ manifest, temporary, operator, group, device, execute }) => {
+module.exports = async ({ manifest, temporary, operator, group, device, execute, client }) => {
   const manifestFile = path.join(temporary, 'ops-manifest.json');
   await fs.writeFile(manifestFile, JSON.stringify(manifest));
   const run = (command, argument) => JSON.parse(execFileSync(process.execPath,
@@ -27,6 +27,6 @@ module.exports = async ({ manifest, temporary, operator, group, device, execute 
   const deployment = deployments.find(d => d.componentName === 'serverless-cli');
   assert.ok(deployment?.receiptsVerified);
   const { loader } = require('./frontend_test_utils.cjs');
-  await execute(loader()('lib/sui.ts').buildDeleteDeploymentTx(deployment.deploymentId, deployment.schemaVersion));
+  await require('./receipt_test_helpers.cjs').deleteDeployment(client, execute, deployment.deploymentId, deployment.schemaVersion);
   console.log(JSON.stringify({ check: 'serverless-ops', result: 'PASS', digests, boundary: 'disposable localnet; unsigned CLI builds, external test-wallet signatures and successful effects; no indexer' }));
 };

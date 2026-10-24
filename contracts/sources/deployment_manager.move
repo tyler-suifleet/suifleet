@@ -1,5 +1,6 @@
 module sui_edge::deployment_manager {
     use std::string::String;
+    use std::bcs;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
     use sui::event;
@@ -19,7 +20,7 @@ module sui_edge::deployment_manager {
     /// migrated records. Statuses written under an older version are discarded
     /// on migration and never returned as receipts: an older package may have
     /// accepted them from a since-revoked key.
-    const RECEIPTS_VERSION: u64 = 2;
+    const LEGACY_RECEIPTS_VERSION: u64 = 2;
     const STATUS_APPLIED: u8 = 1;
     const STATUS_FAILED: u8 = 2;
 
@@ -299,7 +300,10 @@ module sui_edge::deployment_manager {
     ) {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
         let _: V = df::remove(&mut deployment.id, key);
-        deployment.schema_version = SCHEMA_VERSION;
+        if (df::exists(&deployment.id, ReceiptShardKey {})) {
+            let directory: &mut ReceiptDirectory = df::borrow_mut(&mut deployment.id, ReceiptShardKey {});
+            directory.original_schema = SCHEMA_VERSION;
+        } else { deployment.schema_version = SCHEMA_VERSION; };
     }
 
     fun make_deployment(
@@ -439,7 +443,7 @@ module sui_edge::deployment_manager {
     }
 
     fun new_receipts(): Receipts {
-        Receipts { version: RECEIPTS_VERSION, statuses: vec_map::empty() }
+        Receipts { version: LEGACY_RECEIPTS_VERSION, statuses: vec_map::empty() }
     }
 
     /// Records created before receipts existed get them lazily; a record
@@ -450,10 +454,10 @@ module sui_edge::deployment_manager {
             df::add(&mut deployment.id, ReceiptsKey {}, new_receipts());
         };
         let receipts: &mut Receipts = df::borrow_mut(&mut deployment.id, ReceiptsKey {});
-        assert!(receipts.version <= RECEIPTS_VERSION, EPackageOutdated);
-        if (receipts.version < RECEIPTS_VERSION) {
+        assert!(receipts.version <= LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+        if (receipts.version < LEGACY_RECEIPTS_VERSION) {
             receipts.statuses = vec_map::empty();
-            receipts.version = RECEIPTS_VERSION;
+            receipts.version = LEGACY_RECEIPTS_VERSION;
         };
         receipts
     }
@@ -462,6 +466,7 @@ module sui_edge::deployment_manager {
     public entry fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         assert!(ctx.sender() == deployment.creator, ENotCreator);
 
+        finish_receipt_cleanup(&mut deployment);
         // Catalog records require their defining module to remove the binding first.
         assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
         if (df::exists(&deployment.id, ControlKey {})) {
@@ -498,14 +503,269 @@ module sui_edge::deployment_manager {
         // Catalog-bound records resolve dependencies through the original
         // publisher index. Supersede them under a recipient-owned catalog;
         // changing only creator would retain the old publisher as an authority.
+        assert!(receipt_schema(d) != 2, EPackageOutdated);
+        d.creator = recipient;
+    }
+
+    // Verbatim pre-sharding handover guard/body for unit regression; the
+    // localnet harness also executes the actual published base bytecode.
+    #[test_only]
+    public(package) fun legacy_handover_for_testing(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
         assert!(d.schema_version != 2, EPackageOutdated);
         d.creator = recipient;
+    }
+
+    // SF-127: the legacy Receipts layout remains unchanged. Version 3 is a
+    // barrier: v2 entry points abort. Ordinary/rollout schema 4 blocks old
+    // deletion paths; catalogs retain schema 2 to block old handover too.
+    // Ordinary creation stays v2 for mixed clients; explicitly opt in using
+    // begin_sharded_receipts, then migrate each root and finish the barrier.
+    public struct ReceiptLayoutChanged has copy, drop { deployment_id: ID }
+    public struct ShardedTargetGroupsKey has copy, drop, store {}
+    public struct ReceiptShardKey has copy, drop, store {}
+    public struct ReceiptDirectory has store {
+        roots: vector<ID>, original_schema: u64, migrated: u64,
+        ready: bool, retiring: bool, remaining: u64,
+    }
+    public struct ReceiptKey has copy, drop, store { device: ID }
+    public struct ReceiptIndexKey has copy, drop, store { index: u64 }
+    public struct ShardedReceipt has copy, drop, store { status: u8, failed: bool, reported_v3: bool }
+    public struct ReceiptShard has key {
+        id: UID, deployment: ID, index: u64, count: u64,
+        migration_cursor: u64, migrated: bool,
+    }
+    const EShard: u64 = 14;
+    const EBarrier: u64 = 15;
+    const EChunk: u64 = 16;
+    const ECleanup: u64 = 17;
+    const SHARD_COUNT: u64 = 16;
+    const RECEIPTS_VERSION: u64 = 3;
+    const CHUNK_LIMIT: u64 = 64;
+    // Each root holds only counters. Entries are individually allocated fields;
+    // 120k receipts therefore need no large shared-object payload.
+    public fun receipt_shard_index(device: ID): u64 {
+        let bytes = bcs::to_bytes(&device);
+        (bytes[31] as u64) % SHARD_COUNT
+    }
+    public fun receipt_directory(d: &DeploymentRecord): &ReceiptDirectory {
+        df::borrow(&d.id, ReceiptShardKey {})
+    }
+    public fun receipt_roots(d: &DeploymentRecord): &vector<ID> { &receipt_directory(d).roots }
+    public fun receipt_schema(d: &DeploymentRecord): u64 {
+        if (df::exists(&d.id, ReceiptShardKey {})) receipt_directory(d).original_schema else d.schema_version
+    }
+    /// Creator opt-in; repeated starts do nothing. No authority can report while
+    /// the snapshot is copied, and stale pre-v2 history is never promoted.
+    public fun begin_sharded_receipts(d: &mut DeploymentRecord, ctx: &mut TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        if (df::exists(&d.id, ReceiptShardKey {})) return;
+        // Catalog bindings need relocating by their defining module first; an
+        // old catalog delete could otherwise remove a binding and reset schema.
+        assert!(d.schema_version == 1 || d.schema_version == 3, EPackageOutdated);
+        receipts_mut(d);
+        let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
+        receipts.version = RECEIPTS_VERSION;
+        let empty = receipts.statuses.is_empty();
+        let mut roots = vector[]; let mut index = 0;
+        while (index < SHARD_COUNT) {
+            let root = ReceiptShard { id: object::new(ctx), deployment: object::id(d),
+                index, count: 0, migration_cursor: 0, migrated: empty };
+            roots.push_back(object::id(&root));
+            transfer::share_object(root); index = index + 1;
+        };
+        let original_schema = d.schema_version;
+        d.schema_version = 4;
+        // Earliest packages have no schema check in delete_deployment. Their
+        // unconditional removal of TargetGroupsKey must abort, preventing them
+        // from deleting the parent and orphaning the new shared roots.
+        let groups: vector<ID> = df::remove(&mut d.id, TargetGroupsKey {});
+        df::add(&mut d.id, ShardedTargetGroupsKey {}, groups);
+        df::add(&mut d.id, ReceiptShardKey {}, ReceiptDirectory {
+            roots, original_schema, migrated: if (empty) SHARD_COUNT else 0, ready: empty, retiring: false, remaining: SHARD_COUNT,
+        });
+        event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
+    }
+    /// Relocate catalog authority out of the key understood by old deletion
+    /// paths before enabling shards. Called only by the binding's module.
+    public(package) fun begin_catalog_receipts<K: copy + drop + store, N: copy + drop + store, V: store>(
+        d: &mut DeploymentRecord, old_key: K, new_key: N, ctx: &mut TxContext,
+    ) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        if (df::exists(&d.id, ReceiptShardKey {})) return;
+        assert!(d.schema_version == 2, EPackageOutdated);
+        let binding: V = df::remove(&mut d.id, old_key);
+        df::add(&mut d.id, new_key, binding);
+        d.schema_version = 1;
+        begin_sharded_receipts(d, ctx);
+        let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
+        directory.original_schema = 2;
+        // Previously published handover checks the inline schema, not this
+        // directory. Preserve its catalog rejection across every old package.
+        d.schema_version = 2;
+    }
+    fun assert_bound(d: &DeploymentRecord, shard: &ReceiptShard) {
+        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        let directory = receipt_directory(d);
+        assert!(shard.deployment == object::id(d) && shard.index < SHARD_COUNT &&
+            directory.roots[shard.index] == object::id(shard), EShard);
+    }
+    /// At most 64 old entries inspected per call. The v2 snapshot is frozen;
+    /// replaying a finished root is idempotent. Finish makes all roots visible
+    /// together, never a partial authoritative fleet view.
+    public fun migrate_receipt_chunk(d: &mut DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
+        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+        assert_bound(d, shard);
+        assert!(!receipt_directory(d).retiring, ECleanup);
+        if (shard.migrated) return;
+        let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
+        let end = std::u64::min(shard.migration_cursor + limit, receipts.statuses.length());
+        while (shard.migration_cursor < end) {
+            let (device, status) = receipts.statuses.get_entry_by_idx(shard.migration_cursor);
+            if (receipt_shard_index(*device) == shard.index) { put_receipt(shard, *device, *status, false); };
+            shard.migration_cursor = shard.migration_cursor + 1;
+        };
+        if (end == receipts.statuses.length()) {
+            shard.migrated = true;
+            let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
+            directory.migrated = directory.migrated + 1;
+        };
+    }
+    public fun finish_receipt_migration(d: &mut DeploymentRecord) {
+        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
+        assert!(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
+        directory.ready = true;
+        let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
+        receipts.statuses = vec_map::empty();
+        event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
+    }
+    fun assert_readable(d: &DeploymentRecord, shard: &ReceiptShard) {
+        assert_bound(d, shard);
+        let directory = receipt_directory(d);
+        assert!(directory.ready && !directory.retiring, EBarrier);
+    }
+    public fun receipt_status_v3(d: &DeploymentRecord, shard: &ReceiptShard, device: ID): Option<u8> {
+        assert_readable(d, shard);
+        assert!(receipt_shard_index(device) == shard.index, EShard);
+        let key = ReceiptKey { device };
+        if (df::exists(&shard.id, key)) {
+            let receipt: &ShardedReceipt = df::borrow(&shard.id, key);
+            option::some(receipt.status)
+        } else option::none()
+    }
+    public fun receipt_page_v3(d: &DeploymentRecord, shard: &ReceiptShard, start: u64, limit: u64): (vector<ID>, vector<u8>, u64) {
+        assert_readable(d, shard);
+        assert!(limit > 0 && limit <= CHUNK_LIMIT && start <= shard.count, EChunk);
+        let end = std::u64::min(start + limit, shard.count);
+        let mut devices = vector[]; let mut statuses = vector[]; let mut i = start;
+        while (i < end) {
+            let device: ID = *df::borrow(&shard.id, ReceiptIndexKey { index: i });
+            let receipt: &ShardedReceipt = df::borrow(&shard.id, ReceiptKey { device });
+            devices.push_back(device); statuses.push_back(receipt.status); i = i + 1;
+        };
+        (devices, statuses, end)
+    }
+    fun put_receipt(shard: &mut ReceiptShard, device: ID, status: u8, live: bool) {
+        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+        let key = ReceiptKey { device };
+        if (df::exists(&shard.id, key)) {
+            let receipt: &mut ShardedReceipt = df::borrow_mut(&mut shard.id, key);
+            receipt.status = status;
+            if (live) { receipt.failed = receipt.failed || status == STATUS_FAILED; receipt.reported_v3 = true; };
+        } else {
+            df::add(&mut shard.id, key, ShardedReceipt { status, failed: live && status == STATUS_FAILED, reported_v3: live });
+            df::add(&mut shard.id, ReceiptIndexKey { index: shard.count }, device);
+            shard.count = shard.count + 1;
+        };
+    }
+    fun record_sharded(d: &DeploymentRecord, shard: &mut ReceiptShard, cap: &DeviceCap, status: u8, ctx: &TxContext) {
+        assert_readable(d, shard);
+        let device = device_cap::device_id(cap);
+        assert!(receipt_shard_index(device) == shard.index, EShard);
+        if (receipt_schema(d) == 3) {
+            let r = rollout(d); let (found, i) = r.members.index_of(&device);
+            assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+        };
+        put_receipt(shard, device, status, true);
+        event::emit(DeviceStatusReported { deployment_id: object::id(d), device_id: device, status, reporter: ctx.sender() });
+    }
+    public fun report_status_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
+        cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
+        device_cap::assert_active(cap, registry, ctx);
+        assert!(target_devices(d).contains(&device_cap::device_id(cap)), ENotTargeted);
+        record_sharded(d, shard, cap, status, ctx);
+    }
+    public fun report_status_for_group_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
+        cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &mut TxContext) {
+        device_cap::assert_active(cap, registry, ctx);
+        assert!(target_groups(d).contains(&device_group::group_id(group)) && device_group::admin(group) == d.creator &&
+            device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
+        record_sharded(d, shard, cap, status, ctx);
+    }
+    /// Coordinator copies only chain-authoritative shard outcomes. Reporting
+    /// never mutates the deployment; sticky failures survive report overwrites.
+    public fun sync_rollout_receipts(d: &mut DeploymentRecord, shard: &ReceiptShard, devices: vector<ID>) {
+        assert_readable(d, shard);
+        assert!(devices.length() <= CHUNK_LIMIT, EChunk);
+        let mut i = 0;
+        while (i < devices.length()) {
+            let device = devices[i];
+            assert!(receipt_shard_index(device) == shard.index, EShard);
+            if (df::exists(&shard.id, ReceiptKey { device })) {
+                let receipt: ShardedReceipt = *df::borrow(&shard.id, ReceiptKey { device });
+                // Pre-rollout v2 packages can write receipts without a grant.
+                // Migration preserves those statuses, not rollout authority.
+                if (receipt.reported_v3) {
+                    record_rollout_outcome(d, device, if (receipt.failed) STATUS_FAILED else receipt.status);
+                };
+            };
+            i = i + 1;
+        };
+    }
+    public fun begin_receipt_cleanup(d: &mut DeploymentRecord, ctx: &mut TxContext) {
+        assert!(ctx.sender() == d.creator, ENotCreator);
+        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
+        directory.retiring = true; directory.ready = false;
+        event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
+    }
+    public fun cleanup_receipt_chunk(d: &DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
+        assert_bound(d, shard);
+        assert!(receipt_directory(d).retiring, ECleanup);
+        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+        let mut n = 0;
+        while (shard.count > 0 && n < limit) {
+            shard.count = shard.count - 1;
+            let device: ID = df::remove(&mut shard.id, ReceiptIndexKey { index: shard.count });
+            let _: ShardedReceipt = df::remove(&mut shard.id, ReceiptKey { device }); n = n + 1;
+        };
+    }
+    public fun retire_receipt_shard(d: &mut DeploymentRecord, shard: ReceiptShard) {
+        assert_bound(d, &shard);
+        assert!(receipt_directory(d).retiring && shard.count == 0, ECleanup);
+        let ReceiptShard { id, deployment: _, index, count: _, migration_cursor: _, migrated: _ } = shard;
+        let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
+        *(&mut directory.roots[index]) = @0x0.to_id();
+        directory.remaining = directory.remaining - 1;
+        id.delete();
+    }
+    fun finish_receipt_cleanup(d: &mut DeploymentRecord) {
+        if (!df::exists(&d.id, ReceiptShardKey {})) return;
+        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        let directory: &ReceiptDirectory = df::borrow(&d.id, ReceiptShardKey {});
+        assert!(directory.retiring && directory.remaining == 0, ECleanup);
+        let ReceiptDirectory { roots: _, original_schema, migrated: _, ready: _, retiring: _, remaining: _ } = df::remove(&mut d.id, ReceiptShardKey {});
+        d.schema_version = original_schema;
+        let groups: vector<ID> = df::remove(&mut d.id, ShardedTargetGroupsKey {});
+        df::add(&mut d.id, TargetGroupsKey {}, groups);
     }
 
     // ── Read helpers ──────────────────────────────────────────────────────────
 
     public fun target_groups(d: &DeploymentRecord): &vector<ID> {
-        df::borrow(&d.id, TargetGroupsKey {})
+        if (df::exists(&d.id, ReceiptShardKey {})) df::borrow(&d.id, ShardedTargetGroupsKey {})
+        else df::borrow(&d.id, TargetGroupsKey {})
     }
 
     public fun target_devices(d: &DeploymentRecord): &vector<ID> {
@@ -526,18 +786,20 @@ module sui_edge::deployment_manager {
     /// Receipts written under this package's report authority. Older versions
     /// (still writable by older packages until migrated) are not evidence.
     public fun has_current_receipts(d: &DeploymentRecord): bool {
-        has_receipts(d) && receipts_version(d) >= RECEIPTS_VERSION
+        has_receipts(d) && receipts_version(d) == LEGACY_RECEIPTS_VERSION
     }
 
     /// Authoritative statuses: only reports from an active device identity.
     public fun receipt_statuses(d: &DeploymentRecord): &VecMap<ID, u8> {
         assert!(has_receipts(d), ENoReceipts);
         assert!(has_current_receipts(d), EStaleReceipts);
+        assert!(receipts_version(d) == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         &receipts.statuses
     }
 
     public fun receipt_status(d: &DeploymentRecord, device_id: ID): Option<u8> {
+        assert!(!has_receipts(d) || receipts_version(d) <= LEGACY_RECEIPTS_VERSION, EPackageOutdated);
         if (!has_current_receipts(d)) return option::none();
         let statuses = receipt_statuses(d);
         if (statuses.contains(&device_id)) option::some(*statuses.get(&device_id))
@@ -587,12 +849,20 @@ module sui_edge::deployment_manager {
     #[test_only]
     public fun old_package_report_for_testing(d: &mut DeploymentRecord, device_id: ID, status: u8) {
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
-        assert!(receipts.version < RECEIPTS_VERSION, EPackageOutdated);
+        assert!(receipts.version < LEGACY_RECEIPTS_VERSION, EPackageOutdated);
         if (receipts.statuses.contains(&device_id)) {
             *receipts.statuses.get_mut(&device_id) = status;
         } else {
             receipts.statuses.insert(device_id, status);
         };
+    }
+
+    /// Actual pre-rollout v2 packages do not know RolloutKey or admission.
+    #[test_only]
+    public fun pre_rollout_report_for_testing(d: &mut DeploymentRecord, device: ID, status: u8) {
+        let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
+        assert!(receipts.version == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+        receipts.statuses.insert(device, status);
     }
 
     /// Simulates a newer package having migrated this record's receipts.
@@ -697,12 +967,14 @@ module sui_edge::deployment_manager {
     }
 
     public fun rollout(d: &DeploymentRecord): Rollout {
-        assert!(d.schema_version == 3, ERolloutState);
+        assert!(receipt_schema(d) == 3, ERolloutState);
         *df::borrow(&d.id, RolloutKey {})
     }
     public fun rollout_progress(d: &DeploymentRecord): (u8, u64) {
         let r = rollout(d); (r.state, r.cohort)
     }
+    #[test_only]
+    public fun rollout_outcomes_for_testing(d: &DeploymentRecord): vector<u8> { rollout(d).outcomes }
     #[test_only]
     public fun rollout_receipt_for_testing(d: &mut DeploymentRecord, device: ID, status: u8) {
         record_rollout_outcome(d, device, status);
@@ -734,7 +1006,7 @@ module sui_edge::deployment_manager {
         healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &TxContext,
     ) {
         assert!(ctx.sender() == d.creator, ENotCreator);
-        assert!(d.schema_version == 3, ERolloutState);
+        assert!(receipt_schema(d) == 3, ERolloutState);
         let control = control(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         assert!(r.state == 0, ERolloutState);
@@ -825,7 +1097,8 @@ module sui_edge::deployment_manager {
 
     public fun delete_rollout(mut d: DeploymentRecord, ctx: &TxContext) {
         assert!(ctx.sender() == d.creator, ENotCreator);
-        assert!(d.schema_version == 3, ERolloutState);
+        assert!(receipt_schema(&d) == 3, ERolloutState);
+        finish_receipt_cleanup(&mut d);
         let _: Rollout = df::remove(&mut d.id, RolloutKey {});
         d.schema_version = SCHEMA_VERSION;
         delete_deployment(d, ctx);

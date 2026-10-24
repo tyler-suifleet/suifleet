@@ -109,3 +109,9 @@ cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_fa
 | `make test-manifest`, `make test-manifest-live` | Manifest validation, and origins across real upgrades |
 
 A testnet publish and upgrade has not been run by these tests. It spends real gas, needs the release account, and must be run explicitly by the operator. Record the transaction digests and the resulting manifest in the release issue.
+
+The optional all-or-none `receipt_shards` type group enables SF-127. Its directory,
+root, receipt/index keys and relocated group/catalog keys retain their own
+introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
+edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
+without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).

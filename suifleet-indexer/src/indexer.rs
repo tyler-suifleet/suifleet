@@ -70,6 +70,11 @@ const STREAMS: &[(&str, &str, Kind)] = &[
         Kind::Deployment,
     ),
     (
+        "deployment_manager::ReceiptLayoutChanged",
+        "deployment_id",
+        Kind::Deployment,
+    ),
+    (
         "deployment_manager::DeviceStatusReported",
         "deployment_id",
         Kind::Deployment,
@@ -212,6 +217,9 @@ impl Indexer {
     }
 
     async fn sync_stream(&mut self, event: &str, field: &str, kind: Kind) -> anyhow::Result<usize> {
+        if event == "deployment_manager::ReceiptLayoutChanged" && !self.types.contains_key(event) {
+            return Ok(0);
+        }
         let event_type = self.move_type(event)?.to_owned();
         let mut changed = 0;
         loop {
@@ -362,8 +370,16 @@ impl Indexer {
             "{id} is not a DeploymentRecord"
         );
         let f = &object.fields;
+        let sharded = self.field(id, "deployment_manager::ReceiptShardKey").await?.is_some();
         let groups = self
-            .field(id, "deployment_manager::TargetGroupsKey")
+            .field(
+                id,
+                if sharded {
+                    "deployment_manager::ShardedTargetGroupsKey"
+                } else {
+                    "deployment_manager::TargetGroupsKey"
+                },
+            )
             .await?;
         let devices = self
             .field(id, "deployment_manager::TargetDevicesKey")
@@ -372,7 +388,14 @@ impl Indexer {
             .field(id, "deployment_manager::RecipeDigestKey")
             .await?;
         let binding = self
-            .field(id, "component_catalog::CatalogBindingKey")
+            .field(
+                id,
+                if sharded {
+                    "component_catalog::ShardedCatalogBindingKey"
+                } else {
+                    "component_catalog::CatalogBindingKey"
+                },
+            )
             .await?;
         Ok(Some(Deployment {
             id: id.to_owned(),
@@ -399,6 +422,9 @@ impl Indexer {
         let Some(receipts) = self.field(id, "deployment_manager::ReceiptsKey").await? else {
             return Ok(Vec::new());
         };
+        if chain::number(&receipts["version"]) == Some(3) {
+            return self.read_sharded_receipts(id).await;
+        }
         if !current_receipts(id, &receipts)? {
             return Ok(Vec::new());
         }
@@ -416,6 +442,105 @@ impl Indexer {
                 }
             })
             .collect()
+    }
+    async fn read_sharded_receipts(&self, id: &str) -> anyhow::Result<Vec<(String, u8)>> {
+        let directory = self
+            .field(id, "deployment_manager::ReceiptShardKey")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("missing v3 receipt directory"))?;
+        if directory["ready"] != true || directory["retiring"] != false {
+            return Ok(Vec::new());
+        }
+        let roots = chain::id_list(&directory["roots"]);
+        anyhow::ensure!(
+            roots.len() == 16
+                && roots
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
+                    == 16
+                && chain::number(&directory["migrated"]) == Some(16),
+            "invalid receipt directory"
+        );
+        let mut receipts = Vec::new();
+        for (index, root) in roots.iter().enumerate() {
+            let shard = self
+                .chain
+                .object(root)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("missing receipt root"))?;
+            anyhow::ensure!(
+                chain::same_type(
+                    &shard.object_type,
+                    self.move_type("deployment_manager::ReceiptShard")?
+                ) && matches!(shard.owner, chain::Owner::Shared(_))
+                    && shard.fields["deployment"]
+                        .as_str()
+                        .is_some_and(|d| chain::same_id(d, id))
+                    && chain::number(&shard.fields["index"]) == Some(index as u64)
+                    && shard.fields["migrated"] == true,
+                "invalid receipt root binding"
+            );
+            let count = chain::number(&shard.fields["count"])
+                .ok_or_else(|| anyhow::anyhow!("invalid receipt count"))?;
+            let mut start = 0;
+            while start < count {
+                let end = (start + 64).min(count);
+                let ids = (start..end)
+                    .map(|n| {
+                        chain::field_id(
+                            root,
+                            self.move_type("deployment_manager::ReceiptIndexKey")?,
+                            &n.to_le_bytes(),
+                        )
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let entries = self.chain.objects(&ids).await?;
+                let devices = entries
+                    .iter()
+                    .map(|entry| {
+                        let device = entry
+                            .as_ref()
+                            .and_then(|e| e.fields["value"].as_str())
+                            .and_then(chain::normalize)
+                            .ok_or_else(|| anyhow::anyhow!("missing receipt index"))?;
+                        anyhow::ensure!(
+                            chain::id_bytes(&device)?[31] as usize % 16 == index,
+                            "wrong receipt shard"
+                        );
+                        Ok(device)
+                    })
+                    .collect::<anyhow::Result<Vec<String>>>()?;
+                let fields = devices
+                    .iter()
+                    .map(|device| {
+                        chain::field_id(
+                            root,
+                            self.move_type("deployment_manager::ReceiptKey")?,
+                            &chain::id_bytes(device)?,
+                        )
+                    })
+                    .collect::<anyhow::Result<Vec<_>>>()?;
+                let values = self.chain.objects(&fields).await?;
+                for (device, value) in devices.into_iter().zip(values) {
+                    let value = value.ok_or_else(|| anyhow::anyhow!("missing receipt"))?;
+                    let status = chain::number(&value.fields["value"]["status"])
+                        .filter(|s| *s == 1 || *s == 2)
+                        .ok_or_else(|| anyhow::anyhow!("invalid receipt status"))?;
+                    receipts.push((device, status as u8));
+                }
+                start = end;
+            }
+        }
+        let after = self
+            .field(id, "deployment_manager::ReceiptShardKey")
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("receipt directory disappeared"))?;
+        anyhow::ensure!(
+            after["ready"] == true && after["retiring"] == false,
+            "receipt authority changed during read"
+        );
+        Ok(receipts)
     }
 }
 
@@ -507,7 +632,8 @@ fn current_receipts(id: &str, receipts: &Value) -> anyhow::Result<bool> {
     let version = chain::number(&receipts["version"])
         .filter(|v| *v > 0)
         .ok_or_else(|| anyhow::anyhow!("invalid receipts authority version of {id}: {receipts}"))?;
-    Ok(version >= RECEIPTS_AUTHORITY_VERSION)
+    anyhow::ensure!(version <= 3, "unsupported receipts authority version");
+    Ok(version == RECEIPTS_AUTHORITY_VERSION)
 }
 
 /// The next `limit` indexed device IDs after `after`, tombstones and
@@ -599,7 +725,8 @@ mod tests {
         let receipts = |version: Value| serde_json::json!({ "version": version, "statuses": { "contents": [] } });
         assert!(!current_receipts("d", &receipts(serde_json::json!("1"))).unwrap());
         assert!(current_receipts("d", &receipts(serde_json::json!("2"))).unwrap());
-        assert!(current_receipts("d", &receipts(serde_json::json!("3"))).unwrap());
+        assert!(!current_receipts("d", &receipts(serde_json::json!("3"))).unwrap());
+        assert!(current_receipts("d", &receipts(serde_json::json!("4"))).is_err());
         for invalid in [serde_json::json!("0"), Value::Null, serde_json::json!("x")] {
             assert!(current_receipts("d", &receipts(invalid)).is_err());
         }

@@ -39,8 +39,13 @@ module.exports = async ({ client, execute, operator, deviceSigner, device, cap, 
   assert.deepEqual([p.stages[0].granted, p.stages[0].inflight, p.members[0].status], [1, 1, 'granted']);
   assert.ok(p.members[0].grantedAtMs > 0n);
   const report = new Transaction();
-  protocol.calls.deployment_manager_report_verified_status(report, packageId, record, registryId, cap, protocol.STATUS.failed);
+  await require("./receipt_test_helpers.cjs").report(client, report, packageId, record, registryId, cap, device, protocol.STATUS.failed);
   await execute(report, deviceSigner);
+  p = await view();
+  assert.deepEqual([p.samples, p.failures], [0, 0], 'v3 report did not mutate the coordinator');
+  const settle = new Transaction();
+  await rollout.appendRolloutReceiptSync(client, settle, record, members);
+  await execute(settle);
   p = await view();
   assert.deepEqual([p.samples, p.failures, p.thresholdReached, p.state], [1, 1, true, 'Active']);
   await execute(advance([]));
@@ -55,9 +60,7 @@ module.exports = async ({ client, execute, operator, deviceSigner, device, cap, 
   // An aborted rollout cannot be resumed through the dApp's control builder.
   await assert.rejects(execute(rollout.buildRolloutControlTx(record, 0, [], 'resume after abort')));
   assert.equal((await view()).state, 'Aborted');
-  const cleanup = new Transaction();
-  protocol.calls.deployment_manager_delete_rollout(cleanup, packageId, record);
-  await execute(cleanup);
+  await require("./receipt_test_helpers.cjs").deleteDeployment(client, execute, record, "3");
   for (const objectId of members.slice(1)) await execute(sui.buildDeregisterDeviceTx((await sui.fetchDevices(client, owner)).find(d => d.objectId === objectId)));
   console.log(`PASS: real gRPC SF-084 rollout view: dApp builders paused/skipped/admitted, device failure report aborted at the threshold; readers show stages, grants, threshold, abort and all 5 audited decisions (${record})`);
 };

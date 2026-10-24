@@ -69,6 +69,9 @@ def main(script="scripts/test_protocol_live.cjs"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--receipt-security", action="store_true", help="SF127 full live-security gate on a disposable local chain")
+    parser.add_argument("--receipt-clients", action="store_true", help="SF127 pre-identity deletion attack, real daemon and indexer")
+    parser.add_argument("--receipt-shards", action="store_true", help="SF127 populated receipt upgrade and 1000-target storage measurement")
     parser.add_argument("--handover-upgrade", action="store_true")
     parser.add_argument("--retention-keyed-upgrade", action="store_true", help="SF128 populated upgrade, expiry and device checks without repeating the scale population")
     parser.add_argument("--retention-scale-upgrade", action="store_true")
@@ -82,5 +85,5 @@ if __name__ == "__main__":
     if args.retention_keyed_upgrade: os.environ["SF128_UPGRADE_ONLY"] = "1"
     if args.retention_scale_upgrade or args.retention_keyed_upgrade: os.environ["SF128_SCALE_UPGRADE"] = "1"
     if args.device_retention_upgrade: os.environ["SF082_DEVICE_POLICY_UPGRADE"] = "1"
-    main("scripts/test_budget_enrollment_localnet.cjs" if args.budget_enrollment else "scripts/test_fleet_data_upgrade.cjs" if args.fleet_data_upgrade else "scripts/test_retention_upgrade.cjs" if args.retention_upgrade or args.device_retention_upgrade or args.retention_scale_upgrade or args.retention_keyed_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
+    main("scripts/test_receipt_security_localnet.cjs" if args.receipt_security else "scripts/test_receipt_clients_localnet.cjs" if args.receipt_clients else "scripts/test_receipt_shards_localnet.cjs" if args.receipt_shards else "scripts/test_budget_enrollment_localnet.cjs" if args.budget_enrollment else "scripts/test_fleet_data_upgrade.cjs" if args.fleet_data_upgrade else "scripts/test_retention_upgrade.cjs" if args.retention_upgrade or args.device_retention_upgrade or args.retention_scale_upgrade or args.retention_keyed_upgrade else "scripts/test_handover_upgrade.cjs" if args.handover_upgrade
          else "scripts/test_budget_upgrade.cjs" if args.budget_upgrade else "scripts/test_settings_upgrade.cjs" if args.settings_upgrade else "scripts/test_protocol_live.cjs")

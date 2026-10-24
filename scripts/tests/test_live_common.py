@@ -408,6 +408,9 @@ class TeardownTests(unittest.TestCase):
 
     def teardown(self, chain, made, held=(30_000_000, 0)):
         run = live(chain)
+        # These legacy cleanup fixtures have no sharded directory. Separate
+        # decoder/retirement cases below cover v3 storage and failure handling.
+        run.receipt_directory = lambda record: None
         run.operator = OPERATOR
         balances = list(held)
         run.balance = lambda address=None: balances.pop(0)
@@ -509,6 +512,42 @@ class DaemonStartupTests(unittest.TestCase):
         self.assertIs(process, self.process)
         process.kill.assert_not_called()
         process.wait.assert_not_called()
+
+
+class ShardedReceiptViewTests(unittest.TestCase):
+    def fixture(self):
+        run = Live('/nonexistent/client.yaml', 'localnet', 1)
+        roots = [hex(100 + i) for i in range(16)]
+        directory = dict(roots=roots, ready=True, retiring=False, migrated=16)
+        objects = {
+            'receipt': {'objType': '0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptsKey, X>', 'content': {'value': {'version':3, 'statuses':{'contents':[]}}}},
+            'directory': {'objType': '0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptShardKey, X>', 'content': {'value':directory}},
+            'entry': {'objType':'0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptKey, X>', 'content': {'name': {'device':'0x10'}, 'value':{'status':1}}},
+        }
+        for index, root in enumerate(roots):
+            objects[root] = {'content': {'deployment':'0xd', 'index':index, 'count':int(index==0)}}
+        def client(command, parent):
+            if command == 'object': return objects[parent]
+            self.assertEqual(command, 'dynamic-field')
+            return {'dynamicFields': [{'fieldId':v} for v in (['receipt','directory'] if parent=='0xd' else ['entry'] if parent==roots[0] else [])]}
+        run.client = client
+        return run, objects, directory, roots
+
+    def test_reads_bound_v3_receipts_and_never_promotes_partial_migration(self):
+        run, _, directory, _ = self.fixture()
+        self.assertEqual(run.receipts('0xd'), {live_common.dm.object_id('0x10'):1})
+        directory['ready'] = False
+        self.assertEqual(run.receipts('0xd'), {})
+        directory['ready'] = True; directory['retiring'] = True
+        self.assertEqual(run.receipts('0xd'), {})
+
+    def test_foreign_root_and_truncated_cli_view_are_refused(self):
+        run, objects, _, roots = self.fixture()
+        objects[roots[0]]['content']['deployment'] = '0xee'
+        with self.assertRaises(AssertionError): run.receipts('0xd')
+        objects[roots[0]]['content']['deployment'] = '0xd'
+        objects[roots[0]]['content']['count'] = 2
+        with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
 if __name__ == "__main__":

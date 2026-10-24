@@ -40,7 +40,7 @@ MUTATIONS = {
     "binding-recipe": ("deployment_manager", "new_deployment_verified", "df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);", ""),
     "recipe-length": ("deployment_manager", "assert_recipe_hash", "assert!(bytes.length() == 64, EInvalidRecipeHash);", ""),
     "cap-authority": ("device_cap", "assert_signer", "assert!(ctx.sender() == *signer, EWrongSigner);", ""),
-    "receipts-future": ("deployment_manager", "receipts_mut", "assert!(receipts.version <= RECEIPTS_VERSION, EPackageOutdated);", ""),
+    "receipts-future": ("deployment_manager", "receipts_mut", "assert!(receipts.version <= LEGACY_RECEIPTS_VERSION, EPackageOutdated);", ""),
     "receipts-clear": ("deployment_manager", "receipts_mut", "receipts.statuses = vec_map::empty();", ""),
     "role-authority": ("roles", "revoke", "assert!(ctx.sender() == operator, ENotOperator);", ""),
     "role-remove": ("roles", "revoke", "let _: address = df::remove(device_registry::uid_mut(registry), key);", "let _: address = *df::borrow(device_registry::uid(registry), key);"),

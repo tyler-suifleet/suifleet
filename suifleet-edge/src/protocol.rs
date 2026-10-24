@@ -5,11 +5,12 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u64 = 1;
 pub const MANIFEST_SCHEMA_VERSION: u64 = 1;
 pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
-pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
+pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3, 4];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
+pub const SHARD_TYPES: &[&str] = &["deployment_manager::ReceiptShardKey", "deployment_manager::ReceiptDirectory", "deployment_manager::ReceiptKey", "deployment_manager::ReceiptIndexKey", "deployment_manager::ShardedReceipt", "deployment_manager::ReceiptShard", "component_catalog::ShardedCatalogBindingKey", "deployment_manager::ReceiptLayoutChanged", "deployment_manager::ShardedTargetGroupsKey"];
 /// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
 pub mod fleet_settings_values {
     pub const DEFAULT_CHECK_INTERVAL_MS: u64 = 1800000;
@@ -47,6 +48,7 @@ pub struct Balance { pub value: u64 }
 pub mod component_catalog {
     use super::*;
     pub const MODULE: &str = "component_catalog";
+    pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const CREATE_CATALOG: &str = "create_catalog";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
@@ -97,6 +99,11 @@ pub mod component_catalog {
     }
     impl ComponentVersion { pub const MOVE_TYPE: &'static str = "component_catalog::ComponentVersion"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ShardedCatalogBindingKey {
+        pub dummy_field: bool,
+    }
+    impl ShardedCatalogBindingKey { pub const MOVE_TYPE: &'static str = "component_catalog::ShardedCatalogBindingKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct VersionPublished {
         pub catalog_id: [u8; 32],
         pub version_id: [u8; 32],
@@ -111,6 +118,9 @@ pub mod deployment_manager {
     pub const MODULE: &str = "deployment_manager";
     pub const ADVANCE_ROLLOUT: &str = "advance_rollout";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
+    pub const BEGIN_RECEIPT_CLEANUP: &str = "begin_receipt_cleanup";
+    pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
+    pub const CLEANUP_RECEIPT_CHUNK: &str = "cleanup_receipt_chunk";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
@@ -120,22 +130,33 @@ pub mod deployment_manager {
     pub const DELEGATE: &str = "delegate";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
     pub const DELETE_ROLLOUT: &str = "delete_rollout";
+    pub const FINISH_RECEIPT_MIGRATION: &str = "finish_receipt_migration";
     pub const HAS_CURRENT_RECEIPTS: &str = "has_current_receipts";
     pub const HAS_RECEIPTS: &str = "has_receipts";
     pub const HAS_RECIPE_DIGEST: &str = "has_recipe_digest";
     pub const IS_MANAGED: &str = "is_managed";
     pub const MIGRATE: &str = "migrate";
+    pub const MIGRATE_RECEIPT_CHUNK: &str = "migrate_receipt_chunk";
     pub const NEW_DEPLOYMENT_VERIFIED: &str = "new_deployment_verified";
     pub const NEW_ROLLOUT_VERIFIED: &str = "new_rollout_verified";
+    pub const RECEIPT_DIRECTORY: &str = "receipt_directory";
+    pub const RECEIPT_PAGE_V3: &str = "receipt_page_v3";
+    pub const RECEIPT_ROOTS: &str = "receipt_roots";
+    pub const RECEIPT_SCHEMA: &str = "receipt_schema";
+    pub const RECEIPT_SHARD_INDEX: &str = "receipt_shard_index";
     pub const RECEIPT_STATUS: &str = "receipt_status";
+    pub const RECEIPT_STATUS_V3: &str = "receipt_status_v3";
     pub const RECEIPT_STATUSES: &str = "receipt_statuses";
     pub const RECEIPTS_VERSION: &str = "receipts_version";
     pub const RECIPE_BLOB_ID: &str = "recipe_blob_id";
     pub const RECIPE_SHA256: &str = "recipe_sha256";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
+    pub const REPORT_STATUS_FOR_GROUP_V3: &str = "report_status_for_group_v3";
+    pub const REPORT_STATUS_V3: &str = "report_status_v3";
     pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
     pub const REPORT_VERIFIED_STATUS_FOR_GROUP: &str = "report_verified_status_for_group";
+    pub const RETIRE_RECEIPT_SHARD: &str = "retire_receipt_shard";
     pub const ROLLOUT: &str = "rollout";
     pub const ROLLOUT_ELIGIBLE: &str = "rollout_eligible";
     pub const ROLLOUT_POLICY: &str = "rollout_policy";
@@ -145,6 +166,7 @@ pub mod deployment_manager {
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
     pub const STATUSES: &str = "statuses";
+    pub const SYNC_ROLLOUT_RECEIPTS: &str = "sync_rollout_receipts";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -219,6 +241,46 @@ pub mod deployment_manager {
     }
     impl ManagedKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ManagedKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptDirectory {
+        pub roots: Vec<[u8; 32]>,
+        pub original_schema: u64,
+        pub migrated: u64,
+        pub ready: bool,
+        pub retiring: bool,
+        pub remaining: u64,
+    }
+    impl ReceiptDirectory { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptDirectory"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptIndexKey {
+        pub index: u64,
+    }
+    impl ReceiptIndexKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptIndexKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptKey {
+        pub device: [u8; 32],
+    }
+    impl ReceiptKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptLayoutChanged {
+        pub deployment_id: [u8; 32],
+    }
+    impl ReceiptLayoutChanged { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptLayoutChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptShard {
+        pub id: [u8; 32],
+        pub deployment: [u8; 32],
+        pub index: u64,
+        pub count: u64,
+        pub migration_cursor: u64,
+        pub migrated: bool,
+    }
+    impl ReceiptShard { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptShard"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ReceiptShardKey {
+        pub dummy_field: bool,
+    }
+    impl ReceiptShardKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ReceiptShardKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Receipts {
         pub version: u64,
         pub statuses: super::VecMap<[u8; 32], u8>,
@@ -276,6 +338,18 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl RolloutKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ShardedReceipt {
+        pub status: u8,
+        pub failed: bool,
+        pub reported_v3: bool,
+    }
+    impl ShardedReceipt { pub const MOVE_TYPE: &'static str = "deployment_manager::ShardedReceipt"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ShardedTargetGroupsKey {
+        pub dummy_field: bool,
+    }
+    impl ShardedTargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::ShardedTargetGroupsKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct StatusesKey {
         pub dummy_field: bool,
