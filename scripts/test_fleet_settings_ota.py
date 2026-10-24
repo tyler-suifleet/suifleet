@@ -153,25 +153,33 @@ def run(binary):
                 gaps = [b - a for a, b in zip(reads_after(start), reads_after(start)[1:])]
                 assert all(gap < 3 for gap in gaps), (label, gaps)
 
+            def one_batch_per_poll(label):
+                # Let the preceding full refresh finish before measuring idle polls.
+                time.sleep(0.2)
+                before = dict(sim.reads)
+                ota.wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= before.get("BatchGetObjects", 0) + 3,
+                             f"{label}: version gate stopped", process, timeout=10)
+                time.sleep(0.2)
+                delta = {kind: n - before.get(kind, 0) for kind, n in sim.reads.items()}
+                assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, (label, delta)
+                print(f"PASS: {label}: one version batch per idle poll: {delta}")
+
             try:
                 with log_path.open("w") as output:
                     process = subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=output, stderr=output)
                     local_cadence("no record")
-                    before = dict(sim.reads)
-                    ota.wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= before.get("BatchGetObjects", 0) + 3,
-                                 "absent settings stopped the version gate", process, timeout=10)
-                    delta = {kind: n - before.get(kind, 0) for kind, n in sim.reads.items()}
-                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
-                    print(f"PASS: absent fleet settings preserve local cadence and one version batch per idle poll: {delta}")
+                    one_batch_per_poll("absent settings")
 
                     sim.settings = settings(version=2)
                     ota.wait_for(lambda: "unsupported fleet settings version 2" in log(), "newer record not refused", process)
                     local_cadence("newer record")
+                    one_batch_per_poll("newer record")
                     sim.settings = None
                     ota.wait_for(lambda: "Fleet settings readable again" in log(), "absent record not recovered", process)
                     sim.settings = settings(check_interval_ms=1000)
                     ota.wait_for(lambda: "fleet check interval out of bounds" in log(), "out-of-bounds record not refused", process)
                     local_cadence("out-of-bounds record")
+                    one_batch_per_poll("out-of-bounds record")
                     assert "Fleet settings applied" not in log()
                     print("PASS: newer-version and out-of-bounds records were refused; the settings in force stayed applied")
 

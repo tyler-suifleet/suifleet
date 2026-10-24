@@ -118,9 +118,12 @@ impl Applied {
     pub async fn refresh(&mut self, sui: &crate::sui_client::SuiClient, budget: &str) {
         let generation = sui.watch_generation();
         if self.generation == Some(generation) { return; }
-        let result = read(sui, budget).await;
+        // Cache successful object reads even when this daemon refuses the
+        // record. Its watched version will invalidate the refusal; RPC failures
+        // remain retryable without waiting for another generation.
+        let result = sui.fleet_settings(budget).await;
         if result.is_ok() { self.generation = Some(generation); }
-        self.update(result);
+        self.update(result.and_then(|value| value.as_ref().map(Settings::from_json).transpose()));
     }
 
     /// Apply one read: a record, its absence, or an error. Returns true when
@@ -157,15 +160,6 @@ impl Applied {
 pub fn budget_id(cfg: &crate::config::Config) -> Option<&str> {
     cfg.budget.as_ref().map(|b| b.budget_id.as_str())
         .or_else(|| cfg.fleet_data.as_ref().map(|d| d.budget_id.as_str()))
-}
-
-/// Read the fleet's record: None when the deployment predates the settings
-/// types or the owner has not created one.
-pub async fn read(sui: &crate::sui_client::SuiClient, budget_id: &str) -> anyhow::Result<Option<Settings>> {
-    match sui.fleet_settings(budget_id).await? {
-        Some(value) => Settings::from_json(&value).map(Some),
-        None => Ok(None),
-    }
 }
 
 #[cfg(test)]
