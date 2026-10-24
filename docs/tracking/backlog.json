@@ -3072,6 +3072,30 @@
         "Regression tests for current testnet failure replacing old pending, head changes, stale base testnet success, partial GraphQL data/pagination, cached offline mode, bad credentials/no secret output, closed PR stale retry suppression and freshness rendering. Install only tested/reviewed dashboard scope without touching workers/services/config."
       ],
       "validation": "Dashboard/unit regressions, offline CLI fixtures, actual --refresh-github snapshot versus gh pr checks and offline rerender. Use reviewed merged-only activation or the explicitly scoped dashboard installer; report any unmerged local preview separately."
+    },
+    {
+      "key": "SF-148",
+      "title": "Dispatch repairs for failed testnet statuses and expose stalled CI ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Failed automatic testnet commit statuses are not recognized by the running coordinator, leaving nine review tickets without repair workers. Direct-commit operational fix explicitly authorized by the user.",
+      "evidence": "2026-10-24: eight current-head testnet failures, zero workers; coordinator reports ci_failures=[] while GitHub reports testnet/package-upgrade failure. SF146 source fix exists but cannot merge through its own failing gate; isolate the coordinator repair dispatch fix without waiving testnet.",
+      "acceptance": [
+        "Recognize exact-head/current-base durable testnet failure statuses and dispatch bounded deduplicated owner repairs.",
+        "Preserve failed checks as merge blockers; pending/stale/unlinked statuses never cause unsafe source repair.",
+        "Give infrastructure/funding/uncertainty failures an explicit responsible repair owner rather than silently excluding them.",
+        "Regression-test repeated scans, failure-to-pending-to-success transitions and fail-closed merge behavior.",
+        "Commit scoped tested changes directly under Tyler identity, install committed runtime and verify actual worker dispatch."
+      ],
+      "validation": "Coordinator unit/regression suite, compile and diff checks, current GitHub status snapshots plus actual worker reservation/identity evidence. No mocked live acceptance."
     }
   ]
 }
