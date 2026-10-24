@@ -339,16 +339,21 @@ pub struct Binding {
 /// Build a bounded snapshot. Everything a device can make arbitrarily long
 /// is truncated, and components beyond the limits are left out (and said so).
 pub fn snapshot(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64) -> Snapshot {
-    snapshot_limit(binding, signer, seq, dropped, sync, inventory, now, MAX_MESSAGE_BYTES)
+    snapshot_with_service_interval(binding, signer, seq, dropped, sync, inventory, now, MAX_MESSAGE_BYTES, binding.interval_seconds)
 }
 
-/// Same schema and health judgement, bounded to the on-chain summary limit.
+/// Fleet chain summary: bounded bytes and a fixed two-minute service sustain
+/// window, independent of its potentially daily signed reporting cadence.
 pub fn snapshot_limit(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64, max_bytes: usize) -> Snapshot {
+    snapshot_with_service_interval(binding, signer, seq, dropped, sync, inventory, now, max_bytes, 60)
+}
+
+fn snapshot_with_service_interval(binding: &Binding, signer: &str, seq: u64, dropped: u64, sync: SyncHealth, inventory: Inventory, now: u64, max_bytes: usize, service_interval_seconds: u64) -> Snapshot {
     let mut reasons = sync_reasons(&sync, binding.poll_seconds, now);
     reasons.extend(inventory.reasons);
     let mut services = inventory.services;
     if let Some(services) = &services {
-        reasons.extend(crate::service_health::reasons(services, binding.interval_seconds, now));
+        reasons.extend(crate::service_health::reasons(services, service_interval_seconds, now));
     }
     let mut components: Vec<ComponentHealth> = inventory
         .components
@@ -852,6 +857,36 @@ mod tests {
         assert_eq!(s.health, Health::Degraded);
         assert_eq!(bounded("abc", 3), "abc");
         assert_eq!(bounded("abcdef", 5), "ab...");
+    }
+
+    #[test]
+    fn daily_health_reports_keep_two_minute_service_degradation() {
+        use crate::service_health::*;
+        let now = 200_000;
+        for cadence in [60, 3600, 86_400] {
+            for elapsed in [119_999, 120_000, 180_000] {
+                let mut binding = binding();
+                binding.interval_seconds = cadence;
+                let services = Services {
+                    version: VERSION,
+                    messaging: Some(Messaging { queues: vec![QueueHealth {
+                        principal: "sensor".into(), fill_percent: 100,
+                        full_since_ms: Some(now - elapsed), ..QueueHealth::default()
+                    }], ..Messaging::default() }),
+                    bridge: Some(BridgeHealth { connected: false, since_ms: now - elapsed,
+                        ..BridgeHealth::default() }),
+                    ..Services::default()
+                };
+                let legacy_inventory = Inventory { services: Some(services.clone()), ..Inventory::default() };
+                let inventory = Inventory { services: Some(services), ..Inventory::default() };
+                let legacy = snapshot(&binding, "0xs", 1, 0, synced(now), legacy_inventory, now);
+                assert_eq!(legacy.health, if elapsed >= 2 * cadence * 1000 { Health::Degraded } else { Health::Healthy });
+                let report = snapshot_limit(&binding, "0xs", 1, 0, synced(now), inventory, now, 16_384);
+                assert_eq!(report.interval_seconds, cadence);
+                assert_eq!(report.health, if elapsed >= 120_000 { Health::Degraded } else { Health::Healthy });
+                assert_eq!(report.reasons.len(), if elapsed >= 120_000 { 2 } else { 0 });
+            }
+        }
     }
 
     #[test]
