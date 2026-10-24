@@ -34,7 +34,7 @@ export function planOperation(request: Operation, devices: DeviceObject[], group
     const targetGroups = unique(request.targetGroups), targetDevices = unique(request.targetDevices);
     if (!targetGroups.length && !targetDevices.length) throw Error('Deployment needs targets');
     if (targetGroups.some(g => !administered.has(g)) || targetDevices.some(d => !owned.has(d) || !active.has(d))) throw Error('Target authority or active identity missing');
-    if (!request.component || !request.version || !request.recipeBlob || !/^[0-9a-f]{64}$/.test(request.artifactSha256 ?? '') || !/^[0-9a-f]{64}$/.test(request.recipeSha256 ?? '')) throw Error('Verified recipe, artifact digests and component/version required');
+    if (!request.component || !request.version || !request.recipeBlob || !/^[0-9a-f]{64}$/.test(request.artifactSha256 ?? '') || !/^[0-9a-f]{64}$/.test(request.recipeSha256 ?? '')) throw Error('Recipe blob, 64-character lowercase hex digests and component/version required');
     return buildCreateDeploymentTx(request.component, request.version, request.recipeBlob, request.artifactSha256!, request.recipeSha256!, targetGroups, targetDevices);
   }
   const group = request.group && administered.get(id(request.group));
