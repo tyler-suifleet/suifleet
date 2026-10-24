@@ -8,7 +8,17 @@
 > **customer-hosted reference integration**, not product requirements.
 > The product dApp uses no indexer URL or read token.
 
-This page describes the existing HTTP-indexer mode. The optional direct-chain browser reader and separate data package are an incomplete [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md); the daemon still uses this HTTP path. No complete serverless backend or external acceptance is claimed.
+This page documents the optional customer-hosted HTTP reference integration.
+The product daemon publishes on-chain health with `[fleet_data]`, and the dApp
+reads it directly; see [serverless setup](SERVERLESS_FLEET_DATA.md). `[telemetry]`
+and `[fleet_data]` are mutually exclusive: their shared signed snapshot schema
+uses independent sequence counters, so startup rejects concurrent producers.
+The signature itself has no transport domain: customer HTTP ingress must not
+authorize identities used for on-chain health, including historical reports.
+Remove the old ingress authorization when migrating to the product backend.
+External provider, real-wallet and physical acceptance remain separately tracked
+in [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087](https://github.com/tyler-suifleet/suifleet/issues/159).
 
 Redacted remote logs, diagnostic bundles and alerts build on this path: see [LOGS.md](LOGS.md) (SF-020).
 

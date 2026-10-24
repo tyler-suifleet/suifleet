@@ -38,7 +38,14 @@ Preserve keys, journals, logs, writer sequences and pending archive transactions
 Never replace a writer to reset cadence.
 
 Remove [telemetry] to stop HTTP output. [logs] remains archive collection
-configuration. Optional customer HTTP health may coexist with [fleet_data].
+configuration. [telemetry] and [fleet_data] are mutually exclusive; startup
+rejects configuring both. Their signed health schema is shared, with independent
+sequence counters, so concurrent producers would permit cross-transport replay.
+Customer HTTP health is an explicit alternative, not a parallel product backend.
+Exclusivity does not add a cryptographic transport domain: a customer HTTP
+receiver must not trust an identity whose signed health has been published on
+chain, including historical reports. Retire that receiver authorization when
+migrating to on-chain health; do not reuse an on-chain health identity for HTTP.
 When archives are enabled they exclusively own the log cursor: no parallel HTTP
 log shipper starts. An HTTP-only customer integration can use [logs] with
 [telemetry]. Previously buffered HTTP data stays on disk, never silently

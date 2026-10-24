@@ -804,8 +804,8 @@ impl FirmwareHelperConfig {
 }
 
 impl Config {
-    /// Walrus archives own the durable log cursor when enabled. Optional HTTP
-    /// health can coexist, but a second log collector must never race it.
+    /// Walrus archives own the durable log cursor when enabled. HTTP and
+    /// on-chain health are mutually exclusive (their signed schema is shared).
     pub fn http_logs_enabled(&self) -> bool {
         self.logs.is_some() && self.telemetry.is_some()
             && !self.fleet_data.as_ref().is_some_and(|d| d.archives.is_some())
@@ -922,6 +922,9 @@ impl Config {
         }
         validate_aws_iot(&cfg)?;
         if let Some(data) = &cfg.fleet_data {
+            // Both transports use the same signed snapshot schema but independent
+            // sequence counters. Never start both producers for one identity.
+            anyhow::ensure!(cfg.telemetry.is_none(), "configure fleet_data or HTTP telemetry, not both: health signatures share a sequence domain");
             data.validate()?;
             anyhow::ensure!(data.archives.is_none() || cfg.logs.is_some(), "fleet_data.archives needs [logs]");
         }
@@ -1232,7 +1235,7 @@ mod tests {
         assert!(toml::from_str::<Config>(&format!("{base}[telemetry]\nurl='https://x'\ntoken='t'\n")).is_err());
     }
     #[test]
-    fn serverless_health_can_coexist_with_customer_http_health() {
+    fn serverless_health_refuses_customer_http_health_replay_domain() {
         let dir = std::env::temp_dir().join(format!("suifleet-config-serverless-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
@@ -1243,16 +1246,18 @@ mod tests {
         let config = Config::load(&path).unwrap();
         assert!(config.fleet_data.is_some() && config.telemetry.is_none());
         assert!(!config.http_logs_enabled());
-        std::fs::write(&path, format!("{base}{fleet}[telemetry]\nurl='https://customer.example'\n[logs]\n")).unwrap();
-        let mut config = Config::load(&path).unwrap();
-        assert!(config.fleet_data.is_some() && config.telemetry.is_some());
+        // Refuse both transports before either task starts: a public chain
+        // snapshot must not enter a concurrently enabled HTTP sequence space.
+        for logs in ["", "[logs]\n"] {
+            std::fs::write(&path, format!("{base}{fleet}[telemetry]\nurl='https://customer.example'\n{logs}")).unwrap();
+            let error = Config::load(&path).unwrap_err();
+            assert!(error.to_string().contains("health signatures share a sequence domain"), "{error:#}");
+        }
+        // Customer-owned HTTP remains available as an explicit alternative.
+        std::fs::write(&path, format!("{base}[telemetry]\nurl='https://customer.example'\n[logs]\n")).unwrap();
+        let config = Config::load(&path).unwrap();
+        assert!(config.fleet_data.is_none() && config.telemetry.is_some());
         assert!(config.http_logs_enabled());
-        config.fleet_data.as_mut().unwrap().archives = Some(crate::fleet_archive::Config {
-            storage_package: "0x1".into(), storage_type_origin: "0x1".into(), system_id: "0x2".into(),
-            walrus_package: "0x3".into(), key_server_package: "0x4".into(), key_servers: vec![],
-            threshold: 1, node: "/usr/bin/node".into(), codec: "/codec".into(), codec_sha256: "00".repeat(32),
-        });
-        assert!(!config.http_logs_enabled(), "Walrus archives must be the only log collector");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

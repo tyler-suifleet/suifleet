@@ -198,7 +198,8 @@ replay_history = false
 # reported_conflict = "device"
 
 # Product Sui/Walrus fleet backend (no HTTP indexer).
-# Optional customer HTTP health may coexist; archives exclusively collect logs.
+# Mutually exclusive with [telemetry]: shared signed schema, separate sequences.
+# Archives exclusively collect logs.
 # Owner creates/enrolls these objects first; use their actual introduction origin.
 # [fleet_data]
 # package_id = "0x<FleetData call package>"
