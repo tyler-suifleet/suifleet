@@ -20,11 +20,13 @@ device_cap_id    = "0x..."                      # DeviceCap object ID
 # token_label = "suifleet"
 # key_label = "device"
 # pin_file = "/etc/suifleet/pkcs11.pin"
-# The aggregator URL comes from the deployment manifest. Optional download limits:
+# Ordered aggregator_urls come from the deployment manifest (legacy aggregator_url fallback).
+# See docs/WALRUS_DELIVERY.md. Optional download limits:
 # [walrus]
 # max_artifact_bytes = 1073741824   # refuse larger artifacts (default 1 GiB)
 # min_free_bytes = 67108864         # keep this much free on the state filesystem (default 64 MiB)
-# download_attempts = 4             # per blob, for drops, timeouts, 5xx and 429; resumes with HTTP Range
+# range_chunk_bytes = 4194304        # bounded Range requests; 1..=10485760 bytes
+# download_attempts = 4             # per mirror, for drops, timeouts, 5xx and 429; resumes with HTTP Range
 # download_timeout_seconds = 3600   # give up on a blob after this long, across all attempts
 
 [apply]
