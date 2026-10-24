@@ -779,6 +779,7 @@ class GitHubInventory(unittest.TestCase):
     def ci_response(number=2, checks=None, testnet=False, head='a'*40, base='b'*40, more=False):
         return {'data': {'repository': {'testnet': {'oid': 'c'*40} if testnet else None,
             'p'+str(number): dict(number=number, state='OPEN', headRefOid=head, baseRefOid=base,
+                baseRef={'target': {'oid': base}},
                 headRefName='work/sf-001', isDraft=False, title='SF-001',
                 commits={'nodes': [{'commit': {'oid': head, 'statusCheckRollup': {'contexts': {
                     'nodes': checks or [], 'pageInfo': {'hasNextPage': more}}}}}]})}}}
@@ -863,6 +864,41 @@ class GitHubInventory(unittest.TestCase):
                          self.ci_response(head='bad'), {'data': {'repository': {'p2': None}}}]:
             with self.subTest(response=response), self.assertRaises((ValueError, KeyError)):
                 dash.fetch_ci('owner/suifleet', [dict(number=2)], lambda *a, **kw: json.dumps(response), {})
+
+    def test_current_branch_tip_overrides_stale_pr_comparison_base(self):
+        self.ticket(1, 'review')
+        folder = self.f.job(2, status='done', checks=('PENDING',))
+        os.utime(folder/'snapshot.json', (NOW-10, NOW-10))
+        old_base, current_base = 'b'*40, 'd'*40
+        for status_base, expected in [(old_base, 'ci-unknown'), (current_base, 'awaiting-review')]:
+            with self.subTest(status_base=status_base):
+                checks = [dict(__typename='CheckRun', name='check', status='COMPLETED', conclusion='SUCCESS'),
+                          dict(context='testnet/package-upgrade', state='SUCCESS',
+                               description='base:'+status_base)]
+                response = self.ci_response(2, checks, True, base=old_base,
+                                            head=hashlib.sha1(b'2').hexdigest())
+                response['data']['repository']['p2']['headRefName'] = 'work/sf-001'
+                response['data']['repository']['p2']['baseRef']['target']['oid'] = current_base
+                def run(args, env, **kwargs):
+                    self.assertIn('baseRef{target{oid}}', json.loads(kwargs['input'])['query'])
+                    return json.dumps(response)
+                with patch.object(dash.time, 'time', return_value=NOW):
+                    ci = dash.fetch_ci('owner/suifleet', [dict(number=2)], run, {})
+                self.assertEqual(ci['2']['base_oid'], current_base)
+                path = self.snapshot(prs=[dict(number=2, title='SF-001')])
+                raw = json.loads(path.read_text()); raw['ci'] = ci
+                path.write_text(json.dumps(raw))
+                alert = next(a for a in self.f.collect()['attention'] if a.get('ticket') == 'SF-001')
+                self.assertEqual(alert['state'], expected)
+
+    def test_missing_or_invalid_current_base_fails_closed(self):
+        for base_ref in [None, {}, {'target': None}, {'target': {'oid': 'bad'}}]:
+            with self.subTest(base_ref=base_ref):
+                response = self.ci_response()
+                response['data']['repository']['p2']['baseRef'] = base_ref
+                with self.assertRaises(ValueError):
+                    dash.fetch_ci('owner/suifleet', [dict(number=2)],
+                                  lambda *a, **kw: json.dumps(response), {})
 
     def test_old_worker_evidence_is_marked_stale_and_merged_retry_is_hidden(self):
         self.ticket(1, 'review')

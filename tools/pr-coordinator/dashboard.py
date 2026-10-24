@@ -242,7 +242,7 @@ def fetch_ci(repository, prs, run, env, branch='main'):
         raise ValueError('CI inventory exceeds bound')
     for offset in range(0, len(prs), 25):
         batch = prs[offset:offset+25]
-        fields = ' '.join('p%d:pullRequest(number:%d){number state headRefOid baseRefOid headRefName isDraft title commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state description}}}}}}}}' % (p['number'], p['number']) for p in batch)
+        fields = ' '.join('p%d:pullRequest(number:%d){number state headRefOid baseRefOid baseRef{target{oid}} headRefName isDraft title commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state description}}}}}}}}' % (p['number'], p['number']) for p in batch)
         query = 'query{repository(owner:%s,name:%s){testnet:object(expression:%s){oid} %s}}' % (
             json.dumps(owner), json.dumps(repo), json.dumps(branch+':.github/workflows/testnet.yml'), fields)
         response = json.loads(run(['api', 'graphql', '--input', '-'], env, input=json.dumps({'query': query})))
@@ -255,6 +255,10 @@ def fetch_ci(repository, prs, run, env, branch='main'):
                 raise ValueError('PR changed during refresh')
             if not all(re.fullmatch(r'[0-9a-f]{40}', row.get(k, '')) for k in ('headRefOid', 'baseRefOid')):
                 raise ValueError('missing CI revision')
+            # baseRefOid may retain the PR comparison base after the branch advances.
+            base = ((row.get('baseRef') or {}).get('target') or {}).get('oid')
+            if not isinstance(base, str) or not re.fullmatch(r'[0-9a-f]{40}', base):
+                raise ValueError('missing current CI base revision')
             commits = row['commits']['nodes']
             if len(commits) != 1 or commits[0]['commit']['oid'] != row['headRefOid']:
                 raise ValueError('CI head changed during refresh')
@@ -270,7 +274,7 @@ def fetch_ci(repository, prs, run, env, branch='main'):
                 raise ValueError('ambiguous testnet status')
             status = testnet[0] if testnet else {}
             description = status.get('description') or ''
-            prefix = 'base:'+row['baseRefOid']
+            prefix = 'base:'+base
             state = str(status.get('state', 'missing')).lower()
             if status and (not re.fullmatch(re.escape(prefix)+r'(?: class:(?:source|infrastructure|funding|uncertain))?', description)
                            or state == 'success' and description != prefix):
@@ -280,7 +284,7 @@ def fetch_ci(repository, prs, run, env, branch='main'):
                        _testnet_required=data.get('testnet') is not None,
                        _testnet_status={'state': state})
             projection = project_snapshot(row, time.time())
-            projection.update(head_oid=row['headRefOid'], base_oid=row['baseRefOid'], source='GitHub')
+            projection.update(head_oid=row['headRefOid'], base_oid=base, source='GitHub')
             result[str(pr['number'])] = projection
     return result
 
