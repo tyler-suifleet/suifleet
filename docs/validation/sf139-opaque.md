@@ -245,3 +245,47 @@ was unchanged. Additional merged-base checks passed:
 (**45 tests**) and `python3 -m unittest discover -s scripts/tests -p test_tracking.py`
 (**10 tests**). The merge preserves the upstream implementation; no coordinator
 runtime/database or service was changed by this worker.
+
+
+## Current-base testnet failure follow-through (2026-10-24)
+
+The next feedback snapshot retained head `a5d526a`, but main had advanced to
+`de238f73a6b12b9fccca8e257be6fc1a3b265714`. Independent source re-review
+reported no remaining actionable code/security findings. The current base was
+merged into the owner branch; the merge changes coordinator dispatch and tracking
+only, with no changes to the reviewed application, contracts, SDK or harnesses.
+
+The failed automatic run [40140891303](https://github.com/tyler-suifleet/suifleet/actions/runs/40140891303)
+was inspected once, without watching hosted CI. Package/deployment validation and
+independent receipt effects succeeded before the upgrade-security suite exhausted
+the existing three bounded public Walrus publisher attempts with HTTP 500.
+The log reports package allowance use 83,878,186 MIST and upgrade-security
+allowance use 53,225,847 MIST (four transactions in the latter suite); these are
+historical run reports, not a new successful testnet result. No attempt was made
+to reset spending, increase retries or claim an unavailable certification passed.
+A new head needs its own successful current-base CI/testnet and independent review.
+
+This repair performs no new public network mutation, deployment, hardware or
+mainnet operation. The detailed PR reply records new local integration checks.
+Earlier full application, simulator, local-chain and feature-specific testnet
+results above remain historical evidence for unchanged software, not tests rerun
+by this base-integration repair. Physical/real-wallet/provider/mainnet acceptance
+remains unrun in #32 and #159.
+
+New checks after base integration (all passed):
+
+- `python3 -m unittest discover -s tools/pr-coordinator/tests -v`: 384 tests,
+  including bounded testnet repair ownership/dispatch and real-process recovery.
+- `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11 opaque::`:
+  8 passed, 431 filtered out; full-queue custody rejection included.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live_common.py' -v`:
+  35 offline helper tests passed; negative cleanup diagnostics are expected fixtures.
+- `python3 -m unittest discover -s scripts/tests -p '*tracking*' -v`:
+  10 passed; `python3 scripts/bootstrap_tracking.py`: offline dry run passed,
+  118 prepared issues with no remote or local publication mutation.
+- `python3 -m unittest discover -s scripts/tests -p 'test_opaque_sdk.py' -v`:
+  1 passed. `git diff --check` and all three relative validation-note links passed.
+
+No new full simulator, frontend build, Move/localnet or live roundtrip was run in
+this integration repair, since those sources did not change. Hosted CI and
+public-testnet checks for the pushed head remain pending and were not watched.
