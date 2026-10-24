@@ -1,0 +1,81 @@
+--- a/suifleet-edge/Cargo.toml
++++ b/suifleet-edge/Cargo.toml
+@@ -17,0 +18 @@
++prost = "0.14"
+--- a/suifleet-edge/src/sui_client.rs
++++ b/suifleet-edge/src/sui_client.rs
+@@ -164,0 +165 @@
++    stats: std::sync::Arc<std::sync::Mutex<(u64, u64)>>,
+@@ -165,0 +167,11 @@
++}
++
++trait ReadResponse<T> {
++    fn read_into_inner(self, stats: &std::sync::Mutex<(u64, u64)>) -> T;
++}
++impl<T: prost::Message> ReadResponse<T> for tonic::Response<T> {
++    fn read_into_inner(self, stats: &std::sync::Mutex<(u64, u64)>) -> T {
++        let value = self.into_inner();
++        let mut stats = stats.lock().unwrap(); stats.0 += 1; stats.1 += value.encoded_len() as u64;
++        value
++    }
+@@ -273,0 +286 @@
++            stats: Default::default(),
+@@ -287,0 +301,2 @@
++
++    pub fn read_stats(&self) -> (u64,u64) { *self.stats.lock().unwrap() }
+@@ -298 +313 @@
+-            .into_inner();
++            .read_into_inner(&self.stats);
+@@ -360 +375 @@
+-            .into_inner()
++            .read_into_inner(&self.stats)
+@@ -386 +401 @@
+-            .into_inner()
++            .read_into_inner(&self.stats)
+@@ -416 +431 @@
+-            Ok(response) => response.into_inner().object,
++            Ok(response) => response.read_into_inner(&self.stats).object,
+@@ -418 +433 @@
+-            Err(e) if e.code() == tonic::Code::NotFound => return Ok(None),
++            Err(e) if e.code() == tonic::Code::NotFound => { self.stats.lock().unwrap().0 += 1; return Ok(None); },
+@@ -476 +491 @@
+-            .into_inner();
++            .read_into_inner(&self.stats);
+@@ -518 +533 @@
+-            .into_inner();
++            .read_into_inner(&self.stats);
+@@ -577,0 +593 @@
++        self.stats.lock().unwrap().0 += 1;
+@@ -589,0 +606 @@
++            self.stats.lock().unwrap().1 += prost::Message::encoded_len(&frame) as u64;
+@@ -626 +643 @@
+-            .into_inner()
++            .read_into_inner(&self.stats)
+@@ -944 +961 @@
+-            .into_inner()
++            .read_into_inner(&self.stats)
+@@ -1044 +1061 @@
+-                    let executed=response.into_inner().transaction.ok_or_else(||anyhow::anyhow!("missing durable transaction effects"))?;
++                    let executed=response.read_into_inner(&self.stats).transaction.ok_or_else(||anyhow::anyhow!("missing durable transaction effects"))?;
+@@ -1055 +1072 @@
+-                    let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
++                    let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.read_into_inner(&self.stats);
+@@ -1060 +1077 @@
+-                        let version=self.rpc.clone().ledger_client().get_object(request).await?.into_inner().object.and_then(|o|o.version).ok_or_else(||anyhow::anyhow!("gas object version unavailable"))?;
++                        let version=self.rpc.clone().ledger_client().get_object(request).await?.read_into_inner(&self.stats).object.and_then(|o|o.version).ok_or_else(||anyhow::anyhow!("gas object version unavailable"))?;
+@@ -1072 +1089 @@
+-                                let executed = response.into_inner().transaction.ok_or_else(|| anyhow::anyhow!("missing durable effects after gas reconciliation"))?;
++                                let executed = response.read_into_inner(&self.stats).transaction.ok_or_else(|| anyhow::anyhow!("missing durable effects after gas reconciliation"))?;
+@@ -1080 +1097 @@
+-                                let info = self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
++                                let info = self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.read_into_inner(&self.stats);
+@@ -1094 +1111 @@
+-                let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.into_inner();
++                let info=self.rpc.clone().ledger_client().get_service_info(proto::GetServiceInfoRequest::default()).await?.read_into_inner(&self.stats);
+--- a/suifleet-edge/src/linux_main.rs
++++ b/suifleet-edge/src/linux_main.rs
+@@ -456,0 +457 @@
++            let reads_before = sui.read_stats();
+@@ -470,0 +472,2 @@
++                        let reads_after = sui.read_stats();
++                        info!(read_requests = reads_after.0 - reads_before.0, response_bytes = reads_after.1 - reads_before.1, "Chain reads this poll (protobuf payload bytes)");

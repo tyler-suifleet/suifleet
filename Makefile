@@ -65,6 +65,7 @@ test-native-seal:
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --poll-reads
 	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
 	$(RUN) python3 scripts/test_dependency_ota.py
@@ -87,6 +88,7 @@ test-ota:
 	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
