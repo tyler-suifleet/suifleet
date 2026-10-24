@@ -171,7 +171,7 @@ impl Archive {
             1 => self.shadows.is_none() && self.previous_head.is_none() && self.items.is_none(),
             2 => self.shadows.is_some() && self.previous_head.is_none() && self.items.is_none(),
             3 => self.previous_head.is_some() && self.items.is_none(),
-            4 => self.items.as_ref().is_some_and(|items| (2..=16).contains(&items.len())) && self.records.is_empty(),
+            4 => self.items.as_ref().is_some_and(|items| (1..=16).contains(&items.len())) && self.records.is_empty(),
             _ => false,
         }, "unsupported archive schema/kind");
         if let Some(items) = &self.items {
@@ -270,7 +270,8 @@ mod tests {
         serde_json::from_slice::<Archive>(&bytes).unwrap().validate().unwrap();
         archive.items.as_mut().unwrap()[1].identifier = item.identifier.clone();
         assert!(archive.validate().is_err());
-        archive.items = Some(vec![item.clone()]); assert!(archive.validate().is_err());
+        archive.items = Some(vec![item.clone()]); archive.validate().unwrap();
+        archive.items = Some(vec![]); assert!(archive.validate().is_err());
         for identifier in ["manifest", "../escape", ""] {
             assert!(QuiltItem {identifier:identifier.into(), ..item.clone()}.validate().is_err());
         }

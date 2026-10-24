@@ -33,7 +33,7 @@ def raw(id,kind,fields,contents):
         'bcs':{'dataType':'moveObject','type':kind,'bcsBytes':contents.hex()}}}
 class Simulator(budget.BudgetSimulator):
     def __init__(self,compact=False):
-        self.compact=compact;self.heads=[]
+        self.compact=compact;self.heads=[];self.opaque_items={}
         super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0;self.settings=None
     def fleet(self):
         return dict(id=object_id(FLEET),version='1',budget_id=object_id(budget.BUDGET),storage_id=object_id(STORAGE),registry_id=object_id(ota.REGISTRY),
@@ -42,7 +42,7 @@ class Simulator(budget.BudgetSimulator):
         return dict(id=object_id(WRITER),version='1',fleet_id=object_id(FLEET),device_id=object_id(ota.DEVICE),account_id=object_id(budget.ACCOUNT),
             health_seq=str(self.seq),health_at_ms=str(self.at),message=list(self.message),signature=list(self.signature),batch_seq=str(self.batchseq),batch_at_ms=None if self.batch_at is None else str(self.batch_at),emergency_at_ms=None if self.emergency_at is None else str(self.emergency_at),anchor_count=str(len(self.anchors)))
     def obj(self,id):
-        if id==PACKAGE:return {'data':{'version':'2','bcs':{'dataType':'package','typeOriginTable':[{'module_name':'fleet_data','datatype_name':name,'package':origin} for name,origin in [('DiagnosticKey','0xf8'),('CompactHeadKey','0xf9'),('CompactHead','0xf9')]]}}}
+        if id==PACKAGE:return {'data':{'version':'2','bcs':{'dataType':'package','typeOriginTable':[{'module_name':'fleet_data','datatype_name':name,'package':origin} for name,origin in [('DiagnosticKey','0xf8'),('CompactHeadKey','0xf9'),('CompactHead','0xf9'),('ItemKey','0xfa'),('DataItem','0xfa')]]}}}
         if id==FLEET:
             b=addr(id)+u64(1)+addr(budget.BUDGET)+addr(STORAGE)+addr(ota.REGISTRY)+vec(self.chain.encode())+u64(0)+b'\0'+u64(60000)+u64(86400000)+u64(60000)+u64(1)
             return raw(id,f'{PACKAGE}::fleet_data::FleetData',self.fleet(),b)
@@ -56,9 +56,11 @@ class Simulator(budget.BudgetSimulator):
         if method=='suix_getDynamicFieldObject' and params[1]['type']==SETTINGS_KEY:
             assert params[0]==budget.BUDGET;return {'data':{'content':{'fields':{'value':self.settings}}}}
         if method=='shim_height':return {'height':1 if self.history_pruned else 0,'lowest':1 if self.history_pruned else 0}
-        if method=='shim_fields':return super().rpc(method,params)+[[budget.BUDGET,SETTINGS_KEY,'00',SETTINGS_VALUE],[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
+        if method=='shim_fields':return [[WRITER,'0xfa::fleet_data::ItemKey',(u64(seq)+u64(n)).hex()] for seq,n in self.opaque_items]+super().rpc(method,params)+[[budget.BUDGET,SETTINGS_KEY,'00',SETTINGS_VALUE],[FLEET,f'{PACKAGE}::fleet_data::DeviceKey',addr(ota.DEVICE).hex()],
             [WRITER,'0xf8::fleet_data::DiagnosticKey','00']]+([[WRITER,'0xf9::fleet_data::CompactHeadKey','00']] if self.compact else [])+[[WRITER,f'{PACKAGE}::fleet_data::AnchorKey',u64(i).hex()] for i in range(len(self.anchors))]
         if method=='suix_getDynamicFieldObject' and params[0]==WRITER:
+            if params[1]['type'].endswith('::ItemKey'):
+                seq,n=struct.unpack('<QQ',bytes.fromhex(params[1]['value']));return {'data':{'content':{'fields':{'value':{'bcs_hex':self.opaque_items[seq,n].hex()}}}}}
             if params[1]['type'].endswith('::CompactHeadKey'):
                 return {'data':{'content':{'fields':{'value':{'bcs_hex':self.heads[-1].hex()} if self.heads else None}}}}
             value=({'seq':str(self.request_seq),'at_ms':str(self.clock)} if self.request_seq else None) if params[1]['type'].endswith('::DiagnosticKey') else self.anchors[struct.unpack('<Q',bytes.fromhex(params[1]['value']))[0]]
@@ -98,7 +100,7 @@ class Simulator(budget.BudgetSimulator):
                 elif fn=='certify_blob':
                     if self.certify_outage:raise ConnectionError('certification transport outage')
                     blob='0x'+base64.b64decode(args[2]['bcs']).hex();self.certified.add(blob)
-                elif fn in ['anchor','anchor_compact']:
+                elif fn in ['anchor','anchor_compact','anchor_items']:
                     blob='0x'+base64.b64decode(args[7]['bcs']).hex();assert blob in self.certified
                     seq=struct.unpack('<Q',base64.b64decode(args[8]['bcs']))[0];kind=base64.b64decode(args[9]['bcs'])[0]
                     sha=unvec(base64.b64decode(args[10]['bcs']));assert sha==hashlib.sha256((self.upload_dir/(blob+'.bin')).read_bytes()).digest()
@@ -109,6 +111,15 @@ class Simulator(budget.BudgetSimulator):
                     if kind==0:self.batch_at=self.clock
                     else:self.emergency_at=self.clock
                     self.anchors.append(dict(seq=str(seq),kind=kind,blob_object_id=blob,blob_id='2',ciphertext_sha256=list(sha),signer=ota.ADDRESS,at_ms=str(self.clock),end_epoch=100,key_epoch='0'))
+                    if fn=='anchor_items':
+                        encoded=base64.b64decode(args[11]['bcs']);count=encoded[0];offset=1
+                        for n in range(count):
+                            length=0;shift=0
+                            while True:
+                                b=encoded[offset];offset+=1;length|=(b&127)<<shift;shift+=7
+                                if b<128:break
+                            self.opaque_items[seq,n]=u64(len(self.anchors)-1)+encoded[offset:offset+length];offset+=length
+                        assert offset==len(encoded)
                     if fn=='anchor_compact':
                         previous=hashlib.sha256(self.heads[-1]).digest() if self.heads else b''
                         assert unvec(base64.b64decode(args[11]['bcs']))==previous

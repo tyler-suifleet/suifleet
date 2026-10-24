@@ -1383,6 +1383,39 @@ impl SuiClient {
         ] };
         self.durable_call(&data.package_id,&call,path).await
     }
+    pub async fn anchor_opaque_items(&self, data: &crate::fleet_data::Config, cap: &str, blob: &str,
+        seq: u64, kind: u8, sha256: Vec<u8>, items: &[crate::opaque::Index], path: &std::path::Path) -> anyhow::Result<String> {
+        for item in items { item.validate()?; }
+        let encoded=items.iter().map(bcs::to_bytes).collect::<Result<Vec<_>,_>>()?;
+        let call = Call { module: "fleet_data", function: "anchor_items", args: vec![
+            Arg::SharedRead(data.fleet_id.clone()), Arg::Object(data.writer_id.clone()), Arg::SharedRead(data.budget_id.clone()),
+            Arg::SharedRead(data.account_id.clone()), Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()),
+            Arg::SharedRead(data.storage_id.clone()), Arg::Pure(bcs::to_bytes(&Address::from_str(blob)?)?),
+            Arg::Pure(bcs::to_bytes(&seq)?), Arg::Pure(vec![kind]), Arg::Pure(bcs::to_bytes(&sha256)?),
+            Arg::Pure(bcs::to_bytes(&encoded)?), Arg::SharedRead(CLOCK.into()),
+        ] };
+        self.durable_call(&data.package_id,&call,path).await
+    }
+    pub async fn verify_opaque_items(&self, data: &crate::fleet_data::Config, seq: u64, anchor_index: u64,
+        items: &[crate::opaque::Index]) -> anyhow::Result<()> {
+        let package=self.package(&data.package_id).await?;
+        let origin=package.type_origin_table.iter().find(|o|o.module_name.as_str()=="fleet_data" && o.struct_name.as_str()=="ItemKey")
+            .ok_or_else(||anyhow::anyhow!("opaque index origin missing"))?.package;
+        let value_origin=package.type_origin_table.iter().find(|o|o.module_name.as_str()=="fleet_data" && o.struct_name.as_str()=="DataItem")
+            .ok_or_else(||anyhow::anyhow!("opaque value origin missing"))?.package;
+        let key: TypeTag=format!("{origin}::fleet_data::ItemKey").parse()?;
+        #[derive(serde::Deserialize)] struct Field { id: Address, name: (u64,u64), value: (u64,crate::opaque::Index) }
+        for (n,item) in items.iter().enumerate() {
+            let id=Address::from_str(&data.writer_id)?.derive_dynamic_child_id(&key,&bcs::to_bytes(&(seq,n as u64))?);
+            let (kind,owner,bytes)=self.move_object(&id.to_string()).await?;
+            let field: Field=bcs::from_bytes(&bytes)?;
+            anyhow::ensure!(same_type(&kind,&format!("0x2::dynamic_field::Field<{origin}::fleet_data::ItemKey, {value_origin}::fleet_data::DataItem>"))
+                && matches!(owner,Owner::Object(p) if same_id(&p,&data.writer_id))
+                && field.id==id && field.name==(seq,n as u64) && field.value.0==anchor_index && field.value.1==*item,
+                "opaque index not independently acknowledged");
+        }
+        Ok(())
+    }
     /// Resolve the new key's actual type origin; never use DeviceData's older
     /// introduction package for a type added by an upgrade.
     pub async fn compact_archive_head(&self, data: &crate::fleet_data::Config) -> anyhow::Result<Vec<u8>> {
