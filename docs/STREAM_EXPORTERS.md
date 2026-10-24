@@ -1,4 +1,4 @@
-# Kinesis and S3 durable stream exporters (SF-058)
+# Direct customer storage and AWS durable stream exporters (SF-143 / SF-058)
 
 The opt-in Python companion [suifleet_stream_export.py](../sdk/python/suifleet_stream_export.py)
 reads the real durable store through native IPC and exports through unmodified
@@ -8,6 +8,115 @@ do not grant AWS access. No AWS resource or production credential is provisioned
 StreamManager **2.3.1**, rechecked on 2026-10-19 against the
 [AWS component reference](https://docs.aws.amazon.com/greengrass/v2/developerguide/stream-manager-component.html).
 This is native functionality, without its SDK wire protocol or shard-aware pacing.
+
+## Customer-owned storage: no SuiFleet server
+
+The same device-local companion supports `customer_s3` and `http`. Device data
+(sensor values, measurements, application events or binary payloads) enters an
+operator-declared durable stream through `stream_append`; it then travels directly
+from the device to the customer's destination. Neither export transport contacts
+the indexer, Walrus, a credential broker or a SuiFleet-hosted server. Sui is used
+only by the daemon's separately configured health reporting, not for export delivery.
+
+Use the lossless stream configuration below, granting the dedicated exporter UID
+`stream_read`, `stream_describe`, `stream_export_ack` and `stream_export_status`.
+Do not grant those last two operations to producers. Keep the stream, protected
+configuration and private checkpoint directory through platform restarts. This is
+one destination per stream; use separate streams for independent destinations.
+
+Example `/etc/suifleet/export.json` (root-owned, not component-writable):
+
+```json
+{
+  "service": "customer_s3",
+  "endpoint": "https://storage.customer.example",
+  "region": "us-east-1",
+  "destination": "customer-bucket/fleet/device-1/",
+  "credentials_file": "/etc/suifleet-export/s3.json",
+  "stream": "measurements",
+  "component": "customer-export",
+  "source_id": "unique-device-and-stream-generation-id",
+  "socket": "/run/suifleet/ipc.sock",
+  "state_dir": "/var/lib/suifleet-customer-export",
+  "batch_messages": 100,
+  "batch_bytes": 1048576,
+  "bytes_per_second": 1048576,
+  "poll_seconds": 5,
+  "max_backoff_seconds": 300
+}
+```
+
+Provision `s3.json` **on the device**, owned by root or the exporter UID, mode
+0600, with `access_key_id`, `secret_access_key`, and optionally `session_token`.
+These are customer secrets, not Sui keys. No default AWS profile, environment,
+container credential provider or metadata credentials are used for `customer_s3`.
+Use protected parent directories, with read access only for the exporter; never
+put credentials in recipes, images, manifests, chain health or source. Start the
+companion directly as that UID (without the SF-057 wrapper):
+
+```sh
+/opt/suifleet-export/bin/python /usr/libexec/suifleet/suifleet_stream_export.py \
+  --config /etc/suifleet/export.json
+```
+
+Install the same hash-locked dependencies described below. The systemd isolation
+settings below apply, with the customer state directory and direct ExecStart.
+Restart after atomically replacing S3 credentials; HTTP bearer files are reread
+for every request. Missing, oversized, symlinked, non-regular or non-0600 secret
+files fail closed. Keep parent directories protected from untrusted writers.
+
+For AWS S3 use `https://s3.REGION.amazonaws.com` and the bucket region; for R2 use
+`https://ACCOUNT.r2.cloudflarestorage.com` and region `auto`; for GCS interoperability
+use `https://storage.googleapis.com`, region `auto`, and customer-provisioned HMAC
+credentials; for MinIO use the customer's HTTPS endpoint and configured region.
+The service must support path-style S3, multipart upload, sha256 object metadata,
+HeadObject and exact-key incomplete-upload listing/abort. Provider policy, API
+subset and credential provisioning remain the customer's responsibility. These
+endpoint examples are configuration guidance, not live-provider acceptance.
+The bucket/prefix configures the path layout: `PREFIX/SHA256(source_id,stream)/FIRST-LAST-BODY_SHA256.jsonl`.
+The deterministic suffix is required for recovery; the prefix is customer-selected.
+Use an exclusive prefix and the S3 permissions/lifecycle guidance below.
+
+For HTTP, set `service` to `http`, `endpoint` to the customer's ingest URL,
+`destination` to a stable customer-selected destination label and `region` to
+`unused`; remove `credentials_file` and optionally set `bearer_token_file` to a
+private 0600 token file. POST bodies are the same bounded JSON Lines envelopes as
+S3, with `Content-Type: application/x-ndjson`, a stable `Idempotency-Key` and
+`X-SuiFleet-SHA256` body checksum. The customer endpoint must return 2xx **only
+after durable acceptance**, and deduplicate retries by idempotency key (or
+source_id/stream/sequence). A lost reply may repeat the identical body and key.
+3xx redirects are refused, including same-host redirects; 4xx/5xx retain the
+snapshot. TLS certificate validation is enabled; inherited proxies are disabled.
+Both customer transports require HTTPS except loopback HTTP for local fixtures.
+Do not put authentication material in URLs; userinfo, query and fragment are refused.
+
+Both transports use the persisted snapshot/delivered marker/ack protocol below.
+Requests are serial with bounded batches, pacing, connect/read timeouts and
+exponential retry delay capped by `max_backoff_seconds`; failed work remains
+pending indefinitely without growing an unbounded retry queue or dropping data.
+Local disk, IPC or credential failures never authorize retiring unexported data.
+Export need not wait for health publication or indexer availability.
+
+`stream_export_status` publishes only numeric batch/failure/consecutive-failure
+counters and last-delivery time to the daemon. Counters persist in the companion
+checkpoint and are restored/reported after restart. Daemon-local status is volatile
+until the next companion report. The daemon computes retained-message export lag
+from the durable acknowledgement, independent of companion claims, and includes
+external streams in the existing service-health telemetry/on-chain summary.
+Failures use a fixed generic error/category; destination, token and payload never
+enter health. Health still requires the daemon's configured report path, chain
+connectivity and gas; no on-chain delivery is promised during an outage. Lag
+remains visible if the companion stops; failure counters describe observed
+attempts, not detection of a stopped process.
+
+`make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci` also builds pinned MinIO
+source (commit `9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a`, release
+`RELEASE.2025-10-15T17-29-55Z`) as a test-only binary. Actual MinIO multipart/read-back
+and HTTP lost-reply/redirect/failure/restart tests run in the disposable network-none
+container with the real daemon. No MinIO runtime is shipped in SuiFleet.
+Production provider credentials/availability and physical acceptance remain unrun
+in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159) and
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
 
 ## Operator configuration
 
@@ -90,7 +199,7 @@ for this stream/exporter and an AbortIncompleteMultipartUpload lifecycle rule
 as defense against abandoned uploads after loss of the local state. The program
 never creates a bucket, stream, policy or lifecycle rule. Normal AWS endpoints use
 TLS and standard certificate validation. The optional `endpoint` override accepts
-only loopback HTTP for local API emulators; it cannot redirect credentials to a
+only loopback HTTP for local API emulators in the `s3`/`kinesis` modes; it cannot redirect credentials to a
 remote endpoint. SDK proxies, implicit environment/profile endpoint URLs and automatic SDK retries
 are disabled; only the validated explicit emulator override can replace the standard
 AWS service endpoint.
@@ -104,8 +213,8 @@ python3 /usr/libexec/suifleet/suifleet_aws.py \
   --config /etc/suifleet-aws/export.json
 ```
 
-Use a separate SF-057 provider/grant with the intended IAM role scope. The exporter
-requires SDK credentials with method `container-role`; static environment/profile
+Use a separate SF-057 provider/grant with the intended IAM role scope. The `s3`/`kinesis` exporter modes
+require SDK credentials with method `container-role`; static environment/profile
 credentials are refused. The wrapper removes inherited alternative credential
 sources. Do not provision alternative profiles in this UID's home.
 
