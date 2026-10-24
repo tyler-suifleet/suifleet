@@ -80,6 +80,12 @@ const TOKEN = "t".repeat(40);
     await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
     await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
     const row = (name) => page.locator("tr", { has: page.getByText(name, { exact: true }) });
+    const lastSeen = async (name) => {
+      const headers = await page.locator("thead th").allTextContents();
+      const index = headers.findIndex(text => text.trim() === "Last seen");
+      assert.ok(index >= 0, "Last seen column missing");
+      return (await row(name).locator("td").nth(index).textContent()).trim();
+    };
     const status = async (name) => (await row(name).locator("td").first().textContent()).trim();
     await page.waitForFunction(() => document.querySelectorAll("tbody tr").length === 6);
 
@@ -95,9 +101,9 @@ const TOKEN = "t".repeat(40);
     await page.waitForFunction(() => document.body.textContent.includes("Healthy"));
     assert.deepEqual(await Promise.all(devices.map((d) => status(d.name))),
       ["Healthy", "Degraded", "Offline", "Unverified", "Unreported", "Not activated"]);
-    assert.match((await row("pi-healthy").locator("td").nth(3).textContent()).trim(), /^\d+ s ago$/);
-    assert.equal((await row("pi-offline").locator("td").nth(3).textContent()).trim(), "60 min ago");
-    assert.equal((await row("pi-silent").locator("td").nth(3).textContent()).trim(), "never");
+    assert.match(await lastSeen("pi-healthy"), /^\d+ s ago$/);
+    assert.equal(await lastSeen("pi-offline"), "60 min ago");
+    assert.equal(await lastSeen("pi-silent"), "never");
     assert.equal(await page.evaluate(() => sessionStorage.getItem("suifleet.telemetryToken")), "t".repeat(40));
     assert.ok(requests.some((r) => r.authorization === `Bearer ${TOKEN}`));
 

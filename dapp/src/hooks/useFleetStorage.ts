@@ -17,7 +17,7 @@ export function useBudgets() {
   return useQuery<BudgetView[]>({
     queryKey: ["fleet-budgets", NETWORK, account?.address],
     enabled: !!account && budgetSupported(),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     queryFn: () => fetchBudgets(client, account!.address),
   });
 }
@@ -31,7 +31,7 @@ export function useFleetStorage() {
   const storage = useQuery<StorageView | undefined>({
     queryKey: ["fleet-storage", NETWORK, budget?.id, config?.packageId],
     enabled: !!budget && !!config,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     queryFn: () => fetchStorage(client, config!, budget!.id),
   });
   const target: FleetStorageTarget | undefined = config && budget && storage.data
@@ -52,7 +52,7 @@ export function useFleetBlobStore() {
   const [renewalTarget, setRenewalTarget] = useState(0), [maxFee, setMaxFee] = useState('');
   const origin = retentionOrigin();
   const policy = useQuery({ queryKey: ['retention-upload', target?.storageId, origin], enabled: !!target && !!origin,
-    refetchInterval: 15000,
+    refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });
   const retention = policy.data?.policy ? { target: renewalTarget, maxFee, setTarget: setRenewalTarget, setMaxFee } : undefined;
   if (!target) return { reason, retention };

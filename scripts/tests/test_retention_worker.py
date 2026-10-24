@@ -45,6 +45,25 @@ class Chain:
 
 
 class RetentionTests(unittest.TestCase):
+    def test_service_poll_is_hourly_and_once_does_not_sleep(self):
+        from unittest.mock import patch, MagicMock
+        import sys
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / 'config.json'
+            config.write_text('{}')
+            worker = MagicMock()
+            arguments = ['retention_worker.py', '--config', str(config), '--state-dir', directory]
+            with patch.object(sys, 'argv', arguments), patch.object(module, 'Worker', return_value=worker), patch.object(module.time, 'sleep', side_effect=InterruptedError) as sleep:
+                with self.assertRaises(InterruptedError):
+                    module.main()
+                worker.tick.assert_called_once_with()
+                sleep.assert_called_once_with(3600)
+            worker.reset_mock()
+            with patch.object(sys, 'argv', arguments + ['--once']), patch.object(module, 'Worker', return_value=worker), patch.object(module.time, 'sleep') as sleep:
+                module.main()
+                worker.tick.assert_called_once_with()
+                sleep.assert_not_called()
+
     def worker(self, directory, chain):
         return module.Worker({'gas_budget': '10', 'spend_ceiling': '20'}, directory, chain)
 
