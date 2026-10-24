@@ -4,8 +4,9 @@
 //! Announcements are hints. Every candidate still goes through the same
 //! record, operator and membership checks as an event would, and through the
 //! journal's at-most-once bookkeeping.
-use crate::sui_client::Head;
+use crate::{state::Journal, sui_client::Head};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::BTreeMap;
 
 /// What the daemon last acted on, per inbox or group.
@@ -36,6 +37,17 @@ impl Heads {
     pub fn baseline(&self) -> u64 {
         self.polled_ms.unwrap_or(self.since_ms)
     }
+}
+
+/// Start heads for a journal from before inboxes at `since_ms`, with the
+/// event cursor at `cursor`, in one journal write. The baseline comes from
+/// the old cursor, so a journal must never hold a newer cursor without it:
+/// after an interruption the baseline would come from the newer cursor and
+/// records created in between would be skipped.
+pub fn begin(journal: &mut Journal, cursor: Option<Value>, since_ms: u64, scan_ms: u64) -> anyhow::Result<()> {
+    journal.state.cursor = cursor;
+    journal.state.heads = Some(Heads { since_ms, event_scan_ms: Some(scan_ms), ..Default::default() });
+    journal.save()
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -113,6 +125,27 @@ mod tests {
         // Older journals without the field still parse.
         let old: Heads = serde_json::from_str(r#"{"since_ms":7,"seen":{}}"#).unwrap();
         assert_eq!((old.polled_ms, old.baseline()), (None, 7));
+    }
+
+    #[test]
+    fn a_moved_cursor_is_never_durable_without_its_baseline() {
+        let dir = std::env::temp_dir().join(format!("sf125-begin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut journal = Journal::open(&dir, "local".into()).unwrap();
+        journal.state.initialized = true;
+        journal.state.cursor = Some(serde_json::json!({"checkpoint": 10}));
+        journal.save().unwrap();
+        // The write fails after the snapshot is renamed into place, as a
+        // crash right after it would leave the journal.
+        crate::state::FAIL_DIRECTORY_SYNC.with(|fault| fault.set(true));
+        let tip = Some(serde_json::json!({"checkpoint": 101}));
+        assert!(begin(&mut journal, tip.clone(), 9_000, 1).is_err());
+        let disk: crate::state::State =
+            serde_json::from_slice(&std::fs::read(dir.join("state.json")).unwrap()).unwrap();
+        assert_eq!(disk.cursor, tip);
+        assert_eq!(disk.heads.map(|heads| heads.since_ms), Some(9_000), "the baseline from the old cursor");
+        drop(journal);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

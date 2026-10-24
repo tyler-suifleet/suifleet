@@ -11,7 +11,7 @@ resynchronizes from objects alone, and the bounded event scan that still
 applies an unannounced deployment from an older client. A journal written
 before inboxes (no heads) resumes from its event cursor's boundary, so
 records created while it was offline still apply, with history retained
-or pruned.
+or pruned, including after an interruption once the cursor has moved.
 Real-chain behaviour is covered by scripts/test_inbox_localnet.py.
 """
 import argparse
@@ -44,6 +44,7 @@ class InboxSimulator(Simulator):
         self.lowest = 0
         self.unindexed = set()  # Deployments whose events the node does not serve.
         self.inbox = None
+        self.fail_inbox = False
         self.heads = {}
         self.members = {}  # group -> indexed members (MemberKey fields)
         self.event_ms = []  # Chain time of event i, in checkpoint i + 1.
@@ -101,6 +102,8 @@ class InboxSimulator(Simulator):
         if method == "suix_getDynamicFieldObject":
             parent, kind = params[0], params[1]["type"]
             if kind == INBOX_KEY:
+                if self.fail_inbox:
+                    raise ConnectionError("simulated unavailable inbox read")
                 data = self.inbox and {"owner": {"Shared": {"initial_shared_version": "7"}}, "content": {
                     "type": f"{PACKAGE}::fleet_inbox::DeviceInbox",
                     "fields": {"id": "0x1b0c", "device_id": object_id(self.device), "version": "1", **self.inbox}}}
@@ -250,13 +253,30 @@ def run(binary):
                 path.write_text(json.dumps(saved))
 
             # 5b. Such a journal, offline past the node's history: heads start
-            #     at the event cursor's checkpoint time, not the upgrade.
+            #     at the event cursor's checkpoint time, not the upgrade. The
+            #     daemon is killed after the migration, before any head is
+            #     read: the moved cursor is durable only with that baseline.
             legacy()
+            cursor = state()["cursor"]
             sim.now_ms += 1000
             sim.deploy("0x708")
+            created_ms = sim.now_ms
             sim.add("0x7b0", direct=False)
             sim.lowest = len(sim.events)
             sim.now_ms += 1000
+            sim.fail_inbox = True
+            failures = log_path.read_text().count("Sync failed")
+            process = start()
+            wait_for(lambda: log_path.read_text().count("Sync failed") > failures, "inbox read did not fail", process)
+            process.kill(); process.wait(); process = None
+            interrupted = state()
+            assert interrupted["cursor"] != cursor, interrupted
+            assert interrupted["heads"]["since_ms"] < created_ms, interrupted["heads"]
+            assert outcome("0x708") is None, interrupted
+            sim.fail_inbox = False
+            injected = [e for e in sim.errors if "simulated unavailable inbox read" in e]
+            assert injected, sim.errors
+            sim.errors = [e for e in sim.errors if e not in injected]
             process = start()
             wait_for(lambda: outcome("0x708") == 1, "legacy journal lost a record created while offline (pruned)", process)
             settle()

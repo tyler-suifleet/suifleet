@@ -820,10 +820,7 @@ async fn poll(
         // A journal from before inboxes (an older daemon or package): heads
         // start where its event path stopped, so records created while the
         // device was offline still apply after the upgrade.
-        let since_ms = heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
-        info!(since_ms, "Reading the device inbox and group heads from the event cursor's boundary");
-        journal.state.heads = Some(heads::Heads { since_ms, event_scan_ms: Some(telemetry::now_ms()), ..Default::default() });
-        journal.save()?;
+        heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
     }
     if objects {
         announced(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
@@ -954,7 +951,8 @@ async fn announced(
 /// event path handled every record created before its cursor, so the
 /// baseline is that boundary, never the upgrade time. A scan first brings
 /// the cursor to the tip; with pruned history the cursor's own checkpoint
-/// time is the boundary. When neither is knowable the poll fails rather
+/// time is the boundary, and the cursor moves to the tip in the same journal
+/// write that installs it. When neither is knowable the poll fails rather
 /// than skip or replay records.
 #[allow(clippy::too_many_arguments)]
 async fn heads_baseline(
@@ -966,22 +964,24 @@ async fn heads_baseline(
     configs: &configuration::Store,
     supervisor: &mut supervisor::Supervisor,
     journal: &mut Journal,
-) -> anyhow::Result<u64> {
+) -> anyhow::Result<()> {
     let before = sui.chain_time_ms().await?;
-    match scan_events(cfg, sui, walrus, runner, store, configs, supervisor, journal).await {
+    let (cursor, since_ms) = match scan_events(cfg, sui, walrus, runner, store, configs, supervisor, journal).await {
         // An indexer may lag the tip: the scanned position bounds it too.
-        Ok(()) => Ok(sui.cursor_time_ms(&journal.state.cursor).await.map_or(before, |at| at.min(before))),
+        // An interrupted scan leaves an earlier cursor, which a retry rescans.
+        Ok(()) => (journal.state.cursor.clone(),
+            sui.cursor_time_ms(&journal.state.cursor).await.map_or(before, |at| at.min(before))),
         Err(error) if error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
             let since_ms = sui.cursor_time_ms(&journal.state.cursor).await.map_err(|time| anyhow::anyhow!(
                 "{error:#}; announced records have no safe baseline either ({time:#})"))?;
             warn!(%error, since_ms, "Event history is pruned; the device inbox and group heads apply \
                 records from the event cursor's checkpoint time");
-            journal.state.cursor = sui.latest_cursor().await?;
-            journal.save()?;
-            Ok(since_ms)
+            (sui.latest_cursor().await?, since_ms)
         }
-        Err(error) => Err(error),
-    }
+        Err(error) => return Err(error),
+    };
+    info!(since_ms, "Reading the device inbox and group heads from the event cursor's boundary");
+    heads::begin(journal, cursor, since_ms, telemetry::now_ms())
 }
 
 /// The DeploymentCreated event scan from the journal cursor.
