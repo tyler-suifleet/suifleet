@@ -8,6 +8,7 @@ module fleet_storage::fleet_storage_tests {
     use sui::sui::SUI;
     use sui::test_scenario::{Self as ts};
     use fleet_storage::fleet_storage::{Self, FleetStorage, UploadRegistered};
+    use sui_edge::customer::{Self, Customer, Fleet};
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::{Self, DeviceRegistry, DeviceOwnerCap};
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
@@ -1072,6 +1073,64 @@ module fleet_storage::fleet_storage_tests {
         clock::destroy_for_testing(clock); owner_end(fs, budget, cap);
         upload(&mut scenario, &mut system, BLOB + 1, 20);
         finish(scenario, system);
+    }
+
+    /// Adopt the existing populated fixture; storage and account IDs stay intact.
+    fun managed_setup(allowance: u64): (ts::Scenario, System, ID, ID) {
+        let (mut s, system) = setup(quota(POOL, 10));
+        s.next_tx(OWNER);
+        let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
+        transfer::public_transfer(cap, OWNER);
+        let mut registry = s.take_shared<DeviceRegistry>();
+        customer::create(&mut registry, string::utf8(b"Customer"), s.ctx());
+        ts::return_shared(registry); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 2, allowance, 1, s.ctx());
+        let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
+        customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
+        ts::return_shared(c); ts::return_shared(r); ts::return_shared(b); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>(); let fid = object::id(&f);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let r = s.take_shared<DeviceRegistry>();
+        let cap = s.take_from_sender<DeviceOwnerCap>();
+        customer::adopt_device(&mut c, &mut f, &b, &r, cap, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r);
+        (s, system, fid, bid)
+    }
+    #[test]
+    fun managed_upload_charges_customer_and_preserves_existing_storage() {
+        let (mut s, mut system, fid, bid) = managed_setup(POOL);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_managed_blob(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, s.ctx());
+        assert!(customer::used(&c) == encoded(&system, BLOB));
+        assert!(customer::active_devices(&c) == 1);
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::EWrongVersion)]
+    fun legacy_upload_entry_point_rejects_managed_budget() {
+        let (mut s, mut system, _, bid) = managed_setup(POOL);
+        s.next_tx(DEVICE);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_blob(&mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, s.ctx());
+        clock::destroy_for_testing(clock); ts::return_shared(fs); ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::customer)]
+    fun managed_upload_cannot_bypass_customer_allowance() {
+        let (mut s, mut system, fid, bid) = managed_setup(0);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_managed_blob(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, s.ctx());
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
     }
 
 }
