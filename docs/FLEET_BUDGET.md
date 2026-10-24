@@ -235,15 +235,14 @@ The SF-053 signing service signs draws only with `[budget]` in
 Components and root get nothing. A compromised daemon remains bounded by
 the on-chain limits. See [KEY_ISOLATION.md](KEY_ISOLATION.md).
 
-**Device-originated Walrus data.** The contract, the device-key flow and a
-real Testnet upload are implemented and tested (below). The daemon itself
-produces no data for Walrus today: by design, telemetry and logs go to the
-fleet indexer (SF-019, SF-020), and artifacts and recipes are uploaded by
-the owner. Owner uploads now go through fleet storage from the dApp (below).
-A daemon Walrus archival feature would have to choose what to archive and
-add an RS2 encoder to the device client; Mysten's encoder is not published as
-a crate the Yocto build can pin. It is reported in #161 for Codex to triage
-as separate work, not claimed here.
+**Device-originated Walrus data.** The daemon publishes encrypted logs,
+diagnostics and shadow documents to prepaid Walrus storage through the reviewed
+keyless codec and native registration/certification/anchor flow. Health summaries
+are signed on chain, not shipped to a required HTTP server. Owner recipe/artifact
+uploads use fleet storage from the dApp. See [serverless fleet data](SERVERLESS_FLEET_DATA.md)
+and [product ownership/migration](SERVERLESS_PRODUCT.md); the earlier indexer-only
+limitation has been superseded. Production provider/physical/Mainnet acceptance
+remains separately tracked, not established by local fixtures.
 
 ## dApp
 

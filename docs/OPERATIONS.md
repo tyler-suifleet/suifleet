@@ -10,7 +10,7 @@ This runbook describes current local operations and the intended release gates. 
 - Browser frontend: `http://localhost:3000` after `make dapp-dev`.
 - Cache/wallet volumes: `cargo-registry`, `cargo-git`, `pnpm-store`, `move-cache`, `sui-config`.
 - Device service: `suifleet.service`, config/key in `/etc/suifleet`, journal under `/var/lib/suifleet`; service provisioning is idempotent.
-- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices can report signed heartbeat and health telemetry to the fleet indexer ([TELEMETRY.md](TELEMETRY.md)). No production indexer, coordinator, hosted health ingress, secrets service or hosting deployment is currently recorded.
+- Sui authorizes deployments/reports, Walrus holds recipes/artifacts, and the device invokes an operator-configured updater. Devices publish signed on-chain health and encrypted Walrus archives ([serverless operation](SERVERLESS_PRODUCT.md)). SuiFleet hosts no application servers. HTTP indexer and background relay/retention tools are optional customer-owned integrations.
 
 Fleet wallet and native multisig handover uses the recipient-confirmed procedure in
 [FLEET_HANDOVER.md](FLEET_HANDOVER.md). Transfer all relevant authority records and

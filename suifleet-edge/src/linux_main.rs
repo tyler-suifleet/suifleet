@@ -375,13 +375,16 @@ async fn main() -> anyhow::Result<()> {
             .run(),
         )),
         None => {
-            info!("No [telemetry] configured; device health is not reported");
+            if cfg.fleet_data.is_none() {
+                info!("Configure [fleet_data] for on-chain health and Walrus archives");
+            }
             None
         }
     };
-    // Redacted remote logs beside it (validated to have [telemetry]).
+    // Archives own the log cursor when enabled. HTTP health may coexist, but
+    // never start a competing HTTP collector on that same durable cursor.
     let shipper = match (&cfg.logs, &cfg.telemetry) {
-        (Some(settings), Some(telemetry)) => Some(tokio::spawn(
+        (Some(settings), Some(telemetry)) if cfg.http_logs_enabled() => Some(tokio::spawn(
             logs::Task {
                 binding: logs::Binding {
                     chain_identifier: sui.manifest().chain_identifier.clone(),

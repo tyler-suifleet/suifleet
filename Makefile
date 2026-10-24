@@ -345,6 +345,7 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_fleet_recovery.cjs
@@ -371,7 +372,8 @@ test-desired-state-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
 
-# SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
+# Optional customer-hosted reference integration, not a product runtime.
+# Product chain CLI: node scripts/suifleet_ops.cjs (docs/SERVERLESS_PRODUCT.md).
 .PHONY: indexer-build indexer-test test-indexer-localnet
 indexer-build:
 	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml

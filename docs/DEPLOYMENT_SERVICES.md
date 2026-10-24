@@ -194,9 +194,10 @@ limits and mapping rules, stream limits/definitions, and whether exports are
 enabled. It omits broker addresses, destinations, credential references, UIDs
 and credential contents. `<state_dir>/services-effective.json` is the private,
 redacted projection; signed telemetry includes its SHA-256 in the optional
-`service_configuration_sha256` field. The fleet indexer accepts this bounded
-digest; older telemetry without it remains valid. Upgrade the indexer before
-rolling out this daemon, because older indexers reject unknown snapshot fields.
+`service_configuration_sha256` field. The direct-chain dApp verifier accepts this bounded digest; older health
+without it remains valid. Customers using the optional HTTP reference integration
+must update their own indexer before newer daemons: older indexers reject unknown
+snapshot fields. No indexer deployment is required for the product.
 
 `make test-services` builds the real daemon and uses a disposable network-none
 root container to exercise real SO_PEERCRED identities, deployment, upgrade,
