@@ -3,7 +3,8 @@
 // SF-129 owner reclaim of storage deposits. Every action is a dry run first:
 // the transaction is simulated with the owner's own gas and the recoverable
 // SUI is shown; signing rebuilds the same plan and reports actual effects.
-import { useState } from "react";
+// Rescanning, continuing a scan or switching account discards the preview.
+import { useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
@@ -17,24 +18,40 @@ import {
   type ArchivePlan, type DeploymentReclaim, type ReclaimPreview,
 } from "@/lib/storage-reclaim";
 
-function useReclaim(build: () => Transaction) {
+/** A dry run applies only to the plan, transaction context, account and
+ * network it simulated: `deps` names the plan and context `build` reads. Any
+ * change hides the preview, a late simulation of an earlier plan is dropped,
+ * and signing refuses without a successful preview of the current plan. */
+export function useReclaim(deps: readonly unknown[], build: () => Transaction) {
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient(), mutation = useFleetTransaction();
-  const [preview, setPreview] = useState<ReclaimPreview>(), [result, setResult] = useState<string>(), [error, setError] = useState<string>();
+  const context = [...deps, account?.address, client];
+  const [dry, setDry] = useState<{ context: unknown[]; preview: ReclaimPreview }>(), [result, setResult] = useState<string>(), [error, setError] = useState<string>();
+  const current = useRef(context), request = useRef(0);
+  current.current = context;
+  const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+  const preview = dry && same(dry.context, context) ? dry.preview : undefined;
   async function dryRun() {
-    setPreview(undefined); setResult(undefined); setError(undefined);
-    try { setPreview(await previewReclaim(client, build(), account!.address)); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    const simulated = context, seq = ++request.current;
+    setDry(undefined); setResult(undefined); setError(undefined);
+    try {
+      const outcome = await previewReclaim(client, build(), account!.address);
+      if (seq === request.current && same(simulated, current.current)) setDry({ context: simulated, preview: outcome });
+    } catch (cause) {
+      if (seq === request.current && same(simulated, current.current)) setError(cause instanceof Error ? cause.message : String(cause));
+    }
   }
   async function sign() {
     setError(undefined);
+    if (!preview?.ok) { setError("Run a successful dry run of the current plan before signing"); return; }
+    ++request.current;
     try {
       const tx = build();
       tx.setSender(account!.address);
       const { digest } = await mutation.mutateAsync({ transaction: tx });
+      setDry(undefined);
       const executed = await client.waitForTransaction({ digest, include: { effects: true } });
       const gas = executed.Transaction?.effects?.gasUsed;
       setResult(gas ? `Confirmed ${digest}: ${formatReclaim(netReclaim(gas).netMist)} returned after fees.` : `Confirmed ${digest}.`);
-      setPreview(undefined);
       await Promise.all([cache.invalidateQueries({ queryKey: ["fleet-storage"] }), cache.invalidateQueries({ queryKey: ["retention"] }),
         cache.invalidateQueries({ queryKey: ["deployments"] })]);
     } catch (cause) {
@@ -54,7 +71,7 @@ function PreviewLine({ preview }: { preview: ReclaimPreview }) {
 export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageConfig; capId: string; epoch?: number }) {
   const client = useCurrentClient();
   const [plan, setPlan] = useState<ArchivePlan>(), [scanError, setScanError] = useState<string>(), [scanning, setScanning] = useState(false);
-  const reclaim = useReclaim(() => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
+  const reclaim = useReclaim([plan, capId, config.walrus.system], () => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
   if (!DATA_CONFIG) return null;
   // `resume` continues a bounded scan past the history it already listed.
   async function scan(resume?: Record<string, string>) {
@@ -93,7 +110,7 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
 export function DeploymentReclaimPanel({ deployments }: { deployments: DeploymentEvent[] }) {
   const client = useCurrentClient(), account = useCurrentAccount();
   const [plan, setPlan] = useState<DeploymentReclaim[]>(), [scanError, setScanError] = useState<string>(), [scanning, setScanning] = useState(false);
-  const reclaim = useReclaim(() => buildRetireDeploymentsTx(PACKAGE_ID, plan!.filter((r) => r.eligible).slice(0, 64)));
+  const reclaim = useReclaim([plan], () => buildRetireDeploymentsTx(PACKAGE_ID, plan!.filter((r) => r.eligible).slice(0, 64)));
   if (!account) return null;
   async function scan() {
     setScanning(true); setScanError(undefined); setPlan(undefined);
