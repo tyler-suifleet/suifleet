@@ -862,6 +862,8 @@ async fn announced(
     let device = &cfg.device.device_object_id;
     let inbox_id = sui.inbox_id(device)?;
     let inbox_key = inbox_id.clone();
+    // Taken before the inbox read: groups it does not list were joined later.
+    let now_chain = sui.chain_time_ms().await?;
     let inbox = sui.inbox(device).await?;
     if let Some(inbox) = &inbox {
         for group in &inbox.groups {
@@ -871,11 +873,11 @@ async fn announced(
         }
     }
     // A head first seen applies records from then on: the inbox and groups
-    // known when heads began from that baseline, later groups from now.
-    let mut now_chain = None;
+    // known when heads began from that baseline, later groups from the last
+    // poll that did not list them (so records announced while the device
+    // was offline still apply).
     if journal.state.heads.is_none() {
-        let since_ms = sui.chain_time_ms().await?;
-        now_chain = Some(since_ms);
+        let since_ms = now_chain;
         journal.state.heads = Some(heads::Heads { since_ms, ..Default::default() });
         let heads = journal.state.heads.as_mut().unwrap();
         for target in journal.state.groups.iter().chain([&inbox_id]) {
@@ -899,13 +901,7 @@ async fn announced(
         let seen = match heads.seen.get(&target) {
             Some(seen) => seen.clone(),
             None if target == inbox_key => heads::Seen { since_ms: heads.since_ms, ..Default::default() },
-            None => {
-                let since_ms = match now_chain {
-                    Some(at) => at,
-                    None => *now_chain.insert(sui.chain_time_ms().await?),
-                };
-                heads::Seen { since_ms, ..Default::default() }
-            }
+            None => heads::Seen { since_ms: heads.baseline(), ..Default::default() },
         };
         for id in heads::changed(&head, &seen) {
             if journal.state.deployments.contains_key(&id) || journal.state.deferred.contains_key(&id) {
@@ -932,10 +928,9 @@ async fn announced(
         journal.save()?;
     }
     let heads = journal.state.heads.as_mut().unwrap();
-    if heads.next_start_ms != next_start_ms {
-        heads.next_start_ms = next_start_ms;
-        journal.save()?;
-    }
+    heads.next_start_ms = next_start_ms;
+    heads.polled_ms = Some(now_chain);
+    journal.save()?;
     Ok(())
 }
 

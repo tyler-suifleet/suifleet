@@ -96,7 +96,10 @@ With `fleet_inbox` origins in the manifest, every poll:
    changed since it last acted, through the ordinary checks. A record created
    before the head's baseline is not applied: the enrollment baseline (chain
    time), the first poll that read heads after an upgrade, or, for a group
-   followed later, when it was first seen — matching the event baseline;
+   followed later, the chain time taken before the last completed poll read
+   the inbox (which did not list it yet). A group joined while the daemon
+   was stopped therefore applies what was announced since then — matching
+   the event baseline;
 4. runs the `DeploymentCreated` and `DeviceAddedToGroup` scan only every
    `runtime.event_scan_seconds` (default 60; 0 scans every poll), so unannounced deployments arrive within a minute, as a
    safety net for unannounced deployments. Without inbox origins the scan runs
@@ -128,7 +131,8 @@ entries this feature adds; until SF-122 merges they are direct reads.
   derivation, head bounds and scheduling, migration, indexed reports), plus
   three authority mutations in `scripts/check_move_security.py`.
 - Simulator (`make test-ota`): `scripts/test_inbox_ota.py` — baseline, inbox
-  and indexed-group deployments without events, an on-time scheduled start
+  and indexed-group deployments without events, a group joined while the
+  daemon was stopped, an on-time scheduled start
   with a 60 s poll, resync after pruned history, the event safety net.
 - dApp: `scripts/test_inbox.cjs` (in `make check-interfaces`).
 - Indexer: `txbuild` unit test of announced call shapes.

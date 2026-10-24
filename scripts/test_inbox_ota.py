@@ -5,7 +5,7 @@ keys or gas.
 
 Covers the enrollment baseline for announced records, a device-targeted
 deployment and an indexed-group deployment that exist only in objects (no
-events), a scheduled start that runs on time although the poll interval is a
+events), a group joined while the daemon was stopped, a scheduled start that runs on time although the poll interval is a
 minute, a device that was offline longer than the node's event history and
 resynchronizes from objects alone, and the bounded event scan that still
 applies an unannounced deployment from an older client.
@@ -27,6 +27,7 @@ from test_desired_state import manifest, serve
 
 for _name in INBOX_TYPES:
     test_ota.TYPE_ORIGINS[_name] = PACKAGE  # Introduced by the SF-125 upgrade.
+GROUP2 = "0x11"
 INBOX_KEY = f"0x2::derived_object::DerivedObjectKey<{PACKAGE}::fleet_inbox::InboxKey>"
 
 
@@ -176,6 +177,25 @@ def run(binary):
             print("PASS: an indexed group found through the inbox and its head applies a group deployment")
             stop()
 
+            # 3b. Joined a group while offline: its head applies what was
+            #     announced after the last poll, and the event scan is not
+            #     due on restart. Earlier records (before the device joined)
+            #     are not applied.
+            sim.groups[GROUP2] = {"admin": OPERATOR, "device_ids": []}
+            sim.deploy("0x706", groups=[GROUP2], direct=False, created_ms=sim.now_ms - 1)
+            sim.now_ms += 1000
+            sim.members[GROUP2] = {DEVICE}
+            sim.inbox["groups"] = [GROUP, GROUP2]
+            sim.deploy("0x707", groups=[GROUP2], direct=False)
+            sim.now_ms += 1000
+            process = start()
+            wait_for(lambda: outcome("0x707") == 1, "group joined while offline: its deployment was not applied", process)
+            settle()
+            assert outcome("0x706") is None, state()
+            assert GROUP2 in state()["groups"]
+            print("PASS: a group joined while offline applies what was announced since the last poll")
+            stop()
+
             # 4. A scheduled start runs on time although polls are a minute
             #    apart: the inbox carries it and the daemon arms a timer.
             sim.now_ms += 1000
@@ -215,11 +235,11 @@ def run(binary):
             sim.now_ms += 1000
             sim.deploy("0x705", announce=False)
             wait_for(lambda: outcome("0x705") == 1, "unannounced deployment was not found by the event scan", process)
-            wait_for(lambda: len(sim.reports) == 5, "reports were not all delivered", process)
+            wait_for(lambda: len(sim.reports) == 6, "reports were not all delivered", process)
             stop()
             applied_runs = applied.read_text().splitlines()
-            assert len(applied_runs) == 5, applied_runs
-            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705"}, sim.reports
+            assert len(applied_runs) == 6, applied_runs
+            assert {id for id, _ in sim.reports} == {"0x701", "0x702", "0x703", "0x704", "0x705", "0x707"}, sim.reports
             assert not sim.errors, sim.errors
             print("PASS: the event scan remains a safety net for unannounced deployments; each applied once")
     finally:

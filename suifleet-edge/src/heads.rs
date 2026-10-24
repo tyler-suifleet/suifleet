@@ -24,14 +24,26 @@ pub struct Heads {
     /// Earliest announced scheduled start (UTC ms) in any head; 0 for none.
     #[serde(default)]
     pub next_start_ms: u64,
+    /// Chain time (UTC ms) taken before the last completed poll read the
+    /// inbox. A group the inbox lists later was joined after it, so its head
+    /// applies records from then on, including ones created while offline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub polled_ms: Option<u64>,
+}
+
+impl Heads {
+    /// Where a head first seen in this poll starts applying records.
+    pub fn baseline(&self) -> u64 {
+        self.polled_ms.unwrap_or(self.since_ms)
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Seen {
     pub seq: u64,
     /// Records created before this chain time are not applied from this
-    /// head: a group joined later starts from when it was first seen, as the
-    /// event path would.
+    /// head: a group joined later starts from the last poll that did not
+    /// list it, as the event path would.
     pub since_ms: u64,
     /// Component name → deployment, as last acted on.
     #[serde(default)]
@@ -95,6 +107,17 @@ mod tests {
         assert_eq!(changed(&head(1, &[("new", "0xe")]), &Seen::default()), vec!["0xe"]);
         // A first sight with seq 0 has nothing announced yet.
         assert!(changed(&head(0, &[]), &Seen::default()).is_empty());
+    }
+
+    #[test]
+    fn a_later_group_starts_from_the_last_poll() {
+        let mut heads = Heads { since_ms: 1_000, ..Default::default() };
+        assert_eq!(heads.baseline(), 1_000, "before the first poll: the enrollment baseline");
+        heads.polled_ms = Some(5_000);
+        assert_eq!(heads.baseline(), 5_000);
+        // Older journals without the field still parse.
+        let old: Heads = serde_json::from_str(r#"{"since_ms":7,"seen":{}}"#).unwrap();
+        assert_eq!((old.polled_ms, old.baseline()), (None, 7));
     }
 
     #[test]
