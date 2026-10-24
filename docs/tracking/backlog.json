@@ -2946,6 +2946,31 @@
         "Exports are durable and resumable with bounded retries, and report export lag and failures in the on-chain health summary."
       ],
       "validation": "cargo or Python exporter tests against MinIO and an HTTP fixture; restart and failure-injection tests; documentation consistency checks."
+    },
+    {
+      "key": "SF-144",
+      "title": "Read Walrus data directly from storage nodes when aggregators are unavailable",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/Cargo.toml",
+        "suifleet-edge/meta-suifleet",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let the daemon fetch Walrus slivers directly from storage nodes and reconstruct blobs on the device when public aggregators fail, are rate-limited or cap request sizes. This removes any need for SuiFleet to run aggregators: devices use public aggregators first and fall back to direct reads.",
+      "evidence": "User decision 2026-10-23: SuiFleet runs no servers; Walrus aggregators were only included in the cost model as a conservative large-scale assumption. Public aggregators have no SLA and many cap requests at 10 MiB (docs.wal.app/docs/network-reference). Walrus reads are free at the protocol level. The Rust walrus-core crate is publish=false and pins Rust 1.96 against our 1.94 baseline (walrus mainnet-v1.58.1). Complements SF-124/#255 (aggregator fallback list and ranged downloads). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Measure direct-read feasibility on a Raspberry Pi 3 B+ class device for 50 MB and 200 MB blobs: peak memory, CPU time, connections and wall-clock time, recorded in docs.",
+        "If feasible, implement direct reads as a fallback after the aggregator list, with digest verification unchanged and bounded memory (streaming or chunked reconstruction).",
+        "Resolve the dependency and toolchain issue with a reviewed approach (pinned git dependency, vendored minimal reader, or a documented toolchain bump) that keeps Yocto LTS builds working.",
+        "If not feasible on Pi-class hardware, document the limit and the supported alternatives; do not introduce a SuiFleet-hosted aggregator."
+      ],
+      "validation": "Benchmarks on Pi-class hardware or a faithful QEMU/arm64 emulation recorded with exact versions; cargo tests with simulated aggregator failure; a bounded read-only test against Walrus Mainnet or Testnet storage nodes."
     }
   ]
 }

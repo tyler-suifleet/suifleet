@@ -140,7 +140,7 @@ Notes on the comparison:
 - **Gross profit** on the typical profile is about $71 a month at 1,000 devices, $660 at 10,000, $3,100–3,800 at 100,000 and $30,000 at 1,000,000. That is before engineering, support, on-call and card-processing fees (about 3% plus $0.30 per invoice).
 - **The equivalents are not feature-identical.** SuiFleet replaces Greengrass's live telemetry with signed on-chain health at the chosen cadence, and its rows include no cost for secure tunnels or Device Defender.
 - **Greengrass totals use list prices,** including IoT Core's lower messaging tiers above 1 billion messages and S3's lower egress tiers. Greengrass's own $0.16 per device has no published volume discount.
-- **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes, and one to several SuiFleet Walrus aggregators.
+- **Ranges** cover RPC on the public endpoint versus a paid plan or one to several SuiFleet nodes. Their upper ends also include an optional SuiFleet Walrus aggregator allowance, a conservative assumption that the plan below avoids.
 
 Cost components per device per month:
 
@@ -151,7 +151,7 @@ Cost components per device per month:
   - $0 at 1,000 devices, on the public endpoint or Chainstack's free tier.
   - $49–199 a month on a paid plan at 10,000 devices.
   - SuiFleet nodes from about 100,000 devices: $520–1,040 a month at 100,000, and $1,040–4,160 at 1,000,000.
-- Artifact downloads: free on public Walrus aggregators up to about 10,000 devices (heavy fleets earlier), then SuiFleet aggregators ($60–1,300 a month, depending on traffic).
+- Artifact downloads: free from public Walrus aggregators, with direct reads from Walrus storage nodes on the device as the fallback ([SF-144/#290](https://github.com/tyler-suifleet/suifleet/issues/290)). The tables keep a $60–1,300 a month allowance for an optional SuiFleet aggregator at large scale, used only if both prove inadequate.
 
 Owner-side release uploads add about $0.03 per 50 MB release per fleet. One-time per device: about $0.03 of mostly refundable storage deposits plus a 0.06 SUI gas float, which is working capital (about 60,000 SUI at 1,000,000 devices).
 
@@ -197,7 +197,7 @@ As built, every daemon polls every 10 seconds with about 23 gRPC reads, or about
   - Hetzner AX102-class bare metal with extra NVMe, about €449 a month.
   - Cheaper than paid RPC above about 200M requests a month, roughly 100,000 devices at 30-minute checks.
   - Needs prompt upgrades and monitoring.
-- **Network nodes versus servers.** At large scale SuiFleet would run Sui full nodes and Walrus aggregators. Those are Sui-stack network nodes that any party can run interchangeably, not application servers holding customer state; devices fall back to public endpoints if they fail.
+- **Network nodes versus servers.** At large scale SuiFleet would run Sui full nodes to absorb read volume. Walrus aggregators are not needed: devices use public aggregators and fall back to reading storage nodes directly (SF-144). A SuiFleet aggregator would only ever be an optional cache that anyone can run, never something devices depend on.
 
 ### Development required
 
