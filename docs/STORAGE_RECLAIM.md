@@ -223,7 +223,7 @@ was the only faucet request, and it does not replenish the allowance.
 epoch 563, and the run happened at epoch 559. No Testnet archive was expired,
 so no successful Testnet prune or rebate is claimed. A read-only planner check
 on 2026-10-23 (`scripts/reclaim_plan.cjs`) found Walrus epoch 560 and no
-expired archive; a repeat on 2026-10-24 04:10 UTC found the same. Once the Walrus epoch
+expired archive; repeats on 2026-10-24 at 04:10 and 05:23 UTC found the same. Once the Walrus epoch
 reaches 563, rerun the same script with `--reclaim` while holding
 `network:suifleet-testnet`. It reuses the cached, re-verified upgrade and
 records the executed rebate.
