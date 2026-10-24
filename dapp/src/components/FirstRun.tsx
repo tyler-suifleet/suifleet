@@ -49,7 +49,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     queryKey: ["first-run-account", NETWORK, account?.address],
     enabled: !!account,
     retry: false,
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
     queryFn: async () => {
       if (!account!.chains.includes(`sui:${NETWORK}`)) throw new Error(`This account does not support sui:${NETWORK}. Choose a wallet account on this network.`);
       await verifyDeployment(client);
