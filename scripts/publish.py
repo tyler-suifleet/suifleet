@@ -411,7 +411,8 @@ def finish(pending, args, read):
                            f"{pending['digest']} ({published})")
     resolve = SimpleNamespace(rpc=pending["rpc"], chain_identifier=pending["chain"], package=pending["package"],
                               upgrade_cap=pending["cap"], registry=pending["registry"], network=pending["network"],
-                              publisher=pending["walrus"][0], aggregator=pending["walrus"][1])
+                              publisher=pending["walrus"][0], aggregator=pending["walrus"][1],
+                              aggregator_mirror=pending.get("aggregator_urls", []))
     for attempt in range(10):
         try:
             manifest = dm.resolve(resolve, read)
@@ -458,6 +459,11 @@ def run(args, cli=None, read=dm.chain_facts):
         walrus = tuple(given or default for given, default in zip(walrus, defaults))
     for url in walrus:
         dm.endpoint(url)
+    mirrors = getattr(args, "aggregator_mirror", None)
+    if mirrors is None:
+        mirrors = (step.previous or {}).get("walrus", {}).get("aggregator_urls", [])
+    for url in mirrors:
+        dm.endpoint(url)
     action = f"upgrade {step.published['package']} v{step.published['version']}" if step.published else "fresh publish"
     print(f"{action} on {step.env} ({step.network}, chain {step.chain}) as {step.address}")
     if args.dry_run:
@@ -472,7 +478,7 @@ def run(args, cli=None, read=dm.chain_facts):
     pending_path = args.records / step.env / f"pending-{digest}.json"
     pending = dict(env=step.env, network=step.network, chain=step.chain, rpc=step.rpc, address=step.address,
                    digest=digest, package_path=str(args.package.resolve()), walrus=list(walrus),
-                   object_changes=output.get("objectChanges"))
+                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors)
     write_atomic(pending_path, json.dumps(pending, indent=2) + "\n")
     configuration = active_configuration(args, step.env)
     try:
@@ -498,6 +504,7 @@ def parser():
     p.add_argument("--network", choices=("devnet", "localnet"), help="label for a chain that is neither testnet nor mainnet")
     p.add_argument("--dry-run", action="store_true", help="simulate the transaction; write nothing")
     p.add_argument("--publisher", help="Walrus publisher URL (default: previous release, or testnet's public one)")
+    p.add_argument("--aggregator-mirror", action="append", help="ordered device mirrors; repeat for each URL (default: preserve previous release)")
     p.add_argument("--aggregator", help="Walrus aggregator URL (default: previous release, or testnet's public one)")
     p.add_argument("--registry", help="adopt this existing DeviceRegistry when no deployment is recorded")
     p.add_argument("--gas-budget", type=int, default=500_000_000, help="MIST (default 0.5 SUI)")
