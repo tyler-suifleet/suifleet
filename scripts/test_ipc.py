@@ -91,7 +91,7 @@ def run():
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state))}\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\ncomponent_stop_timeout_seconds = 1\n'
                 f'[ipc]\nsocket = {json.dumps(str(path))}\nadministrators = [0]\n'
                 '[ipc.components.svc]\nuid = 61001\noperations = ["config", "health", "status", "publish", "receive"]\n'
@@ -137,6 +137,14 @@ def run():
                     pass
                 assert client.install('0x703')['status'] == 2, 'unauthenticated artifact installed'
                 assert 'tampered' not in client.list()['installed']
+                try:
+                    wait_for(lambda: {test_ota.object_id(id) for id, _ in sim.reports} ==
+                        {test_ota.object_id('0x701'), test_ota.object_id('0x703')},
+                        'local installs did not promptly report at the default 30-minute cadence', process)
+                except AssertionError:
+                    print('Reports:', sim.reports, flush=True)
+                    print((root/'daemon.log').read_text(), flush=True)
+                    raise
                 print('PASS: local install/list/start/stop/restart/status/logs/config; no replay, wrong-target and digest rejection')
 
                 # Each SDK process drops all groups and changes UID before connecting.

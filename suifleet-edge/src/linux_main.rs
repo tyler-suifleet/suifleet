@@ -8,6 +8,7 @@ mod tunneling;
 mod clientdevices;
 mod client_gateway;
 mod control;
+mod cadence;
 mod apply;
 mod oci;
 mod bridge;
@@ -468,6 +469,7 @@ async fn main() -> anyhow::Result<()> {
             "Daemon started with durable deployment polling"
         );
         let mut reads_before = sui.read_stats();
+        let mut cadence = cadence::Cadence::default();
         loop {
             let cycle = poll(
                 &cfg,
@@ -496,13 +498,19 @@ async fn main() -> anyhow::Result<()> {
                         info!(read_requests = reads_after.0 - reads_before.0, response_bytes = reads_after.1 - reads_before.1, "Chain reads this poll (protobuf payload bytes)");
                         // Include producer reads made during the preceding sleep.
                         reads_before = reads_after;
+                        cadence.record(result.is_ok());
                         sync.lock().unwrap().record(&result);
                         if let Err(error) = result { warn!(%error, "Sync failed; retrying without advancing cursor"); }
                     }
                 },
                 _ = &mut shutdown => { info!("Stopping; interrupted apply requires inspection on restart"); break; }
             }
-            let delay = tokio::time::sleep(Duration::from_secs(cfg.runtime.poll_seconds));
+            let delay = tokio::time::sleep(cadence.delay(
+                &cfg.runtime,
+                journal.state.deferred.values(),
+                telemetry::now_ms(),
+                journal.state.check_window,
+            ));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -529,7 +537,18 @@ async fn main() -> anyhow::Result<()> {
                             break;
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
+                        let needs_report = pending.request.operation == "install" && result.is_ok()
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && !o.reported);
                         let _ = pending.reply.send(ipc::response(result));
+                        // A local request can discover a scheduled record while
+                        // the normal check sleeps. Only shorten the wakeup;
+                        // unrelated IPC traffic must never postpone a check.
+                        let next = tokio::time::Instant::now() + if needs_report {
+                            Duration::ZERO
+                        } else {
+                            cadence.delay(&cfg.runtime, journal.state.deferred.values(), telemetry::now_ms(), journal.state.check_window)
+                        };
+                        if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
                     Some(control) = async {
                         match console_server.as_mut() {
@@ -769,6 +788,9 @@ async fn poll(
         services::commit(cfg, journal, next, None).await.map_err(|error| services::RecoveryRequired(format!("service reconciliation failed: {error:#}")))?;
     }
     journal.save()?;
+    // Independent receipt delivery precedes even a failed watch/discovery read.
+    // The helper validates current authority and funds only actual writes.
+    flush_funded_reports(cfg, sui, journal).await?;
     let mut watch_roots = vec![
         sui.manifest().upgrade_cap_id.clone(),
         sui.manifest().shared_objects.registry.id.clone(),
@@ -801,7 +823,6 @@ async fn poll(
         )
         .await?;
     let pending_work = !journal.state.initialized
-        || journal.state.deployments.values().any(|o| !o.reported)
         || journal.state.deferred.iter().any(|(id, d)| {
             if d.terminal || journal.state.deployments.contains_key(id) {
                 return false;
@@ -850,55 +871,7 @@ async fn poll(
         collect_firmware_results(cfg, journal)?;
     }
     settle_configuration(configs, journal, supervisor)?;
-    // Top up gas from the fleet budget before reporting (SF-083). A failure
-    // only delays reports, which stay queued.
-    if let Some(budget) = cfg.budget.as_ref().filter(|_| {
-        journal
-            .state
-            .deployments
-            .values()
-            .any(|o| !o.reported && o.status.is_some())
-    }) {
-        let mut funding = journal.state.funding.clone().unwrap_or_default();
-        match funding::top_up(
-            budget,
-            sui,
-            &cfg.device.device_object_id,
-            &cfg.device.device_cap_id,
-            &mut funding,
-            telemetry::now_ms(),
-        )
-        .await
-        {
-            Ok(changed) => {
-                if changed || journal.state.funding.is_none() {
-                    journal.state.funding = Some(funding);
-                    journal.save()?;
-                }
-            }
-            Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
-        }
-    }
-    // Reports remain queued across network failures and daemon restarts.
-    let pending: Vec<_> = journal
-        .state
-        .deployments
-        .iter()
-        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
-        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
-        .collect();
-    for (id, status) in pending {
-        match sui
-            .report_status(&id, &cfg.device.device_cap_id, status)
-            .await
-        {
-            Ok(_) => {
-                journal.state.deployments.get_mut(&id).unwrap().reported = true;
-                journal.save()?;
-            }
-            Err(error) => warn!(%id, %error, "Status report remains queued"),
-        }
-    }
+    flush_funded_reports(cfg, sui, journal).await?;
     loop {
         let combined = journal.state.discovery_cursor.is_some();
         let page_start = if combined {
@@ -1000,6 +973,79 @@ async fn poll(
         sui.set_event_limit(None);
     }
     sui.finish_full_poll();
+    // Report new outcomes before the long normal sleep.
+    flush_funded_reports(cfg, sui, journal).await
+}
+/// Retry only real queued writes, with fresh authority, before fallible watch
+/// or discovery work. Reporting failures remain independent of event cadence.
+async fn flush_funded_reports(
+    cfg: &Config,
+    sui: &SuiClient,
+    journal: &mut Journal,
+) -> anyhow::Result<()> {
+    if !journal
+        .state
+        .deployments
+        .values()
+        .any(|o| !o.reported && o.status.is_some())
+    {
+        return Ok(());
+    }
+    sui.validate_deployment().await?;
+    sui.validate_cap(&cfg.device.device_cap_id, &cfg.device.device_object_id)
+        .await?;
+    if let Some(budget) = cfg.budget.as_ref().filter(|_| {
+        journal
+            .state
+            .deployments
+            .values()
+            .any(|o| !o.reported && o.status.is_some())
+    }) {
+        let mut funding = journal.state.funding.clone().unwrap_or_default();
+        match funding::top_up(
+            budget,
+            sui,
+            &cfg.device.device_object_id,
+            &cfg.device.device_cap_id,
+            &mut funding,
+            telemetry::now_ms(),
+        )
+        .await
+        {
+            Ok(changed) => {
+                if changed || journal.state.funding.is_none() {
+                    journal.state.funding = Some(funding);
+                    journal.save()?;
+                }
+            }
+            Err(error) => warn!(%error, "Gas top-up check failed; retrying next poll"),
+        }
+    }
+    flush_reports(sui, journal, &cfg.device.device_cap_id).await
+}
+/// Keep durable receipt retries independent of later discovery/reconciliation.
+/// Report failures remain queued without poisoning discovery cadence: a deleted
+/// deployment or lost targeting can make a receipt permanently undeliverable.
+/// Journal I/O failures still abort the cycle immediately.
+async fn flush_reports(sui: &SuiClient, journal: &mut Journal, cap: &str) -> anyhow::Result<()> {
+    let pending: Vec<_> = journal
+        .state
+        .deployments
+        .iter()
+        .filter(|(_, outcome)| !outcome.reported && outcome.status.is_some())
+        .map(|(id, outcome)| (id.clone(), outcome.status.unwrap()))
+        .collect();
+    for (id, status) in pending {
+        match sui.report_status(&id, cap, status).await {
+            Ok(_) => {
+                journal.state.deployments.get_mut(&id).unwrap().reported = true;
+                journal.save()?;
+            }
+            Err(error) => {
+                warn!(%id, %error, "Status report remains queued");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -1186,8 +1232,11 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -
     // Restart notice if its saved timestamp is ahead of the corrected clock.
     let notified = journal.state.deferred.get(id)
         .filter(|d| d.control == control && d.notified_ms <= now)
-        .map(|d| d.notified_ms).unwrap_or(now);
-    let reason = match control.reason(now, notified)? {
+        .map(|d| d.notified_ms)
+        .unwrap_or(now);
+    let policy_reason = control.reason(now, notified)?;
+    cadence::Window::remember(&mut journal.state.check_window, &control, now);
+    let reason = match policy_reason {
         Some(reason) => Some(reason),
         None => sui.rollout_admission(id, device).await?,
     };

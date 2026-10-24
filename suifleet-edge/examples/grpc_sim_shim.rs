@@ -52,7 +52,12 @@ impl Shim {
         if let Some(error) = reply.get("error") {
             // The simulator reports an unavailable service (and failed
             // assertions) as errors; the daemon must treat both as failures.
-            return Err(Status::unavailable(error["message"].as_str().unwrap_or("error").to_owned()));
+            let message = error["message"].as_str().unwrap_or("error").to_owned();
+            return Err(match error["code"].as_i64() {
+                Some(429) => Status::resource_exhausted(message),
+                Some(408) => Status::deadline_exceeded(message),
+                _ => Status::unavailable(message),
+            });
         }
         Ok(reply["result"].clone())
     }

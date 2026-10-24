@@ -11,6 +11,24 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_receipt_timeout_diagnostics_exclude_private_journal_and_log_values(self):
+        import tempfile
+        from live_package_upgrade import daemon_progress
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); journal = root/'journal'; log = root/'log'
+            journal.write_text(json.dumps(dict(initialized=True, device_key='PRIVATE-CANARY',
+                cursor={'after':'PRIVATE-CANARY'}, deployments={'0x1':dict(status=1,
+                    reported=False, error='PRIVATE-CANARY', secret='PRIVATE-CANARY')})))
+            log.write_text('Sync failed PRIVATE-CANARY RPC request timeout\n')
+            diagnostic = daemon_progress(journal, log)
+            self.assertTrue(diagnostic['initialized'])
+            self.assertEqual(list(diagnostic['outcomes'].values()),
+                             [dict(status=1, reported=False, has_error=True)])
+            self.assertEqual(diagnostic['log_counts']['RPC request timeout'], 1)
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            journal.write_text('malformed'); log.unlink()
+            self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)

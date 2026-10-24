@@ -6,10 +6,12 @@ fn client(url: &str) -> SuiClient {
     let mut manifest: crate::config::DeploymentManifest =
         serde_json::from_str(include_str!("../../manifests/fixture.localnet.json")).unwrap();
     manifest.rpc_url = url.to_owned();
-    SuiClient::load(
+    manifest.rpc_urls = vec![url.to_owned()];
+    let client = SuiClient::load(
         SuiConfig {
             manifest_path: "fixture.json".into(),
             rpc_url: url.to_owned(),
+            rpc_urls: vec![url.to_owned()],
             package_id: manifest.call_package_id.clone(),
             manifest: Some(manifest),
         },
@@ -17,7 +19,11 @@ fn client(url: &str) -> SuiClient {
             ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
         )),
     )
-    .unwrap()
+    .unwrap();
+    // These gate tests model a completed deployment validation. Candidate
+    // identity verification is independently exercised by rpc_tests.
+    client.verified[0].store(true, std::sync::atomic::Ordering::Release);
+    client
 }
 
 #[derive(Clone)]
@@ -25,9 +31,18 @@ struct Node {
     response: Arc<Mutex<proto::BatchGetObjectsResponse>>,
     requests: Arc<Mutex<usize>>,
     unavailable: Arc<Mutex<bool>>,
+    wrong_chain: bool,
 }
 #[tonic::async_trait]
 impl proto::ledger_service_server::LedgerService for Node {
+    async fn get_service_info(&self, _: tonic::Request<proto::GetServiceInfoRequest>) -> Result<tonic::Response<proto::GetServiceInfoResponse>, tonic::Status> {
+        let mut genesis = [0; 32];
+        genesis[..4].copy_from_slice(&[0x12, 0x34, 0xab, 0xcd]);
+        if self.wrong_chain { genesis[0] = 0xff; }
+        let mut info = proto::GetServiceInfoResponse::default();
+        info.chain_id = Some(sui_sdk_types::Digest::new(genesis).to_string());
+        Ok(tonic::Response::new(info))
+    }
     async fn batch_get_objects(
         &self,
         request: tonic::Request<proto::BatchGetObjectsRequest>,
@@ -79,6 +94,7 @@ async fn unchanged_is_one_version_request_and_errors_never_authorize_idle() {
         response: Arc::new(Mutex::new(version(Some(1)))),
         requests: Default::default(),
         unavailable: Default::default(),
+        wrong_chain: false,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let sui = client(&format!("http://{}", listener.local_addr().unwrap()));
@@ -181,6 +197,9 @@ impl proto::ledger_service_server::LedgerService for HistoryNode {
         _: tonic::Request<proto::GetServiceInfoRequest>,
     ) -> Result<tonic::Response<proto::GetServiceInfoResponse>, tonic::Status> {
         let mut info = proto::GetServiceInfoResponse::default();
+        let mut genesis = [0; 32];
+        genesis[..4].copy_from_slice(&[0x12, 0x34, 0xab, 0xcd]);
+        info.chain_id = Some(sui_sdk_types::Digest::new(genesis).to_string());
         info.lowest_available_checkpoint =
             Some(self.floor.load(std::sync::atomic::Ordering::SeqCst));
         Ok(tonic::Response::new(info))
@@ -290,4 +309,47 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
         .to_string()
         .contains("pruned"));
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
+}
+
+async fn serve_watch(node: Node) -> (String, Server) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = Server(tokio::spawn(async move {
+        tonic::transport::Server::builder().add_service(proto::ledger_service_server::LedgerServiceServer::new(node))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener)).await.unwrap();
+    }));
+    (url, server)
+}
+
+#[tokio::test]
+async fn version_batch_fallback_counts_attempts_and_verifies_chain_before_reading() {
+    let primary = Node { response: Arc::new(Mutex::new(version(Some(1)))), requests: Default::default(), unavailable: Arc::new(Mutex::new(true)), wrong_chain: false };
+    let backup = Node { response: Arc::new(Mutex::new(version(Some(1)))), requests: Default::default(), unavailable: Default::default(), wrong_chain: false };
+    let (primary_url, _primary) = serve_watch(primary.clone()).await;
+    let (backup_url, _backup) = serve_watch(backup.clone()).await;
+    let base = client(&primary_url);
+    let mut config = base.config.clone(); config.rpc_urls.push(backup_url);
+    let sui = SuiClient::load(config.clone(), base.signer.clone()).unwrap();
+    sui.verified[0].store(true, std::sync::atomic::Ordering::Release);
+    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll();
+    assert!(!sui.poll_changed(&["0xa".into()], &[], 86400, 60).await.unwrap());
+    assert_eq!(*primary.requests.lock().unwrap(), 1);
+    assert_eq!(*backup.requests.lock().unwrap(), 1);
+    assert_eq!(sui.read_stats().0, 3); // Failed batch + identity probe + successful batch.
+    *primary.unavailable.lock().unwrap() = false;
+    assert!(!sui.poll_changed(&["0xa".into()], &[], 86400, 60).await.unwrap());
+    assert_eq!(sui.read_stats().0, 4); // Healthy primary remains one read.
+
+    let wrong = Node { wrong_chain: true, ..backup.clone() };
+    *wrong.requests.lock().unwrap() = 0;
+    let (wrong_url, _wrong) = serve_watch(wrong.clone()).await;
+    config.rpc_urls[1] = wrong_url;
+    let sui = SuiClient::load(config, base.signer.clone()).unwrap();
+    sui.verified[0].store(true, std::sync::atomic::Ordering::Release);
+    *primary.unavailable.lock().unwrap() = true;
+    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll();
+    let error = sui.poll_changed(&["0xa".into()], &[], 86400, 60).await.err().unwrap();
+    assert!(error.to_string().contains("chain identifier mismatch"), "{error}");
+    assert_eq!(*wrong.requests.lock().unwrap(), 0); // No unverified object read.
+    assert_eq!(sui.read_stats().0, 2); // Failed primary + rejected identity probe.
 }

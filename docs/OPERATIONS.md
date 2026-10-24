@@ -78,7 +78,7 @@ admission and the operator double read are **not** cached.
 
 ```toml
 [runtime]
-poll_seconds = 10
+poll_seconds = 1800 # SF-123 default; choose a shorter explicit interval as needed
 event_discovery_seconds = 60
 full_revalidation_seconds = 86400
 ```
@@ -104,6 +104,11 @@ data; diagnostics and component crashes wake archive consideration. Fleet-budget
 balance/account checks happen before writes, so idle enrollment no longer draws
 gas merely to build a float. Failed writes stay queued with the existing funding
 and durable-transaction recovery behavior.
+
+Queued receipts validate current authority and retry before the version gate or
+fallible discovery, and new outcomes flush before the normal cadence sleep.
+RPC fallback verifies each candidate chain before use; metrics count every
+explicit read attempt, identity probe and partial event response, including retries.
 
 Each poll logs `read_requests` and `response_bytes` for daemon reads, including
 fleet producer reads between polls as well. Bytes are encoded protobuf response
@@ -632,3 +637,52 @@ are unnecessary in this mode. Do not remove a pending transaction or ciphertext
 to force a fresh upload: reconcile retained effects first. Owner prepaid storage,
 revocation and cadence remain enforced on chain. A static export or simulator run
 does not establish live Site deployment, certification or production acceptance.
+
+## Check cadence and endpoint fallback (SF-123)
+
+`[runtime] poll_seconds` defaults to 1800 (30 minutes); customers may set
+1..=86400 seconds, including 3600 for hourly checks. `rollout_poll_seconds`
+defaults to 60, accepts the same bounds, and is capped at `poll_seconds`.
+Known active maintenance windows and deployments waiting for rollout eligibility
+use the faster cadence. An observed active calendar window remains in bounded
+journal metadata until its recorded end/expiry, even after an update completes
+and across daemon restarts. Overlapping observed periods coalesce; this clock
+metadata never grants admission authority. This is a local fallback until SF-130 supplies fleet settings.
+An undiscovered deployment or remotely changed control is observed at the next
+check; local timers cannot anticipate unpublished changes.
+
+After discovering controls, the daemon arms a local wakeup for the latest of
+scheduled start, maintenance-window start and durable advance-notice completion.
+Thus a known window shorter than 30 minutes can still be entered. Restarts
+reconstruct deadlines from the journal. Every wake re-reads identity, targeting,
+controls and grants; a timer grants no authority. Paused, terminal and impossible
+windows do not cause a tight loop. Failures use exponential equal jitter with
+millisecond randomness (initially 1–2 seconds, capped at one hour or twice the
+configured check interval, whichever is lower); a successful check resets it.
+Discovery/reconciliation failure backoff takes precedence over control wakeups
+during an outage. Receipt-delivery failures stay queued and logged independently;
+they do not fail an otherwise successful check or suppress local timers, even
+when a deleted deployment or lost targeting makes delivery permanently impossible.
+
+The manifest may include `rpc_urls`, an ordered list of at most eight gRPC v2
+endpoints. `[sui] rpc_urls` is an optional local override. An empty or omitted
+list falls back to the existing manifest `rpc_url`, preserving older manifests.
+Newly generated manifests include a one-element list. For pilots put Mysten's
+public endpoint first (testnet `https://fullnode.testnet.sui.io:443`), followed by
+an explicitly configured provider or your own indexed node. No provider is
+purchased or automatically discovered.
+
+Before using a candidate the daemon verifies its chain identity. A missing,
+malformed or mismatched identity is a hard rejection, never a reason to try a
+different chain. Unavailable, rate-limited (including HTTP 429), and timed-out
+calls try the next endpoint in order. Calls and whole event pages have a
+30-second timeout per candidate; partial event pages are discarded before
+retrying, so no cursor advances over missing frames. Simulation retries rebuild
+the same intended call and retain verify-before-sign checks. Execution retries
+submit the same signed bytes; effects still determine success. Configure endpoints
+without credentials in URLs and ensure every candidate retains the required
+indexed history. Other authorization, data and execution errors fail closed.
+
+Set staged rollout `offline_timeout_ms` **above the normal check interval plus
+worst-case download/apply/report time** (and allow for network/backoff delays).
+Do not keep the old few-second stall timeout when normal checks take 30 minutes.
