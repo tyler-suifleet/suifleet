@@ -379,10 +379,19 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertEqual(sleeps, [41.0])
         self.assertIn('"x-ratelimit-remaining": "0"', logs[0])
 
+    def test_runner_quota_reset_from_failed_ci_fits_default_budget(self):
+        # Run 40126963456 requested a 605-second wait, beyond the old 150s cap.
+        quota = self.http_error(403, {'X-RateLimit-Remaining': '0',
+                                     'X-RateLimit-Reset': '1000604'})
+        result, sleeps, _, calls = self.retrying_read([quota, self.branches()])
+        self.assertEqual(result, self.branches())
+        self.assertEqual(sleeps, [605.0])
+        self.assertEqual(len(calls), 2)
+
     def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
         limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})
         with self.assertRaisesRegex(RuntimeError, r'unavailable after 4 attempt\(s\).*budget 150s.*HTTP 429.*core') as error:
-            self.retrying_read([limited() for _ in range(10)])
+            self.retrying_read([limited() for _ in range(10)], budget=150)
         self.assertNotIn('Authorization', str(error.exception))
         # A quota that resets beyond the budget fails at once instead of sleeping past the job timeout.
         far = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 3000)})

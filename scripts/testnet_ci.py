@@ -12,9 +12,10 @@ from urllib.request import Request, urlopen
 
 CONTEXT = 'testnet/package-upgrade'
 SHA = re.compile(r'^[0-9a-f]{40}$')
-# The keyless preflight job has a 5-minute timeout; keep all retry waiting
-# well inside it so an exhausted budget fails with a diagnostic, not a kill.
-PUBLIC_RETRY_BUDGET = 150
+# Shared runner anonymous quota can reset several minutes away (605s in CI).
+# Bound recovery to 15 minutes inside the keyless preflight job's 20-minute
+# timeout; a later reset still fails closed without waiting past the deadline.
+PUBLIC_RETRY_BUDGET = 900
 PUBLIC_MAX_ATTEMPTS = 6
 TRANSIENT_STATUS = (500, 502, 503, 504)
 RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining',
