@@ -115,7 +115,7 @@ python3 scripts/retention_worker.py --config /private/retention.json \
   --state-dir /private/retention-state
 ```
 
-The process polls every 30 seconds; run it under the owner's service manager for
+The process polls hourly; run it under the owner's service manager for
 liveness. `--once` executes one reconciliation for diagnostics. The private
 `retention.json` state file records snapshots, independent failures, successful
 digests/epochs and notification status. A file lock permits one worker. Atomic

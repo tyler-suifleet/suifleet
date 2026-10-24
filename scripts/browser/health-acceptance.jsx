@@ -2,6 +2,8 @@
 // page, dApp Kit and telemetry verification. The wallet and chain reads are
 // fixtures; the health service is a real HTTP server serving signed reports.
 import React from "react";
+import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
+import { deriveDynamicFieldID } from "@mysten/sui/utils";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createDAppKit, DAppKitProvider } from "@mysten/dapp-kit-react";
@@ -32,7 +34,7 @@ const responses = manifestClient(m);
 client.ledgerService.getServiceInfo = responses.ledgerService.getServiceInfo;
 client.getObject = responses.getObject;
 // Device detail history uses these hooks too; this health-only fixture has no deployments/groups.
-client.listEvents = async () => ({ events: [], hasNextPage: false, endCursor: null });
+client.ledgerService.listEvents = responses.ledgerService.listEvents;
 const device = (d) => ({ objectId: d.id, type: type("device_registry::Device"), content: DeviceBcs.serialize({
   id: d.id, name: d.name, device_address: fixture.signer, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() });
 client.listOwnedObjects = async ({ type: wanted }) => {
@@ -41,7 +43,18 @@ client.listOwnedObjects = async ({ type: wanted }) => {
     : fixture.devices.filter((d) => !d.activated).map(device);
   return { objects, hasNextPage: false };
 };
-client.getObjects = async ({ objectIds }) => ({ objects: objectIds.map((id) => device(fixture.devices.find((d) => d.id === id))) });
+const identities = new Map(fixture.devices.filter(d => d.activated).map(d => {
+  const keyType = type("device_registry::IdentityKey");
+  const fieldId = deriveDynamicFieldID(m.shared_objects.registry.id, TypeTagSerializer.parseFromStr(keyType), bcs.Address.serialize(d.id).toBytes());
+  const Field = bcs.struct("Field", { id: bcs.Address, name: bcs.Address, value: IdentityBcs });
+  return [fieldId, {objectId:fieldId,type:`0x2::dynamic_field::Field<${keyType},${type("device_registry::Identity")}>`,
+    content:Field.serialize({id:fieldId,name:d.id,value:{signer:fixture.signer,revoked:false,owner_cap:d.cap}}).toBytes()}];
+}));
+client.getObjects = async ({ objectIds }) => ({ objects: objectIds.map(id => {
+  if (identities.has(id)) return identities.get(id);
+  const found = fixture.devices.find(d => d.id === id);
+  return found ? device(found) : new ObjectError(id,"not found",{reason:"notFound"});
+}) });
 client.getDynamicField = async ({ name }) => {
   const id = normalizeSuiAddress([...name.bcs].map((b) => b.toString(16).padStart(2, "0")).join(""));
   const found = fixture.devices.find((d) => d.id === id && d.activated);

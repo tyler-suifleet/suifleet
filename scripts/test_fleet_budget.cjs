@@ -375,3 +375,41 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
   assert.equal(costs.estimate(base).protectedCapacity, undefined);
   console.log('PASS: archive growth above 1024 records and deposit-independent projections');
 }
+
+// Render the actual manager with failed/loading account reads. Fleet-wide
+// containment must remain available, without stale totals or false enrollment.
+{
+  const ts = appRequire('typescript');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(root, 'dapp/src/components/FleetBudget.tsx'), 'utf8');
+  const manager = source.slice(source.indexOf('export function BudgetManager()'), source.indexOf('/** The live Walrus epoch'));
+  const compiled = ts.transpileModule(manager, { compilerOptions: {
+    target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX,
+  } }).outputText;
+  const view = { id: 'budget', capId: 'cap', balance: 100n, defaultLimits: budget.DEFAULT_LIMITS,
+    lowBalanceThreshold: 0n, totalDeposited: 100n, totalWithdrawn: 0n, totalPaid: 0n, totalAllocated: 0n, totalReclaimed: 0n };
+  const stale = [{ reserve: 999n, limits: budget.DEFAULT_LIMITS, periodStartMs: 0n, drawnInPeriod: 0n, drawsInPeriod: 0n }];
+  for (const paused of [false, true]) for (const query of [
+    { error: new Error('Incomplete account batch') },
+    { error: new Error('Device index mismatch'), data: stale },
+    { data: undefined },
+  ]) {
+    const sandbox = { exports: {}, require: appRequire, ...budget, runwayDays: costs.runwayDays, NETWORK: 'fixture',
+      useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
+      useFleetBudget: () => ({ budget: { ...view, paused } }),
+      useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
+      useSubmit: () => ({ submit: () => {}, pending: false }), useState: () => ['', () => {}],
+      useQuery: () => query, sui: (value) => `${value} SUI`,
+    };
+    vm.runInNewContext(compiled, sandbox);
+    const html = appRequire('react-dom/server').renderToStaticMarkup(sandbox.exports.BudgetManager());
+    assert.ok(html.includes(paused ? 'Resume all devices' : 'Pause all devices'));
+    assert.ok(html.includes('Withdraw unallocated funds'));
+    assert.ok(html.includes('Deposited 100 SUI'));
+    assert.ok(html.includes(query.error ? query.error.message : 'Loading budget accounts'));
+    for (const hidden of ['<table', 'not enrolled', 'Enroll with float', '999 SUI', 'No draws this period', 'days left', '<ul']) {
+      assert.ok(!html.includes(hidden), `unavailable account data must not render ${hidden}`);
+    }
+  }
+  console.log('PASS: budget pause/resume and withdrawal survive failed, stale-error and loading account queries without misleading account UI');
+}
