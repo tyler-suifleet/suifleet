@@ -62,10 +62,13 @@ module sui_edge::rollout_health_tests {
             let owner = ts::take_from_sender<DeviceOwnerCap>(&s);
             registry::revoke_device(&mut r, &owner); ts::return_to_sender(&s, owner);
         };
+        // The same post-apply sample remains valid after the former 120s TTL,
+        // including through the bake. Only grant binding and identity matter.
+        clock::set_for_testing(&mut c, 360001);
         dm::advance_rollout_onchain(&mut d, &r, vector[], &c, ts::ctx(&mut s));
-        clock::set_for_testing(&mut c, 180101);
-        if (healthy) { dm::advance_rollout_onchain(&mut d, &r, vector[], &c, ts::ctx(&mut s)); };
-        progress(&d, if (!healthy) 2 else if (revoke) 0 else 3);
+        clock::set_for_testing(&mut c, 360101);
+        if (healthy && !revoke) { dm::advance_rollout_onchain(&mut d, &r, vector[], &c, ts::ctx(&mut s)); };
+        progress(&d, if (!healthy) 2 else if (revoke) 1 else 3);
         dm::delete_rollout(d, ts::ctx(&mut s)); ts::return_shared(r);
         clock::destroy_for_testing(c); ts::end(s);
     }
