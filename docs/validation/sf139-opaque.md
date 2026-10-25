@@ -326,3 +326,238 @@ watch hosted CI. Fresh exact-head/base checks and independent review remain
 required. Physical, mainnet, production-provider and manual real-wallet acceptance
 remains unrun in #32/#159. This diagnosis and regression do not constitute a fix
 of the external service or merge approval.
+
+### Publisher recovery integration (2026-10-24)
+
+Integrated main `3b7f364` into the SF-139 owner branch. Main includes the
+independently reviewed SF-146 fallback `432fa73` as `c6a3c47` and wallet
+publisher selection as `aea8038` (the implementation also supplied in
+`68942fa`). No duplicate cherry-pick or change to the SF-146 worktree was
+needed. Shared production harness files match main; opaque-data application,
+SDK and scoped-decryption interfaces are unchanged. The merge resolves the
+SF-139 persistent-500 regression to exhaust all publishers and bounded passes
+without returning a blob ID, instead of expecting single-publisher retries.
+
+Fresh scoped checks after integration:
+
+- `python3 -m unittest discover -s scripts/tests -p test_live_common.py`:
+  38 passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  80 tests OK, one skipped.
+- `test_live_fleet_data.py` and `test_opaque_sdk.py` through the same unittest
+  discovery command: one test each, passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  39 tests OK.
+- `python3 -m py_compile scripts/live_common.py scripts/live_wallet_gate.py`
+  and `git diff --check origin/main HEAD`: passed.
+- Fresh `Walrus('testnet').working_publisher()` probe: Mysten returned
+  HTTP 500, "could not find WAL coins with sufficient balance"; the pinned
+  `https://publisher.walrus-01.tududes.com` stored the fresh probe, whose bytes
+  were independently read back through Mysten's aggregator. Publishers paid;
+  no wallet, Sui transaction, funding, shared lease or run allowance was used.
+  This is publisher-selection evidence, not full wallet/feature acceptance.
+
+Existing strict spend/uncertainty accounting, certification, anchor/effects
+verification and read-back remain enforced. No new full chain, Rust, Move,
+OTA or frontend build run is claimed for this harness-only resolution.
+Exact-head/current-base hosted CI, automatic testnet (including the shared
+wallet fixture) and fresh independent review remain required after push.
+Physical acceptance (#32) and final provider/manual-wallet/mainnet acceptance
+(#159) remain deferred and unrun. No merge approval is claimed.
+
+### Current-base recovery integration (2026-10-25)
+
+Integrated snapshot/current main `56215ecb0a6e4ee50b7a8eb58c185cc8f5eb1233`
+(SF-146 reconciliation and per-suite funding) after the independent review of
+`1dab86f` reported no actionable source/security findings. The merge was clean;
+`git diff --exit-code 1dab86f HEAD -- suifleet-edge contracts dapp sdk interfaces`
+passed, confirming no application, contract, SDK or interface change.
+
+Fresh offline checks after integration:
+
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  116 tests OK, 1 skipped.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  39 tests OK (publisher errors and synthetic transaction logs are test fixtures,
+  not live transactions or effects evidence).
+- `python3 -m unittest discover -s scripts/tests -p test_opaque_sdk.py`:
+  1 test OK; corresponding `test_tracking.py`: 10 tests OK.
+- `python3 -m py_compile scripts/ci_testnet_wallet.py scripts/live_package_upgrade.py scripts/sui_toolchain.py scripts/testnet_ci.py scripts/testnet_reconcile.py`:
+  passed. `node --check` for `scripts/sui_tx_inspect.cjs` and
+  `scripts/testnet_reconcile.cjs`: passed. `git diff --check`: passed.
+
+Rust, Move, OTA, frontend and public testnet were not rerun by this repair;
+previous evidence remains historical. This resolves base drift only. Exact-head
+hosted CI, automatic testnet including shared-wallet fixtures, and fresh
+independent evidence review remain required and pending coordinator collection.
+No hosted CI polling, live-wallet mutation, production deployment or hardware
+operation occurred. Deferred physical and final provider/manual-wallet/mainnet
+acceptance remains unrun in #32 and #159.
+
+### Batched-polling base integration (2026-10-25)
+
+Integrated snapshot/current main
+`e543b9d1dd7b156d3300dfbf4914dc4eb2615789`, including SF-122 polling,
+shared funding and bounded publisher fixes. The latest independent review of
+`5b15244` reported no actionable source/security findings; its old-head checks
+are historical, not approval for this integration.
+
+The archive merge retains opaque batch selection, completed-batch fairness and
+verified index retirement alongside main's schedule and pre-write funding checks.
+Opaque exports bypass the empty-log shortcut: IPC/stream intake does not populate
+the log spool and must remain discoverable after idle periods. Publisher tests
+retain both upstream fallback/integrity negatives and the persistent-all-publisher
+500 refusal to acknowledge storage. No contract, SDK or interface migration was
+introduced by the merge.
+
+Fresh checks:
+
+- Rust 1.94.0, `CARGO_BUILD_JOBS=2` and private
+  `CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build`:
+  `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  **441 passed, 4 pre-existing ignored**; corresponding
+  `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed.
+- Every **28 post-build command** from the current `make test-ota` recipe,
+  followed by the opaque round trip below, passed sequentially in disposable
+  network-isolated containers (**29 commands total**). This includes idle poll
+  reads, firmware/supervisor/daemon handoff, configuration, deployment control,
+  telemetry/logs/console, rollout, cadence, budget/fleet settings, recovery,
+  legacy/compact/Quilt archives and independent browser/SDK verification.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  **41 OK**; `-p 'test_testnet*.py'`: **116 OK, 1 skipped**;
+  `-p test_opaque_sdk.py`: **1 OK**; `-p test_tracking.py`: **10 OK**.
+  Synthetic transaction/cleanup diagnostics are mocked failure-path evidence.
+- Network-isolated `suifleet-dev:sf037` container, fresh daemon/examples:
+  `python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim`:
+  passed, including independent native signature/Seal SDK decryption, binary/text
+  assembly, scope/epoch tamper rejection, multi-message stream batches, outage and
+  restart recovery, exact ciphertext/purchase reuse and verified index retirement.
+- In the same pinned container, `node node_modules/typescript/bin/tsc --noEmit`
+  and `node node_modules/next/dist/bin/next build` from `dapp/`: passed.
+  The initial pnpm wrapper refused a noninteractive dependency purge; direct Node
+  entry points avoid dependency mutation. Existing root-owned `.next` output
+  required running the disposable build container as root.
+- `python3 -m py_compile scripts/tests/test_live_common.py scripts/test_opaque_ota.py`,
+  `node --check scripts/verify_opaque_native.cjs` and `git diff --check`: passed.
+
+No fresh Move/local-chain or public-testnet run is claimed by this repair;
+contracts are unchanged. Hosted exact-head/current-base ordinary/security CI,
+automatic public-testnet validation and fresh independent review remain required
+after push. Hosted CI was not polled. Deferred physical acceptance (#32) and final
+provider/manual-wallet/mainnet acceptance (#159) remain unrun. No production
+service deployment, wallet mutation, physical programming or mainnet operation.
+
+### Fleet-data metering base integration (2026-10-25)
+
+Merged snapshot/current main `58fce5b1d73ffc3d1b75c378a8e668124416e3a9`
+(SF-142) cleanly. The latest independent review found no actionable source or
+security defect; pending hosted checks are not approval. `git diff --exit-code
+ec8f035 HEAD -- suifleet-edge contracts sdk interfaces` passed: daemon, contracts,
+SDK and interfaces are unchanged by this integration.
+
+Fresh network-none checks in pinned `suifleet-dev:sf037` containers:
+
+- `node scripts/test_data_metering.cjs` and `node scripts/test_archive_quilt.cjs`:
+  passed, including typed metering failures and actual pinned Quilt geometry.
+- From `dapp/`, `node node_modules/typescript/bin/tsc --noEmit` and
+  `node node_modules/next/dist/bin/next build`: passed; static pages exported.
+- `node scripts/test_fleet_settings_browser.cjs` in `suifleet-dev:sf010-chrome`
+  with `CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell`:
+  passed, actual Chromium settings/pricing/deposit/transaction/failure cases.
+- `python3 scripts/test_opaque_ota.py --binary /build/debug/suifleet --shim
+  /build/debug/examples/grpc_sim_shim`: passed with the prior verified private
+  debug build mounted read-only at `/build`; daemon sources are unchanged.
+  Real IPC/chunk intake, stream batches, outage/restart custody, immutable
+  ciphertext/purchase reuse, verified indexes and independent pinned-SDK
+  signature/Seal binary/text retrieval all passed.
+- Offline `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  41 OK; `-p 'test_testnet*.py'`: 116 OK, 1 skipped;
+  `-p test_opaque_sdk.py`: 1 OK; `-p test_tracking.py`: 10 OK.
+- `git diff --check`: passed.
+
+Initial browser attempt lacked Chromium in sf037; the browser-equipped pinned
+image passed. Initial non-root Next build could not unlink existing root-owned
+output; disposable root container passed. Initial opaque attempt required root
+for its IPC admin fixture; the root container passed. No test failure was ignored.
+
+The review's nonblocking opt-in opaque idle-read limitation is retained: empty
+opaque-enabled queues bypass the log-only idle shortcut and can repeat chain
+reads each poll after the interval. Default-device idle savings remain intact.
+A future cheap durable queue/stream wake check must preserve post-idle discovery,
+stream checkpoints and restart recovery; no such optimization is claimed here.
+Record this within existing SF-139/#284 rather than create an unauthorized issue.
+
+No fresh Rust compilation, Move/local-chain or public-testnet execution is claimed
+for this frontend-base integration. Prior evidence remains historical. Hosted
+exact-head/current-base CI, automatic testnet and fresh independent review remain
+required after push; no hosted CI was watched or polled. Physical #32 and final
+provider/manual-wallet/mainnet #159 acceptance remain deferred and unrun.
+
+### Signed rollout-health baseline integration (2026-10-25)
+
+Integrated current/snapshot main `40d104f6c2e6ccf1c4ce8aa6297ca8ad9b89911d`
+(SF-138). The latest independent review of `ce8f7db` reported no actionable
+source/security finding; its pending hosted evidence was not approval. The sole
+merge conflict was the acceptance-policy insertion: retained both SF-138 and
+SF-139 with their original deferred checks and retained software gates. Daemon
+IPC, signer policy and chain adapter merged without conflict; the scoped opaque
+handlers coexist with the new signed rollout-health paths. Opaque contracts and
+SDK are unchanged.
+
+Fresh checks on the merged tree:
+
+- Rust 1.94.0 with `CARGO_BUILD_JOBS=2`, private target
+  `/home/tyler/.local/state/suifleet/sf139-build`,
+  `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  **448 passed, 0 failed, 4 pre-existing ignored**.
+  `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed.
+- `/tmp/sf121-tools/sui move test --path contracts --build-env testnet`:
+  **195 passed**; the corresponding `contracts/fleet_data` command: **29 passed**.
+- `scripts/check_contract_interfaces.py`, `scripts/generate_interfaces.py --check`
+  and `scripts/test_generated_interfaces.py`, with the pinned Sui directory in
+  PATH: passed, **704 references, 14 compiled modules, zero drift**, including
+  negative ABI and stale-generated-file cases. The initial host invocation lacked
+  `sui` in PATH; the complete rerun passed with the pinned CLI available.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`: **41 OK**;
+  `-p 'test_testnet*.py'`: **116 OK, 1 skipped**; `-p test_opaque_sdk.py`:
+  **1 OK**; `-p test_deployment_manifest.py`: **18 OK**;
+  `-p test_tracking.py`: **10 OK**. These are offline fixture tests, not live writes.
+- Network-none `suifleet-dev:sf037`: `node scripts/test_rollout.cjs`,
+  `node scripts/test_incremental_history.cjs`, `node scripts/test_archive_quilt.cjs`:
+  passed. From `dapp/`, direct Node TypeScript `tsc --noEmit` and Next `build`:
+  passed with static export. The first non-root build could not unlink existing
+  root-owned output; rerunning in the disposable root container passed.
+- Network-none `suifleet-dev:sf010-chrome`,
+  `CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell`,
+  `node scripts/test_fleet_settings_browser.cjs`: exit 0.
+- All **28 post-build commands** generated by `make -n INSIDE_DEV_CONTAINER=1
+  test-ota`, plus `scripts/test_opaque_ota.py` (**29 total**), passed sequentially
+  with fresh binaries/examples mounted read-only in network-none sf037 containers.
+  Used root for admin fixtures and UID 1001 for the CloudWatch test. Coverage
+  includes signed rollout-health outage/restart retry without reapply/duplicate
+  receipt, cadence, supervision, updates, recovery, legacy/compact/Quilt archives,
+  and opaque multi-message streams, certification outage, exact purchase/ciphertext
+  reuse, verified index retirement and independent pinned SDK binary/text retrieval.
+  The rollout fixture emitted BrokenPipeError during its outage scenario and
+  subsequently passed; no command failure was ignored.
+
+Main advanced again during validation to
+`3c6625c33b238914a2b22d4b7c1a3dd1a69aff27` (coordinator dependency bookkeeping).
+Merged it cleanly. `git diff --exit-code 73d704ed HEAD -- suifleet-edge contracts
+ dapp sdk interfaces` passed: tested application sources remain byte-identical.
+`python3 -m unittest discover -s tools/pr-coordinator/tests -p
+ test_merge_dependencies.py`: **3 OK**;
+`PYTHONPATH=tools/pr-coordinator python3 -m unittest discover -s
+ tools/pr-coordinator/tests -p test_pending_repair_transfer.py`: **2 OK**;
+tracking tests rerun: **10 OK**. The initial transfer-test invocation lacked
+PYTHONPATH and failed import; the correctly configured run passed.
+
+No fresh local-chain upgrade or public-testnet execution is claimed. Prior live
+roundtrip/upgrade evidence remains historical. Hosted exact-head/current-base CI,
+automatic testnet status and fresh independent review are pending coordinator
+gates after push; no hosted CI was watched or polled. Physical/target acceptance
+remains unrun in #32; actual mainnet and final provider/manual-wallet acceptance
+remain unrun in #159/#32. No deployment, hardware programming, production
+credentials or shared-wallet mutation occurred. Only the coordinator merges.

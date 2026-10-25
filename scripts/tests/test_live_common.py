@@ -293,6 +293,14 @@ class WalrusUploadTests(unittest.TestCase):
         blob, attempts = self.upload(*[server] * len(self.PUBLISHERS), self.STORED)
         self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS + self.PUBLISHERS[:1]))
 
+    def test_persistent_publisher_500_fails_without_acknowledging_storage(self):
+        import urllib.error
+        # Exhaust every publisher and pass: no blob ID may be acknowledged.
+        failure = urllib.error.HTTPError("u", 500, "Internal Server Error", {}, None)
+        error, attempts = self.upload(*[failure] * (live_common.WALRUS_PASSES * len(self.PUBLISHERS)))
+        self.assertIs(error, failure)
+        self.assertEqual(attempts, self.PUBLISHERS * live_common.WALRUS_PASSES)
+
     def test_persistent_primary_outage_uses_other_publishers_with_same_bytes(self):
         import io
         import urllib.error

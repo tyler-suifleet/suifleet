@@ -328,7 +328,9 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         schedule.fingerprint = fingerprint;
         schedule.wake();
     }
-    if schedule.empty && !config.opaque && spool.pending()?.is_empty() && !dir.join("pending.json").try_exists()? {
+    // Opaque intake and stream writes do not populate the log spool. Keep
+    // checking their local queues when opaque exports are enabled.
+    if !config.opaque && schedule.empty && spool.pending()?.is_empty() && !dir.join("pending.json").try_exists()? {
         return Ok(());
     }
     if tokio::time::Instant::now() < schedule.next_due {
@@ -411,7 +413,7 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
             crate::opaque::collect_streams(task, &config.walrus_streams)?;
             crate::opaque::Queue::open(&task.state_dir)?.items().iter().take(16).cloned().collect::<Vec<_>>()
         } else { vec![] };
-        if records.is_empty() && kind == 0 && !shadows_changed && opaque.is_empty() { schedule.empty = !config.opaque; schedule.next_due = tokio::time::Instant::now(); return Ok(()); }
+        if records.is_empty() && kind == 0 && !shadows_changed && opaque.is_empty() { schedule.empty = true; schedule.next_due = tokio::time::Instant::now(); return Ok(()); }
         if kind != 0 && records.len() < 4096 { records.push(Record { source: "daemon".into(), line: if diagnostics { "Owner/support diagnostic request observed" } else { "Supervised component crash observed" }.into() }); }
         if records.is_empty() { records.push(Record { source: "daemon".into(), line: "Shadow state snapshot".into() }); }
         let seq = writer.batch_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("archive sequence exhausted"))?;
