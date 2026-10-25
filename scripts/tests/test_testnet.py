@@ -382,7 +382,7 @@ class PublicEnvironmentTests(unittest.TestCase):
     def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
         limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})
         with self.assertRaisesRegex(RuntimeError, r'unavailable after 4 attempt\(s\).*budget 150s.*HTTP 429.*core') as error:
-            self.retrying_read([limited() for _ in range(10)])
+            self.retrying_read([limited() for _ in range(10)], budget=150)
         self.assertNotIn('Authorization', str(error.exception))
         # A quota that resets beyond the budget fails at once instead of sleeping past the job timeout.
         far = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 3000)})
@@ -395,6 +395,22 @@ class PublicEnvironmentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r'after 3 attempt\(s\)'):
             self.retrying_read(outcomes, attempts=3)
         self.assertEqual(len(outcomes), 7)
+
+    def test_keyless_probe_can_wait_through_one_hourly_quota_reset(self):
+        from testnet_ci import PROBE_RETRY_BUDGET, PUBLIC_RETRY_BUDGET
+        self.assertEqual(PUBLIC_RETRY_BUDGET, 150)
+        far = self.http_error(403, {'X-RateLimit-Remaining': '0',
+                                  'X-RateLimit-Reset': str(1_000_000 + 3600)})
+        result, sleeps, _, calls = self.retrying_read(
+            [far, self.branches()], budget=PROBE_RETRY_BUDGET)
+        self.assertEqual(result, self.branches())
+        self.assertEqual(sleeps, [3601.0])
+        self.assertEqual(len(calls), 2)
+        # Persistently unavailable metadata still fails at the fixed deadline.
+        outcomes = [self.http_error(429, {'Retry-After': '3601'}) for _ in range(3)]
+        with self.assertRaisesRegex(RuntimeError, r'after 2 attempt\(s\).*budget 3700s'):
+            self.retrying_read(outcomes, budget=PROBE_RETRY_BUDGET)
+        self.assertEqual(len(outcomes), 1)
 
     def test_ordinary_denials_are_not_retried(self):
         for error in (self.http_error(403, {'X-RateLimit-Remaining': '42'}, b'{"message":"Resource not accessible by integration"}'),
