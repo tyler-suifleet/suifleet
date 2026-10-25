@@ -121,7 +121,7 @@ def run(binary):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\n'
                 'component_stop_timeout_seconds = 3\ncomponent_max_restarts = 3\n'
                 f'[components]\nconfiguration_overlay_dir = {json.dumps(str(overlay))}\n'

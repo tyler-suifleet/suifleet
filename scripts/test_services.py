@@ -155,7 +155,7 @@ def run():
                 '[sui]\nmanifest_path="deployment.json"\n'
                 f'[device]\nkeypair_path="{key}"\ndevice_object_id="{DEVICE}"\ndevice_cap_id="{CAP}"\n'
                 f'[walrus]\naggregator_url="{url}"\n[apply]\ncommand="/bin/false"\nallow_recipe_commands=true\ntimeout_seconds=30\n'
-                f'[runtime]\nstate_dir="{state}"\npoll_seconds=1\ncomponent_startup_seconds=1\ncomponent_ready_timeout_seconds=2\ncomponent_stop_timeout_seconds=1\ncomponent_max_restarts=0\n'
+                f'[runtime]\nstate_dir="{state}"\npoll_seconds=1\nevent_discovery_seconds=1\ncomponent_startup_seconds=1\ncomponent_ready_timeout_seconds=2\ncomponent_stop_timeout_seconds=1\ncomponent_max_restarts=0\n'
                 '[components.recovery_commands]\napp="true"\n'
                 f'[ipc]\nsocket="{sock}"\nadministrators=[0]\n[ipc.components.app]\nuid={UID}\n')
             log = (root / 'daemon.log').open('a')

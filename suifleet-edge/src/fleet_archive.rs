@@ -67,11 +67,22 @@ struct Pending {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate { pub signature: String, pub bitmap: String, pub message: String }
 #[derive(Default, Serialize, Deserialize)]
-struct Completed { crash: String, #[serde(default)] request_seq: u64,
-    #[serde(default)] shadows: String,
-    #[serde(default)] seq: u64, #[serde(default)] registration: Option<String>,
-    #[serde(default)] certification: Option<String>, #[serde(default)] anchor: Option<String> }
-fn atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+struct Completed {
+    crash: String,
+    #[serde(default)]
+    request_seq: u64,
+    #[serde(default)]
+    shadows: String,
+    #[serde(default)]
+    seq: u64,
+    #[serde(default)]
+    registration: Option<String>,
+    #[serde(default)]
+    certification: Option<String>,
+    #[serde(default)]
+    anchor: Option<String>,
+}
+pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let temporary = path.with_extension("tmp");
     let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temporary)?;
@@ -255,17 +266,81 @@ fn encrypt_archive(task: &Task, config: &Config, fleet: &crate::fleet_data::Flee
     Ok(ciphertext)
 }
 
-pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
-    let Some(config) = &task.config.archives else { return Ok(()); };
-    let settings = task.log_settings.as_ref().ok_or_else(|| anyhow::anyhow!("archives need [logs] collection limits"))?;
-    let dir = task.state_dir.join("fleet-data"); std::fs::create_dir_all(&dir)?;
+/// Local scheduling carries no authority: every due write still revalidates
+/// chain cadence and identity. An empty due spool waits for local data without
+/// postponing its first archive by a whole batch interval.
+pub struct Schedule {
+    pub next_due: tokio::time::Instant,
+    fingerprint: String,
+    empty: bool,
+}
+impl Default for Schedule {
+    fn default() -> Self {
+        Self {
+            next_due: tokio::time::Instant::now(),
+            fingerprint: String::new(),
+            empty: false,
+        }
+    }
+}
+impl Schedule {
+    pub fn wake(&mut self) {
+        self.next_due = tokio::time::Instant::now();
+        self.empty = false;
+    }
+}
+
+pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
+    let Some(config) = &task.config.archives else {
+        return Ok(());
+    };
+    let settings = task
+        .log_settings
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("archives need [logs] collection limits"))?;
+    let dir = task.state_dir.join("fleet-data");
+    std::fs::create_dir_all(&dir)?;
     let mut spool = telemetry::Spool::open(&dir.join("logs"), settings.buffer_max)?;
     let collector = crate::logs::Task { binding: crate::logs::Binding { chain_identifier: task.sui.manifest().chain_identifier.clone(),
         registry: task.sui.manifest().shared_objects.registry.id.clone(), device_id: task.device_id.clone() },
         // Collection has no network effect. This URL is never used.
-        url: "http://127.0.0.1/".parse()?, state_dir: task.state_dir.clone(), overlay_dir: task.overlay_dir.clone(),
-        interval_seconds: settings.interval_seconds, max_lines: settings.max_lines_per_interval, buffer_max: settings.buffer_max, signer: task.signer.clone() };
+        url: "http://127.0.0.1/".parse()?,
+        state_dir: task.state_dir.clone(),
+        overlay_dir: task.overlay_dir.clone(),
+        interval_seconds: settings.interval_seconds,
+        max_lines: settings.max_lines_per_interval,
+        buffer_max: settings.buffer_max,
+        signer: task.signer.clone(),
+    };
     collector.collect(&mut spool)?;
+    let inventory = telemetry::inventory(&task.state_dir);
+    let crashed: Vec<_> = inventory
+        .components
+        .iter()
+        .filter(|c| matches!(c.phase.as_deref(), Some("broken" | "backoff")))
+        .collect();
+    let shadows = task
+        .services
+        .lock()
+        .unwrap()
+        .health_sources()
+        .shadows
+        .map(|store| store.lock().unwrap().snapshot());
+    let fingerprint = hex::encode(Sha256::digest(serde_json::to_vec(&(crashed, shadows))?));
+    if fingerprint != schedule.fingerprint {
+        schedule.fingerprint = fingerprint;
+        schedule.wake();
+    }
+    if schedule.empty && spool.pending()?.is_empty() && !dir.join("pending.json").try_exists()? {
+        return Ok(());
+    }
+    if tokio::time::Instant::now() < schedule.next_due {
+        return Ok(());
+    }
+    schedule.empty = false;
+    // Retry failures on a bounded cadence, without revalidating every poll.
+    schedule.next_due = tokio::time::Instant::now() + Duration::from_secs(60);
+    task.sui.validate_deployment().await?;
     task.sui.validate_cap(&task.cap, &task.device_id).await?;
     let (fleet, writer) = task.config.read(&task.sui, &task.device_id).await?;
     let completed: Completed = load(&dir.join("completed.json"))?.unwrap_or_default();
@@ -285,13 +360,33 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
         let shadows = task.services.lock().unwrap().health_sources().shadows.map(|store| store.lock().unwrap().snapshot());
         let shadow_fingerprint = match &shadows { Some(s) => hex::encode(Sha256::digest(serde_json::to_vec(s)?)), None => String::new() };
         let shadows_changed = shadows.is_some() && shadow_fingerprint != completed.shadows;
-        let shadow_bytes = match &shadows { Some(s) => serde_json::to_vec(s)?.len(), None => 0 };
-        let last = if kind != 0 { writer.emergency_at_ms } else { writer.batch_at_ms };
-        let interval = if kind != 0 { fleet.emergency_interval_ms } else { crate::fleet_settings::archive_interval_ms(fleet.batch_interval_ms, fleet_settings) };
-        if last.is_some_and(|at| now < at.saturating_add(interval)) { return Ok(()); }
-        let mut records = Vec::new(); let mut logs = Vec::new(); let mut bytes = 0;
-        let mut dropped_lines = spool.dropped().saturating_mul(crate::logs::MAX_RECORDS as u64);
-        for (seq,path) in spool.pending()? {
+        let shadow_bytes = match &shadows {
+            Some(s) => serde_json::to_vec(s)?.len(),
+            None => 0,
+        };
+        let last = if kind != 0 {
+            writer.emergency_at_ms
+        } else {
+            writer.batch_at_ms
+        };
+        let interval = if kind != 0 {
+            fleet.emergency_interval_ms
+        } else {
+            crate::fleet_settings::archive_interval_ms(fleet.batch_interval_ms, fleet_settings)
+        };
+        if let Some(at) = last.filter(|at| now < at.saturating_add(interval)) {
+            schedule.next_due = tokio::time::Instant::now()
+                + Duration::from_millis(at.saturating_add(interval) - now);
+            return Ok(());
+        }
+        schedule.next_due = tokio::time::Instant::now() + Duration::from_millis(interval);
+        let mut records = Vec::new();
+        let mut logs = Vec::new();
+        let mut bytes = 0;
+        let mut dropped_lines = spool
+            .dropped()
+            .saturating_mul(crate::logs::MAX_RECORDS as u64);
+        for (seq, path) in spool.pending()? {
             let envelope: telemetry::Envelope = serde_json::from_slice(&std::fs::read(path)?)?;
             let message = zeroize::Zeroizing::new(STANDARD.decode(envelope.message)?);
             let batch: crate::logs::Batch = serde_json::from_slice(&message).map_err(|_| anyhow::anyhow!("invalid archived log batch"))?;
@@ -300,11 +395,20 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
                 && crate::sui_client::same_id(&batch.device_id,&task.device_id) && crate::sui_client::same_id(&batch.signer,&task.signer.address()), "foreign log spool binding");
             let size = message.len();
             // The shadow snapshot shares the plaintext budget with the logs.
-            if bytes + size + shadow_bytes > 2*1024*1024 || records.len() + batch.records.len() > 4096 { break; }
-            bytes += size; logs.push(seq); dropped_lines = dropped_lines.max(batch.dropped_lines);
-            records.extend(batch.records.into_iter().map(|r| Record { source: r.source, line: r.line }));
+            if bytes + size + shadow_bytes > 2 * 1024 * 1024
+                || records.len() + batch.records.len() > 4096
+            {
+                break;
+            }
+            bytes += size;
+            logs.push(seq);
+            dropped_lines = dropped_lines.max(batch.dropped_lines);
+            records.extend(batch.records.into_iter().map(|r| Record {
+                source: r.source,
+                line: r.line,
+            }));
         }
-        if records.is_empty() && kind == 0 && !shadows_changed { return Ok(()); }
+        if records.is_empty() && kind == 0 && !shadows_changed { schedule.empty = true; schedule.next_due = tokio::time::Instant::now(); return Ok(()); }
         if kind != 0 && records.len() < 4096 { records.push(Record { source: "daemon".into(), line: if diagnostics { "Owner/support diagnostic request observed" } else { "Supervised component crash observed" }.into() }); }
         if records.is_empty() { records.push(Record { source: "daemon".into(), line: "Shadow state snapshot".into() }); }
         let seq = writer.batch_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("archive sequence exhausted"))?;
@@ -400,6 +504,7 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
             anyhow::ensure!(string(&prepared, "blob_id")? == pending.blob_id && string(&prepared,"root_hash")? == pending.root_hash
                 && prepared["size"].as_u64() == pending.size, "pending Quilt encoding changed before purchase");
         }
+        task.before_write().await?;
         let digest = task.sui.register_archive(&task.config, config, &task.cap, &pending.blob_id, &pending.root_hash,
             pending.size.unwrap_or(std::fs::metadata(dir.join("ciphertext.bin"))?.len()), &dir.join("register.bcs")).await?;
         pending.registration = Some(digest); atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
@@ -414,8 +519,19 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
         pending.certificate = Some(serde_json::from_value(result)?); atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     if pending.certification_digest.is_none() {
-        match task.sui.certify_archive(&task.config,config,blob,pending.certificate.as_ref().unwrap(),&dir.join("certify.bcs")).await {
-            Ok(digest) => pending.certification_digest=Some(digest),
+        task.before_write().await?;
+        match task
+            .sui
+            .certify_archive(
+                &task.config,
+                config,
+                blob,
+                pending.certificate.as_ref().unwrap(),
+                &dir.join("certify.bcs"),
+            )
+            .await
+        {
+            Ok(digest) => pending.certification_digest = Some(digest),
             Err(error) => {
                 // Missing signed intent means simulation failed before signing,
                 // or effects proved a failed execution. Refresh confirmations
@@ -431,6 +547,7 @@ pub async fn tick(task: &Task, fleet_settings: Option<&crate::fleet_settings::Se
         atomic(&pending_path,&serde_json::to_vec(&pending)?)?;
     }
     if pending.anchor_digest.is_none() {
+        task.before_write().await?;
         pending.anchor_digest=Some(if let Some(previous) = &pending.previous_head {
             let hash = if previous.is_empty() { vec![] } else { Sha256::digest(previous).to_vec() };
             task.sui.anchor_archive_compact(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),hash,&dir.join("anchor.bcs")).await?
