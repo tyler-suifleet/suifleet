@@ -1,0 +1,166 @@
+{
+  "result": "PASS",
+  "chain": "e0cdd7f9",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+  "head": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+  "origins": {
+    "FleetData": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "DeviceKey": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "DeviceData": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "AnchorKey": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "Anchor": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "CompactHeadKey": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "CompactHead": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "HealthUpdated": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "DataAnchored": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+    "DiagnosticKey": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "DiagnosticRequest": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "ItemKey": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "DataItem": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+    "ReadGrantKey": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336"
+  },
+  "digests": {
+    "publish core": "GRjtM7fHZm4YopZXaKAPgknHs3MjCzF6tTt9BS3TAW6B",
+    "publish WAL": "C9Yf2wgfiXZwmNPZpAsLqBcmRXrsg3iKu16SS6vEVBv5",
+    "publish Walrus": "XAm4iZupL5fMXv98x2LLNs8Rtjki92STsSDSGRm2Jy6",
+    "publish storage": "A1ypnkGqcA5pXTxWXm1TQxrYtZPDrwFBujKjBT6N5P4W",
+    "publish base data": "7V9xP1cAa2PUx6a8rf3Tvh1A42NcaW7wDd1PKoFHhM7s",
+    "register existing device": "79ekuavP3geiCXTSWW3hEfRaviVPRXM13p1kFsymstDF",
+    "create budget": "CDJ68g8ypozv5YdQV7126jBspA5nNCbVunkBjyctaAfU",
+    "enroll account": "Hxz5HH6vqPLk4s6SvgRY7Pyx55XyFR1mPMu9VFM3WFHJ",
+    "create actual storage": "5ByKEY8KKhNysgRbxf7xFN3VZCiKCp23ersarU3pSZVP",
+    "create base fleet": "BwFStDog8s2YLMkBQ79MPPZbP9gfa3cpfksKLxPKWUV3",
+    "create base writer": "HNURTJ4XSa8E8bkwwbANu4Np5KeHzWoG8VFcQMCz7TXw",
+    "upgrade data": "3R75bQgNioTcyf53EnTCCq3SyJH9h1yf2g4ZVsg6T5gc",
+    "diagnostics on existing writer": "6S7RZ7nUnWk8bc2rq9uMRLeFmwYQrYN17PQNu8HZJxtm",
+    "legacy fleet support grant": "7ms24bM4Zmj4URwMshuyxbGbDm9pYbd3HyAfL4YgQ5ws",
+    "scoped stream grant on existing fleet": "6GodyHFDw2Hrzw8igkiFaeLwCbnSjUhtZDxBdTjHWU3N",
+    "revoke scoped stream grant": "28JGmxM2Y4MNcR5KrC4DZ2DeKC65guZDXqAN7tdEtXow",
+    "serverless signed services health": "Eps57c4wECSNKD7vVJyxqNFRLkS2mPUp88XX59sWdBNd",
+    "revoke device": "ArpA6oSTPxxQCb8g3ShTLN5AyLY7nBxK6MCmoU2x93do"
+  },
+  "attacks": {
+    "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d": {
+      "digest": "HpVsBy93bNk1vbZBe7miLVmJyotvABvRjQm5Ks2xLP7V",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x29be70a608029008c745b92dc9def28be90f91884bb27aaf9d867430f6812fc2::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x29be70a608029008c745b92dc9def28be90f91884bb27aaf9d867430f6812fc2",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336": {
+      "digest": "AJGKGkxPqxCM7gWbhrfZzr9DRPdP8pdQ5p8X7RNdo3wz",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x29be70a608029008c745b92dc9def28be90f91884bb27aaf9d867430f6812fc2::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x29be70a608029008c745b92dc9def28be90f91884bb27aaf9d867430f6812fc2",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "scopedChecks": [
+    {
+      "pkg": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+      "fn": "seal_approve_owner",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x1da49c64e5d446f74ae5005fcb5500e7f196f7dbfb6d00b643a4e92229f3db7d",
+      "fn": "seal_approve_support",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_owner",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_support",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_owner",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "0000000000000000000000000000000000000000000000000000000000000000",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xdead",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02dc4b52aab1527145f2580a9e381ff1095bcc991b496d331e0248d6afa7f336",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0x1d0354e2dcd942f525cd0dc574425bb9bb0328d4f7814bd5b1afaf116e95f689",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    }
+  ],
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ]
+}

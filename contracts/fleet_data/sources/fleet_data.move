@@ -298,6 +298,86 @@ module fleet_data::fleet_data {
         event::emit(DataAnchored { fleet_id: object::id(fleet), device_id: writer.device_id, index, anchor });
     }
 
+    /// SF139 additive scoped index. Original FleetData/DeviceData layouts stay stable.
+    public struct ItemKey has copy, drop, store { batch: u64, item: u64 }
+    public struct DataItem has copy, drop, store {
+        anchor_index: u64, sequence: u64, stream: String, key: String, content_type: String,
+        metadata: vector<u8>, upload: String, chunk: u32, chunks: u32, total_size: u64,
+        size: u64, sha256: vector<u8>, identifier: String, ciphertext_size: u64,
+        ciphertext_sha256: vector<u8>,
+    }
+    public struct ReadGrantKey has copy, drop, store { device_id: ID, stream_hash: vector<u8>, reader: address }
+    public fun set_read_grant(fleet: &mut FleetData, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        device_id: ID, stream_hash: vector<u8>, reader: address, allowed: bool) {
+        owner(fleet, budget, cap);
+        assert!(writer_id(fleet, device_id).is_some() && (stream_hash.is_empty() || stream_hash.length() == 32), EBounds);
+        let key = ReadGrantKey {device_id, stream_hash, reader};
+        if (df::exists(&fleet.id, key)) { let _: bool = df::remove(&mut fleet.id, key); };
+        if (allowed) df::add(&mut fleet.id, key, true);
+    }
+    /// Exactly120 bytes. Every legacy approval (including old packages) refuses >104.
+    public fun scoped_identity_matches(fleet: &FleetData, id: &vector<u8>, device_id: ID, stream_hash: &vector<u8>): bool {
+        assert!(fleet.version == VERSION, EVersion);
+        if (id.length() != 120 || stream_hash.length() != 32 || writer_id(fleet, device_id).is_none()) return false;
+        let mut prefix = identity_prefix(fleet);
+        prefix.append(device_id.to_bytes()); prefix.append(*stream_hash);
+        let mut i = 0;
+        while (i < 104) { if (id[i] != prefix[i]) return false; i = i + 1; };
+        true
+    }
+    entry fun seal_approve_scoped_owner(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, cap: &BudgetOwnerCap, device_id: ID, stream_hash: vector<u8>) {
+        owner(fleet, budget, cap);
+        assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
+    }
+    entry fun seal_approve_scoped_reader(id: vector<u8>, fleet: &FleetData,
+        device_id: ID, stream_hash: vector<u8>, ctx: &TxContext) {
+        assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
+        assert!(df::exists(&fleet.id, ReadGrantKey {device_id, stream_hash, reader:ctx.sender()})
+            || df::exists(&fleet.id, ReadGrantKey {device_id, stream_hash:vector[], reader:ctx.sender()}), EAccess);
+    }
+    /// One anchor transaction indexes up to16 independent opaque patches.
+    public fun anchor_items(fleet: &FleetData, writer: &mut DeviceData,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
+        seq: u64, kind: u8, ciphertext_sha256: vector<u8>, items: vector<vector<u8>>,
+        clock: &Clock, ctx: &mut TxContext) {
+        assert!(!items.is_empty() && items.length() <= 16, EBounds);
+        let anchor_index = writer.anchor_count;
+        anchor_impl(fleet, writer, budget, account, registry, cap, storage,
+            blob_object_id, seq, kind, ciphertext_sha256, false, vector[], clock, ctx);
+        let mut n = 0;
+        while (n < items.length()) {
+            let mut bytes = bcs::new(items[n]);
+            let sequence = bytes.peel_u64();
+            let stream = std::string::utf8(bytes.peel_vec_u8());
+            let key = std::string::utf8(bytes.peel_vec_u8());
+            let content_type = std::string::utf8(bytes.peel_vec_u8());
+            let metadata = bytes.peel_vec_u8();
+            let upload = std::string::utf8(bytes.peel_vec_u8());
+            let chunk = bytes.peel_u32(); let chunks = bytes.peel_u32();
+            let total_size = bytes.peel_u64(); let size = bytes.peel_u64();
+            let sha256 = bytes.peel_vec_u8(); let identifier = std::string::utf8(bytes.peel_vec_u8());
+            let ciphertext_size = bytes.peel_u64(); let ciphertext_sha256 = bytes.peel_vec_u8();
+            assert!(bytes.into_remainder_bytes().is_empty(), EBounds);
+            assert!(stream.length() > 0 && stream.length() <= 128 && key.length() > 0 && key.length() <= 256
+                && content_type.length() > 0 && content_type.length() <= 128 && metadata.length() <= 6144
+                && upload.length() == 64 && chunks > 0 && chunks <= 2731 && chunk < chunks
+                && total_size <= 67108864 && size <= 24576 && size <= total_size && sha256.length() == 32
+                && identifier.length() > 0 && identifier.length() <= 64
+                && ciphertext_size > 0 && ciphertext_size <= 131072 && ciphertext_sha256.length() == 32, EBounds);
+            df::add(&mut writer.id, ItemKey {batch:seq,item:n}, DataItem {anchor_index,sequence,stream,key,content_type,
+                metadata,upload,chunk,chunks,total_size,size,sha256,identifier,ciphertext_size,ciphertext_sha256});
+            n = n + 1;
+        };
+    }
+    #[test_only]
+    public fun item_exists_for_testing(writer: &DeviceData,batch:u64,item:u64):bool {df::exists(&writer.id,ItemKey {batch,item})}
+    #[test_only]
+    public fun approve_scoped_for_testing(id: vector<u8>, fleet: &FleetData, device_id: ID, stream_hash: vector<u8>, ctx: &TxContext) {
+        seal_approve_scoped_reader(id, fleet, device_id, stream_hash, ctx)
+    }
+
     /// Seal accounts only. There is deliberately no device/group approval.
     /// The owner proves current capability custody, so transferring the budget
     /// cap does not leave an implicit grant for the original owner's address.

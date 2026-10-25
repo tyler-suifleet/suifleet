@@ -338,9 +338,10 @@ fn check_fleet_transaction(policy: &Policy, tx: &Transaction,
     anyhow::ensure!(call.package == Address::from_str(&cfg.package_id)? && call.type_arguments.is_empty(), "wrong fleet-data package");
     anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "wrong gas owner/budget");
     let compact = call.function.as_str() == "anchor_compact";
-    let anchor = compact || call.function.as_str() == "anchor";
+    let opaque = call.function.as_str() == "anchor_items";
+    let anchor = compact || opaque || call.function.as_str() == "anchor";
     anyhow::ensure!(anchor || call.function.as_str() == "report_health", "unexpected fleet-data intent");
-    let length = if compact { 13 } else if anchor { 12 } else { 10 };
+    let length = if compact || opaque { 13 } else if anchor { 12 } else { 10 };
     anyhow::ensure!(call.arguments.len() == length && ptb.inputs.len() <= length, "unexpected fleet-data inputs");
     // The SDK deduplicates equal pure BCS inputs (empty vector and kind=0
     // are both [0]). Every argument is still typed/bound below, and no unused
@@ -364,6 +365,13 @@ fn check_fleet_transaction(policy: &Policy, tx: &Transaction,
         let seq: u64 = bcs::from_bytes(pure(8)?)?; let kind: u8 = bcs::from_bytes(pure(9)?)?;
         let hash: Vec<u8> = bcs::from_bytes(pure(10)?)?;
         anyhow::ensure!(seq > 0 && seq <= 9_007_199_254_740_991 && kind <= 2 && hash.len() == 32, "archive anchor bounds");
+        if opaque {
+            anyhow::ensure!(cfg.archives.as_ref().is_some_and(|a|a.opaque), "opaque signing disabled");
+            anyhow::ensure!(pure(11)?.len() <= 8192, "opaque index transaction byte limit");
+            let encoded: Vec<Vec<u8>>=bcs::from_bytes(pure(11)?)?;
+            anyhow::ensure!((1..=16).contains(&encoded.len()), "opaque index item count");
+            for bytes in encoded { let item: crate::opaque::Index=bcs::from_bytes(&bytes)?;item.validate()?; }
+        }
         if compact {
             anyhow::ensure!(cfg.archives.as_ref().is_some_and(|a| a.compact_history), "compact archive signing disabled");
             let previous: Vec<u8> = bcs::from_bytes(pure(11)?)?;
@@ -448,6 +456,15 @@ pub fn check_logs(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
 pub fn check_personal(policy: &Policy, message: &[u8]) -> anyhow::Result<()> {
     let kind = serde_json::from_slice::<serde_json::Value>(message).ok().and_then(|v| v.get("kind").and_then(|k| k.as_str()).map(str::to_owned));
     match kind.as_deref() {
+        Some("fleet-opaque") => {
+            let cfg=policy.fleet_data.as_ref().ok_or_else(||anyhow::anyhow!("fleet data disabled"))?;
+            anyhow::ensure!(cfg.archives.as_ref().is_some_and(|a|a.opaque) && message.len() <= 65536, "opaque signing disabled/oversize");
+            let opaque: crate::opaque::Message=serde_json::from_slice(message)?;opaque.validate()?;
+            anyhow::ensure!(serde_json::to_vec(&opaque)? == message && opaque.chain_identifier==policy.chain_identifier
+                && Address::from_str(&opaque.registry)?==policy.registry && Address::from_str(&opaque.signer)?==policy.device
+                && Address::from_str(&opaque.fleet_id)?==Address::from_str(&cfg.fleet_id)?, "foreign opaque binding");
+            Ok(())
+        }
         Some("fleet-data") => {
             let cfg = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data signing is disabled"))?;
             anyhow::ensure!(cfg.archives.is_some(), "archive signing is disabled");
@@ -1493,7 +1510,7 @@ mod fleet_intent_tests {
         p.fleet_data.as_mut().unwrap().archives=Some(crate::fleet_archive::Config {
             storage_package:"0xf6".into(), storage_type_origin:"0xf6".into(), system_id:"0xf4".into(), walrus_package:"0xf7".into(),
             key_server_package:"0xf5".into(), key_servers:vec![crate::config::KeyServerConfig { object_id:"0xf8".into(),weight:1,api_key_name:None,api_key_file:None }],
-            threshold:1,node:"/usr/bin/node".into(),codec:"/usr/lib/codec.cjs".into(),codec_sha256:"00".repeat(32),compact_history:false,quilt:false,
+            threshold:1,node:"/usr/bin/node".into(),codec:"/usr/lib/codec.cjs".into(),codec_sha256:"00".repeat(32),compact_history:false,quilt:false,opaque:false,walrus_streams:vec![],
         });p
     }
     fn snapshot(p: &Policy) -> crate::telemetry::Snapshot {
@@ -1556,9 +1573,28 @@ mod fleet_intent_tests {
         enabled.fleet_data.as_mut().unwrap().archives.as_mut().unwrap().compact_history = true;
         check_personal(&enabled,&serde_json::to_vec(&archive).unwrap()).unwrap();
     }
+    #[test]
+    fn opaque_personal_and_anchor_intents_are_opt_in_bounded_and_bound() {
+        let mut p=archive_policy();
+        let item=crate::opaque::Item {sequence:0,descriptor:crate::opaque::Metadata {stream:"sensor".into(),key:"raw".into(),content_type:"application/octet-stream".into(),metadata:Default::default(),upload:"ab".repeat(32),chunk:0,chunks:1,total_size:1,size:1,sha256:<sha2::Sha256 as sha2::Digest>::digest([0]).to_vec()},data:"AA==".into(),source_sequence:None};
+        let mut m=crate::opaque::Message {kind:"fleet-opaque".into(),schema:1,chain_identifier:p.chain_identifier.clone(),registry:p.registry.to_string(),fleet_id:"0xf1".into(),device_id:"0xd0".into(),signer:p.device.to_string(),batch_sequence:1,item};
+        let bytes=serde_json::to_vec(&m).unwrap();assert!(check_personal(&p,&bytes).is_err());
+        p.fleet_data.as_mut().unwrap().archives.as_mut().unwrap().opaque=true;
+        check_personal(&p,&bytes).unwrap();
+        for field in ["chain_identifier","registry","fleet_id","signer"] {
+            let mut bad=serde_json::to_value(&m).unwrap();bad[field]=if field=="chain_identifier" {"ffffffff"}else{"0xff"}.into();
+            let bad:crate::opaque::Message=serde_json::from_value(bad).unwrap();assert!(check_personal(&p,&serde_json::to_vec(&bad).unwrap()).is_err());
+        }
+        m.item.data="AQ==".into();assert!(check_personal(&p,&serde_json::to_vec(&m).unwrap()).is_err());
+        let good=archive_transaction("anchor_items",None,100,"0xf0");check(&p,&good).unwrap();
+        assert!(check(&archive_policy(),&good).is_err());
+        assert!(check(&p,&archive_transaction("anchor_items",None,131073,"0xf0")).is_err());
+        assert!(check(&p,&archive_transaction("anchor_items",None,100,"0xfe")).is_err());
+        for index in 0..5 {assert!(check(&p,&archive_transaction("anchor_items",Some((index,"0xfe",index==1)),100,"0xf0")).is_err());}
+    }
     fn archive_transaction(kind:&str, change:Option<(usize,&str,bool)>,size:u64,package:&str)->Vec<u8> {
         let p=archive_policy();let mut b=TransactionBuilder::new();let mut args=Vec::new();
-        let anchor=kind=="anchor" || kind=="anchor_compact";
+        let anchor=kind=="anchor" || kind=="anchor_compact" || kind=="anchor_items";
         let objects:Vec<(&str,bool)>=match kind {
             "register_blob"=>vec![("0x5",true),("0xb0",false),("0xac",false),("0x13",false)],
             "certify_blob"=>vec![("0x5",true),("0xf4",false)],
@@ -1573,6 +1609,10 @@ mod fleet_intent_tests {
         }else{
             args.push(b.object(ObjectInput::shared(a("0x5"),1,false)));args.push(b.pure(&a("0xc0")));args.push(b.pure(&1u64));args.push(b.pure(&0u8));args.push(b.pure(&vec![4u8;32]));
             if kind=="anchor_compact" {args.push(b.pure(&Vec::<u8>::new()));}
+            if kind=="anchor_items" {
+                let item=crate::opaque::Index {sequence:0,stream:"sensor".into(),key:"raw".into(),content_type:"application/octet-stream".into(),metadata:b"{}".to_vec(),upload:"ab".repeat(32),chunk:0,chunks:1,total_size:1,size:1,sha256:vec![0;32],identifier:"data-00".into(),ciphertext_size:size,ciphertext_sha256:vec![1;32]};
+                args.push(b.pure(&vec![bcs::to_bytes(&item).unwrap()]));
+            }
             args.push(b.object(ObjectInput::shared(a("0x6"),1,false)));
         }
         b.move_call(Function::new(a(package),if anchor{"fleet_data"}else{"fleet_storage"}.parse().unwrap(),kind.parse().unwrap()),args);

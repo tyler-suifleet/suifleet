@@ -160,3 +160,16 @@ Physical, actual-mainnet and final production-provider/manual-wallet checks stay
 unrun in SF-031/#32 and SF-087/#159 under the standing implementation split.
 The [sharded receipt evidence](SHARDED_RECEIPTS.md) distinguishes actual 1,000-target
 measurements from the functional 120,000-receipt storage target and pending CI.
+
+SF-139 opaque device data retains authenticated intake, bounded durable chunking,
+raw-byte/signature/ciphertext integrity, quota/restart/failure cases, scoped Seal
+and old-package bypass tests, isolated-chain upgrades, applicable automatic
+testnet/CI and fresh independent review as implementation gates. Its implemented
+SF-140 interface and actual local/public evidence are documented in
+[OPAQUE_DATA.md](OPAQUE_DATA.md) and [SF139 validation](validation/sf139-opaque.md).
+Physical/Pi work, actual mainnet, final production key-provider accounts and manual
+IdP/prover/Slush/extension-wallet acceptance remain explicitly unrun in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). This changes
+acceptance ordering only; it grants no production/hardware/mainnet operation and
+waives no source, software, exact-head CI or review gate.
