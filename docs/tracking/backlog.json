@@ -3120,6 +3120,29 @@
         "Add meaningful offline recovery, restart, safety-fence and budget regression tests; verify installed committed runtime and actual dispatch."
       ],
       "validation": "Full offline coordinator suite, Python compilation/diff checks, Tyler-authored scoped commits and verified runtime hashes/worker handoffs. Public testnet success remains separate."
+    },
+    {
+      "key": "SF-150",
+      "title": "Separate merge prerequisites from development blockers and preflight repair launches",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Native GitHub blocked-by edges added for merge prerequisites prevent atomic assert before a repair can spawn, leaving reserved repairs in progress for hours. Add explicit merge-only prerequisites and a development-dependency launch preflight.",
+      "evidence": "2026-10-25: PR306 job1166 and PR307 job1168 have empty launch directories and no PID; ticket assert rejects remote SF139/SF129 dependencies. Source work uses pinned reviewed APIs under explicit user authorization, with upstream merge required before integration.",
+      "acceptance": [
+        "Represent SF140->SF139 and SF141->SF129 as merge_depends_on, enforce them before integration, and remove only those native development-blocking edges.",
+        "Preflight genuine development dependencies before reserving or resuming a repair. A blocked dependency must leave Review unchanged rather than a workerless In progress claim.",
+        "Verify empty launch receipts, unchanged ownership and stopped old workers; reconcile the two existing reserved launches and retire the superseded stopped implementation record.",
+        "Add offline merge-guard and no-resume dependency regression tests. Install verified committed source and observe both repairs start."
+      ],
+      "validation": "Coordinator regression suite, compile/diff checks, concrete ticket assert diagnostics and verified actual worker dispatch. Preserve claim identities, dirty work, CI/testnet/review gates and user authorship."
     }
   ]
 }
