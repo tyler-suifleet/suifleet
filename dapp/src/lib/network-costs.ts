@@ -21,7 +21,7 @@ export const MEASURED = {
   referenceGasPrice: BigInt(1000),
   /** Highest measured single v3 report at 1,000 targets (docs/validation/sf127-localnet.json).
    * Later cleanup rebates belong to the cleanup sender, not the reporting device. */
-  receipt: gas(1_070_000, 9_515_200, 4_378_968),
+  receipt: gas(1_080_000, 9_515_200, 4_378_968),
   /** One fleet_budget::draw_gas, measured on testnet (docs/validation/sf083-testnet.json). */
   draw: gas(1_000_000, 6_391_600, 5_403_060),
   /** Observed Testnet SF-082 effects; fixture observations, not fleet-size gas ceilings or a production quote. */

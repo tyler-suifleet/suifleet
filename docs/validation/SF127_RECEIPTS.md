@@ -547,3 +547,31 @@ No public-network writes or hardware operations occurred. Hosted CI/automatic
 testnet and fresh independent exact-head/current-base review remain required
 coordinator gates. Physical acceptance stays unrun in #32; mainnet and final
 production-provider/manual-wallet acceptance stay unrun in #159.
+
+### CI estimator synchronization repair (2026-10-25)
+
+CI run `40182529849`, job `121136416089`, failed at
+`test-fleet-settings`: the refreshed 1,000-target receipt evidence records
+1,080,000 MIST computation, while the estimator retained 1,070,000 MIST.
+`node scripts/test_fleet_budget.cjs` reproduced the exact mismatch locally.
+The estimator now uses the recorded maximum single-report effects, preserving
+9,515,200 MIST storage and 4,378,968 MIST rebate. The independently asserted
+Mainnet-rescaled net estimate is consequently 5,244,232 MIST. The evidence
+comparison and all pricing, deposit and transaction checks remain enforced.
+
+Verification for this repair:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/opt/google/chrome/chrome make test-fleet-settings`
+  passed all four scripts, including the real-browser settings flow (host).
+- In `suifleet-dev:sf037`, network disabled, the budget, settings and settings-cost
+  Node scripts passed with pinned Node 22.22.2.
+- In the same pinned image, `cd dapp && pnpm typecheck && pnpm build` passed.
+- `git diff --check` passed. No contracts, daemon or transaction logic changed;
+  their suites and live tests were not rerun for this numeric-input repair.
+
+The branch already contains snapshot/fetched base
+`3c6625c33b238914a2b22d4b7c1a3dd1a69aff27`; merging it was a no-op.
+Hosted CI and automatic public-testnet checks on the repaired head remain pending
+for the coordinator, together with fresh independent review. This is no approval
+or network acceptance claim. Physical acceptance remains deferred in #32;
+mainnet and final provider/manual-wallet acceptance remain deferred in #159.
