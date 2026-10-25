@@ -650,3 +650,62 @@ the fixture checks connect/sign/rejection/effects/network errors and disconnect.
 Manual extension-wallet/production-provider, physical and mainnet acceptance
 remain unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## Device-data metering and price proposal (SF-142)
+
+The Data page reads the connected owner's fleet storage directly over gRPC.
+It checks the shared object's type origin, budget binding and supported version,
+then pages typed `RecordKey` and `UsageKey` fields. A second object read rejects
+an intervening upload, release or renewal. Record counts must equal `blob_count`;
+device lifetime counters plus the owner's remainder equal `total_encoded_bytes`.
+Malformed fields, repeated cursors, incomplete scans and reads fail visibly.
+The scan bounds are 100,000 relevant fields and 3,000 pages; larger fleets need
+paginated export rather than a silently truncated total.
+
+Streams here mean **uploading device IDs**, with all data kinds from a device
+grouped together; the owner release stream is separate. Lifetime written bytes
+are **encoded Walrus bytes**, including redundancy. Unexpired logical bytes and
+month-to-date stored GB-month come from each current blob record's logical size,
+upload time and expiry. Byte-time is clipped to the current UTC month using the
+live Walrus epoch schedule. Expired records remain visible as held records but
+add no current storage. Registration does not prove certification or availability.
+
+Releasing a blob removes its record without reducing lifetime write counters.
+Consequently this view preserves lifetime encoded writes, but its historical
+byte-time covers only records still held by the fleet. It does not fabricate a
+complete historical invoice or apply logical-GB prices to encoded lifetime bytes.
+Changed epoch durations also limit historical expiry projections. Complete billing
+history would require a separately retained historical ledger; this UI is usage
+and planning evidence, not a charging system.
+
+The Settings planner accepts additional device-data MiB per device per month,
+on top of enabled log volume. Both use the selected batching cadence/retention
+and flow into the existing network-cost and prepaid-deposit estimator, including
+Walrus encoding, rounded units, transaction costs and headroom. This does not
+enable uploads or change device quotas. Owner release volume remains separately
+funded and outside the device-data allowance.
+
+All proposed data prices live in `fleet-pricing.ts`'s existing configurable table:
+`data.includedBytesPerDeviceMonth` (10,000,000 decimal bytes),
+`includedRetentionDays` (42), `writeUsdPerGB` (0.10), and
+`storageUsdPerGBMonth` (0.05). A complete `NEXT_PUBLIC_FLEET_PRICE_TABLE` override
+must now include these validated fields; an old or malformed override fails
+closed. No price is a finalized commercial commitment.
+
+The homogeneous fleet estimate pools the per-device monthly write allowance.
+It exempts the included cohort's first 42 retention days from storage price;
+excess bytes and excess retention are priced as decimal GB and GB-month.
+Storage is a steady-state projection (monthly writes × retention / average
+calendar month), not the first month's invoice. Data usage charges are added
+after the plan minimum and annual plan discount. Network costs remain separate
+and fund the deposit at cost, including data within the commercial allowance.
+
+Validation: `make test-data-metering`, `make test-fleet-settings`,
+`make dapp-typecheck`, `make dapp-build`; the existing network-none
+`python3 scripts/test_protocol_localnet.py --retention-upgrade` also reconciles
+the browser meter against actual pre-upgrade and post-upgrade storage records.
+See [recorded SF-142 evidence](validation/SF142_DATA_METERING.md).
+No Move API/layout, migration, dependency version or daemon behavior changes.
+Physical/Mainnet/provider/manual-wallet acceptance remains unrun in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).

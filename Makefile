@@ -250,7 +250,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-retention test-fleet-settings test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-data-metering test-retention test-fleet-settings test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -757,3 +757,7 @@ test-retention-scale-upgrade:
 .PHONY: test-budget-enrollment-localnet
 test-budget-enrollment-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
+
+.PHONY: test-data-metering
+test-data-metering:
+	$(RUN) node scripts/test_data_metering.cjs

@@ -96,6 +96,19 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       }
       assert.deepEqual((await cells("archiveIntervalMs-86400000")).slice(4), ["not charged", "not charged"]);
       const unlogged = await depositSui();
+      // SF142: expected non-log device data changes both the proposed price and
+      // the actual prepaid recommendation, even with log uploads disabled.
+      const dataInput = page.getByLabel("Additional device data per device per month (MiB)");
+      await dataInput.fill("20");
+      await page.waitForFunction(() => !document.querySelector('[data-testid="archiveIntervalMs-604800000"]').textContent.includes("log uploads off"));
+      assert.ok(await depositSui() > unlogged, "additional device data funds archives without enabling logs");
+      assert.match(await text("suifleet-price"), /10,000,000,000 bytes written per month included/);
+      assert.match(await text("suifleet-price"), /\$0\.1000\/GB written and \$0\.0500\/GB-month/);
+      assert.doesNotMatch(await text("suifleet-price"), /Device data: \$0 per month/);
+      await dataInput.fill("0");
+      await page.waitForFunction(() => document.querySelector('[data-testid="archiveIntervalMs-604800000"]').textContent.includes("log uploads off"));
+      assert.equal(await depositSui(), unlogged);
+
       await page.getByLabel(/Estimate with device log uploads/).check();
       await page.getByLabel("Log data per device per month (MiB)").waitFor();
       assert.equal(await page.getByLabel("Log data per device per month (MiB)").inputValue(), "10");

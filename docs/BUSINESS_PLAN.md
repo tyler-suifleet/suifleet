@@ -323,3 +323,10 @@ Compute/AI, database, storage, security and operations have different addressabl
 ## Manufacturer prospect research
 
 The [50-company discovery shortlist](business/prospects/README.md) supplies a sourced CSV, ranked readable report, explicit migration/safety caveats and prioritized discovery questions (SF-105). It is research only: fleet size, budget and buyer interest remain unknown, and no outreach or pilot has occurred.
+
+SF-142 implements the proposed data rates and allowance in the shared configurable
+price table and Settings planner, with separate network cost/deposit estimates.
+The Data page reconciles current on-chain records and lifetime encoded-write
+counters per uploading-device stream; it does not charge customers or claim a
+complete historical billing ledger after records are released. See
+[the metering definitions and pricing assumptions](FLEET_BUDGET.md#device-data-metering-and-price-proposal-sf-142).
