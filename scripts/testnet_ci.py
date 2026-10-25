@@ -6,11 +6,17 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 CONTEXT = 'testnet/package-upgrade'
+# Failure classes a status may carry. Only `source` (and unclassified) failures
+# are source-repair candidates; the others are infrastructure, funding or a
+# retained on-chain uncertainty that a rerun reconciles. Merge gates ignore the
+# class: anything but exact-head/base success blocks.
+FAILURE_CLASSES = ('source', 'infrastructure', 'funding', 'uncertain')
 SHA = re.compile(r'^[0-9a-f]{40}$')
 # The keyless preflight job has a 5-minute timeout; keep all retry waiting
 # well inside it so an exhausted budget fails with a diagnostic, not a kill.
@@ -19,6 +25,13 @@ PUBLIC_MAX_ATTEMPTS = 6
 TRANSIENT_STATUS = (500, 502, 503, 504)
 RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining',
                 'x-ratelimit-reset', 'x-ratelimit-used', 'x-ratelimit-resource')
+# Branch policy verified by this job's planning step, kept beside the preserved
+# trusted controller in RUNNER_TEMP (never in the test revision's workspace).
+ENVIRONMENT_RECORD = 'testnet-environment-policy.json'
+
+
+class PublicRateLimited(RuntimeError):
+    """The anonymous quota stayed exhausted beyond the retry budget."""
 
 
 def api(path, payload=None):
@@ -116,22 +129,54 @@ def public_api(path, opener=urlopen, sleep=time.sleep, clock=time.monotonic, wal
         delay = max(delay, min(2.0 ** attempt, 30.0))
         elapsed = clock() - start
         if attempt == attempts or elapsed + delay > budget:
-            raise RuntimeError(
+            limited = isinstance(failure, HTTPError) and failure.code in (403, 429)
+            raise (PublicRateLimited if limited else RuntimeError)(
                 f'Public environment policy metadata unavailable after {attempt} attempt(s) '
                 f'in {elapsed:.0f}s (retry budget {budget}s, next wait {delay:.0f}s): {reason}') from failure
         log(f'testnet preflight: public policy read attempt {attempt} failed ({reason}); retrying in {delay:.0f}s')
         sleep(delay)
 
 
-def verify_environment(repo, get=api, read_public=public_api):
+def verify_environment(repo, get=api, read_public=public_api, record=None, fallback=None):
+    """Verify the dedicated environment is main-only without reviewers or bypass.
+
+    `record` saves the verified branch policy for the same job. `fallback` lets
+    the pre-spend recheck reuse that record only when the anonymous quota stays
+    exhausted (shared runner IPs routinely drain it); the authenticated
+    environment facts are always fetched afresh, and a missing or unready
+    record fails closed. GitHub admits the job to the environment before any
+    step runs, so the recheck guards against configuration drift only.
+    """
     environment = get(f'repos/{repo}/environments/live-package-upgrade')
-    branches = read_public(f'repos/{repo}/environments/live-package-upgrade/deployment-branch-policies')
+    transport = 'public HTTPS, no authorization header'
+    try:
+        branches = read_public(f'repos/{repo}/environments/live-package-upgrade/deployment-branch-policies')
+    except PublicRateLimited:
+        branches = load_record(fallback)
+        if branches is None:
+            raise
+        print('testnet recheck: public quota exhausted; reusing branch policy verified by this job', file=sys.stderr)
+        transport = 'planning-step record (public quota exhausted)'
     if not environment_ready(environment, branches):
         raise RuntimeError('dedicated testnet environment must be main-only, without reviewers or admin bypass')
+    if record:
+        with open(record, 'w') as stream:
+            json.dump(branches, stream, sort_keys=True)
     return {'environment': 'live-package-upgrade', 'branch': 'main',
             'policy_id': branches['branch_policies'][0]['id'],
-            'branch_policy_transport': 'public HTTPS, no authorization header',
+            'branch_policy_transport': transport,
             'required_reviewers': False, 'admin_bypass': False}
+
+
+def load_record(path):
+    if not path:
+        return None
+    try:
+        with open(path) as stream:
+            value = json.load(stream)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def trusted_pr(pr, repo, sha, permissions):
@@ -184,10 +229,47 @@ def environment_ready(environment, branches):
             and [(b['name'], b.get('type', 'branch')) for b in branches['branch_policies']] == [('main', 'branch')])
 
 
-def status(repo, head, base, state, url):
+def failure_class(outcome, evidence_dir='evidence', dependencies='success'):
+    """Classify a failed run for repair scheduling.
+
+    A revision whose dependencies fail to build is a source failure. A run that
+    otherwise failed before the acceptance step executed is infrastructure.
+    Otherwise the revision's own evidence may name a class; anything missing,
+    malformed or unknown is treated as a source failure. A wrong class can only
+    change who is asked to look at the failure, never the merge gate."""
+    if dependencies == 'failure':
+        return 'source'
+    if outcome != 'failure':
+        return 'infrastructure'
+    found = []
+    for path in sorted(Path(evidence_dir).glob('*.json'))[:16]:
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 << 20:
+                continue
+            value = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(value, dict) and value.get('success') is False:
+            found.append(value.get('failure_class'))
+    if not found or any(value not in FAILURE_CLASSES for value in found):
+        return 'source'
+    for name in ('source', 'funding', 'uncertain', 'infrastructure'):
+        if name in found:
+            return name
+
+
+def description(base, state, failure=None):
+    assert SHA.fullmatch(base)
+    if state == 'failure':
+        assert failure in FAILURE_CLASSES
+        return f'base:{base} class:{failure}'
+    return f'base:{base}'
+
+
+def status(repo, head, base, state, url, failure=None):
     assert SHA.fullmatch(head) and SHA.fullmatch(base)
     api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
-        description=f'base:{base}', target_url=url))
+        description=description(base, state, failure), target_url=url))
 
 
 def verify_checkout(expected, run=subprocess.run):
@@ -206,7 +288,8 @@ if __name__ == '__main__':
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
-    parser.add_argument('--status', choices=['pending', 'success', 'failure'])
+    # `error` marks a cancelled run: never a source failure, never success.
+    parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
     if args.verify_checkout:
@@ -218,8 +301,10 @@ if __name__ == '__main__':
             parser.error('probe cannot publish status or authorize a run')
         print(json.dumps(verify_environment(repo), sort_keys=True))
     elif args.status:
+        failure = failure_class(os.environ.get('ACCEPTANCE_OUTCOME', ''),
+                                dependencies=os.environ.get('DEPENDENCIES_OUTCOME', '')) if args.status == 'failure' else None
         status(repo, os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.status,
-               f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}')
+               f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}', failure)
     else:
         with open(os.environ['GITHUB_EVENT_PATH']) as stream:
             selection = plan(os.environ['GITHUB_EVENT_NAME'], json.load(stream), repo)
@@ -227,7 +312,11 @@ if __name__ == '__main__':
                              or selection['base'] != os.environ['BASE_REF']):
             raise RuntimeError('superseded head/base: no testnet mutation submitted')
         if selection:
-            verify_environment(repo)
+            saved = os.path.join(os.environ['RUNNER_TEMP'], ENVIRONMENT_RECORD) if os.environ.get('RUNNER_TEMP') else None
+            if args.recheck:
+                verify_environment(repo, fallback=saved)
+            else:
+                verify_environment(repo, record=saved)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             for key, value in (selection or {}).items():
                 print(f'{key}={value}', file=stream)

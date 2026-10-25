@@ -44,13 +44,31 @@ function command(value) {
   }
 }
 
+// Execution window: a transaction can never execute after max_epoch. Address
+// balance gas reservations appear as version-0 payment references.
+function expiration(value) {
+  if (!value || value.$kind === 'None') return { kind: 'None', min_epoch: null, max_epoch: null };
+  if (value.$kind === 'Epoch') return { kind: 'Epoch', min_epoch: null, max_epoch: String(value.Epoch) };
+  if (value.$kind === 'ValidDuring') {
+    const window = value.ValidDuring;
+    return { kind: 'ValidDuring', min_epoch: window.minEpoch == null ? null : String(window.minEpoch),
+      max_epoch: window.maxEpoch == null ? null : String(window.maxEpoch) };
+  }
+  return { kind: String(value.$kind), min_epoch: null, max_epoch: null };
+}
+
 async function main() {
-  const { Transaction } = await import(pathToFileURL(req.resolve('@mysten/sui/transactions')));
-  const data = Transaction.from(fs.readFileSync(0, 'utf8').trim()).getData();
+  const { Transaction, TransactionDataBuilder } = await import(pathToFileURL(req.resolve('@mysten/sui/transactions')));
+  const { fromBase64 } = await import(pathToFileURL(req.resolve('@mysten/sui/utils')));
+  const encoded = fs.readFileSync(0, 'utf8').trim();
+  const data = Transaction.from(encoded).getData();
   process.stdout.write(JSON.stringify({
+    digest: TransactionDataBuilder.getDigestFromBytes(fromBase64(encoded)),
     sender: data.sender,
     gas_owner: data.gasData.owner,
     gas_budget: String(data.gasData.budget),
+    gas_payment: (data.gasData.payment || []).map((ref) => ({ objectId: ref.objectId, version: String(ref.version), digest: ref.digest })),
+    expiration: expiration(data.expiration),
     inputs: data.inputs.map(input),
     commands: data.commands.map(command),
   }) + '\n');
