@@ -430,6 +430,50 @@ class PublicEnvironmentTests(unittest.TestCase):
         read = lambda path: self.retrying_read([retry(), self.branches()])[0]
         self.assertEqual(verify_environment('a/b', Mock(return_value=self.environment()), read)['policy_id'], 7)
 
+    def test_recheck_reuses_this_jobs_verified_policy_only_when_quota_is_exhausted(self):
+        import tempfile
+        from testnet_ci import PublicRateLimited, verify_environment
+        exhausted = lambda: self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 2103)})
+        with self.assertRaises(PublicRateLimited):
+            self.retrying_read([exhausted()])
+        with tempfile.TemporaryDirectory() as directory:
+            record = Path(directory) / 'policy.json'
+            # Planning step: a fresh public read is verified, then recorded.
+            verify_environment('a/b', Mock(return_value=self.environment()), Mock(return_value=self.branches()), record=record)
+            self.assertEqual(json.loads(record.read_text()), self.branches())
+            limited = lambda path: self.retrying_read([exhausted()])[0]
+            proof = verify_environment('a/b', Mock(return_value=self.environment()), limited, fallback=record)
+            self.assertEqual(proof['policy_id'], 7)
+            self.assertIn('planning-step record', proof['branch_policy_transport'])
+            # The authenticated environment is still read afresh and must stay ready.
+            for environment in (dict(self.environment(), can_admins_bypass=True),
+                                dict(self.environment(), protection_rules=[{'type': 'required_reviewers'}])):
+                with self.subTest(environment=environment), self.assertRaisesRegex(RuntimeError, 'main-only'):
+                    verify_environment('a/b', Mock(return_value=environment), limited, fallback=record)
+            # A misconfigured or malformed record never passes.
+            record.write_text(json.dumps({'total_count': 1, 'branch_policies': [{'id': 7, 'name': '*', 'type': 'branch'}]}))
+            with self.assertRaisesRegex(RuntimeError, 'main-only'):
+                verify_environment('a/b', Mock(return_value=self.environment()), limited, fallback=record)
+            for content in ('not json', '[]'):
+                record.write_text(content)
+                with self.subTest(content=content), self.assertRaises(PublicRateLimited):
+                    verify_environment('a/b', Mock(return_value=self.environment()), limited, fallback=record)
+            # A real denial, transport failure or missing record still fails closed.
+            record.write_text(json.dumps(self.branches()))
+            denied = lambda path: self.retrying_read([self.http_error(404, {}, b'{"message":"Not Found"}')])[0]
+            with self.assertRaisesRegex(RuntimeError, 'HTTP 404') as raised:
+                verify_environment('a/b', Mock(return_value=self.environment()), denied, fallback=record)
+            self.assertNotIsInstance(raised.exception, PublicRateLimited)
+            from urllib.error import URLError
+            offline = lambda path: self.retrying_read([URLError('offline')] * 10, attempts=2)[0]
+            with self.assertRaises(RuntimeError) as raised:
+                verify_environment('a/b', Mock(return_value=self.environment()), offline, fallback=record)
+            self.assertNotIsInstance(raised.exception, PublicRateLimited)
+            with self.assertRaises(PublicRateLimited):
+                verify_environment('a/b', Mock(return_value=self.environment()), limited, fallback=Path(directory) / 'absent.json')
+            with self.assertRaises(PublicRateLimited):
+                verify_environment('a/b', Mock(return_value=self.environment()), limited)
+
     def test_authenticated_failures_have_sanitized_useful_errors(self):
         from unittest.mock import patch
         from testnet_ci import api

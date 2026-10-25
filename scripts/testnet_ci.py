@@ -25,6 +25,13 @@ PUBLIC_MAX_ATTEMPTS = 6
 TRANSIENT_STATUS = (500, 502, 503, 504)
 RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining',
                 'x-ratelimit-reset', 'x-ratelimit-used', 'x-ratelimit-resource')
+# Branch policy verified by this job's planning step, kept beside the preserved
+# trusted controller in RUNNER_TEMP (never in the test revision's workspace).
+ENVIRONMENT_RECORD = 'testnet-environment-policy.json'
+
+
+class PublicRateLimited(RuntimeError):
+    """The anonymous quota stayed exhausted beyond the retry budget."""
 
 
 def api(path, payload=None):
@@ -122,22 +129,54 @@ def public_api(path, opener=urlopen, sleep=time.sleep, clock=time.monotonic, wal
         delay = max(delay, min(2.0 ** attempt, 30.0))
         elapsed = clock() - start
         if attempt == attempts or elapsed + delay > budget:
-            raise RuntimeError(
+            limited = isinstance(failure, HTTPError) and failure.code in (403, 429)
+            raise (PublicRateLimited if limited else RuntimeError)(
                 f'Public environment policy metadata unavailable after {attempt} attempt(s) '
                 f'in {elapsed:.0f}s (retry budget {budget}s, next wait {delay:.0f}s): {reason}') from failure
         log(f'testnet preflight: public policy read attempt {attempt} failed ({reason}); retrying in {delay:.0f}s')
         sleep(delay)
 
 
-def verify_environment(repo, get=api, read_public=public_api):
+def verify_environment(repo, get=api, read_public=public_api, record=None, fallback=None):
+    """Verify the dedicated environment is main-only without reviewers or bypass.
+
+    `record` saves the verified branch policy for the same job. `fallback` lets
+    the pre-spend recheck reuse that record only when the anonymous quota stays
+    exhausted (shared runner IPs routinely drain it); the authenticated
+    environment facts are always fetched afresh, and a missing or unready
+    record fails closed. GitHub admits the job to the environment before any
+    step runs, so the recheck guards against configuration drift only.
+    """
     environment = get(f'repos/{repo}/environments/live-package-upgrade')
-    branches = read_public(f'repos/{repo}/environments/live-package-upgrade/deployment-branch-policies')
+    transport = 'public HTTPS, no authorization header'
+    try:
+        branches = read_public(f'repos/{repo}/environments/live-package-upgrade/deployment-branch-policies')
+    except PublicRateLimited:
+        branches = load_record(fallback)
+        if branches is None:
+            raise
+        print('testnet recheck: public quota exhausted; reusing branch policy verified by this job', file=sys.stderr)
+        transport = 'planning-step record (public quota exhausted)'
     if not environment_ready(environment, branches):
         raise RuntimeError('dedicated testnet environment must be main-only, without reviewers or admin bypass')
+    if record:
+        with open(record, 'w') as stream:
+            json.dump(branches, stream, sort_keys=True)
     return {'environment': 'live-package-upgrade', 'branch': 'main',
             'policy_id': branches['branch_policies'][0]['id'],
-            'branch_policy_transport': 'public HTTPS, no authorization header',
+            'branch_policy_transport': transport,
             'required_reviewers': False, 'admin_bypass': False}
+
+
+def load_record(path):
+    if not path:
+        return None
+    try:
+        with open(path) as stream:
+            value = json.load(stream)
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def trusted_pr(pr, repo, sha, permissions):
@@ -273,7 +312,11 @@ if __name__ == '__main__':
                              or selection['base'] != os.environ['BASE_REF']):
             raise RuntimeError('superseded head/base: no testnet mutation submitted')
         if selection:
-            verify_environment(repo)
+            saved = os.path.join(os.environ['RUNNER_TEMP'], ENVIRONMENT_RECORD) if os.environ.get('RUNNER_TEMP') else None
+            if args.recheck:
+                verify_environment(repo, fallback=saved)
+            else:
+                verify_environment(repo, record=saved)
         with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
             for key, value in (selection or {}).items():
                 print(f'{key}={value}', file=stream)
