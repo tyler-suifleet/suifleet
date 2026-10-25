@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "devices": 1000,
+  "basis": {
+    "kind": "illustrative",
+    "as_of": "2026-10-25",
+    "sources": [
+      "docs/business/SUBSCRIPTION_PRICING.md: synthetic sensitivity example, not a measured fleet bill"
+    ]
+  },
+  "unquoted_costs": [],
+  "recurring_costs": {
+    "sui_sensitive_usd": "8",
+    "walrus_usd": "0.50",
+    "services_usd": "0.50"
+  },
+  "commercial": {
+    "candidate_monthly_usd": "80",
+    "monthly_minimum_usd": "49",
+    "annual_discount_fraction": "0.10"
+  },
+  "working_capital": {
+    "refundable_storage_deposits_usd": "30",
+    "device_gas_float_usd": "60"
+  }
+}

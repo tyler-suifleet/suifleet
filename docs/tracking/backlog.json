@@ -3176,6 +3176,31 @@
         "Add offline boundary and invalid-configuration tests; install verified committed source while preserving running workers."
       ],
       "validation": "Offline coordinator tests, compilation, configuration validation and verified running service/worker status."
+    },
+    {
+      "key": "SF-152",
+      "title": "Base subscription planning on stressed SUI-sensitive costs",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "docs/BUSINESS_PLAN.md",
+        "docs/business",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "User requests basing the pricing model on a multiple of SUI-sensitive costs. Add a reproducible subscription planning calculator separating SUI-sensitive recurring expense, other recurring expense and refundable working capital.",
+      "evidence": "2026-10-25 user decision: update pricing model to be based on a multiple of the SUI-sensitive cost. Preserve fixed subscriptions and purchased workload limits; no automatic usage invoices. User follow-up: consider SUI prices as much as 10x.",
+      "acceptance": [
+        "A configurable SUI-cost stress multiple and stressed infrastructure margin determine a subscription floor, with explicit provisional defaults of 10x and 80%, not final approved tariffs.",
+        "Separate WAL and USD/service exposure, unknown costs, refundable deposits and gas float. Do not multiply every cost by the SUI multiple or treat deposits as recurring expense.",
+        "Account for payment fees, annual discounts and volume price floors; unknown required inputs refuse an authoritative quote.",
+        "Update business plan to distinguish historical price tables and margins from the new policy, include reproducible sensitivity examples and regression tests.",
+        "Provide tested implementation in a PR for independent review; do not silently alter live customer pricing or spending allowances."
+      ],
+      "validation": "Offline pricing sensitivity and input validation regression tests, CLI examples and documentation consistency checks; no network mutation required."
     }
   ]
 }
