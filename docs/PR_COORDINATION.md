@@ -836,3 +836,28 @@ exact-head testnet status before redirecting an existing implementation. Success
 checks invalidate an earlier source-only review and request a final evidence
 review; failure never becomes approval. A repair-limit or ownership blocker stays
 visible with its responsible owner and requires a concrete recovery decision.
+
+### Completed repairs and independent check budgets
+
+A successful worker exit with a validated repair result is collected separately
+from the ticket handoff. If the worker omitted its handoff, the coordinator checks
+the durable exit/process identity, unchanged claim and model, stopped helpers,
+shared-resource leases, clean owner branch and current PR before returning the
+same reservation to Review. It may renew a verified stopped expired reservation
+only to finish this terminal handoff; it neither edits files nor starts a worker.
+A blocked verdict remains blocked evidence and never becomes approval. Dirty work,
+uncertain receipts or a changed owner stop the handoff and preserve the work.
+
+A failed ticket mirror is retried independently, including after service restart.
+The coordinator re-reads ownership so a locally successful Review transition is
+published without replaying the transition or worker. Normal exact-head testnet,
+source review and merge gates still apply.
+
+Repair limits and backoff apply separately to each workflow/check on a PR, across
+head, base and run changes. Three compiler failures cannot consume the first
+public-testnet repair. A combined repair counts against each failing check it
+handles; a successful full CI snapshot ends those failure episodes. Migration
+attributes historical attempts using verified saved snapshots and their existing
+repair fingerprints. Missing or corrupt history retains a conservative wildcard
+limit, rather than silently granting more retries. The legacy PR-wide counter is
+retained as history but no longer blocks unrelated checks.
