@@ -2,7 +2,7 @@
 
 Decision basis: 2026-10-16. This records Tyler's original commercial thesis, not a newly discovered positioning idea. Product implementation and hardware acceptance remain separate from business hypotheses.
 
-Updated 2026-10-25: the user selected a subscription floor based on a multiple of SUI-sensitive recurring cost. The [current planning policy](business/SUBSCRIPTION_PRICING.md) uses configurable 3× SUI-cost stress and an 80% infrastructure margin target under stress. Those numerical defaults are planning assumptions; final tariffs and production margins remain unapproved and unmeasured until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267). The 2026-10-23 prices below are historical commercial candidates, subject to this floor.
+Updated 2026-10-25: the user selected a subscription floor based on a multiple of SUI-sensitive recurring cost. The [current planning policy](business/SUBSCRIPTION_PRICING.md) uses configurable 10× SUI-cost stress and an 80% infrastructure margin target under stress. The user requested the 10× exposure case; the margin target remains a planning assumption, and final tariffs and production margins remain unapproved and unmeasured until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267). The 2026-10-23 prices below are historical commercial candidates, subject to this floor.
 
 ## The opportunity
 
@@ -19,24 +19,25 @@ WAL expense `W` and other recurring services `O`. Apply the configurable stress
 multiple to `S`, then price for the chosen margin under that stress:
 
 ```text
-risk floor = (3 × S + W + O + fixed payment fee) / (1 − 0.80 − payment fee fraction)
+risk floor = (10 × S + W + O + fixed payment fee) / (1 − 0.80 − payment fee fraction)
 subscription = max(risk floor, monthly minimum, commercial price after discounts)
 ```
 
-The current planning inputs are 3× SUI-cost stress, 80% stressed infrastructure
+The current planning inputs are 10× SUI-cost stress, 80% stressed infrastructure
 margin and provisional payment fees of 3% + $0.30 per invoice. Annual fixed fees
 are amortized over 12 months. Volume/annual discounts cannot undercut the floor.
 Refundable deposits and gas float remain separate working capital; unknown
 required provider costs must be quoted rather than counted as zero. The multiple
-covers total SUI-cost exposure, not a separate 3× token shock and 3× gas shock.
+covers total SUI-cost exposure, not a separate 10× token shock and 10× gas shock.
 WAL stress is independently configurable; its baseline multiplier is 1× under
 USD-targeted storage pricing.
 
 The [reproducible policy and calculator](business/SUBSCRIPTION_PRICING.md) show the
-formula, source requirements and sensitivity at 1×/2×/3×/5× SUI cost. An explicitly
-synthetic $9/month cost split ($8 SUI-sensitive plus $1 other) yields a $148.83
+formula, source requirements and sensitivity at 1×/2×/3×/5×/10× SUI cost, plus a
+20× boundary case. An explicitly
+synthetic $9/month cost split ($8 SUI-sensitive plus $1 other) yields a $478.24
 monthly floor with these assumptions, preserving about 80% infrastructure margin
-at 3× SUI cost. This is arithmetic, not a measured cost split or a final tariff.
+at 10× SUI cost. This is arithmetic, not a measured cost split or a final tariff.
 Customer prices remain fixed for purchased terms; a token move does not generate
 an automatic usage invoice. Reassess quotes and renewals against current costs.
 

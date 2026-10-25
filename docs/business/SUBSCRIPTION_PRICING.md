@@ -4,11 +4,12 @@ Decision recorded 2026-10-25: derive the fixed subscription floor from a multipl
 of SUI-sensitive recurring cost. Customers buy device capacity and bounded
 reporting, data and retention settings, with no automatic usage-overage invoices.
 
-The [planning policy](subscription-policy.json) currently uses a **3× SUI-cost
+The [planning policy](subscription-policy.json) currently uses a **10× SUI-cost
 multiple** and an **80% infrastructure margin target at that stressed cost**.
-These are explicit, configurable planning assumptions selected for this model,
-not user-approved final multipliers, tariffs or guaranteed margins. Final prices
-still require the measured production bill in SF-135/#267. Labor, support, taxes
+The user requested the 10× exposure case. The 80% margin target remains a
+configurable planning assumption; final tariffs are provisional and margins are
+not guaranteed. Final prices still require the measured production bill in
+SF-135/#267. Labor, support, taxes
 and customer acquisition are outside this infrastructure margin.
 
 ## Formula and cost classification
@@ -25,10 +26,10 @@ All amounts below are monthly USD for the whole fleet at its purchased workload:
   retention included. Separate the SUI transactions for those operations into `S`.
 - `O`: other required recurring services, including paid RPC, delivery, hosting
   or Seal providers where applicable. An unknown price is unquoted, not zero.
-- `mS`, `mW`: independent cost-stress multipliers (defaults **3** and **1**).
+- `mS`, `mW`: independent cost-stress multipliers (defaults **10** and **1**).
   `mS` stresses total SUI-denominated cost, covering token appreciation and/or
-  higher fees per operation; it does not separately multiply both and accidentally
-  apply a 9× shock. `mW = 1` assumes Walrus's USD-targeted pricing holds; use a
+  higher fees per operation; it does not separately multiply both by 10 and accidentally
+  apply a 100× shock. `mW = 1` assumes Walrus's USD-targeted pricing holds; use a
   higher value to examine repricing delays or other WAL-cost exposure.
 - `g`: stressed infrastructure margin target (**0.80**); `p`: payment fee fraction
   (**0.03**); `f`: fixed payment fee per invoice (**$0.30**, divided by 12 for an
@@ -71,21 +72,27 @@ python3 scripts/subscription_pricing.py docs/business/subscription-example.json 
 python3 -m unittest discover -s scripts/tests -p test_subscription_pricing.py -v
 ```
 
-The monthly subscription floor is **$148.83**. It includes card-fee allowance and
+The monthly subscription floor is **$478.24**. It includes card-fee allowance and
 rounding. Its sensitivity at that same fixed customer price is:
 
 | SUI cost multiple | WAL cost multiple | Recurring cost | Infrastructure margin after payment fees |
 |---:|---:|---:|---:|
-| 1× | 1× | $9.00 | 90.75% |
-| 2× | 1× | $17.00 | 85.38% |
-| 3× | 1× | $25.00 | 80.00% |
-| 5× | 1× | $41.00 | 69.25% |
-| 1× | 2× | $9.50 | 90.42% |
+| 1× | 1× | $9.00 | 95.06% |
+| 2× | 1× | $17.00 | 93.38% |
+| 3× | 1× | $25.00 | 91.71% |
+| 5× | 1× | $41.00 | 88.36% |
+| 10× | 1× | $81.00 | 80.00% |
+| 20× | 1× | $161.00 | 63.27% |
+| 1× | 2× | $9.50 | 94.95% |
 
 With the example's requested 10% annual discount, the risk floor overrides the
-$72 commercial candidate. Amortizing the single fixed card fee produces **$147.21
-per month / $1,766.52 annually**, rather than applying 10% below a safe floor.
+$72 commercial candidate. Amortizing the single fixed card fee produces **$476.62
+per month / $5,719.44 annually**, rather than applying 10% below a safe floor.
 These amounts demonstrate the policy; they are not a new customer price list.
+The 10× row assumes SUI-denominated fees per operation stay unchanged while SUI
+appreciates tenfold. The multiplier applies to total SUI-sensitive cost, so a
+simultaneous 2× fee increase would produce 20× exposure; that row shows the
+remaining margin rather than promising the 80% target beyond the selected buffer.
 
 ## Preparing a customer plan
 

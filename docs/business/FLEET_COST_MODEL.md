@@ -324,7 +324,7 @@ production bill.
 The [subscription policy](SUBSCRIPTION_PRICING.md) layers a configurable SUI-cost
 stress multiple and target infrastructure margin over a complete recurring bill.
 It separates SUI-sensitive expense, WAL expense, USD/service expense and working
-capital. Defaults are provisional planning inputs: 3× SUI cost and 80% margin at
+capital. Defaults are provisional planning inputs: 10× SUI cost and 80% margin at
 stress, with payment fees accounted for. They do not convert this historical,
 incomplete SF-054 scenario into a measured production bill. Supply missing costs
 before pricing; never use Testnet balances or assumed refunds as recurring revenue.
