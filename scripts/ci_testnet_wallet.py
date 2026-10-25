@@ -7,9 +7,10 @@ import subprocess
 import sys
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
-PACKAGE_UPGRADE_CEILING = 800_000_000
+# A fresh SF-129 base->head pair stores 0.705 SUI of packages alone (run 40184514226).
+PACKAGE_UPGRADE_CEILING = 1_000_000_000
 # SF-010 suites after the package-upgrade gate, each with its own strict
-# allowance (run ceiling: 0.6 + 0.5 + 0.15 SUI). They spend real gas, so
+# allowance (run ceiling: 1.0 + 0.7 + 0.15 = 1.85 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
 # dispatch (the `wallet` live gate); scheduled main runs skip them.
 SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 700_000_000),

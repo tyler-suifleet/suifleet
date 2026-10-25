@@ -855,9 +855,10 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    # A fresh base->head fixture with the SF-083 budget costs about 0.58 SUI
-    # (base publish 0.265 + head upgrade 0.316, run 39720082567).
-    parser.add_argument("--max-spend-mist", type=int, default=800_000_000)
+    # A fresh SF-129 base->head fixture stores 0.705 SUI of packages (base
+    # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
+    # device funding, deployments and cleanup.
+    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")
