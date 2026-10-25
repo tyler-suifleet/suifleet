@@ -145,3 +145,77 @@ remain coordinator gates after push. SF-129 must be merged before integration.
 Deferred physical/Mainnet/provider/manual-wallet acceptance remains unrun in
 #32/#159. No production deployment, physical operation or public-wallet mutation
 was performed.
+
+## PR #307 current-base integration repair (2026-10-25)
+
+Integrated snapshot/current main `82591d81a130e8eb03f2e176590cf991347aed30`.
+The independent review reported no blocking source defect, but the branch no
+longer included the base. Resolved six conflicting files by preserving both
+stream retention and SF-139 opaque support: additive Move APIs and tests,
+pending-journal fields, signer fixtures, simulator state and shared/owned object
+classification in the gRPC shim. No existing type layout or origin was changed.
+
+Extended the stream signer regression to reject foreign storage, system, clock
+and device-cap objects, and incorrect mutability for every shared authority
+input. Added a second `make test-opaque` mode with stream retention enabled.
+It verifies that every opaque/log purchase uses the stream API, while the first
+mode verifies legacy registration remains unchanged. Both modes retain real IPC,
+durable custody, certification-outage/restart, independent SDK decryption and
+index-retirement assertions. These are offline fixtures, not provider acceptance.
+
+Fresh checks used `suifleet-dev:sf035`, dedicated `sf141-move` and `sf141-cargo`
+caches, no container network, and the host Chrome for browser checks:
+
+- `make test-contracts`: core 207/207, storage 68/68, data 47/47 passed.
+- `python3 scripts/check_move_security.py`: passed strict compiler/linter gates
+  and genuine negative authority mutations.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml`:
+  447 passed, four existing ignores. Locked offline bins/examples build passed.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml --features
+  pkcs11`: 449 passed, four existing ignores. A fresh default-feature filtered
+  `stream_purchase_signer_binds_all_authority_and_requires_opt_in` run passed
+  (1 test) after extending the negative fixture coverage.
+- `make dapp-typecheck dapp-build`: passed all prerequisites, typecheck and
+  static production export. Stream retention/panel, reclaim/panel, fleet-data
+  and data-metering Node fixtures passed.
+- Host `CHROME_EXECUTABLE=/opt/google/chrome/chrome make INSIDE_DEV_CONTAINER=1
+  test-fleet-settings` and `node scripts/test_data_session_browser.cjs`: passed
+  real-browser Settings and Data session-expiry/isolation checks.
+- `make test-retention`: passed 15 Python tests and the SDK compatibility fixtures.
+- `python3 scripts/generate_interfaces.py --check`: passed all 12 modules.
+- Offline tracking: 10 tests and publication dry run passed; no remote mutation.
+- `SF141_RETENTION=1 SF129_RECEIPT=/tmp/pr307-localnet.json python3
+  scripts/test_reclaim_localnet.py`: existing-object upgrade, per-stream purchase,
+  expiry and reclaim passed on disposable network-none localnet. Its temporary
+  receipt was not retained; the original committed receipt remains historical.
+- Full `make test-ota` with `INSIDE_DEV_CONTAINER=1 CARGO_NET_OFFLINE=true`:
+  passed the fresh bins/examples build and every updater, supervision,
+  configuration, recovery, reporting, budget and archive simulator, including
+  all five archive modes. A disconnected simulator request emitted a server
+  BrokenPipe traceback during dependency tests; the dependency assertions and
+  complete outer command passed (exit 0).
+- `make test-opaque` as root in a disposable network-none container: Python SDK
+  test and both real-daemon modes passed, including the new combined mode.
+
+Initial Rust cache mounts used the wrong directory (missing registry, then
+hiding the executable); corrected registry-only mount passed. The first interface
+check omitted its Move cache and failed offline dependency resolution; rerunning
+with the correct cache passed. These setup failures were not ignored assertions.
+
+Review-note triage (limitations remain explicit, not claimed fixed): registration
+kind is not bound to the later anchor kind; this does not cross the owning device's
+WAL/upload quota boundary. The pre-existing 32-anchor UI window can omit older
+longer-lived archives. The Data page still uses the existing testnet Walrus
+configuration. Owner pruning of an expired compact root can require explicit
+recovery of an offline device's pending journal, as documented above. The signer
+negative-coverage note is addressed by the expanded regression in this repair.
+These observations remain attached to SF-141's PR/issue for follow-through;
+this repair does not silently promise malicious-device retention, unbounded
+archive browsing, mainnet configuration or automatic destructive replay.
+
+SF-129/#264 remains open and must merge before final SF-141 integration. Hosted
+checks for the new pushed head and current base, automatic public Testnet and a
+fresh independent review remain coordinator gates; this worker neither watches
+nor polls hosted CI. Physical/Mainnet/production-provider/manual-wallet checks
+remain explicitly unrun in #32/#159. No public wallet mutation, production
+deployment, physical operation, new issue or other worker was started.
