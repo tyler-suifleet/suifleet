@@ -7,6 +7,7 @@ import subprocess
 import sys
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+PACKAGE_UPGRADE_CEILING = 1_000_000_000
 # SF-010 suites after the package-upgrade gate, each with its own strict
 # allowance (run ceiling: 1.0 + 0.7 + 0.15 = 1.85 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
@@ -25,6 +26,13 @@ def suites_relevant(base, git=subprocess.run):
         return True
     changed = git(['git', 'diff', '--name-only', f'{base}...HEAD'], capture_output=True, text=True, check=True).stdout
     return any(name.startswith(SUITE_PATHS) for name in changed.split())
+
+
+def required_balance(selected):
+    """Every selected suite's allowance, funded before the first one spends.
+    Allowances are not replenished between suites, so a later suite must
+    never discover too late that an earlier one used the balance it needed."""
+    return PACKAGE_UPGRADE_CEILING + sum(ceiling for _, _, ceiling in selected)
 
 
 def restore_pending(root, state):
@@ -77,17 +85,20 @@ active_env: testnet
 active_address: '{ADDRESS}'
 ''')
         wallet.chmod(0o600)
+        selected = SUITES if relevant(base) else ()
         code = run(['python3', 'scripts/live_package_upgrade.py', '--wallet', str(wallet),
-                    '--base-ref', base, '--state', state, '--max-spend-mist', '1000000000', '--evidence', 'evidence/package-upgrade.json',
+                    '--base-ref', base, '--state', state, '--evidence', 'evidence/package-upgrade.json',
+                    '--max-spend-mist', str(PACKAGE_UPGRADE_CEILING),
+                    '--required-balance-mist', str(required_balance(selected)),
                     '--faucet-tool', os.environ.get('SUIFLEET_FAUCET_TOOL', '/opt/sui-network/sui')],
                    check=False).returncode
-        if code or not relevant(base):
+        if code or not selected:
             if not code:
                 print('SF-010 upgrade-security/wallet suites skipped: head changes none of their inputs')
             return code
         restore_pending(root, state)
         try:
-            for name, script, ceiling in SUITES:
+            for name, script, ceiling in selected:
                 print(f'SF-010 {name} suite (allowance {ceiling} MIST)', flush=True)
                 code = run(['python3', script, '--wallet', str(wallet), '--state', state,
                             '--max-spend-mist', str(ceiling), '--evidence', f'evidence/{name}.json'],
