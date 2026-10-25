@@ -1,3 +1,4 @@
+import type { NamedFleet } from './customer-fleets';
 import { bcs } from '@mysten/sui/bcs';
 import { ObjectError } from '@mysten/sui/client';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
@@ -58,7 +59,7 @@ export async function readShardedReceipts(client: Pick<SuiGrpcClient, 'getDynami
 /** One resumable operator step, never an unbounded wallet transaction. Repeat
  * after confirmation until the directory is ready, or until cleanup is complete.
  */
-export async function buildReceiptMaintenanceTx(client: Pick<SuiGrpcClient, 'getObject' | 'getDynamicField'>, deployment: string, action: 'migrate' | 'cleanup') {
+export async function buildReceiptMaintenanceTx(client: Pick<SuiGrpcClient, 'getObject' | 'getDynamicField'>, deployment: string, action: 'migrate' | 'cleanup', fleet?: NamedFleet) {
   const { Transaction } = await import('@mysten/sui/transactions');
   const { calls } = await import('./fleet-protocol');
   const manifest = requireManifest();
@@ -71,7 +72,8 @@ export async function buildReceiptMaintenanceTx(client: Pick<SuiGrpcClient, 'get
   const directory = await readReceiptDirectory(client, deployment);
   if (!directory) {
     if (action !== 'migrate') throw Error('Deployment has no shards');
-    if (record.schema_version === '2') calls.component_catalog_begin_sharded_receipts(tx, packageId, deployment);
+    if (fleet) tx.moveCall({ target: `${packageId}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(deployment)] });
+    else if (record.schema_version === '2') calls.component_catalog_begin_sharded_receipts(tx, packageId, deployment);
     else calls.deployment_manager_begin_sharded_receipts(tx, packageId, deployment);
     return tx;
   }
@@ -88,7 +90,11 @@ export async function buildReceiptMaintenanceTx(client: Pick<SuiGrpcClient, 'get
     // A separate finish transaction keeps retries deterministic after chunks.
     if (complete === 16) calls.deployment_manager_finish_receipt_migration(tx, packageId, deployment);
   } else {
-    if (!directory.retiring) { calls.deployment_manager_begin_receipt_cleanup(tx, packageId, deployment); return tx; }
+    if (!directory.retiring) {
+      if (fleet) tx.moveCall({ target: `${packageId}::customer::begin_receipt_cleanup`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(deployment)] });
+      else calls.deployment_manager_begin_receipt_cleanup(tx, packageId, deployment);
+      return tx;
+    }
     let live = 0;
     for (const root of directory.roots) {
       if (normalizeSuiAddress(root) === normalizeSuiAddress('0x0')) continue;
@@ -100,7 +106,8 @@ export async function buildReceiptMaintenanceTx(client: Pick<SuiGrpcClient, 'get
       else calls.deployment_manager_cleanup_receipt_chunk(tx, packageId, deployment, root, 64);
     }
     if (live === 0) {
-      if (directory.original_schema === '2') calls.component_catalog_delete_deployment(tx, packageId, deployment);
+      if (fleet) tx.moveCall({ target: `${packageId}::customer::delete_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(deployment)] });
+      else if (directory.original_schema === '2') calls.component_catalog_delete_deployment(tx, packageId, deployment);
       else if (directory.original_schema === '3') calls.deployment_manager_delete_rollout(tx, packageId, deployment);
       else calls.deployment_manager_delete_deployment(tx, packageId, deployment);
     }

@@ -1,4 +1,5 @@
 import { readShardedReceipts, readReceiptDirectory, buildReceiptMaintenanceTx } from "./receipt-shards";
+import type { NamedFleet } from "./customer-fleets";
 import { batchFields } from './batch-fields';
 import { incrementalEvents as allEvents } from "./event-history";
 import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
@@ -34,6 +35,7 @@ export interface DeviceObject {
   deviceAddress: string;
   arch: string;
   registeredAt: number;
+  managed?: boolean;
   /**
    * Set once the device is activated: the registry holds the Device and this
    * owner cap controls it. Unactivated devices (all those registered before
@@ -114,9 +116,16 @@ export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField"
   // Additive upgrades can bump it while retaining the same BCS layout.
   if (BigInt(receipts.version) === BigInt(0)) throw new Error("Invalid Receipts authority version");
   if (receipts.statuses.contents.some((entry) => entry.value !== 1 && entry.value !== 2)) throw new Error("Unsupported Receipts status");
-  if (receipts.version === "3") return readShardedReceipts(client, deploymentId);
-  if (BigInt(receipts.version) > BigInt(3)) throw new Error("Unsupported receipts authority version");
-  if (BigInt(receipts.version) < RECEIPTS_AUTHORITY_VERSION) return { verified: false, statuses: {} };
+  if (receipts.version === "4") return readShardedReceipts(client, deploymentId);
+  if (BigInt(receipts.version) > BigInt(4)) throw new Error("Unsupported receipts authority version");
+  let managed = false;
+  if (requireManifest().type_origins['deployment_manager::CustomerFleetKey']) {
+    try {
+      await client.getDynamicField({ parentId: deploymentId, name: { type: moveType('deployment_manager::CustomerFleetKey'), bcs: new Uint8Array([0]) } });
+      managed = true;
+    } catch (error) { if (!(error instanceof ObjectError && error.reason === 'notFound')) throw error; }
+  }
+  if (BigInt(receipts.version) !== (managed ? BigInt(3) : RECEIPTS_AUTHORITY_VERSION)) return { verified: false, statuses: {} };
   return { verified: true, statuses: Object.fromEntries(receipts.statuses.contents.map((entry) => [entry.key, entry.value])) };
 }
 
@@ -128,9 +137,15 @@ export function buildRegisterDeviceTx(
   deviceAddress: string,
   arch: string,
   sender: string,
+  fleet?: NamedFleet,
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::register_device`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id),
+      tx.object(fleet.budgetId), tx.object(REGISTRY_ID), tx.pure.string(name), tx.pure.address(deviceAddress), tx.pure.string(arch), tx.object("0x6")] });
+    return tx;
+  }
   const [device] = calls.device_registry_register_device(tx, PACKAGE_ID, REGISTRY_ID, name, deviceAddress, arch, "0x6");
   calls.device_cap_issue_cap(tx, PACKAGE_ID, device);
   const [owner] = calls.device_registry_activate_device(tx, PACKAGE_ID, REGISTRY_ID, device);
@@ -176,10 +191,11 @@ export function buildDeregisterDeviceTx(device: DeviceRef): Transaction {
 
 // ── Group transactions ────────────────────────────────────────────────────────
 
-export function buildCreateGroupTx(name: string, description: string): Transaction {
+export function buildCreateGroupTx(name: string, description: string, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.device_group_create_group(tx, PACKAGE_ID, name, description, "0x6");
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::create_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.pure.string(name), tx.pure.string(description), tx.object("0x6")] });
+  else calls.device_group_create_group(tx, PACKAGE_ID, name, description, "0x6");
   return tx;
 }
 
@@ -188,9 +204,13 @@ export function buildCreateGroupTx(name: string, description: string): Transacti
  * inbox exists: the group is then listed in it (creating it if needed), so
  * the device finds the group without event history.
  */
-export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef, inboxExists?: boolean): Transaction {
+export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef, inboxExists?: boolean, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::add_to_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(device.objectId)] });
+    return tx;
+  }
   const ownerCapId = device.ownerCapId;
   if (inboxSupported() && ownerCapId && inboxExists !== undefined) {
     // A new inbox is created before the custody loan: new_inbox requires
@@ -204,9 +224,13 @@ export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef
 }
 
 /** Also unlists the group from the device's inbox when it exists. */
-export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string, inboxExists = false): Transaction {
+export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string, inboxExists = false, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_from_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(deviceId)] });
+    return tx;
+  }
   if (inboxSupported() && inboxExists) {
     calls.fleet_inbox_remove_member(tx, PACKAGE_ID, groupObjectId, inboxIdFor(deviceId));
   } else {
@@ -215,10 +239,11 @@ export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: st
   return tx;
 }
 
-export function buildDeleteGroupTx(groupObjectId: string): Transaction {
+export function buildDeleteGroupTx(groupObjectId: string, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.device_group_delete_group(tx, PACKAGE_ID, groupObjectId);
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::delete_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId)] });
+  else calls.device_group_delete_group(tx, PACKAGE_ID, groupObjectId);
   return tx;
 }
 
@@ -234,9 +259,19 @@ export function buildCreateDeploymentTx(
   targetDeviceIds: string[] = [],
   initiallyPaused = false,
   announcements?: Announcements,
+  fleet?: NamedFleet,
 ): Transaction {
   requireManifest();
   const tx = new Transaction();
+  if (fleet) {
+    const [record] = tx.moveCall({ target: `${PACKAGE_ID}::customer::new_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id),
+      tx.pure.string(componentName), tx.pure.string(version), tx.pure.string(recipeBlobId), tx.pure.string(artifactSha256), tx.pure.string(recipeSha256),
+      tx.pure.vector("id", targetGroupIds), tx.pure.vector("id", targetDeviceIds), tx.object("0x6")] });
+    if (initiallyPaused) tx.moveCall({ target: `${PACKAGE_ID}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
+    if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) tx.moveCall({ target: `${PACKAGE_ID}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record] });
+    calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
+    return tx;
+  }
   if (initiallyPaused || announcements || requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) {
     const [record] = calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
     if (initiallyPaused) calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
@@ -251,15 +286,16 @@ export function buildCreateDeploymentTx(
 
 /** One bounded deletion step. Sharded deployments first stop admission and
  * reports, drain fields, retire roots, then consume the deployment. */
-export async function buildDeleteDeploymentStepTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, deployment: string, schema = "1"): Promise<Transaction> {
+export async function buildDeleteDeploymentStepTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, deployment: string, schema = "1", fleet?: NamedFleet): Promise<Transaction> {
   const directory = await readReceiptDirectory(client, deployment);
-  return directory ? buildReceiptMaintenanceTx(client, deployment, "cleanup") : buildDeleteDeploymentTx(deployment, schema);
+  return directory ? buildReceiptMaintenanceTx(client, deployment, "cleanup", fleet) : buildDeleteDeploymentTx(deployment, schema, fleet);
 }
 
-export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1"): Transaction {
+export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1", fleet?: NamedFleet): Transaction {
   requireManifest();
   if (schemaVersion !== "1" && schemaVersion !== "2" && schemaVersion !== "3") throw new Error("Unsupported DeploymentRecord schema");
   const tx = new Transaction();
+  if (fleet) { tx.moveCall({ target: `${PACKAGE_ID}::customer::delete_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(deploymentObjectId)] }); return tx; }
   if (schemaVersion === "2") calls.component_catalog_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
   else if (schemaVersion === "3") calls.deployment_manager_delete_rollout(tx, PACKAGE_ID, deploymentObjectId);
   else calls.deployment_manager_delete_deployment(tx, PACKAGE_ID, deploymentObjectId);
@@ -295,6 +331,20 @@ export async function fetchDevices(client: SuiGrpcClient, owner: string): Promis
     const meta = Object.fromEntries(fields.meta.contents.map((entry) => [entry.key, entry.value]));
     return { objectId: object.objectId, name: meta[ALIAS_META_KEY] || fields.name, chainName: fields.name, serial: meta[SERIAL_META_KEY] || undefined,
       meta, deviceAddress: fields.device_address, arch: fields.arch, registeredAt: Number(fields.registered_at), ownerCapId: ownerCaps.get(object.objectId) };
+  });
+}
+
+/** Exact managed inventory; authorization comes from verified Customer/Fleet state. */
+export async function fetchFleetDevices(client: SuiGrpcClient, ids: string[]): Promise<DeviceObject[]> {
+  const devices = await objectsInBatches(client, ids);
+  if (devices.length !== ids.length) throw Error("Fleet device inventory is incomplete");
+  return devices.map(object => {
+    if (normalizeStructTag(object.type) !== normalizeStructTag(DEVICE_TYPE)) throw Error("Unexpected fleet device type");
+    const fields = DeviceBcs.parse(object.content);
+    const meta = Object.fromEntries(fields.meta.contents.map(entry => [entry.key, entry.value]));
+    return { objectId: object.objectId, name: meta[ALIAS_META_KEY] || fields.name, chainName: fields.name,
+      serial: meta[SERIAL_META_KEY] || undefined, meta, deviceAddress: fields.device_address,
+      arch: fields.arch, registeredAt: Number(fields.registered_at), managed: true };
   });
 }
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+
 import { useState } from "react";
 import { buildDeploymentControlTx, controlReason, type DeploymentControl } from "@/lib/deployment-control";
 import { useDevices } from "@/hooks/useDevices";
@@ -16,6 +18,7 @@ import { PageHeader } from "@/components/ui";
 import Link from "next/link";
 
 export default function DeploymentsPage() {
+  const { fleet } = useFleetSelection();
   const { data: deployments = [], isLoading, error, refetch } = useDeployments();
   const devices = useDevices(), groups = useGroups();
   const [view, setView] = useState<"devices" | "deployments">("devices");
@@ -76,16 +79,16 @@ export default function DeploymentsPage() {
                   d={d}
                   devices={devices.data ?? []}
                   groups={groups.data ?? []}
-                  canDelete={account?.address === d.creator}
+                  canDelete={fleet ? fleet.administrator && fleet.id === d.creator : account?.address === d.creator}
                   isPending={isPending}
                   onControl={(control) => signAndExecute(
-                    { transaction: buildDeploymentControlTx(d.deploymentId, control) },
+                    { transaction: buildDeploymentControlTx(d.deploymentId, control, fleet) },
                     { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
                   )}
                   onDelete={async () => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
                     try { signAndExecute(
-                      { transaction: await buildDeleteDeploymentStepTx(client, d.deploymentId, d.schemaVersion) },
+                      { transaction: await buildDeleteDeploymentStepTx(client, d.deploymentId, d.schemaVersion, fleet) },
                       {
                         onSuccess: () => setTimeout(() => refetch(), 3000),
                         onError: (err) => alert(`Failed: ${err.message}`),

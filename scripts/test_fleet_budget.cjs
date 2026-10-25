@@ -175,6 +175,15 @@ assert.deepEqual(fns(budget.buildSetDeviceSuspendedTx(budgetId, capId, accountId
 assert.deepEqual(fns(budget.buildFundReserveTx(budgetId, capId, accountId, BigInt(1))), ["fleet_budget::fund_reserve"]);
 assert.deepEqual(fns(budget.buildReclaimReserveTx(budgetId, capId, accountId, BigInt(1))), ["fleet_budget::reclaim_reserve"]);
 assert.deepEqual(fns(budget.buildRemoveDeviceTx(budgetId, capId, accountId)), ["fleet_budget::remove_device"]);
+const namedFleet = { id: deviceId, customerId: capId };
+assert.throws(() => budget.buildRemoveDeviceTx(budgetId, capId, accountId, namedFleet, deviceId), /Connect the wallet/);
+const removal = budget.buildRemoveDeviceTx(budgetId, capId, accountId, namedFleet, deviceId, sender).getData();
+assert.equal(removal.commands[0].MoveCall.module, "customer");
+assert.equal(removal.commands[0].MoveCall.function, "remove_device");
+assert.deepEqual(removal.commands[1].TransferObjects.objects, [{ Result: 0, $kind: "Result" }]);
+const recipient = removal.commands[1].TransferObjects.address.Input;
+assert.deepEqual(removal.inputs[recipient].Pure.bytes, bcs.Address.serialize(sender).toBase64());
+
 assert.deepEqual(fns(budget.buildEnrollDeviceTx(budgetId, capId, deviceId, BigInt(1), BigInt(2))), ["fleet_budget::enroll_device"]);
 assert.throws(() => budget.buildFundReserveTx(budgetId, capId, accountId, BigInt(0)), /positive/);
 // Owner account changes name the account and only read the budget.
@@ -422,7 +431,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     { data: undefined },
   ]) {
     const sandbox = { exports: {}, require: appRequire, ...budget, runwayDays: costs.runwayDays, NETWORK: 'fixture',
-      useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
+      useFleetSelection: () => ({}), useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
       useFleetBudget: () => ({ budget: { ...view, paused } }),
       useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
       useSubmit: () => ({ submit: () => {}, pending: false }), useState: () => ['', () => {}],

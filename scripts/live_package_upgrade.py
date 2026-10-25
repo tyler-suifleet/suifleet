@@ -80,10 +80,9 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
-# Run 40206647454 exhausted 400M upgrading the SF-127 package. Reserve
-# 500M for package storage/computation; Budget still caps this to the unchanged
-# per-run allowance and retains the full reservation for unknown outcomes.
-PACKAGE_GAS = 500_000_000  # Largest single gas reservation; not a spend-limit increase.
+# Pinned PR279 correction: current main packages need a 700M reservation.
+# Effects settle actual gas under the unchanged non-replenishing run ceiling.
+PACKAGE_GAS = 700_000_000
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
@@ -539,7 +538,9 @@ def run(args):
         return ledger.execute(client, label, command, **kwargs)
 
     def transaction(label, *ptb, budget=None, funding=0):
-        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding)
+        # Fresh publication can consume most of the run ceiling. Never submit
+        # an ordinary PTB with its configured gas budget silently reduced.
+        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]
@@ -720,7 +721,7 @@ def run(args):
                         target = {"cap": upgrade_cap, "package": old}
                         upgraded = step("upgrade to head", lambda persist: mutate("upgrade to head", toolchain.package_submitter(
                             client, tools["build"]["path"], package_dir, common, sender=operator,
-                            upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=PACKAGE_GAS),
+                            upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=ledger.remaining),
                             lambda data, tx: toolchain.verify_package_transaction(data, head_built, sender=operator,
                                                                                   budget=tx["gas_budget"], upgrade=target),
                             legacy=lambda marker: reconciler.legacy_publication(
@@ -919,7 +920,7 @@ if __name__ == "__main__":
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
     # SF-127 fresh package storage alone cost 0.720 SUI (run 40125390496);
     # setup, device funding, reports and cleanup also need allowance.
-    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
+    parser.add_argument("--max-spend-mist", type=int, default=1_400_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")

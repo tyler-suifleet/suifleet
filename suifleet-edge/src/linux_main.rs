@@ -122,14 +122,15 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let launched = args.len() == 2 && args[1] == "--launch";
-    let check_config = args.len() == 3 && args[1] == "--check-config";
+    let check_operator = args.len() == 3 && args[1] == "--check-operator";
+    let check_config = check_operator || (args.len() == 3 && args[1] == "--check-config");
     let helper = args.len() == 3 && args[1] == "--firmware-helper";
     let signer_service = args.len() == 3 && args[1] == "--signer-service";
     let tunneling = args.len() == 3 && args[1] == "--secure-tunneling";
     let cloudwatch_logs = args.len() == 3 && args[1] == "--cloudwatch-logs";
     anyhow::ensure!(
         args.len() == 1 || launched || check_config || helper || signer_service || cloudwatch_logs || tunneling,
-        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
+        "usage: suifleet [--launch | --provision KEY_PATH | --derive-address KEY_PATH | --enroll ENROLL_TOML | --check-config CONFIG_PATH | --check-operator CONFIG_PATH | --self-check CONFIG_PATH | --console-token | --firmware-helper CONFIG | --signer-service SIGNER_TOML | --cloudwatch-logs CONFIG_JSON | --secure-tunneling CONFIG_JSON | --record-main-process PATH | --key-holder CONFIG_PATH | --verify-release BUNDLE_DIR TRUST_FILE [TARGET]]"
     );
     {
         use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -206,6 +207,11 @@ async fn main() -> anyhow::Result<()> {
     let signer = identity::signer(&cfg.device)?;
     let sui = SuiClient::load(cfg.sui.clone(), signer.clone())?;
     sui.validate_deployment().await?;
+    if check_operator {
+        let operator = sui.operator(&cfg.device.device_object_id).await?;
+        println!("{}", serde_json::json!({ "operator": operator }));
+        return Ok(());
+    }
     if check_config {
         println!("Verified deployment configuration");
         return Ok(());
@@ -775,17 +781,33 @@ async fn enroll(path: &Path) -> anyhow::Result<()> {
     let claim = identity::Ed25519File(identity::load(&enroll.claim_key_path)?);
     let sui = SuiClient::load(sui_config, identity::signer(&device)?)?;
     sui.validate_deployment().await?;
-    let arch = enroll.arch.clone().unwrap_or_else(|| std::env::consts::ARCH.to_owned());
-    let enrolled = sui.enroll(&enroll.policy_id, &enroll.name, &arch, &claim).await?;
-    println!("{}", serde_json::json!({
-        "digest": enrolled.digest,
-        "device_address": enrolled.device_address,
-        "device_object_id": enrolled.device_object_id,
-        "device_cap_id": enrolled.device_cap_id,
-        "owner_cap_id": enrolled.owner_cap_id,
-    }));
-    eprintln!("Enrolled. Daemon config:\n[device]\ndevice_object_id = \"{}\"\ndevice_cap_id = \"{}\"",
-              enrolled.device_object_id, enrolled.device_cap_id);
+    let arch = enroll
+        .arch
+        .clone()
+        .unwrap_or_else(|| std::env::consts::ARCH.to_owned());
+    let enrolled = sui
+        .enroll(
+            &enroll.policy_id,
+            &enroll.name,
+            &arch,
+            &claim,
+            enroll.managed.as_ref(),
+        )
+        .await?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "digest": enrolled.digest,
+            "device_address": enrolled.device_address,
+            "device_object_id": enrolled.device_object_id,
+            "device_cap_id": enrolled.device_cap_id,
+            "owner_cap_id": enrolled.owner_cap_id,
+        })
+    );
+    eprintln!(
+        "Enrolled. Daemon config:\n[device]\ndevice_object_id = \"{}\"\ndevice_cap_id = \"{}\"",
+        enrolled.device_object_id, enrolled.device_cap_id
+    );
     Ok(())
 }
 

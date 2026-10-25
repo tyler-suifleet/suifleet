@@ -95,7 +95,7 @@ module sui_edge::component_catalog {
     #[allow(lint(prefer_mut_tx_context))]
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         if (deployment_manager::receipt_schema(&deployment) == 2 &&
-            deployment_manager::receipts_version(&deployment) == 3) {
+            deployment_manager::receipts_version(&deployment) == 4) {
             deployment_manager::remove_catalog_binding<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
         } else {
             deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
@@ -105,6 +105,20 @@ module sui_edge::component_catalog {
     public fun begin_sharded_receipts(d: &mut DeploymentRecord, ctx: &mut TxContext) {
         deployment_manager::begin_catalog_receipts<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(
             d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, ctx);
+    }
+    public(package) fun remove_for_customer(record: &mut DeploymentRecord, authority: address) {
+        if (deployment_manager::receipts_version(record) == 4) {
+            deployment_manager::remove_catalog_binding_as<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {}, authority);
+        } else {
+            deployment_manager::remove_catalog_binding_as<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
+        };
+    }
+    public(package) fun begin_customer_receipts(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
+        deployment_manager::begin_catalog_receipts_as<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, authority, ctx);
+    }
+    public(package) fun new_for_customer(value: &ComponentVersion, creator: address, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
+        deployment_manager::new_catalog_as(creator, value.component_name, value.version, groups, devices,
+            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
     }
     public fun versions(catalog: &ComponentCatalog): &VecMap<String, ID> { &catalog.versions }
     public fun publisher(catalog: &ComponentCatalog): address { catalog.publisher }

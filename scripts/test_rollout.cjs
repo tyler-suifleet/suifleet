@@ -34,6 +34,15 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   };
   assert.deepEqual(candidatesOf(advance), [n('0x1')]); // Offline 0x2 is never admitted.
   assert.deepEqual(candidatesOf(await r.buildAdvanceRolloutTx(client,'0x42','0xad')), []);
+  const fleet = {id:n('0xad'),customerId:n('0xc')};
+  const managed = await r.buildAdvanceRolloutTx(client,'0x42','0xbe',['0x1'],{fleet});
+  const call = managed.getData().commands[0].MoveCall;
+  assert.equal(call.module, 'customer');
+  assert.equal(call.function, 'advance_rollout_onchain');
+  assert.equal(call.arguments.length, 6);
+  const managedData = managed.getData();
+  assert.deepEqual(bcs.vector(bcs.Address).parse(Buffer.from(managedData.inputs[call.arguments[4].Input].Pure.bytes,'base64')), [n('0x1')]);
+  await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',[],{fleet:{...fleet,id:n('0xbe')}}), /mismatch/);
   const skipOffline = r.buildRolloutControlTx('0x42', 0, ['0x2'], 'skip offline canary');
   assert.equal(skipOffline.getData().commands[0].MoveCall.function, 'control_rollout');
   await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x3']), /rollout members/);

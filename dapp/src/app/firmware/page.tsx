@@ -1,5 +1,7 @@
 "use client";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+
 import { Fragment, useState, useCallback, useEffect, useRef } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
@@ -36,6 +38,7 @@ interface ArtifactResult {
 }
 
 export default function FirmwarePage() {
+  const { fleet: selectedFleet } = useFleetSelection();
   const account = useCurrentAccount();
   const client = useCurrentClient();
   const [catalogVersion, setCatalogVersion] = useState<ComponentVersion | null>(null);
@@ -131,7 +134,7 @@ export default function FirmwarePage() {
     try {
       let transaction;
       if (catalogVersion) {
-        transaction = buildCatalogDeploymentTx(catalogVersion.objectId, [...selectedGroups], [...selectedDevices], initiallyPaused);
+        transaction = buildCatalogDeploymentTx(catalogVersion.objectId, [...selectedGroups], [...selectedDevices], initiallyPaused, selectedFleet);
       } else {
         const recipe = buildRecipe(artifact!);
         setDeployPhase("uploading");
@@ -141,12 +144,12 @@ export default function FirmwarePage() {
           ? buildDesiredRevisionTx(Array.from(selectedGroups), {
               componentName, version, initiallyPaused, recipeBlobId: recipeUpload.blobId,
               artifactSha256: artifact!.sha256, recipeSha256: recipeUpload.sha256,
-            })
+            }, [], selectedFleet)
           : buildCreateDeploymentTx(componentName, version, recipeUpload.blobId,
               artifact!.sha256, recipeUpload.sha256, [...selectedGroups], [...selectedDevices], initiallyPaused,
               // Announce to the device inboxes and group heads (SF-125).
-              account && inboxSupported() ? announcementsFor(groups, devices, account.address, [...selectedGroups],
-                [...selectedDevices], await existingInboxes(client, [...selectedDevices])) : undefined);
+              !selectedFleet && account && inboxSupported() ? announcementsFor(groups, devices, account.address, [...selectedGroups],
+                [...selectedDevices], await existingInboxes(client, [...selectedDevices])) : undefined, selectedFleet);
       }
       const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
       succeeded = true;

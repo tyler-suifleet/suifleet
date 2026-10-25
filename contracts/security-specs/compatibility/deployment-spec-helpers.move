@@ -11,10 +11,11 @@
         let present = df::exists(&deployment.id, ReceiptsKey {});
         prover::prover::asserts(!present || df::exists_with_type<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}));
         let old_version = if (present) df::borrow<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}).version else 0;
-        prover::prover::asserts(old_version <= LEGACY_RECEIPTS_VERSION);
+        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else LEGACY_RECEIPTS_VERSION;
+        prover::prover::asserts(old_version <= target_version);
         let result = receipts_mut(deployment);
-        prover::prover::ensures(result.version == LEGACY_RECEIPTS_VERSION);
-        if (!present || old_version < LEGACY_RECEIPTS_VERSION) prover::prover::ensures(result.statuses.is_empty());
+        prover::prover::ensures(result.version == target_version);
+        if (!present || old_version < target_version) prover::prover::ensures(result.statuses.is_empty());
         result
     }
 

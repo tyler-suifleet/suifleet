@@ -435,10 +435,11 @@ impl Indexer {
         let Some(receipts) = self.field(id, "deployment_manager::ReceiptsKey").await? else {
             return Ok(Vec::new());
         };
-        if chain::number(&receipts["version"]) == Some(3) {
+        if chain::number(&receipts["version"]) == Some(4) {
             return self.read_sharded_receipts(id).await;
         }
-        if !current_receipts(id, &receipts)? {
+        let managed = self.field(id, "deployment_manager::CustomerFleetKey").await?.is_some();
+        if !current_receipts(id, &receipts, managed)? {
             return Ok(Vec::new());
         }
         let entries = receipts["statuses"]["contents"]
@@ -641,12 +642,12 @@ fn incompatible(
 /// Whether receipts were written under the current report authority. Older
 /// versions stay writable through older packages until migrated, which
 /// discards them; they are never evidence (as the dApp's `readReceipts`).
-fn current_receipts(id: &str, receipts: &Value) -> anyhow::Result<bool> {
+fn current_receipts(id: &str, receipts: &Value, managed: bool) -> anyhow::Result<bool> {
     let version = chain::number(&receipts["version"])
         .filter(|v| *v > 0)
         .ok_or_else(|| anyhow::anyhow!("invalid receipts authority version of {id}: {receipts}"))?;
     anyhow::ensure!(version <= 3, "unsupported receipts authority version");
-    Ok(version == RECEIPTS_AUTHORITY_VERSION)
+    Ok(version == if managed { 3 } else { RECEIPTS_AUTHORITY_VERSION })
 }
 
 /// The next `limit` indexed device IDs after `after`, tombstones and
@@ -736,12 +737,14 @@ mod tests {
     #[test]
     fn only_current_authority_receipts_are_evidence() {
         let receipts = |version: Value| serde_json::json!({ "version": version, "statuses": { "contents": [] } });
-        assert!(!current_receipts("d", &receipts(serde_json::json!("1"))).unwrap());
-        assert!(current_receipts("d", &receipts(serde_json::json!("2"))).unwrap());
-        assert!(!current_receipts("d", &receipts(serde_json::json!("3"))).unwrap());
-        assert!(current_receipts("d", &receipts(serde_json::json!("4"))).is_err());
+        assert!(!current_receipts("d", &receipts(serde_json::json!("1")), false).unwrap());
+        assert!(current_receipts("d", &receipts(serde_json::json!("2")), false).unwrap());
+        assert!(!current_receipts("d", &receipts(serde_json::json!("3")), false).unwrap());
+        assert!(current_receipts("d", &receipts(serde_json::json!("4")), false).is_err());
+        assert!(current_receipts("d", &receipts(serde_json::json!("3")), true).unwrap());
+        assert!(!current_receipts("d", &receipts(serde_json::json!("2")), true).unwrap());
         for invalid in [serde_json::json!("0"), Value::Null, serde_json::json!("x")] {
-            assert!(current_receipts("d", &receipts(invalid)).is_err());
+            assert!(current_receipts("d", &receipts(invalid), false).is_err());
         }
     }
 

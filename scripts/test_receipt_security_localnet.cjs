@@ -80,9 +80,9 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     await fs.writeFile(keyFile,JSON.stringify([Buffer.concat([Buffer.from([0]),Buffer.from(secret)]).toString('base64')]),{mode:0o600});
     await fs.writeFile(wallet,`keystore:\n  File: ${keyFile}\nenvs:\n- alias: local\n  rpc: ${rpc}\nactive_env: local\nactive_address: ${owner.toSuiAddress()}\n`,{mode:0o600});
     const evidence=path.join(root,'docs/validation/sf127-upgrade-security-localnet.json');
-    // Match the normal upgrade-security suite's 0.7-SUI ceiling. This only
+    // Match the reviewed PR279 upgrade-security suite's 0.85-SUI ceiling. This only
     // configures disposable localnet accounting; public/default limits stay unchanged.
-    const output=execFileSync('python3',['scripts/live_upgrade_security.py','--wallet',wallet,'--network','localnet','--max-spend-mist','700000000','--walrus','local','--state',path.join(tmp,'state.json'),'--evidence',evidence],{
+    const output=execFileSync('python3',['scripts/live_upgrade_security.py','--wallet',wallet,'--network','localnet','--max-spend-mist','850000000','--walrus','local','--state',path.join(tmp,'state.json'),'--evidence',evidence],{
       cwd:root,encoding:'utf8',maxBuffer:8*1024*1024,timeout:600000,env:{...process.env,SUIFLEET_NETWORK_SUI:'/opt/sui-network/sui'},stdio:['ignore','pipe','pipe']});
     console.log(output);
     console.log('PASS: complete normal SF-001/SF-010/v3 live-security gate on an isolated local chain; public testnet remains pending CI');

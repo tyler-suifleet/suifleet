@@ -298,6 +298,1323 @@
         }
       }
     },
+    "customer": {
+      "functions": {
+        "active_devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "add_claims": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "vector<address>",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "add_to_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::device_group::DeviceGroup",
+            "sui::object::ID",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_budget": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "sui_edge::fleet_budget::BudgetOwnerCap",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::DeviceOwnerCap",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::device_group::DeviceGroup",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_indexed_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::device_group::DeviceGroup",
+            "vector<sui::object::ID>",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "adopt_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&sui_edge::seal_policy::AccessPolicy",
+            "sui_edge::seal_policy::AccessAdminCap",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "advance_rollout": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "advance_rollout_onchain": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "assert_admin": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "assert_fleet": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet"
+          ],
+          "returns": []
+        },
+        "assert_member": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "begin_receipt_cleanup": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "begin_revision": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&sui_edge::device_group::DeviceGroup",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::desired_state::RevisionPlan"
+          ]
+        },
+        "begin_sharded_receipts": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "bind_device_metadata": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "std::string::String",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "borrow_budget_cap": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::fleet_budget::BudgetOwnerCap",
+            "sui_edge::customer::BudgetLoan"
+          ]
+        },
+        "commit_revision": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "sui_edge::desired_state::RevisionPlan",
+            "&mut sui_edge::device_group::DeviceGroup",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "configure_charging": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [
+            {
+              "name": "W",
+              "constraints": [
+                "Drop"
+              ]
+            }
+          ],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "W",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "configure_enrollment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "u64",
+            "u64",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "control_rollout": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "u8",
+            "vector<sui::object::ID>",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_enrollment_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "u64",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_fleet": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "create_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "delete_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "delete_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "sui_edge::device_group::DeviceGroup",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "deregister_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Fleet"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "enroll": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui_edge::device_registry::DeviceOwnerCap",
+            "u64",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enroll_claim": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "fleet_budget": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Fleet"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "fleet_customer": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Fleet"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
+        "fleets": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "new_catalog_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&sui_edge::component_catalog::ComponentVersion",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::deployment_manager::DeploymentRecord"
+          ]
+        },
+        "new_deployment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "vector<sui::object::ID>",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::deployment_manager::DeploymentRecord"
+          ]
+        },
+        "new_rollout": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "std::string::String",
+            "vector<sui::object::ID>",
+            "vector<u64>",
+            "sui_edge::deployment_manager::RolloutPolicy",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::deployment_manager::DeploymentRecord"
+          ]
+        },
+        "pending_devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Fleet"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
+        "policy_account": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "address",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "policy_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "policy_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&sui_edge::device_group::DeviceGroup",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "reassign_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "register_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "address",
+            "std::string::String",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "register_funded_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "std::string::String",
+            "address",
+            "std::string::String",
+            "u64",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "remove_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "sui::object::ID",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui_edge::device_registry::DeviceOwnerCap"
+          ]
+        },
+        "remove_from_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::device_group::DeviceGroup",
+            "sui::object::ID",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "rename_fleet": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "std::string::String",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_group_status": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui_edge::device_group::DeviceGroup",
+            "u8",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_group_status_v4": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui_edge::deployment_manager::ReceiptShard",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "&sui_edge::device_group::DeviceGroup",
+            "u8",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_status": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "u8",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "report_status_v4": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui_edge::deployment_manager::ReceiptShard",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "u8",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "reserve_allowance": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "reserve_device_allowance": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [
+            {
+              "name": "W",
+              "constraints": [
+                "Drop"
+              ]
+            }
+          ],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&sui_edge::fleet_budget::FleetBudget",
+            "&sui_edge::fleet_budget::GasAccount",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::device_cap::DeviceCap",
+            "u64",
+            "W",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "retire_pending_device": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Fleet",
+            "&mut sui_edge::fleet_budget::FleetBudget",
+            "&mut sui_edge::fleet_budget::GasAccount",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "return_budget_cap": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Fleet",
+            "sui_edge::fleet_budget::BudgetOwnerCap",
+            "sui_edge::customer::BudgetLoan"
+          ],
+          "returns": []
+        },
+        "revoke_claim": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::enrollment::EnrollmentPolicy",
+            "address",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "revoke_policy_group": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "sui::object::ID",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "rotate_device_key": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "address",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "rotate_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::seal_policy::AccessPolicy",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_control": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "u8",
+            "u64",
+            "u64",
+            "u64",
+            "u64",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_credential": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "address",
+            "bool",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_default_fleet": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_device_revoked": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::device_registry::DeviceRegistry",
+            "sui::object::ID",
+            "bool",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_entitlement": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "u64",
+            "u64",
+            "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "used": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "u64"
+          ]
+        }
+      },
+      "structs": {
+        "AssignmentKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "BudgetKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "BudgetLoan": {
+          "abilities": [],
+          "type_parameters": [],
+          "fields": [
+            [
+              "fleet_id",
+              "sui::object::ID"
+            ],
+            [
+              "cap_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "CredentialChanged": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "wallet",
+              "address"
+            ],
+            [
+              "active",
+              "bool"
+            ],
+            [
+              "administrator",
+              "bool"
+            ]
+          ]
+        },
+        "Customer": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "version",
+              "u64"
+            ],
+            [
+              "registry_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "credentials",
+              "sui::vec_map::VecMap<address,bool>"
+            ],
+            [
+              "administrators",
+              "u64"
+            ],
+            [
+              "fleets",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "default_fleet",
+              "std::option::Option<sui::object::ID>"
+            ],
+            [
+              "active_devices",
+              "u64"
+            ],
+            [
+              "device_limit",
+              "u64"
+            ],
+            [
+              "allowance",
+              "u64"
+            ],
+            [
+              "used",
+              "u64"
+            ],
+            [
+              "period",
+              "u64"
+            ],
+            [
+              "charge_type",
+              "vector<u8>"
+            ]
+          ]
+        },
+        "CustomerCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "wallet",
+              "address"
+            ]
+          ]
+        },
+        "CustomerKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "wallet",
+              "address"
+            ]
+          ]
+        },
+        "DeviceAssigned": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "fleet_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "DeviceReleased": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "fleet_id",
+              "sui::object::ID"
+            ],
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "Fleet": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "version",
+              "u64"
+            ],
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "budget_id",
+              "sui::object::ID"
+            ],
+            [
+              "devices",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "pending_devices",
+              "u64"
+            ],
+            [
+              "groups",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "deployments",
+              "vector<sui::object::ID>"
+            ],
+            [
+              "policies",
+              "sui::vec_map::VecMap<sui::object::ID,sui::object::ID>"
+            ],
+            [
+              "enrollment_policies",
+              "vector<sui::object::ID>"
+            ]
+          ]
+        },
+        "FleetCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "customer_id",
+              "sui::object::ID"
+            ],
+            [
+              "fleet_id",
+              "sui::object::ID"
+            ],
+            [
+              "name",
+              "std::string::String"
+            ],
+            [
+              "budget_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "GroupCountKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "device_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "Membership": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "customer_id",
+              "sui::object::ID"
+            ]
+          ]
+        },
+        "PolicyKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "policy_id",
+              "sui::object::ID"
+            ]
+          ]
+        }
+      }
+    },
     "deployment_manager": {
       "functions": {
         "advance_rollout": {
@@ -890,6 +2207,17 @@
             "u64"
           ]
         },
+        "schema_version": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "u64"
+          ]
+        },
         "set_control": {
           "visibility": "Public",
           "entry": false,
@@ -1018,6 +2346,20 @@
           ]
         },
         "ControlKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "CustomerFleetKey": {
           "abilities": [
             "Copy",
             "Drop",
@@ -2209,6 +3551,16 @@
             "sui_edge::device_registry::DeviceOwnerCap"
           ]
         },
+        "assert_admin": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
         "borrow_device": {
           "visibility": "Public",
           "entry": false,
@@ -2870,6 +4222,20 @@
             [
               "enrolled",
               "u64"
+            ]
+          ]
+        },
+        "ManagedKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
             ]
           ]
         },
@@ -3630,6 +4996,20 @@
             ],
             [
               "paused",
+              "bool"
+            ]
+          ]
+        },
+        "CustomerManagedKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
               "bool"
             ]
           ]
@@ -5036,6 +6416,17 @@
             "&vector<address>"
           ]
         },
+        "cap_policy": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessAdminCap"
+          ],
+          "returns": [
+            "sui::object::ID"
+          ]
+        },
         "cap_policy_id": {
           "visibility": "Public",
           "entry": false,
@@ -5209,6 +6600,28 @@
           ],
           "returns": [
             "std::string::String"
+          ]
+        },
+        "policy_devices": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
+          ]
+        },
+        "policy_groups": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::seal_policy::AccessPolicy"
+          ],
+          "returns": [
+            "&vector<sui::object::ID>"
           ]
         },
         "revoke_account": {
@@ -5523,6 +6936,33 @@
       "fleet_budget::BudgetPaused",
       "fleet_budget::BudgetConfigured"
     ],
+    "rollout_health": [
+      "deployment_manager::RolloutHealthKey",
+      "deployment_manager::RolloutHealth"
+    ],
+    "fleet_settings": [
+      "fleet_settings::SettingsKey",
+      "fleet_settings::Settings",
+      "fleet_settings::FleetSettingsChanged"
+    ],
+    "customer": [
+      "customer::Customer",
+      "customer::Fleet",
+      "customer::Membership",
+      "customer::CustomerKey",
+      "customer::BudgetKey",
+      "customer::DeviceKey",
+      "customer::AssignmentKey",
+      "customer::GroupCountKey",
+      "customer::CustomerCreated",
+      "customer::FleetCreated",
+      "customer::CredentialChanged",
+      "customer::DeviceAssigned",
+      "customer::DeviceReleased",
+      "enrollment::ManagedKey",
+      "customer::PolicyKey",
+      "deployment_manager::CustomerFleetKey"
+    ],
     "fleet_inbox": [
       "fleet_inbox::DeviceInbox",
       "fleet_inbox::InboxKey",
@@ -5534,16 +6974,6 @@
       "device_group::IndexKey",
       "device_group::GroupIndex",
       "device_group::GroupIndexed"
-
-    ],
-    "rollout_health": [
-      "deployment_manager::RolloutHealthKey",
-      "deployment_manager::RolloutHealth"
-    ],
-    "fleet_settings": [
-      "fleet_settings::SettingsKey",
-      "fleet_settings::Settings",
-      "fleet_settings::FleetSettingsChanged"
     ],
     "receipt_shards": [
       "deployment_manager::ReceiptShardKey",

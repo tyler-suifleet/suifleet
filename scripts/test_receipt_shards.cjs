@@ -26,7 +26,7 @@ for (let i=0; i<devices.length; i++) {
 }
 const client = {
   getDynamicField: async ({name}) => {
-    if (name.type.endsWith('::ReceiptsKey')) return { dynamicField: { value: { type:type('deployment_manager::Receipts'), bcs:p.deployment_manager_ReceiptsBcs.serialize({version:3,statuses:{contents:[]}}).toBytes() } } };
+    if (name.type.endsWith('::ReceiptsKey')) return { dynamicField: { value: { type:type('deployment_manager::Receipts'), bcs:p.deployment_manager_ReceiptsBcs.serialize({version:4,statuses:{contents:[]}}).toBytes() } } };
     return { dynamicField: { value: { type:type('deployment_manager::ReceiptDirectory'), bcs:p.deployment_manager_ReceiptDirectoryBcs.serialize(directory).toBytes() } } };
   },
   getObject: async ({objectId}) => { const index = roots.indexOf(objectId); return { object: {

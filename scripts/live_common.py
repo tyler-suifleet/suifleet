@@ -223,16 +223,17 @@ class Live:
                              head=subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
         print(f"{self.network} chain {self.chain}, operator {self.operator}, balance {self.start_balance / 1e9:.3f} SUI")
 
-    def execute(self, label, command, *, gas, funding=0, expect="success", sender=None):
+    def execute(self, label, command, *, gas, funding=0, expect="success", sender=None, require_full=False):
         """One charged mutation. `sender` is (client.yaml, Budget) for a
         child account the run funded: its own gas is bounded by (and
         recorded against) that funding, which the run already charged."""
         self.assert_lock()
         config, ledger = sender or (None, self.ledger)
-        return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect)
+        return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect,
+                              require_full=require_full)
 
     def transaction(self, label, *ptb, budget=200_000_000, funding=0, sender=None):
-        return self.execute(label, ["ptb", *ptb], gas=budget, funding=funding, sender=sender)
+        return self.execute(label, ["ptb", *ptb], gas=budget, funding=funding, sender=sender, require_full=True)
 
     def child(self, config, funding):
         """The Budget for a child account funded with `funding` MIST."""
@@ -278,13 +279,13 @@ class Live:
             if command[0] == "serialized-tx":
                 return execute(*command)
             return self.client(*command, json_output=json_output, check=check)
-        # Current 13-module upgrades need the same 500M reservation as the
-        # package gate (400M failed in run 40226492793). Budget.execute still
-        # caps this at the remaining non-replenishing suite allowance.
         built = self.evidence.setdefault("verified_package_transactions", {})
         result = self.execute(label, toolchain.package_submitter(
             client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
-            record=built.setdefault(label, {})), gas=500_000_000)
+            record=built.setdefault(label, {})),
+            # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
+            # existing allowance; effects settle actual cost, never replenishing it.
+            gas=self.ledger.remaining if upgrade is not None else 400_000_000)
         if upgrade is None:
             toolchain.write_pubfile(pubfile, self.chain, package_dir, self.published(result),
                                     self.created(result, "::package::UpgradeCap")[0])
@@ -319,9 +320,9 @@ class Live:
             if "ReceiptsKey" in str(value.get("objType", "")):
                 receipts = plain(value.get("content", {}))["value"]
                 version = int(receipts["version"])
-                if version < 3:
+                if version < 4:
                     return {dm.object_id(e["key"]): int(e["value"]) for e in receipts["statuses"]["contents"]}
-                assert version == 3, "unsupported receipts version"
+                assert version == 4, "unsupported receipts version"
                 directory = self.receipt_directory(deployment)
                 assert directory and len(directory["roots"]) == 16
                 if not directory["ready"] or directory["retiring"]:

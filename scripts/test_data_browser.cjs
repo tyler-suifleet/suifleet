@@ -6,6 +6,13 @@ const {Transaction}=appRequire('@mysten/sui/transactions');
 (async()=>{
  const f=await require('./fixtures/data-browser.cjs')(),load=loader(),ui=load('lib/data-browser.ts'),opaque=load('lib/opaque-data.ts');
  const {dataPages}=load('lib/data-pages.ts');
+ const {selectedDataAuthority}=load('lib/data-authority.ts');
+ const selected={id:'0x1',customerId:'0x2',budgetId:'0x3',administrator:true};
+ assert.deepEqual(selectedDataAuthority([selected],selected,'0x3'),{kind:'customer',customerId:'0x2',fleetId:'0x1'});
+ assert.deepEqual(selectedDataAuthority([{...selected,administrator:false}],selected,'0x3'),{kind:'reader'});
+ for(const fleets of [[],[{...selected,budgetId:'0x4'}],[{...selected,customerId:'0x4'}],[{...selected,id:'0x4'}]])assert.throws(()=>selectedDataAuthority(fleets,selected,'0x3'),/revoked/);
+ assert.throws(()=>selectedDataAuthority([selected],undefined,'0x3'),/revoked/);
+
  let discoveries=0,scans=[];
  const pager=dataPages(async()=>{discoveries++;return {devices:['a','b'],hasNextPage:false};},async(device,cursor)=>{scans.push([device,cursor]);return {rows:[],cursor:'next',hasNextPage:!cursor};});
  assert.equal((await pager()).more,true);assert.equal(discoveries,1);assert.equal(scans.length,0);

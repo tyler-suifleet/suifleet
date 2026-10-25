@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useFleetSelection } from "./useFleetSelection";
+import { useFleetDataConfig } from "./useFleetDataConfig";
 import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
@@ -22,13 +24,15 @@ function useNow(periodMs: number): number {
  * (`currentHealth`) instead of leaving it on screen.
  */
 export function useFleetHealth(deviceIds: string[]) {
+  const selection = useFleetSelection(), config = useFleetDataConfig();
   const client = useCurrentClient();
   const account = useCurrentAccount();
   const now = useNow(5_000);
+  const scopedIds = selection.supported ? deviceIds.filter(id => selection.fleet?.devices.includes(id)) : deviceIds;
   const query = useQuery<Record<string, DeviceHealth>>({
-    queryKey: ["health", NETWORK, account?.address, ...deviceIds],
-    queryFn: () => fetchFleetHealth(client, deviceIds, account!.address),
-    enabled: !!account?.address && deviceIds.length > 0,
+    queryKey: ["health", NETWORK, account?.address, selection.identity, ...scopedIds],
+    queryFn: () => fetchFleetHealth(client, scopedIds, account!.address, undefined, undefined, undefined, selection.supported ? { config } : undefined),
+    enabled: !!account?.address && scopedIds.length > 0 && (!selection.supported || !!selection.fleet),
     refetchInterval: HEALTH_REFRESH_MS,
   });
   return { data: currentHealth(query.data, query.dataUpdatedAt, query.isError, Math.max(now, query.dataUpdatedAt)), error: query.error };

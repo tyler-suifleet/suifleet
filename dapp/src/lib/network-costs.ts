@@ -19,9 +19,9 @@ const gas = (computation: number, storage: number, rebate: number): GasEffects =
 export const MEASURED = {
   /** The reference gas price the effects below were paid at (MIST per computation unit). */
   referenceGasPrice: BigInt(1000),
-  /** Highest measured single v3 report at 1,000 targets (docs/validation/sf127-localnet.json).
+  /** Highest measured single sharded v4 report at 1,000 targets (docs/validation/sf127-localnet.json).
    * Later cleanup rebates belong to the cleanup sender, not the reporting device. */
-  receipt: gas(1_160_000, 9_515_200, 4_378_968),
+  receipt: gas(1_470_000, 9_515_200, 4_378_968),
   /** One fleet_budget::draw_gas, measured on testnet (docs/validation/sf083-testnet.json). */
   draw: gas(1_000_000, 6_391_600, 5_403_060),
   /** Observed Testnet SF-082 effects; fixture observations, not fleet-size gas ceilings or a production quote. */

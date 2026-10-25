@@ -122,6 +122,32 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
    assert.equal(result.$kind,'FailedTransaction');assert.match(JSON.stringify(result.FailedTransaction.status),/device_cap::assert_active/);
    await client.waitForTransaction({digest:result.FailedTransaction.digest});attacks[pkg]={digest:result.FailedTransaction.digest,status:result.FailedTransaction.status};
   }
+  // Adopt the existing budget after upgrade; its original scoped identity stays valid.
+  tx=new Transaction();tx.moveCall({target:`${core.pkg}::customer::create`,arguments:[tx.object(registry),tx.pure.string('Customer')]});
+  r=await execute('create managed customer',tx);const customer=created(r,'::customer::Customer'),defaultFleet=created(r,'::customer::Fleet');
+  tx=new Transaction();tx.moveCall({target:`${core.pkg}::customer::set_entitlement`,arguments:[tx.object(customer),tx.object(registry),tx.pure.u64(1),tx.pure.u64(10000000),tx.pure.u64(1)]});
+  tx.moveCall({target:`${core.pkg}::customer::adopt_budget`,arguments:[tx.object(customer),tx.object(budget),tx.object(budgetCap),tx.pure.string('Existing')]});
+  r=await execute('adopt existing data budget',tx);const managed=created(r,'::customer::Fleet');
+  async function customerApprove(fleetId=managed,success=true) {
+   const probe=new Transaction();probe.setSender(owner.toSuiAddress());
+   probe.moveCall({target:`${head}::fleet_data::seal_approve_scoped_customer`,arguments:[probe.pure.vector('u8',scoped),probe.object(fleet),probe.object(budget),probe.object(customer),probe.object(fleetId),probe.pure.id(deviceId),probe.pure.vector('u8',stream)]});
+   const bytes=await probe.build({client,onlyTransactionKind:true});
+   const wire=bcs.TransactionKind.parse(bytes).ProgrammableTransaction;
+   assert.equal(wire.commands.length,1);
+   const sharedInputs=wire.inputs.filter(i=>i.Object?.SharedObject);
+   assert.equal(sharedInputs.length,4);
+   assert(sharedInputs.every(i=>!i.Object.SharedObject.mutable),'approval inputs must be read-only');
+   const result=await client.simulateTransaction({transaction:probe,checksEnabled:false,include:{effects:true}});
+   assert.equal(Boolean(result.Transaction?.status.success),success,JSON.stringify(result));
+   scopedChecks.push({fn:'seal_approve_scoped_customer',fleetId,success});
+  }
+  await customerApprove();await customerApprove(defaultFleet,false);
+  // Rotate away the original wallet; the same read-only probe must now fail.
+  tx=new Transaction();
+  tx.moveCall({target:`${core.pkg}::customer::set_credential`,arguments:[tx.object(customer),tx.pure.address(device.toSuiAddress()),tx.pure.bool(true),tx.pure.bool(true)]});
+  tx.moveCall({target:`${core.pkg}::customer::set_credential`,arguments:[tx.object(customer),tx.pure.address(owner.toSuiAddress()),tx.pure.bool(false),tx.pure.bool(false)]});
+  await execute('rotate managed administrator',tx);await customerApprove(managed,false);
+  console.log('PASS managed scoped approval preserves pre-adoption identity, read-only PTB, cross-fleet rejection and credential rotation');
   console.log(JSON.stringify({result:'PASS',chain,baseRef,base:base.pkg,head,origins,digests,attacks,scopedChecks,checks:['pinned real Walrus/storage dependencies','existing-object byte preservation','later DiagnosticKey origin','new API on existing writer','old and new entry points refuse revoked device']}));
  }finally{await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1});

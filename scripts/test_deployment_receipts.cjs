@@ -31,7 +31,7 @@ const { normalizeSuiAddress } = appRequire("@mysten/sui/utils");
     if (parentId === "0xlegacy") throw new ObjectError("notExists", "missing field", { reason: "notFound" });
     if (parentId === "0xother") throw new Error("transport unavailable");
     return { dynamicField: { value: { type: `${fixture.type_origins["deployment_manager::Receipts"]}::deployment_manager::Receipts`, bcs:
-      parentId === "0xbroken" ? new Uint8Array() : ReceiptsBcs.serialize({ version: parentId === "0xfuture" ? 4 : parentId === "0xinvalid" ? 0 : parentId === "0xprevious" ? 1 : 2,
+      parentId === "0xbroken" ? new Uint8Array() : ReceiptsBcs.serialize({ version: parentId === "0xfuture" ? 5 : parentId === "0xinvalid" ? 0 : parentId === "0xprevious" ? 1 : 2,
         statuses: { contents: [{ key: "0xde", value: parentId === "0xbadstatus" ? 9 : 1 }] } }).toBytes() } } };
   } };
   assert.deepEqual(await sui.readReceipts(client, "0xnew"), { verified: true, statuses: { [normalizeSuiAddress("0xde")]: 1 } });

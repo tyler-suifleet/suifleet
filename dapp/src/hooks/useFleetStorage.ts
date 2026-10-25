@@ -5,25 +5,28 @@ import { useState } from "react";
 import { fetchRetention, retentionOrigin } from "@/lib/retention";
 import { parseToken } from "@/lib/network-costs";
 import { useQuery } from "@tanstack/react-query";
+import { useFleetSelection } from "./useFleetSelection";
 import { NETWORK } from "@/lib/constants";
-import { budgetSupported, fetchBudgets, fetchStorage, storageConfig, type BudgetView, type StorageView } from "@/lib/fleet-budget";
+import { budgetSupported, fetchBudgets, fetchManagedBudget, fetchStorage, storageConfig, type BudgetView, type StorageView } from "@/lib/fleet-budget";
 import { uploadToFleetStorage, type FleetStorageTarget } from "@/lib/fleet-upload";
 import type { BlobStore } from "@/lib/walrus";
 import { useFleetTransaction } from "./useFleetTransaction";
 
 /** Budgets whose owner cap the connected account holds (shared with the budget page). */
 export function useBudgets() {
+  const selection = useFleetSelection();
   const account = useCurrentAccount(), client = useCurrentClient();
   return useQuery<BudgetView[]>({
-    queryKey: ["fleet-budgets", NETWORK, account?.address],
-    enabled: !!account && budgetSupported(),
+    queryKey: ["fleet-budgets", NETWORK, account?.address, selection.identity],
+    enabled: !!account && budgetSupported() && (!selection.supported || !!selection.fleet),
     refetchInterval: 60_000,
-    queryFn: () => fetchBudgets(client, account!.address),
+    queryFn: async () => selection.supported ? [await fetchManagedBudget(client, selection.fleet!.budgetId)] : fetchBudgets(client, account!.address),
   });
 }
 
 /** The connected owner's budget, its fleet storage if any, and why fleet storage is unavailable otherwise. */
 export function useFleetStorage() {
+  const selection = useFleetSelection();
   const client = useCurrentClient();
   const budgets = useBudgets();
   const budget = budgets.data?.[0];
@@ -35,7 +38,7 @@ export function useFleetStorage() {
     queryFn: () => fetchStorage(client, config!, budget!.id),
   });
   const target: FleetStorageTarget | undefined = config && budget && storage.data
-    ? { config, storageId: storage.data.id, budgetId: budget.id, capId: budget.capId } : undefined;
+    ? { config, storageId: storage.data.id, budgetId: budget.id, capId: budget.capId, managed: selection.fleet ? { customerId: selection.fleet.customerId, fleetId: selection.fleet.id } : undefined } : undefined;
   const why = reason ?? (budgets.error ? `Budget unavailable: ${budgets.error.message}`
     : storage.error ? `Fleet storage unavailable: ${storage.error.message}`
     : !budget ? (budgets.isLoading ? "Loading your fleet budget…" : "Create a fleet budget on the Network budget page first.")

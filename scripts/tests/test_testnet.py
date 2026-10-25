@@ -56,15 +56,15 @@ class TrustTests(unittest.TestCase):
 
     def test_large_package_reservation_preserves_run_ceiling_and_unknown_charge(self):
         from live_package_upgrade import PACKAGE_GAS, funding_shortfall
-        # Run 40206647454: base/setup settled to 396,504,956 MIST, then
-        # the upgrade exhausted its old 400M budget. Exercise the same ledger
-        # position with a synthetic 450M successful upgrade, not a live claim.
-        self.assertEqual(PACKAGE_GAS, 500_000_000)
+        # Synthetic ledger position exercises the PR279 700M reservation
+        # after 200M setup, and a 450M effects cost. This is accounting
+        # regression evidence, not a live package-cost claim.
+        self.assertEqual(PACKAGE_GAS, 700_000_000)
         self.assertIn('no single gas pool', funding_shortfall((450_000_000, 450_000_000), 900_000_000))
-        self.assertIsNone(funding_shortfall((500_000_000, 500_000_000), 1_000_000_000))
+        self.assertIsNone(funding_shortfall((700_000_000, 300_000_000), 1_000_000_000))
         for outcome in ('success', 'unknown'):
             ledger = Budget(1_000_000_000, [])
-            ledger.grant(396_504_956)
+            ledger.grant(200_000_000)
             def submit(budget):
                 self.assertEqual(budget, PACKAGE_GAS)
                 if outcome == 'unknown':
@@ -74,12 +74,29 @@ class TrustTests(unittest.TestCase):
             if outcome == 'unknown':
                 with self.assertRaises(RuntimeError):
                     ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
-                self.assertEqual(ledger.used, 896_504_956)
+                self.assertEqual(ledger.used, 900_000_000)
             else:
                 ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
-                self.assertEqual(ledger.used, 846_504_956)
+                self.assertEqual(ledger.used, 650_000_000)
             with self.assertRaises(Spent):
                 ledger.grant(ledger.remaining + 1)
+    def test_large_upgrade_uses_remaining_allowance_without_replenishment(self):
+        evidence = []
+        budget = Budget(800_000_000, evidence)
+        budget.grant(351_442_556)  # Setup in failed run 40140740252.
+        def upgrade(reserved):
+            self.assertEqual(reserved, 448_557_444)
+            return dict(digest='upgrade', effects=dict(status=dict(status='success'),
+                gasUsed=dict(computationCost='10000000', storageCost='400000000', storageRebate='0')))
+        budget.execute(Mock(), 'upgrade to head', upgrade, gas=budget.remaining)
+        self.assertEqual(budget.used, 761_442_556)
+        self.assertEqual(budget.remaining, 38_557_444)
+        # A later unknown operation keeps its entire remaining reservation.
+        with self.assertRaises(TimeoutError):
+            budget.execute(Mock(), 'unknown', Mock(side_effect=TimeoutError()), gas=budget.remaining)
+        self.assertEqual(budget.used, 800_000_000)
+        with self.assertRaises(Spent):
+            budget.execute(Mock(), 'retry', upgrade, gas=400_000_000)
 
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
@@ -235,14 +252,56 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[0], '1000000000', 'evidence/package-upgrade.json'),
-                                               (calls[1], '700000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[0], '1400000000', 'evidence/package-upgrade.json'),
+                                               (calls[1], '850000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
                 if command is not calls[0]:
                     self.assertNotIn('--faucet-tool', command)  # Package gate only.
+
+    def test_fresh_sf129_package_costs_leave_room_for_deployments(self):
+        # Actual settled costs/funding from run 40184514226: base publish,
+        # register, group, head upgrade, activation, device top-up (gas +
+        # funding) and the three-deployment batch. Under the former 0.8-SUI
+        # ceiling only 5,827,318 MIST remained for the base-package deployment,
+        # which failed with InsufficientGas.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING
+        observed = [349_109_200, 8_425_378, 1_243_578, 356_186_163, 8_737_163,
+                    1_988_000 + 30_000_000, 38_483_200]
+        self.assertEqual(800_000_000 - sum(observed), 5_827_318)
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        for cost in observed:
+            ledger.grant(cost)
+        # Room for the base deployment, cleanup and report-gas variance; the
+        # ceiling stays strict and non-replenishing.
+        self.assertGreaterEqual(ledger.remaining, 150_000_000)
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+
+    def test_fresh_post_sf136_pair_fits_the_package_budget_and_ceilings(self):
+        # Run 40238821132: publishing base b819cb2 (SF-136, 62,599 bytecode
+        # bytes) with the former fixed 0.4-SUI budget failed InsufficientGas.
+        # Run 40184514226 measured 349,109,200 MIST for 39,646 bytes, about
+        # 8,806 MIST/byte; the SF-129 head is 63,783 bytes and the
+        # upgrade-security base 6,608. Setup/deployment costs as measured.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
+        from live_package_upgrade import PACKAGE_GAS
+        rate = 349_109_200 // 39_646
+        base, head = 62_599 * rate, 63_783 * rate
+        self.assertLess(400_000_000, base)
+        self.assertGreaterEqual(PACKAGE_GAS - base, 100_000_000)
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        for cost in (base, 8_425_378, 1_243_578, head, 8_737_163, 1_988_000 + 30_000_000, 38_483_200):
+            ledger.grant(cost)
+        self.assertGreaterEqual(ledger.remaining, 150_000_000)
+        # Upgrade-security: small base, the same head upgrade, and its cached
+        # run's measured 104,743,694 MIST of objects/reports (run 40231623943).
+        security = Budget(dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security'], [])
+        for cost in (6_608 * rate, head, 104_743_694):
+            security.grant(cost)
+        self.assertGreaterEqual(security.remaining, 100_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
@@ -433,10 +492,19 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertEqual(sleeps, [41.0])
         self.assertIn('"x-ratelimit-remaining": "0"', logs[0])
 
+    def test_runner_quota_reset_from_failed_ci_fits_default_budget(self):
+        # Run 40126963456 requested a 605-second wait, beyond the old 150s cap.
+        quota = self.http_error(403, {'X-RateLimit-Remaining': '0',
+                                     'X-RateLimit-Reset': '1000604'})
+        result, sleeps, _, calls = self.retrying_read([quota, self.branches()])
+        self.assertEqual(result, self.branches())
+        self.assertEqual(sleeps, [605.0])
+        self.assertEqual(len(calls), 2)
+
     def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
         limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})
         with self.assertRaisesRegex(RuntimeError, r'unavailable after 4 attempt\(s\).*budget 150s.*HTTP 429.*core') as error:
-            self.retrying_read([limited() for _ in range(10)])
+            self.retrying_read([limited() for _ in range(10)], budget=150)
         self.assertNotIn('Authorization', str(error.exception))
         # A quota that resets beyond the budget fails at once instead of sleeping past the job timeout.
         far = self.http_error(403, {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': str(1_000_000 + 3000)})

@@ -832,7 +832,7 @@ module sui_edge::deployment_manager_tests {
         let roots = *deployment_manager::receipt_roots(&d);
         let index = deployment_manager::receipt_shard_index(device);
         let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s, roots[index]);
-        assert!(deployment_manager::receipts_version(&d) == 3);
+        assert!(deployment_manager::receipts_version(&d) == 4);
         assert!(deployment_manager::receipt_status_v3(&d, &root, device) == option::some(1));
         let (devices, statuses, next) = deployment_manager::receipt_page_v3(&d, &root, 0, 64);
         assert!(devices == vector[device] && statuses == vector[1] && next == 1);
@@ -1007,7 +1007,7 @@ module sui_edge::deployment_manager_tests {
     fun future_receipt_authority_rejects_v3_cleanup() {
         let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
         let mut d = ts::take_shared<DeploymentRecord>(&s);
-        deployment_manager::set_receipts_version_for_testing(&mut d, 4);
+        deployment_manager::set_receipts_version_for_testing(&mut d, 5);
         deployment_manager::begin_receipt_cleanup(&mut d, ts::ctx(&mut s)); ts::return_shared(d); s.end();
     }
     #[test]
@@ -1015,7 +1015,7 @@ module sui_edge::deployment_manager_tests {
     fun future_receipt_authority_rejects_v3_migration_finish() {
         let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
         let mut d = ts::take_shared<DeploymentRecord>(&s);
-        deployment_manager::set_receipts_version_for_testing(&mut d, 4);
+        deployment_manager::set_receipts_version_for_testing(&mut d, 5);
         deployment_manager::finish_receipt_migration(&mut d); ts::return_shared(d); s.end();
     }
 

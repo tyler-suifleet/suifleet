@@ -80,6 +80,13 @@ def fixture_valid(live, fixture):
 
 def run(args):
     live = Live(args.wallet, args.network, args.max_spend_mist)
+    # These small fixture PTBs measured <= 14M MIST gross. Keep their full
+    # 20M reservation available after the enlarged package upgrade, rather
+    # than demanding an unused 200M. Package/chunk budgets stay explicit;
+    # all effects and unknown submissions use the same strict ledger.
+    def transaction(label, *ptb, budget=20_000_000, **kwargs):
+        return live.transaction(label, *ptb, budget=budget, **kwargs)
+
     live.preflight()
     repository = Path(__file__).resolve().parents[1]
     base = subprocess.check_output(["git", "-C", str(repository), "rev-parse", args.base_ref], text=True).strip()
@@ -115,7 +122,7 @@ def run(args):
             def legacy_state(old, registry):
                 """A legacy device, its signer-bound cap (plus one the operator
                 keeps), a group and a receipted deployment, all through `old`."""
-                registered = live.transaction("register legacy device + bound cap + group (base)",
+                registered = transaction("register legacy device + bound cap + group (base)",
                     "--move-call", f"{old}::device_registry::register_device", f"@{registry}", '"legacy-pi"',
                     f"@{device_address}", '"aarch64"', CLOCK, "--assign", "device",
                     "--move-call", f"{old}::device_cap::issue_cap", "device",
@@ -133,12 +140,12 @@ def run(args):
                     live.readable(cap_id)
                 cap = next(c for c in caps if dm.object_id(live.owner(c)) == dm.object_id(device_address))
                 minted = next(c for c in caps if c != cap)
-                live.transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
-                d0 = live.created(live.transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
+                transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
+                d0 = live.created(transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
                                                    *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK),
                                   "::deployment_manager::DeploymentRecord")[0]
                 made["base_records"].append(d0)
-                live.transaction("legacy device reports Applied via base", "--move-call", f"{old}::deployment_manager::report_status",
+                transaction("legacy device reports Applied via base", "--move-call", f"{old}::deployment_manager::report_status",
                                  f"@{d0}", f"@{cap}", "1u8", budget=10_000_000, sender=device_wallet)
                 wait_for(lambda: live.receipts(d0) == {dm.object_id(device): 1}, "base receipt not readable")
                 return device, cap, minted, group, d0
@@ -181,7 +188,7 @@ def run(args):
             live.check(f"upgraded in place to {new[:12]}…; identity types originate in the upgrade, existing types in the base")
 
             # 3. Attacks (each must abort exactly as intended).
-            d1 = live.created(live.transaction("deployment via head", "--move-call", f"{new}::deployment_manager::create_deployment_verified",
+            d1 = live.created(transaction("deployment via head", "--move-call", f"{new}::deployment_manager::create_deployment_verified",
                                                *deployment_args(walrus, "1.0.0", run_id), "vector[]", ids([device]), CLOCK),
                               "::deployment_manager::DeploymentRecord")[0]
             made["head_records"].append(d1)
@@ -200,14 +207,14 @@ def run(args):
             live.check("old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written")
 
             # 4. Activation, the real daemon (paying from the device's charged funding), revocation.
-            activated = live.transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
+            activated = transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
                                          f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
             live.readable(owner_cap)
             daemon, components = start_daemon(root, "legacy", manifest, f'[device]\nkeypair_path = "{key}"\n'
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
-            d2 = live.created(live.transaction("deployment via head (after activation)",
+            d2 = live.created(transaction("deployment via head (after activation)",
                                                "--move-call", f"{new}::deployment_manager::create_deployment_verified",
                                                *deployment_args(walrus, "2.0.0", run_id), "vector[]", ids([device]), CLOCK),
                               "::deployment_manager::DeploymentRecord")[0]
@@ -219,11 +226,11 @@ def run(args):
             # SF-127: freeze the populated v2 receipt before copying it to
             # independently shared roots. The still-callable v1 package cannot
             # cross the barrier, and the daemon must report a fresh v3 record.
-            live.transaction("begin populated v3 migration", "--move-call", f"{new}::deployment_manager::begin_sharded_receipts", f"@{d2}", budget=50_000_000)
+            transaction("begin populated v3 migration", "--move-call", f"{new}::deployment_manager::begin_sharded_receipts", f"@{d2}", budget=50_000_000)
             roots = live.receipt_directory(d2)["roots"]
             assert len(roots) == 16
             assert live.receipts(d2) == {}, "partial migration is not authoritative"
-            live.transaction("migrate v2 receipt in bounded chunks", *(
+            transaction("migrate v2 receipt in bounded chunks", *(
                 arg for root_id in roots for arg in ("--move-call", f"{new}::deployment_manager::migrate_receipt_chunk", f"@{d2}", f"@{root_id}", "64")),
                 "--move-call", f"{new}::deployment_manager::finish_receipt_migration", f"@{d2}", budget=50_000_000)
             assert live.receipts(d2) == {dm.object_id(device): 1}, "migration dropped the v2 receipt"
@@ -255,7 +262,7 @@ def run(args):
             assert live.receipts(d2) == {dm.object_id(device): 1}
             assert history(components) == ["2.0.0"], "migration retry replayed the updater"
             live.check("populated v2 receipt preserved; old-package write rejected; real daemon durable retry reports v3 with new provenance and no updater replay")
-            live.transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
+            transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
             attack("verified report after revocation", "--move-call", f"{new}::deployment_manager::report_verified_status",
                    f"@{d2}", f"@{registry}", f"@{cap}", "2u8", module="device_cap", function="assert_active", code=2)
             assert live.receipts(d2) == {dm.object_id(device): 1}, "revoked device changed its receipt"
