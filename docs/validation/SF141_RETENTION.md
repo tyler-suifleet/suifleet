@@ -398,3 +398,125 @@ remain pending coordinator enforcement and were not polled. Fresh independent
 review and dependency verification remain required. Physical/mainnet/provider/
 manual-wallet acceptance is deferred and unrun in #32/#159. No public writes,
 production deployment, hardware programming, issue creation or merge occurred.
+
+
+## Recovered current-main and pinned SF-129 integration (2026-10-25)
+
+Same SF-141 owner and branch resumed under the operator's explicit recovery.
+Codex model: `gpt-6.1-sol`. Integrated current main
+`b819cb2010ac4890e4d2d3bb5dad62b9df9b6a8d` and the explicitly pinned,
+independently reviewed SF-129 head
+`50df059cb127ff2c19dcda29c0f901c15e9b7b09`. Interface coordination was posted
+in [PR 279](https://github.com/tyler-suifleet/suifleet/pull/279#issuecomment-6404451978)
+and [PR 307](https://github.com/tyler-suifleet/suifleet/pull/307#issuecomment-6404452229).
+SF-129 remains a strict **merge-only** prerequisite. Carrying its pinned source
+here does not establish that it merged or that public expiry-window rebates ran.
+
+The eleven main conflicts and subsequent pinned-head conflicts are reconciled.
+The combined storage implementation preserves the managed-customer allowance
+reservation and the finite, WAL-quota-bounded stream purchase. New additive
+`register_managed_stream_blob` and `register_managed_blob_for_epochs` entry points
+bind the customer/fleet and atomically charge the encoded-byte allowance. Legacy
+entry points reject managed budgets. Rust selects the charged call and its signer
+checks customer/fleet IDs and mutability, opt-in, all existing objects and bounds.
+No existing public signature or layout was changed by this repair. The completed
+implementation and localnet-helper commits are `33791c47`, `6c80079c`, `ea2afa7c`,
+`fdf5af58` and `44bce4be`; the two parent reconciliations are `210a3f89` and
+`80ad3b99`.
+
+Retention controls use the selected fleet and freshly discovered administrator
+credential; the existing managed transaction wrapper borrows and returns the
+custodied cap. Archive plaintext, sessions and pending reads are invalidated on
+fleet changes. Real Chrome regression now changes fleet during a pending read
+and proves that its old plaintext cannot publish. The duplicate browser export
+and duplicate interface JSON keys introduced by integration were removed.
+
+The localnet harness saves the head storage tree once, upgrades it after core,
+and inspects the live layout version before migration (the SF-141 base is already
+v3). It preserves owner, exclusive-expiry, retirement and type-origin checks.
+The reviewed transaction gas accounting in `scripts/live_package_upgrade.py`
+remains unchanged. Privileged metadata reads retain main's 900-second budget;
+the separate keyless probe retains this branch's reviewed 3700-second bound.
+
+Fresh checks used `suifleet-dev:sf037` with network disabled, checkout mounted at
+`/workspace`, the `sf141-move` Move cache and `sf141-cargo` mounted at
+`/home/dev/.cargo/registry`. Browser checks used host Chrome at
+`/usr/bin/google-chrome`. Commands and results:
+
+- `INSIDE_DEV_CONTAINER=1 make test-contracts`: core 261/261 and storage 74/74.
+  The newly added fleet-data positive fixture initially used an invalid synthetic
+  blob ID; corrected it to Walrus `derive_blob_id`, then
+  `sui move test --path contracts/fleet_data --build-env testnet`: 60/60 passed.
+- `python3 scripts/check_move_security.py`: passed strict compiler/extra linters,
+  core 261, storage 74, data 59 and genuine negative authority mutations. This
+  run preceded the additional managed positive data fixture; that fixture's
+  fresh result is the 60-test run above.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml`:
+  459 passed, four existing ignored. This preceded the additional managed-stream
+  signer test. `--features pkcs11`: 462 passed, four existing ignored, including
+  that test. After making its module binding explicit for the ABI scanner, the
+  default-feature filtered `managed_stream_signing_requires_charged_path_and_exact_authority`
+  regression passed again. Locked offline bins/examples build passed.
+- In pinned Node 22, `cd dapp && pnpm typecheck && pnpm build`: passed, including
+  the final fleet-reset changes. `make test-manifest` with host Chrome passed,
+  including real Chromium generic Data browsing and all existing fixture checks.
+- `node scripts/test_stream_retention.cjs`, `test_stream_retention_panel.cjs`,
+  `test_storage_reclaim.cjs`, `test_storage_reclaim_panel.cjs`: passed. The policy
+  panel fixture now covers managed administrator, managed read-only and stale
+  response refusal as well as legacy authority/bounds.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_data_session_browser.cjs`:
+  passed expiry, late-read and selected-fleet reset/late-read assertions.
+  `make INSIDE_DEV_CONTAINER=1 test-fleet-settings` with the same Chrome: passed.
+- `python3 scripts/generate_interfaces.py --capture`, then `--check`: passed,
+  14 core modules. `python3 scripts/check_contract_interfaces.py`: passed,
+  990 references across all 16 first-party modules, zero drift. Duplicate optional
+  origin keys were normalized; the retained values are unchanged.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`: 133 tests
+  OK, one existing skip. `test_live_common.py`: 40 OK; `test_live_fleet_reclaim.py`:
+  12 OK. These are offline tests, not public transactions.
+- `test_retention*.py`: 15 OK; `node scripts/test_retention.cjs`: passed SDK,
+  cross-runtime BCS, policy, funding, batching and failure fixtures.
+- Root network-none `python3 scripts/test_opaque_ota.py --binary
+  suifleet-edge/target/debug/suifleet --shim
+  suifleet-edge/target/debug/examples/grpc_sim_shim --stream-retention`: passed
+  real IPC, durable outage/restart, exact purchase/ciphertext reuse, index retirement
+  and independent pinned SDK decryption.
+- Network-none `SF141_RETENTION=1 SF129_RECEIPT=/workspace/.sf141-localnet-receipt.json
+  python3 scripts/test_reclaim_localnet.py`: passed existing-object upgrades,
+  per-stream purchase, expiry, opaque item removal, compact history and reclaim.
+  [Retained receipt](SF141_CURRENT_MAIN_LOCALNET.json) contains 78 local transactions
+  and the genuinely failed pre-expiry prune. Its fixture base is the original
+  SF-129 v3 base, not a claim to have replaced that base with a later publication.
+
+- `CARGO_NET_OFFLINE=true INSIDE_DEV_CONTAINER=1 make test-ota`: full suite
+  passed, including updater/platform, supervisor, configuration, daemon-update,
+  desired-state/inbox/handover/control, telemetry/log/console, rollout, cadence,
+  budget/settings/recovery and all five fleet archive modes (legacy, idle reads,
+  compact, compact+Quilt, compact+Quilt+stream retention). A disconnected-client
+  HTTP `BrokenPipeError` appeared in the daemon-update fixture; its scenario
+  assertions passed and the complete outer Make suite reached the final PASS.
+
+- Network-none `SF129_RECEIPT=/workspace/.sf141-reclaim-regression-receipt.json
+  python3 scripts/test_reclaim_localnet.py` (default SF-129 mode): passed the
+  existing-object core/storage/data upgrades, old-entry-point and owner/expiry
+  refusals, archive/blob reclaim, desired-state retirement and deployment-record
+  reclaim. [Retained regression receipt](SF141_CURRENT_MAIN_RECLAIM.json) records
+  62 actual local transactions and measured rebates; these are not public expiry evidence.
+
+Recovered setup/regression failures were not ignored: an initial registry mount
+used the wrong Cargo path; the initial frontend aggregate requested a Chrome
+binary absent from the container, so browser aggregation ran on the host and
+production compilation ran with pinned container Node. The inherited controller
+assertion expected the obsolete 150-second value; it now checks main's 900.
+The first combined localnet run caught duplicate declarations; the next caught an
+unneeded v3-to-v3 migration. Both are repaired and the final SF-141 run passed.
+The ABI scanner initially lacked an explicit fleet-data module in the new signer
+test; the test now declares and uses that module, and the scanner passes.
+
+No public wallet mutation, hardware operation, mainnet write or production
+credential/provider acceptance was performed. Physical, mainnet, final production
+provider and manual real-wallet acceptance remain unrun in #32 and #159.
+Hosted exact-head/current-base CI and automatic public-testnet checks remain for
+the coordinator after push; no hosted CI was watched or polled. Fresh independent
+review and SF-129's integration gate remain required; this is a repair handoff,
+not approval or permission to merge.
