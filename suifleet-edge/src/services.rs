@@ -371,7 +371,7 @@ impl Runtime {
             "operations":a.operations,"publish":a.publish,"subscribe":a.subscribe,"pubsub_policies":a.pubsub_policies,"streams":a.streams,"shadow_policies":a.shadow_policies
         }))).collect::<BTreeMap<_,_>>()),
         "pubsub":self.effective.pubsub.as_ref().map(|p| serde_json::json!({"limits":p.limits(),"bridge_mappings":p.bridge.as_ref().map(|b| &b.mappings)})),
-        "streams":self.effective.streams.as_ref().map(|s| serde_json::json!({"max_streams":s.max_streams,"max_total_bytes":s.max_total_bytes,"definitions":s.definitions.iter().map(|d| serde_json::json!({"name":d.name,"max_size":d.max_size,"persistence":d.persistence,"strategy_on_full":d.strategy_on_full,"time_to_live_seconds":d.time_to_live_seconds,"discard_exported":d.discard_exported,"export_enabled":d.export.is_some(),"external_export":d.external_export})).collect::<Vec<_>>()}))})
+        "streams":self.effective.streams.as_ref().map(|s| serde_json::json!({"max_streams":s.max_streams,"max_total_bytes":s.max_total_bytes,"definitions":s.definitions.iter().map(|d| serde_json::json!({"name":d.name,"max_size":d.max_size,"persistence":d.persistence,"strategy_on_full":d.strategy_on_full,"time_to_live_seconds":d.time_to_live_seconds,"discard_exported":d.discard_exported,"export_enabled":d.export.is_some(),"external_export":d.external_export,"walrus_export":d.walrus_export})).collect::<Vec<_>>()}))})
     }
 }
 

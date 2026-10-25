@@ -22,6 +22,7 @@ mod funding;
 mod fleet_data;
 mod fleet_settings;
 mod fleet_archive;
+mod opaque;
 mod handoff;
 mod identity;
 mod iotcore;
@@ -688,6 +689,10 @@ async fn local_request(
         // Administrators only (component ACLs cannot list it).
         "client_devices" => client_devices.ok_or_else(|| anyhow::anyhow!("client devices are not enabled ([client_devices])"))?
             .handle(&request.payload, telemetry::now_ms()),
+        "data_put" => {
+            anyhow::ensure!(cfg.fleet_data.as_ref().and_then(|d|d.archives.as_ref()).is_some_and(|a|a.opaque), "opaque storage disabled");
+            opaque::handle(&cfg.runtime.state_dir, &request.topic, &request.payload)
+        }
         op if op.starts_with("stream_") => {
             let store = streams.ok_or_else(|| anyhow::anyhow!("streams are not enabled ([streams])"))?;
             let declared: Vec<String> = cfg.streams.iter().flat_map(|s| s.definitions.iter().map(|d| d.name.clone())).collect();

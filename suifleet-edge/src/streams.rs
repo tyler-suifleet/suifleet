@@ -133,6 +133,9 @@ pub struct Definition {
     /// Operator-selected external SDK exporter; never component-created.
     #[serde(default, skip_serializing_if = "is_false")]
     pub external_export: bool,
+    /// Operator-only destination, acknowledged only by verified fleet anchors.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub walrus_export: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportConfig>,
 }
@@ -158,7 +161,7 @@ pub fn handle(store: &Mutex<Store>, declared: &[String], operation: &str, name: 
         "stream_create" => {
             let mut def = payload.clone();
             let object = def.as_object_mut().ok_or_else(|| StreamError { code: "invalid", oldest: None, detail: "payload is a stream definition".into() })?;
-            if object.contains_key("export") || object.contains_key("external_export") {
+            if object.contains_key("export") || object.contains_key("external_export") || object.contains_key("walrus_export") {
                 return fail("invalid", "exports are declared by the operator, not by components");
             }
             if object.get("name").is_some_and(|n| n != name) {
@@ -245,11 +248,15 @@ impl Definition {
         if self.time_to_live_seconds.is_some_and(|t| !(1..=31_536_000).contains(&t)) {
             return fail("invalid", "time_to_live_seconds must be 1..=31536000");
         }
+        if self.walrus_export && (self.external_export || self.export.is_some() || self.persistence != Persistence::File
+            || self.time_to_live_seconds.is_some() || self.strategy_on_full != Strategy::RejectNewData) {
+            return fail("invalid", "Walrus exports require exclusive File/RejectNewData without TTL");
+        }
         if self.external_export && (self.export.is_some() || self.persistence != Persistence::File
             || self.time_to_live_seconds.is_some() || self.strategy_on_full != Strategy::RejectNewData) {
             return fail("invalid", "external exports require File/RejectNewData without TTL or HTTP export");
         }
-        if self.discard_exported && self.export.is_none() && !self.external_export {
+        if self.discard_exported && self.export.is_none() && !self.external_export && !self.walrus_export {
             return fail("invalid", "discard_exported needs an export");
         }
         if let Some(export) = &self.export {
@@ -997,6 +1004,14 @@ impl Store {
         found.into_iter().map(|e| Ok(Message { sequence: e.sequence, appended_ms: e.appended_ms, data: stream.read_data(e)? })).collect()
     }
 
+    pub fn validate_walrus(&mut self, name: &str) -> anyhow::Result<()> {
+        let def=&self.get(name)?.def;
+        anyhow::ensure!(def.walrus_export && def.persistence == Persistence::File && def.strategy_on_full == Strategy::RejectNewData
+            && def.time_to_live_seconds.is_none() && def.export.is_none() && !def.external_export,
+            "Walrus requires durable reject-on-full stream without TTL or another exporter");
+        Ok(())
+    }
+
     pub fn describe(&mut self, name: &str, now_ms: u64) -> anyhow::Result<Value> {
         let stream = self.get(name)?;
         stream.retire(now_ms)?;
@@ -1458,7 +1473,7 @@ mod tests {
 
     fn def(name: &str, max: u64, strategy: Strategy) -> Definition {
         Definition { name: name.into(), max_size: max, strategy_on_full: strategy, persistence: Persistence::File,
-            time_to_live_seconds: None, discard_exported: false, external_export: false, export: None }
+            time_to_live_seconds: None, discard_exported: false, external_export: false, walrus_export:false, export: None }
     }
 
     #[test]
