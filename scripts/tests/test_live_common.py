@@ -157,6 +157,7 @@ class PackageTransactionTests(unittest.TestCase):
             calls.append(dict(build_tool=build_tool, package_dir=package_dir, sender=sender, upgrade=upgrade))
 
             def submit(budget):
+                calls[-1]["budget"] = budget
                 if refuse:
                     raise sui_toolchain.NotSubmitted("bytecode differs")
                 record.update(kind="upgrade" if upgrade else "publish")
@@ -191,6 +192,31 @@ class PackageTransactionTests(unittest.TestCase):
             run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml", upgrade=upgrade)
         self.assertEqual(calls[0]["upgrade"], upgrade)
         pubfile.assert_not_called()
+
+    def test_security_upgrade_uses_package_sized_reservation_within_suite_ceiling(self):
+        # Run 40226492793: the pre-identity -> current upgrade failed with
+        # InsufficientGas at 400M despite 565,551,753 MIST left in the suite.
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=700_000_000)
+        run.ledger.used = 134_448_247
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)):
+            run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml",
+                        upgrade={"cap": "0xcap", "package": "0xold"})
+        self.assertEqual(calls[0]["budget"], live_package_upgrade.PACKAGE_GAS)
+        self.assertEqual(calls[0]["budget"], 500_000_000)
+        self.assertEqual(run.ledger.used, 219_448_247)
+        self.assertEqual(run.ledger.limit, 700_000_000)
+        self.assertEqual(len(chain.calls), 1)
+
+    def test_package_reservation_still_caps_at_remaining_allowance(self):
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=700_000_000)
+        run.ledger.used = 300_000_000
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)):
+            run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml",
+                        upgrade={"cap": "0xcap", "package": "0xold"})
+        self.assertEqual(calls[0]["budget"], 400_000_000)
+        self.assertEqual(run.ledger.used, 385_000_000)
 
     def test_refused_package_transaction_is_never_submitted_or_charged(self):
         calls, chain = [], Chain()

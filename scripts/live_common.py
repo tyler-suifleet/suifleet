@@ -278,10 +278,13 @@ class Live:
             if command[0] == "serialized-tx":
                 return execute(*command)
             return self.client(*command, json_output=json_output, check=check)
+        # Current 13-module upgrades need the same 500M reservation as the
+        # package gate (400M failed in run 40226492793). Budget.execute still
+        # caps this at the remaining non-replenishing suite allowance.
         built = self.evidence.setdefault("verified_package_transactions", {})
         result = self.execute(label, toolchain.package_submitter(
             client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
-            record=built.setdefault(label, {})), gas=400_000_000)
+            record=built.setdefault(label, {})), gas=500_000_000)
         if upgrade is None:
             toolchain.write_pubfile(pubfile, self.chain, package_dir, self.published(result),
                                     self.created(result, "::package::UpgradeCap")[0])
