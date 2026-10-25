@@ -54,6 +54,33 @@ class TrustTests(unittest.TestCase):
         with self.assertRaises(Spent):
             ledger.grant(96_017_220)
 
+    def test_large_package_reservation_preserves_run_ceiling_and_unknown_charge(self):
+        from live_package_upgrade import PACKAGE_GAS, funding_shortfall
+        # Run 40206647454: base/setup settled to 396,504,956 MIST, then
+        # the upgrade exhausted its old 400M budget. Exercise the same ledger
+        # position with a synthetic 450M successful upgrade, not a live claim.
+        self.assertEqual(PACKAGE_GAS, 500_000_000)
+        self.assertIn('no single gas pool', funding_shortfall((450_000_000, 450_000_000), 900_000_000))
+        self.assertIsNone(funding_shortfall((500_000_000, 500_000_000), 1_000_000_000))
+        for outcome in ('success', 'unknown'):
+            ledger = Budget(1_000_000_000, [])
+            ledger.grant(396_504_956)
+            def submit(budget):
+                self.assertEqual(budget, PACKAGE_GAS)
+                if outcome == 'unknown':
+                    raise RuntimeError('unknown outcome')
+                return dict(digest='offline', effects=dict(status=dict(status='success'),
+                    gasUsed=dict(computationCost='5000000', storageCost='445000000', storageRebate='0')))
+            if outcome == 'unknown':
+                with self.assertRaises(RuntimeError):
+                    ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
+                self.assertEqual(ledger.used, 896_504_956)
+            else:
+                ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
+                self.assertEqual(ledger.used, 846_504_956)
+            with self.assertRaises(Spent):
+                ledger.grant(ledger.remaining + 1)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)

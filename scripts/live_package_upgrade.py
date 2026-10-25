@@ -80,7 +80,10 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
-PACKAGE_GAS = 400_000_000  # Publish/upgrade budget: the largest single gas reservation.
+# Run 40206647454 exhausted 400M upgrading the SF-127 package. Reserve
+# 500M for package storage/computation; Budget still caps this to the unchanged
+# per-run allowance and retains the full reservation for unknown outcomes.
+PACKAGE_GAS = 500_000_000  # Largest single gas reservation; not a spend-limit increase.
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",

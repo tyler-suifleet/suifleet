@@ -123,6 +123,8 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     await fs.cp(path.join(root, "contracts/sources"), path.join(tree, "sources"), { recursive: true });
     for (const name of ["Move.toml", "Move.lock"]) await fs.copyFile(path.join(root, "contracts", name), path.join(tree, name));
     const built = compile(tree); tx = new Transaction();
+    // Match the bounded public gate reservation (run 40206647454 exhausted 400M).
+    tx.setGasBudget(500_000_000);
     const [ticket] = tx.moveCall({ target: "0x2::package::authorize_upgrade", arguments: [tx.object(upgradeCap), tx.pure.u8(0), tx.pure.vector("u8", built.digest)] });
     const receipt = tx.upgrade({ modules: built.modules, dependencies: built.dependencies, package: old, ticket });
     tx.moveCall({ target: "0x2::package::commit_upgrade", arguments: [tx.object(upgradeCap), receipt] });
