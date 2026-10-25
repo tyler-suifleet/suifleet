@@ -36,8 +36,10 @@ def run():
                 return {'data':{'content':{'fields':{'value':{**rollout,'outcomes':base64.b64encode(bytes(rollout['outcomes'])).decode()}}}}}
             return super().rpc(method, params)
     handles = []
-    try:
-        with tempfile.TemporaryDirectory(prefix='suifleet-rollout-') as tmp:
+    # Stop daemons inside the temporary directory: a still-running daemon can
+    # write state while TemporaryDirectory removes it.
+    with tempfile.TemporaryDirectory(prefix='suifleet-rollout-') as tmp:
+        try:
             root = Path(tmp)
             for i, device in enumerate(MEMBERS):
                 sim = View(device, f'0xc{i+2}')
@@ -123,10 +125,10 @@ def run():
             assert [count(i) for i in range(3)]==[1,1,0]
             assert all(not h['sim'].errors for h in handles),[h['sim'].errors for h in handles]
             print('PASS: three daemon cohorts, canary-only grants, offline member, crash/restart, pause/resume, fail-closed reads, final operator recheck and durable abort; apply counts 1/1/0')
-    finally:
-        for h in handles:
-            if h['process']:
-                h['process'].terminate(); h['process'].wait(timeout=10)
-            h['shim'].terminate(); h['shim'].wait(timeout=10); h['server'].shutdown(); h['log'].close()
+        finally:
+            for h in handles:
+                if h['process']:
+                    h['process'].terminate(); h['process'].wait(timeout=10)
+                h['shim'].terminate(); h['shim'].wait(timeout=10); h['server'].shutdown(); h['log'].close()
 
 if __name__=='__main__': run()
