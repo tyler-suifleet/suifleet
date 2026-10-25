@@ -397,3 +397,30 @@ will not watch them. Next: restore publisher availability or implement a separat
 verified bounded provider repair, then obtain actual exact-head/current-base
 CI/testnet success and fresh independent review. Physical #32 and mainnet/final
 provider/manual-wallet #159 acceptance remain deferred and unrun.
+
+
+### Current-base feedback handoff (2026-10-24)
+
+The latest independent review of `74f88c5` found no actionable source/security
+defects and confirmed the old-package handover repair remains resolved. Its
+acceptance verdict was blocked: hosted checks were incomplete and automatic
+testnet evidence was missing after the previously recorded publisher failures.
+This is not a newly identified receipt-runtime defect or a provider repair.
+
+Merged snapshot/current fetched main `c598629ea329062e08afa0e019b7b0d82eb191f0`
+without conflicts. The incoming changes concern coordinator repair dispatch and
+tracking; the receipt runtime is unchanged. Local checks after integration:
+`python3 -m unittest discover -s scripts/tests -p 'test_live_common*.py'`
+passed 38 tests; the equivalent `test_testnet*.py` command passed 81 tests with
+one existing skip. Expected cleanup/reset diagnostics are negative fixtures.
+Broader Move/Rust/frontend/OTA/localnet checks were not repeated for this merge.
+
+Hosted exact-head/current-base CI and automatic public-testnet checks remain
+pending/unassessed at handoff; this worker does not watch or poll them. No public
+mutations, provider substitutions, retry increases, deployment, hardware work or
+merge to main were performed. A successful actual automatic testnet run and fresh
+independent evidence review remain required. Deferred external acceptance remains
+unrun in #32 and #159. Coordinator-only integration and all software/security gates
+remain in force.
+
+Full post-merge coordinator regression: `python3 -m unittest discover -s tools/pr-coordinator/tests` — 391 tests passed in 122.116 seconds. `git diff --check` passed.
