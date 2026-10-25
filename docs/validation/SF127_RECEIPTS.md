@@ -362,3 +362,38 @@ remain deferred and unrun. No merge, deployment or hardware operation occurred.
 Full coordinator regression: `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
 discover -s tools/pr-coordinator/tests` passed all 384 tests in 120.836s.
 `git diff --check` passed.
+
+### Repeated publisher failure: run 40148248434
+
+[Automatic run 40148248434](https://github.com/tyler-suifleet/suifleet/actions/runs/40148248434)
+used head `d16749b946c274f177ad3ab4a5e649c5f9b4ec6c` and base
+`de238f73a6b12b9fccca8e257be6fc1a3b265714`. Its failed-step log confirms
+chain `4c78adac` and the dedicated CI operator. The package-upgrade phase
+reused verified packages, passed all four independently effects-checked receipt
+writes and deleted the deployments: 76,971,332 MIST allowance used across
+three operator transactions. The upgrade-security phase failed uploading the
+legacy artifact at `Walrus.store` with HTTP 500 after bounded retries. Its final
+log recorded five transactions, 120,855,047 MIST allowance used and approximately
+0.0789 SUI net spend. These are partial failed-run observations, not full
+acceptance; transaction digests are not present in this failed-step excerpt.
+
+Added an offline regression specifically reproducing persistent HTTP 500: all
+three PUT attempts fail, the final exception propagates, and a fourth successful
+response is never consumed. No source defect was identified; changing retry
+limits or substituting simulated storage would not establish actual public
+Walrus acceptance. The provider failure remains unresolved, so this repair
+handoff is blocked rather than a claim of a fixed service or successful CI.
+No automatic rerun or public-wallet mutation was initiated by this worker.
+
+`git merge --no-edit origin/main` reported already up to date; the snapshot and
+fetched current base above are included. Scoped checks: `python3 -m unittest
+discover -s scripts/tests -p 'test_live_common*.py'` passed 38 tests;
+`python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'` passed
+81 tests with one existing skip; `git diff --check` passed. Expected synthetic
+connection-reset/cleanup diagnostics come from negative fixtures. Broad receipt,
+Move/Rust/frontend/OTA/localnet suites were not repeated for this test/documentation
+change. Hosted checks on the pushed head remain pending/unassessed; this worker
+will not watch them. Next: restore publisher availability or implement a separately
+verified bounded provider repair, then obtain actual exact-head/current-base
+CI/testnet success and fresh independent review. Physical #32 and mainnet/final
+provider/manual-wallet #159 acceptance remain deferred and unrun.
