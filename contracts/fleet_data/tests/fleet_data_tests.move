@@ -616,8 +616,7 @@ module fleet_data::fleet_data_tests {
         sequence:u64,stream:vector<u8>,key:vector<u8>,content_type:vector<u8>,metadata:vector<u8>,upload:vector<u8>,
         chunk:u32,chunks:u32,total_size:u64,size:u64,sha256:vector<u8>,identifier:vector<u8>,ciphertext_size:u64,ciphertext_sha256:vector<u8>,
     }
-    #[test]
-    fun opaque_items_share_one_certified_anchor() {
+    fun opaque_items_reclaim(prune_epoch: u32) {
         let (mut s,mut system)=setup();
         let blob=upload(&mut s,&mut system,123,true);
         ts::next_tx(&mut s,DEVICE);
@@ -627,11 +626,36 @@ module fleet_data::fleet_data_tests {
         let cap=ts::take_from_address<DeviceCap>(&s,DEVICE);let clock=clock_at(&mut s,DAY);
         let first=ItemWire {sequence:1,stream:b"sensor",key:b"raw",content_type:b"application/octet-stream",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:3,size:3,sha256:zeros(32),identifier:b"data-00",ciphertext_size:100,ciphertext_sha256:zeros(32)};
         let second=ItemWire {sequence:2,stream:b"text",key:b"reading",content_type:b"text/plain",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:5,size:5,sha256:zeros(32),identifier:b"data-01",ciphertext_size:110,ciphertext_sha256:zeros(32)};
-        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,1,0,zeros(32),vector[sui::bcs::to_bytes(&first),sui::bcs::to_bytes(&second)],&clock,ts::ctx(&mut s));
+        let mut items = vector[sui::bcs::to_bytes(&first), sui::bcs::to_bytes(&second)];
+        if (prune_epoch > 0) {
+            while (items.length() < 16) items.push_back(sui::bcs::to_bytes(&first));
+        };
+        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,1,0,zeros(32),items,&clock,ts::ctx(&mut s));
+        if (prune_epoch > 0) assert!(fleet_data::item_exists_for_testing(&writer, 1, 15), 105);
         assert!(fleet_data::anchor_count(&writer)==1,100);
         assert!(fleet_data::item_exists_for_testing(&writer,1,0) && fleet_data::item_exists_for_testing(&writer,1,1),100);
         clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
-        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);destroy(system);ts::end(s);
+        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);
+        if (prune_epoch > 0) {
+            // A newer ordinary archive must survive opaque-batch reclamation.
+            let newer = upload(&mut s, &mut system, 124, true);
+            anchor(&mut s, newer, 2, 0, DAY * 2);
+            prune(&mut s, prune_epoch, vector[0]);
+            ts::next_tx(&mut s, OWNER);
+            let writer = ts::take_shared<DeviceData>(&s);
+            assert!(!fleet_data::has_anchor(&writer, 0), 101);
+            assert!(fleet_data::has_anchor(&writer, 1), 102);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 0), 103);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 1), 104);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 15), 106);
+            ts::return_shared(writer);
+        };
+        destroy(system);ts::end(s);
     }
+
+    #[test] fun opaque_items_share_one_certified_anchor() { opaque_items_reclaim(0) }
+    #[test] fun prune_expired_opaque_batch_removes_all_items() { opaque_items_reclaim(5) }
+    #[test, expected_failure(abort_code=fleet_data::EUnexpired)]
+    fun prune_opaque_batch_refuses_early_reclaim() { opaque_items_reclaim(4) }
 
 }

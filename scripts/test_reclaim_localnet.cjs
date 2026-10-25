@@ -294,7 +294,15 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
           tx = new Transaction();
           tx.moveCall({target:`${dataHead}::fleet_data::anchor_compact`,arguments:[tx.object(fleet),tx.object(d.writer),tx.object(budget),tx.object(d.account),tx.object(registry),tx.object(d.cap),tx.object(storage),tx.pure.address(blob),tx.pure.u64(1),tx.pure.u8(kind),tx.pure.vector('u8',Array.from(createHash('sha256').update(blob).digest())),tx.pure.vector('u8',[]),tx.object('0x6')]});
           await execute('stream logs: compact root with temporary expiry index',tx,d.key);
-        } else await anchor(d, blob, 1, kind, `stream ${kind}`, dataHead);
+        } else {
+          // Exercise opaque metadata under the same paid stream-retention policy.
+          const wire = bcs.struct('ItemWire', {sequence:bcs.u64(),stream:bcs.vector(bcs.u8()),key:bcs.vector(bcs.u8()),content_type:bcs.vector(bcs.u8()),metadata:bcs.vector(bcs.u8()),upload:bcs.vector(bcs.u8()),chunk:bcs.u32(),chunks:bcs.u32(),total_size:bcs.u64(),size:bcs.u64(),sha256:bcs.vector(bcs.u8()),identifier:bcs.vector(bcs.u8()),ciphertext_size:bcs.u64(),ciphertext_sha256:bcs.vector(bcs.u8())});
+          const bytes = wire.serialize({sequence:1,stream:Array.from(Buffer.from('diagnostics')),key:[1],content_type:Array.from(Buffer.from('text/plain')),metadata:Array.from(Buffer.from('{}')),upload:Array(64).fill(48),chunk:0,chunks:1,total_size:3,size:3,sha256:Array(32).fill(0),identifier:Array.from(Buffer.from('data-00')),ciphertext_size:100,ciphertext_sha256:Array(32).fill(0)}).toBytes();
+          tx = new Transaction();
+          tx.moveCall({target:`${dataHead}::fleet_data::anchor_items`,arguments:[tx.object(fleet),tx.object(d.writer),tx.object(budget),tx.object(d.account),tx.object(registry),tx.object(d.cap),tx.object(storage),tx.pure.address(blob),tx.pure.u64(1),tx.pure.u8(kind),tx.pure.vector('u8',Array(32).fill(0)),tx.pure.vector('vector<u8>',[Array.from(bytes)]),tx.object('0x6')]});
+          await execute('stream diagnostics: opaque item under paid retention',tx,d.key);
+          assert.equal((await load('lib/opaque-data.ts').listDataItems(client,config,d.deviceId)).items.length,1);
+        }
         written.push({d, blob, record});
       }
       await execute('owner browser extends logs before expiry',policy.extendStreamArchiveTx(config,{packageId:storageHead,walrus:{system}},budgetCap,written[0].blob,1));
@@ -325,6 +333,8 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
         const result = await execute(`reclaim expired stream ${kind}`,reclaim.buildArchiveReclaimTx(config,budgetCap,system,selected).tx);
         assert.equal(preview.netMist,-net(gasOf(result)));
         assert.equal(await bulk.readAnchorAt(client,config,fresh[kind].deviceId,0),undefined);
+        assert.equal((await load('lib/opaque-data.ts').listDataItems(client,config,fresh[kind].deviceId)).items.length,0,'expired opaque metadata disappears from the reader index');
+        assert.equal((await client.listDynamicFields({parentId:fresh[kind].writer})).dynamicFields.length,0,'all anchor, reuse and opaque metadata deposits reclaimed');
         assert.equal((await policy.streamExpiryPlan(await reclaim.planArchiveReclaim(client,config,storagePackage.pkg,fresh.map(d=>d.deviceId),epoch),kind)).anchors.length,0,'restart/rescan is a no-op');
         // Unanchored ciphertext remains under fleet custody, even when expired.
         assert((await client.getDynamicField({parentId:storage,name:{type:`${storagePackage.pkg}::fleet_storage::RecordKey`,bcs:bcs.Address.serialize(loose.blob).toBytes()}})).dynamicField);

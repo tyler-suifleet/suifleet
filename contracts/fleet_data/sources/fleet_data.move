@@ -399,6 +399,17 @@ module fleet_data::fleet_data {
             if (df::exists(&writer.id, blob_object_id)) {
                 let _: bool = df::remove(&mut writer.id, blob_object_id);
             };
+            // Opaque batches index at most 16 items by the anchor sequence.
+            // Reclaim their fields too so readers stop listing expired data and
+            // the owner recovers the metadata storage deposits.
+            let mut item = 0;
+            while (item < 16) {
+                let item_key = ItemKey { batch: anchor.seq, item };
+                if (df::exists(&writer.id, item_key)) {
+                    let _: DataItem = df::remove(&mut writer.id, item_key);
+                };
+                item = item + 1;
+            };
             let compact_key = CompactHeadKey { reserved: false };
             if (df::exists(&writer.id, compact_key)
                 && df::borrow<CompactHeadKey, CompactHead>(&writer.id, compact_key).index == *index) {
