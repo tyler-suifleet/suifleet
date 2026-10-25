@@ -26,6 +26,7 @@ merging implementation does not establish them or authorize deployment.
 | SF-053 device-key isolation | SF-031 physical Pi acceptance and hardware-token protection; real systemd/cgroup-v2 isolation evidence remains a premerge gate |
 | SF-015 component configuration | SF-010 real extension-wallet configuration UI; SF-031 physical Pi configuration persistence/restart. Relevant local and authorized automatic testnet checks remain required. |
 | SF-019 telemetry | SF-010 real extension-wallet dashboard and SF-031 physical Pi heartbeat/recovery plus provisioned hosted-indexer integration. Disposable local-indexer/public-testnet validation remains normal authorized work. |
+| SF-138 on-chain rollout health | SF-031/#32 physical targets and manual real-wallet acceptance; SF-087/#159 production-provider and actual mainnet acceptance. Local Move/upgrade, daemon simulator, browser/unit/build, normal CI/testnet and independent review remain required. |
 | SF-017 staged rollout | SF-031 physical Pi/target integration only; local compatibility, simulator and normal automatic testnet CI remain required. |
 | SF-024 indexer | SF-010 public-node/archival integration |
 | SF-025 packaging | SF-029 bootable Pi image and SF-031 physical acceptance; final BitBake/QEMU evidence remains required for the packaging implementation |

@@ -216,7 +216,7 @@ def daemon_part(binary, emulator, root, distinct_uids=False):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\ncomponent_startup_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\ncomponent_startup_seconds = 1\n'
                 f'log_group_read = {json.dumps(group_read)}\n'
                 f'[components]\nconfiguration_overlay_dir = {json.dumps(str(overlays))}\n')
 

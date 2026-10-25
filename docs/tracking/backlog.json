@@ -2868,9 +2868,13 @@
         "Authorized users decrypt and download items in the browser; small text and JSON items preview inline; integrity is checked against the indexed SHA-256.",
         "Owners grant and revoke read access per stream or device through Seal policies, with the caveat that revocation does not affect data already decrypted.",
         "Items or filtered sets export directly from the browser to customer-owned storage (S3-compatible presigned upload or HTTP), with credentials kept in the browser session only.",
-        "Clear empty, loading, unavailable-history and access-denied states."
+        "Clear empty, loading, unavailable-history and access-denied states.",
+        "Development may use the pinned source-reviewed SF-139 / PR #302 interfaces documented in docs/OPAQUE_DATA.md and opaque-data.ts. SF-139 must be verified merged before final integration of SF-140; required actual CI/testnet and independent review remain gates."
       ],
-      "validation": "dApp typecheck, production build, unit tests and browser tests against fixture data, including decryption, filtering, sharing and export."
+      "validation": "dApp typecheck, production build, unit tests and browser tests against fixture data, including decryption, filtering, sharing and export.",
+      "merge_depends_on": [
+        "SF-139"
+      ]
     },
     {
       "key": "SF-141",
@@ -2895,9 +2899,13 @@
       "acceptance": [
         "Retention settings per stream stored on chain with bounds, shown and edited in the dApp Data section and settings page.",
         "Devices buy the configured retention at write time; retention beyond the Walrus maximum renews through a dApp-triggered or prepaid mechanism, not a SuiFleet-hosted worker.",
-        "Expired items drop from the index and their blob objects and anchors are reclaimed through SF-129's mechanisms."
+        "Expired items drop from the index and their blob objects and anchors are reclaimed through SF-129's mechanisms.",
+        "Development may use the pinned source-reviewed SF-129 / PR #279 expiry/reclaim APIs with merged SF-128. SF-129 must be verified merged before final integration of SF-141; no claim that public expiry-window rebate acceptance has already run."
       ],
-      "validation": "Move unit and upgrade tests; daemon tests for retention at write; localnet lifecycle test through expiry and reclaim."
+      "validation": "Move unit and upgrade tests; daemon tests for retention at write; localnet lifecycle test through expiry and reclaim.",
+      "merge_depends_on": [
+        "SF-129"
+      ]
     },
     {
       "key": "SF-142",
@@ -3122,6 +3130,29 @@
         "Add meaningful offline recovery, restart, safety-fence and budget regression tests; verify installed committed runtime and actual dispatch."
       ],
       "validation": "Full offline coordinator suite, Python compilation/diff checks, Tyler-authored scoped commits and verified runtime hashes/worker handoffs. Public testnet success remains separate."
+    },
+    {
+      "key": "SF-150",
+      "title": "Separate merge prerequisites from development blockers and preflight repair launches",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Native GitHub blocked-by edges added for merge prerequisites prevent atomic assert before a repair can spawn, leaving reserved repairs in progress for hours. Add explicit merge-only prerequisites and a development-dependency launch preflight.",
+      "evidence": "2026-10-25: PR306 job1166 and PR307 job1168 have empty launch directories and no PID; ticket assert rejects remote SF139/SF129 dependencies. Source work uses pinned reviewed APIs under explicit user authorization, with upstream merge required before integration.",
+      "acceptance": [
+        "Represent SF140->SF139 and SF141->SF129 as merge_depends_on, enforce them before integration, and remove only those native development-blocking edges.",
+        "Preflight genuine development dependencies before reserving or resuming a repair. A blocked dependency must leave Review unchanged rather than a workerless In progress claim.",
+        "Verify empty launch receipts, unchanged ownership and stopped old workers; reconcile the two existing reserved launches and retire the superseded stopped implementation record.",
+        "Add offline merge-guard and no-resume dependency regression tests. Install verified committed source and observe both repairs start."
+      ],
+      "validation": "Coordinator regression suite, compile/diff checks, concrete ticket assert diagnostics and verified actual worker dispatch. Preserve claim identities, dirty work, CI/testnet/review gates and user authorship."
     }
   ]
 }

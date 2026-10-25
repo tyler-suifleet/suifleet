@@ -23,6 +23,7 @@ use std::{str::FromStr, sync::Arc};
 
 use serde_json::{json, Value};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use prost::Message;
 use sui_crypto::SuiVerifier;
 use sui_rpc::proto::sui::rpc::v2 as proto;
 use sui_sdk_types::{Address, Digest, MoveStruct, Object, ObjectData, StructTag, TypeTag};
@@ -111,63 +112,43 @@ impl Shim {
     }
 }
 
-fn to_proto(value: &Value) -> prost_types::Value {
-    use prost_types::value::Kind;
-    prost_types::Value {
-        kind: Some(match value {
-            Value::Null => Kind::NullValue(0),
-            Value::Bool(b) => Kind::BoolValue(*b),
-            Value::Number(n) => Kind::NumberValue(n.as_f64().unwrap_or_default()),
-            Value::String(s) => Kind::StringValue(s.clone()),
-            Value::Array(items) => Kind::ListValue(prost_types::ListValue {
-                values: items.iter().map(to_proto).collect(),
-            }),
-            Value::Object(map) => Kind::StructValue(prost_types::Struct {
-                fields: map.iter().map(|(k, v)| (k.clone(), to_proto(v))).collect(),
-            }),
-        }),
-    }
-}
-
-fn number(value: &Value) -> u64 {
-    value
-        .as_str()
-        .and_then(|s| s.parse().ok())
-        .or_else(|| value.as_u64())
-        .unwrap_or_default()
-}
-
-/// The simulator spells its scenario object IDs without leading zeros
-/// ("0xca"); transactions carry canonical 64-hex IDs.
-fn short_id(id: &str) -> String {
-    let digits = id.trim_start_matches("0x").trim_start_matches('0');
-    format!("0x{}", if digits.is_empty() { "0" } else { digits })
-}
-
-fn cursor(next: usize) -> prost::bytes::Bytes {
-    (next as u64).to_le_bytes().to_vec().into()
-}
-
-#[tonic::async_trait]
-impl proto::ledger_service_server::LedgerService for Shim {
-    async fn get_service_info(
+impl Shim {
+    async fn versioned_object(
         &self,
-        _: Request<proto::GetServiceInfoRequest>,
-    ) -> Result<Response<proto::GetServiceInfoResponse>, Status> {
-        let chain = self.call("sui_getChainIdentifier", json!([])).await?;
-        let prefix = hex::decode(chain.as_str().unwrap_or_default())
-            .map_err(|e| Status::internal(e.to_string()))?;
-        let mut genesis = [0u8; 32];
-        genesis[..prefix.len()].copy_from_slice(&prefix);
-        let mut info = proto::GetServiceInfoResponse::default();
-        info.chain_id = Some(Digest::new(genesis).to_string());
-        let height=self.call("shim_height",json!([])).await?;
-        info.checkpoint_height=Some(number(if height.is_object(){&height["height"]}else{&height}));
-        info.lowest_available_checkpoint=Some(if height.is_object(){number(&height["lowest"])}else{0});
-        Ok(Response::new(info))
+        request: Request<proto::GetObjectRequest>,
+    ) -> Result<Response<proto::GetObjectResponse>, Status> {
+        let id = request.get_ref().object_id.clone().unwrap_or_default();
+        let mut response = self.read_object(request).await?.into_inner();
+        if let Some(object) = response.object.as_mut() {
+            // Simulated versions change with contents and chain reset. Real
+            // nodes provide monotonically increasing ledger object versions.
+            if object.version.is_none() {
+                use sha2::{Digest as _, Sha256};
+                let salt = self.call("shim_version_salt", json!([])).await?;
+                let contents = if object.bcs.is_some() {
+                    let mut plain = proto::GetObjectRequest::default();
+                    plain.object_id = Some(id.clone());
+                    plain.read_mask = Some(prost_types::FieldMask {
+                        paths: vec!["owner".into(), "object_type".into(), "json".into()],
+                    });
+                    self.read_object(Request::new(plain))
+                        .await?
+                        .into_inner()
+                        .object
+                        .ok_or_else(|| Status::internal("version object missing"))?
+                } else {
+                    object.clone()
+                };
+                let mut hash = Sha256::new();
+                hash.update(contents.encode_to_vec());
+                hash.update(salt.to_string());
+                object.version = Some(u64::from_le_bytes(hash.finalize()[..8].try_into().unwrap()));
+            }
+            object.object_id = Some(id);
+        }
+        Ok(Response::new(response))
     }
-
-    async fn get_object(
+    async fn read_object(
         &self,
         request: Request<proto::GetObjectRequest>,
     ) -> Result<Response<proto::GetObjectResponse>, Status> {
@@ -280,6 +261,128 @@ impl proto::ledger_service_server::LedgerService for Shim {
         response.object = Some(object);
         Ok(Response::new(response))
     }
+}
+
+fn to_proto(value: &Value) -> prost_types::Value {
+    use prost_types::value::Kind;
+    prost_types::Value {
+        kind: Some(match value {
+            Value::Null => Kind::NullValue(0),
+            Value::Bool(b) => Kind::BoolValue(*b),
+            Value::Number(n) => Kind::NumberValue(n.as_f64().unwrap_or_default()),
+            Value::String(s) => Kind::StringValue(s.clone()),
+            Value::Array(items) => Kind::ListValue(prost_types::ListValue {
+                values: items.iter().map(to_proto).collect(),
+            }),
+            Value::Object(map) => Kind::StructValue(prost_types::Struct {
+                fields: map.iter().map(|(k, v)| (k.clone(), to_proto(v))).collect(),
+            }),
+        }),
+    }
+}
+
+fn number(value: &Value) -> u64 {
+    value
+        .as_str()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| value.as_u64())
+        .unwrap_or_default()
+}
+
+/// The simulator spells its scenario object IDs without leading zeros
+/// ("0xca"); transactions carry canonical 64-hex IDs.
+fn short_id(id: &str) -> String {
+    let digits = id.trim_start_matches("0x").trim_start_matches('0');
+    format!("0x{}", if digits.is_empty() { "0" } else { digits })
+}
+
+fn cursor(next: usize) -> prost::bytes::Bytes {
+    (next as u64).to_le_bytes().to_vec().into()
+}
+
+#[tonic::async_trait]
+impl proto::ledger_service_server::LedgerService for Shim {
+    async fn get_service_info(
+        &self,
+        _: Request<proto::GetServiceInfoRequest>,
+    ) -> Result<Response<proto::GetServiceInfoResponse>, Status> {
+        self.call("shim_read", json!(["GetServiceInfo", 50]))
+            .await?;
+        let chain = self.call("sui_getChainIdentifier", json!([])).await?;
+        let prefix = hex::decode(chain.as_str().unwrap_or_default())
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut genesis = [0u8; 32];
+        genesis[..prefix.len()].copy_from_slice(&prefix);
+        let mut info = proto::GetServiceInfoResponse::default();
+        info.chain_id = Some(Digest::new(genesis).to_string());
+        let height = self.call("shim_height", json!([])).await?;
+        info.checkpoint_height = Some(number(if height.is_object() {
+            &height["height"]
+        } else {
+            &height
+        }));
+        info.lowest_available_checkpoint = Some(if height.is_object() {
+            number(&height["lowest"])
+        } else {
+            0
+        });
+        Ok(Response::new(info))
+    }
+
+    async fn get_object(
+        &self,
+        request: Request<proto::GetObjectRequest>,
+    ) -> Result<Response<proto::GetObjectResponse>, Status> {
+        let result = self.versioned_object(request).await;
+        let bytes = result
+            .as_ref()
+            .map(|r| r.get_ref().encoded_len())
+            .unwrap_or(0);
+        self.call("shim_read", json!(["GetObject", bytes])).await?;
+        result
+    }
+
+    async fn batch_get_objects(
+        &self,
+        request: Request<proto::BatchGetObjectsRequest>,
+    ) -> Result<Response<proto::BatchGetObjectsResponse>, Status> {
+        let request = request.into_inner();
+        if request.read_mask.as_ref().map(|m| m.paths.as_slice())
+            != Some(&["version".to_owned()][..])
+        {
+            return Err(Status::invalid_argument(
+                "watch batch must use version-only mask",
+            ));
+        }
+        let mut response = proto::BatchGetObjectsResponse::default();
+        for mut item in request.requests {
+            item.read_mask = Some(prost_types::FieldMask {
+                paths: vec!["owner".into(), "object_type".into(), "json".into()],
+            });
+            let result = match self.versioned_object(Request::new(item)).await {
+                Ok(r) => {
+                    let mut object = proto::Object::default();
+                    object.version = r.into_inner().object.and_then(|o| o.version);
+                    proto::get_object_result::Result::Object(object)
+                }
+                Err(e) => {
+                    let mut error = sui_rpc::proto::google::rpc::Status::default();
+                    error.code = e.code() as i32;
+                    error.message = e.message().to_owned();
+                    proto::get_object_result::Result::Error(error)
+                }
+            };
+            let mut item = proto::GetObjectResult::default();
+            item.result = Some(result);
+            response.objects.push(item);
+        }
+        self.call(
+            "shim_read",
+            json!(["BatchGetObjects", response.encoded_len()]),
+        )
+        .await?;
+        Ok(Response::new(response))
+    }
 
     async fn get_transaction(
         &self,
@@ -291,7 +394,7 @@ impl proto::ledger_service_server::LedgerService for Shim {
             if result.is_null(){return Err(Status::not_found("not executed"));}
             let mut status=proto::ExecutionStatus::default();status.success=Some(result["effects"]["status"]["status"]=="success");
             let mut effects=proto::TransactionEffects::default();effects.status=Some(status);
-            let mut tx=proto::ExecutedTransaction::default();tx.digest=Some(digest);tx.effects=Some(effects);tx.checkpoint=Some(0);
+            let mut tx=proto::ExecutedTransaction::default();tx.digest=Some(digest);tx.effects=Some(effects);tx.checkpoint=if result.get("checkpoint").is_some_and(Value::is_null) { None } else { Some(result["checkpoint"].as_u64().unwrap_or(0)) };
             let mut response=proto::GetTransactionResponse::default();response.transaction=Some(tx);return Ok(Response::new(response));
         }
         let index: u64 = digest
@@ -320,19 +423,50 @@ impl proto::ledger_service_server::LedgerService for Shim {
                 _ => None,
             })
             .ok_or_else(|| Status::invalid_argument("expected an event type filter"))?;
-        let events = self.call("shim_events", json!([event_type])).await?;
+        let combined = request.filter.as_ref().is_some_and(|f| f.terms.len() == 2);
+        let events = if combined {
+            self.call("shim_discovery_events", json!([])).await?
+        } else {
+            self.call("shim_events", json!([event_type])).await?
+        };
         let events = events.as_array().cloned().unwrap_or_default();
+        self.call(
+            "shim_read",
+            json!(["ListEvents", serde_json::to_vec(&events).unwrap().len()]),
+        )
+        .await?;
         // Event i is in checkpoint i + 1; a cursor is the next index to read.
         let start = match request.options.as_ref().and_then(|o| o.after.as_ref()) {
-            Some(after) => u64::from_le_bytes(after.as_ref().try_into().map_err(|_| Status::invalid_argument("cursor"))?) as usize,
-            None => request.start_checkpoint.map(|c| c.saturating_sub(1) as usize).unwrap_or(0),
+            Some(after) => u64::from_le_bytes(
+                after
+                    .as_ref()
+                    .try_into()
+                    .map_err(|_| Status::invalid_argument("cursor"))?,
+            ) as usize,
+            None => request
+                .start_checkpoint
+                .map(|c| c.saturating_sub(1) as usize)
+                .unwrap_or(0),
         };
-        let end = (start + PAGE).min(events.len().max(start));
+        let bound = request
+            .end_checkpoint
+            .map(|c| c.saturating_sub(1) as usize)
+            .unwrap_or(events.len());
+        let available = events.len().min(bound);
+        let end = (start + PAGE).min(available.max(start));
         let mut frames = Vec::new();
         for (index, parsed) in events.iter().enumerate().take(end).skip(start) {
             let mut event = proto::Event::default();
-            event.event_type = Some(event_type.clone());
-            event.json = Some(Box::new(to_proto(parsed)));
+            event.event_type = Some(if combined {
+                parsed["event_type"].as_str().unwrap().to_owned()
+            } else {
+                event_type.clone()
+            });
+            event.json = Some(Box::new(to_proto(if combined {
+                &parsed["json"]
+            } else {
+                parsed
+            })));
             event.checkpoint = Some(index as u64 + 1);
             // One event per simulated transaction "event-<index>".
             event.transaction_digest = Some(format!("event-{index}"));
@@ -347,8 +481,10 @@ impl proto::ledger_service_server::LedgerService for Shim {
         let mut watermark = proto::Watermark::default();
         watermark.cursor = Some(cursor(end));
         let mut done = proto::QueryEnd::default();
-        done.reason = Some(if end < events.len() {
+        done.reason = Some(if end < available {
             proto::QueryEndReason::ItemLimit
+        } else if request.end_checkpoint.is_some() {
+            proto::QueryEndReason::CheckpointBound
         } else {
             proto::QueryEndReason::LedgerTip
         } as i32);

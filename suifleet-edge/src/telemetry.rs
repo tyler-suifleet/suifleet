@@ -168,9 +168,21 @@ pub struct Inventory {
     pub services: Option<crate::service_health::Services>,
 }
 
+/// A post-apply sample must include this exact installed deployment and all
+/// known runtime health checks. Missing/unreadable state fails closed.
+pub fn rollout_healthy(inventory: &Inventory, deployment: &str, component: &str, version: &str) -> bool {
+    inventory.reasons.is_empty()
+        && inventory.components.iter().any(|c| c.deployment_id == deployment && c.name == component && c.version == version && c.installed)
+        && inventory.components.iter().all(|c| !c.supervised || c.phase.as_deref() == Some("running"))
+}
+
 /// Read the journal and supervisor files (each replaced atomically by its
-/// writer), never the live structures of the poll loop.
+/// writer). Callers with the shared funding record can override its journal
+/// copy so producer failures remain visible while the main poll is busy.
 pub fn inventory(state_dir: &Path) -> Inventory {
+    inventory_with_funding(state_dir, None)
+}
+pub fn inventory_with_funding(state_dir: &Path, funding: Option<&crate::funding::Funding>) -> Inventory {
     use sha2::Digest;
     let mut inventory = Inventory::default();
     inventory.service_configuration_sha256 = std::fs::read(state_dir.join("services-effective.json")).ok().map(|b| hex::encode(sha2::Sha256::digest(&b)));
@@ -208,7 +220,7 @@ pub fn inventory(state_dir: &Path) -> Inventory {
         }
     }
     // Budget exhaustion (SF-083) is reported, with the receipts it holds back.
-    if let Some(reason) = journal.funding.as_ref().and_then(|f| crate::funding::reason(f, inventory.pending_receipts)) {
+    if let Some(reason) = funding.or(journal.funding.as_ref()).and_then(|f| crate::funding::reason(f, inventory.pending_receipts)) {
         inventory.reasons.push(reason);
     }
     // Without the committed specs, the supervisor's own status still names
@@ -574,6 +586,7 @@ pub async fn flush_as(http: &reqwest::Client, url: &reqwest::Url, spool: &Spool,
 }
 
 pub struct Task {
+    pub funding: Option<Arc<tokio::sync::Mutex<crate::funding::Funding>>>,
     pub binding: Binding,
     pub url: reqwest::Url,
     pub state_dir: PathBuf,
@@ -591,7 +604,11 @@ impl Task {
         let now = now_ms();
         let seq = spool.next_seq(now)?;
         let sync = self.sync.lock().unwrap().clone();
-        let mut inventory = inventory(&self.state_dir);
+        let funding = match &self.funding {
+            Some(funding) => Some(funding.lock().await.clone()),
+            None => None,
+        };
+        let mut inventory = inventory_with_funding(&self.state_dir, funding.as_ref());
         let sources = self.services.lock().unwrap().health_sources();
         inventory.services = crate::service_health::collect(&sources, tracker, self.binding.started_ms, now);
         let snapshot = snapshot(&self.binding, &self.signer.address(), seq, spool.dropped(), sync, inventory, now);
@@ -707,6 +724,12 @@ mod tests {
         })).unwrap()).unwrap();
         assert_eq!(super::inventory(&funded).reasons,
             ["network funding: the fleet budget is empty; its owner must deposit; 1 receipt(s) queued until gas is available"]);
+        let mut live = crate::funding::Funding::default();
+        live.block("fleet writer paused".into(), 123);
+        assert_eq!(super::inventory_with_funding(&funded, Some(&live)).reasons,
+            ["network funding: fleet writer paused; 1 receipt(s) queued until gas is available"]);
+        live.clear();
+        assert!(super::inventory_with_funding(&funded, Some(&live)).reasons.is_empty());
         std::fs::remove_dir_all(funded).unwrap();
         let empty = temp();
         assert_eq!(super::inventory(&empty).reasons, ["daemon journal unreadable"]);
@@ -778,6 +801,28 @@ mod tests {
         assert_eq!(components, [("svc".to_owned(), true, false, None)]);
         assert_eq!((health, reasons.len()), (Health::Healthy, 0));
         std::fs::remove_dir_all(oneshot).unwrap();
+    }
+
+    #[test]
+    fn rollout_health_requires_exact_install_and_known_runtime() {
+        let mut inventory = Inventory::default();
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
+        inventory.components.push(ComponentHealth { name: "app".into(), version: "1".into(),
+            deployment_id: "0xd".into(), installed: true, supervised: false, phase: None,
+            restarts: None, last_exit: None, since_ms: None });
+        assert!(rollout_healthy(&inventory, "0xd", "app", "1"));
+        assert!(!rollout_healthy(&inventory, "0xother", "app", "1"));
+        assert!(!rollout_healthy(&inventory, "0xd", "dependency", "1"));
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "2"));
+        inventory.components[0].installed = false;
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
+        inventory.components[0].installed = true;
+        inventory.components[0].supervised = true;
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
+        inventory.components[0].phase = Some("running".into());
+        assert!(rollout_healthy(&inventory, "0xd", "app", "1"));
+        inventory.reasons.push("bridge unavailable".into());
+        assert!(!rollout_healthy(&inventory, "0xd", "app", "1"));
     }
 
     #[test]

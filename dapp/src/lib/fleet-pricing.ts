@@ -1,3 +1,4 @@
+import { dataPrice } from "./data-pricing";
 // SF-131: the SuiFleet price list, in one table. Every default and add-on price
 // the settings page shows comes from here; nothing else hard-codes a price.
 // Source: the 2026-10-23 pricing proposal in docs/BUSINESS_PLAN.md (merged in
@@ -22,6 +23,7 @@ export interface PriceOption {
 }
 
 export interface PriceTable {
+  data: { includedBytesPerDeviceMonth: number; includedRetentionDays: number; writeUsdPerGB: number; storageUsdPerGBMonth: number };
   source: string;
   currency: "USD";
   base: {
@@ -40,6 +42,7 @@ export interface PriceTable {
 const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
 
 export const DEFAULT_PRICE_TABLE: PriceTable = {
+  data: { includedBytesPerDeviceMonth: 10_000_000, includedRetentionDays: 42, writeUsdPerGB: 0.10, storageUsdPerGBMonth: 0.05 },
   source: "docs/BUSINESS_PLAN.md pricing proposal, 2026-10-23 (not yet approved)",
   currency: "USD",
   base: {
@@ -93,6 +96,11 @@ const whole = (value: unknown, name: string, min: number) => {
 export function validatePriceTable(raw: unknown): PriceTable {
   const t = raw as PriceTable;
   if (!t || typeof t !== "object" || !t.base || !t.settings || !t.addOns?.encryptedDelivery) fail("missing base, settings or addOns");
+  if (!t.data) fail("missing data prices");
+  whole(t.data.includedBytesPerDeviceMonth, "includedBytesPerDeviceMonth", 0);
+  whole(t.data.includedRetentionDays, "includedRetentionDays", 0);
+  price(t.data.writeUsdPerGB, "writeUsdPerGB");
+  price(t.data.storageUsdPerGBMonth, "storageUsdPerGBMonth");
   if (typeof t.source !== "string" || !t.source) fail("source is required");
   if (t.currency !== "USD") fail("currency must be USD");
   if (!Array.isArray(t.base.tiers) || t.base.tiers.length === 0) fail("at least one base tier is required");
@@ -153,7 +161,7 @@ export function basePrice(table: PriceTable, devices: number) {
 export const LOG_SETTING_KEYS: readonly SettingKey[] = ["archiveIntervalMs", "archiveRetentionDays"];
 
 /** `logUploads` false (the new-plan default) leaves the archive cadence and retention unpriced. */
-export interface PriceSelection { values: Record<SettingKey, number>; logUploads: boolean; encryptedDelivery: boolean; annualPrepay: boolean }
+export interface PriceSelection { values: Record<SettingKey, number>; logUploads: boolean; encryptedDelivery: boolean; annualPrepay: boolean; dataBytesPerDeviceMonth?: number; retentionDays?: number }
 
 /** The SuiFleet price for a fleet: base, each add-on per device and per fleet, the minimum, annual discount and activation. */
 export function fleetPrice(table: PriceTable, devices: number, selection: PriceSelection) {
@@ -173,7 +181,8 @@ export function fleetPrice(table: PriceTable, devices: number, selection: PriceS
   const minimumApplied = subtotal < table.base.monthlyMinimumUsd;
   const beforeDiscount = Math.max(subtotal, table.base.monthlyMinimumUsd);
   const discount = selection.annualPrepay ? beforeDiscount * table.base.annualPrepayDiscountPercent / 100 : 0;
-  const monthly = beforeDiscount - discount;
-  return { base, addOns, subtotal, minimumApplied, discount, monthly,
+  const data = dataPrice(table, devices, selection.dataBytesPerDeviceMonth ?? 0, selection.retentionDays ?? selection.values.archiveRetentionDays);
+  const monthly = beforeDiscount - discount + data.monthlyUsd;
+  return { base, addOns, data, subtotal, minimumApplied, discount, monthly,
     perDevice: devices ? monthly / devices : 0, activationOneTime: devices * table.base.activationUsdPerDevice };
 }

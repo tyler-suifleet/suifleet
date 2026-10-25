@@ -1,6 +1,7 @@
 "use client";
 import { liveArchiveEntries } from "@/lib/stream-retention";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
+import { DataUsage } from "@/components/DataUsage";
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount, useCurrentClient, useDAppKit } from '@mysten/dapp-kit-react';
 import { SessionKey } from '@mysten/seal';
@@ -148,7 +149,7 @@ export default function FleetDataPage() {
       await execute({transaction:tx});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
-  return <div className="max-w-5xl space-y-4"><PageHeader title="Fleet archives" subtitle="Signed logs, diagnostics and shadow documents, verified from Sui and decrypted in this browser" />
+  return <div className="max-w-5xl space-y-4"><DataUsage /><PageHeader title="Fleet archives" subtitle="Signed logs, diagnostics and shadow documents, verified from Sui and decrypted in this browser" />
     <StreamRetentionPanel />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>

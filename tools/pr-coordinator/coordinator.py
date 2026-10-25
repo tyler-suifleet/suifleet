@@ -826,7 +826,27 @@ class Coordinator:
         print(f"{project['id']} {key}: pending Review ownership published at revision {revision}", flush=True)
         return current
 
+    def development_blocker(self, project, owner):
+        """Do not reserve/resume a repair that ticket assert would reject.
+
+        merge_depends_on is intentionally enforced only during integration;
+        authorized development can consume a pinned, reviewed prerequisite.
+        """
+        if owner.get('remote', {}).get('external_blockers'):
+            return 'external development dependency is incomplete'
+        dependencies = set(owner.get('spec', {}).get('depends_on', [])) | set(owner.get('remote', {}).get('depends_on', []))
+        for key in sorted(dependencies):
+            dependency = json.loads(self.ticket(project, 'show', key))
+            if dependency['status'] != 'done' or dependency.get('publish_pending'):
+                return 'development dependency is incomplete: ' + key
+        return None
+
     def launch(self, project, pr, owner, kind, recovery=None):
+        if kind == 'fix' and (reason := self.development_blocker(project, owner)):
+            if recovery is not None:
+                self.store.db.execute('UPDATE jobs SET error=? WHERE id=?', (reason, recovery['id']))
+            print(f"{project['id']} PR#{pr['number']}: repair not launched: {reason}", flush=True)
+            return
         family = ('Claude' if owner['agent'] == 'Codex' else 'Codex') if kind == 'review' else owner['agent']
         fingerprint = repair_feedback(pr) if kind == 'fix' and pr.get('_ci_repair') else feedback(pr)
         directory = self.state / project['id'] / f"pr-{pr['number']}-{kind}-{pr['headRefOid'][:12]}-{fingerprint[:12]}"
@@ -1453,7 +1473,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         current=json.loads(self.ticket(project,'show',owner['key']))
         if current['token'] != owner['token'] or current['status'] != 'review' or current.get('publish_pending') or current.get('expired'):
             raise RuntimeError('review ownership changed or is unpublished')
-        dependencies=set(current.get('spec',{}).get('depends_on',[])) | set(current.get('remote',{}).get('depends_on',[]))
+        dependencies=set(current.get('spec',{}).get('depends_on',[])) | set(current.get('remote',{}).get('depends_on',[])) | set(current.get('spec',{}).get('merge_depends_on',[]))
         for key in dependencies:
             dependency=json.loads(self.ticket(project,'show',key))
             if dependency['status'] != 'done' or dependency.get('publish_pending'):

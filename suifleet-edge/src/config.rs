@@ -436,6 +436,7 @@ impl DeploymentManifest {
             ("catalog", crate::catalog::TYPES),
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
+            ("rollout health", crate::protocol::ROLLOUT_HEALTH_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
@@ -478,6 +479,7 @@ impl DeploymentManifest {
             .iter()
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
+            .chain(crate::protocol::ROLLOUT_HEALTH_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
@@ -894,8 +896,10 @@ impl Config {
         );
         anyhow::ensure!(
             (1..=86_400).contains(&cfg.runtime.poll_seconds)
-                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds),
-            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400"
+                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds)
+                && cfg.runtime.full_revalidation_seconds > 0
+                && cfg.runtime.event_discovery_seconds > 0,
+            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400; full_revalidation_seconds and event_discovery_seconds must be positive"
         );
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
@@ -1027,6 +1031,8 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub rollout_poll_seconds: u64,
+    pub full_revalidation_seconds: u64,
+    pub event_discovery_seconds: u64,
     pub replay_history: bool,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
@@ -1048,6 +1054,8 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 1800,
             rollout_poll_seconds: 60,
+            full_revalidation_seconds: 86_400,
+            event_discovery_seconds: 60,
             replay_history: false,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,
@@ -1080,6 +1088,16 @@ mod tests {
         }
         assert!(toml::from_str::<ShadowsConfig>("thing_name = \"d\"\nunknown = 1").is_err());
     }
+    #[test]
+    fn rollout_health_origins_are_optional_but_all_or_none() {
+        let mut manifest = fixture();
+        manifest.validate().unwrap();
+        manifest.type_origins.remove(crate::protocol::ROLLOUT_HEALTH_TYPES[0]);
+        assert!(manifest.validate().is_err());
+        manifest.type_origins.remove(crate::protocol::ROLLOUT_HEALTH_TYPES[1]);
+        manifest.validate().unwrap();
+    }
+
     #[test]
     fn mixed_origins_and_compatibility() {
         let manifest = fixture();

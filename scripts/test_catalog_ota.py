@@ -78,7 +78,7 @@ def run():
             manifest=dict(schema_version=1,protocol_version=1,network='localnet',chain_identifier=sim.chain,rpc_url=url,call_package_id=ota.PACKAGE,upgrade_cap_id=ota.UPGRADE_CAP,package_version='3',type_origins=ota.TYPE_ORIGINS,
                 shared_objects={'registry':{'id':ota.REGISTRY,'initial_shared_version':'1'}},supported_clients={'edge':{'min':'0.2.0','max_exclusive':'0.3.0'}},walrus={'publisher_url':aggregator,'aggregator_url':aggregator})
             (root/'deployment.json').write_text(json.dumps(manifest));config=root/'config.toml'
-            config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh "+str(component.UPDATER)+" --root "+str(root/"components"))}\n[runtime]\nstate_dir={json.dumps(str(root/"state"))}\npoll_seconds=1\n')
+            config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh "+str(component.UPDATER)+" --root "+str(root/"components"))}\n[runtime]\nstate_dir={json.dumps(str(root/"state"))}\npoll_seconds=1\nevent_discovery_seconds=1\n')
             def state():
                 p=root/'state/state.json';return json.loads(p.read_text()) if p.exists() else {}
             with (root/'daemon.log').open('w') as log:
