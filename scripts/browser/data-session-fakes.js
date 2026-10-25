@@ -7,7 +7,7 @@ const control = { keys: [], reads: [] };
 window.__control = control;
 
 const account = { address: operator, chains: ["sui:localnet"] };
-const client = { $extend: () => ({ walrus: {} }) };
+const client = { $extend: () => ({ walrus: { systemState: async () => ({committee:{epoch:0}}) } }) };
 const wallet = {
   stores: { $connection: { get: () => ({ account }) }, $currentNetwork: { get: () => "localnet" } },
   signPersonalMessage: async () => ({ signature: "signed" }),
@@ -42,3 +42,10 @@ export const SEAL_SETTINGS = {};
 export const WALRUS_AGGREGATOR = "";
 export const walrus = () => ({});
 export const TESTNET_WALRUS_PACKAGE_CONFIG = {};
+
+export const liveArchiveEntries = async (_client,_config,_device,entries) => entries;
+
+export const parseCompactHead = () => { throw Error('This session fixture has no compact history'); };
+
+// The policy panel has its own authority/async tests; this fixture isolates sessions.
+export const StreamRetentionPanel = () => null;

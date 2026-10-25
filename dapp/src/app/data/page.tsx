@@ -1,4 +1,6 @@
 "use client";
+import { liveArchiveEntries } from "@/lib/stream-retention";
+import { StreamRetentionPanel } from "@/components/StreamRetention";
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount, useCurrentClient, useDAppKit } from '@mysten/dapp-kit-react';
 import { SessionKey } from '@mysten/seal';
@@ -76,7 +78,10 @@ export default function FleetDataPage() {
       const count=Number(writer?.anchor_count ?? 0);
       if(!Number.isSafeInteger(count)) throw Error('Archive index exceeds browser limits');
       const start=Math.max(0,count-32),{entries:page}=await readAnchorEntries(client,DATA_CONFIG,device,start,32);
-      if(current===generation.current){setEntries(page.reverse());setAnchorCount(count);}
+      const {walrus,TESTNET_WALRUS_PACKAGE_CONFIG}=await import('@mysten/walrus');
+      const epoch=(await client.$extend(walrus({packageConfig:TESTNET_WALRUS_PACKAGE_CONFIG})).walrus.systemState()).committee.epoch;
+      const live=await liveArchiveEntries(client,DATA_CONFIG,device,page,epoch);
+      if(current===generation.current){setEntries(live.reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -115,7 +120,11 @@ export default function FleetDataPage() {
         if([3,4].includes(opened.schema) && opened.previous_head?.length){
           const previous=parseCompactHead(new Uint8Array(opened.previous_head));
           const previousIndex=Number(previous.index);
-          if(Number.isSafeInteger(previousIndex))setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,{index:previousIndex,anchor:previous.anchor}]);
+          if(Number.isSafeInteger(previousIndex)) {
+            const epoch=(await storage.systemState()).committee.epoch;
+            const live=await liveArchiveEntries(client,DATA_CONFIG,device,[{index:previousIndex,anchor:previous.anchor}],epoch);
+            if(current===generation.current && session.current===reading && !reading.isExpired())setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,...live]);
+          }
         }
       }
     } catch {if(current===generation.current){note(index,kind,allowed?.kind,'refused');setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}}
@@ -140,6 +149,7 @@ export default function FleetDataPage() {
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Fleet archives" subtitle="Signed logs, diagnostics and shadow documents, verified from Sui and decrypted in this browser" />
+    <StreamRetentionPanel />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}

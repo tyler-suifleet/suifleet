@@ -36,15 +36,18 @@ export interface FleetDataConfig {
   storageId: string;
   /** Verified introduction origin of CompactHead/CompactHeadKey, only after upgrade. */
   compactHistoryOrigin?: string;
+  /** Introduction package for SF-141 stream policy fields. */
+  streamRetentionOrigin?: string;
 }
 
 export function parseDataConfig(raw: string): FleetDataConfig {
   const value = JSON.parse(raw);
   const fields = ["schema", "chainIdentifier", "registryId", "packageId", "typeOrigin", "fleetId", "budgetId", "storageId"];
-  if (!value || Object.keys(value).filter(key => key !== "compactHistoryOrigin").sort().join() !== fields.sort().join() || value.schema !== 1
+  if (!value || Object.keys(value).filter(key => key !== "compactHistoryOrigin" && key !== "streamRetentionOrigin").sort().join() !== fields.sort().join() || value.schema !== 1
     || !/^[0-9a-f]{8}$/.test(value.chainIdentifier)) throw new Error("Invalid fleet data configuration");
   for (const key of fields.filter(k => k !== "schema" && k !== "chainIdentifier")) value[key] = id(value[key]);
   if (value.compactHistoryOrigin !== undefined) value.compactHistoryOrigin = id(value.compactHistoryOrigin);
+  if (value.streamRetentionOrigin !== undefined) value.streamRetentionOrigin = id(value.streamRetentionOrigin);
   const manifest = requireManifest();
   if (value.chainIdentifier !== manifest.chain_identifier || value.registryId !== id(manifest.shared_objects.registry.id)) {
     throw new Error("Fleet data configuration is for another deployment");

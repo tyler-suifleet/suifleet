@@ -361,7 +361,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
     {storage && <>
       <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />
       {DATA_CONFIG?.storageId === storage.id && DATA_CONFIG.budgetId === budget.id && <ArchiveReclaimPanel config={config} capId={budget.capId} epoch={walrusState.data?.epoch} />}
-      <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p>
+      <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in upload fees so far (including capacity for per-stream writes).</p>
       {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
         <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.text}</li>)}</ul>}
       <fieldset className="border rounded p-2 space-y-2" disabled={pending}>

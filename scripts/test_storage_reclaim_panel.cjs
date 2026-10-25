@@ -2,7 +2,7 @@
 // context, account and network it simulated. Runs the actual component source
 // with a stateful hook runtime; chain, wallet and planner calls are injected.
 const fs = require('node:fs'), path = require('node:path'), Module = require('node:module'), assert = require('node:assert/strict');
-const { appRequire } = require('./frontend_test_utils.cjs');
+const { appRequire, loader } = require('./frontend_test_utils.cjs');
 const ts = appRequire('typescript');
 
 // Minimal React hook runtime: state and refs persist across renders by call order.
@@ -41,6 +41,7 @@ const dependencies = {
   '@/lib/constants': { PACKAGE_ID: '0x82' },
   '@/lib/fleet-data': { DATA_CONFIG: {}, async listFleetDeviceIds() { return { devices: ['0xd1'], hasNextPage: false }; } },
   '@/lib/storage-reclaim': reclaimLib,
+  '@/lib/stream-retention': loader()('lib/stream-retention.ts'),
 };
 const filename = path.resolve(__dirname, '../dapp/src/components/StorageReclaim.tsx');
 const loaded = new Module(filename, module);

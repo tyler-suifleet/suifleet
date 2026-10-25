@@ -4,6 +4,7 @@
 // the transaction is simulated with the owner's own gas and the recoverable
 // SUI is shown; signing rebuilds the same plan and reports actual effects.
 // Rescanning, continuing a scan or switching account discards the preview.
+import { ARCHIVE_STREAMS, streamExpiryPlan } from "@/lib/stream-retention";
 import { useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,6 +71,7 @@ function PreviewLine({ preview }: { preview: ReclaimPreview }) {
 /** Expired archive anchors and blobs of this fleet's devices. */
 export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageConfig; capId: string; epoch?: number }) {
   const client = useCurrentClient();
+  const [stream, setStream] = useState(0);
   const [plan, setPlan] = useState<ArchivePlan>(), [scanError, setScanError] = useState<string>(), [scanning, setScanning] = useState(false);
   const reclaim = useReclaim([plan, capId, config.walrus.system], () => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
   if (!DATA_CONFIG) return null;
@@ -84,7 +86,8 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
         devices.push(...page.devices);
         cursor = page.hasNextPage ? page.cursor : undefined;
       } while (cursor);
-      setPlan(await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!, undefined, resume));
+      const scanned = await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!, undefined, resume);
+      setPlan(DATA_CONFIG!.streamRetentionOrigin ? streamExpiryPlan(scanned, stream) : scanned);
     } catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setScanning(false); }
   }
@@ -92,6 +95,7 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
   return <fieldset className="border rounded p-2 space-y-2" disabled={scanning || reclaim.pending}>
     <legend className="px-1 font-semibold">Reclaim expired archives</legend>
     <p>Deletes the chain index entry of each archive whose Walrus storage has ended, releases its blob from fleet storage and burns it, returning those storage deposits. Archives whose storage was renewed are kept. Expired archives are no longer readable from Walrus; export anything you must keep before it expires.</p>
+    {DATA_CONFIG.streamRetentionOrigin && <label>Archive stream <select value={stream} onChange={e => { setStream(Number(e.target.value)); setPlan(undefined); }}>{ARCHIVE_STREAMS.map((name, i) => <option key={name} value={i}>{name}</option>)}</select> Unanchored uploads are kept for device recovery.</label>}
     <button type="button" disabled={epoch === undefined} onClick={() => void scan()}>Find expired archives</button>
     {scanError && <p role="alert">Archive scan failed: {scanError}</p>}
     {plan && <p role="status">Walrus epoch {plan.epoch}: {plan.anchors.length} expired indexed archive(s) and {plan.loose.length} unindexed expired device blob(s) of {plan.scanned} live index entries.{plan.truncated ? " More history exists past the scan bound; reclaim these, then continue the scan." : ""}</p>}

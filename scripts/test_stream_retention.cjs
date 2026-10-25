@@ -1,0 +1,28 @@
+const assert = require('node:assert/strict'), fs = require('node:fs');
+const {loader,appRequire} = require('./frontend_test_utils.cjs');
+const manifest = JSON.parse(fs.readFileSync('manifests/fixture.localnet.json'));
+process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
+const load = loader(), policy = load('lib/stream-retention.ts');
+const {normalizeSuiAddress:id} = appRequire('@mysten/sui/utils');
+const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1'),storageId:id('0x51')};
+for(const [kind,epochs] of [[0,1],[1,13],[2,53]]) policy.validateStreamRetention(kind,epochs);
+for(const pair of [[3,3],[-1,3],[0,0],[0,54],[0,NaN],[0,1.5]]) assert.throws(()=>policy.validateStreamRetention(...pair));
+const plan={epoch:5,anchors:[{anchor:{kind:0}},{anchor:{kind:1}}],loose:[id('0x123')],scanned:2,resume:{},truncated:false};
+assert.equal(policy.streamExpiryPlan(plan,0).anchors.length,1);
+assert.deepEqual(policy.streamExpiryPlan(plan,0).loose,[]);
+assert.equal(plan.loose.length,1,'selection must not mutate source scan');
+(async()=>{
+ const reads=[];
+ const client={async getDynamicField(req){reads.push(req);return {dynamicField:{value:{type:`${config.streamRetentionOrigin}::fleet_data::StreamRetention`,bcs:policy.StreamRetentionBcs.serialize({epochs:13}).toBytes()}}};}};
+ assert.equal(await policy.readStreamRetention(client,config,1),13);
+ assert.equal(reads[0].name.type,`${config.streamRetentionOrigin}::fleet_data::StreamRetentionKey`);
+ await assert.rejects(policy.readStreamRetention({async getDynamicField(){throw Error('transport');}},config,0),/transport/);
+ await assert.rejects(policy.readStreamRetention({async getDynamicField(){return {dynamicField:{value:{type:'0x1::bad::Record',bcs:new Uint8Array()}}};}},config,0),/Unexpected/);
+ const tx=policy.setStreamRetentionTx(config,id('0xc1'),2,26).getData();
+ assert.equal(tx.commands[0].MoveCall.function,'set_stream_retention');
+ assert.equal(tx.commands[0].MoveCall.package,config.packageId);
+ const extension=policy.extendStreamArchiveTx(config,{packageId:id('0x84'),walrus:{system:id('0x85')}},id('0xc1'),id('0xd1'),13).getData();
+ assert.equal(extension.commands[0].MoveCall.function,'extend_stream_blob');
+ assert.throws(()=>policy.extendStreamArchiveTx(config,{packageId:id('0x84'),walrus:{system:id('0x85')}},id('0xc1'),'bad',13));
+ console.log('stream retention bounds, introduction origin, owner transaction and non-destructive selection PASS');
+})().catch(e=>{console.error(e);process.exitCode=1;});
