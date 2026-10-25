@@ -2857,7 +2857,9 @@
       "area": "frontend",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [],
+      "depends_on": [
+        "SF-139"
+      ],
       "paths": [
         "dapp/src",
         "docs/DASHBOARD_VIEWS.md"

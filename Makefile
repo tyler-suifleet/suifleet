@@ -374,6 +374,8 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
+	$(RUN) node scripts/test_data_browser.cjs
+	$(RUN) node scripts/test_data_browser_browser.cjs
 	$(RUN) node scripts/test_compact_archives.cjs
 	$(RUN) node scripts/test_archive_quilt.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_archive_envelope.py
