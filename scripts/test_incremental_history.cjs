@@ -57,6 +57,29 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
   const failing = fixture(); failing.fail(true);
   await assert.rejects(history.incrementalEvents(failing.client, '0x1::test::Failure'), /transport unavailable/);
   assert.equal([...store.keys()].some(k => k.endsWith('Failure:*')), false, 'no cursor committed on failure');
+  // Live retention can invalidate an otherwise fresh cursor mid-stream.
+  const race = fixture(); let raceCalls = 0;
+  race.client.ledgerService.listEvents = request => {
+    race.calls.push(request);
+    return { responses: (async function* () {
+      if (++raceCalls === 1) {
+        yield event(1); race.floor(8n);
+        throw Error('requested data below earliest available; lowest available tx_seq is 42');
+      }
+      yield event(1); yield event(9); yield end('race-tip', 9n);
+    })() };
+  };
+  result = await history.incrementalEvents(race.client, '0x1::test::RetentionRace');
+  assert.deepEqual(result.map(e => e.transactionDigest), ['digest9', 'digest1']);
+  assert.equal(race.calls[1].startCheckpoint, 8n);
+  assert.equal(race.calls[1].options.after, undefined);
+  assert.match(history.historySnapshot(), /retention advanced during discovery/);
+  const pruned = fixture(); let attempts = 0;
+  pruned.client.ledgerService.listEvents = () => ({ responses: (async function* () {
+    attempts++; throw Error('requested data below earliest available');
+  })() });
+  await assert.rejects(history.incrementalEvents(pruned.client, '0x1::test::StillPruned'), /below earliest/);
+  assert.equal(attempts, 2, 'pruning recovery is bounded and never returns empty success');
   const quota = fixture(); quota.frames([end('quota', 1n)]);
   window.localStorage.setItem = () => { throw Error('quota exceeded'); };
   assert.deepEqual(await history.incrementalEvents(quota.client, '0x1::test::Quota'), []);
@@ -129,5 +152,5 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
   const rescan = fixture(); rescan.frames([created(1,0),end('rescan',2002n)]);
   assert.equal((await history.incrementalEvents(rescan.client,type)).length,1);
   assert.equal(rescan.calls[0].options.after,undefined,'overflow reload rescans retained range');
-  console.log('PASS: type/sender filters; persisted cursor+BCS; reload, empty scan progress, concurrency, pruned/corrupt cache recovery, 250-page reload resumption, origin/stream capacity and nonfatal storage failures');
+  console.log('PASS: type/sender filters; persisted cursor+BCS; reload, empty scan progress, concurrency, pruned/corrupt cache recovery, 250-page reload resumption, origin/stream capacity, bounded mid-stream pruning recovery and nonfatal storage failures');
 })().catch(e => { console.error(e); process.exitCode = 1; });

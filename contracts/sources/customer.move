@@ -512,6 +512,12 @@ module sui_edge::customer {
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::advance_rollout_as(record, online, healthy, unhealthy, clock, object::id(fleet).to_address());
     }
+    public fun advance_rollout_onchain(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord,
+        registry: &DeviceRegistry, candidates: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::advance_rollout_onchain_as(record, registry, candidates, clock, object::id(fleet).to_address());
+    }
     public fun control_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);

@@ -98,7 +98,8 @@ export async function incrementalEvents(client: SuiGrpcClient, type: string, sen
 async function scan(client: SuiGrpcClient, key: string, type: string, sender?: string): Promise<Event[]> {
   const { response: info } = await client.ledgerService.getServiceInfo({});
   if (info.lowestAvailableCheckpoint === undefined) throw Error('History unavailable: endpoint does not report its retained checkpoint range');
-  const lowest = info.lowestAvailableCheckpoint;
+  let lowest = info.lowestAvailableCheckpoint;
+  let pruningRetries = 0;
   let cache = memory.get(client);
   if (!cache) memory.set(client, cache = new Map());
   let invalid = false;
@@ -131,20 +132,34 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
       options: { ordering: 0, limit: 50, after: before ? fromBase64(before) : undefined },
     });
     let reason: number | undefined;
-    for await (const frame of call.responses) {
-      if (frame.watermark?.cursor) next.cursor = toBase64(frame.watermark.cursor);
-      if (frame.watermark?.checkpoint !== undefined) next.checkpoint = frame.watermark.checkpoint.toString();
-      const event = frame.event;
-      if (event) {
-        if (!event.transactionDigest || event.eventIndex === undefined || !event.contents?.value || event.checkpoint === undefined) throw Error('Incomplete history event');
-        const id = `${event.transactionDigest}:${event.eventIndex}`;
-        if (!known.has(id)) {
-          known.add(id);
-          next.events.push({ packageId: event.packageId!, module: event.module!, sender: event.sender!, eventType: event.eventType!,
-            bcs: compactDiscovery(type, event.contents.value), json: null, checkpoint: event.checkpoint.toString(), transactionDigest: event.transactionDigest, eventIndex: event.eventIndex });
+    try {
+      for await (const frame of call.responses) {
+        if (frame.watermark?.cursor) next.cursor = toBase64(frame.watermark.cursor);
+        if (frame.watermark?.checkpoint !== undefined) next.checkpoint = frame.watermark.checkpoint.toString();
+        const event = frame.event;
+        if (event) {
+          if (!event.transactionDigest || event.eventIndex === undefined || !event.contents?.value || event.checkpoint === undefined) throw Error('Incomplete history event');
+          const id = `${event.transactionDigest}:${event.eventIndex}`;
+          if (!known.has(id)) {
+            known.add(id);
+            next.events.push({ packageId: event.packageId!, module: event.module!, sender: event.sender!, eventType: event.eventType!,
+              bcs: compactDiscovery(type, event.contents.value), json: null, checkpoint: event.checkpoint.toString(), transactionDigest: event.transactionDigest, eventIndex: event.eventIndex });
+          }
         }
+        if (frame.end) reason = frame.end.reason;
       }
-      if (frame.end) reason = frame.end.reason;
+    } catch (error) {
+      // Retention may advance after GetServiceInfo or invalidate a saved cursor
+      // inside the same checkpoint. Retry reads once, keeping every known ID.
+      if (!(error instanceof Error) || !/requested data below earliest available/i.test(error.message) || pruningRetries++ >= 1) throw error;
+      const { response: refreshed } = await client.ledgerService.getServiceInfo({});
+      if (refreshed.lowestAvailableCheckpoint === undefined || refreshed.lowestAvailableCheckpoint < lowest) throw error;
+      lowest = refreshed.lowestAvailableCheckpoint;
+      next.cursor = undefined;
+      next.checkpoint = lowest.toString();
+      next.partial = true;
+      warn(key, `History unavailable before checkpoint ${lowest}; retention advanced during discovery. Known objects are preserved; use an archival endpoint for complete history.`);
+      continue;
     }
     if (reason === undefined || reason === 0) throw Error('History stream ended without a successful terminal frame');
     if (reason === 1 || reason === 2) {

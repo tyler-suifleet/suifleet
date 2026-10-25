@@ -5,7 +5,7 @@ module sui_edge::deployment_manager {
     use sui::event;
     use sui::vec_map::{Self, VecMap};
     use sui_edge::device_cap::{Self, DeviceCap};
-    use sui_edge::device_registry::DeviceRegistry;
+    use sui_edge::device_registry::{Self, DeviceRegistry};
     use sui_edge::device_group::{Self, DeviceGroup};
 
     // ── Constants ─────────────────────────────────────────────────────────────
@@ -694,6 +694,34 @@ module sui_edge::deployment_manager {
         cohort: u64, state: u8, // 0 active, 1 paused, 2 aborted, 3 complete
         bake_started_ms: u64, progress_ms: u64, revision: u64,
     }
+    /// One bounded report per admitted member. The transaction signature and
+    /// active cap authenticate the device; ordinary receipts cannot supply it.
+    public struct RolloutHealthKey has copy, drop, store {}
+    public struct RolloutHealth has copy, drop, store {
+        devices: vector<ID>, healthy: vector<bool>, at_ms: vector<u64>, signers: vector<address>,
+    }
+
+    public fun report_rollout_health(d: &mut DeploymentRecord, registry: &DeviceRegistry,
+        cap: &DeviceCap, healthy: bool, clock: &Clock, ctx: &mut TxContext) {
+        device_cap::assert_active(cap, registry, ctx);
+        let device = device_cap::device_id(cap);
+        let r = rollout(d);
+        let (found, i) = r.members.index_of(&device);
+        assert!(found && r.admitted_at[i] != 0 && r.outcomes[i] != 0 && !r.skipped[i], ENotTargeted);
+        assert!(clock.timestamp_ms() >= r.admitted_at[i], ERolloutState);
+        if (!df::exists(&d.id, RolloutHealthKey {})) {
+            df::add(&mut d.id, RolloutHealthKey {}, RolloutHealth { devices: vector[], healthy: vector[], at_ms: vector[], signers: vector[] });
+        };
+        let h: &mut RolloutHealth = df::borrow_mut(&mut d.id, RolloutHealthKey {});
+        // Idempotent retry after uncertain execution; never overwrite a sample.
+        if (!h.devices.contains(&device)) {
+            h.devices.push_back(device);
+            h.healthy.push_back(healthy && r.outcomes[i] == STATUS_APPLIED);
+            h.at_ms.push_back(clock.timestamp_ms());
+            h.signers.push_back(ctx.sender());
+        };
+    }
+
     public struct RolloutDecision has copy, drop {
         deployment_id: ID, revision: u64, cohort: u64, state: u8,
         reason: String, at_ms: u64, admitted: vector<ID>,
@@ -785,6 +813,36 @@ module sui_edge::deployment_manager {
         found && r.admitted_at[i] != 0 && r.outcomes[i] == 0 && !r.skipped[i] && r.state == 0
     }
 
+    /// Serverless tick: health is read from active-device signed post-outcome
+    /// reports, never from creator-supplied telemetry lists. Candidates are
+    /// attempted under the existing concurrency/rate/stall limits; a grant is
+    /// permission, not evidence that an offline device has started work.
+    public fun advance_rollout_onchain(d: &mut DeploymentRecord, registry: &DeviceRegistry,
+        candidates: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
+        advance_rollout_onchain_as(d, registry, candidates, clock, ctx.sender());
+    }
+    public(package) fun advance_rollout_onchain_as(d: &mut DeploymentRecord, registry: &DeviceRegistry,
+        candidates: vector<ID>, clock: &Clock, authority: address) {
+        let r = rollout(d);
+        let mut healthy = vector[]; let mut unhealthy = vector[];
+        if (df::exists(&d.id, RolloutHealthKey {})) {
+            let h: &RolloutHealth = df::borrow(&d.id, RolloutHealthKey {});
+            let mut i = 0;
+            while (i < h.devices.length()) {
+                let device = h.devices[i];
+                let (found, j) = r.members.index_of(&device);
+                if (found && r.admitted_at[j] != 0 && h.at_ms[i] >= r.admitted_at[j]) {
+                    if (!h.healthy[i]) { unhealthy.push_back(device); }
+                    else if (device_registry::is_active_signer(registry, device, h.signers[i])) {
+                        healthy.push_back(device);
+                    };
+                };
+                i = i + 1;
+            };
+        };
+        advance_rollout_as(d, candidates, healthy, unhealthy, clock, authority);
+    }
+
     /// Tick by the creator, after checking current identity-bound telemetry.
     /// `healthy` must name fresh, verified reports of this deployment installed;
     /// `unhealthy` names verified degraded applied members. This is an explicit
@@ -851,7 +909,7 @@ module sui_edge::deployment_manager {
                 };
                 i = i + 1;
             };
-            if (!admitted.is_empty()) { reason = std::string::utf8(b"admitted online cohort members"); }
+            if (!admitted.is_empty()) { reason = std::string::utf8(b"admitted cohort members"); }
             else if (now - r.progress_ms >= r.policy.offline_timeout_ms) {
                 r.state = 1; reason = std::string::utf8(b"offline or ambiguous cohort stalled; capacity retained");
             };
@@ -893,6 +951,9 @@ module sui_edge::deployment_manager {
         assert!(ctx.sender() == d.creator, ENotCreator);
         assert!(d.schema_version == 3, ERolloutState);
         let _: Rollout = df::remove(&mut d.id, RolloutKey {});
+        if (df::exists(&d.id, RolloutHealthKey {})) {
+            let _: RolloutHealth = df::remove(&mut d.id, RolloutHealthKey {});
+        };
         d.schema_version = SCHEMA_VERSION;
         delete_deployment(d, ctx);
     }

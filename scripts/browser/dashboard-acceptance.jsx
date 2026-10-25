@@ -10,6 +10,7 @@ import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { ObjectError } from "@mysten/sui/client";
 import { bcs, TypeTagSerializer } from "@mysten/sui/bcs";
+import { Transaction } from "@mysten/sui/transactions";
 import { deriveDynamicFieldID, normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils";
 import DevicesPage from "@/app/devices/page";
 import DashboardPage from "@/app/page";
@@ -28,7 +29,14 @@ import { manifestClient } from "../fixtures/manifest-client.ts";
 
 const m = ACCEPTANCE_MANIFEST, f = DASHBOARD_FIXTURE;
 const account = { address: f.operator, publicKey: new Uint8Array(32), chains: [`sui:${m.network}`], features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
-const refuse = async () => { throw new Error("This read-only acceptance must not sign"); };
+const refuse = async (input) => {
+  if (location.hash === "#onchain") {
+    const transaction = Transaction.from(await input.transaction.toJSON());
+    window.rolloutTransaction = transaction.getData();
+    throw new Error("Fixture wallet stopped before signing");
+  }
+  throw new Error("This read-only acceptance must not sign");
+};
 const wallet = {
   version: "1.0.0", name: "SuiFleet Acceptance Wallet", icon: "data:image/svg+xml;base64,PHN2Zy8+", chains: [`sui:${m.network}`], accounts: [account],
   features: {
@@ -44,13 +52,13 @@ const dataType = (name) => normalizeStructTag(`${config.typeOrigin}::fleet_data:
 const notFound = () => new ObjectError("missing", "not found", { reason: "notFound" });
 const forged = location.hash === "#forged";
 const fleet = { id: config.fleetId, version: "1", budget_id: config.budgetId, storage_id: config.storageId, registry_id: config.registryId,
-  chain_identifier: config.chainIdentifier, key_epoch: "0", support: [], health_interval_ms: "3600000", batch_interval_ms: "86400000",
+  chain_identifier: config.chainIdentifier, key_epoch: "0", support: [], health_interval_ms: "86400000", batch_interval_ms: "86400000",
   emergency_interval_ms: "300000", device_count: String(f.devices.length) };
 const writers = Object.fromEntries(f.devices.map((d) => [id(d.writer), d]));
 // #far-future: u64 grant and decision times beyond the Date range are shown raw.
 const farFuture = location.hash === "#far-future", u64max = "18446744073709551615";
 const rollout = farFuture ? { ...f.rollout, record: { ...f.rollout.record, admitted_at: [u64max, ...f.rollout.record.admitted_at.slice(1)] },
-  decisions: f.rollout.decisions.map((d) => d.revision === "3" ? { ...d, at_ms: u64max } : d) } : f.rollout;
+  decisions: f.rollout.decisions.map((d) => d.revision === "3" ? { ...d, at_ms: u64max } : d) } : location.hash === "#onchain" ? { ...f.rollout, record: { ...f.rollout.record, state: 0 } } : f.rollout;
 const deployment = { id: rollout.id, creator: f.operator, component_name: "app", version: "2.0.0", recipe_blob_id: "blob", artifact_sha256: "a".repeat(64), created_at: "1", schema_version: "3" };
 
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });
@@ -60,6 +68,8 @@ responses.listEvents = (request) => client.listEvents(request);
 client.ledgerService.listEvents = responses.ledgerService.listEvents;
 client.getObject = async ({ objectId }) => {
   objectId = id(objectId);
+  if (objectId === rollout.id) return { object: { objectId, type: type("deployment_manager::DeploymentRecord"), content: DeploymentBcs.serialize(deployment).toBytes() } };
+  if (location.hash === "#onchain" && (objectId === config.fleetId || writers[objectId])) throw Error("Rollout must not read periodic fleet health");
   if (objectId === config.fleetId) return { object: { objectId, owner: { $kind: "Shared" }, type: dataType("FleetData"), content: FleetDataBcs.serialize(fleet).toBytes() } };
   const d = writers[objectId];
   if (d) {
@@ -74,23 +84,30 @@ const deviceObject = (d) => ({ objectId: d.id, type: type("device_registry::Devi
   id: d.id, name: d.name, device_address: f.signer, arch: "aarch64", meta: { contents: [] }, registered_at: 1, schema_version: 1 }).toBytes() });
 client.listOwnedObjects = async ({ type: wanted }) => ({ hasNextPage: false, objects: normalizeStructTag(wanted) === type("device_registry::DeviceOwnerCap")
   ? f.devices.map((d) => ({ objectId: d.cap, content: DeviceOwnerCapBcs.serialize({ id: d.cap, device_id: d.id }).toBytes() })) : [] });
+// Match the production batch reader's complete Field type, ID and key bytes.
+const fields = new Map();
+function field(parent, keyType, Key, name, valueType, Value, value) {
+  const fieldId = deriveDynamicFieldID(parent, TypeTagSerializer.parseFromStr(keyType), Key.serialize(name).toBytes());
+  fields.set(fieldId, { objectId: fieldId, type: `0x2::dynamic_field::Field<${keyType},${valueType}>`,
+    content: bcs.struct("Field", {id:bcs.Address,name:Key,value:Value}).serialize({id:fieldId,name,value}).toBytes() });
+}
+for (const d of f.devices) {
+  field(m.shared_objects.registry.id, type("device_registry::IdentityKey"), bcs.Address, d.id,
+    type("device_registry::Identity"), IdentityBcs, {signer:f.signer,revoked:false,owner_cap:d.cap});
+  field(config.fleetId, dataType("DeviceKey"), bcs.Address, d.id, "0x2::object::ID", bcs.Address, d.writer);
+}
+for (const [name, value] of [["TargetGroupsKey", []], ["TargetDevicesKey", rollout.members]]) {
+  field(rollout.id, type(`deployment_manager::${name}`), bcs.bool(), false,
+    "vector<0x2::object::ID>", bcs.vector(bcs.Address), value);
+}
+field(rollout.id, type("deployment_manager::ReceiptsKey"), bcs.bool(), false,
+  type("deployment_manager::Receipts"), ReceiptsBcs, {version:"2",statuses:{contents:rollout.receipts}});
 client.getObjects = async ({ objectIds }) => ({ objects: await Promise.all(objectIds.map(async (objectId) => {
+  if (fields.has(id(objectId))) return fields.get(id(objectId));
+  if (writers[id(objectId)]) return (await client.getObject({objectId})).object;
   if (id(objectId) === id(rollout.id)) return { objectId, type: type("deployment_manager::DeploymentRecord"), content: DeploymentBcs.serialize(deployment).toBytes() };
   const d = f.devices.find((d) => d.id === id(objectId));
-  if (d) return deviceObject(d);
-  if (writers[id(objectId)]) return (await client.getObject({ objectId })).object;
-  const requests = f.devices.flatMap(d => [
-    { parent: m.shared_objects.registry.id, keyType: type("device_registry::IdentityKey"), key: bcs.Address.serialize(d.id).toBytes() },
-    { parent: config.fleetId, keyType: dataType("DeviceKey"), key: bcs.Address.serialize(d.id).toBytes() },
-  ]);
-  for (const name of ["ReceiptsKey", "TargetGroupsKey", "TargetDevicesKey"]) requests.push({ parent: rollout.id, keyType: type("deployment_manager::" + name), key: bcs.bool().serialize(false).toBytes() });
-  for (const r of requests) {
-    if (deriveDynamicFieldID(r.parent, TypeTagSerializer.parseFromStr(r.keyType), r.key) !== id(objectId)) continue;
-    const { dynamicField: { value } } = await client.getDynamicField({ parentId: r.parent, name: { type: r.keyType, bcs: r.key } });
-    return { objectId, type: normalizeStructTag('0x2::dynamic_field::Field<' + r.keyType + ',' + value.type + '>'),
-      content: new Uint8Array([...bcs.Address.serialize(objectId).toBytes(), ...r.key, ...value.bcs]) };
-  }
-  return notFound();
+  return d ? deviceObject(d) : notFound();
 })) });
 client.listEvents = async ({ filter }) => {
   const wanted = normalizeStructTag(filter.eventType);
@@ -99,6 +116,8 @@ client.listEvents = async ({ filter }) => {
     : wanted === type("deployment_manager::RolloutDecision") ? rollout.decisions.map((d) => ({ bcs: DecisionBcs.serialize({ deployment_id: rollout.id, ...d }).toBytes() })) : [];
   return { events, hasNextPage: false, endCursor: null };
 };
+responses.listEvents = client.listEvents;
+client.ledgerService.listEvents = responses.ledgerService.listEvents;
 client.listDynamicFields = async ({ parentId }) => {
   if (id(parentId) !== config.fleetId) throw notFound();
   return { hasNextPage: false, cursor: null, dynamicFields: f.devices.map((d) => ({ $kind: "DynamicField", name: { type: dataType("DeviceKey"), bcs: bcs.Address.serialize(d.id).toBytes() }, valueType: "0x2::object::ID" })) };

@@ -385,4 +385,39 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); s.end();
     }
 
+    fun managed_onchain_tick(foreign: bool, revoked: bool) {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 1);
+        let device = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let mut clock = sui::clock::create_for_testing(s.ctx());
+        sui::clock::set_for_testing(&mut clock, 1);
+        let policy = sui_edge::deployment_manager::rollout_policy(1, 1, 1, 100, 1, 10000, 2000);
+        let record = customer::new_rollout(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"),
+            utf8(b"hash"), utf8(b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            vector[device], vector[0], policy, &clock, s.ctx());
+        sui_edge::deployment_manager::share_deployment(record);
+        ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        if (revoked) { let mut c = s.take_shared<Customer>();
+            customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx()); ts::return_shared(c); s.next_tx(OWNER); };
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(if (foreign) b else a);
+        let registry = s.take_shared<DeviceRegistry>();
+        let mut record = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::advance_rollout_onchain(&c, &f, &mut record, &registry, vector[device], &clock, s.ctx());
+        assert!(sui_edge::deployment_manager::rollout_eligible(&record, device));
+        // No signed post-apply sample: a second tick cannot manufacture success.
+        sui::clock::set_for_testing(&mut clock, 1000);
+        customer::advance_rollout_onchain(&c, &f, &mut record, &registry, vector[], &clock, s.ctx());
+        let (state, _) = sui_edge::deployment_manager::rollout_progress(&record); assert!(state == 0);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(registry); ts::return_shared(record);
+        sui::clock::destroy_for_testing(clock); s.end();
+    }
+    #[test]
+    fun managed_onchain_rollout_requires_signed_health() { managed_onchain_tick(false, false); }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun managed_onchain_rollout_rejects_foreign_fleet() { managed_onchain_tick(true, false); }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_onchain_rollout_rejects_revoked_wallet() { managed_onchain_tick(false, true); }
+
 }
