@@ -147,3 +147,55 @@ exact-head/current-base CI/testnet, then obtain fresh independent review.
   passed signed health/browser verification, health/bulk retries, exhaustion,
   cadence, restart/revocation/diagnostics, encrypted shadow change detection and
   fleet-setting cadence overrides.
+
+## PR306 merged prerequisite integration (2026-10-25)
+
+PR #302 was verified MERGED at `82591d81a130e8eb03f2e176590cf991347aed30`
+(mergedAt `2026-10-25T10:59:29Z`) via `gh pr view 302 --json
+state,mergedAt,mergeCommit`. The latest fetched main is that commit. Integration
+commit `b7577418` contains it. The supplied independent review reported no source
+findings; its SF139 prerequisite blocker is now resolved. Producer and publisher
+test conflicts use the reviewed merged-main versions exactly; no new producer API
+or Data UI behavior is introduced. `git diff origin/main --
+suifleet-edge/src/fleet_archive.rs scripts/tests/test_live_common.py` is empty.
+
+Current repair checks:
+
+- `python3 -m unittest discover -s scripts/tests -p test_live_common.py`:
+  40 passed; entirely offline mocked helper fixtures, no actual wallet operations.
+- `PATH=/tmp/sf140-fix-bin:$PATH make dapp-typecheck RUN=` and
+  `make dapp-build RUN=`: passed using host Node 24.21.0 and pnpm 11.0.8.
+- `PATH=/tmp/sf140-bin:$PATH pnpm --dir dapp typecheck` and
+  `PATH=/tmp/sf140-bin:$PATH make dapp-build RUN=`: passed again using pinned
+  Node 22.22.2 / pnpm 11.0.8.
+- Under the same pinned PATH, `node scripts/test_data_browser.cjs` and
+  `node scripts/test_data_browser_browser.cjs`: passed scoped ciphertext,
+  filtering, digest/access refusal, assembly, grants, export, scope cleanup and
+  real Chromium UI fixtures. These are software fixtures, not live provider or
+  extension-wallet evidence.
+
+Hosted CI and automatic public-testnet acceptance for this new head remain
+pending and were not polled. Fresh independent review remains required. Final
+manual wallet/provider, physical and actual-mainnet checks remain unrun in
+[#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159). No new machine-wallet
+mutation, production credentials, hardware operations or merge to main occurred.
+
+- Full `make dapp-typecheck RUN=` repeated with the pinned Node 22.22.2 /
+  pnpm 11.0.8 PATH: passed, including offline/frontend regressions.
+- `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  448 passed, 0 failed, 4 ignored; 177.19s.
+- Same environment, `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example grpc_sim_shim`:
+  passed; existing dead-code warnings remain.
+- `python3 scripts/test_fleet_data_ota.py --binary /home/tyler/.local/state/suifleet/sf139-build/debug/suifleet --shim /home/tyler/.local/state/suifleet/sf139-build/debug/examples/grpc_sim_shim --idle-reads`:
+  passed (3 batch reads / 1152 response bytes over 3 idle polls; upgraded-core
+  refusal for due health/archive writers).
+- `docker run --rm --network none --user 0:0 -v "$PWD:/workspace" -v /home/tyler/.local/state/suifleet/sf139-build:/sf140-build:ro -w /workspace suifleet-dev:sf037 python3 scripts/test_opaque_ota.py --binary /sf140-build/debug/suifleet --shim /sf140-build/debug/examples/grpc_sim_shim`:
+  passed real IPC, durable certification outage/restart/exact ciphertext reuse,
+  index retirement and independent pinned SDK signature/Seal/binary/text/assembly/
+  tamper refusal. No external network access in this container.
+- Regular `python3 scripts/test_fleet_data_ota.py` with the same `--binary`
+  and `--shim` paths (without `--idle-reads`): passed signed health/browser
+  verification, archive/bulk retries, exhaustion, cadence, restart, revocation,
+  diagnostics, encrypted shadow verification and fleet-setting cadence overrides.
+- `git diff --check`: passed. Full cross-layer `make check` was not rerun.
