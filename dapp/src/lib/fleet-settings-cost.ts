@@ -48,14 +48,21 @@ export interface Workload {
   devices: number;
   /** Deployments each device reports a receipt for, per month. */
   deploymentsPerMonth: number;
-  /** Device log data archived per device per month. */
+  /** Whether devices upload logs. Off by default for new plans (BUSINESS_PLAN.md, 2026-10-23); the archive cadence and retention then cost nothing. */
+  logUploads: boolean;
+  /** Device log data archived per device per month, when log uploads are on. */
   logBytesPerDeviceMonth: number;
   releasesPerMonth: number;
   artifactBytes: number;
 }
 
-/** The business plan's typical fleet: four 50 MiB releases and 10 MiB of logs per device a month. */
-export const DEFAULT_WORKLOAD: Workload = { devices: 100, deploymentsPerMonth: 4, logBytesPerDeviceMonth: 10 * 1024 * 1024, releasesPerMonth: 4, artifactBytes: 50 * 1024 * 1024 };
+/** The business plan's typical fleet: four 50 MiB releases a month, log uploads off (10 MiB per device a month once enabled). */
+export const DEFAULT_WORKLOAD: Workload = { devices: 100, deploymentsPerMonth: 4, logUploads: false, logBytesPerDeviceMonth: 10 * 1024 * 1024, releasesPerMonth: 4, artifactBytes: 50 * 1024 * 1024 };
+
+/** Log bytes the devices actually upload per device per month: none unless log uploads are on. */
+export function uploadedLogBytes(workload: Workload): number {
+  return workload.logUploads ? workload.logBytesPerDeviceMonth : 0;
+}
 
 export interface NetworkCost {
   /** Sui gas, MIST, and Walrus fees, FROST, per device per month. */
@@ -82,7 +89,8 @@ export function settingNetworkCost(key: SettingKey, settings: FleetSettings, wor
   const fee = rescaled(quote), devices = workload.devices;
   const prices = { storage: quote.walrusStoragePrice, write: quote.walrusWritePrice };
   const uploads = MONTH_MS / settings.archiveIntervalMs;
-  const perUpload = workload.logBytesPerDeviceMonth > 0 ? blobCostFrost(Math.ceil(workload.logBytesPerDeviceMonth / uploads), settings.archiveRetentionEpochs, prices) : undefined;
+  const logBytes = uploadedLogBytes(workload), idle = workload.logUploads ? "no log data" : "log uploads off";
+  const perUpload = logBytes > 0 ? blobCostFrost(Math.ceil(logBytes / uploads), settings.archiveRetentionEpochs, prices) : undefined;
   switch (key) {
     case "checkIntervalMs": {
       const checks = MONTH_MS / settings.checkIntervalMs;
@@ -95,10 +103,10 @@ export function settingNetworkCost(key: SettingKey, settings: FleetSettings, wor
       return cost(reports * Number(fee.recurringHealthNetMist), 0, quote, devices, `${trim(reports)} signed health reports`);
     }
     case "archiveIntervalMs":
-      if (!perUpload) return cost(0, 0, quote, devices, "no log data");
+      if (!perUpload) return cost(0, 0, quote, devices, idle);
       return cost(uploads * Number(fee.archiveNetMist), uploads * Number(perUpload.write), quote, devices, `${trim(uploads)} archives (3 transactions and a Walrus write each)`);
     case "archiveRetentionDays":
-      if (!perUpload) return cost(0, 0, quote, devices, "no log data");
+      if (!perUpload) return cost(0, 0, quote, devices, idle);
       return cost(0, uploads * Number(perUpload.storage), quote, devices, `${settings.archiveRetentionEpochs} Walrus epoch(s) of storage per archive`);
   }
 }
@@ -127,12 +135,12 @@ export function fleetNetworkCost(settings: FleetSettings, workload: Workload, qu
  * the displayed rate. Releases keep the archive retention.
  */
 export function depositInput(settings: FleetSettings, workload: Workload, months: number): EstimateInput {
-  const archives = workload.logBytesPerDeviceMonth > 0 ? Math.ceil(MONTH_MS / settings.archiveIntervalMs) : 0;
+  const logBytes = uploadedLogBytes(workload), archives = logBytes > 0 ? Math.ceil(MONTH_MS / settings.archiveIntervalMs) : 0;
   return {
     devices: workload.devices, months, receiptsPerDeviceMonth: workload.deploymentsPerMonth, anchorsPerDeviceMonth: 0,
     healthSummariesPerDeviceMonth: Math.ceil(MONTH_MS / settings.healthIntervalMs), serverlessData: archives > 0,
     releasesPerMonth: workload.releasesPerMonth, artifactBytes: workload.artifactBytes,
-    dataUploadsPerDeviceMonth: archives, dataBytesPerDeviceMonth: workload.logBytesPerDeviceMonth, storageEpochs: settings.archiveRetentionEpochs,
+    dataUploadsPerDeviceMonth: archives, dataBytesPerDeviceMonth: logBytes, storageEpochs: settings.archiveRetentionEpochs,
     floatMist: DEFAULT_LIMITS.floatCap, drawMist: BigInt(50_000_000), marginPercent: 20,
   };
 }

@@ -33,9 +33,10 @@ import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionT
 const sui = (mist: bigint) => `${formatToken(mist)} SUI`;
 const wal = (frost: bigint) => `${formatToken(frost)} WAL`;
 
-// The default fleet settings (SF-131: daily health, weekly archives kept six weeks) for one device over a year.
+// The default fleet settings (SF-131: daily health) for one device over a year, with log uploads
+// off as new fleets default (2026-10-23), the same default the Fleet settings page starts from.
 const SETTINGS_ESTIMATE = depositInput(toSettings(defaultValues(DEFAULT_PRICE_TABLE), NETWORK), { ...DEFAULT_WORKLOAD, devices: 1, releasesPerMonth: 1, artifactBytes: 1024 * 1024 }, 12);
-export const DEFAULT_ESTIMATE: EstimateInput = DATA_CONFIG ? SETTINGS_ESTIMATE
+export const DEFAULT_ESTIMATE: EstimateInput = DATA_CONFIG ? { ...SETTINGS_ESTIMATE, serverlessData: true }
   : { ...SETTINGS_ESTIMATE, healthSummariesPerDeviceMonth: 0, serverlessData: false, dataBytesPerDeviceMonth: 0, dataUploadsPerDeviceMonth: 0, storageEpochs: 2 };
 
 function NumberField({ label, value, onChange, step }: { label: string; value: number; onChange: (value: number) => void; step?: number }) {
@@ -68,7 +69,7 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
       <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health, weekly archives kept six weeks); the Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
+    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health) with log archives disabled; enabling archives in this estimate does not configure the device, and existing fleets keep their on-chain settings. The Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
     {result.estimate?.protectedCapacity && <p role="status">Projected archives: {result.estimate.protectedCapacity.planned}; existing covered blobs entered: {result.estimate.protectedCapacity.existing}. Migrated v3 storage has no fleet-wide protection slot cap. Archives purchased through their full owner-approved target need no renewal reserve. Releases and recipes still require finite renewal authorization. Check actual coverage, reserves and per-blob expiry before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">

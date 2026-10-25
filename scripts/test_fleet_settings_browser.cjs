@@ -87,6 +87,24 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const fiveMinutes = await cells("checkIntervalMs-300000");
       assert.match(fiveMinutes[1], /8,766 reads, no network fee/);
       assert.deepEqual(fiveMinutes.slice(2), ["$0", "$0", "$0.0500", "$50.00"]);
+      // Log uploads are off for new plans: archives cost nothing, are not charged and are not funded.
+      assert.equal(await page.getByLabel(/Estimate with device log uploads/).isChecked(), false);
+      assert.equal(await page.getByLabel("Log data per device per month (MiB)").count(), 0);
+      for (const id of ["archiveIntervalMs-86400000", "archiveIntervalMs-604800000", "archiveRetentionDays-42"]) {
+        const row = await cells(id);
+        assert.deepEqual(row.slice(1, 4), ["log uploads off", "$0", "$0"], `${id} without log uploads`);
+      }
+      assert.deepEqual((await cells("archiveIntervalMs-86400000")).slice(4), ["not charged", "not charged"]);
+      const unlogged = await depositSui();
+      await page.getByLabel(/Estimate with device log uploads/).check();
+      await page.getByLabel("Log data per device per month (MiB)").waitFor();
+      assert.equal(await page.getByLabel("Log data per device per month (MiB)").inputValue(), "10");
+      assert.match((await cells("archiveIntervalMs-604800000"))[1], /^4\.3 archives/);
+      assert.deepEqual((await cells("archiveIntervalMs-86400000")).slice(4), ["$0.0800", "$80.00"]);
+      assert.ok(await depositSui() > unlogged, "enabling log uploads funds the archives");
+      await page.getByLabel(/Estimate with device log uploads/).uncheck();
+      await page.waitForFunction(() => document.querySelector('[data-testid="archiveIntervalMs-604800000"]').textContent.includes("log uploads off"));
+      assert.equal(await depositSui(), unlogged);
       // Testnet's one-day epochs cannot keep archives a year within SF-130's 53-epoch bound.
       assert.ok(await page.locator("#archiveRetentionDays-365").isDisabled());
       assert.match((await cells("archiveRetentionDays-365"))[1], /Unavailable here: needs 365 Walrus epochs of 1 day\(s\); the limit is 53/);
@@ -165,8 +183,10 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       for (const id of ["checkIntervalMs-900000", "rolloutCheckIntervalMs-0", "healthIntervalMs-3600000", "archiveIntervalMs-86400000", "archiveRetentionDays-42"]) {
         assert.ok(await page.locator(`#${id}`).isChecked(), `${id} is the saved choice`);
       }
-      assert.match(await text("suifleet-price"), /add-ons \$0\.63/, "hourly health, daily archives and 15-minute checks for 3 devices");
+      assert.match(await text("suifleet-price"), /add-ons \$0\.39/, "hourly health and 15-minute checks for 3 devices; daily archives not charged with log uploads off");
       await page.locator("#healthIntervalMs-86400000").check();
+      await waitText("add-ons $0.03");
+      await page.getByLabel(/Estimate with device log uploads/).check();
       await waitText("add-ons $0.27");
       assert.ok(await page.getByRole("button", { name: "Save settings" }).isEnabled());
       assert.equal((await control()).signed.length, 0);

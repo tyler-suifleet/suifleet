@@ -100,15 +100,19 @@ near(pricing.basePrice(table, 150_000).usd, 10_000 * 0.08 + 90_000 * 0.05 + 50_0
 const huge = pricing.basePrice(table, 1_200_000);
 near(huge.usd, 800 + 4500 + 900_000 * 0.04 + 200_000 * 0.03, 1e-9, "custom tier"); assert.equal(huge.custom, true);
 const defaults = settings.defaultValues(table);
-const small = pricing.fleetPrice(table, 100, { values: defaults, encryptedDelivery: false, annualPrepay: false });
+const small = pricing.fleetPrice(table, 100, { values: defaults, logUploads: false, encryptedDelivery: false, annualPrepay: false });
 assert.equal(small.minimumApplied, true); assert.equal(small.monthly, 49); near(small.activationOneTime, 10, 1e-9, "activation");
 // The plan's heavy profile at 10,000 devices: 15-minute checks, hourly health, daily archives = $0.29 a device, $2,900.
 const heavy = { ...defaults, checkIntervalMs: 15 * MIN, healthIntervalMs: HOUR, archiveIntervalMs: DAY };
-const heavyPrice = pricing.fleetPrice(table, 10_000, { values: heavy, encryptedDelivery: false, annualPrepay: false });
+const heavyPrice = pricing.fleetPrice(table, 10_000, { values: heavy, logUploads: true, encryptedDelivery: false, annualPrepay: false });
 near(heavyPrice.monthly, 2900, 1e-9, "heavy fleet"); near(heavyPrice.perDevice, 0.29, 1e-9, "heavy device");
-const annual = pricing.fleetPrice(table, 10_000, { values: heavy, encryptedDelivery: true, annualPrepay: true });
+const annual = pricing.fleetPrice(table, 10_000, { values: heavy, logUploads: true, encryptedDelivery: true, annualPrepay: true });
 near(annual.monthly, (2900 + 200) * 0.9, 1e-9, "Seal add-on and annual discount");
-assert.throws(() => pricing.fleetPrice(table, 10, { values: { ...defaults, healthIntervalMs: 2 * HOUR }, encryptedDelivery: false, annualPrepay: false }), /not an option/);
+// With log uploads off (the new-plan default) the archive cadence and retention are not charged.
+const unlogged = pricing.fleetPrice(table, 10_000, { values: { ...heavy, archiveRetentionDays: 365 }, logUploads: false, encryptedDelivery: false, annualPrepay: false });
+near(unlogged.monthly, 2900 - 800, 1e-9, "no daily-archive add-on without log uploads");
+assert.deepEqual(unlogged.addOns.filter((a) => pricing.LOG_SETTING_KEYS.includes(a.key)).map((a) => a.usdPerFleet), [0, 0]);
+assert.throws(() => pricing.fleetPrice(table, 10, { values: { ...defaults, healthIntervalMs: 2 * HOUR }, logUploads: true, encryptedDelivery: false, annualPrepay: false }), /not an option/);
 console.log("PASS: SuiFleet price: graduated tiers, custom above 1M, $49 minimum, add-ons per device and fleet, Seal, annual discount, activation");
 
 // ── Settings: SF-130 bounds and per-network retention epochs ──
@@ -127,7 +131,24 @@ for (const key of pricing.SETTING_KEYS) for (const o of table.settings[key]) set
 console.log("PASS: settings follow SF-130 bounds; retention days round up to whole Walrus epochs per network; every offered option is valid on Mainnet");
 
 // ── Network cost per setting, per device and per fleet, at the Mainnet quote ──
-const workload = { ...settings.DEFAULT_WORKLOAD, devices: 1000 };
+// New plans default to log uploads off (BUSINESS_PLAN.md, 2026-10-23): archives cost nothing and the
+// deposit funds none, whatever cadence is selected, until uploads are explicitly enabled.
+assert.equal(settings.DEFAULT_WORKLOAD.logUploads, false);
+const unloggedWorkload = { ...settings.DEFAULT_WORKLOAD, devices: 1000 };
+assert.equal(settings.uploadedLogBytes(unloggedWorkload), 0);
+for (const key of ["archiveIntervalMs", "archiveRetentionDays"]) {
+  const off = settings.settingNetworkCost(key, settings.toSettings({ ...defaults, archiveIntervalMs: DAY }, "mainnet"), unloggedWorkload, MAINNET_QUOTE);
+  assert.deepEqual([off.mistPerDevice, off.frostPerDevice, off.detail], [0, 0, "log uploads off"], key);
+}
+{
+  const off = settings.depositInput(settings.toSettings(defaults, "mainnet"), unloggedWorkload, 3);
+  assert.deepEqual([off.dataUploadsPerDeviceMonth, off.dataBytesPerDeviceMonth, off.serverlessData], [0, 0, false], "no archives funded by default");
+  const offDeposit = settings.recommendDeposit(settings.toSettings(defaults, "mainnet"), unloggedWorkload, 3, MAINNET_QUOTE);
+  const onDeposit = settings.recommendDeposit(settings.toSettings(defaults, "mainnet"), { ...unloggedWorkload, logUploads: true }, 3, MAINNET_QUOTE);
+  assert.ok(onDeposit.suiDepositMist > offDeposit.suiDepositMist && onDeposit.walDepositFrost > offDeposit.walDepositFrost, "enabling uploads funds archives");
+}
+// Explicitly enabled: the business plan's typical 10 MiB of logs per device a month.
+const workload = { ...unloggedWorkload, logUploads: true };
 const line = (key, values) => settings.settingNetworkCost(key, settings.toSettings(values, "mainnet"), workload, MAINNET_QUOTE);
 const usdPerMist = MAINNET_QUOTE.usd.SUI / 1e9;
 assert.equal(line("checkIntervalMs", { ...defaults, checkIntervalMs: 5 * MIN }).usdPerDevice, 0, "checks are reads: no network fee");
