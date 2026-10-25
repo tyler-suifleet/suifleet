@@ -100,3 +100,29 @@ bytes, one owner stream; compatible upgrade digest
 `12DgCgaZHjuzpDfTkSMwsxmiPefSsHm8druZrKWe66HX` and rejected old-package
 withdrawal digest `HyhVMKc2YyUiKoS5mZKxXA6i4Wuku2DZzqk5Gps3oPvp`.
 These are disposable local-chain receipts, not public-testnet evidence.
+
+
+## Current-base feedback revalidation
+
+The follow-up review found no remaining actionable source/security defects; its
+outstanding gates were hosted CI/testnet and current-base integration. Merged
+`e543b9d1dd7b156d3300dfbf4914dc4eb2615789` into the owner branch without
+conflicts. The prior DataUsage loading fix remains intact. No additional
+application change or acceptance waiver was needed.
+
+Repeated the three network-none reproduction commands above after integration:
+`make test-data-metering dapp-typecheck dapp-build`, `make test-fleet-settings`
+(including actual Chromium), and
+`python3 scripts/test_protocol_localnet.py --retention-upgrade`.
+The isolated-chain reconciliation again reported two records, 21 logical bytes,
+1,326,800 lifetime encoded bytes and one owner stream. Compatible upgrade digest:
+`DpqoUHzL5VCKBzhR8Mr6L3fBcLSdFzj8Nguc2ftcbK1u`; rejected legacy withdrawal:
+`6Zx1Tzvf3c4VTcvcBYFbNtUEGzHB4cD5vvym1X7DwtY9`.
+These are local-chain results only. Hosted CI/automatic testnet for the pushed
+revision and fresh independent review remain required, pending coordinator gates.
+Deferred final external acceptance remains unrun in #32 and #159.
+
+All three commands exited 0. The complete typecheck included 116 offline
+testnet-controller tests, 39 live-common fixture tests, manifest/frontend
+regressions and TypeScript. The production build exported all 16 static pages.
+These offline controller fixtures do not establish public-testnet execution.
