@@ -293,6 +293,26 @@ class WalrusUploadTests(unittest.TestCase):
         blob, attempts = self.upload(*[server] * len(self.PUBLISHERS), self.STORED)
         self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS + self.PUBLISHERS[:1]))
 
+    def test_the_dapp_is_given_a_publisher_that_just_stored_a_probe(self):
+        import io
+        import urllib.error
+        dry = urllib.error.HTTPError("u", 500, "internal", {}, io.BytesIO(
+            b'{"error":{"code":500,"message":"could not find WAL coins with sufficient balance"}}'))
+        walrus, bodies = live_common.Walrus("testnet"), []
+
+        def urlopen(request, timeout):
+            bodies.append(request.data)
+            if len(bodies) == 1:
+                raise dry
+            return nullcontext(io.BytesIO(self.STORED))
+        with patch.object(live_common.urllib.request, "urlopen", urlopen), patch("sys.stderr", new_callable=io.StringIO), \
+                patch.object(walrus, "readable", return_value=True) as readable:
+            self.assertEqual(walrus.working_publisher(), self.PUBLISHERS[1])
+            self.assertEqual(walrus.working_publisher(), self.PUBLISHERS[0])
+        # Each probe is fresh bytes, verified through the aggregator.
+        self.assertEqual(len(set(bodies)), 2)
+        self.assertEqual(readable.call_count, 2)
+
     def test_uploads_are_bounded_and_client_errors_drop_the_publisher(self):
         import urllib.error
         error, attempts = self.upload(*[TimeoutError("read timed out")] * (live_common.WALRUS_PASSES * len(self.PUBLISHERS)), self.STORED)
