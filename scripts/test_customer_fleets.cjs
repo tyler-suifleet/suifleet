@@ -82,6 +82,54 @@ for (const [authority, fn, count] of [
  const grantKey=bcs.struct("ReadGrantKey",{device_id:bcs.Address,stream_hash:bcs.byteVector(),reader:bcs.Address});
  guestClient.listDynamicFields=async()=>({dynamicFields:readerActive?[{$kind:"DynamicField",name:{type:`${cfg.typeOrigin}::fleet_data::ReadGrantKey`,bcs:grantKey.serialize({device_id:D,stream_hash:[],reader:B}).toBytes()},valueType:"bool"}]:[],hasNextPage:false});
  guestClient.getDynamicField=async()=>({dynamicField:{value:{type:"0x2::object::ID",bcs:appRequire("@mysten/sui/bcs").bcs.Address.serialize(W).toBytes()}}});
+ // A 10k-field device index must not block credentialed administrators.
+ const savedOwned=guestClient.listOwnedObjects, savedList=guestClient.listDynamicFields;
+ guestClient.listOwnedObjects=client.listOwnedObjects;
+ let scans=0;
+ guestClient.listDynamicFields=async()=>{scans++;throw Error("large device index must not be scanned");};
+ let admins=await guestRead.fetchCustomerFleets(guestClient,A);
+ assert.equal(admins.length,2);assert.equal(scans,0,"verified member bypasses grant index entirely");
+ assert.deepEqual(guestRead.withManagedBudgetCap(tx,admins[0],CAP).getData().commands.map(c=>c.MoveCall.function),["borrow_budget_cap","set","return_budget_cap"]);
+ // A separate configured locator may exhaust its bound without suppressing
+ // the member's fleets or capability-loan transaction recheck.
+ const other={...cfg,fleetId:id("0xf3"),budgetId:id("0xb3")};
+ const savedGet=guestClient.getObject;
+ guestClient.getObject=async request=>request.objectId===other.fleetId?{object:{objectId:other.fleetId,owner:{$kind:"Shared"},type:`${other.typeOrigin}::fleet_data::FleetData`,content:data.FleetDataBcs.serialize({id:other.fleetId,version:1,budget_id:other.budgetId,storage_id:other.storageId,registry_id:other.registryId,chain_identifier:other.chainIdentifier,key_epoch:0,support:[],health_interval_ms:3600000,batch_interval_ms:86400000,emergency_interval_ms:300000,device_count:10001}).toBytes()}}:savedGet(request);
+ process.env.NEXT_PUBLIC_FLEET_DATA_CONFIGS=JSON.stringify([cfg,other]);
+ const warnings=[];scans=0;
+ guestClient.listDynamicFields=async()=>({dynamicFields:Array.from({length:100},()=>({name:{type:`${cfg.typeOrigin}::fleet_data::DeviceKey`}})),hasNextPage:true,cursor:`page-${++scans}`});
+ admins=await guestRead.fetchCustomerFleets(guestClient,A,message=>warnings.push(message));
+ assert.equal(admins.length,2);assert.equal(admins[0].administrator,true);
+ assert.equal(scans,100);assert.equal(warnings.length,1);assert.match(warnings[0],/discovery unavailable/);
+ assert.equal(guestRead.withManagedBudgetCap(tx,admins[0],CAP).getData().commands[0].MoveCall.function,"borrow_budget_cap");
+ // Exercise the shipped transaction hook: fresh discovery still reaches the
+ // fixture wallet and confirms node effects despite the unrelated full index.
+ let submitted;
+ const transactionSelection={supported:true,fleet:admins[0],identity:"admin"};
+ const transactionLoad=loader({
+  "react":{useRef:value=>({current:value})},
+  "@tanstack/react-query":{useMutation:options=>options,useQueryClient:()=>({invalidateQueries:async()=>{}})},
+  "@mysten/enoki":{isEnokiWallet:()=>false},
+  "@mysten/dapp-kit-react":{useCurrentClient:()=>guestClient,useDAppKit:()=>({stores:{$connection:{get:()=>({account:{address:A,chains:[`sui:${m.network}`]}})},$currentNetwork:{get:()=>m.network}},signAndExecuteTransaction:async({transaction})=>{submitted=transaction;return {Transaction:{status:{success:true},digest:"fixture-digest"}};}})},
+  "./useFleetSelection":{useFleetSelection:()=>transactionSelection},
+  "@/lib/customer-fleets":guestRead,
+  "@/lib/fleet-budget":{fetchManagedBudget:async()=>({capId:CAP})},
+ });
+ const oldStorage=global.localStorage,oldWarn=console.warn;
+ global.localStorage={getItem:()=>F};console.warn=()=>{};
+ guestClient.waitForTransaction=async()=>({Transaction:{status:{success:true},digest:"fixture-digest",events:[]}});
+ try {
+  const executed=await transactionLoad("hooks/useFleetTransaction.ts").useFleetTransaction().mutationFn({transaction:tx});
+  assert.equal(executed.digest,"fixture-digest");
+  assert.equal(submitted.getData().commands[0].MoveCall.function,"borrow_budget_cap");
+ } finally {global.localStorage=oldStorage;console.warn=oldWarn;}
+ guestClient.listDynamicFields=async()=>{throw Error("RPC unavailable");};
+ assert.equal((await guestRead.fetchCustomerFleets(guestClient,A,message=>warnings.push(message))).length,2);
+ assert.equal(warnings.length,2,"RPC errors are contained and reported");
+ guestClient.listOwnedObjects=savedOwned;
+ assert.deepEqual(await guestRead.fetchCustomerFleets(guestClient,A,()=>{}),[],"failed reader discovery confers no authority");
+ delete process.env.NEXT_PUBLIC_FLEET_DATA_CONFIGS;
+ guestClient.getObject=savedGet;guestClient.listDynamicFields=savedList;
  const guest=await guestRead.fetchCustomerFleets(guestClient,B);assert.equal(guest.length,1);assert.equal(guest[0].support,true);assert.equal(guest[0].administrator,false);
  const {Transaction}=appRequire("@mysten/sui/transactions");
  const diagnostic=new Transaction();diagnostic.moveCall({target:`${cfg.packageId}::fleet_data::request_diagnostics_support`,arguments:[diagnostic.object(cfg.fleetId),diagnostic.object(W),diagnostic.object("0x6")]});

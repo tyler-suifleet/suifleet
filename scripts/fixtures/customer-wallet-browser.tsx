@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 const listeners = new Set<() => void>();
 let version = 0;
 export const A = "0x" + "a".repeat(64), B = "0x" + "b".repeat(64);
-export const state = { account: A, network: "localnet", revoked: false, fail: false, delayed: false,
+export const state = { account: A, network: "localnet", revoked: false, warning: false, fail: false, delayed: false,
   created: false, transactions: [] as unknown[], pending: [] as (() => void)[] };
 function emit() { version++; for (const listener of listeners) listener(); }
 function useVersion() { useSyncExternalStore(fn => { listeners.add(fn); return () => { listeners.delete(fn); }; }, () => version, () => 0); }
@@ -22,6 +22,7 @@ const client = { getObjects: async ({ objectIds }: { objectIds: string[] }) => (
 export const control = {
  wallet(account: string, network = "localnet") { state.account = account; state.network = network; emit(); },
  revoke(value = true) { state.revoked = value; emit(); },
+ warn(value = true) { state.warning = value; emit(); },
  fail(value = true) { state.fail = value; emit(); },
  delay(value = true) { state.delayed = value; },
  release() { state.delayed = false; for (const fn of state.pending.splice(0)) fn(); },

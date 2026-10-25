@@ -16,7 +16,7 @@ function subscribe(listener: () => void) {
 }
 interface Selection {
   supported: boolean; stale: boolean; fleets: NamedFleet[]; fleet?: NamedFleet; loading: boolean; error?: Error | null;
-  identity: string; select: (id: string) => void; refresh: () => void;
+  warnings?: string[]; identity: string; select: (id: string) => void; refresh: () => void;
 }
 const Context = createContext<Selection>({ supported: false, stale: false, fleets: [], loading: false, identity: "", select() {}, refresh() {} });
 export function FleetSelectionProvider({ children }: { children: ReactNode }) {
@@ -34,9 +34,13 @@ export function FleetSelectionProvider({ children }: { children: ReactNode }) {
   }, [identity, account?.address, tick]);
   const query = useQuery({ queryKey: ["customer-fleets", identity, epoch.current.value],
     enabled: supported && !!account && network === NETWORK,
-    queryFn: () => fetchCustomerFleets(client, account!.address), refetchInterval: 15_000 });
+    queryFn: async () => {
+      const warnings: string[] = [];
+      const fleets = await fetchCustomerFleets(client, account!.address, message => warnings.push(message));
+      return { fleets, warnings };
+    }, refetchInterval: 15_000 });
   const valid = !!account && network === NETWORK && preference?.identity === identity && !query.isError;
-  const fleets = valid ? query.data ?? [] : [];
+  const fleets = valid ? query.data?.fleets ?? [] : [];
   const fleet = valid ? selectFleet(fleets, preference.id) : undefined;
   useEffect(() => {
     if (account && fleet && preference?.identity === identity && !preference.id) {
@@ -44,7 +48,7 @@ export function FleetSelectionProvider({ children }: { children: ReactNode }) {
       setPreference({ identity, id: fleet.id });
     }
   }, [account?.address, fleet, identity, preference]);
-  const value: Selection = { supported, stale: valid && query.isSuccess && !!preference.id && !fleet, fleets, fleet, identity: `${identity}:${fleet?.customerId ?? "unresolved"}:${fleet?.id ?? "unresolved"}:${fleet?.administrator ? "admin" : fleet?.support ? "support" : "read"}`,
+  const value: Selection = { warnings: valid ? query.data?.warnings : [], supported, stale: valid && query.isSuccess && !!preference.id && !fleet, fleets, fleet, identity: `${identity}:${fleet?.customerId ?? "unresolved"}:${fleet?.id ?? "unresolved"}:${fleet?.administrator ? "admin" : fleet?.support ? "support" : "read"}`,
     loading: supported && !!account && (query.isLoading || preference?.identity !== identity), error: account && network !== NETWORK ? new Error("Wallet network does not match this deployment") : query.error,
     select(id) {
       if (!account || !fleets.some(f => f.id === id)) return;
@@ -58,6 +62,7 @@ export function useFleetSelection() { return useContext(Context); }
  * change; unresolved/revoked selection never renders prior fleet content. */
 export function FleetScope({ children }: { children: ReactNode }) {
   const selection = useFleetSelection();
-  if (selection.supported && !selection.fleet) return <p role="status">{selection.loading ? "Verifying fleet access…" : "Select or create a fleet to continue."}</p>;
-  return <div key={selection.identity}>{children}</div>;
+  const warnings = selection.warnings?.map(message => <p role="status" key={message}>{message}</p>);
+  if (selection.supported && !selection.fleet) return <>{warnings}<p role="status">{selection.loading ? "Verifying fleet access…" : "Select or create a fleet to continue."}</p></>;
+  return <div key={selection.identity}>{warnings}{children}</div>;
 }

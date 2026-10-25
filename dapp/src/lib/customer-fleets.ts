@@ -19,34 +19,22 @@ export interface NamedFleet {
   policies: { id: string; capId: string }[];
   activeDevices: bigint; deviceLimit: bigint; allowance: bigint; used: bigint;
 }
-export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string): Promise<NamedFleet[]> {
+export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string, warn: (message: string) => void = console.warn): Promise<NamedFleet[]> {
   await verifyDeployment(client);
   if (!customersSupported()) return [];
   const credentials = await allOwned(client, wallet, moveType("customer::Membership"));
   const ids = [...new Set(credentials.map(o => customer_MembershipBcs.parse(o.content).customer_id))];
   const supportBudgets = new Set<string>();
   const readerBudgets = new Set<string>();
-  for (const config of configuredDataFleets()) {
-    const data = await readFleetData(client, config);
-    if (data.support.some(address => normalizeId(address) === normalizeId(wallet))) supportBudgets.add(normalizeId(config.budgetId));
-    else if (await hasScopedReadGrant(client, config, wallet)) readerBudgets.add(normalizeId(config.budgetId));
-  }
-  if (supportBudgets.size || readerBudgets.size) {
-    const events = await allEvents(client, moveType("customer::FleetCreated"));
-    for (const event of events) {
-      const created = customer_FleetCreatedBcs.parse(event.bcs);
-      if ((supportBudgets.has(normalizeId(created.budget_id)) || readerBudgets.has(normalizeId(created.budget_id))) && !ids.includes(created.customer_id)) ids.push(created.customer_id);
-    }
-  }
   const result: NamedFleet[] = [];
-  for (const id of ids) {
+  async function appendCustomer(id: string) {
     const { object } = await client.getObject({ objectId: id, include: { content: true } });
     if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Customer"))) throw Error("Unexpected customer type");
     const c = customer_CustomerBcs.parse(object.content);
     if (BigInt(c.version) !== BigInt(1)) throw Error("Customer authority version requires a newer dashboard");
     if (normalizeId(c.id) !== normalizeId(id) || normalizeId(c.registry_id) !== normalizeId(REGISTRY_ID)) throw Error("Customer registry mismatch");
     const credential = c.credentials.contents.find(entry => normalizeId(entry.key) === normalizeId(wallet));
-    if (!credential && !supportBudgets.size && !readerBudgets.size) continue; // Owned credentials are hints; current shared authority is decisive.
+    if (!credential && !supportBudgets.size && !readerBudgets.size) return; // Owned credentials are hints; current shared authority is decisive.
     for (const fleetId of c.fleets) {
       const { object: fleet } = await client.getObject({ objectId: fleetId, include: { content: true } });
       if (normalizeStructTag(fleet.type) !== normalizeStructTag(moveType("customer::Fleet"))) throw Error("Unexpected fleet type");
@@ -55,12 +43,35 @@ export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string)
       if (normalizeId(f.id) !== normalizeId(fleetId) || normalizeId(f.customer_id) !== normalizeId(id)) throw Error("Fleet customer mismatch");
       const support = supportBudgets.has(normalizeId(f.budget_id));
       if (!credential && !support && !readerBudgets.has(normalizeId(f.budget_id))) continue;
+      if (result.some(existing => normalizeId(existing.id) === normalizeId(fleetId))) continue;
       result.push({ support, id: fleetId, customerId: id, customerName: c.name, name: f.name, budgetId: f.budget_id,
         credentials: c.credentials.contents.map(c => ({ wallet: c.key, administrator: c.value })), enrollmentPolicies: f.enrollment_policies, devices: f.devices, groups: f.groups, deployments: f.deployments, policies: f.policies.contents.map(p => ({ id: p.key, capId: p.value })), administrator: credential?.value ?? false,
         isDefault: c.default_fleet === fleetId, activeDevices: BigInt(c.active_devices), deviceLimit: BigInt(c.device_limit),
         allowance: BigInt(c.allowance), used: BigInt(c.used) });
     }
   }
+  // Resolve current shared membership before optional reader discovery. Device
+  // indexes must never be scanned for fleets already reachable by a credential.
+  for (const id of ids) await appendCustomer(id);
+  const guestIds = new Set<string>();
+  for (const config of configuredDataFleets()) {
+    if (result.some(f => normalizeId(f.budgetId) === normalizeId(config.budgetId))) continue;
+    try {
+      const data = await readFleetData(client, config);
+      if (data.support.some(address => normalizeId(address) === normalizeId(wallet))) supportBudgets.add(normalizeId(config.budgetId));
+      else if (await hasScopedReadGrant(client, config, wallet)) readerBudgets.add(normalizeId(config.budgetId));
+    } catch {
+      warn(`Reader/support discovery unavailable for data fleet ${config.fleetId}. Other fleet access remains available.`);
+    }
+  }
+  if (supportBudgets.size || readerBudgets.size) {
+    const events = await allEvents(client, moveType("customer::FleetCreated"));
+    for (const event of events) {
+      const created = customer_FleetCreatedBcs.parse(event.bcs);
+      if (supportBudgets.has(normalizeId(created.budget_id)) || readerBudgets.has(normalizeId(created.budget_id))) guestIds.add(created.customer_id);
+    }
+  }
+  for (const id of guestIds) await appendCustomer(id);
   return result;
 }
 export function buildCreateCustomerTx(name: string) {
