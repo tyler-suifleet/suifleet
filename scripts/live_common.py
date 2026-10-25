@@ -527,7 +527,7 @@ def start_daemon(root, name, manifest, device_section):
     components = state / "test-components"
     template = root / f"template-{name}.toml"
     template.write_text(device_section + f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\n'
-                        f'timeout_seconds = 60\n[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 3\nevent_scan_seconds = 0\n')
+                        f'timeout_seconds = 60\n[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 3\nevent_discovery_seconds = 1\n')
     release = root / f"release-{name}"
     dm.generate(manifest, release, template)
     # The child keeps its own copy of the log descriptor; the parent's closes here.

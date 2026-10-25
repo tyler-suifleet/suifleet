@@ -767,7 +767,7 @@ def run(args):
             template.write_text(
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\ntimeout_seconds = 60\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\nevent_scan_seconds = 0\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\nevent_discovery_seconds = 1\n')
             dm.generate(manifest, root / "release", template)
             log = (root / "daemon.log").open("w")
             process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release/config.toml")},

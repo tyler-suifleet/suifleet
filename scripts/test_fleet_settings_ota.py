@@ -5,7 +5,7 @@ gas or hardware.
 
 The simulator keeps the fleet's `fleet_settings::Settings` record in a
 dynamic field of the FleetBudget, as the contract does. Checked, by timing the
-daemon's settings reads and event scans:
+daemon's version batches and event scans:
 
 - with no record the device checks at its local poll interval;
 - a newer-version record and an out-of-bounds record are refused and the
@@ -58,15 +58,18 @@ class SettingsSimulator(budget.BudgetSimulator):
         super().__init__()
         self.gas = 1_000_000  # Above the low-water mark: no draws.
         self.settings = None
-        self.reads = []  # (monotonic time, record returned)
+        self.settings_reads = []  # (monotonic time, record returned)
         self.scans = []
+        self.checks = []
 
     def rpc(self, method, params):
+        if method == "shim_read" and params[0] == "BatchGetObjects":
+            self.checks.append(time.monotonic())
         if method == "shim_fields":
             return super().rpc(method, params) + [[budget.BUDGET, KEY, "00", VALUE]]
         if method == "suix_getDynamicFieldObject" and params[1]["type"] == KEY:
             assert params[0] == budget.BUDGET, params
-            self.reads.append((time.monotonic(), self.settings))
+            self.settings_reads.append((time.monotonic(), self.settings))
             return {"data": {"content": {"fields": {"value": self.settings}}}}
         if method == "shim_events" and params[0].endswith("::deployment_manager::DeploymentCreated"):
             self.scans.append(time.monotonic())
@@ -141,7 +144,7 @@ def run(binary):
                 return json.loads(path.read_text()) if path.exists() else {}
 
             def reads_after(t):
-                return [at for at, _ in sim.reads if at > t]
+                return [at for at in sim.checks if at > t]
 
             def local_cadence(label):
                 """Two more reads, each about one local poll apart."""
@@ -150,20 +153,33 @@ def run(binary):
                 gaps = [b - a for a, b in zip(reads_after(start), reads_after(start)[1:])]
                 assert all(gap < 3 for gap in gaps), (label, gaps)
 
+            def one_batch_per_poll(label):
+                # Let the preceding full refresh finish before measuring idle polls.
+                time.sleep(0.2)
+                before = dict(sim.reads)
+                ota.wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= before.get("BatchGetObjects", 0) + 3,
+                             f"{label}: version gate stopped", process, timeout=10)
+                time.sleep(0.2)
+                delta = {kind: n - before.get(kind, 0) for kind, n in sim.reads.items()}
+                assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, (label, delta)
+                print(f"PASS: {label}: one version batch per idle poll: {delta}")
+
             try:
                 with log_path.open("w") as output:
                     process = subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)}, stdout=output, stderr=output)
                     local_cadence("no record")
-                    print("PASS: without a fleet settings record the device checks at its local interval")
+                    one_batch_per_poll("absent settings")
 
                     sim.settings = settings(version=2)
                     ota.wait_for(lambda: "unsupported fleet settings version 2" in log(), "newer record not refused", process)
                     local_cadence("newer record")
+                    one_batch_per_poll("newer record")
                     sim.settings = None
                     ota.wait_for(lambda: "Fleet settings readable again" in log(), "absent record not recovered", process)
                     sim.settings = settings(check_interval_ms=1000)
                     ota.wait_for(lambda: "fleet check interval out of bounds" in log(), "out-of-bounds record not refused", process)
                     local_cadence("out-of-bounds record")
+                    one_batch_per_poll("out-of-bounds record")
                     assert "Fleet settings applied" not in log()
                     print("PASS: newer-version and out-of-bounds records were refused; the settings in force stayed applied")
 
@@ -180,8 +196,11 @@ def run(binary):
                     sim.settings = settings(check_interval_ms=ROUTINE_S * 1000, rollout_check_interval_ms=FAST_S * 1000)
                     changed = time.monotonic()
                     ota.wait_for(lambda: "rollout_check_interval_ms=30000" in log(), "valid record not applied", process)
-                    first = reads_after(changed)[0]
-                    assert first - changed < 3, "record not read at the next check"
+                    # A settings refresh may finish in the check already in
+                    # flight when the owner changes the record. Anchor the
+                    # next cadence to that completed batch, not a second read.
+                    first = sim.checks[-1]
+                    assert abs(first - changed) < 3, "record not read at the next check"
                     ota.wait_for(lambda: len(reads_after(first)) >= 1, "no fast check", process, timeout=FAST_S + 10)
                     fast = reads_after(first)[0] - first
                     assert FAST_S - 1 <= fast <= FAST_S + 4, f"fast check after {fast:.1f}s"

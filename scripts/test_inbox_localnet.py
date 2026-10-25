@@ -315,7 +315,7 @@ def run(rpc_url, faucet_url, base_dir, evidence_path):
                 config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                     f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{device}"\ndevice_cap_id = "{device_cap}"\n'
                     f'[apply]\ncommand = "python3 {updater}"\ntimeout_seconds = 30\n'
-                    f'[runtime]\nstate_dir = "{root}/state"\npoll_seconds = 1\nevent_scan_seconds = {scan_seconds}\n')
+                    f'[runtime]\nstate_dir = "{root}/state"\npoll_seconds = 1\nevent_discovery_seconds = {max(1, scan_seconds)}\n')
 
             def state():
                 path = root / "state/state.json"
@@ -332,15 +332,16 @@ def run(rpc_url, faucet_url, base_dir, evidence_path):
 
             configure(3600)
             process = start()
-            wait_for(lambda: state().get("heads", {}).get("seen") and state()["heads"].get("event_scan_ms"),
+            wait_for(lambda: state().get("heads", {}).get("seen") and state().get("discovery_cursor"),
                      "daemon did not read its inbox and scan once", process)
-            first_scan = state()["heads"]["event_scan_ms"]
+            # Only an event scan moves the cursor; checkpoints keep coming.
+            first_scan = state()["cursor"]
             direct = deploy("inbox-direct", direct=True)
             grouped = deploy("inbox-group", groups=True)
             for deployment in (direct, grouped):
                 wait_for(lambda: reported(deployment), f"{deployment} not applied/reported from objects", process)
                 wait_for(lambda: receipt(deployment) == 1, f"{deployment} receipt not on chain", process)
-            assert state()["heads"]["event_scan_ms"] == first_scan, "the event scan ran although it was not due"
+            assert state()["cursor"] == first_scan, "the event scan ran although it was not due"
             evidence["checks"].append("device and group deployments applied from inbox/group head alone, receipts on chain")
             process.terminate()
             process.wait(timeout=20)

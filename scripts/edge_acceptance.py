@@ -613,7 +613,7 @@ def device_template(device, ids, apply_command, state_dir, poll, signer=None, ke
               "allow_recipe_commands = false", "timeout_seconds = 120",
               "", "[runtime]", f"state_dir = {json.dumps(str(state_dir))}", f"poll_seconds = {poll}",
               # Its deployments are unannounced (SF-125): scan events every poll.
-              "event_scan_seconds = 0", ""]
+              "event_discovery_seconds = 1", ""]
     return "\n".join(lines)
 
 

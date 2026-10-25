@@ -95,7 +95,8 @@ checks reports as before.
 
 ## Daemon
 
-With `fleet_inbox` origins in the manifest, every poll:
+With `fleet_inbox` origins in the manifest, every poll that leaves the
+SF-122 idle path (a changed watched version, due discovery or local work):
 
 1. reads the device's inbox at its derived address and follows the groups it
    lists;
@@ -108,10 +109,12 @@ With `fleet_inbox` origins in the manifest, every poll:
    the inbox (which did not list it yet). A group joined while the daemon
    was stopped therefore applies what was announced since then — matching
    the event baseline;
-4. runs the `DeploymentCreated` and `DeviceAddedToGroup` scan only every
-   `runtime.event_scan_seconds` (default 60; 0 scans every poll), so unannounced deployments arrive within a minute, as a
-   safety net for unannounced deployments. Without inbox origins the scan runs
-   every poll as before.
+4. runs the combined `DeploymentCreated`/`DeviceAddedToGroup` discovery scan
+   (SF-122) only when its `runtime.event_discovery_seconds` bound is due
+   (default 60, or the faster rollout cadence in an active maintenance
+   window), and until the one-time combined-cursor migration completes, so
+   unannounced deployments still arrive within a minute, as a safety net.
+   Without inbox origins every changed poll scans events as before.
 
 A journal written before inboxes (an older daemon, or a deployment without
 inbox origins at enrollment) has no heads. Its event path handled every record
@@ -121,14 +124,16 @@ first scans events to the tip and starts heads at the chain time taken before
 the scan (or the scanned checkpoint's time, if earlier). If that history is
 pruned, it starts heads at the time of the checkpoint before the cursor's
 (`GetCheckpoint`; a JSON-RPC-era cursor is located through its transaction),
-and moves the cursor to the tip in the same journal write that stores the
-heads. A journal therefore never holds the moved cursor without the baseline
+and moves the cursor past the pruned range in the same journal write that
+stores the heads: the combined discovery cursor to the tip, or, before the
+SF-122 cursor migration, the deployment cursor to the migration's fence. A journal therefore never holds the moved cursor without the baseline
 taken from the old one, so an interruption cannot shift that baseline. When neither is available the poll fails with an explicit error instead of
 skipping or replaying records.
 
 If the node has pruned the history at the device's cursor (or rejects the
 range with `OUT_OF_RANGE`), a device with inbox origins logs it, moves the
-cursor to the tip and continues from objects: it resynchronizes from its inbox
+cursor to the tip (the migration fence for a cursor not yet merged, and
+likewise for the membership cursor) and continues from objects: it resynchronizes from its inbox
 and group heads alone. Unannounced deployments created in the pruned range are
 not applied. Without inbox origins pruned history still stops polling with an
 explicit error.
@@ -143,8 +148,12 @@ Indexed membership is read as the group's `MemberKey` field for this device
 member vector.
 
 SF-122 batches the daemon's steady-state reads into one version check. The
-inbox object and each followed group's `HeadKey` field are the watch-set
-entries this feature adds; until SF-122 merges they are direct reads.
+inbox object (watched even before it exists, so its creation counts) and each
+followed group's `HeadKey` field (a watched child of the group) are the
+watch-set entries this feature adds. An announcement changes one of their
+versions, so the next poll leaves the idle path and reads the inbox, heads
+and announced records directly; a quiet poll stays one `BatchGetObjects`
+request.
 
 ## Tests
 

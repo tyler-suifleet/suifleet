@@ -125,7 +125,7 @@ def run(binary, receipt):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{ota.DEVICE}"\ndevice_cap_id = "{ota.CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 f'[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\ncomponent_stop_timeout_seconds = 3\n'
                 f'[budget]\nbudget_id = "{budget.BUDGET}"\nlow_water_mist = {budget.LOW_WATER}\ndraw_mist = {budget.DRAW}\n')
 
@@ -176,9 +176,11 @@ def run(binary, receipt):
                 with (root / "daemon.log").open("w") as log:
                     process = start()
                     daemon_pid = process.pid
-                    ota.wait_for(lambda: funding().get("draws") == 1, "daemon did not draw from the budget", process)
+                    ota.wait_for(lambda: state().get("initialized"), "daemon did not initialize", process)
+                    assert not sim.draws, "idle enrollment must not draw gas"
                     ota.wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
                     sim.add("0x301", event=dict(component_name="svc", version="1.0.0"), recipe=dict(lifecycle={"run": run_command}))
+                    ota.wait_for(lambda: funding().get("draws") == 1, "pending write did not draw from the budget", process)
                     ota.wait_for(lambda: reported("0x301") and status().get("phase") == "running", "supervised component did not start", process)
                     sim.add("0x302")
                     ota.wait_for(lambda: reported("0x302"), "one-shot deployment did not report", process)
@@ -260,7 +262,14 @@ def run(binary, receipt):
                     print(f"PASS: daemon restart restored the installed version in {measured['restart_recovery_seconds']}s without replaying one-shot work")
 
                     # Compromised-device response: the owner revokes the identity.
+                    # Fence the prior in-flight poll before publishing new work.
+                    # A simulated revocation cannot retroactively invalidate a
+                    # read that already returned the previous identity.
+                    diagnostic = "device identity is revoked"
+                    failures = (root / "daemon.log").read_text().count(diagnostic)
                     sim.identity = dict(sim.identity, revoked=True)
+                    ota.wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
+                                 "daemon did not reject the revoked identity", process)
                     reports = len(sim.reports)
                     sim.add("0x308")
                     time.sleep(3)

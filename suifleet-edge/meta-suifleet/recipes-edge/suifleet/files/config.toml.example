@@ -47,11 +47,13 @@ poll_seconds = 10
 replay_history = false
 
 # With device inboxes and group heads (SF-125, docs/SHARED_INTERFACES.md) the
-# daemon reads announced deployments from objects every poll and scans events
-# only this often, as a safety net for unannounced deployments. Without them
-# it scans every poll. Event history the node has pruned is then skipped and
-# the device resynchronizes from its inbox and group heads.
-# event_scan_seconds = 60
+# inbox and head versions join each poll's version batch (SF-122), so an
+# announced deployment is read from objects as soon as its version changes.
+# The event scan then runs only every event_discovery_seconds, as a safety net
+# for unannounced deployments. Without them every changed poll scans events.
+# Event history the node has pruned is then skipped and the device
+# resynchronizes from its inbox and group heads.
+# event_discovery_seconds = 60
 
 # Dependency candidates: "never" (default) uses only the live catalog and
 # Walrus; "cached" keeps authenticated versions/recipes/artifacts under

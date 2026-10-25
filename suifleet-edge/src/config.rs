@@ -896,8 +896,10 @@ impl Config {
         );
         anyhow::ensure!(
             (1..=86_400).contains(&cfg.runtime.poll_seconds)
-                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds),
-            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400"
+                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds)
+                && cfg.runtime.full_revalidation_seconds > 0
+                && cfg.runtime.event_discovery_seconds > 0,
+            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400; full_revalidation_seconds and event_discovery_seconds must be positive"
         );
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
@@ -1029,12 +1031,9 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub rollout_poll_seconds: u64,
+    pub full_revalidation_seconds: u64,
+    pub event_discovery_seconds: u64,
     pub replay_history: bool,
-    /// With device inboxes (SF-125), how often the DeploymentCreated and
-    /// DeviceAddedToGroup event scan runs as a safety net for deployments
-    /// older packages and clients create without announcing them. 0 scans
-    /// every poll. Without inboxes the scan runs every poll regardless.
-    pub event_scan_seconds: u64,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
     pub component_startup_seconds: u64,
@@ -1055,8 +1054,9 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 1800,
             rollout_poll_seconds: 60,
+            full_revalidation_seconds: 86_400,
+            event_discovery_seconds: 60,
             replay_history: false,
-            event_scan_seconds: 60,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,
             component_stop_timeout_seconds: 10,

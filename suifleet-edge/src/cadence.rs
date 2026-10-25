@@ -119,6 +119,28 @@ impl Cadence {
         Duration::from_millis(delay.max(1))
     }
 }
+/// Idle version checks do not scan events at every short test/customer poll.
+/// An observed active window, including one retained after completion, does
+/// require discovery at the configured fast cadence for subsequent work.
+pub fn discovery_bound<'a>(
+    config: &RuntimeConfig,
+    controls: impl Iterator<Item = &'a Deferred>,
+    now: u64,
+    window: Option<Window>,
+) -> u64 {
+    let active = |w: Window| w.start_ms <= now && now < w.end_ms;
+    let fast = window.is_some_and(active) || controls.filter(|d| !d.terminal).any(|d| {
+        Window::control(&d.control).is_some_and(active)
+            || (d.control.state == 0
+                && (d.control.expires_ms == 0 || now < d.control.expires_ms)
+                && matches!(d.reason.as_str(), "waiting for rollout eligibility" | "ready for admission"))
+    });
+    if fast {
+        config.event_discovery_seconds.min(config.rollout_poll_seconds).min(config.poll_seconds)
+    } else {
+        config.event_discovery_seconds
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,6 +153,21 @@ mod tests {
             reason: "not yet scheduled".into(),
             terminal: false,
         }
+    }
+    #[test]
+    fn idle_batch_bound_and_retained_fast_discovery_are_independent() {
+        let mut cfg = RuntimeConfig { poll_seconds: 1, ..Default::default() };
+        assert_eq!(discovery_bound(&cfg, [].iter(), 5, None), 60);
+        cfg.poll_seconds = 1800; cfg.rollout_poll_seconds = 2;
+        let window = Some(Window { start_ms: 10, end_ms: 20 });
+        assert_eq!(discovery_bound(&cfg, [].iter(), 9, window), 60);
+        assert_eq!(discovery_bound(&cfg, [].iter(), 10, window), 2);
+        assert_eq!(discovery_bound(&cfg, [].iter(), 19, window), 2); // Completed job's retained window.
+        assert_eq!(discovery_bound(&cfg, [].iter(), 20, window), 60);
+        let mut pending = deferred(Control::default()); pending.reason = "waiting for rollout eligibility".into();
+        assert_eq!(discovery_bound(&cfg, [&pending].into_iter(), 5, None), 2);
+        pending.terminal = true;
+        assert_eq!(discovery_bound(&cfg, [&pending].into_iter(), 5, None), 60);
     }
     #[test]
     fn defaults_fast_windows_and_short_local_deadlines() {

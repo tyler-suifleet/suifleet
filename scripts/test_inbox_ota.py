@@ -94,6 +94,12 @@ class InboxSimulator(Simulator):
                            artifact_sha256="0" * 64, target_groups=[], target_devices=[], creator="0xbad")
             return [foreign if e["parsedJson"]["deployment_id"] in self.unindexed else e["parsedJson"]
                     for e in self.events]
+        if method == "shim_discovery_events":
+            # The combined SF-122 stream: event i is still in checkpoint
+            # i + 1, and unannounced-only records stay masked.
+            assert not self.memberships, "inbox scenarios list groups only in the inbox"
+            kind = f"{test_ota.ORIGIN}::deployment_manager::DeploymentCreated"
+            return [dict(event_type=kind, json=event) for event in self.rpc("shim_events", [kind])]
         if method == "shim_fields":
             device = object_id(self.device)[2:]
             return super().rpc(method, params) + [[REGISTRY, INBOX_KEY, device]] + [
@@ -139,7 +145,7 @@ def run(binary):
                     f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                     f'[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 30\n'
                     f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = {poll_seconds}\n'
-                    f'event_scan_seconds = {scan_seconds}\n')
+                    f'event_discovery_seconds = {max(1, scan_seconds)}\n')
 
             def state():
                 path = root / "state" / "state.json"
@@ -156,9 +162,10 @@ def run(binary):
                 process.terminate(); process.wait(timeout=10); process = None
 
             def settle():
+                """Wait for two completed cycles, including reconciliation and logs."""
                 for _ in range(2):
-                    checks = sim.chain_checks
-                    wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                    polls = test_ota.completed_polls(log_path)
+                    wait_for(lambda: test_ota.completed_polls(log_path) > polls, "daemon stopped polling", process)
                 time.sleep(0.3)
 
             # 1. Enrollment baseline. The inbox exists with a record created

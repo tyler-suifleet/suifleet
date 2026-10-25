@@ -4,7 +4,10 @@
 //! Announcements are hints. Every candidate still goes through the same
 //! record, operator and membership checks as an event would, and through the
 //! journal's at-most-once bookkeeping.
-use crate::{state::Journal, sui_client::Head};
+use crate::{
+    state::{Journal, State},
+    sui_client::Head,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -19,9 +22,6 @@ pub struct Heads {
     /// Inbox or group ID → what was last acted on.
     #[serde(default)]
     pub seen: BTreeMap<String, Seen>,
-    /// Device-clock time (UTC ms) of the last event safety-net scan.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub event_scan_ms: Option<u64>,
     /// Earliest announced scheduled start (UTC ms) in any head; 0 for none.
     #[serde(default)]
     pub next_start_ms: u64,
@@ -39,15 +39,41 @@ impl Heads {
     }
 }
 
-/// Start heads for a journal from before inboxes at `since_ms`, with the
-/// event cursor at `cursor`, in one journal write. The baseline comes from
-/// the old cursor, so a journal must never hold a newer cursor without it:
-/// after an interruption the baseline would come from the newer cursor and
-/// records created in between would be skipped.
-pub fn begin(journal: &mut Journal, cursor: Option<Value>, since_ms: u64, scan_ms: u64) -> anyhow::Result<()> {
-    journal.state.cursor = cursor;
-    journal.state.heads = Some(Heads { since_ms, event_scan_ms: Some(scan_ms), ..Default::default() });
+/// Start heads for a journal from before inboxes at `since_ms` in one
+/// journal write, moving past pruned deployment history to `pruned_tip` when
+/// given. The baseline comes from the old cursor, so a journal must never
+/// hold a newer cursor without it: after an interruption the baseline would
+/// come from the newer cursor and records created in between would be skipped.
+pub fn begin(journal: &mut Journal, since_ms: u64, pruned_tip: Option<Option<Value>>) -> anyhow::Result<()> {
+    if let Some(tip) = pruned_tip {
+        skip_pruned_deployments(&mut journal.state, tip);
+    }
+    journal.state.heads = Some(Heads { since_ms, ..Default::default() });
     journal.save()
+}
+
+/// Resume the deployment event scan after pruned history, once heads cover
+/// it. The combined discovery stream (SF-122) moves to `tip` as one cursor;
+/// before its migration the deployment cursor stops at the merge fence, from
+/// which the combined stream continues.
+pub fn skip_pruned_deployments(state: &mut State, tip: Option<Value>) {
+    if state.discovery_cursor.is_some() {
+        state.cursor = tip.clone();
+        state.discovery_cursor = tip.clone();
+        state.membership_cursor = tip;
+    } else {
+        state.cursor = fence(state).or(tip);
+    }
+}
+
+/// Resume the pre-migration membership scan after pruned history at the
+/// merge fence, once the inbox lists the device's groups.
+pub fn skip_pruned_memberships(state: &mut State, tip: Option<Value>) {
+    state.membership_cursor = fence(state).or(tip);
+}
+
+fn fence(state: &State) -> Option<Value> {
+    state.discovery_merge_checkpoint.map(|checkpoint| serde_json::json!({ "checkpoint": checkpoint }))
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -73,15 +99,6 @@ pub fn changed(head: &Head, seen: &Seen) -> Vec<String> {
         .filter(|(name, id)| seen.components.get(*name) != Some(*id))
         .map(|(_, id)| id.clone())
         .collect()
-}
-
-/// Whether the event safety net is due. Every poll without heads; a clock
-/// that moved back counts as due.
-pub fn scan_due(last_ms: Option<u64>, now_ms: u64, interval_seconds: u64) -> bool {
-    match last_ms {
-        None => true,
-        Some(last) => last > now_ms || now_ms - last >= interval_seconds.saturating_mul(1000),
-    }
 }
 
 /// Milliseconds until the earliest announced scheduled start, when one is
@@ -139,7 +156,7 @@ mod tests {
         // crash right after it would leave the journal.
         crate::state::FAIL_DIRECTORY_SYNC.with(|fault| fault.set(true));
         let tip = Some(serde_json::json!({"checkpoint": 101}));
-        assert!(begin(&mut journal, tip.clone(), 9_000, 1).is_err());
+        assert!(begin(&mut journal, 9_000, Some(tip.clone())).is_err());
         let disk: crate::state::State =
             serde_json::from_slice(&std::fs::read(dir.join("state.json")).unwrap()).unwrap();
         assert_eq!(disk.cursor, tip);
@@ -149,12 +166,26 @@ mod tests {
     }
 
     #[test]
-    fn the_event_scan_is_bounded_but_survives_clock_rollback() {
-        assert!(scan_due(None, 10, 3600));
-        assert!(!scan_due(Some(1_000), 3_599_999, 3600));
-        assert!(scan_due(Some(1_000), 3_601_000, 3600));
-        assert!(scan_due(Some(5_000), 4_000, 3600), "clock moved back");
-        assert!(scan_due(Some(5_000), 5_000, 0), "0 scans every poll");
+    fn pruned_history_resumes_at_the_fence_or_the_combined_tip() {
+        let tip = Some(serde_json::json!({"checkpoint": 900}));
+        let mut state = State {
+            cursor: Some(serde_json::json!({"checkpoint": 10})),
+            membership_cursor: Some(serde_json::json!({"checkpoint": 20})),
+            discovery_merge_checkpoint: Some(500),
+            ..Default::default()
+        };
+        // Before the merge: each pre-migration cursor stops at the fence on
+        // its own; the other keeps scanning what is still retained.
+        skip_pruned_deployments(&mut state, tip.clone());
+        assert_eq!(state.cursor, Some(serde_json::json!({"checkpoint": 500})));
+        assert_eq!(state.membership_cursor, Some(serde_json::json!({"checkpoint": 20})));
+        skip_pruned_memberships(&mut state, tip.clone());
+        assert_eq!(state.membership_cursor, Some(serde_json::json!({"checkpoint": 500})));
+        assert_eq!(state.discovery_cursor, None);
+        // After it: the one combined stream moves to the tip.
+        state.discovery_cursor = state.cursor.clone();
+        skip_pruned_deployments(&mut state, tip.clone());
+        assert_eq!((&state.cursor, &state.discovery_cursor, &state.membership_cursor), (&tip, &tip, &tip));
     }
 
     #[test]
