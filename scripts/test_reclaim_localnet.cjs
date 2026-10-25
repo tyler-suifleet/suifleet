@@ -37,10 +37,12 @@ const DEVICES = 4;
     const tree = path.join(tmp, 'contracts'); await fs.cp(path.join(root, 'contracts'), tree, { recursive: true, filter: (p) => !['build', 'Published.toml'].includes(path.basename(p)) });
     const baseTree = path.join(tmp, 'base'); await fs.mkdir(baseTree);
     assert.match(BASE, /^[0-9a-f]{40}$/, 'SF129_BASE_REF must be a full commit hash');
-    const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_data/sources'], { maxBuffer: 64 * 1024 * 1024 });
+    const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_storage/sources', 'contracts/fleet_data/sources'], { maxBuffer: 64 * 1024 * 1024 });
     execFileSync('tar', ['-x', '-C', baseTree], { input: archive });
     const headCore = path.join(tmp, 'head-core-sources'); await fs.cp(path.join(tree, 'sources'), headCore, { recursive: true });
     const headData = await fs.readFile(path.join(tree, 'fleet_data/sources/fleet_data.move'));
+    // Head storage may use core modules the base lacks: publish base storage, upgrade it after core.
+    const headStorage = path.join(tmp, 'head-storage-sources'); await fs.cp(path.join(tree, 'fleet_storage/sources'), headStorage, { recursive: true });
     const cache = '/home/dev/.move/git', pin = 'https___github_com_MystenLabs_walrus_git_c68b530e0b1e522b4a3896190d883e4312a1cf0e';
     assert((await fs.readdir(cache)).includes(pin), 'pinned Walrus source cache missing');
     const deps = path.join(tmp, 'deps'); await fs.mkdir(deps);
@@ -139,7 +141,9 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     const walPackage = await publish('WAL', path.join(deps, 'wal')), walrusPackage = await publish('Walrus', path.join(deps, 'walrus'));
     let tx = new Transaction(); tx.moveCall({ target: `${walrusPackage.pkg}::system::reclaim_fixture` });
     const system = one(await execute('initialize isolated Walrus system', tx), '::system::System');
-    const storagePackage = await publish('storage', path.join(tree, 'fleet_storage'));
+    const storageTree = path.join(tree, 'fleet_storage');
+    await fs.rm(path.join(storageTree, 'sources'), { recursive: true }); await fs.cp(path.join(baseTree, 'contracts/fleet_storage/sources'), path.join(storageTree, 'sources'), { recursive: true });
+    const storagePackage = await publish('storage', storageTree);
     const dataTree = path.join(tree, 'fleet_data');
     await fs.writeFile(path.join(dataTree, 'sources/fleet_data.move'), await fs.readFile(path.join(baseTree, 'contracts/fleet_data/sources/fleet_data.move')));
     const dataBase = await publish('base data', dataTree);
@@ -180,17 +184,18 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     const RecordBcs = bcs.struct('BlobRecord', { device_id: bcs.option(bcs.Address), blob_id: bcs.u256(), size: bcs.u64(), encoded_size: bcs.u64(), end_epoch: bcs.u32(), uploaded_at_ms: bcs.u64() });
     const secretKey = new Uint8Array(32); secretKey[31] = 1; // the fixture member's public key is the G1 generator
     const u32 = (n) => bcs.u32().serialize(n).toBytes(), u256 = (n) => bcs.u256().serialize(n).toBytes();
-    async function upload(d, root, label) {
+    // Calls go to `pkg`; types keep the original storage package id.
+    async function upload(d, root, label, pkg = storagePackage.pkg) {
       let tx = new Transaction();
       const [blobId] = tx.moveCall({ target: `${walrusPackage.pkg}::blob::derive_blob_id`, arguments: [tx.pure.u256(root), tx.pure.u8(1), tx.pure.u64(100)] });
-      tx.moveCall({ target: `${storagePackage.pkg}::fleet_storage::register_blob`, arguments: [tx.object(storage), tx.object(budget), tx.object(d.account), tx.object(registry), tx.object(d.cap), tx.object(system), blobId, tx.pure.u256(root), tx.pure.u64(100), tx.pure.u8(1), tx.object('0x6')] });
+      tx.moveCall({ target: `${pkg}::fleet_storage::register_blob`, arguments: [tx.object(storage), tx.object(budget), tx.object(d.account), tx.object(registry), tx.object(d.cap), tx.object(system), blobId, tx.pure.u256(root), tx.pure.u64(100), tx.pure.u8(1), tx.object('0x6')] });
       const registered = await execute(`${label}: register`, tx, d.key), blob = one(registered, '::blob::Blob');
       const field = await client.getDynamicField({ parentId: storage, name: { type: `${storagePackage.pkg}::fleet_storage::RecordKey`, bcs: bcs.Address.serialize(blob).toBytes() } });
       const record = RecordBcs.parse(field.dynamicField.value.bcs);
       const message = new Uint8Array([1, 0, 3, ...u32(0), ...u256(record.blob_id), 0]);
       const signature = bls12_381.longSignatures.sign(bls12_381.longSignatures.hash(message), secretKey).toBytes();
       tx = new Transaction();
-      tx.moveCall({ target: `${storagePackage.pkg}::fleet_storage::certify_blob`, arguments: [tx.object(storage), tx.object(system), tx.pure.address(blob), tx.pure.vector('u8', Array.from(signature)), tx.pure.vector('u8', [1]), tx.pure.vector('u8', Array.from(message))] });
+      tx.moveCall({ target: `${pkg}::fleet_storage::certify_blob`, arguments: [tx.object(storage), tx.object(system), tx.pure.address(blob), tx.pure.vector('u8', Array.from(signature)), tx.pure.vector('u8', [1]), tx.pure.vector('u8', Array.from(message))] });
       const certified = await execute(`${label}: certify`, tx, d.key);
       return { blob, record, registered, certified };
     }
@@ -238,6 +243,11 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     // ── In-place upgrades of the existing packages ──────────────────────────
     await fs.rm(path.join(tree, 'sources'), { recursive: true }); await fs.cp(headCore, path.join(tree, 'sources'), { recursive: true });
     const coreHead = await upgrade('core', tree, core);
+    await fs.rm(path.join(storageTree, 'sources'), { recursive: true }); await fs.cp(headStorage, path.join(storageTree, 'sources'), { recursive: true });
+    const storageHead = await upgrade('storage', storageTree, storagePackage);
+    // The existing storage object moves to the head layout version explicitly.
+    tx = new Transaction(); tx.moveCall({ target: `${storageHead}::fleet_storage::migrate`, arguments: [tx.object(storage), tx.object(budget), tx.object(budgetCap)] });
+    await execute('migrate fleet storage', tx);
     await fs.writeFile(path.join(dataTree, 'sources/fleet_data.move'), headData);
     const dataHead = await upgrade('data', dataTree, dataBase);
     const dataOrigins = await origins(dataHead), coreOrigins = await origins(coreHead);
@@ -250,7 +260,7 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     await assert.rejects(client.getMoveFunction({ packageId: dataBase.pkg, moduleName: 'fleet_data', name: 'prune_expired_anchors' }));
     // Devices keep registering through the existing storage after the upgrade;
     // this upload stays unanchored and is reclaimed as a loose expired blob.
-    const late = await upload(fleetDevices[1], 2999, 'device 1 post-upgrade upload');
+    const late = await upload(fleetDevices[1], 2999, 'device 1 post-upgrade upload', storageHead);
 
     // ── Reclaim through the dApp planner, with dry-run previews ─────────────
     const manifest = JSON.parse(await fs.readFile(path.join(root, 'manifests/fixture.localnet.json')));
@@ -355,7 +365,7 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     const result = {
       schema: 1, mode: 'isolated-network-none-localnet', result: 'PASS', revision: execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), base: BASE, chain,
       referenceGasPrice: String((await client.getReferenceGasPrice()).referenceGasPrice),
-      packages: { coreBase: core.pkg, coreHead, dataBase: dataBase.pkg, dataHead, storage: storagePackage.pkg, walrus: walrusPackage.pkg },
+      packages: { coreBase: core.pkg, coreHead, dataBase: dataBase.pkg, dataHead, storage: storagePackage.pkg, storageHead, walrus: walrusPackage.pkg },
       typeOrigins: { 'fleet_data::FleetData': dataOrigins['fleet_data::FleetData'], 'fleet_data::AnchorsPruned': dataOrigins['fleet_data::AnchorsPruned'],
         'fleet_data::ExpiredBlobsBurned': dataOrigins['fleet_data::ExpiredBlobsBurned'], 'desired_state::Retirement': coreOrigins['desired_state::Retirement'],
         'deployment_manager::DeploymentRecord': coreOrigins['deployment_manager::DeploymentRecord'] },
