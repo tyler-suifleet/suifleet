@@ -45,9 +45,9 @@ export default function FleetDataPage() {
   // under the discarded session no longer matches session.current.
   function expire(){session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setMessage('Seal session expired; decrypted records were discarded.');}
   useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
-  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
+  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client,DATA_CONFIG,selection.identity]);
   // The access record and the signed session belong to one account.
-  useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
+  useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client,DATA_CONFIG,selection.identity]);
   // Plaintext lives only as long as the signed five-minute Seal session.
   useEffect(()=>{
     const timer=setInterval(()=>{if(session.current?.isExpired())expire();},5_000);
@@ -57,12 +57,12 @@ export default function FleetDataPage() {
     let live=true;
     if(DATA_CONFIG && account)void authority().then(a=>{if(live)setRole(a.kind);}).catch(()=>{if(live)setRole('none');});
     return()=>{live=false;};
-  },[account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
+  },[account?.address,client,DATA_CONFIG,selection.identity]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
     let live=true;setFleetDevices([]);setCursor(null);setMore(false);
     if(DATA_CONFIG && account)void listFleetDeviceIds(client,DATA_CONFIG).then(page=>{if(live){setFleetDevices(page.devices);setCursor(page.cursor);setMore(page.hasNextPage);}}).catch(()=>{if(live)setMessage('Fleet index unavailable.');});
     return()=>{live=false;};
-  },[account?.address,client]);
+  },[account?.address,client,DATA_CONFIG,selection.identity]);
   async function loadMore(){
     if(!DATA_CONFIG)return;const current=generation.current;
     try{const page=await listFleetDeviceIds(client,DATA_CONFIG,cursor);if(current===generation.current){setFleetDevices(old=>[...new Set([...old,...page.devices])]);setCursor(page.cursor);setMore(page.hasNextPage);}}
@@ -96,7 +96,7 @@ export default function FleetDataPage() {
       if(current===generation.current){setEntries(live.reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
-  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client,DATA_CONFIG,selection.identity]); // eslint-disable-line react-hooks/exhaustive-deps
   function note(index:number,kind:number,authority:'owner'|'support'|undefined,outcome:'opened'|'refused') {
     if(!account || !authority)return;
     setAccess(log=>recordAccess(log,{atMs:Date.now(),account:account.address,authority,device,index,kind:(['logs','diagnostics','crash'] as const)[kind] ?? 'logs',outcome}));

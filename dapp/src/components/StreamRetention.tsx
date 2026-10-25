@@ -1,13 +1,17 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount, useCurrentClient } from '@mysten/dapp-kit-react';
-import { DATA_CONFIG } from '@/lib/fleet-data';
-import { fetchBudgets, storageConfig } from '@/lib/fleet-budget';
+import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
+import { useFleetSelection } from '@/hooks/useFleetSelection';
+import { fetchCustomerFleets } from '@/lib/customer-fleets';
+import { selectedDataAuthority } from '@/lib/data-authority';
+import { fetchBudgets, fetchManagedBudget, storageConfig } from '@/lib/fleet-budget';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { ARCHIVE_STREAMS, readStreamPolicies, setStreamRetentionTx, extendStreamArchiveTx } from '@/lib/stream-retention';
 
 export function StreamRetentionPanel() {
+  const DATA_CONFIG = useFleetDataConfig(), selection = useFleetSelection();
   const client = useCurrentClient(), account = useCurrentAccount();
   const { mutateAsync: execute, isPending } = useFleetTransaction();
   const [values, setValues] = useState<(number | undefined)[]>([]), [kind, setKind] = useState(0), [epochs, setEpochs] = useState(3);
@@ -19,12 +23,16 @@ export function StreamRetentionPanel() {
     const current = ++generation.current; setCap(undefined); setValues([]); setLoaded(false); setMessage('');
     if (!DATA_CONFIG?.streamRetentionOrigin || !account) return;
     const config = DATA_CONFIG;
-    void Promise.all([readStreamPolicies(client, config), fetchBudgets(client, account.address)]).then(([policies, budgets]) => {
+    void Promise.all([readStreamPolicies(client, config), (async () => {
+      if (!selection.supported) return fetchBudgets(client, account.address);
+      const authority = selectedDataAuthority(await fetchCustomerFleets(client, account.address), selection.fleet, config.budgetId);
+      return authority.kind === 'customer' ? [await fetchManagedBudget(client, config.budgetId)] : [];
+    })()]).then(([policies, budgets]) => {
       if (current !== generation.current) return;
       setValues(policies); setLoaded(true); setCap(budgets.find(b => normalizeSuiAddress(b.id) === config.budgetId)?.capId);
     }).catch(() => { if (current === generation.current) setMessage('Retention policy unavailable.'); });
     return () => { generation.current++; };
-  }, [client, account?.address]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [client, account?.address, DATA_CONFIG, selection.identity]); // eslint-disable-line react-hooks/exhaustive-deps
   async function save() {
     if (!DATA_CONFIG || !cap) return;
     const current = generation.current;

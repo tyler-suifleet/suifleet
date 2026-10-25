@@ -6,6 +6,7 @@ const {normalizeSuiAddress:id} = appRequire('@mysten/sui/utils');
 const config={packageId:id('0x82'),streamRetentionOrigin:id('0x83'),fleetId:id('0xf1'),budgetId:id('0xb1')};
 const actual=loader()('lib/stream-retention.ts');
 let slots=[],cursor=0,effects=[],account={address:id('0xa1')},policies=[3,13,26],signed=[],pendingResolve;
+let selection={supported:false,identity:'legacy'},admin=true;
 const client={};
 const react={
  useState(initial){const i=cursor++;if(!slots[i])slots[i]={value:initial};return [slots[i].value,v=>{slots[i].value=typeof v==='function'?v(slots[i].value):v;}];},
@@ -14,8 +15,11 @@ const react={
 };
 const dependencies={react,
  '@mysten/dapp-kit-react':{useCurrentClient:()=>client,useCurrentAccount:()=>account},
- '@/lib/fleet-data':{DATA_CONFIG:config},
- '@/lib/fleet-budget':{storageConfig:()=>({}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
+ '@/lib/customer-fleets':{fetchCustomerFleets:async()=>[{...selection.fleet,administrator:admin}]},
+ '@/lib/data-authority':{selectedDataAuthority:loader()('lib/data-authority.ts').selectedDataAuthority},
+ '@/hooks/useFleetDataConfig':{useFleetDataConfig:()=>config},
+ '@/hooks/useFleetSelection':{useFleetSelection:()=>selection},
+ '@/lib/fleet-budget':{storageConfig:()=>({}),fetchManagedBudget:async()=>({id:config.budgetId,capId:id('0xc2')}),fetchBudgets:async()=>account.address===id('0xa1')?[{id:config.budgetId,capId:id('0xc1')}]:[]},
  '@/lib/stream-retention':{...actual,readStreamPolicies:async()=>policies},
  '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({isPending:false,mutateAsync:({transaction})=>{signed.push(transaction);return new Promise(resolve=>{pendingResolve=resolve;});}})},
 };
@@ -36,5 +40,11 @@ const flush=()=>new Promise(r=>setImmediate(r));
  const tx=signed[0].getData();assert.equal(tx.commands[0].MoveCall.function,'set_stream_retention');
  account={address:id('0xa2')};render();await flush();tree=render();assert.equal(button(tree).props.disabled,true,'support/non-owner cannot save');
  pendingResolve({digest:'fixture'});await flush();tree=render();assert(!text(tree).includes('Retention confirmed'),'old-account response must not publish success');
+ selection={supported:true,identity:'managed-1',fleet:{id:id('0xf9'),customerId:id('0xc9'),budgetId:config.budgetId}};
+ render();await flush();tree=render();assert.equal(button(tree).props.disabled,false,'fresh managed administrator can save using custodied cap');
+ button(tree).props.onClick();await flush();assert.equal(signed.length,2);
+ assert(signed[1].getData().inputs.some(i=>i.UnresolvedObject?.objectId===id('0xc2')),'builder uses managed budget cap for transaction wrapper');
+ admin=false;selection={...selection,identity:'managed-read-only'};render();await flush();tree=render();assert.equal(button(tree).props.disabled,true,'managed read-only credential cannot save');
+ pendingResolve({digest:'fixture'});await flush();assert(!text(render()).includes('Retention confirmed'),'late managed authority response discarded');
  console.log('stream policy panel: owner edit, non-owner refusal, horizon validation and account-change response isolation PASS');
 })().catch(e=>{console.error(e);process.exitCode=1;});
