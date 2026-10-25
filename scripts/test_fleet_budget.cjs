@@ -25,14 +25,20 @@ const budget = load("lib/fleet-budget.ts");
 const { fleet_budget_GasAccountBcs } = load("lib/fleet-protocol.ts");
 const { bcs } = appRequire("@mysten/sui/bcs");
 
-// ── The estimate's inputs are the SF-054 measurements ──
-const receipt = quotes.historical_testnet_transactions.find((t) => t.label === "device receipt").effects.gasEffects.gasSummary;
-// The measured effects, at the Testnet reference gas price they were paid at (SF-054 quotes it), reproduce each net fee.
+// The estimate combines recorded SF-127 receipt effects with SF-054 rates.
+const sf127 = JSON.parse(fs.readFileSync(path.join(root, "docs/validation/sf127-localnet.json"), "utf8"));
+assert.equal(sf127.result, "PASS");
+assert.equal(sf127.targets, 1000);
+const singles = sf127.receipt_transactions.filter((t) => t.count === 1);
+assert.ok(singles.some((t) => t.start === sf127.targets - 1), "measured at 1,000 targets");
+const receipt = singles.reduce((a, b) => BigInt(a.computation) + BigInt(a.storage) - BigInt(a.rebate) > BigInt(b.computation) + BigInt(b.storage) - BigInt(b.rebate) ? a : b);
+assert.ok(receipt.digest, "receipt effects have transaction provenance");
+// Localnet receipt effects use the same reference price as the historical Testnet measurements.
 assert.equal(costs.MEASURED.referenceGasPrice, BigInt(quotes.testnet.epoch.referenceGasPrice));
 const net = (effects) => costs.netMist(effects, costs.MEASURED.referenceGasPrice);
 const receiptNetMist = net(costs.MEASURED.receipt), drawNetMist = net(costs.MEASURED.draw);
-assert.deepEqual(costs.MEASURED.receipt, { computation: BigInt(receipt.computationCost), storage: BigInt(receipt.storageCost), rebate: BigInt(receipt.storageRebate) });
-assert.equal(receiptNetMist, BigInt(receipt.computationCost + receipt.storageCost - receipt.storageRebate));
+assert.deepEqual(costs.MEASURED.receipt, { computation: BigInt(receipt.computation), storage: BigInt(receipt.storage), rebate: BigInt(receipt.rebate) });
+assert.equal(receiptNetMist, BigInt(receipt.computation) + BigInt(receipt.storage) - BigInt(receipt.rebate));
 // The SF-054 rates: gas at the measured Testnet price, Walrus at the SF-054 Mainnet snapshot.
 const SF054 = { ...costs.MAINNET_QUOTE, referenceGasPrice: costs.MEASURED.referenceGasPrice,
   walrusStoragePrice: costs.MEASURED.walrus.storagePricePerUnit, walrusWritePrice: costs.MEASURED.walrus.writePricePerUnit };
@@ -47,7 +53,7 @@ assert.equal(BigInt(drawGas.net_mist), BigInt(drawGas.computationCost) + BigInt(
 assert.equal(BigInt(drawTx.gas_mist), BigInt(drawGas.net_mist));
 assert.deepEqual(costs.MEASURED.draw, { computation: BigInt(drawGas.computationCost), storage: BigInt(drawGas.storageCost), rebate: BigInt(drawGas.storageRebate) });
 assert.equal(drawNetMist, BigInt(drawGas.net_mist), "draw cost measured on testnet");
-assert.equal(costs.MEASURED.minComputationMist, BigInt(receipt.computationCost));
+assert.equal(costs.MEASURED.minComputationMist, BigInt(1_000_000));
 assert.equal(costs.MEASURED.walrus.nShards, quotes.walrus.n_shards);
 assert.equal(costs.MEASURED.walrus.storagePricePerUnit, BigInt(quotes.walrus.storage_price_per_unit_size));
 assert.equal(costs.MEASURED.walrus.writePricePerUnit, BigInt(quotes.walrus.write_price_per_unit_size));
@@ -62,7 +68,7 @@ for (const rate of rates) {
   assert.equal(cost.storage, BigInt(rate.storage_frost));
   assert.equal(cost.write, BigInt(rate.write_frost));
 }
-console.log("PASS: estimate inputs equal the SF-054 measured receipt, Walrus rates, exact RS2 sizes and spot quotes, and the SF-083 testnet draw");
+console.log("PASS: estimate inputs equal the SF-127 measured v3 receipt, SF-054 Walrus rates, exact RS2 sizes and spot quotes, and the SF-083 testnet draw");
 
 // The SF-054 scenario: 1000 devices, 4 shared releases, one report each per release.
 const base = { devices: 1000, months: 1, receiptsPerDeviceMonth: 4, anchorsPerDeviceMonth: 0, releasesPerMonth: 4,
