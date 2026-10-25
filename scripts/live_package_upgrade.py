@@ -80,7 +80,9 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
-PACKAGE_GAS = 400_000_000  # Publish/upgrade budget: the largest single gas reservation.
+# Base publish budget: the largest fixed gas reservation. After SF-136 a fresh
+# main base publish costs ~0.55 SUI; 0.4 SUI failed InsufficientGas (run 40238821132).
+PACKAGE_GAS = 700_000_000
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
@@ -917,8 +919,9 @@ if __name__ == "__main__":
     # about 0.85 SUI in total.
     # A fresh SF-129 base->head fixture stored 0.705 SUI of packages (base
     # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
-    # device funding, deployments and cleanup.
-    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
+    # device funding, deployments and cleanup. After SF-136 a fresh pair is
+    # ~0.55 + ~0.56 SUI of packages, about 1.2 SUI in total (run 40238821132).
+    parser.add_argument("--max-spend-mist", type=int, default=1_400_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")

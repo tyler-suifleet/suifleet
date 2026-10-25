@@ -16,7 +16,7 @@ const react = {
   },
   useRef(initial) { const i = cursor++; if (!(i in slots)) slots[i] = { current: initial }; return slots[i]; },
 };
-const env = { account: { address: '0xa1' }, client: { name: 'testnet' } };
+const env = { account: { address: '0xa1' }, client: { name: 'testnet' }, selection: { supported: false, identity: 'i1' }, fleets: [], dataConfig: {} };
 const simulated = [], signed = [], plans = [];
 let pendingPreview;
 const reclaimLib = {
@@ -39,7 +39,14 @@ const dependencies = {
   '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) },
   '@/hooks/useFleetTransaction': { useFleetTransaction: () => ({ isPending: false, async mutateAsync({ transaction }) { signed.push(transaction.label); return { digest: 'D1' }; } }) },
   '@/lib/constants': { PACKAGE_ID: '0x82' },
-  '@/lib/fleet-data': { DATA_CONFIG: {}, async listFleetDeviceIds() { return { devices: ['0xd1'], hasNextPage: false }; } },
+  '@/lib/fleet-data': { async listFleetDeviceIds() { return { devices: ['0xd1'], hasNextPage: false }; } },
+  // A stable locator, as the hook returns from module-level configuration.
+  '@/hooks/useFleetDataConfig': { useFleetDataConfig: () => env.dataConfig },
+  '@/hooks/useFleetSelection': { useFleetSelection: () => env.selection },
+  '@/lib/fleet-budget': { async fetchManagedBudget(_client, budgetId) { return { capId: `cap-of-${budgetId}` }; } },
+  // The custodied cap is borrowed for the transaction, as useFleetTransaction does when signing.
+  '@/lib/customer-fleets': { async fetchCustomerFleets() { return env.fleets; },
+    withManagedBudgetCap: (tx, fleet, capId) => ({ ...tx, label: `loan(${fleet.id},${capId}):${tx.label}` }) },
   '@/lib/storage-reclaim': reclaimLib,
   '@/lib/stream-retention': loader()('lib/stream-retention.ts'),
 };
@@ -128,5 +135,26 @@ async function click(view, label) {
     assert.equal(signed.length, 1);
     assert.equal(signed[0], simulated.at(-1), 'the signed records are the ones previewed');
   }
-  console.log('PASS: SF-129 reclaim panels bind each dry-run preview to its plan, account and network; rescans, continued scans and late simulations never authorize signing');
+  // Managed fleet: the dry run simulates the same custodied-cap loan that
+  // signing applies; read-only/revoked access and a fleet switch refuse.
+  {
+    simulated.length = 0; signed.length = 0;
+    const fleet = { id: '0xf1', customerId: '0xc0', budgetId: '0xb1', administrator: true };
+    env.selection = { supported: true, identity: 'i1', fleet }; env.fleets = [fleet];
+    const view = mount(panels.ArchiveReclaimPanel, { config: { walrus: { system: '0x5e' }, packageId: '0x5a' }, capId: '0xb1cap', epoch: 600 });
+    await click(view, 'Find expired archives');
+    // The loan is composed from fresh fleet/budget reads before simulating.
+    const dryRun = view().buttons['Dry run'].onClick(); await flush(); pendingPreview(); await dryRun; await flush();
+    assert.equal(simulated.at(-1), 'loan(0xf1,cap-of-0xb1):A:0xb1cap', 'the managed preview borrows the fleet cap');
+    assert.ok(!view().buttons['Sign and reclaim'].disabled);
+    env.selection = { ...env.selection, fleet: { ...fleet, id: '0xf2' } };
+    assert.ok(view().buttons['Sign and reclaim'].disabled, 'switching fleets invalidates the preview');
+    env.selection = { supported: true, identity: 'i1', fleet }; env.fleets = [{ ...fleet, administrator: false }];
+    await view().buttons['Dry run'].onClick(); await flush();
+    assert.match(view().text, /revoked or is read-only/);
+    assert.ok(view().buttons['Sign and reclaim'].disabled, 'a read-only credential never gets a preview');
+    assert.deepEqual(signed, []);
+    env.selection = { supported: false, identity: 'i1' }; env.fleets = [];
+  }
+  console.log('PASS: SF-129 reclaim panels bind each dry-run preview to its plan, account and network; rescans, continued scans, late simulations and fleet switches never authorize signing; managed previews borrow the custodied cap');
 })().catch((error) => { console.error(error); process.exitCode = 1; });

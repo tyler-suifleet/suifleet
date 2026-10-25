@@ -119,10 +119,11 @@ module sui_edge::desired_state {
 
     /// Store the revision on the group. Aborts if the group changed since `begin`.
     public fun commit(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
-        commit_as(plan, group, clock, ctx.sender());
+        commit_as(plan, group, clock, ctx.sender(), ctx);
     }
 
-    public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address) {
+    /// `ctx` scopes the SF-129 retirement check to the current transaction.
+    public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
         assert!(device_group::group_id(group) == group_id, EWrongGroup);
         assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
