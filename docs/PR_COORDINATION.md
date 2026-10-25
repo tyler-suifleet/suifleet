@@ -861,3 +861,25 @@ attributes historical attempts using verified saved snapshots and their existing
 repair fingerprints. Missing or corrupt history retains a conservative wildcard
 limit, rather than silently granting more retries. The legacy PR-wide counter is
 retained as history but no longer blocks unrelated checks.
+
+### Development blockers and merge prerequisites
+
+`depends_on` and native GitHub blocked-by edges stop development claims and
+ownership assertions. The coordinator checks those dependencies before reserving
+or resuming a repair, so a known blocker does not create a workerless In progress
+claim. A pending recovery reports the dependency explicitly and retains its intent.
+
+Use `merge_depends_on` in the ticket specification when the user authorizes
+implementation against a pinned, reviewed interface before its upstream PR merges.
+It does not block implementation assertions. The coordinator verifies every such
+ticket is Done and its ownership publication is current before integration; it
+never turns pending upstream code into merge approval. SF-140 requires SF-139 at
+merge, and SF-141 requires SF-129 at merge. Keep these requirements in the issues
+and catalog rather than also adding native development-blocking edges.
+
+An exact same-claim pre-spawn repair intent can supersede the stopped original
+implementation reservation. The dispatcher verifies its claim/branch/worktree,
+head, empty process receipts and un-crossed launch boundary. This is retained
+repair ownership, not proof of a running worker. An uncertain spawn without a
+process receipt is still retained for explicit recovery. Extra CI metadata does
+not invalidate otherwise verified core ownership proof for a live repair.
