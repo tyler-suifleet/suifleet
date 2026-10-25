@@ -393,3 +393,57 @@ independent evidence review remain required and pending coordinator collection.
 No hosted CI polling, live-wallet mutation, production deployment or hardware
 operation occurred. Deferred physical and final provider/manual-wallet/mainnet
 acceptance remains unrun in #32 and #159.
+
+### Batched-polling base integration (2026-10-25)
+
+Integrated snapshot/current main
+`e543b9d1dd7b156d3300dfbf4914dc4eb2615789`, including SF-122 polling,
+shared funding and bounded publisher fixes. The latest independent review of
+`5b15244` reported no actionable source/security findings; its old-head checks
+are historical, not approval for this integration.
+
+The archive merge retains opaque batch selection, completed-batch fairness and
+verified index retirement alongside main's schedule and pre-write funding checks.
+Opaque exports bypass the empty-log shortcut: IPC/stream intake does not populate
+the log spool and must remain discoverable after idle periods. Publisher tests
+retain both upstream fallback/integrity negatives and the persistent-all-publisher
+500 refusal to acknowledge storage. No contract, SDK or interface migration was
+introduced by the merge.
+
+Fresh checks:
+
+- Rust 1.94.0, `CARGO_BUILD_JOBS=2` and private
+  `CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build`:
+  `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  **441 passed, 4 pre-existing ignored**; corresponding
+  `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples`:
+  passed.
+- Every **28 post-build command** from the current `make test-ota` recipe,
+  followed by the opaque round trip below, passed sequentially in disposable
+  network-isolated containers (**29 commands total**). This includes idle poll
+  reads, firmware/supervisor/daemon handoff, configuration, deployment control,
+  telemetry/logs/console, rollout, cadence, budget/fleet settings, recovery,
+  legacy/compact/Quilt archives and independent browser/SDK verification.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  **41 OK**; `-p 'test_testnet*.py'`: **116 OK, 1 skipped**;
+  `-p test_opaque_sdk.py`: **1 OK**; `-p test_tracking.py`: **10 OK**.
+  Synthetic transaction/cleanup diagnostics are mocked failure-path evidence.
+- Network-isolated `suifleet-dev:sf037` container, fresh daemon/examples:
+  `python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim`:
+  passed, including independent native signature/Seal SDK decryption, binary/text
+  assembly, scope/epoch tamper rejection, multi-message stream batches, outage and
+  restart recovery, exact ciphertext/purchase reuse and verified index retirement.
+- In the same pinned container, `node node_modules/typescript/bin/tsc --noEmit`
+  and `node node_modules/next/dist/bin/next build` from `dapp/`: passed.
+  The initial pnpm wrapper refused a noninteractive dependency purge; direct Node
+  entry points avoid dependency mutation. Existing root-owned `.next` output
+  required running the disposable build container as root.
+- `python3 -m py_compile scripts/tests/test_live_common.py scripts/test_opaque_ota.py`,
+  `node --check scripts/verify_opaque_native.cjs` and `git diff --check`: passed.
+
+No fresh Move/local-chain or public-testnet run is claimed by this repair;
+contracts are unchanged. Hosted exact-head/current-base ordinary/security CI,
+automatic public-testnet validation and fresh independent review remain required
+after push. Hosted CI was not polled. Deferred physical acceptance (#32) and final
+provider/manual-wallet/mainnet acceptance (#159) remain unrun. No production
+service deployment, wallet mutation, physical programming or mainnet operation.
