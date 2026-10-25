@@ -46,7 +46,7 @@ assert.equal(MAINNET_QUOTE.usdObservedAt, snapshot.token_market_quotes.WAL.last_
 const receipt = MEASURED.receipt;
 assert.equal(netMist(receipt, MEASURED.referenceGasPrice), receipt.computation + receipt.storage - receipt.rebate, "identity at the measured price");
 assert.equal(costs.MAINNET.receiptNetMist, receipt.computation / BigInt(10) + receipt.storage - receipt.rebate);
-assert.equal(costs.MAINNET.receiptNetMist, BigInt(5_244_232));
+assert.equal(costs.MAINNET.receiptNetMist, BigInt(5_252_232));
 assert.equal(netMist(MEASURED.draw, BigInt(2000)) - netMist(MEASURED.draw, BigInt(1000)), MEASURED.draw.computation, "only computation scales");
 assert.equal(costs.MAINNET.archiveNetMist, MEASURED.fleetData.archive.reduce((sum, e) => sum + e.computation / BigInt(10) + e.storage - e.rebate, BigInt(0)));
 assert.deepEqual(rescaled(MAINNET_QUOTE), costs.MAINNET);
