@@ -728,3 +728,91 @@ root and migration/cleanup remain operator-funded.
 Completion: the combined frontend command above exited 0; all prerequisites,
 TypeScript typecheck and the production static build passed. `git diff --check`
 also passed. The fetched base is an ancestor of the integrated head.
+
+
+### Device inbox base integration (2026-10-25)
+
+Latest independent source review of `b57519f9` found no actionable defects.
+Integrated snapshot/current main `f076a6334d75539ef3ba447484924cfa2896cb38`
+(SF-125 device inboxes/member index) in `7e4d2d9b`. Conflict resolutions retain
+both optional origin groups and their all-or-none validation, initialize shard
+roots before announcing the same deployment/rollout record, and retain both
+interface fixture suites. Added combined-feature frontend PTB regressions and
+a Move regression proving group/device announcements and scheduled starts work
+after group targets move behind the receipt barrier.
+
+Fresh local checks (disposable network-none containers):
+
+- `INSIDE_DEV_CONTAINER=1 make test-contracts generate-interfaces check-interfaces`
+  passed 235 core / 61 storage / 29 fleet-data tests and 847 client references
+  against 15 compiled modules with zero drift. After adding the combined Move
+  regression, `sui move test --path contracts --build-env testnet` passed 236/236.
+- `INSIDE_DEV_CONTAINER=1 make dapp-typecheck dapp-build` passed, including
+  offline toolchain/live-common/manifest fixtures, actual Chromium flows,
+  combined inbox/shard transaction fixtures, TypeScript and static production build.
+- `INSIDE_DEV_CONTAINER=1 make test-interfaces test-compat test-publish` passed:
+  17 interface, 15 compatibility, 40 Greengrass compatibility and 36 publishing
+  tests. Initial invocation omitted the Move cache and failed before its
+  compilation-dependent test; corrected invocation mounted the existing cache
+  and passed without weakening checks.
+
+Runtime and isolated-chain completion is recorded below. Local logs are
+`/tmp/sf127-inbox-{static,frontend,runtime,localnet,compat-retry,security}.log`.
+No public-wallet mutations or hosted CI polling. Hosted exact-head/current-base
+ordinary/security CI and automatic testnet remain coordinator gates, pending on
+the pushed repair head. Fresh independent review is required. Physical acceptance
+remains unrun in SF-031/#32; actual mainnet and final provider/manual-wallet
+acceptance remain unrun in SF-087/#159. Reports serialize within each root;
+120,000 is a storage bound, not a concurrency benchmark. Migration/cleanup
+remain operator-funded.
+
+Additional completed checks:
+
+- `python3 scripts/check_move_security.py` passed pinned compiler/strict linters,
+  compatibility baselines, genuine authority-negative tests and bypass mutations,
+  including the new inbox authority/member-index protections.
+- `make edge-test` passed 456 default and 458 PKCS#11 tests; four existing OCI
+  tests ignored in each. Both builds used locked dependencies.
+- Integration measurement found the max individual report computation increased
+  to 1,160,000 MIST (storage 9,515,200; rebate 4,378,968; gross 10,675,200).
+  Updated `MEASURED.receipt` and the independent rescaled-price expectation;
+  the final `make dapp-typecheck dapp-build` rerun passed after this correction.
+  The earlier localnet run used base `9b3799fe`; it is superseded by the
+  current-base run recorded below, not mislabeled as current-base evidence.
+
+- `python3 scripts/test_protocol_localnet.py --receipt-shards` passed against
+  current base `f076a6334d75539ef3ba447484924cfa2896cb38`: compatible upgrade,
+  old-package report/delete/catalog handover attacks, resumable migration of
+  70 v2 receipts, 1,000 authoritative v3 receipts and complete bounded cleanup.
+  Final single-report gross 10,675,200 MIST < 60,000,000 MIST float.
+  Refreshed sanitized effects are in `sf127-localnet.json`. Final budget/settings
+  fixtures were rerun after this evidence refresh and passed.
+
+- Rebuilt the production indexer with locked dependencies, then
+  `python3 scripts/test_protocol_localnet.py --receipt-clients` passed:
+  pre-identity old-package deletion rejection, actual daemon ordinary/catalog
+  v3 reports, independently effects-checked device-signed schema-4 rollout health
+  retry, production-indexer receipt/binding reads and bounded cleanup. Refreshed
+  sanitized effects are in `sf127-clients-localnet.json`.
+
+Final base movement: main advanced to
+`2169f7979c1c446b838f04a46e05e31a168697d6` during runtime verification.
+Integrated it conflict-free in `61fab74f`; the delta is SF-151 coordinator
+configuration and tracking/docs only. `git diff --quiet f076a633 origin/main --
+contracts dapp suifleet-edge suifleet-indexer interfaces scripts Makefile` passed,
+so the recorded application/chain checks cover byte-identical code on this base.
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+tools/pr-coordinator/tests -p test_repair_budgets.py` passed all five focused
+coordinator regressions. No installed services or coordinator database changed.
+
+Runtime completion: `INSIDE_DEV_CONTAINER=1 make edge-test test-ota &&
+cargo test --locked --manifest-path suifleet-indexer/Cargo.toml && cargo build
+--locked --manifest-path suifleet-indexer/Cargo.toml` exited 0. The full OTA
+target rebuilt all daemon bins/examples and passed every scenario, including
+strict receipt idle reads, inbox/pruned-history safety-net behavior, catalog,
+dependencies, firmware restart, supervisor, configuration, daemon update, desired
+state, handover, deployment controls, telemetry/logs/console, rollout, cadence,
+budget/settings, recovery and all four fleet-data modes. Indexer unit tests
+passed 48/48 and its locked build passed. These are simulator/isolated-chain/host
+checks; they establish no physical, public-provider or real-wallet acceptance.
+Final `git diff --check` passed. All test/build resource locks were released.
