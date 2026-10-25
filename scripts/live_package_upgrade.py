@@ -743,12 +743,16 @@ def run(args):
             inboxes = all(name in manifest["type_origins"] for name in dm.INBOX_TYPES)
             inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device) if inboxes else None
             if inboxes and not fixture.get("inbox"):
-                made = transaction("index group + create device inbox (head)",
-                    "--move-call", f"{new}::device_group::index_members", f"@{group}", "10",
-                    "--move-call", f"{new}::fleet_inbox::new_inbox", f"@{registry}", f"@{fixture['owner_cap']}", "--assign", "inbox",
-                    "--move-call", f"{new}::fleet_inbox::follow_group", "inbox", f"@{group}",
-                    "--move-call", f"{new}::fleet_inbox::share_inbox", "inbox")
-                assert created(made, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
+                # An earlier run whose outcome was lost may already have claimed
+                # the derived address; adopt that inbox (free read, verified
+                # below) rather than abort on it every run.
+                if owner_of(client, inbox) != "shared":
+                    made = transaction("index group + create device inbox (head)",
+                        "--move-call", f"{new}::device_group::index_members", f"@{group}", "10",
+                        "--move-call", f"{new}::fleet_inbox::new_inbox", f"@{registry}", f"@{fixture['owner_cap']}", "--assign", "inbox",
+                        "--move-call", f"{new}::fleet_inbox::follow_group", "inbox", f"@{group}",
+                        "--move-call", f"{new}::fleet_inbox::share_inbox", "inbox")
+                    assert created(made, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
                 fixture["inbox"] = inbox
                 save_state(state_path, state)
             if inboxes:
