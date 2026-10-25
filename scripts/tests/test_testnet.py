@@ -201,7 +201,7 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '700000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[1], '850000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
@@ -226,6 +226,29 @@ class TrustTests(unittest.TestCase):
         self.assertGreaterEqual(ledger.remaining, 150_000_000)
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
+
+    def test_fresh_post_sf136_pair_fits_the_package_budget_and_ceilings(self):
+        # Run 40238821132: publishing base b819cb2 (SF-136, 62,599 bytecode
+        # bytes) with the former fixed 0.4-SUI budget failed InsufficientGas.
+        # Run 40184514226 measured 349,109,200 MIST for 39,646 bytes, about
+        # 8,806 MIST/byte; the SF-129 head is 63,783 bytes and the
+        # upgrade-security base 6,608. Setup/deployment costs as measured.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
+        from live_package_upgrade import PACKAGE_GAS
+        rate = 349_109_200 // 39_646
+        base, head = 62_599 * rate, 63_783 * rate
+        self.assertLess(400_000_000, base)
+        self.assertGreaterEqual(PACKAGE_GAS - base, 100_000_000)
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        for cost in (base, 8_425_378, 1_243_578, head, 8_737_163, 1_988_000 + 30_000_000, 38_483_200):
+            ledger.grant(cost)
+        self.assertGreaterEqual(ledger.remaining, 150_000_000)
+        # Upgrade-security: small base, the same head upgrade, and its cached
+        # run's measured 104,743,694 MIST of objects/reports (run 40231623943).
+        security = Budget(dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security'], [])
+        for cost in (6_608 * rate, head, 104_743_694):
+            security.grant(cost)
+        self.assertGreaterEqual(security.remaining, 100_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
