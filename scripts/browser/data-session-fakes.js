@@ -28,6 +28,10 @@ export const useDevices = () => ({ data: [] });
 export const useFleetTransaction = () => ({ mutateAsync: async () => {}, isPending: false });
 
 export const DATA_CONFIG = { budgetId: "0xb1", typeOrigin: "0x81", packageId: "0x81", fleetId: "0xf1" };
+export const useFleetDataConfig = () => DATA_CONFIG;
+export const useFleetSelection = () => ({ supported: false });
+export const fetchManagedBudget = async () => { throw Error("Unexpected managed budget read in support-session fixture"); };
+export { parseCompactHead } from "@/lib/fleet-bulk";
 export const readFleetData = async () => ({ support: [operator] });
 export const readDeviceData = async () => ({ id: "0xe1", anchor_count: "1" });
 export const listFleetDeviceIds = async () => ({ devices: [device], cursor: null, hasNextPage: false });

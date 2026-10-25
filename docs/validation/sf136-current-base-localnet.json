@@ -1,0 +1,80 @@
+{
+  "result": "PASS",
+  "base": "c7548c4325a1a600bece25c8485af35faadd5361",
+  "old_package": "0x0857e83c8646f07c550e9a9c83799e63430adad544cd69d5c8f34c463998db34",
+  "head_package": "0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d",
+  "customer": "0xbc83adf4e829cbed89450e4c75da460e6d62d0b35caca06166207c7bf07f6d63",
+  "fleet": "0x5c278dc636024fd5a2736dd352be6eeaed4de3f95fe73414fb3f4e0125e3aaa4",
+  "digests": {
+    "publish base": "DbyFD6SVm3gob6nLQLEMyxgxmXeULhQj6xgUSVCyBuud",
+    "legacy budget": "AkZQ6it4xQNJEt1CQcJgCTf31ZPCep1nEBKtkuXgUhj2",
+    "legacy device": "Bg3m8A8aBa4Zjzvvv75NYzn8oftZYy9WgbYBMnTZqQuE",
+    "legacy enrollment": "CnWPqkqcXAeAiSHgyJtHrLuLQCDbrqBDaxA5YvzAQFi9",
+    "legacy group": "9SG1ZhWAK61FFU7NZquKxfW1Eso8vwRbCc4yonZzvTMx",
+    "legacy membership": "4a1AVadgiepC7iSwXxvDci5ZqMHbuDn5uaYNmUKJcYnJ",
+    "legacy stale device": "TrPz3YhCjVScciLDCoSn81JDFdmE4A9ZeodXjsJqSb8",
+    "legacy stale enrollment": "Fcxu8XqVp5yQidd4k59HYNxGtBh8MxFUsTJqyFVjPDwP",
+    "legacy deregistration leaves account": "eF8YgR7oefGbwXeCiUmjrzPDPCuQqqk2sZcWD2jRqKB",
+    "upgrade head": "CPGcio866ypKSBozPARSKtk4gNmDHmjmKNo9fuKkvaMs",
+    "create customer and default": "DVb4Nf62Wz6fHj8tYs2zYQ4LjAcADghAVYXniKKaGy9C",
+    "retry customer": "8hHNykhjveo124gQxEvSvtU1bi8ZBBYAjnwyUq3ntr3e",
+    "set entitlement": "6ySKjUd8PQ6BwnrytXX8Xq2YJGbPUnub7pvVzz9bNG86",
+    "adopt populated budget": "EMD3g7gdSt9fzJcbB8T83TDSftonpisJvmjGxhm5pyqz",
+    "reconcile device": "3kmZGjuMjJHNGCBwy6t1Y1WThpyuDm4sgEd5DJK3aemd",
+    "retire stale pending account": "3Hk175JqZwQyKWUrHGU4LjF3f6UxQ3SnWrs4bxVGTaLA",
+    "adopt populated group": "8G8EuK5ym7QhGXPUFkDkb45LupXsWpBeGCmDWQw1UM6x",
+    "add second wallet": "6MBNqG4YUA4J3WPGfepK3Cb2DzAmwZXsowYEDrr8vvQC",
+    "second wallet creates fleet": "BBcJii2PNau799VkHxvdB4fVHmd27tVMVsmFbuUj8jV",
+    "revoke second wallet": "E8M223hqFSdkCuA6XNFT9zPp5FthGMmk7aBRKbLtN4it",
+    "managed device gas draw": "AaY8HAYKcrAMEC5YsWWPdt9evA9jJbNY8HgQpWSeJyfc",
+    "managed settings capability composition": "E9Lv2NjBbQ51Q47DJWpVpG5SATRMVL3nkMpiYR4MDgjQ",
+    "managed receipt deployment": "9FWYtxvwVPHrvitYdBSomymTcK2bK6BGTuwLEgXNgf7Z",
+    "clear source group before reassignment": "4kPnNLMPkjKrJtGArYH2ynj3fcEXSf5MhgY8bgY53dPy",
+    "explicit atomic reassignment": "CXAbLdrnhDn7XsAK5eRveTvgvgHoPb4Qk9g5woWFm9Gi",
+    "managed removal returns custody": "14Hc2fobQ5V7hcsQH9g8VqvKY9pTPA9V2PjX88CivAHp"
+  },
+  "failures": {
+    "pending migration cannot lend cap": {
+      "digest": "9awT2MG5pChNTNw2qFrMNStvHr3Hvsidhfb1WayGAqMT",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d::customer::borrow_budget_cap' (instruction 17)"
+    },
+    "retired pending account cannot release capacity twice": {
+      "digest": "6oaMoZCEZ6HGL1MMYFaHqnNc1XKo8tU4XfUiMUWERHN2",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d::customer::retire_pending_device' (instruction 38)"
+    },
+    "old gas draw after adoption": {
+      "digest": "7o2RQxYuU4Ynodvg6AxURuXyDBD1wuGfwYF16pAEi2oz",
+      "status": "MoveAbort in 1st command, abort code: 0, in '0x0857e83c8646f07c550e9a9c83799e63430adad544cd69d5c8f34c463998db34::fleet_budget::assert_may_draw' (instruction 18)"
+    },
+    "old group mutation after adoption": {
+      "digest": "3AqiS3sydztnekcbyT4xZE8nv16BtujeZQujVf9k267h",
+      "status": "MoveAbort in 1st command, abort code: 0, in '0x0857e83c8646f07c550e9a9c83799e63430adad544cd69d5c8f34c463998db34::device_group::remove_device' (instruction 11)"
+    },
+    "old budget mutation with borrowed cap": {
+      "digest": "HQt39Wdq8Uu9M37eZSuUP9XZb4eNhbZEfy9sCPBmkRQw",
+      "status": "InvalidLinkage in command 1"
+    },
+    "cross fleet group insertion": {
+      "digest": "9oNZfNqXoFSn2D13SMY2BjkENFSJAknXz8kxw7EqojRp",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d::customer::assert_group' (instruction 32)"
+    },
+    "revoked wallet creates fleet": {
+      "digest": "6HoKdqGRg3zeDdLZ65Su9F4LnQ9iJri8SLKWiEKwUgKe",
+      "status": "MoveAbort in 1st command, abort code: 0, in '0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d::customer::assert_member' (instruction 28)"
+    },
+    "old receipt mutation after adoption": {
+      "digest": "FLwHK7Brq1iRkrDnWz2qmkDeqW8A18sukQWi2i6r3gFo",
+      "status": "MoveAbort in 1st command, abort code: 5, in '0x0857e83c8646f07c550e9a9c83799e63430adad544cd69d5c8f34c463998db34::deployment_manager::receipts_mut' (instruction 29)"
+    },
+    "reassigned device cannot report source receipt": {
+      "digest": "HZ5MWFvfMK2p4GEiFNLsuuj6kYt3uVEfE5raLV2ji8Jz",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0xc1803b4cad531914833e3deee411db44006263bd708d21f42f1193311d74ba3d::customer::assert_reporter' (instruction 72)"
+    }
+  },
+  "daemon_operator": "0x5c278dc636024fd5a2736dd352be6eeaed4de3f95fe73414fb3f4e0125e3aaa4",
+  "operator_after_reassignment": "0x8273c48fb38c12351cbd3a25a244a49c9701395e4292778956ce6d681ad10ae4",
+  "managed_receipt": {
+    "key": "0x423d333eeab30985a3e72393b864a94736fc115970b39dd9c68849170af380b0",
+    "value": 2
+  }
+}

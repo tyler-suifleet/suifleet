@@ -1,4 +1,7 @@
 "use client";
+
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 // Per-device services and alert drill-down (SF-084), read only through the
 // SF-082 verified chain path. See lib/device-services.ts for the rules.
 import { useEffect, useState } from "react";
@@ -8,12 +11,14 @@ import { normalizeSuiAddress as id } from "@mysten/sui/utils";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
-import { DATA_CONFIG, listFleetDeviceIds } from "@/lib/fleet-data";
+import { listFleetDeviceIds } from "@/lib/fleet-data";
 import { deviceAlerts, deviceHref, deviceServicesView, linkedDevice, utc, type ServicesView, type Unavailable } from "@/lib/device-services";
 import type { ShadowSyncHealth } from "@/lib/telemetry";
 import { HealthBadge, PageHeader, Section } from "@/components/ui";
 
 export default function DeviceServicesPage() {
+  const DATA_CONFIG = useFleetDataConfig();
+  const selection = useFleetSelection();
   const client = useCurrentClient(), account = useCurrentAccount();
   const { data: owned = [] } = useDevices();
   const [devices, setDevices] = useState<string[]>([]), [cursor, setCursor] = useState<string | null>(null), [more, setMore] = useState(false);
@@ -37,18 +42,20 @@ export default function DeviceServicesPage() {
       setDevices((old) => [...new Set([...old, ...page.devices])]); setCursor(page.cursor); setMore(page.hasNextPage);
     } catch { setIndexError("Fleet device index page unavailable."); }
   }
+  const visible = selection.supported ? devices.filter(d => selection.fleet?.devices.includes(d)) : devices;
+  const selectedDevice = selection.supported && !selection.fleet?.devices.includes(device) ? "" : device;
   const name = (device: string) => owned.find((d) => id(d.objectId) === id(device))?.name ?? device;
   return <div className="max-w-5xl space-y-4">
     <PageHeader title="Device services" subtitle="Shadows, streams, messaging, bridge and alerts from each device's signed, chain-anchored report" />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment; device service views need the verified Sui path.</p>
       : !account ? <p>Connect a wallet to read this fleet.</p> : <>
-      <label>Device <select className="border rounded p-2" value={device} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?${new URLSearchParams({ device: e.target.value })}` : "?"); }}>
+      <label>Device <select className="border rounded p-2" value={selectedDevice} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?${new URLSearchParams({ device: e.target.value })}` : "?"); }}>
         <option value="">Choose a device</option>
-        {[...new Set([...(device ? [device] : []), ...devices])].map((d) => <option key={d} value={d}>{name(d)}</option>)}
+        {[...new Set([...(selectedDevice ? [selectedDevice] : []), ...visible])].map((d) => <option key={d} value={d}>{name(d)}</option>)}
       </select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={() => void loadMore()}>Load more devices</button>}
       {indexError && <p role="alert">{indexError}</p>}
-      {device && <DeviceDetail key={device} device={device} name={name(device)} indexed={devices.includes(device) || !more} />}
+      {selectedDevice && <DeviceDetail key={selectedDevice} device={selectedDevice} name={name(selectedDevice)} indexed={visible.includes(selectedDevice) || !more} />}
     </>}
   </div>;
 }

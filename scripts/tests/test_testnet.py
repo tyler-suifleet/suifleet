@@ -29,6 +29,24 @@ class TrustTests(unittest.TestCase):
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
+    def test_large_upgrade_uses_remaining_allowance_without_replenishment(self):
+        evidence = []
+        budget = Budget(800_000_000, evidence)
+        budget.grant(351_442_556)  # Setup in failed run 40140740252.
+        def upgrade(reserved):
+            self.assertEqual(reserved, 448_557_444)
+            return dict(digest='upgrade', effects=dict(status=dict(status='success'),
+                gasUsed=dict(computationCost='10000000', storageCost='400000000', storageRebate='0')))
+        budget.execute(Mock(), 'upgrade to head', upgrade, gas=budget.remaining)
+        self.assertEqual(budget.used, 761_442_556)
+        self.assertEqual(budget.remaining, 38_557_444)
+        # A later unknown operation keeps its entire remaining reservation.
+        with self.assertRaises(TimeoutError):
+            budget.execute(Mock(), 'unknown', Mock(side_effect=TimeoutError()), gas=budget.remaining)
+        self.assertEqual(budget.used, 800_000_000)
+        with self.assertRaises(Spent):
+            budget.execute(Mock(), 'retry', upgrade, gas=400_000_000)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)
@@ -397,6 +415,15 @@ class PublicEnvironmentTests(unittest.TestCase):
         _, sleeps, logs, _ = self.retrying_read([quota, self.branches()])
         self.assertEqual(sleeps, [41.0])
         self.assertIn('"x-ratelimit-remaining": "0"', logs[0])
+
+    def test_runner_quota_reset_from_failed_ci_fits_default_budget(self):
+        # Run 40126963456 requested a 605-second wait, beyond the old 150s cap.
+        quota = self.http_error(403, {'X-RateLimit-Remaining': '0',
+                                     'X-RateLimit-Reset': '1000604'})
+        result, sleeps, _, calls = self.retrying_read([quota, self.branches()])
+        self.assertEqual(result, self.branches())
+        self.assertEqual(sleeps, [605.0])
+        self.assertEqual(len(calls), 2)
 
     def test_exhausted_retry_budget_fails_closed_with_diagnostics(self):
         limited = lambda: self.http_error(429, {'Retry-After': '50', 'X-RateLimit-Resource': 'core'})

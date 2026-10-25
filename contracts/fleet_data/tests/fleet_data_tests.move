@@ -6,6 +6,7 @@ module fleet_data::fleet_data_tests {
     use sui::coin;
     use sui::sui::SUI;
     use sui::test_scenario::{Self as ts};
+    use sui_edge::customer::{Self, Customer, Fleet as ManagedFleet};
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::{Self, DeviceRegistry, DeviceOwnerCap};
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
@@ -579,6 +580,105 @@ module fleet_data::fleet_data_tests {
         prune(&mut s, 5, vector[0]);
         anchor(&mut s, a, 3, 0, 2 * DAY + 1); finish(s, system);
     }
+    fun managed_setup(): (ts::Scenario, System, ID, ID) {
+        let (mut s, system) = setup();
+        s.next_tx(OWNER);
+        let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
+        transfer::public_transfer(cap, OWNER);
+        let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
+        ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
+        let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
+        customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
+        ts::return_shared(c); ts::return_shared(r); ts::return_shared(b); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<ManagedFleet>(); let fid = object::id(&f);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut r = s.take_shared<DeviceRegistry>();
+        let mut a = s.take_shared<GasAccount>(); let cap = s.take_from_sender<DeviceOwnerCap>();
+        customer::adopt_device(&mut c, &mut f, &b, &mut a, &mut r, cap, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r); ts::return_shared(a);
+        (s, system, fid, bid)
+    }
+    #[test]
+    fun customer_approval_preserves_original_archive_identity_after_adoption() {
+        let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
+        let fleet = s.take_shared<FleetData>(); let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut id = fleet_data::identity_prefix(&fleet); id.append(zeros(16));
+        fleet_data::approve_customer_for_testing(id, &fleet, &b, &c, &f, s.ctx());
+        ts::return_shared(fleet); ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun customer_membership_does_not_give_read_only_credentials_archive_keys() {
+        let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); customer::set_credential(&mut c, SUPPORT, true, false, s.ctx());
+        ts::return_shared(c); s.next_tx(SUPPORT);
+        let fleet = s.take_shared<FleetData>(); let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let b = s.take_shared_by_id<FleetBudget>(bid); let mut id = fleet_data::identity_prefix(&fleet); id.append(zeros(16));
+        fleet_data::approve_customer_for_testing(id, &fleet, &b, &c, &f, s.ctx());
+        ts::return_shared(fleet); ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); finish(s, system);
+    }
+
+    // Identity is captured before adoption; no cap extraction or address grant is needed.
+    fun managed_scoped(mode: u8) {
+        let (mut s, system) = setup(); s.next_tx(OWNER);
+        let fleet = s.take_shared<FleetData>(); let a = s.take_shared<GasAccount>();
+        let device_id = fleet_budget::account_device_id(&a);
+        let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
+        ts::return_to_address(OWNER, cap);
+        let stream = std::hash::sha2_256(b"sensor");
+        let mut id = fleet_data::identity_prefix(&fleet);
+        id.append(device_id.to_bytes()); id.append(stream); id.append(zeros(16));
+        ts::return_shared(fleet); ts::return_shared(a);
+        let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
+        ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut b = s.take_shared_by_id<FleetBudget>(bid);
+        let cap = s.take_from_sender<BudgetOwnerCap>();
+        let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
+        customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
+        customer::set_credential(&mut c, SUPPORT, true, mode != 1, s.ctx());
+        ts::return_shared(c); ts::return_shared(b); ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        let ids = customer::fleets(&c); let fid = ids[ids.length() - 1];
+        if (mode == 2) customer::set_credential(&mut c, SUPPORT, false, false, s.ctx());
+        if (mode == 3) {
+            // Rotate owner authority to SUPPORT; the previous owner loses access.
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx());
+        };
+        let cid = object::id(&c);
+        ts::return_shared(c); s.next_tx(SUPPORT);
+        if (mode == 6) {
+            let mut r = s.take_shared<DeviceRegistry>();
+            customer::create(&mut r, string::utf8(b"Other customer"), s.ctx()); ts::return_shared(r);
+        };
+        s.next_tx(if (mode == 3) OWNER else SUPPORT);
+        let c = if (mode == 6) {
+            let original = s.take_shared_by_id<Customer>(cid);
+            let other = s.take_shared<Customer>(); ts::return_shared(original); other
+        } else s.take_shared_by_id<Customer>(cid);
+        let fleet = s.take_shared<FleetData>();
+        let b = s.take_shared_by_id<FleetBudget>(bid);
+        let f = if (mode == 4) {
+            s.take_shared_by_id<ManagedFleet>(customer::fleets(&c)[0])
+        } else s.take_shared_by_id<ManagedFleet>(fid);
+        fleet_data::approve_scoped_customer_for_testing(id, &fleet, &b, &c, &f, device_id,
+            if (mode == 5) zeros(32) else stream, s.ctx());
+        ts::return_shared(c); ts::return_shared(fleet); ts::return_shared(b); ts::return_shared(f); finish(s, system);
+    }
+    #[test] fun managed_scoped_pre_adoption_identity() { managed_scoped(0) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_read_only_denied() { managed_scoped(1) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_revoked_denied() { managed_scoped(2) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_rotated_owner_denied() { managed_scoped(3) }
+    #[test, expected_failure(abort_code = fleet_data::EBinding)]
+    fun managed_scoped_cross_fleet_denied() { managed_scoped(4) }
+    #[test, expected_failure(abort_code = fleet_data::EAccess)]
+    fun managed_scoped_cross_stream_denied() { managed_scoped(5) }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun managed_scoped_cross_customer_denied() { managed_scoped(6) }
+
     fun scoped(grant: bool, device_wide: bool, wrong_stream: bool, revoke: bool, legacy: bool) {
         let (mut s,system)=setup();
         ts::next_tx(&mut s,OWNER);

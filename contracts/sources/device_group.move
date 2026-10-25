@@ -111,19 +111,7 @@ module sui_edge::device_group {
         ctx: &TxContext,
     ) {
         assert!(ctx.sender() == group.admin, ENotAdmin);
-        let device_id = device_registry::device_id(device);
-        assert!(!contains_device(group, device_id), EDeviceAlreadyInGroup);
-        if (is_indexed(group)) {
-            df::add(&mut group.id, MemberKey { device_id }, true);
-            let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members + 1;
-        } else {
-            group.device_ids.push_back(device_id);
-        };
-        event::emit(DeviceAddedToGroup {
-            group_id: object::id(group),
-            device_id,
-        });
+        add_managed(group, device_registry::device_id(device));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -133,21 +121,7 @@ module sui_edge::device_group {
         ctx: &TxContext,
     ) {
         assert!(ctx.sender() == group.admin, ENotAdmin);
-        // An older package may have added an indexed member to the vector too:
-        // remove it from both so it is no longer a member anywhere.
-        let indexed = df::exists(&group.id, MemberKey { device_id });
-        if (indexed) {
-            let _: bool = df::remove(&mut group.id, MemberKey { device_id });
-            let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members - 1;
-        };
-        let (found, idx) = group.device_ids.index_of(&device_id);
-        assert!(found || indexed, EDeviceNotInGroup);
-        if (found) { group.device_ids.swap_remove(idx); };
-        event::emit(DeviceRemovedFromGroup {
-            group_id: object::id(group),
-            device_id,
-        });
+        remove_managed(group, device_id);
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
@@ -193,6 +167,56 @@ module sui_edge::device_group {
     public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
         assert!(ctx.sender() == group.admin, ENotAdmin);
         group.admin = recipient;
+    }
+
+    /// Managed groups use an object address as admin. No wallet can sign as
+    /// that address, sealing legacy add/remove/handover entry points.
+    public(package) fun new_managed(name: String, description: String, admin: address,
+        clock: &Clock, ctx: &mut TxContext): DeviceGroup {
+        let group = DeviceGroup { id: object::new(ctx), name, description, admin,
+            device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: SCHEMA_VERSION };
+        event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
+        group
+    }
+    public(package) fun delete_managed(mut group: DeviceGroup) {
+        if (is_indexed(&group)) {
+            let _: GroupIndex = df::remove(&mut group.id, IndexKey {});
+        };
+        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;
+        event::emit(GroupDeleted { group_id: id.to_inner(), admin });
+        id.delete();
+    }
+    public(package) fun share_managed(group: DeviceGroup) { transfer::share_object(group); }
+    public(package) fun add_managed(group: &mut DeviceGroup, device_id: ID) {
+        assert!(!contains_device(group, device_id), EDeviceAlreadyInGroup);
+        if (is_indexed(group)) {
+            df::add(&mut group.id, MemberKey { device_id }, true);
+            let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
+            index.members = index.members + 1;
+        } else {
+            group.device_ids.push_back(device_id);
+        };
+        event::emit(DeviceAddedToGroup {
+            group_id: object::id(group),
+            device_id,
+        });
+    }
+    public(package) fun remove_managed(group: &mut DeviceGroup, device_id: ID) {
+        // An older package may have added an indexed member to the vector too:
+        // remove it from both so it is no longer a member anywhere.
+        let indexed = df::exists(&group.id, MemberKey { device_id });
+        if (indexed) {
+            let _: bool = df::remove(&mut group.id, MemberKey { device_id });
+            let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
+            index.members = index.members - 1;
+        };
+        let (found, idx) = group.device_ids.index_of(&device_id);
+        assert!(found || indexed, EDeviceNotInGroup);
+        if (found) { group.device_ids.swap_remove(idx); };
+        event::emit(DeviceRemovedFromGroup {
+            group_id: object::id(group),
+            device_id,
+        });
     }
 
     /// Replays an older package's `add_device`, which sees only the vector.

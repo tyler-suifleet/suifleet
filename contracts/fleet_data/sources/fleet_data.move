@@ -7,6 +7,7 @@ module fleet_data::fleet_data {
     use sui::clock::Clock;
     use sui::dynamic_field as df;
     use sui::event;
+    use sui_edge::customer::{Self, Customer, Fleet};
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::DeviceRegistry;
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
@@ -469,6 +470,16 @@ module fleet_data::fleet_data {
         owner(fleet, budget, cap);
         assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
     }
+    /// Read-only managed authority; credential revocation is checked on every request.
+    entry fun seal_approve_scoped_customer(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet,
+        device_id: ID, stream_hash: vector<u8>, ctx: &mut TxContext) {
+        customer::assert_admin(customer, ctx);
+        customer::assert_fleet(customer, managed);
+        assert!(fleet.version == VERSION && object::id(budget) == fleet.budget_id
+            && customer::fleet_budget(managed) == fleet.budget_id, EBinding);
+        assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
+    }
     entry fun seal_approve_scoped_reader(id: vector<u8>, fleet: &FleetData,
         device_id: ID, stream_hash: vector<u8>, ctx: &TxContext) {
         assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
@@ -525,6 +536,17 @@ module fleet_data::fleet_data {
         owner(fleet, budget, cap);
         assert!(identity_matches(fleet, &id), EAccess);
     }
+    /// Read-only Seal approval for managed customer administrators. Do not
+    /// borrow/mutate capabilities in an approval PTB: key servers accept only
+    /// seal_approve calls with read-only shared inputs.
+    entry fun seal_approve_customer(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &mut TxContext) {
+        customer::assert_admin(customer, ctx);
+        customer::assert_fleet(customer, managed);
+        assert!(fleet.version == VERSION && object::id(budget) == fleet.budget_id
+            && customer::fleet_budget(managed) == fleet.budget_id, EBinding);
+        assert!(identity_matches(fleet, &id), EAccess);
+    }
     entry fun seal_approve_support(id: vector<u8>, fleet: &FleetData, ctx: &TxContext) {
         assert!(identity_matches(fleet, &id) && fleet.support.contains(&ctx.sender()), EAccess);
     }
@@ -578,6 +600,16 @@ module fleet_data::fleet_data {
     public fun burn_at_epoch_for_testing(fleet: &FleetData, budget: &FleetBudget, cap: &BudgetOwnerCap,
         storage: &mut FleetStorage, epoch: u32, blob_object_ids: vector<ID>) {
         burn_at(fleet, budget, cap, storage, epoch, blob_object_ids)
+    }
+    #[test_only]
+    public fun approve_scoped_customer_for_testing(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet,
+        device_id: ID, stream_hash: vector<u8>, ctx: &mut TxContext) {
+        seal_approve_scoped_customer(id, fleet, budget, customer, managed, device_id, stream_hash, ctx)
+    }
+    #[test_only]
+    public fun approve_customer_for_testing(id: vector<u8>, fleet: &FleetData, budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &mut TxContext) {
+        seal_approve_customer(id, fleet, budget, customer, managed, ctx)
     }
     #[test_only]
     public fun approve_support_for_testing(id: vector<u8>, fleet: &FleetData, ctx: &TxContext) {

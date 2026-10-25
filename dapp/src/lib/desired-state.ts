@@ -1,3 +1,4 @@
+import type { NamedFleet } from "./customer-fleets";
 // Desired fleet state (SF-013): each group's revisioned component → deployment
 // map. Devices reconcile toward the current revision of every group they are
 // in; superseded deployments are never applied, new members pick the state up,
@@ -40,22 +41,28 @@ export interface DesiredConflict {
  * version of its component in each, and stop desiring the `remove`d
  * components. Every change in a group's revision commits together or not at all.
  */
-export function buildDesiredRevisionTx(groupIds: string[], change?: DesiredChange, remove: string[] = []): Transaction {
+export function buildDesiredRevisionTx(groupIds: string[], change?: DesiredChange, remove: string[] = [], fleet?: NamedFleet): Transaction {
   requireManifest();
   if (groupIds.length === 0) throw new Error("Desired state needs at least one group");
   if (!change && remove.length === 0) throw new Error("A revision must change something");
   const tx = new Transaction();
   const [record] = change
-    ? calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, change.componentName, change.version,
+    ? fleet ? tx.moveCall({ target: `${PACKAGE_ID}::customer::new_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id),
+        tx.pure.string(change.componentName), tx.pure.string(change.version), tx.pure.string(change.recipeBlobId), tx.pure.string(change.artifactSha256),
+        tx.pure.string(change.recipeSha256), tx.pure.vector("id", groupIds), tx.pure.vector("id", []), tx.object("0x6")] }) : calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, change.componentName, change.version,
         change.recipeBlobId, change.artifactSha256, change.recipeSha256, groupIds, [], "0x6")
     : [undefined];
   for (const group of groupIds) {
-    const [plan] = calls.desired_state_begin(tx, PACKAGE_ID, group);
+    const [plan] = fleet ? tx.moveCall({ target: `${PACKAGE_ID}::customer::begin_revision`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(group)] }) : calls.desired_state_begin(tx, PACKAGE_ID, group);
     if (record) calls.desired_state_set_component(tx, PACKAGE_ID, plan, record);
     for (const name of remove) calls.desired_state_remove_component(tx, PACKAGE_ID, plan, name);
-    calls.desired_state_commit(tx, PACKAGE_ID, plan, group, "0x6");
+    if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::commit_revision`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), plan, tx.object(group), tx.object("0x6")] });
+    else calls.desired_state_commit(tx, PACKAGE_ID, plan, group, "0x6");
   }
-  if (record && change?.initiallyPaused) calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+  if (record && change?.initiallyPaused) {
+    if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
+    else calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+  }
   if (record) calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   return tx;
 }

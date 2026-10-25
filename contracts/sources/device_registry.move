@@ -205,6 +205,20 @@ module sui_edge::device_registry {
         cap
     }
 
+    /// Explicit managed adoption replaces the owner capability in registry
+    /// identity. Every pre-existing gas/data account bound to the old cap then
+    /// fails, including accounts in legacy budgets unknown to the new fleet.
+    public(package) fun rebind_owner(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
+        let device_id = cap.device_id;
+        let old_id = object::id(&cap);
+        let identity = *identity_of(registry, device_id);
+        assert!(identity.owner_cap == old_id && is_custodied(registry, device_id), EWrongDevice);
+        let DeviceOwnerCap { id, device_id: _ } = cap; id.delete();
+        let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
+        set_identity(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
+        cap
+    }
+
     /// Stop trusting any report from the device until it is reinstated.
     public fun revoke_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap) {
         let signer = custodied(registry, cap).device_address;
@@ -302,6 +316,10 @@ module sui_edge::device_registry {
         dof::borrow(&registry.id, CustodyKey { device_id })
     }
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
+
+    public fun assert_admin(registry: &DeviceRegistry, ctx: &mut TxContext) {
+        assert!(registry.admin == ctx.sender(), EWrongDevice);
+    }
 
     /// A cap the registry's identity does not name.
     #[test_only]

@@ -54,12 +54,17 @@ def submitted_budget(chain):
 
 
 class LiveSpendTests(unittest.TestCase):
-    def test_reserves_only_the_remaining_allowance(self):
+    def test_refuses_incomplete_reservation_without_submission(self):
         chain = Chain(effects(cost=1_000_000))
         run = live(chain)
         run.ledger.used = 90_000_000
-        run.transaction("near the ceiling", "--move-call", "x")
-        self.assertEqual(submitted_budget(chain), 10_000_000)  # Not the default 200,000,000.
+        with self.assertRaises(Spent):
+            run.transaction("near the ceiling", "--move-call", "x", budget=20_000_000)
+        self.assertEqual(chain.calls, [])
+        self.assertEqual(run.ledger.used, 90_000_000)
+        self.assertEqual(run.evidence["transactions"], [])
+        run.transaction("fits the allowance", "--move-call", "x", budget=10_000_000)
+        self.assertEqual(submitted_budget(chain), 10_000_000)
         self.assertEqual(run.ledger.used, 91_000_000)
 
     def test_exhausted_allowance_never_submits(self):
@@ -76,9 +81,9 @@ class LiveSpendTests(unittest.TestCase):
     def test_rebates_never_replenish(self):
         chain = Chain(effects(cost=1_000_000, rebate=500_000_000), effects(cost=1_000_000))
         run = live(chain)
-        run.transaction("delete with a large rebate", "--move-call", "x")
+        run.transaction("delete with a large rebate", "--move-call", "x", budget=10_000_000)
         self.assertEqual(run.ledger.used, 0)  # Net cost clamps at zero, never below.
-        run.transaction("next", "--move-call", "x")
+        run.transaction("next", "--move-call", "x", budget=10_000_000)
         self.assertEqual(run.ledger.remaining, 99_000_000)
 
     def test_failed_execution_is_charged_and_read_back_by_digest(self):
@@ -87,7 +92,7 @@ class LiveSpendTests(unittest.TestCase):
         chain = Chain(CompletedProcess([], 1, "", f"Error executing transaction '{digest}': failure"), tx_blocks={digest: failed})
         run = live(chain)
         with self.assertRaises(RuntimeError):
-            run.transaction("fails on chain", "--move-call", "x")
+            run.transaction("fails on chain", "--move-call", "x", budget=10_000_000)
         self.assertEqual(run.ledger.used, 2_000_000)
         self.assertEqual(run.evidence["transactions"][-1]["status"], "failure")
 
@@ -123,10 +128,17 @@ class LiveSpendTests(unittest.TestCase):
         run.transaction("fund the device", "--split-coins", "gas", "[40000000]", funding=40_000_000, budget=10_000_000)
         self.assertEqual(run.ledger.used, 41_000_000)
         device = run.child("/tmp/device.yaml", 40_000_000)
-        run.transaction("device report", "--move-call", "x", budget=100_000_000, sender=device)
+        with self.assertRaises(Spent):
+            run.transaction("device oversized budget", "--move-call", "x", budget=100_000_000, sender=device)
+        self.assertEqual(len(chain.calls), 1)
+        self.assertEqual(device[1].used, 0)
+        self.assertEqual(run.ledger.used, 41_000_000)
+        self.assertEqual(len(run.evidence["transactions"]), 1)
+        run.transaction("device report", "--move-call", "x", budget=10_000_000, sender=device)
         command, config = chain.calls[1]
         self.assertEqual(config, "/tmp/device.yaml")
-        self.assertEqual(int(command[command.index("--gas-budget") + 1]), 40_000_000)  # Capped by the child's funding.
+        self.assertEqual(int(command[command.index("--gas-budget") + 1]), 10_000_000)  # Full requested budget fits the child's funding.
+        self.assertEqual(device[1].used, 1_000_000)
         self.assertEqual(run.ledger.used, 41_000_000)  # Already charged as funding.
         device[1].used = 39_000_000
         with self.assertRaises(Spent):
@@ -144,7 +156,7 @@ class LiveSpendTests(unittest.TestCase):
         run = live(chain)
         with patch.dict("os.environ", {"SUIFLEET_TESTNET_LOCK_TOKEN": "t"}), \
                 patch.object(live_common.subprocess, "run") as lock:
-            run.transaction("locked", "--move-call", "x")
+            run.transaction("locked", "--move-call", "x", budget=10_000_000)
         self.assertIn("lock-assert", lock.call_args.args[0])
 
 

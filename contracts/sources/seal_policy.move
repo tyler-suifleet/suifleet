@@ -154,6 +154,16 @@ module sui_edge::seal_policy {
 
     /// Only a group's own admin may grant it: the group's admin decides its
     /// membership, and so which devices the grant covers.
+    public(package) fun grant_managed_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
+        check_admin(policy, cap);
+        let group_id = device_group::group_id(group);
+        add(&mut policy.groups, group_id);
+        changed(policy, SCOPE_GROUP, group_id.to_address(), true);
+    }
+    public fun cap_policy(cap: &AccessAdminCap): ID { cap.policy_id }
+    public fun policy_devices(policy: &AccessPolicy): &vector<ID> { &policy.devices }
+    public fun policy_groups(policy: &AccessPolicy): &vector<ID> { &policy.groups }
+
     public fun grant_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup, ctx: &TxContext) {
         check_admin(policy, cap);
         assert!(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);

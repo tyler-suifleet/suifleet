@@ -18,9 +18,8 @@ CONTEXT = 'testnet/package-upgrade'
 # class: anything but exact-head/base success blocks.
 FAILURE_CLASSES = ('source', 'infrastructure', 'funding', 'uncertain')
 SHA = re.compile(r'^[0-9a-f]{40}$')
-# The privileged controller keeps a short budget. The separate keyless probe
-# can wait through one shared runner-IP hourly quota reset, without keys or gas.
-PUBLIC_RETRY_BUDGET = 150
+# Privileged reads retain the reviewed 900-second budget; keyless probes allow one hourly reset.
+PUBLIC_RETRY_BUDGET = 900
 PROBE_RETRY_BUDGET = 3700
 PUBLIC_MAX_ATTEMPTS = 6
 TRANSIENT_STATUS = (500, 502, 503, 504)

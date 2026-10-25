@@ -31,6 +31,7 @@ module fleet_storage::fleet_storage {
     use sui::event;
     use sui_edge::device_cap::{Self, DeviceCap};
     use sui_edge::device_registry::DeviceRegistry;
+    use sui_edge::customer::{Self, Customer, Fleet};
     use sui_edge::fleet_budget::{Self, FleetBudget, BudgetOwnerCap, GasAccount};
     use wal::wal::WAL;
     use walrus::blob::Blob;
@@ -71,6 +72,8 @@ module fleet_storage::fleet_storage {
         max_blob_size: u64,
         write_fees_per_period: u64,
     }
+
+    public struct CustomerCharge has drop {}
 
     public struct FleetStorage has key {
         id: UID,
@@ -711,8 +714,27 @@ module fleet_storage::fleet_storage {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
+        assert!(fleet_budget::version(budget) == 1, EWrongVersion);
         register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash,
             size, encoding_type, option::none(), clock, ctx)
+    }
+
+    /// Issuer configuration, idempotent for this producer type origin. The
+    /// witness is never returned or publicly constructible by a device.
+    public fun configure_customer_charging(customer: &mut Customer, registry: &DeviceRegistry, ctx: &mut TxContext) {
+        customer::configure_charging(customer, registry, CustomerCharge {}, ctx);
+    }
+
+    public fun register_managed_blob(
+        customer: &mut Customer, fleet: &Fleet, fs: &mut FleetStorage,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, system: &mut System, blob_id: u256, root_hash: u256,
+        size: u64, encoding_type: u8, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
+        assert!(customer::fleet_budget(fleet) == object::id(budget) && fs.budget_id == object::id(budget), EWrongBudget);
+        let amount = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
+        customer::reserve_device_allowance(customer, fleet, budget, account, registry, cap, amount, CustomerCharge {}, ctx);
+        register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash, size, encoding_type, option::none(), clock, ctx)
     }
 
     /// Buy the complete finite lifetime at write time. Both capacity and write
@@ -723,6 +745,7 @@ module fleet_storage::fleet_storage {
         blob_id: u256, root_hash: u256, size: u64, encoding_type: u8,
         epochs: u32, clock: &Clock, ctx: &mut TxContext,
     ): ID {
+        assert!(fleet_budget::version(budget) == 1, EWrongVersion);
         assert!(epochs > 0 && epochs <= 53, EInvalidEpochs);
         register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash,
             size, encoding_type, option::some(epochs), clock, ctx)
@@ -829,6 +852,7 @@ module fleet_storage::fleet_storage {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
+        assert!(fleet_budget::version(budget) == 1, EWrongVersion);
         assert!(!df::exists(&fs.id, RetentionKey {}), EInsufficientWal);
         register_owner_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx)
     }
@@ -840,6 +864,14 @@ module fleet_storage::fleet_storage {
         system: &mut System, blob_id: u256, root_hash: u256, size: u64,
         encoding_type: u8, clock: &Clock, target: u32, max_fee: u64, ctx: &mut TxContext,
     ): ID {
+        assert!(fleet_budget::version(budget) == 1, EWrongVersion);
+        register_retained_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, target, max_fee, ctx)
+    }
+
+    fun register_retained_impl(
+        fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, system: &mut System,
+        blob_id: u256, root_hash: u256, size: u64, encoding_type: u8, clock: &Clock, target: u32, max_fee: u64, ctx: &mut TxContext,
+    ): ID {
         assert_retention_funded(fs);
         assert!(df::exists(&fs.id, RetentionKey {}), EInsufficientWal);
         let id = register_owner_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx);
@@ -849,6 +881,25 @@ module fleet_storage::fleet_storage {
         prepay_renewal(fs, budget, cap, system, id, ctx);
         assert_retention_funded(fs);
         id
+    }
+
+    public fun register_managed_fleet_blob(
+        customer: &mut Customer, fleet: &Fleet, fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        system: &mut System, blob_id: u256, root_hash: u256, size: u64, encoding_type: u8, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
+        assert!(customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
+        customer::reserve_allowance(customer, fleet, encoding::encoded_blob_length(size, encoding_type, system.n_shards()), ctx);
+        assert!(!df::exists(&fs.id, RetentionKey {}), EInsufficientWal);
+        register_owner_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, ctx)
+    }
+
+    public fun register_managed_retained_fleet_blob(
+        customer: &mut Customer, fleet: &Fleet, fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap,
+        system: &mut System, blob_id: u256, root_hash: u256, size: u64, encoding_type: u8, clock: &Clock, target: u32, max_fee: u64, ctx: &mut TxContext,
+    ): ID {
+        assert!(customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
+        customer::reserve_allowance(customer, fleet, encoding::encoded_blob_length(size, encoding_type, system.n_shards()), ctx);
+        register_retained_impl(fs, budget, cap, system, blob_id, root_hash, size, encoding_type, clock, target, max_fee, ctx)
     }
 
     fun register_owner_impl(

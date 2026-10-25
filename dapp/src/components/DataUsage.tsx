@@ -4,18 +4,21 @@ import { useQuery } from '@tanstack/react-query';
 import { useFleetStorage } from '@/hooks/useFleetStorage';
 import { useWalrusState } from './FleetBudget';
 import { readDataMeter } from '@/lib/data-metering';
-import { DATA_CONFIG } from '@/lib/fleet-data';
+import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
+import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { normalizeSuiAddress } from '@mysten/sui/utils';
 import { NETWORK } from '@/lib/constants';
 
 const number = (value: bigint) => value.toLocaleString('en-US');
 export function DataUsage() {
   const client = useCurrentClient();
+  const DATA_CONFIG = useFleetDataConfig();
+  const selection = useFleetSelection();
   const { storage, budget, config, reason } = useFleetStorage();
   const schedule = useWalrusState(config);
   const matchesFleet = !DATA_CONFIG || (!!budget && !!storage && normalizeSuiAddress(budget.id) === DATA_CONFIG.budgetId && normalizeSuiAddress(storage.id) === DATA_CONFIG.storageId);
   const usage = useQuery({
-    queryKey: ['data-meter', NETWORK, storage?.id, budget?.id, config?.storageOrigin ?? config?.packageId, schedule.data],
+    queryKey: ['data-meter', NETWORK, selection.identity, storage?.id, budget?.id, config?.storageOrigin ?? config?.packageId, schedule.data],
     enabled: matchesFleet && !!storage && !!budget && !!config && !!schedule.data,
     refetchInterval: 60000,
     queryFn: () => {

@@ -25,6 +25,7 @@ import {
 
 import { enrollBudgetDevices, enrollmentReads, prepareEnrollment, type EnrollmentProgress } from "@/lib/budget-enrollment";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { ArchiveReclaimPanel } from "@/components/StorageReclaim";
 import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
@@ -192,6 +193,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
 
 /** Balance, warnings, per-device reserves and usage, and the owner controls. */
 export function BudgetManager() {
+  const { fleet: selectedFleet } = useFleetSelection();
   const account = useCurrentAccount(), client = useCurrentClient();
   const { budget, isLoading, error: readError } = useFleetBudget();
   const devices = useDevices();
@@ -203,7 +205,7 @@ export function BudgetManager() {
   const [batchError, setBatchError] = useState("");
   const pending = singlePending || batchRunning;
   const [withdraw, setWithdraw] = useState("");
-  const activated = (devices.data ?? []).filter((device) => device.ownerCapId);
+  const activated = (devices.data ?? []).filter((device) => device.ownerCapId || device.managed);
   const accounts = useQuery<(AccountView | undefined)[]>({
     queryKey: ["fleet-budget-accounts", NETWORK, budget?.id, activated.map((d) => d.objectId).join()],
     enabled: !!budget && devices.isSuccess,
@@ -216,7 +218,7 @@ export function BudgetManager() {
     batchBusy.current = true; setBatchRunning(true); setBatchError("");
     try {
       await enrollBudgetDevices({
-        devices: activated.map(d => ({ objectId: d.objectId, ownerCapId: d.ownerCapId! })),
+        devices: activated.filter(d => !!d.ownerCapId).map(d => ({ objectId: d.objectId, ownerCapId: d.ownerCapId! })),
         ...enrollmentReads(client, account.address, budget.id),
         prepare: tx => prepareEnrollment(tx, client, account.address),
         execute: tx => {
@@ -252,7 +254,7 @@ export function BudgetManager() {
     </div>
     <p>SUI already sent to a device stays with it: a compromised device can spend at most its float plus one period allowance per period, never more than its reserve, until you suspend or remove it here, pause the budget or revoke its key on the Devices page.</p>
     <div className="space-y-1">
-      <button type="button" className="border rounded px-2 py-1" disabled={pending || !accountsReady || !activated.length} onClick={() => void enrollAll()}>
+      <button type="button" className="border rounded px-2 py-1" disabled={pending || !accountsReady || !activated.some(d => !!d.ownerCapId)} onClick={() => void enrollAll()}>
         {batchProgress?.phase === "stopped" ? "Resume enrollment" : "Enroll all unenrolled devices"}
       </button>
       <p>Up to 200 devices per approval (5 approvals for 1,000 new devices). Each chunk is checked for size and gas before signing. Initial floats and up to two period allowances per device come from the budget; limited reserves are shared evenly.</p>
@@ -282,7 +284,7 @@ export function BudgetManager() {
             <button type="button" className="underline" disabled={pending || a.reserve === BigInt(0)} onClick={() => void submit(() => buildReclaimReserveTx(budget.id, budget.capId, a.accountId, a.reserve))}>Reclaim reserve</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildFundDeviceTx(budget.id, budget.capId, a.accountId, a.limits.floatCap))}>Send float</button>
             <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildSetDeviceSuspendedTx(budget.id, budget.capId, a.accountId, !a.suspended))}>{a.suspended ? "Resume" : "Suspend"}</button>
-            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId))}>Remove</button>
+            <button type="button" className="underline" disabled={pending} onClick={() => void submit(() => buildRemoveDeviceTx(budget.id, budget.capId, a.accountId, selectedFleet, device.objectId, account.address))}>Remove</button>
           </> : <button type="button" className="underline" disabled={pending || !accounts.isSuccess} onClick={() => void submit(() => buildEnrollDeviceTx(budget.id, budget.capId, device.ownerCapId!, budget.defaultLimits.floatCap,
             defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap)))}>Enroll with float and reserve</button>}</td>
         </tr>;

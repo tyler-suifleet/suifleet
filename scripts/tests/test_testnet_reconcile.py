@@ -488,9 +488,13 @@ class RunFlow(unittest.TestCase):
                 'group': tc.normal('0x' + 'd9' * 32), 'member_added': True, 'pending_operation': marker}}}
         return state
 
-    def restart_after_executed_upgrade(self, marker, chain, decode=None, cap_package=HEAD, stop=('stop at activation', tc.NotSubmitted)):
-        """The upgrade executed but the run died before head_package was saved:
-        the cap already points at HEAD version 2 when the next run starts."""
+    def restart_after_executed_upgrade(self, marker, chain, decode=None, cap_package=HEAD, stop=('stop at activation', tc.NotSubmitted),
+                                       cap_version=2, submitter=None):
+        """Resume a checkpointed upgrade and stop before activation/signing.
+
+        By default the upgrade succeeded and its cap already points at HEAD;
+        the failed-upgrade case retains the original package and cap version.
+        """
         reads = []
 
         def chain_facts(rpc, *ids):
@@ -498,7 +502,7 @@ class RunFlow(unittest.TestCase):
                 reads.append(ids)
                 return {'chain_identifier': '4c78adac', 'objects': {CAP: {
                     'kind': 'object', 'type': '0x2::package::UpgradeCap', 'owner': {'address': ADDRESS},
-                    'upgrade_cap': {'package': cap_package, 'version': 2}}}}
+                    'upgrade_cap': {'package': cap_package, 'version': cap_version}}}}
             return {'chain_identifier': '4c78adac'}
 
         def output(argv, **kwargs):
@@ -513,6 +517,8 @@ class RunFlow(unittest.TestCase):
                      patch.object(live.toolchain, 'write_pubfile'),
                      patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'upgrade'}),
                      patch.object(live.toolchain, 'ptb_submitter', side_effect=tc.NotSubmitted('stop at activation'))]
+            if submitter:
+                extra.append(patch.object(live.toolchain, 'package_submitter', side_effect=submitter))
             if decode:
                 extra.append(patch.object(live.toolchain, 'decode', side_effect=decode))
             with self.assertRaisesRegex(stop[1], stop[0]):
@@ -539,6 +545,43 @@ class RunFlow(unittest.TestCase):
         self.assertEqual(evidence['reconciliations'][0]['digest'], 'U1')
         self.assertEqual(evidence['transactions'], [])
         self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))  # No second upgrade.
+
+    def test_failed_upgrade_is_reconciled_before_new_bounded_reservation(self):
+        # Run 40185557156 exhausted the gas left after publishing the base.
+        # A continuation must reuse that base, prove the old upgrade failed,
+        # and reserve from the new run's unchanged ceiling before signing.
+        marker = pending(max_epoch='8')
+        marker['label'] = 'upgrade to head'
+        marker['tx'].update(digest='U1', sender=tc.normal(ADDRESS))
+        failed = facts(digest='U1', sender=tc.normal(ADDRESS), success=False)
+        failed['error'] = 'InsufficientGas'
+        failed['gas_used'] = {'computationCost': '4650000', 'storageCost': '1634000',
+                              'storageRebate': '1633837'}
+        chain = FakeChain(epoch=8, transactions={'U1': failed})
+        reservations = []
+
+        def submitter(*args, **kwargs):
+            self.assertEqual(kwargs['upgrade'], {'cap': CAP, 'package': PACKAGE})
+
+            def submit(budget):
+                reservations.append(budget)
+                raise tc.NotSubmitted('stop before signing recovered upgrade')
+            return submit
+
+        saved, evidence, commands, _ = self.restart_after_executed_upgrade(
+            marker, chain, decode=decoded(digest='U1', sender=ADDRESS),
+            cap_package=PACKAGE, cap_version=1, submitter=submitter,
+            stop=('stop before signing recovered upgrade', tc.NotSubmitted))
+        self.assertEqual(reservations, [800_000_000])
+        self.assertEqual(saved['base_package'], PACKAGE)
+        self.assertNotIn('head_package', saved)
+        self.assertNotIn('pending_operation', saved)
+        self.assertEqual(evidence['reconciliations'][0]['outcome'], 'failed')
+        self.assertEqual(evidence['reconciliations'][0]['gas_mist'], 4_650_163)
+        self.assertEqual(evidence['reconciliations'][0]['charged_by'], 'earlier run')
+        self.assertEqual(evidence['transactions'][0]['status'], 'not_submitted')
+        self.assertEqual(evidence['allowance_used_mist'], 0)
+        self.assertFalse(any('serialized-tx' in c or 'ptb' in c for c in commands))
 
     def test_adopted_upgrade_must_be_the_package_the_cap_points_at(self):
         marker = pending(max_epoch='8')

@@ -1,4 +1,7 @@
 "use client";
+
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 import { useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +18,8 @@ const defaults: RolloutInput = { component: "", version: "", recipe: "", artifac
   cohorts: [], concurrency: 1, rateCount: 1, rateWindowMs: 60000, bakeMs: 300000,
   minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 3600000 };
 export default function RolloutsPage() {
+  const { fleet } = useFleetSelection();
+  const dataConfig = useFleetDataConfig();
   const client = useCurrentClient(); const account = useCurrentAccount();
   const { data: deployments = [] } = useDeployments();
   const [input, setInput] = useState(defaults); const [cohorts, setCohorts] = useState("");
@@ -39,7 +44,7 @@ export default function RolloutsPage() {
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
       <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
         const parsed = cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean));
-        return buildRolloutTx({ ...input, cohorts: parsed }, await rolloutAnnouncements(client, account!.address, parsed.flat()));
+        return buildRolloutTx({ ...input, cohorts: parsed }, fleet ? undefined : await rolloutAnnouncements(client, account!.address, parsed.flat()), fleet);
       }); }}>
         <p>Use a recipe and its exact digests from the firmware upload. One cohort per line, with device IDs separated by spaces. Cohorts are an immutable snapshot of direct targets; adding group members never expands it.</p>
         {(["component", "version", "recipe", "artifactSha256", "recipeSha256"] as const).map(key => <label className="block" key={key}>{key}<input required className="border ml-2 p-1" value={input[key]} onChange={e => setInput({ ...input, [key]: e.target.value })} /></label>)}
@@ -55,10 +60,10 @@ export default function RolloutsPage() {
       <RolloutDetail id={selected} rollout={rollout} />
       <label className="block">Admission candidate IDs<input className="border ml-2" value={candidates} onChange={e => setCandidates(e.target.value)} /></label>
       <p>Choose reachable members to admit. Leave blank to evaluate health without new grants. Omitted offline members remain eligible for audited skips; admitted members retain capacity until they report.</p>
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean)))}>Verify on-chain health and advance</button>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean), fleet ? { fleet, config: dataConfig } : undefined))}>Verify on-chain health and advance</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
-      {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason))}>{label}</button>)}
+      {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason, fleet))}>{label}</button>)}
     </div>}
   </div>;
 }
