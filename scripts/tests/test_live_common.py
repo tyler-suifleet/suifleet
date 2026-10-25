@@ -258,7 +258,7 @@ class WalrusUploadTests(unittest.TestCase):
         attempts = []
 
         def urlopen(request, timeout):
-            attempts.append(request.get_method())
+            attempts.append(request.full_url)
             outcome = outcomes[len(attempts) - 1]
             if isinstance(outcome, BaseException):
                 raise outcome
@@ -275,7 +275,26 @@ class WalrusUploadTests(unittest.TestCase):
         import urllib.error
         server = urllib.error.HTTPError("u", 503, "busy", {}, None)
         blob, attempts = self.upload(TimeoutError("read timed out"), server, self.STORED)
-        self.assertEqual((blob, attempts), ("blob1", ["PUT"] * 3))
+        self.assertEqual(blob, "blob1")
+        self.assertEqual(attempts, [live_common.WALRUS_TESTNET[0] + "/v1/blobs?epochs=1",
+                                    *[live_common.WALRUS_TESTNET_FALLBACK + "/v1/blobs?epochs=1"] * 2])
+
+    def test_reference_publisher_funding_failure_uses_independent_publisher(self):
+        import urllib.error
+        failure = urllib.error.HTTPError("u", 500, "insufficient WAL", {}, None)
+        blob, attempts = self.upload(failure, self.STORED)
+        self.assertEqual(blob, "blob1")
+        self.assertEqual(len(attempts), 2)
+        self.assertTrue(attempts[1].startswith(live_common.WALRUS_TESTNET_FALLBACK))
+
+    def test_success_still_requires_aggregator_readback(self):
+        walrus = live_common.Walrus("testnet")
+        with patch.object(walrus, "store", return_value=json.loads(self.STORED)), \
+                patch.object(walrus, "readable", return_value=False), \
+                patch.object(live_common, "wait_for", side_effect=RuntimeError("unreadable")) as wait:
+            with self.assertRaisesRegex(RuntimeError, "unreadable"):
+                walrus.put("recipe", b"body")
+            self.assertFalse(wait.call_args.args[0]())
 
     def test_retries_are_bounded_and_client_errors_are_not_retried(self):
         import urllib.error

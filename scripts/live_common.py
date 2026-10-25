@@ -37,6 +37,9 @@ CHAINS = {"testnet": "4c78adac"}
 AGENT = {"User-Agent": "suifleet-acceptance/1"}
 # The public publisher occasionally stalls; uploads are retried (content-addressed).
 WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 3, 10
+# Public Testnet operator listed at https://docs.wal.app/docs/system-overview/public-aggregators-and-publishers
+# Keep the total attempt budget unchanged when the reference publisher is unavailable.
+WALRUS_TESTNET_FALLBACK = "https://publisher.walrus-01.tududes.com"
 WALRUS_TESTNET = ("https://publisher.walrus-testnet.walrus.space", "https://aggregator.walrus-testnet.walrus.space")
 # Move aborts as the CLI reports them: "... aborted within function
 # '0x…::module::function' at instruction N with code C", or the older
@@ -327,9 +330,11 @@ class Walrus:
         """PUT a blob to the public publisher, retrying transient failures
         (timeouts, resets, 5xx) a bounded number of times. Blob IDs are
         content-addressed and the publisher pays, so a retry spends nothing
-        from the run's wallet and returns the same ID."""
+        from the run's wallet and returns the same ID. After a transient error,
+        use an independent public Testnet publisher within the same attempt budget."""
         for attempt in range(1, WALRUS_ATTEMPTS + 1):
-            request = urllib.request.Request(f"{self.publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
+            publisher = self.publisher if attempt == 1 else WALRUS_TESTNET_FALLBACK
+            request = urllib.request.Request(f"{publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
                     return json.load(response)
