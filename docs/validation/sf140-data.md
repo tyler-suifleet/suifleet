@@ -97,3 +97,53 @@ remains unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159). No mainnet, hardware,
 production credentials or machine-wallet mutation occurred. No migration is added
 by this UI; its deployment must use the updated SF139 package and verified origins.
+
+## PR306 base integration repair (2026-10-25)
+
+The repair snapshot contained no review comments/threads/source findings, but
+reported a conflicting branch without its current base. Integrated main
+`3c6625c33b238914a2b22d4b7c1a3dd1a69aff27`. The Data page retains upstream
+`DataUsage` and the generic browser. Policy entries from both histories remain.
+The pinned SF139 producer retains opaque state/anchoring alongside upstream
+pre-write authority checks; the empty-log fast path cannot bypass opaque intake.
+Upstream publisher fallback regressions supersede the old single-publisher test.
+
+Validation uses host Node 22.22.2, pnpm 11.0.8 and Rust 1.94.0. The initial
+frontend target completed its regression scripts but could not find pnpm for its
+last tsc command; rerun with the pinned pnpm PATH. The first cargo invocation
+lacked a selected toolchain; subsequent invocations explicitly select 1.94.0.
+The initial build shell's pnpm wrapper lacked execute permission; corrected before
+the successful production build. These setup failures are not test successes.
+Hosted CI/testnet and fresh independent review remain pending; SF139 merged-main
+is still required. Final external checks remain unrun in #32/#159.
+
+Repair verification results:
+
+- `make dapp-typecheck RUN=` with pinned Node/pnpm PATH: passed, including
+  Data unit/Chromium fixtures and final `tsc --noEmit`.
+- `make dapp-build RUN=`: passed (16 static pages, existing Tailwind warning).
+- `CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/home/tyler/.local/state/suifleet/sf139-build cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml --features pkcs11`:
+  448 passed, 0 failed, 4 ignored; 120.74s test execution.
+- Same environment, `cargo +1.94.0 build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example grpc_sim_shim`: passed.
+- `python3 -m unittest discover -s scripts/tests -p test_live_common.py`:
+  39 passed (offline error/effects/cleanup fixtures, no wallet access).
+- `node scripts/test_data_metering.cjs`: passed.
+- `python3 scripts/test_fleet_data_ota.py --binary /home/tyler/.local/state/suifleet/sf139-build/debug/suifleet --shim /home/tyler/.local/state/suifleet/sf139-build/debug/examples/grpc_sim_shim --idle-reads`:
+  passed: 3 batch reads / 1149 bytes across three idle polls and core-upgrade
+  refusal for due writers.
+- `docker run --rm --network none --user 0:0 -v "$PWD:/workspace" -v /home/tyler/.local/state/suifleet/sf139-build:/sf140-build:ro -w /workspace suifleet-dev:sf037 python3 scripts/test_opaque_ota.py --binary /sf140-build/debug/suifleet --shim /sf140-build/debug/examples/grpc_sim_shim`:
+  passed native signatures/Seal SDK decryption, binary/text/assembly/tamper refusal,
+  real IPC custody, certification outage and restart reuse/index retirement.
+  The first attempt used a musl runtime image without the host binary's ELF
+  loader and failed before starting the fixture; the dev-image rerun passed.
+- Conflict paths and SF140 delta whitespace checks passed. The upstream tree has
+  a pre-existing blank EOF line in `data-metering.ts`; it was not reformatted.
+
+No full cross-layer suite, new live chain execution, manual wallet/provider,
+physical or mainnet acceptance is claimed by this repair. No migrations beyond
+upstream SF139 requirements. The coordinator must verify merged SF139 and actual
+exact-head/current-base CI/testnet, then obtain fresh independent review.
+- Regular `scripts/test_fleet_data_ota.py` with the same freshly built daemon/shim:
+  passed signed health/browser verification, health/bulk retries, exhaustion,
+  cadence, restart/revocation/diagnostics, encrypted shadow change detection and
+  fleet-setting cadence overrides.
