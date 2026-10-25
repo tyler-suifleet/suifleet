@@ -73,7 +73,7 @@ impl Config {
 }
 
 /// Archive schema shared with the browser. No arbitrary signing payloads.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Record { pub source: String, pub line: String }
 /// Schema 2 (SF-084): the device's shadow documents when it archived, for the
@@ -112,7 +112,42 @@ impl ShadowSnapshot {
         Ok(())
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
+/// Exact BCS layout of the compact root; u256 is 32 little-endian bytes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactAnchor {
+    pub seq: u64, pub kind: u8, pub blob_object_id: Address, pub blob_id: [u8; 32],
+    pub ciphertext_sha256: Vec<u8>, pub signer: Address, pub at_ms: u64,
+    pub end_epoch: u32, pub key_epoch: u64,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactHead {
+    pub first_index: u64, pub index: u64, pub anchor: CompactAnchor, pub previous_hash: Vec<u8>,
+}
+impl CompactHead {
+    pub fn parse(bytes: &[u8]) -> anyhow::Result<Self> {
+        anyhow::ensure!(bytes.len() <= 512, "compact archive head exceeds limit");
+        let head: Self = bcs::from_bytes(bytes)?;
+        anyhow::ensure!(head.first_index <= head.index && head.anchor.seq > 0 && head.anchor.kind <= 2
+            && head.anchor.ciphertext_sha256.len() == 32
+            && matches!(head.previous_hash.len(), 0 | 32), "invalid compact archive head");
+        Ok(head)
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QuiltItem {
+    pub identifier: String, pub size: u64, pub sha256: String,
+}
+impl QuiltItem {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.identifier.is_empty() && self.identifier.len() <= 64
+            && self.identifier != "manifest" && self.identifier.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+            && self.size > 0 && self.size <= MAX_ARCHIVE as u64
+            && self.sha256.len() == 64 && self.sha256.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c)), "invalid Quilt item descriptor");
+        Ok(())
+    }
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Archive {
     pub schema: u8, pub kind: String, pub chain_identifier: String, pub registry: String,
@@ -121,10 +156,36 @@ pub struct Archive {
     /// Present exactly in schema 2; devices without shadows keep schema 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadows: Option<ShadowSnapshot>,
+    /// Schema 3: exact prior on-chain CompactHead BCS bytes (empty at start).
+    /// Its hash is checked against the new head before history is trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_head: Option<Vec<u8>>,
+    /// Schema 4: independently signed/encrypted patches in the same Quilt.
+    /// Their identifiers are locators, SHA256 binds each exact ciphertext.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<QuiltItem>>,
 }
 impl Archive {
     pub fn validate(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(matches!((self.schema, &self.shadows), (1, None) | (2, Some(_))) && self.kind == "fleet-data", "unsupported archive schema/kind");
+        anyhow::ensure!(self.kind == "fleet-data" && match self.schema {
+            1 => self.shadows.is_none() && self.previous_head.is_none() && self.items.is_none(),
+            2 => self.shadows.is_some() && self.previous_head.is_none() && self.items.is_none(),
+            3 => self.previous_head.is_some() && self.items.is_none(),
+            4 => self.items.as_ref().is_some_and(|items| (1..=16).contains(&items.len())) && self.records.is_empty(),
+            _ => false,
+        }, "unsupported archive schema/kind");
+        if let Some(items) = &self.items {
+            let mut names = std::collections::HashSet::new();
+            let mut bytes = 0u64;
+            for item in items { item.validate()?; bytes += item.size; anyhow::ensure!(names.insert(&item.identifier), "duplicate Quilt item"); }
+            anyhow::ensure!(bytes <= MAX_ARCHIVE as u64, "Quilt ciphertext quota exceeded");
+        }
+        if let Some(previous) = &self.previous_head {
+            if !previous.is_empty() {
+                let head = CompactHead::parse(previous)?;
+                anyhow::ensure!(head.anchor.seq < self.seq, "archive history does not move backwards");
+            }
+        }
         if let Some(shadows) = &self.shadows { shadows.validate()?; }
         anyhow::ensure!(["logs", "diagnostics", "crash"].contains(&self.reason.as_str()), "invalid archive reason");
         anyhow::ensure!(self.seq > 0 && [self.seq, self.observed_ms, self.dropped_lines].iter().all(|n| *n <= 9_007_199_254_740_991), "archive integer out of range");
@@ -142,17 +203,18 @@ pub struct Task {
     pub log_settings: Option<crate::config::LogsConfig>,
 }
 impl Task {
-    async fn beat(&self, tracker: &mut crate::service_health::Tracker) -> anyhow::Result<()> {
+    async fn beat(&self, tracker: &mut crate::service_health::Tracker, settings: Option<&crate::fleet_settings::Settings>) -> anyhow::Result<()> {
         self.sui.validate_cap(&self.cap, &self.device_id).await?;
         let (fleet, writer) = self.config.read(&self.sui, &self.device_id).await?;
         // Cadence uses chain time, never the device's possibly fast clock.
         let clock = self.sui.object("0x6").await?;
         let now = clock.fields["timestamp_ms"].as_str().and_then(|s| s.parse::<u64>().ok())
             .or_else(|| clock.fields["timestamp_ms"].as_u64()).ok_or_else(|| anyhow::anyhow!("invalid chain clock"))?;
-        if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(fleet.health_interval_ms) { return Ok(()); }
+        let interval = crate::fleet_settings::health_interval_ms(fleet.health_interval_ms, settings);
+        if writer.health_seq != 0 && now < writer.health_at_ms.saturating_add(interval) { return Ok(()); }
         let seq = writer.health_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("health sequence exhausted"))?;
         let binding = telemetry::Binding { chain_identifier: fleet.chain_identifier,
-            registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: 60,
+            registry: fleet.registry_id.to_string(), device_id: self.device_id.clone(), interval_seconds: interval / 1000,
             poll_seconds: self.poll_seconds, started_ms: self.started_ms, boot_id: telemetry::boot_id() };
         let mut inventory = telemetry::inventory(&self.state_dir);
         let sources = self.services.lock().unwrap().health_sources();
@@ -168,18 +230,27 @@ impl Task {
     }
     pub async fn run(self) {
         let mut tracker = crate::service_health::Tracker::default();
+        let mut applied = crate::fleet_settings::Applied::new("fleet data");
         loop {
-            if let Err(error) = self.beat(&mut tracker).await {
+            // SF-130: the fleet's cadences, read once per round.
+            applied.update(crate::fleet_settings::read(&self.sui, &self.config.budget_id).await);
+            let settings = applied.current().copied();
+            if let Err(error) = self.beat(&mut tracker, settings.as_ref()).await {
                 tracing::warn!(%error, "Direct-chain health pending; will re-read authority/cadence before retry");
             }
             if self.config.archives.is_some() {
-                let result = crate::fleet_archive::tick(&self).await;
+                let result = crate::fleet_archive::tick(&self, settings.as_ref()).await;
                 if let Err(error) = &result { tracing::warn!(%error, "Encrypted fleet archive pending; retained for retry"); }
                 if let Err(error) = crate::fleet_archive::status(&self.state_dir, result.is_err()) {
                     tracing::warn!(%error, "Archive publication status could not be persisted");
                 }
             }
-            tokio::time::sleep(Duration::from_secs(self.poll_seconds.clamp(1,60))).await;
+            // Without fleet settings, at least every minute; with them, at the fleet's check interval.
+            let wait = match &settings {
+                Some(s) => Duration::from_secs(crate::fleet_settings::check_seconds(self.poll_seconds, s)),
+                None => Duration::from_secs(self.poll_seconds.clamp(1, 60)),
+            };
+            tokio::time::sleep(wait).await;
         }
     }
 }
@@ -188,10 +259,59 @@ impl Task {
 mod tests {
     use super::*;
     #[test]
+    fn quilt_manifest_binds_bounded_unique_ciphertexts_and_history() {
+        let item = QuiltItem { identifier: "logs-1".into(), size: 128, sha256: "ab".repeat(32) };
+        let mut archive = Archive { schema: 4, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(),
+            registry: "0x1".into(), fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1,
+            observed_ms: 1, reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None,
+            previous_head: Some(vec![]), items: Some(vec![item.clone(), QuiltItem {identifier:"diagnostics-2".into(), ..item.clone()}]) };
+        archive.validate().unwrap();
+        let bytes = serde_json::to_vec(&archive).unwrap();
+        serde_json::from_slice::<Archive>(&bytes).unwrap().validate().unwrap();
+        archive.items.as_mut().unwrap()[1].identifier = item.identifier.clone();
+        assert!(archive.validate().is_err());
+        archive.items = Some(vec![item.clone()]); archive.validate().unwrap();
+        archive.items = Some(vec![]); assert!(archive.validate().is_err());
+        for identifier in ["manifest", "../escape", ""] {
+            assert!(QuiltItem {identifier:identifier.into(), ..item.clone()}.validate().is_err());
+        }
+        for sha256 in ["AB".repeat(32), "aa".repeat(31)] {
+            assert!(QuiltItem {sha256, ..item.clone()}.validate().is_err());
+        }
+        assert!(QuiltItem {size:0, ..item}.validate().is_err());
+    }
+    #[test]
+    fn compact_head_matches_browser_bcs_and_rejects_invalid_history() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/compact-head.json")).unwrap();
+        let bytes = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
+        let mut head = CompactHead::parse(&bytes).unwrap();
+        assert_eq!(head.anchor.seq, 2);
+        assert_eq!(head.anchor.blob_id[0], 123);
+        assert_eq!(bcs::to_bytes(&head).unwrap(), bytes);
+        head.first_index = 2;
+        assert!(CompactHead::parse(&bcs::to_bytes(&head).unwrap()).is_err());
+        assert!(CompactHead::parse(&vec![0;513]).is_err());
+        head.first_index = 0; head.previous_hash = vec![0;31];
+        assert!(CompactHead::parse(&bcs::to_bytes(&head).unwrap()).is_err());
+    }
+    #[test]
+    fn compact_archive_schema_keeps_legacy_shapes_and_requires_backward_link() {
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../../interfaces/compat/compact-head.json")).unwrap();
+        let previous = hex::decode(vector["bcs_hex"].as_str().unwrap()).unwrap();
+        let mut a = Archive { schema: 3, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
+            fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 3, observed_ms: 1,
+            reason: "logs".into(), dropped_lines: 0, records: vec![], shadows: None, previous_head: Some(previous), items: None };
+        a.validate().unwrap();
+        a.seq = 2; assert!(a.validate().is_err()); a.seq = 3;
+        a.schema = 1; assert!(a.validate().is_err()); a.schema = 3;
+        a.previous_head = None; assert!(a.validate().is_err());
+        a.previous_head = Some(vec![]); a.validate().unwrap();
+    }
+    #[test]
     fn archive_shape_rejects_unsafe_integers_unknown_fields_and_oversized_records() {
         let mut a = Archive { schema: 1, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
-            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None };
+            reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "ready".into() }], shadows: None, previous_head: None, items: None };
         a.validate().unwrap();
         a.seq = 9_007_199_254_740_992; assert!(a.validate().is_err()); a.seq = 1;
         a.records[0].line = "x".repeat(4097); assert!(a.validate().is_err()); a.records.clear();
@@ -211,7 +331,7 @@ mod tests {
         let mut a = Archive { schema: 2, kind: "fleet-data".into(), chain_identifier: "4c78adac".into(), registry: "0x1".into(),
             fleet_id: "0x2".into(), device_id: "0x3".into(), signer: "0x4".into(), seq: 1, observed_ms: 1,
             reason: "logs".into(), dropped_lines: 0, records: vec![Record { source: "daemon".into(), line: "Shadow state snapshot".into() }],
-            shadows: Some(snapshot.clone()) };
+            shadows: Some(snapshot.clone()), previous_head: None, items: None };
         a.validate().unwrap();
         // Round trip, and schema 1 bytes never mention shadows.
         let bytes = serde_json::to_vec(&a).unwrap();

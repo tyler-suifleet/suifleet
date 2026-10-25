@@ -68,7 +68,7 @@ impl Drop for Server {
 }
 const OPS: &[&str] = &["list", "status", "start", "stop", "restart", "logs", "config", "health", "publish", "receive", "install",
     "subscribe", "unsubscribe", "ack", "messaging", "client_devices",
-    "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list", "stream_export_ack",
+    "data_put", "stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list", "stream_export_ack", "stream_export_status",
     "shadow_get", "shadow_update", "shadow_delete", "shadow_list", "shadows"];
 impl Settings {
     pub fn validate(&self) -> anyhow::Result<()> {
@@ -112,7 +112,7 @@ impl Settings {
             "receive" => anyhow::ensure!(acl.subscribe.contains(&r.topic) || authorized(policies, "SubscribeToTopic", &r.topic), "forbidden_topic"),
             // Revoking the policy also ends access to an existing subscription.
             "subscribe" | "unsubscribe" | "ack" => anyhow::ensure!(authorized(policies, "SubscribeToTopic", &r.topic), "forbidden_topic"),
-            op if op.starts_with("stream_") && op != "stream_list" =>
+            op if op == "data_put" || (op.starts_with("stream_") && op != "stream_list") =>
                 anyhow::ensure!(acl.streams.iter().any(|p| crate::streams::glob(p, &r.topic)), "forbidden_stream"),
             _ => {}
         }
@@ -297,6 +297,18 @@ mod tests {
     }
     fn request(op: &str) -> Request {
         Request { version: 1, operation: op.into(), component: "a".into(), topic: "a/events".into(), payload: json!("healthy") }
+    }
+    #[test]
+    fn opaque_intake_requires_operation_peer_and_stream_authority() {
+        let mut p=policy();
+        let acl=p.components.get_mut("a").unwrap();
+        acl.operations.push("data_put".into());acl.streams=vec!["sensor*".into()];
+        let good=Request {version:1,operation:"data_put".into(),component:"a".into(),topic:"sensor-raw".into(),payload:json!({})};
+        assert_eq!(p.authorize(61001,&good).unwrap(),"a");
+        assert!(p.authorize(61002,&good).is_err());
+        assert!(p.authorize(61001,&Request {topic:"private".into(),..good.clone()}).is_err());
+        p.components.get_mut("a").unwrap().operations.retain(|o|o!="data_put");
+        assert!(p.authorize(61001,&good).is_err());
     }
     #[test]
     fn authorization_is_exact_and_defaults_to_deny() {

@@ -661,6 +661,11 @@ module sui_edge::fleet_budget {
     public fun account_total_drawn(account: &GasAccount): u64 { account.total_drawn }
     public fun account_enrolled_at_ms(account: &GasAccount): u64 { account.enrolled_at_ms }
 
+    /// For per-fleet records kept by other modules of this package
+    /// (`fleet_settings`); each module owns its own dynamic-field key types.
+    public(package) fun uid(budget: &FleetBudget): &UID { &budget.id }
+    public(package) fun uid_mut(budget: &mut FleetBudget): &mut UID { &mut budget.id }
+
     #[test_only]
     public fun set_version_for_testing(budget: &mut FleetBudget, version: u64) { budget.version = version; }
 }

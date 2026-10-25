@@ -2765,6 +2765,362 @@
         "Mainnet spending happens only under explicit user authorization for that run, per AGENTS.md."
       ],
       "validation": "Effects-checked Mainnet evidence committed under docs/business; reproducible accounting script; independent review of the updated tables."
+    },
+    {
+      "key": "SF-137",
+      "title": "Remove the server indexer from the product path",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "suifleet-edge/src",
+        "suifleet-indexer",
+        "scripts",
+        "manifests",
+        "docs"
+      ],
+      "resources": [],
+      "description": "SuiFleet must operate no application servers. Every product feature must work with no HTTP indexer configured: health and fleet visibility from signed on-chain health, logs and diagnostics from Walrus, alerts derived in the dApp, and history and operations read directly from the chain. Customers who want their own pipeline integrate it themselves (SF-143); the indexer is not SuiFleet infrastructure.",
+      "evidence": "User decision 2026-10-23: no servers in the solution; customers may integrate their own storage. Code audit of main ab621e7: dApp hooks/useFleetAlerts.ts, hooks/useFleetHealth.ts, lib/telemetry.ts, lib/alerts.ts, lib/fleet-data.ts, lib/fleet-recovery.ts, app/page.tsx, app/services/page.tsx and app/devices/page.tsx read the indexer; the daemon ships heartbeats and logs over HTTP (suifleet-edge/src/telemetry.rs, logs.rs; config.rs makes HTTP telemetry and fleet_data mutually exclusive); docs/TELEMETRY.md says the daemon still uses the HTTP path; CloudWatch metrics exports pass indexer signature verification (docs/CLOUDWATCH_METRICS.md:97); support log search, the ops CLI and indexer transaction builds (docs/INDEXER.md, docs/LOGS.md) assume the server; owner-run processes (scripts/retention_worker.py, fleet_alert_relay.cjs) must also be hosted by someone. SF-084 already serves dashboard views without an indexer (docs/DASHBOARD_VIEWS.md). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "An inventory of every indexer-dependent feature in the daemon, dApp, CLI, scripts and docs, each mapped to its serverless replacement or to a customer-owned integration.",
+        "The daemon defaults to serverless mode: on-chain health and Walrus data. HTTP telemetry and log shipping become an optional customer-owned integration, and the exclusivity between HTTP telemetry and fleet_data is removed or made explicit.",
+        "Every dApp view and alert works with no indexer configured; no default manifest or build points at a SuiFleet-hosted indexer.",
+        "Fleet visibility metrics now carried by HTTP heartbeats (messaging, streams, shadows, services) are carried by the bounded on-chain health summary or Walrus data instead.",
+        "The ops CLI and bulk transaction building read and build against the chain directly.",
+        "Owner-run background processes are replaced by dApp-triggered actions, prepaid mechanisms or device-side work, or documented as optional customer-run tools; SuiFleet hosts none.",
+        "The indexer code is removed from the product build or clearly marked as an optional, customer-hosted reference integration; docs updated accordingly."
+      ],
+      "validation": "dApp typecheck, production build and browser tests with no indexer URL; daemon and OTA simulator tests in serverless mode; a localnet end-to-end run with no HTTP services; documentation consistency checks."
+    },
+    {
+      "key": "SF-138",
+      "title": "Gate staged rollouts on signed on-chain health instead of server telemetry",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/rollout.ts",
+        "dapp/src",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "docs/STAGED_ROLLOUTS.md"
+      ],
+      "resources": [],
+      "description": "The staged-rollout health gate requires signed telemetry no older than 120 seconds, which only the HTTP indexer provides. Replace it with a serverless signal: the device writes a bounded on-chain health report immediately after applying a deployment, outside its normal cadence, and the gate judges freshness relative to the deployment grant rather than wall-clock seconds.",
+      "evidence": "dapp/src/lib/rollout.ts:45-54 requires fresh signed health within 120 s via fetchFleetHealth (lib/telemetry.ts). Low-cost defaults make on-chain health daily (docs/BUSINESS_PLAN.md, SF-130/#265), so the current gate cannot pass without the server. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A post-apply health report written on chain right after a deployment outcome, exempt from the normal cadence but bounded per deployment so it cannot be abused; additive Move change if needed.",
+        "The rollout gate admits the next wave from receipts plus post-apply health for this deployment, with timeouts and failure thresholds unchanged in meaning.",
+        "No dependence on the HTTP indexer; behaviour documented in docs/STAGED_ROLLOUTS.md."
+      ],
+      "validation": "Move unit and upgrade tests if contracts change; dApp rollout unit and browser tests; localnet staged-rollout run with daily default health and no indexer."
+    },
+    {
+      "key": "SF-139",
+      "title": "Store any device data on Walrus",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "contracts/fleet_data",
+        "contracts/fleet_storage",
+        "interfaces",
+        "sdk",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let customer components put arbitrary device data on Walrus: files, blobs, durable stream contents, sensor batches, logs or anything else, treated as opaque bytes. Data is batched on the device, encrypted with Seal, stored on fleet storage and indexed on chain, using the same device-local batching as the log archives.",
+      "evidence": "User requirement 2026-10-23: the data stored from a device should not matter; customers can put anything. Today only daemon/component logs and diagnostics reach Walrus (docs/SERVERLESS_FLEET_DATA.md); component streams leave the device only through HTTP or AWS exporters (docs/STREAMS.md, docs/STREAM_EXPORTERS.md). Coordinate with SF-121/#252 (Codex), which implements device-local quilting for log archives: reuse its batching and archive index rather than build a second one. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A device-side API for components (IPC and CLI) to submit opaque data items with a stream or key name, content type and optional metadata; durable streams can be configured to flush to Walrus.",
+        "Items are spooled durably, batched, Seal-encrypted and written to fleet storage with an on-chain index entry per item (device, stream, key, sequence, size, content SHA-256, batch reference), bounded by the fleet's budget and storage quotas.",
+        "Per-item size limits and backpressure are explicit; large files are chunked; nothing is acknowledged or dropped before certified storage and its anchor are independently verified.",
+        "Data is opaque to SuiFleet: no schema is imposed, and authorized readers can retrieve and verify each item independently of its batch.",
+        "Enforce authenticated per-device/per-stream Seal read grants without legacy fleet-wide or old-package bypass; SF-139 owns producer/contract/reader bindings and SF-140 consumes them in the UI. Reuse SF-121 tick/Pending/schema4 Quilt descriptors and preserve batching, raw bytes, durable recovery and verified-anchor-only retirement."
+      ],
+      "validation": "cargo tests and OTA simulator for intake, spooling, restart and quota limits; Move unit and upgrade tests for index changes; a localnet and bounded testnet round trip storing and retrieving mixed binary and text data."
+    },
+    {
+      "key": "SF-140",
+      "title": "Data section in the dApp for browsing, downloading and sharing device data",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "docs/DASHBOARD_VIEWS.md"
+      ],
+      "resources": [],
+      "description": "Add a Data section to the dApp: a fleet-wide browser for device data stored on Walrus, filterable by device, group, stream, key, content type and time, with in-browser decryption, download, preview for small text items, sharing grants and export to customer-owned storage. It runs entirely in the browser with no server.",
+      "evidence": "User requirement 2026-10-23: there should be a data portion of the dApp. Today the dApp decrypts log and diagnostic archives one device at a time (docs/SERVERLESS_FLEET_DATA.md); fleet-wide log search exists only through the indexer (docs/LOGS.md), which SF-137 removes. Start with existing log and diagnostic archives and add generic items when SF-139 lands. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A Data section listing items fleet-wide from the on-chain index with filters for device, group, stream, key, content type and time range, using incremental, bounded reads.",
+        "Authorized users decrypt and download items in the browser; small text and JSON items preview inline; integrity is checked against the indexed SHA-256.",
+        "Owners grant and revoke read access per stream or device through Seal policies, with the caveat that revocation does not affect data already decrypted.",
+        "Items or filtered sets export directly from the browser to customer-owned storage (S3-compatible presigned upload or HTTP), with credentials kept in the browser session only.",
+        "Clear empty, loading, unavailable-history and access-denied states."
+      ],
+      "validation": "dApp typecheck, production build, unit tests and browser tests against fixture data, including decryption, filtering, sharing and export."
+    },
+    {
+      "key": "SF-141",
+      "title": "Per-stream retention and expiry for device data",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/fleet_storage",
+        "contracts/fleet_data",
+        "suifleet-edge/src",
+        "dapp/src",
+        "docs/RETENTION_RENEWAL.md"
+      ],
+      "resources": [],
+      "description": "Let owners set a retention period per data stream (for example 6 weeks, 6 months, 1 year, or custom up to the Walrus maximum), buy that retention when data is written so no renewal process is needed, and expire data automatically with its storage deposits recovered.",
+      "evidence": "Today periodic archives buy a fixed number of epochs and protected retention relies on an owner-run renewal worker (docs/RETENTION_RENEWAL.md), which SF-137 removes from SuiFleet operations; anchors are kept permanently (docs/SERVERLESS_FLEET_DATA.md). Coordinate with SF-128/#258 (protected-blob cap) and SF-129/#264 (deposit reclaim). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Retention settings per stream stored on chain with bounds, shown and edited in the dApp Data section and settings page.",
+        "Devices buy the configured retention at write time; retention beyond the Walrus maximum renews through a dApp-triggered or prepaid mechanism, not a SuiFleet-hosted worker.",
+        "Expired items drop from the index and their blob objects and anchors are reclaimed through SF-129's mechanisms."
+      ],
+      "validation": "Move unit and upgrade tests; daemon tests for retention at write; localnet lifecycle test through expiry and reclaim."
+    },
+    {
+      "key": "SF-142",
+      "title": "Meter and price device data storage",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "contracts/fleet_storage",
+        "docs/BUSINESS_PLAN.md",
+        "docs/FLEET_BUDGET.md"
+      ],
+      "resources": [],
+      "description": "Measure each fleet's device-data usage (bytes written and bytes stored over time) and show its cost and price before customers commit, using the proposed data add-on: an included allowance per device, then a per-GB write price and per-GB-month storage price.",
+      "evidence": "docs/BUSINESS_PLAN.md (2026-10-23) proposes pricing device data per GB. Walrus costs about $0.018 per GB written and $0.021 per GB-month stored at 2026-10-23 rates, against CloudWatch Logs ingestion at $0.50 per GB. fleet_storage already keeps usage counters. Extends the settings and deposit work in SF-131/#266. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Per-fleet and per-stream usage (written and stored bytes) derived from on-chain records and shown in the dApp.",
+        "Cost and SuiFleet price for data shown live from one configurable price table, including the included allowance; the prepaid deposit accounts for expected data volume.",
+        "Usage figures reconcile with on-chain storage records in tests."
+      ],
+      "validation": "dApp typecheck, build and unit tests for metering and pricing; reconciliation test against localnet storage records."
+    },
+    {
+      "key": "SF-143",
+      "title": "Export device data directly to customer-owned storage without SuiFleet servers",
+      "priority": "P1",
+      "area": "edge",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "sdk",
+        "scripts",
+        "docs/STREAMS.md",
+        "docs/STREAM_EXPORTERS.md",
+        "docs/CLOUDWATCH_METRICS.md"
+      ],
+      "resources": [],
+      "description": "Support customers who want device data in their own storage: devices export streams and data directly to any S3-compatible service (AWS S3, Cloudflare R2, Google Cloud Storage's S3 API, MinIO) or an HTTP endpoint the customer runs, with customer-provided credentials, and no SuiFleet-hosted hop.",
+      "evidence": "Existing exporters are AWS-specific Python companions (Kinesis, S3, Firehose, CloudWatch Logs; docs/STREAM_EXPORTERS.md, docs/FIREHOSE.md) and CloudWatch metrics exports first pass indexer verification (docs/CLOUDWATCH_METRICS.md:97). User decision 2026-10-23: customers may integrate their own storage, but SuiFleet runs no servers. Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "A generic S3-compatible exporter (configurable endpoint, region, bucket, path layout) and HTTP exporter for durable streams and device data, with credentials supplied and stored on the device as customer secrets.",
+        "No export path depends on the SuiFleet indexer; the CloudWatch metrics verification step moves to the device or is documented as customer-side.",
+        "Exports are durable and resumable with bounded retries, and report export lag and failures in the on-chain health summary."
+      ],
+      "validation": "cargo or Python exporter tests against MinIO and an HTTP fixture; restart and failure-injection tests; documentation consistency checks."
+    },
+    {
+      "key": "SF-144",
+      "title": "Read Walrus data directly from storage nodes when aggregators are unavailable",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "suifleet-edge/src",
+        "suifleet-edge/Cargo.toml",
+        "suifleet-edge/meta-suifleet",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Let the daemon fetch Walrus slivers directly from storage nodes and reconstruct blobs on the device when public aggregators fail, are rate-limited or cap request sizes. This removes any need for SuiFleet to run aggregators: devices use public aggregators first and fall back to direct reads.",
+      "evidence": "User decision 2026-10-23: SuiFleet runs no servers; Walrus aggregators were only included in the cost model as a conservative large-scale assumption. Public aggregators have no SLA and many cap requests at 10 MiB (docs.wal.app/docs/network-reference). Walrus reads are free at the protocol level. The Rust walrus-core crate is publish=false and pins Rust 1.96 against our 1.94 baseline (walrus mainnet-v1.58.1). Complements SF-124/#255 (aggregator fallback list and ranged downloads). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "acceptance": [
+        "Measure direct-read feasibility on a Raspberry Pi 3 B+ class device for 50 MB and 200 MB blobs: peak memory, CPU time, connections and wall-clock time, recorded in docs.",
+        "If feasible, implement direct reads as a fallback after the aggregator list, with digest verification unchanged and bounded memory (streaming or chunked reconstruction).",
+        "Resolve the dependency and toolchain issue with a reviewed approach (pinned git dependency, vendored minimal reader, or a documented toolchain bump) that keeps Yocto LTS builds working.",
+        "If not feasible on Pi-class hardware, document the limit and the supported alternatives; do not introduce a SuiFleet-hosted aggregator."
+      ],
+      "validation": "Benchmarks on Pi-class hardware or a faithful QEMU/arm64 emulation recorded with exact versions; cargo tests with simulated aggregator failure; a bounded read-only test against Walrus Mainnet or Testnet storage nodes."
+    },
+    {
+      "key": "SF-121",
+      "title": "Reduce serverless fleet telemetry and log costs; validate subscription economics",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-082",
+        "SF-084",
+        "SF-083"
+      ],
+      "paths": [
+        "contracts",
+        "interfaces",
+        "suifleet-edge",
+        "dapp",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Implement serverless, device-local Walrus quilting for existing signed Seal-encrypted log archives and evaluate health batching honestly. USER CONSTRAINT: no additional server. Quilting runs inside the existing edge client. Do not require a fleet collector, gateway server, browser left open, Nautilus enclave or always-on managed service. Cross-device pooling is not assumed possible without an explicit data rendezvous and is outside the required implementation. Preserve the existing standalone edge-to-Sui/Walrus operation. Platform subscription/device tiers with bounded pooled log allowance is agreed; $100/month for1000devices remains an example, not an approved price or proven margin.",
+      "evidence": "SF082 fleet_archive.rs currently registers, certifies and anchors separate per-device archives; health summaries are separate transactions. Existing acceptance evaluated quilts but did not require their use. User now explicitly requests quilting. Official Quilt docs: batch up to666items forQuiltV1, patch IDs depend on whole quilt, retention/deletion/extension apply to whole quilt. Per-device daily health gas can dominate storage, so log savings must not be misrepresented as removing health transactions.",
+      "acceptance": [
+        "Inspect the actual merged archive/health/retention implementation and pinned Walrus SDK Quilt support. Document current versus proposed transaction counts, source revisions, ciphertext sizes and measurable savings; no unsupported blanket cost claims.",
+        "Implement bounded Quilt formation and per-item retrieval for encrypted device log/diagnostic archives. Group only compatible fleet/access policy and retention lifecycle; respect actual SDK item/size limits. Keep signed chain/registry/device/sequence/content-digest bindings and authenticate each patch independently; QuiltPatchId is not a content digest.",
+        "Implement quilting locally in the existing edge client, batching multiple pending records/streams over a bounded time/byte window; no additional server, collector, always-on browser, Nautilus or mandatory gateway. Do not wrap a lone regular blob in a quilt and claim a saving. Measure useful record granularity versus already-batched archive. Cross-device aggregation is not required and must not be claimed without an explicit approved rendezvous mechanism.",
+        "Adapt actual fleet-owned storage, device write authorization, certification and archive references/indexes/readers to quilts with compatible additive schemas. Reject forged/replayed/misattributed records and revoked writers; preserve quotas and retention. Preserve old regular-blob reads and type origins. No new collector authority.",
+        "Persist spool/queue state across offline/restart/timeout, bound disk/memory/bytes/items/age/retries and use idempotent publish recovery. Do not acknowledge/drop source records until certified storage and required anchors are independently verified. Handle partial batches, missing/wrong patches, withholding and collector outage with explicit unavailable/pending results.",
+        "Update daemon/dApp/codec and packaging as required, log discovery/decryption, retention renewal and budget estimates. Keep separate health-summary and deployment-receipt costs visible; quilting alone must not be claimed to reduce those. Do not silently remove on-chain health authentication or change receipt trust.",
+        "Produce representative1000device comparisons for current per-device archives versus serverless per-device quilts: exact report/anchor transaction counts, health cadence, compressed/encrypted/encoded bytes, retention and retries. Explicitly show which savings require cross-device aggregation and are unavailable in this design. Quilt does not merge separate devices automatically or remove existing health writes. Use actual effects/quotes and distinguish testnet from mainnet; model $100/month only as illustration.",
+        "Verify actual pinned SDK Quilt write/read roundtrip and confidential owner/support access with unauthorized/tamper/revocation/replay and restart controls; meaningful Rust/Move/UI and simulator tests, production build, authorized bounded public-testnet validation and independent review. Preserve live Pi/mainnet acceptance in existing tickets; no physical programming or mainnet spending.",
+        "Restore only this published ticket and remote mapping as a contained Tyler-authored tracking commit; update business docs to record agreed platform subscription/device tiers with bounded pooled logs, without inventing final price/margin. Implementation PR uses Closes for the published issue. Codex explicitly authorizes restoring missing already-published SF-082 seed/mapping (and any already-published transitive seed references needed for offline validation) from canonical catalog/history as a separate tracking repair, preserving live ownership and remote IDs; no new issue creation is needed for this metadata repair.",
+        "USER COST REJECTION: the measured per-archive path extrapolates to about812 testSUI/month for1000devices with daily archives, excluding health; this is unacceptable for the illustrative $100/month subscription. Treat actual end-to-end cost reduction as the goal, not Quilt adoption. Benchmark computation versus retained object deposits and realistic cleanup, locate per-upload registration/certification/anchor growth, evaluate fewer/batched transactions and additive bounded/reusable references without weakening device authority or authentication. Do not claim a fixed subsidy, rebate, batching count or hypothetical architecture establishes mainnet viability. Preserve no-additional-server constraint. Report a measured feasible operating envelope and explicit remaining limits; do not declare success merely because Quilt works."
+      ],
+      "validation": "Actual pinned SDK Quilt roundtrip in existing edge runtime; negative authority/patch/replay and restart/offline/certification recovery; compatibility tests, scoped UI/build/package checks; measured device-local economics; bounded authorized testnet evidence and independent review. No additional server and no claimed cross-device aggregation."
+    },
+    {
+      "key": "SF-082",
+      "title": "Host the dApp and fleet backend on Sui and Walrus instead of a server",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-019",
+        "SF-020",
+        "SF-022",
+        "SF-024"
+      ],
+      "paths": [
+        "dapp",
+        "suifleet-edge/src",
+        "suifleet-indexer",
+        "contracts",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Use Sui infrastructure as the backend: publish the static dApp as a Walrus Site, and replace the server-hosted fleet indexer for health, logs, diagnostics and alerts with Sui/Walrus-native data that the dApp reads and verifies directly. A self-hosted indexer may remain an optional accelerator, never a requirement. Implementation may proceed against the published SF-083/#218 interface v1 at exact commit 57cd3bc1aec364d302b7192c8c19eb550c10aa23, documented in docs/FLEET_BUDGET.md. This changes implementation scheduling only. SF-083/#161 remains a mandatory merge/integration prerequisite. Keep the consumer PR DRAFT while SF-083 is not Done; if implementation finishes first, retain the claim with an explicit integration blocker and handoff evidence. Never mark Ready or claim acceptance_complete until SF-083 is merged, current main is integrated and funding/storage compatibility and end-to-end tests pass. Independent review and all normal CI/testnet gates remain mandatory. Do not guess unpublished APIs or silently repin. Proposed shared-interface changes must be recorded in both consumer issues before implementation. Consume fleet_storage::register_blob/certify_blob, fleet_budget::assert_may_draw, GasAccount and fleet-owned non-deletable blobs. Telemetry cadence, encrypted log batches, authenticated anchors, index and verified browser reads are SF082 implementation scope. Preserve existing budget public signatures/layouts. ",
+      "evidence": "The indexer (SF-019/SF-020/SF-024) runs as a local HTTP service; docs/LOGS.md lists a hosted indexer with TLS/rate limiting as not covered, and OPERATIONS.md notes Walrus Sites is intended but unverified. User direction 2026-10-19: the backend should be hosted on Walrus using Sui infrastructure.",
+      "acceptance": [
+        "Publish the production dApp build as a Walrus Site with a pinned, verified site-builder version, deployment manifest binding and a documented update/rollback procedure; no off-chain server is needed to use the app.",
+        "Devices write signed telemetry snapshots and redacted log batches as Walrus blobs, logs and diagnostics Seal-encrypted to the fleet owner and authorized support roles, and anchor them on Sui (per-device object or events) with bounded frequency and cost.",
+        "Fleet data blobs are written with SF-083 owner-prepaid storage and stay fleet-owned (a device cannot delete or shorten history); a per-fleet on-chain index lists them for the dApp; the Seal read policy is Move code: the owner and authorized support roles decrypt, devices write but cannot read other devices' data, and revocation removes a device's write right.",
+        "The dApp discovers, fetches, verifies (device signature, registry identity, chain binding) and decrypts this data client-side, and derives health and alerts in the browser with the same rules as SF-020; unverifiable data is shown as unavailable, never trusted.",
+        "Data cadence is a cost requirement: small health snapshots go on-chain directly (events on transactions devices already send, or periodic summaries), not as per-snapshot Walrus blobs; bulk data such as logs is batched into at most one Walrus upload per device per configurable period (default daily), plus immediate uploads for diagnostics requests and crashes.",
+        "Before relying on it, validate Walrus's fixed per-blob overhead (recorded as an approximately 64 MB encoding-metadata figure in docs/business/network-costs-2026-10-16.json) with a real quote, and evaluate Walrus quilts or other batching to reduce per-upload cost; document the measured cost per upload and per device per month for the chosen cadence.",
+        "Define retention and deletion (Walrus storage epochs, expiry and rebates) and the per-device write cadence; costs feed the SF-083 prepaid budget.",
+        "Document what has no serverless equivalent (for example push webhooks/notifications) and provide an optional, owner-run relay or indexer that consumes the same on-chain/Walrus data without becoming a trust root.",
+        "Record the pinned SF083 commit, consumed functions/layouts and extension boundary in the issue. Keep PR draft until SF083 is verified Done/merged; integrate its actual merged implementation and rerun relevant compatibility, adversarial and end-to-end tests before Ready/Review acceptance. Mocked success or an unmerged pinned dependency is not integrated acceptance."
+      ],
+      "validation": "Localnet/simulated-Walrus end-to-end: device writes, anchors and the dApp verifies/decrypts; tampered, replayed, foreign-chain and revoked-device data rejected; Walrus Site build reproducibility; authorized testnet publication and dApp acceptance recorded separately with exact costs.",
+      "merge_depends_on": [
+        "SF-083"
+      ]
+    },
+    {
+      "key": "SF-147",
+      "title": "Show current GitHub CI states and honest evidence freshness in fleet-status",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/dashboard.py",
+        "tools/pr-coordinator/tests/test_dashboard.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User asks why CI labels are stale and requests a fix. Explicit --refresh-github currently refreshes issue/PR counts only, but CI labels derive from worker launch snapshots; failed current testnet statuses incorrectly remain ci-pending for hours. Installed dashboard also predates merged quota support.",
+      "evidence": "2026-10-24 root audit: refresh_github fetches REST issues/pulls, no current check results; collect uses latest job snapshot.json (immutable). All five ready PRs have failed testnet statuses while CLI reports ci-pending. Reviews source age reflects database/job modification rather than current coordinator polling; do not label that coordinator inactivity. Preserve normal offline dashboard refresh and account scoping.",
+      "acceptance": [
+        "Explicit --refresh-github fetches bounded current check/status evidence for the exact open PR head/base, including testnet/package-upgrade, and atomically caches it with freshness/provenance. Batch requests where possible, bound pagination, preserve credentials privately. Ordinary live refresh stays offline.",
+        "Prefer newer authoritative matching-head/base GitHub evidence over old launch snapshots; mismatched head/base, failed/partial fetch, missing or stale evidence must show unknown/stale explicitly, never fresh pending or success. Distinguish source evidence age from service heartbeat and active jobs.",
+        "Mark historical-only CI as stale, include last-known result and observed time, and remove obsolete retry notices for verified merged/superseded PR jobs without mutating coordinator ownership. Keep GitHub/local ticket discrepancy reporting honest.",
+        "Regression tests for current testnet failure replacing old pending, head changes, stale base testnet success, partial GraphQL data/pagination, cached offline mode, bad credentials/no secret output, closed PR stale retry suppression and freshness rendering. Install only tested/reviewed dashboard scope without touching workers/services/config."
+      ],
+      "validation": "Dashboard/unit regressions, offline CLI fixtures, actual --refresh-github snapshot versus gh pr checks and offline rerender. Use reviewed merged-only activation or the explicitly scoped dashboard installer; report any unmerged local preview separately."
+    },
+    {
+      "key": "SF-148",
+      "title": "Dispatch repairs for failed testnet statuses and expose stalled CI ownership",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Failed automatic testnet commit statuses are not recognized by the running coordinator, leaving nine review tickets without repair workers. Direct-commit operational fix explicitly authorized by the user.",
+      "evidence": "2026-10-24: eight current-head testnet failures, zero workers; coordinator reports ci_failures=[] while GitHub reports testnet/package-upgrade failure. SF146 source fix exists but cannot merge through its own failing gate; isolate the coordinator repair dispatch fix without waiving testnet.",
+      "acceptance": [
+        "Recognize exact-head/current-base durable testnet failure statuses and dispatch bounded deduplicated owner repairs.",
+        "Preserve failed checks as merge blockers; pending/stale/unlinked statuses never cause unsafe source repair.",
+        "Give infrastructure/funding/uncertainty failures an explicit responsible repair owner rather than silently excluding them.",
+        "Regression-test repeated scans, failure-to-pending-to-success transitions and fail-closed merge behavior.",
+        "Commit scoped tested changes directly under Tyler identity, install committed runtime and verify actual worker dispatch."
+      ],
+      "validation": "Coordinator unit/regression suite, compile and diff checks, current GitHub status snapshots plus actual worker reservation/identity evidence. No mocked live acceptance."
+    },
+    {
+      "key": "SF-149",
+      "title": "Reconcile completed repair ownership and bound retry budgets per failing check",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Completed blocked repairs leave live In progress claims with no worker; a PR-wide retry budget also blocks unrelated failing checks. Reconcile stopped same-claim repairs to Review without approval and count bounded repair attempts per check.",
+      "evidence": "2026-10-24: jobs1079/1090 finished blocked but SF125/SF131 stayed In progress; SF125 expired. PR281 exhausted 3 aggregate attempts on Move compiler-lints twice and testnet-preflight once, so its first testnet/package-upgrade failure cannot dispatch.",
+      "acceptance": [
+        "Before handing off a completed repair, verify durable successful exit/result, stopped process identity, unchanged claim, branch/worktree, no claim helpers and no shared-resource lease; transition to Review without approving or discarding dirty work.",
+        "Retry a failed ownership publication separately from worker execution; never relaunch an unknown process or replace another owner.",
+        "Use separate three-attempt/backoff budgets per workflow/check, retaining deduplication and head/base-independent failure limits. Migrate verifiable historical receipts and fail closed on ambiguous history.",
+        "Recover current stopped SF125/SF131 claims and allow the first testnet repair on PR281 under the correct budget; preserve all actual testnet and review gates.",
+        "Add meaningful offline recovery, restart, safety-fence and budget regression tests; verify installed committed runtime and actual dispatch."
+      ],
+      "validation": "Full offline coordinator suite, Python compilation/diff checks, Tyler-authored scoped commits and verified runtime hashes/worker handoffs. Public testnet success remains separate."
     }
   ]
 }

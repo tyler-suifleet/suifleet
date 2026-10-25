@@ -6,19 +6,21 @@ import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import shutil
 import subprocess
 import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'sdk/python'), str(ROOT / '.ci-cache/aws-export-python')]
 from defusedxml import ElementTree as ET
-from suifleet_stream_export import Exporter, validate
+from suifleet_stream_export import Exporter, validate, private_secret, atomic as atomic_checkpoint
 from suifleet_ipc import Client, IpcError
 from test_ota import Simulator, start_grpc, wait_for, PACKAGE, REGISTRY, DEVICE, CAP, UPGRADE_CAP, TYPE_ORIGINS
 
@@ -240,11 +242,11 @@ class ActualExporters(unittest.TestCase):
             f'[runtime]\nstate_dir = "{cls.root}/state"\npoll_seconds = 1\n' +
             f'[ipc]\nsocket = "{cls.socket}"\nadministrators = [0]\n' +
             '[ipc.components.untrusted]\nuid = 62003\noperations = ["stream_read", "stream_describe"]\nstreams = ["*"]\n' +
-            '[ipc.components.exporter]\nuid = 62004\noperations = ["stream_read", "stream_describe", "stream_export_ack"]\nstreams = ["*"]\n' +
+            '[ipc.components.exporter]\nuid = 62004\noperations = ["stream_read", "stream_describe", "stream_export_ack", "stream_export_status"]\nstreams = ["*"]\n' +
             '[streams]\nmax_streams = 32\nmax_total_bytes = 536870912\n' +
             ''.join(f'[[streams.definitions]]\nname = "test{i}"\nmax_size = 16777216\n' +
                     'strategy_on_full = "RejectNewData"\nexternal_export = true\ndiscard_exported = true\n'
-                    for i in range(24)))
+                    for i in range(32)))
         cls.log = (cls.root / 'daemon.log').open('a')
         cls.start()
         cls.index = 0
@@ -307,6 +309,280 @@ class ActualExporters(unittest.TestCase):
 
     def checkpoint(self):
         return self.source.stream_describe(self.stream)['exported']
+
+    def customer(self, service='http'):
+        self.config.update(service=service, destination='bucket/exclusive/')
+        if service == 'customer_s3':
+            secret = Path(self.temp.name) / 'credentials.json'
+            secret.write_text(json.dumps(dict(access_key_id='LOCALACCESS', secret_access_key='local-secret',
+                                             session_token='local-token')))
+            secret.chmod(0o600)
+            self.config['credentials_file'] = str(secret)
+        return self.open()
+
+    def test_customer_s3_private_credentials_and_recovery(self):
+        self.append([{'temperature': 42}, {'temperature': 43}])
+        exporter = self.customer('customer_s3')
+        exporter.step()
+        self.assertGreaterEqual(self.checkpoint(), 1)
+        self.assertTrue(self.emu.objects)
+        self.assertTrue(all(s.startswith('AWS4-HMAC-SHA256 Credential=LOCALACCESS/')
+                            for s in self.emu.signatures))
+        exporter.report(True)
+        status = self.source.stream_describe(self.stream)['external_export_status']
+        self.assertEqual(status['consecutive_failures'], 1)
+        exporter = self.open()
+        self.assertEqual(exporter.state['status']['failures'], 1)
+        exporter.report(False)
+        self.assertEqual(self.source.stream_describe(self.stream)['external_export_status']['consecutive_failures'], 0)
+
+    def test_customer_idle_polls_do_not_write_or_report(self):
+        for service in ('http', 'customer_s3'):
+            with self.subTest(service=service):
+                exporter = self.customer(service)
+                def idle_polls():
+                    polls = []
+                    def sleep(delay):
+                        polls.append(delay)
+                        if len(polls) == 10:
+                            raise KeyboardInterrupt()
+                    exporter.sleep = sleep
+                    with patch('suifleet_stream_export.atomic') as atomic, patch.object(
+                            exporter.source, 'request', wraps=exporter.source.request) as request:
+                        with self.assertRaises(KeyboardInterrupt):
+                            exporter.run()
+                        atomic.assert_not_called()
+                        self.assertFalse(any(call.args[0] == 'stream_export_status'
+                                             for call in request.call_args_list))
+                    self.assertEqual(polls, [self.config['poll_seconds']] * 10)
+                idle_polls()
+                exporter.report(True)
+                with patch('suifleet_stream_export.atomic', wraps=atomic_checkpoint) as atomic:
+                    exporter.report(False)
+                    self.assertEqual(atomic.call_count, 1)
+                status = self.source.stream_describe(self.stream)['external_export_status']
+                self.assertEqual((status['failures'], status['consecutive_failures']), (1, 0))
+                idle_polls()
+                # Persisted healthy counters remain quiet after exporter restart too.
+                exporter = self.open()
+                idle_polls()
+                exporter.lock.close()
+                # Each service needs its own config-bound checkpoint.
+                exporter.path.unlink()
+
+    def test_customer_backoff_reports_failures_without_advancing(self):
+        self.append([{'retain': 'during outage'}])
+        exporter = self.customer('customer_s3')
+        self.emu.mode = 'denied'
+        backoffs = []
+        def sleep(delay):
+            if delay >= 1:
+                backoffs.append(delay)
+                if len(backoffs) == 5:
+                    raise KeyboardInterrupt()
+        exporter.sleep = sleep
+        with self.assertRaises(KeyboardInterrupt):
+            exporter.run()
+        self.assertEqual(backoffs, [1, 2, 4, 8, 8])
+        self.assertEqual(self.checkpoint(), -1)
+        status = self.source.stream_describe(self.stream)['external_export_status']
+        self.assertEqual((status['failures'], status['consecutive_failures']), (5, 5))
+        exporter = self.open()
+        self.assertEqual(exporter.state['status']['failures'], 5)
+        self.emu.mode = 'ok'
+        exporter.step()
+        exporter.report(False, True)
+        self.assertEqual(self.source.stream_describe(self.stream)['external_export_status']['consecutive_failures'], 0)
+
+    def test_customer_secret_permissions_and_no_fallback(self):
+        self.customer('customer_s3').lock.close()
+        path = Path(self.config['credentials_file'])
+        for mode in (0o644, 0o640):
+            path.chmod(mode)
+            with self.assertRaises(ValueError):
+                self.open()
+        path.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.open()
+        # No default/container credentials may substitute for the customer file.
+        self.assertFalse(self.emu.calls)
+        target = Path(self.temp.name) / 'actual-secret'
+        target.write_text('secret')
+        target.chmod(0o600)
+        path.symlink_to(target)
+        with self.assertRaises(OSError):
+            private_secret(path)
+        path.unlink()
+        path.write_bytes(b'x' * 16385)
+        path.chmod(0o600)
+        with self.assertRaises(ValueError):
+            private_secret(path)
+
+    def test_customer_http_lost_reply_restart_and_health(self):
+        received, headers = [], []
+        mode = ['lost']
+        class HTTP(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                received.append(self.rfile.read(int(self.headers['Content-Length'])))
+                headers.append(dict(self.headers))
+                if mode[0] == 'lost':
+                    self.connection.close()
+                    return
+                self.send_response(int(mode[0]))
+                if mode[0] == '307':
+                    self.send_header('Location', '/redirect-must-not-follow')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), HTTP)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            self.config['endpoint'] = f'http://127.0.0.1:{server.server_port}/ingest'
+            token = Path(self.temp.name) / 'token'
+            token.write_text('private-customer-token')
+            token.chmod(0o600)
+            self.config['bearer_token_file'] = str(token)
+            self.append([{'data': 7}])
+            exporter = self.customer()
+            with self.assertRaises(Exception):
+                exporter.step()
+            exporter.report(True)
+            self.assertEqual(self.checkpoint(), -1)
+            self.assertIsNotNone(exporter.state['pending'])
+            exporter = self.open()
+            mode[0] = '307'
+            with self.assertRaises(Exception):
+                exporter.step()
+            self.assertEqual(len(received), 2, 'redirect must not be followed')
+            mode[0] = '503'
+            with self.assertRaises(Exception):
+                exporter.step()
+            mode[0] = '204'
+            exporter.step()
+            exporter.report(False, True)
+            self.assertEqual(self.checkpoint(), 0)
+            self.assertEqual(len(set(received)), 1)
+            self.assertEqual(len({h['Idempotency-Key'] for h in headers}), 1)
+            self.assertEqual(headers[-1]['Authorization'], 'Bearer private-customer-token')
+            self.assertEqual(json.loads(received[-1])['payload'], {'data': 7})
+            status = self.source.stream_describe(self.stream)['external_export_status']
+            self.assertEqual(status['consecutive_failures'], 0)
+            self.assertIsNotNone(status['last_success_ms'])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_customer_http_tls_validation_and_no_key_logging(self):
+        cert = Path(self.temp.name) / 'tls.crt'
+        key = Path(self.temp.name) / 'tls.key'
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                        '-keyout', str(key), '-out', str(cert), '-subj', '/CN=localhost',
+                        '-addext', 'subjectAltName=IP:127.0.0.1'], check=True, capture_output=True)
+        received = []
+        class HTTPS(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_POST(self):
+                received.append(self.rfile.read(int(self.headers['Content-Length'])))
+                self.send_response(204)
+                self.end_headers()
+        server = ThreadingHTTPServer(('127.0.0.1', 0), HTTPS)
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(str(cert), str(key))
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            self.config['endpoint'] = f'https://127.0.0.1:{server.server_port}/ingest'
+            self.append([{'tls': 'verified'}])
+            exporter = self.customer()
+            with self.assertRaises(Exception):
+                exporter.step()
+            self.assertEqual(self.checkpoint(), -1)
+            self.assertFalse(received, 'untrusted TLS must not receive payload')
+            os.environ['SSL_CERT_FILE'] = str(cert)
+            os.environ['SSLKEYLOGFILE'] = str(Path(self.temp.name) / 'tls-keylog')
+            exporter.step()
+            self.assertEqual(self.checkpoint(), 0)
+            self.assertEqual(len(received), 1)
+            self.assertFalse(Path(os.environ['SSLKEYLOGFILE']).exists())
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_customer_endpoint_and_secret_validation(self):
+        self.config.update(service='customer_s3', destination='bucket/exclusive/',
+                           credentials_file='/private/credentials')
+        for url in ('http://remote.example', 'https://user:secret@example.com',
+                    'https://example.com/?token=secret', 'file:///private/key', 'https://example.com/#fragment'):
+            with self.assertRaises(ValueError):
+                validate(dict(self.config, endpoint=url))
+        for url in ('https://storage.example.com', 'https://account.r2.cloudflarestorage.com',
+                    'http://127.0.0.1:9000'):
+            validate(dict(self.config, endpoint=url))
+
+    def test_customer_s3_minio_readback_and_restart(self):
+        import boto3
+        binary = ROOT / '.ci-cache/minio-bin/minio'
+        if not binary.is_file():
+            self.fail('build pinned MinIO with scripts/test_stream_export.sh first')
+        # A private network-none namespace and ephemeral port, no shared server.
+        with socket.socket() as reserve:
+            reserve.bind(('127.0.0.1', 0))
+            port = reserve.getsockname()[1]
+        certs = Path(self.temp.name) / 'certs'
+        certs.mkdir()
+        cert, key = certs / 'public.crt', certs / 'private.key'
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                        '-keyout', str(key), '-out', str(cert), '-subj', '/CN=localhost',
+                        '-addext', 'subjectAltName=IP:127.0.0.1'], check=True, capture_output=True)
+        keylog = Path(self.temp.name) / 's3-tls-keylog'
+        os.environ['SSLKEYLOGFILE'] = str(keylog)
+        os.environ['AWS_CA_BUNDLE'] = str(cert)
+        log = (Path(self.temp.name) / 'minio.log').open('w')
+        process = subprocess.Popen([str(binary), 'server', str(Path(self.temp.name) / 'objects'),
+                                    '--certs-dir', str(certs), '--address', f'127.0.0.1:{port}', '--console-address', '127.0.0.1:0'],
+                                   env={**os.environ, 'MINIO_ROOT_USER': 'LOCALACCESS',
+                                        'MINIO_ROOT_PASSWORD': 'local-secret', 'MINIO_BROWSER': 'off'},
+                                   stdout=log, stderr=log)
+        try:
+            endpoint = f'https://127.0.0.1:{port}'
+            self.config['endpoint'] = endpoint
+            self.append([{'device-data': 'direct'}, {'binary': 'envelope'}])
+            self.customer('customer_s3').lock.close()
+            # MinIO has no STS token for this isolated root fixture.
+            secret = Path(self.config['credentials_file'])
+            secret.write_text(json.dumps(dict(access_key_id='LOCALACCESS', secret_access_key='local-secret')))
+            exporter = self.open()
+            client = boto3.client('s3', endpoint_url=endpoint, region_name='us-east-1',
+                                  aws_access_key_id='LOCALACCESS', aws_secret_access_key='local-secret',
+                                  verify=str(cert))
+            wait_for(lambda: self.minio_ready(client), 'MinIO did not start', process)
+            client.create_bucket(Bucket='bucket')
+            exporter.snapshot()
+            exporter = self.open()  # restart after durable snapshot, before send
+            exporter.step()
+            self.assertEqual(self.checkpoint(), 1)
+            objects = client.list_objects_v2(Bucket='bucket')['Contents']
+            self.assertEqual(len(objects), 1)
+            body = client.get_object(Bucket='bucket', Key=objects[0]['Key'])['Body'].read()
+            self.assertEqual([json.loads(line)['payload'] for line in body.splitlines()],
+                             [{'device-data': 'direct'}, {'binary': 'envelope'}])
+            self.assertFalse(self.open().step(), 'restart must not export acknowledged data again')
+            self.assertFalse(keylog.exists(), 'customer S3 must disable inherited TLS key logging')
+        finally:
+            process.terminate()
+            process.wait(timeout=30)
+            log.close()
+
+    @staticmethod
+    def minio_ready(client):
+        try:
+            client.list_buckets()
+            return True
+        except Exception:
+            return False
 
     def test_partial_batch_restart_only_retries_failed_records(self):
         self.append([{'n': n} for n in range(3)])
@@ -465,6 +741,12 @@ except IpcError as error:
     assert str(error)=='request_failed'
 else:
     raise AssertionError('untrusted ack allowed')
+try:
+    client.stream_export_status(sys.argv[3], 0, 0, 0)
+except IpcError as error:
+    assert str(error)=='request_failed'
+else:
+    raise AssertionError('untrusted health report allowed')
 try:
     client.stream_create('forged', 4096)
 except IpcError as error:

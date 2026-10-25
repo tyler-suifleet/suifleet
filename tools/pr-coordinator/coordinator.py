@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Persistent local reciprocal PR reviews. GitHub is never a model identity oracle."""
 import argparse
+from datetime import date, datetime
 import fcntl
 import hashlib
 import json
@@ -12,8 +13,14 @@ import sqlite3
 import subprocess
 import time
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 MARKER = '<!-- pr-coordinator -->'
+# SF-145: hosted CI is the coordinator's job; a model polling it only burns quota.
+CI_HANDOFF = ('Do NOT wait for, watch or poll hosted CI (no sleep/watch loops, monitors or background watchers): '
+              'record the pushed head and that hosted CI is pending in your evidence, then hand off. Pending CI is never '
+              'approval: the coordinator enforces exact-head/base checks, independent review and merge gates, and '
+              'dispatches CI repair if a check fails.')
 FAMILIES = {'Codex', 'Claude'}
 
 
@@ -156,11 +163,34 @@ def checks_blocker(pr):
     return None
 
 
+TESTNET_CONTEXT = 'testnet/package-upgrade'
+RUN_URL = re.compile(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+')
+TESTNET_DESCRIPTION = re.compile(r'base:([0-9a-f]{40})(?: class:([a-z]{1,20}))?')
+
+
+def testnet_failure(pr):
+    """The exact-head automatic testnet failure for the current base, or None.
+
+    Commit statuses are per head and the combined status keeps only the newest
+    per context, so a queued/running rerun (pending), a cancelled run (error),
+    a stale base or a status without a durable Actions run never qualifies."""
+    status = pr.get('_testnet_status') or {}
+    if status.get('state') != 'failure':
+        return None
+    match = TESTNET_DESCRIPTION.fullmatch(status.get('description') or '')
+    url = status.get('target_url') or ''
+    if not match or match.group(1) != pr.get('baseRefOid') or not RUN_URL.fullmatch(url):
+        return None
+    return {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
+            'detailsUrl': url, 'startedAt': status.get('created_at'), 'completedAt': status.get('updated_at'),
+            'classification': match.group(2) or 'source'}
+
+
 def failed_checks(pr):
     """Only actionable completed runs with a durable evidence link can start repair.
 
     Every reported check is a merge requirement under this coordinator's policy.
-    Status errors, cancelled runs and missing infrastructure evidence stay blockers,
+    Status errors, cancelled runs and unlinked failures stay blockers,
     but cannot safely identify a source repair. Rollups can contain old reruns:
     select the newest observation per workflow/name before considering failures.
     """
@@ -190,7 +220,16 @@ def failed_checks(pr):
                 and check.get('detailsUrl')):
             failures.append({key: check.get(key) for key in
                              ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+    testnet = testnet_failure(pr)
+    if testnet:
+        failures.append(testnet)
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
+
+
+def ci_check_keys(pr):
+    # A source failure episode follows the check across head/base/run changes.
+    return sorted({json.dumps([row.get('workflowName', ''), row['name']], separators=(',', ':'))
+                   for row in pr['_ci_repair']})
 
 
 def repair_feedback(pr):
@@ -307,7 +346,13 @@ class Store:
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
+          CREATE TABLE IF NOT EXISTS repair_handoffs (job INTEGER PRIMARY KEY, state TEXT, error TEXT, updated REAL);
+          CREATE TABLE IF NOT EXISTS quota_recoveries (
+            job INTEGER, attempt INTEGER, source TEXT, reset REAL, state TEXT, replacement TEXT,
+            reason TEXT, updated REAL, PRIMARY KEY(job,attempt));
         ''')
+
+        self.migrate_check_budgets()
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
         for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT'),('repair_claim','TEXT')]:
@@ -329,6 +374,46 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    def migrate_check_budgets(self):
+        """Attribute legacy attempts only when durable snapshots verify their scope.
+
+        An atomic additive migration leaves an unknown-history wildcard fence;
+        it never silently grants more attempts after missing/corrupt evidence.
+        """
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_check_budget'").fetchone():
+                self.db.execute('COMMIT'); return
+            self.db.execute("CREATE TABLE ci_check_budget (project TEXT, pr INTEGER, check_key TEXT, "
+                            "attempts INTEGER, retry_after REAL, PRIMARY KEY(project,pr,check_key))")
+            for budget in self.db.execute('SELECT * FROM ci_repair_budget').fetchall():
+                count = budget['attempts']
+                receipts = self.db.execute(
+                    'SELECT r.*,j.directory FROM ci_repairs r LEFT JOIN jobs j ON j.id=r.job '
+                    'WHERE r.project=? AND r.pr=? ORDER BY r.created DESC LIMIT ?',
+                    (budget['project'], budget['pr'], count)).fetchall()
+                checks = {}
+                try:
+                    if count != len(receipts): raise ValueError('incomplete history')
+                    for receipt in receipts:
+                        snapshot = json.loads((Path(receipt['directory'])/'snapshot.json').read_text())
+                        if (snapshot['headRefOid'] != receipt['head'] or snapshot['baseRefOid'] != receipt['base']
+                                or repair_feedback(snapshot) != receipt['evidence']):
+                            raise ValueError('unverified history')
+                        keys = ci_check_keys(snapshot)
+                        if not keys: raise ValueError('missing check scope')
+                        for key in keys:
+                            old_count, old_deadline = checks.get(key, (0, 0))
+                            checks[key] = (old_count+1, max(old_deadline, receipt['retry_after'] or 0))
+                except (OSError, ValueError, KeyError, TypeError):
+                    checks = {'*': (count, budget['retry_after'])}
+                for key, (attempts, deadline) in checks.items():
+                    self.db.execute('INSERT INTO ci_check_budget VALUES(?,?,?,?,?)',
+                                    (budget['project'], budget['pr'], key, attempts, deadline))
+            self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
     def ci_repair_blocker(self, project, pr):
         rows = self.db.execute(
             'SELECT * FROM ci_repairs WHERE project=? AND pr=? AND head=? AND base=? ORDER BY created DESC',
@@ -336,19 +421,20 @@ class Store:
         evidence = repair_feedback(pr)
         if any(row['evidence'] == evidence for row in rows):
             return 'CI failure already reserved; inspect existing repair receipt (no automatic replay)'
-        budget = self.db.execute('SELECT attempts,retry_after FROM ci_repair_budget WHERE project=? AND pr=?',
-                                 (project, pr['number'])).fetchone()
-        if budget and budget['attempts'] >= 3:
-            return 'CI repair limit reached (3 attempts); owner must inspect failure and explicitly recover'
-        if budget and budget['retry_after'] > time.time():
-            return 'CI repair backoff until ' + str(budget['retry_after'])
+        for key in ['*', *ci_check_keys(pr)]:
+            budget = self.db.execute('SELECT attempts,retry_after FROM ci_check_budget '
+                                     'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+            if budget and budget['attempts'] >= 3:
+                return 'CI repair limit reached (3 attempts for this check); owner must inspect failure and explicitly recover'
+            if budget and (budget['retry_after'] or 0) > time.time():
+                return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
 
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
-            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined') AND project=? AND pr=?", (project, pr['number'])).fetchone()
-            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned') AND family=? AND kind=?", (family, kind)).fetchone()[0]
+            active = self.db.execute("SELECT 1 FROM jobs WHERE status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch') AND project=? AND pr=?", (project, pr['number'])).fetchone()
+            count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned','quota_launch') AND family=? AND kind=?", (family, kind)).fetchone()[0]
             limit = self.worker_limits.get(family, {}).get(kind, 1)
             quarantine_count = self.db.execute("SELECT COUNT(*) FROM jobs WHERE status='quarantined' AND family=? AND kind=?", (family,kind)).fetchone()[0]
             pause = self.db.execute('SELECT retry_after FROM quarantine_backoff WHERE family=? AND kind=?', (family,kind)).fetchone()
@@ -370,6 +456,13 @@ class Store:
                 deadline = time.time() + min(3600, 300 * 2**attempts)
                 self.db.execute('INSERT OR REPLACE INTO ci_repair_budget VALUES(?,?,?,?)',
                                 (project, pr['number'], attempts + 1, deadline))
+                for key in ci_check_keys(pr):
+                    previous_budget = self.db.execute('SELECT attempts FROM ci_check_budget '
+                        'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+                    check_attempts = previous_budget['attempts'] if previous_budget else 0
+                    check_deadline = time.time() + min(3600, 300 * 2**check_attempts)
+                    self.db.execute('INSERT OR REPLACE INTO ci_check_budget VALUES(?,?,?,?,?)',
+                        (project, pr['number'], key, check_attempts+1, check_deadline))
                 self.db.execute('INSERT INTO ci_repairs VALUES(?,?,?,?,?,?,?,?)',
                     (project, pr['number'], pr['headRefOid'], pr['baseRefOid'], fingerprint,
                      cursor.lastrowid, time.time(), deadline))
@@ -441,6 +534,142 @@ def worker_stopped(pid, started):
         return True
     except (OSError, ValueError, IndexError):
         return False
+
+
+TERMINAL_LOG_BYTES = 32768
+QUOTA_GRACE = 120          # seconds after the provider's stated reset before a same-claim retry
+QUOTA_RETRIES = 4          # quota recoveries per claim (implementation) or per repair job
+QUOTA_SKEW = 300           # a reset this far before the exit receipt still counts as that window
+QUOTA_SESSION_HORIZON = 6*3600     # session windows reset within five hours
+QUOTA_DATED_HORIZON = 8*86400      # weekly limits name a date within a week
+MONTHS = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+# Observed Claude CLI terminal text (2026-10-23):
+#   You've hit your session limit · resets 4:30pm (America/Los_Angeles)
+# Weekly limits additionally name the day. Anything else (usage/auth/billing
+# text, unknown zones, missing times) is not a validated reset.
+QUOTA_LIMIT = re.compile("You've hit your (session|weekly|Opus weekly) limit · resets "
+                         "(?:(" + '|'.join(MONTHS) + ") ([1-9]|[12][0-9]|3[01]), )?"
+                         r"([1-9]|1[0-2])(?::([0-5][0-9]))?(am|pm) \(([A-Za-z]+(?:/[A-Za-z0-9_+-]+){1,2}|UTC)\)")
+
+
+def terminal_lines(directory):
+    """Nonblank lines of a stopped worker's bounded log tail, or None.
+
+    Only an actual nonzero, non-signal, non-timeout wrapper receipt without a
+    result qualifies. A truncated first line is never accepted as complete."""
+    directory = Path(directory)
+    receipt = directory/'exit.json'
+    if receipt.stat().st_size > 1024 or (directory/'result.json').exists():
+        return None
+    value = json.loads(receipt.read_text())
+    if (not isinstance(value, dict) or set(value) != {'returncode'}
+            or type(value['returncode']) is not int or not 1 <= value['returncode'] < 124):
+        return None
+    with (directory/'worker.log').open('rb') as stream:
+        size = stream.seek(0, 2)
+        stream.seek(max(0, size-TERMINAL_LOG_BYTES))
+        data = stream.read(TERMINAL_LOG_BYTES)
+    if size > TERMINAL_LOG_BYTES:
+        data = data.split(b'\n', 1)[-1]
+    return [line.rstrip() for line in data.decode('utf-8', errors='replace').splitlines() if line.strip()] or None
+
+
+def _quota_reset(directory, now):
+    lines = terminal_lines(directory)
+    if not lines:
+        return None
+    # Only the final terminal line: earlier assistant text, quoted logs or a
+    # later unrelated error never qualify.
+    match = QUOTA_LIMIT.fullmatch(lines[-1])
+    if match is None:
+        try:
+            terminal = json.loads(lines[-1])
+        except ValueError:
+            return None
+        if (not isinstance(terminal, dict) or terminal.get('type') != 'result' or terminal.get('is_error') is not True
+                or not isinstance(terminal.get('result'), str)):
+            return None
+        match = QUOTA_LIMIT.fullmatch(terminal['result'])
+        if match is None:
+            return None
+    kind, month, day, hour, minute, half, zone = match.groups()
+    # The message has no date or year: anchor it to the durable exit receipt.
+    stopped = (Path(directory)/'exit.json').stat().st_mtime
+    if stopped > now + QUOTA_SKEW:
+        return None
+    zone = ZoneInfo(zone)
+    local = datetime.fromtimestamp(stopped, zone)
+    hour, minute = int(hour) % 12 + (12 if half == 'pm' else 0), int(minute or 0)
+    if month is None:
+        if kind != 'session':
+            return None  # A weekly reset without its day is unknown.
+        days = [date.fromordinal(local.date().toordinal()+n) for n in (0, 1)]
+        horizon = QUOTA_SESSION_HORIZON
+    else:
+        days = []
+        for year in (local.year, local.year+1):
+            try:
+                days.append(date(year, MONTHS.index(month)+1, int(day)))
+            except ValueError:
+                continue
+        horizon = QUOTA_DATED_HORIZON
+    for candidate in days:
+        reset = datetime(candidate.year, candidate.month, candidate.day, hour, minute, tzinfo=zone).timestamp()
+        if -QUOTA_SKEW <= reset - stopped <= horizon:
+            return reset
+    return None
+
+
+def quota_reset(directory, now=None):
+    """Epoch of an explicit, bounded provider quota reset, or None (never guessed)."""
+    try:
+        return _quota_reset(directory, time.time() if now is None else now)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+
+
+def claim_processes(token, started):
+    """Live same-user processes started after `started` that carry the claim token.
+
+    A same-user process whose environment or command line cannot be read (for
+    example a nondumpable helper) is reported as `uninspectable`: denied
+    inspection is an unknown outcome, never proof that no same-claim process exists.
+    """
+    found = []
+    marker = ('PR_COORDINATOR_CLAIM_TOKEN='+token).encode()
+    for path in Path('/proc').iterdir():
+        if not path.name.isdigit() or int(path.name) == os.getpid():
+            continue
+        fields = None
+        try:
+            if path.stat().st_uid != os.getuid():
+                continue
+            fields = (path/'stat').read_text().rsplit(')', 1)[1].split()
+            if fields[0] in 'ZX' or int(fields[19]) < int(started):
+                continue
+            if marker in (path/'environ').read_bytes().split(b'\0') or token.encode() in (path/'cmdline').read_bytes():
+                found.append(dict(pid=int(path.name), started=fields[19]))
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        except PermissionError:
+            found.append(dict(pid=int(path.name), started=fields[19] if fields else None, uninspectable=True))
+    return found
+
+
+def uninspectable_reason(found):
+    """Name denied-inspection processes so an operator can stop one or recover explicitly."""
+    hidden = []
+    for process in found:
+        if process.get('uninspectable'):
+            try:
+                name = Path(f"/proc/{process['pid']}/comm").read_text().strip()
+            except OSError:
+                name = '?'
+            hidden.append(f"{process['pid']} {name}")
+    if hidden:
+        return ('an uninspectable same-user process may carry the claim token (pid '+', '.join(hidden)
+                +'); stop it or recover explicitly')
+    return None
 
 
 class Coordinator:
@@ -722,15 +951,194 @@ Do not edit the coordinator database or forge another model's review. Only this 
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
         if pr.get('_ci_repair'):
-            common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required.\n'
+            common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required. Infrastructure, funding and uncertain-transaction classifications still have a repair owner: diagnose/reconcile them within the existing authorization and strict spend limits; do not erase uncertain state, blindly replay mutations, increase retries forever, fabricate success or park merely because the failure came from a service. Coordinate shared harness fixes in the existing PRs.\n'
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
-The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head and required checks; if blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
+The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the current base and that the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
 
+    def record_quota(self, project, row, reset):
+        """Defer a verified-stopped repair to its provider quota reset under the same claim."""
+        attempt = self.store.db.execute('SELECT COUNT(*)+1 FROM quota_recoveries WHERE job=?', (row['id'],)).fetchone()[0]
+        if attempt > QUOTA_RETRIES:
+            return False
+        now = time.time()
+        retry_after = max(now, reset+QUOTA_GRACE)
+        when = datetime.fromtimestamp(reset).astimezone().isoformat(timespec='minutes')
+        reason = f'provider quota limit; same-claim repair retry {attempt}/{QUOTA_RETRIES} after reset at {when}'
+        self.store.db.execute('BEGIN IMMEDIATE')
+        try:
+            self.store.db.execute('INSERT INTO quota_recoveries VALUES(?,?,?,?,?,?,?,?)',
+                                  (row['id'], attempt, row['directory'], reset, 'waiting', None, reason, now))
+            self.store.db.execute("UPDATE jobs SET status='quota_wait',error=?,retry_after=? WHERE id=?",
+                                  (reason, retry_after, row['id']))
+            self.store.db.execute('COMMIT')
+        except BaseException:
+            self.store.db.execute('ROLLBACK'); raise
+        print(f"{project['id']} PR#{row['pr']}: repair stopped on provider quota; {reason}", flush=True)
+        return True
+
+    def adopt_quota_launch(self, row):
+        """A launch intent interrupted by a service crash is adopted or held, never replayed."""
+        record = self.store.db.execute("SELECT * FROM quota_recoveries WHERE job=? AND state='launch_intent'",
+                                       (row['id'],)).fetchone()
+        process = Path(record['replacement'])/'process.json' if record and record['replacement'] else None
+        if process is not None and process.exists():
+            identity = json.loads(process.read_text())
+            self.store.db.execute("UPDATE jobs SET status='running',directory=?,pid=?,started=?,error=NULL WHERE id=?",
+                                  (record['replacement'], identity['pid'], identity['started'], row['id']))
+            state, reason = 'launched', 'replacement adopted from its process receipt after restart'
+        else:
+            self.store.db.execute("UPDATE jobs SET status='orphaned',pid=NULL,started=NULL,error=? WHERE id=?",
+                                  ('quota recovery launch uncertain; explicit recovery required', row['id']))
+            state, reason = 'uncertain', 'interrupted launch without a process receipt; never replayed'
+        if record:
+            self.store.db.execute('UPDATE quota_recoveries SET state=?,reason=?,updated=? WHERE job=? AND attempt=?',
+                                  (state, reason, time.time(), row['id'], record['attempt']))
+
+    def quota_fence(self, project, row, intent, source):
+        """(owner, reason): read-only same-claim fences checked immediately before relaunch."""
+        owner = json.loads(self.ticket(project, 'show', intent['key']))
+        snapshot = json.loads((source/'snapshot.json').read_text()).get('ticket') or {}
+        token = owner.get('token')
+        if (owner.get('status') != 'in_progress' or owner.get('publish_pending')
+                or not isinstance(token, str) or not token
+                or hashlib.sha256(token.encode()).hexdigest() != intent['claim']
+                or owner.get('agent') != row['family'] or owner.get('agent') != snapshot.get('agent')
+                or owner.get('model') != snapshot.get('model')
+                or any(owner.get(k) != intent[k] for k in ('key', 'branch', 'worktree'))):
+            return None, 'ownership changed'
+        self.ticket(project, 'assert', intent['key'], '--token', token)
+        if json.loads((source/'command.json').read_text()) != self.config['workers'][row['family']]:
+            return owner, 'configured worker command changed'
+        if (not worker_stopped(row['pid'], row['started'])
+                or json.loads((source/'process.json').read_text()) != dict(pid=row['pid'], started=row['started'])):
+            return owner, 'original repair process identity not verified stopped'
+        if found := claim_processes(token, row['started']):
+            return owner, uninspectable_reason(found) or 'a live process still carries the claim token'
+        now = time.time()
+        for lock in json.loads(self.ticket(project, 'locks')):
+            if lock.get('expired') or (lock.get('expires') or 0) <= now:
+                continue
+            named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+', f"{lock.get('session') or ''} {lock.get('purpose') or ''}".upper())
+            if (lock.get('session') == owner.get('session') or str(lock.get('ticket') or '').split('::')[-1] == intent['key']
+                    or intent['key'] in named):
+                return owner, 'the claim still holds a shared-resource lease'
+        worktree = Path(intent['worktree'])
+        if run(['git', 'branch', '--show-current'], cwd=worktree).strip() != intent['branch']:
+            return owner, 'worktree left the repair branch'
+        for operation in ('MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'rebase-merge', 'rebase-apply', 'sequencer', 'index.lock'):
+            path = Path(run(['git', 'rev-parse', '--git-path', operation], cwd=worktree).strip())
+            if (path if path.is_absolute() else worktree/path).exists():
+                return owner, 'worktree has an unfinished git operation'
+        pr = json.loads(self.gh(project, ['pr', 'view', str(row['pr']), '--repo', project['repository'],
+                                          '--json', 'state,isCrossRepository,headRefName']))
+        if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr.get('headRefName') != intent['branch']:
+            return owner, 'PR is no longer the open same-repository repair branch'
+        busy = self.store.db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('reserved','running','orphaned','quota_launch') "
+                                     "AND family=? AND kind='fix' AND id!=?", (row['family'], row['id'])).fetchone()[0]
+        if busy >= self.store.worker_limits.get(row['family'], {}).get('fix', 1):
+            return owner, 'waiting for configured repair capacity'
+        return owner, None
+
+    def resume_quota(self, project, row):
+        """Relaunch one same-family repair under the unchanged claim once the reset passed.
+
+        Dirty/staged/untracked work and pushed commits are preserved; the new
+        worker continues them. Any doubt keeps the job waiting or retained."""
+        intent = json.loads(row['repair_claim'])
+        record = self.store.db.execute("SELECT * FROM quota_recoveries WHERE job=? AND state='waiting' ORDER BY attempt DESC",
+                                       (row['id'],)).fetchone()
+        if record is None or record['source'] != row['directory']:
+            self.store.db.execute("UPDATE jobs SET status='orphaned',error=? WHERE id=?",
+                                  ('quota recovery record missing; explicit recovery required', row['id']))
+            return
+        source = Path(row['directory'])
+        if row['retry_after'] > time.time():
+            # Before the reset only keep the unchanged retained claim alive; no remote PR reads.
+            try:
+                owner = json.loads(self.ticket(project, 'show', intent['key']))
+                token = owner.get('token')
+                if (owner.get('status') == 'in_progress' and isinstance(token, str) and token
+                        and hashlib.sha256(token.encode()).hexdigest() == intent['claim']):
+                    self.ticket(project, 'assert', intent['key'], '--token', token)
+                    self.ticket(project, 'heartbeat', intent['key'], '--token', token)
+            except (OSError, ValueError, subprocess.CalledProcessError):
+                pass  # An expired or unavailable claim is never renewed here; the fence decides at the reset.
+            return
+        try:
+            owner, reason = self.quota_fence(project, row, intent, source)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.CalledProcessError) as error:
+            owner, reason = True, f'verification unavailable ({type(error).__name__}); nothing launched'
+        if owner is None:
+            # Authoritative ownership transition: stop waiting; the stopped receipt stays for inspection.
+            self.store.db.execute("UPDATE jobs SET status='quarantined',error=? WHERE id=?",
+                                  ('quota recovery cancelled: ownership/status changed; inspect receipt', row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='cancelled',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  ('ownership/status changed', time.time(), row['id'], record['attempt']))
+            return
+        if reason:
+            if owner is not True:
+                self.ticket(project, 'heartbeat', intent['key'], '--token', owner['token'])
+            self.store.db.execute('UPDATE quota_recoveries SET reason=?,updated=? WHERE job=? AND attempt=?',
+                                  (reason, time.time(), row['id'], record['attempt']))
+            return
+        self.ticket(project, 'heartbeat', intent['key'], '--token', owner['token'])
+        base = source.parent if source.name.startswith('quota-') else source
+        directory = base/f"quota-{record['attempt']}"
+        self.store.db.execute('BEGIN IMMEDIATE')
+        try:
+            changed = self.store.db.execute("UPDATE jobs SET status='quota_launch' WHERE id=? AND status='quota_wait'",
+                                            (row['id'],)).rowcount
+            if changed:
+                self.store.db.execute("UPDATE quota_recoveries SET state='launch_intent',replacement=?,updated=? "
+                                      "WHERE job=? AND attempt=? AND state='waiting'",
+                                      (str(directory), time.time(), row['id'], record['attempt']))
+            self.store.db.execute('COMMIT')
+        except BaseException:
+            self.store.db.execute('ROLLBACK'); raise
+        if not changed:
+            return
+        # Crossing the intent makes any failure ambiguous: never automatically replay it.
+        try:
+            directory.mkdir(mode=0o700)
+            snapshot = json.loads((source/'snapshot.json').read_text())
+            (directory/'snapshot.json').write_text(json.dumps(snapshot, indent=2))
+            preface = (f"Your previous repair worker stopped on an explicit provider quota limit whose stated reset has now passed. "
+                       f"Original evidence: {source}.\nContinue the SAME retained claim on the existing branch/worktree. Inspect git status, "
+                       "git log and the current PR first: earlier commits may already be pushed and staged, dirty or untracked work must be "
+                       "preserved. Do not claim, recover, release, reset, clean or switch models. Snapshot facts may be stale; revalidate them.\n")
+            prompt = preface + self.prompt(project, snapshot, owner, 'fix', row['family'], directory, directory/'result.json')
+            command = self.config['workers'][row['family']]
+            token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', project['github_account']]).strip()
+            env = {**os.environ, 'PR_COORDINATOR_ACTIVE': '1', 'GH_TOKEN': token, 'PR_COORDINATOR_CLAIM_TOKEN': owner['token']}
+            (directory/'command.json').write_text(json.dumps(command))
+            (directory/'prompt.txt').write_text(prompt)
+            child = subprocess.Popen(['/usr/bin/python3', str(Path(__file__).with_name('worker.py')), str(directory)],
+                                     cwd=intent['worktree'], env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL, start_new_session=True)
+            self.children[row['id']] = child
+            self.store.db.execute("UPDATE jobs SET status='running',directory=?,pid=?,started=?,error=NULL WHERE id=?",
+                                  (str(directory), child.pid, process_identity(child.pid), row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='launched',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  ('same family/model repair resumed under unchanged claim', time.time(), row['id'], record['attempt']))
+            print(f"{project['id']} PR#{row['pr']}: resumed {row['family']} repair after provider quota reset", flush=True)
+        except Exception as error:
+            # Clearing the stopped original identity keeps the possible replacement held, never auto-quarantined.
+            self.store.db.execute("UPDATE jobs SET status='orphaned',pid=NULL,started=NULL,error=? WHERE id=?",
+                                  ('quota recovery launch uncertain; explicit recovery required', row['id']))
+            self.store.db.execute("UPDATE quota_recoveries SET state='uncertain',reason=?,updated=? WHERE job=? AND attempt=?",
+                                  (f'replacement launch uncertain ({type(error).__name__}); never replayed', time.time(), row['id'], record['attempt']))
+
     def collect(self, project, owners):
-        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned')", (project['id'],)).fetchall()
+        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status IN ('running','reserved','retry','orphaned','quota_wait','quota_launch')", (project['id'],)).fetchall()
         for row in rows:
             try:
+                if row['status'] == 'quota_launch':
+                    self.adopt_quota_launch(row)
+                    continue
+                if row['status'] == 'quota_wait':
+                    self.resume_quota(project, row)
+                    continue
                 if row['status'] == 'orphaned':
                     if worker_stopped(row['pid'], row['started']):
                         self.store.quarantine(row)
@@ -794,6 +1202,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     retry = row['kind'] == 'review' and receipt_path.exists() and process_identity(row['pid']) != row['started']
                     status = 'retry' if retry else 'orphaned'
                     delay = min(3600,300*(2**min(row['attempts'],4)))
+                    # SF-145: an explicit provider quota reset is never retried before that time.
+                    reset = quota_reset(row['directory']) if receipt_path.exists() else None
+                    if reset is not None and retry:
+                        delay = max(delay, reset+QUOTA_GRACE-time.time())
+                    elif reset is not None and row['kind'] == 'fix' and row['repair_claim']:
+                        if self.record_quota(project, row, reset):
+                            continue
+                        error = RuntimeError('provider quota retry budget exhausted; claim retained for explicit recovery')
                     self.store.db.execute("UPDATE jobs SET status=?,error=?,retry_after=? WHERE id=?", (status,str(error),time.time()+delay,row['id']))
                     print(f"{project['id']} PR#{row['pr']}: worker needs recovery: {error}", flush=True)
             except Exception as error:
@@ -812,6 +1228,86 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
         # Publication failures must never discard a validated worker result.
         self.publish_results(project)
+        self.reconcile_repair_handoffs(project, owners)
+
+    def reconcile_repair_handoffs(self, project, owners):
+        """Finish a verified stopped repair's ownership handoff, never approve it.
+
+        Result publication and ticket publication are separate retryable actions.
+        No worker is restarted and no worktree content is changed by this method.
+        """
+        candidates = self.store.db.execute(
+            "SELECT j.*,h.state AS handoff_state FROM jobs j LEFT JOIN repair_handoffs h ON h.job=j.id "
+            "WHERE j.project=? AND j.kind='fix' AND j.status='done' AND j.repair_claim IS NOT NULL "
+            "AND (h.state IS NULL OR h.state='pending') "
+            "AND j.id=(SELECT MAX(n.id) FROM jobs n WHERE n.project=j.project AND n.pr=j.pr AND n.kind='fix')",
+            (project['id'],)).fetchall()
+        for row in candidates:
+            try:
+                intent = json.loads(row['repair_claim'])
+                if row['handoff_state'] is None and not any(
+                        o.get('key') == intent['key'] and o.get('status') == 'in_progress' for o in owners):
+                    continue  # A worker that already handed off needs no ticket mutation.
+                self.store.db.execute("INSERT OR IGNORE INTO repair_handoffs VALUES(?,'pending',NULL,?)",
+                                      (row['id'], time.time()))
+                directory = Path(row['directory'])
+                result = normalize_result(json.loads(row['result']))
+                receipt = json.loads((directory/'exit.json').read_text())
+                identity = json.loads((directory/'process.json').read_text())
+                if (receipt.get('returncode') != 0 or identity != dict(pid=row['pid'], started=row['started'])
+                        or not worker_stopped(row['pid'], row['started'])):
+                    raise RuntimeError('repair exit/process receipt is not verified stopped')
+                owner = json.loads(self.ticket(project, 'show', intent['key']))
+                snapshot = json.loads((directory/'snapshot.json').read_text())['ticket']
+                token = owner.get('token')
+                if (not token or hashlib.sha256(token.encode()).hexdigest() != intent['claim']
+                        or any(owner.get(k) != intent[k] for k in ('key','branch','worktree'))
+                        or owner.get('agent') != row['family'] or owner.get('agent') != snapshot['agent']
+                        or owner.get('model') != snapshot['model']):
+                    raise RuntimeError('repair ownership changed; no handoff mutation')
+                if owner['status'] == 'review':
+                    # A previous mirror failure can follow a successful local transition.
+                    if owner.get('publish_pending'): self.ticket(project, 'publish', intent['key'])
+                elif owner['status'] == 'in_progress':
+                    if claim_processes(token, row['started']):
+                        raise RuntimeError('a claim helper is still live or uninspectable')
+                    for lease in json.loads(self.ticket(project, 'locks')):
+                        if lease.get('expired') or (lease.get('expires') or 0) <= time.time(): continue
+                        named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+',
+                                           f"{lease.get('session') or ''} {lease.get('purpose') or ''}".upper())
+                        if (lease.get('session') == owner.get('session')
+                                or str(lease.get('ticket') or '').split('::')[-1] == intent['key'] or intent['key'] in named):
+                            raise RuntimeError('repair still holds a shared-resource lease')
+                    if (run(['git','branch','--show-current'], cwd=intent['worktree']).strip() != intent['branch']
+                            or run(['git','status','--porcelain'], cwd=intent['worktree']).strip()):
+                        raise RuntimeError('repair worktree changed or dirty; preserve it for explicit continuation')
+                    pr = self.pr(project, row['pr'])
+                    if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr['headRefName'] != intent['branch']:
+                        raise RuntimeError('repair PR ownership is no longer current')
+                    # This is a terminal handoff under the same unchanged reservation,
+                    # not permission to edit or restart an expired implementation.
+                    self.ticket(project, 'heartbeat', intent['key'], '--token', token)
+                    self.ticket(project, 'review', intent['key'], '--token', token,
+                                '--text', 'Coordinator verified stopped repair handoff; verdict '
+                                + result['verdict'] + '. This is not approval. ' + result['evidence'])
+                else:
+                    raise RuntimeError('repair claim is not eligible for terminal handoff')
+                self.store.db.execute("UPDATE repair_handoffs SET state='complete',error=NULL,updated=? WHERE job=?",
+                                      (time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: completed repair ownership handed to Review (not approval)", flush=True)
+            except Exception as error:
+                # Keep the real result and stopped receipt; retry publication separately.
+                safe = {'repair exit/process receipt is not verified stopped',
+                        'repair ownership changed; no handoff mutation',
+                        'a claim helper is still live or uninspectable',
+                        'repair still holds a shared-resource lease',
+                        'repair worktree changed or dirty; preserve it for explicit continuation',
+                        'repair PR ownership is no longer current',
+                        'repair claim is not eligible for terminal handoff'}
+                detail = str(error) if type(error) is RuntimeError and str(error) in safe else type(error).__name__
+                self.store.db.execute("UPDATE repair_handoffs SET error=?,updated=? WHERE job=?",
+                                      ('handoff pending: '+detail, time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: terminal repair handoff pending ({detail})", flush=True)
 
     def publish_results(self, project):
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status='done' AND publication_done=0 AND (retry_after IS NULL OR retry_after<=?)", (project['id'],time.time())).fetchall()
@@ -878,6 +1374,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # A verified green snapshot ends this failure episode; head/base
                     # movement and cancelled/pending runs never reset the budget.
                     self.store.db.execute('DELETE FROM ci_repair_budget WHERE project=? AND pr=?',
+                                          (project['id'], pr['number']))
+                    self.store.db.execute('DELETE FROM ci_check_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
                 repair = {**pr, '_ci_repair': failures} if failures else None

@@ -133,6 +133,9 @@ pub struct Definition {
     /// Operator-selected external SDK exporter; never component-created.
     #[serde(default, skip_serializing_if = "is_false")]
     pub external_export: bool,
+    /// Operator-only destination, acknowledged only by verified fleet anchors.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub walrus_export: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export: Option<ExportConfig>,
 }
@@ -158,7 +161,7 @@ pub fn handle(store: &Mutex<Store>, declared: &[String], operation: &str, name: 
         "stream_create" => {
             let mut def = payload.clone();
             let object = def.as_object_mut().ok_or_else(|| StreamError { code: "invalid", oldest: None, detail: "payload is a stream definition".into() })?;
-            if object.contains_key("export") || object.contains_key("external_export") {
+            if object.contains_key("export") || object.contains_key("external_export") || object.contains_key("walrus_export") {
                 return fail("invalid", "exports are declared by the operator, not by components");
             }
             if object.get("name").is_some_and(|n| n != name) {
@@ -195,6 +198,28 @@ pub fn handle(store: &Mutex<Store>, declared: &[String], operation: &str, name: 
                 out
             }).collect::<Vec<_>>()}))
         }
+        "stream_export_status" => {
+            if !store.get(name)?.def.external_export {
+                return fail("invalid", "stream has no operator-selected external exporter");
+            }
+            // Only numeric counters cross this boundary. Never accept destination,
+            // credential, payload or arbitrary exception text into chain health.
+            let mut status = json!({});
+            for key in ["batches", "failures", "consecutive_failures", "last_success_ms"] {
+                let value = payload.get(key).filter(|v| v.is_null() && key == "last_success_ms")
+                    .cloned().or_else(|| payload.get(key).and_then(Value::as_u64).map(|n| json!(n)))
+                    .ok_or_else(|| anyhow::anyhow!("invalid exporter counter"))?;
+                status[key] = value;
+            }
+            if status["consecutive_failures"].as_u64() > status["failures"].as_u64() {
+                return fail("invalid", "inconsistent exporter counters");
+            }
+            status["last_error"] = if status["consecutive_failures"].as_u64().unwrap_or(0) > 0 {
+                json!("customer export failed")
+            } else { Value::Null };
+            store.set_export_status(name, status);
+            Ok(json!({"updated": true}))
+        }
         "stream_export_ack" => {
             if !store.get(name)?.def.external_export {
                 return fail("invalid", "stream has no operator-selected external exporter");
@@ -223,11 +248,15 @@ impl Definition {
         if self.time_to_live_seconds.is_some_and(|t| !(1..=31_536_000).contains(&t)) {
             return fail("invalid", "time_to_live_seconds must be 1..=31536000");
         }
+        if self.walrus_export && (self.external_export || self.export.is_some() || self.persistence != Persistence::File
+            || self.time_to_live_seconds.is_some() || self.strategy_on_full != Strategy::RejectNewData) {
+            return fail("invalid", "Walrus exports require exclusive File/RejectNewData without TTL");
+        }
         if self.external_export && (self.export.is_some() || self.persistence != Persistence::File
             || self.time_to_live_seconds.is_some() || self.strategy_on_full != Strategy::RejectNewData) {
             return fail("invalid", "external exports require File/RejectNewData without TTL or HTTP export");
         }
-        if self.discard_exported && self.export.is_none() && !self.external_export {
+        if self.discard_exported && self.export.is_none() && !self.external_export && !self.walrus_export {
             return fail("invalid", "discard_exported needs an export");
         }
         if let Some(export) = &self.export {
@@ -643,6 +672,7 @@ impl Stream {
             "exported": self.exported, "bytes": self.bytes,
             "messages": self.entries.len(), "corrupt_segments": self.corrupt,
             "export": self.def.export.as_ref().map(|e| json!({"url": redact_url(&e.url), "status": self.export_status})),
+            "external_export_status": self.def.external_export.then(|| self.export_status.clone()),
         })
     }
 }
@@ -974,6 +1004,14 @@ impl Store {
         found.into_iter().map(|e| Ok(Message { sequence: e.sequence, appended_ms: e.appended_ms, data: stream.read_data(e)? })).collect()
     }
 
+    pub fn validate_walrus(&mut self, name: &str) -> anyhow::Result<()> {
+        let def=&self.get(name)?.def;
+        anyhow::ensure!(def.walrus_export && def.persistence == Persistence::File && def.strategy_on_full == Strategy::RejectNewData
+            && def.time_to_live_seconds.is_none() && def.export.is_none() && !def.external_export,
+            "Walrus requires durable reject-on-full stream without TTL or another exporter");
+        Ok(())
+    }
+
     pub fn describe(&mut self, name: &str, now_ms: u64) -> anyhow::Result<Value> {
         let stream = self.get(name)?;
         stream.retire(now_ms)?;
@@ -1041,7 +1079,7 @@ impl Store {
                     overwrite: stream.def.strategy_on_full == Strategy::OverwriteOldestData,
                     rejected: stream.rejected,
                     lost: stream.lost,
-                    export: stream.def.export.as_ref().map(|_| {
+                    export: (stream.def.export.is_some() || stream.def.external_export).then(|| {
                         let lag = live.iter().rev().take_while(|e| e.sequence as i64 > stream.exported).count() as u64;
                         (lag, stream.export_status.clone())
                     }),
@@ -1435,7 +1473,7 @@ mod tests {
 
     fn def(name: &str, max: u64, strategy: Strategy) -> Definition {
         Definition { name: name.into(), max_size: max, strategy_on_full: strategy, persistence: Persistence::File,
-            time_to_live_seconds: None, discard_exported: false, external_export: false, export: None }
+            time_to_live_seconds: None, discard_exported: false, external_export: false, walrus_export:false, export: None }
     }
 
     #[test]
@@ -2086,6 +2124,41 @@ mod tests {
         let mut store = Store::open(&path, QUOTA, 0).unwrap();
         assert_eq!(store.describe("external", 0).unwrap()["exported"], 0);
         assert_eq!(store.read("external", 1, 1, 1, 0).unwrap()[0].data, b"pending");
+        drop(store);
+        let _ = std::fs::remove_dir_all(path);
+    }
+
+    #[test]
+    fn external_export_health_counts_retained_lag_and_sanitizes_reports() {
+        let path = dir("external-health");
+        let mut definition = def("external", 4096, Strategy::RejectNewData);
+        definition.external_export = true;
+        let mut store = Store::open(&path, QUOTA, 0).unwrap();
+        store.create(definition).unwrap();
+        store.append("external", b"pending", 0).unwrap();
+        let store = Arc::new(Mutex::new(store));
+        let all = |_: &str| true;
+        let status = json!({"batches": 0, "failures": 3, "consecutive_failures": 3,
+                            "last_success_ms": null, "last_error": "SECRET destination"});
+        handle(&store, &[], "stream_export_status", "external", &status, &all).unwrap();
+        let facts = store.lock().unwrap().health(0).remove(0);
+        let (lag, status) = facts.export.unwrap();
+        assert_eq!(lag, 1);
+        assert_eq!(status["failures"], 3);
+        assert_eq!(status["last_error"], "customer export failed");
+        assert!(!status.to_string().contains("SECRET"));
+        let sources = crate::service_health::Sources { streams: Some(store.clone()), ..Default::default() };
+        let services = crate::service_health::collect(&sources, &mut Default::default(), 0, 0).unwrap();
+        let summary = services.streams.as_ref().unwrap().streams[0].export.as_ref().unwrap();
+        assert_eq!((summary.lag, summary.failures, summary.consecutive_failures), (1, 3, 3));
+        assert!(!crate::service_health::reasons(&services, 30, 0).is_empty());
+        assert!(!serde_json::to_string(&services).unwrap().contains("SECRET"));
+        for invalid in [json!({}), json!({"batches": -1, "failures": 1, "consecutive_failures": 1, "last_success_ms": null}),
+                        json!({"batches": 0, "failures": 1, "consecutive_failures": 2, "last_success_ms": null})] {
+            assert!(handle(&store, &[], "stream_export_status", "external", &invalid, &all).is_err());
+        }
+        handle(&store, &[], "stream_export_ack", "external", &json!({"sequence": 0}), &all).unwrap();
+        assert_eq!(store.lock().unwrap().health(0)[0].export.as_ref().unwrap().0, 0);
         drop(store);
         let _ = std::fs::remove_dir_all(path);
     }

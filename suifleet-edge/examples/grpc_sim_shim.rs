@@ -51,18 +51,23 @@ impl Shim {
         if let Some(error) = reply.get("error") {
             // The simulator reports an unavailable service (and failed
             // assertions) as errors; the daemon must treat both as failures.
-            return Err(Status::unavailable(error["message"].as_str().unwrap_or("error").to_owned()));
+            let message = error["message"].as_str().unwrap_or("error").to_owned();
+            return Err(match error["code"].as_i64() {
+                Some(429) => Status::resource_exhausted(message),
+                Some(408) => Status::deadline_exceeded(message),
+                _ => Status::unavailable(message),
+            });
         }
         Ok(reply["result"].clone())
     }
 
-    /// Dynamic fields the simulator knows, as (parent, key type, key BCS hex),
-    /// matched by their derived object IDs.
+    /// Dynamic fields the simulator knows, as (parent, key type, key BCS hex
+    /// [, value type]), matched by their derived object IDs.
     async fn dynamic_field(&self, id: Address) -> Result<Option<proto::Object>, Status> {
         let fields = self.call("shim_fields", json!([])).await?;
         for field in fields.as_array().into_iter().flatten() {
-            let (Some(parent), Some(key), Some(key_hex)) =
-                (field[0].as_str(), field[1].as_str(), field[2].as_str())
+            let (Some(parent), Some(key), Some(key_hex), value_type) =
+                (field[0].as_str(), field[1].as_str(), field[2].as_str(), field[3].as_str().unwrap_or("unknown"))
             else {
                 return Err(Status::internal("malformed simulator field"));
             };
@@ -81,7 +86,25 @@ impl Shim {
                 return Err(Status::not_found(format!("dynamic field {id} not found")));
             }
             let mut object = proto::Object::default();
-            object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, unknown>"));
+            if key.ends_with("::fleet_data::CompactHeadKey") || key.ends_with("::fleet_data::ItemKey") {
+                let head = hex::decode(value["bcs_hex"].as_str().ok_or_else(|| Status::internal("missing compact head bytes"))?)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                let mut contents = id.inner().to_vec(); contents.extend(&key_bcs); contents.extend(head);
+                let origin = key.split("::").next().unwrap_or_default();
+                let name=if key.ends_with("::ItemKey") {"DataItem"} else {"CompactHead"};
+                let tag = format!("0x2::dynamic_field::Field<{key}, {origin}::fleet_data::{name}>");
+                let structure = MoveStruct::new(StructTag::from_str(&tag).map_err(|e| Status::internal(e.to_string()))?, false, 1, contents)
+                    .ok_or_else(|| Status::internal("compact field has no UID"))?;
+                let full = Object::new(ObjectData::Struct(structure), sui_sdk_types::Owner::Object(parent_id), Digest::ZERO, 0);
+                let mut bcs = proto::Bcs::default();
+                bcs.value = Some(bcs::to_bytes(&full).map_err(|e| Status::internal(e.to_string()))?.into());
+                object.object_id = Some(id.to_string());
+                object.object_type = Some(tag);
+                object.bcs = Some(bcs);
+                object.json = Some(Box::new(to_proto(&json!({"value": value}))));
+                return Ok(Some(object));
+            }
+            object.object_type = Some(format!("0x2::dynamic_field::Field<{key}, {value_type}>"));
             object.json = Some(Box::new(to_proto(&json!({"value": value}))));
             return Ok(Some(object));
         }
@@ -163,6 +186,9 @@ impl proto::ledger_service_server::LedgerService for Shim {
             .is_some_and(|mask| mask.paths.iter().any(|p| p == "bcs"));
         let mut response = proto::GetObjectResponse::default();
         if wants_bcs {
+            if let Some(field) = self.dynamic_field(address).await? {
+                if field.bcs.is_some() { response.object = Some(field); return Ok(Response::new(response)); }
+            }
             let package = self.call("sui_getObject", json!([id, {"showBcs": true}])).await?;
             let data = &package["data"];
             if data["bcs"]["dataType"] == "moveObject" {
@@ -393,8 +419,8 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
             }
             let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
             if matches!(call.module.as_deref(), Some("fleet_data" | "fleet_storage")) {
-                let owned = match function.as_str() { "report_health" | "anchor" => index==5, "register_blob" => index==4, _=>false };
-                let mutable = match function.as_str() { "report_health" | "anchor" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
+                let owned = match function.as_str() { "report_health" | "anchor" | "anchor_compact" | "anchor_items" => index==5, "register_blob" => index==4, _=>false };
+                let mutable = match function.as_str() { "report_health" | "anchor" | "anchor_compact" | "anchor_items" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
                 inputs.push(builder.object(if owned { sui_transaction_builder::ObjectInput::owned(id,1,Digest::ZERO) }
                     else { sui_transaction_builder::ObjectInput::shared(id,1,mutable) }));
                 continue;

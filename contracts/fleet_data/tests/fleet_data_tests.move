@@ -119,6 +119,74 @@ module fleet_data::fleet_data_tests {
         ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry);
         ts::return_to_address(DEVICE, cap);
     }
+    fun compact(s: &mut ts::Scenario, id: ID, seq: u64, at: u64, previous: vector<u8>): vector<u8> {
+        ts::next_tx(s, DEVICE);
+        let fleet = ts::take_shared<FleetData>(s);
+        let mut writer = ts::take_shared<DeviceData>(s);
+        let storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let account = ts::take_shared<GasAccount>(s);
+        let registry = ts::take_shared<DeviceRegistry>(s);
+        let cap = ts::take_from_address<DeviceCap>(s, DEVICE);
+        let clock = clock_at(s, at);
+        fleet_data::anchor_compact(&fleet, &mut writer, &budget, &account, &registry, &cap, &storage,
+            id, seq, 0, zeros(32), previous, &clock, ts::ctx(s));
+        let bytes = sui::bcs::to_bytes(&fleet_data::compact_head(&writer).destroy_some());
+        clock::destroy_for_testing(clock);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry);
+        ts::return_to_address(DEVICE, cap);
+        bytes
+    }
+    #[test]
+    fun compact_history_commits_previous_head_without_legacy_entries() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let two = upload(&mut s, &mut system, 102, true);
+        let second = compact(&mut s, two, 2, 2 * DAY, std::hash::sha2_256(first));
+        let three = upload(&mut s, &mut system, 103, true);
+        let third = compact(&mut s, three, 3, 3 * DAY, std::hash::sha2_256(second));
+        // After the initial empty predecessor, the root never grows with history.
+        assert!(third.length() < 512);
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ESequence)]
+    fun compact_history_refuses_stale_predecessor() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let _ = compact(&mut s, one, 1, DAY, vector[]);
+        let two = upload(&mut s, &mut system, 102, true);
+        let _ = compact(&mut s, two, 2, 2 * DAY, vector[]);
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EBlob)]
+    fun compact_history_refuses_uncertified_archive() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, false);
+        let _ = compact(&mut s, one, 1, DAY, vector[]);
+        destroy(system); ts::end(s);
+    }
+    // Compact mode deliberately has no unbounded global seen-blob set.
+    // Readers must refuse the old blob's ciphertext sequence at the third link.
+    #[test]
+    fun compact_history_only_deduplicates_current_head() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let two = upload(&mut s, &mut system, 102, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let second = compact(&mut s, two, 2, 2 * DAY, std::hash::sha2_256(first));
+        let _ = compact(&mut s, one, 3, 3 * DAY, std::hash::sha2_256(second));
+        destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EExists)]
+    fun compact_history_refuses_same_blob_twice() {
+        let (mut s, mut system) = setup();
+        let one = upload(&mut s, &mut system, 101, true);
+        let first = compact(&mut s, one, 1, DAY, vector[]);
+        let _ = compact(&mut s, one, 2, 2 * DAY, std::hash::sha2_256(first));
+        destroy(system); ts::end(s);
+    }
     fun admin(s: &mut ts::Scenario, operation: u8) {
         ts::next_tx(s, OWNER);
         let mut fleet = ts::take_shared<FleetData>(s);
@@ -153,7 +221,7 @@ module fleet_data::fleet_data_tests {
     #[test]
     fun health_and_daily_batch() {
         let (mut s, mut system) = setup();
-        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001);
+        health(&mut s, 1, 1); health(&mut s, 2, DAY + 1);
         let first = upload(&mut s, &mut system, 42, true);
         anchor(&mut s, first, 1, 0, 1);
         let crash = upload(&mut s, &mut system, 43, true);
@@ -161,6 +229,11 @@ module fleet_data::fleet_data_tests {
         let next = upload(&mut s, &mut system, 44, true);
         anchor(&mut s, next, 3, 0, DAY + 1);
         finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ECadence)]
+    fun daily_default_refuses_an_hourly_report() {
+        let (mut s, system) = setup();
+        health(&mut s, 1, 1); health(&mut s, 2, 3_600_001); finish(s, system);
     }
     #[test, expected_failure(abort_code = fleet_data::ESequence)]
     fun replayed_health() { let (mut s, system) = setup(); health(&mut s, 1, 1); health(&mut s, 1, DAY); finish(s, system); }
@@ -259,6 +332,61 @@ module fleet_data::fleet_data_tests {
         assert!(fleet_data::anchor_count(&writer) == 0);
         ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(budget); ts::return_shared(account);
         ts::return_to_address(OWNER, cap); ts::return_to_address(DEVICE, identity_cap); destroy(system); ts::end(s);
+    }
+
+    fun scoped(grant: bool, device_wide: bool, wrong_stream: bool, revoke: bool, legacy: bool) {
+        let (mut s,system)=setup();
+        ts::next_tx(&mut s,OWNER);
+        let mut fleet=ts::take_shared<FleetData>(&s);
+        let budget=ts::take_shared<FleetBudget>(&s);
+        let account=ts::take_shared<GasAccount>(&s);
+        let device_id=fleet_budget::account_device_id(&account);
+        let cap=ts::take_from_address<BudgetOwnerCap>(&s,OWNER);
+        let stream=std::hash::sha2_256(b"sensor");
+        if (grant) fleet_data::set_read_grant(&mut fleet,&budget,&cap,device_id,if(device_wide)vector[] else stream,SUPPORT,true);
+        if (revoke) fleet_data::set_read_grant(&mut fleet,&budget,&cap,device_id,if(device_wide)vector[] else stream,SUPPORT,false);
+        let mut id=fleet_data::identity_prefix(&fleet);id.append(device_id.to_bytes());id.append(stream);id.append(zeros(16));
+        assert!(id.length()==120 && !fleet_data::identity_matches(&fleet,&id),100);
+        assert!(fleet_data::scoped_identity_matches(&fleet,&id,device_id,&stream),100);
+        assert!(!fleet_data::scoped_identity_matches(&fleet,&id,device_id,&zeros(32)),100);
+        ts::return_shared(fleet);ts::return_shared(account);ts::return_shared(budget);ts::return_to_address(OWNER,cap);
+        ts::next_tx(&mut s,SUPPORT);
+        let fleet=ts::take_shared<FleetData>(&s);
+        if (legacy) fleet_data::approve_support_for_testing(id,&fleet,ts::ctx(&mut s))
+        else fleet_data::approve_scoped_for_testing(id,&fleet,device_id,if(wrong_stream)zeros(32) else stream,ts::ctx(&mut s));
+        ts::return_shared(fleet);destroy(system);ts::end(s);
+    }
+    #[test] fun scoped_stream_grant() {scoped(true,false,false,false,false)}
+    #[test] fun scoped_device_grant() {scoped(true,true,false,false,false)}
+    #[test, expected_failure(abort_code=fleet_data::EAccess)]
+    fun scoped_wrong_stream() {scoped(true,false,true,false,false)}
+    #[test, expected_failure(abort_code=fleet_data::EAccess)]
+    fun scoped_revoked_stream() {scoped(true,false,false,true,false)}
+    #[test, expected_failure(abort_code=fleet_data::EAccess)]
+    fun scoped_no_grant() {scoped(false,false,false,false,false)}
+    #[test, expected_failure(abort_code=fleet_data::EAccess)]
+    fun legacy_approval_refuses_scoped_identity() {scoped(true,true,false,false,true)}
+
+    public struct ItemWire has drop {
+        sequence:u64,stream:vector<u8>,key:vector<u8>,content_type:vector<u8>,metadata:vector<u8>,upload:vector<u8>,
+        chunk:u32,chunks:u32,total_size:u64,size:u64,sha256:vector<u8>,identifier:vector<u8>,ciphertext_size:u64,ciphertext_sha256:vector<u8>,
+    }
+    #[test]
+    fun opaque_items_share_one_certified_anchor() {
+        let (mut s,mut system)=setup();
+        let blob=upload(&mut s,&mut system,123,true);
+        ts::next_tx(&mut s,DEVICE);
+        let fleet=ts::take_shared<FleetData>(&s);let mut writer=ts::take_shared<DeviceData>(&s);
+        let budget=ts::take_shared<FleetBudget>(&s);let account=ts::take_shared<GasAccount>(&s);
+        let registry=ts::take_shared<DeviceRegistry>(&s);let storage=ts::take_shared<FleetStorage>(&s);
+        let cap=ts::take_from_address<DeviceCap>(&s,DEVICE);let clock=clock_at(&mut s,DAY);
+        let first=ItemWire {sequence:1,stream:b"sensor",key:b"raw",content_type:b"application/octet-stream",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:3,size:3,sha256:zeros(32),identifier:b"data-00",ciphertext_size:100,ciphertext_sha256:zeros(32)};
+        let second=ItemWire {sequence:2,stream:b"text",key:b"reading",content_type:b"text/plain",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:5,size:5,sha256:zeros(32),identifier:b"data-01",ciphertext_size:110,ciphertext_sha256:zeros(32)};
+        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,1,0,zeros(32),vector[sui::bcs::to_bytes(&first),sui::bcs::to_bytes(&second)],&clock,ts::ctx(&mut s));
+        assert!(fleet_data::anchor_count(&writer)==1,100);
+        assert!(fleet_data::item_exists_for_testing(&writer,1,0) && fleet_data::item_exists_for_testing(&writer,1,1),100);
+        clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
+        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);destroy(system);ts::end(s);
     }
 
 }

@@ -361,22 +361,19 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
   console.log('SF082 estimate reproduces measured first/recurring health and all three archive transaction costs');
 }
 
-// Protected capacity is fleet-wide, finite and independent of deposit headroom.
+// Keyed v3 protection projects archive growth without the obsolete slot cap.
 {
   const capacity = costs.protectedArchiveCapacity;
-  assert.deepEqual(capacity(0, 10, 30, 4), { remaining: 1024, planned: 1200, exceedsCapacity: true, daysToCapacity: 102.4 });
-  assert.equal(capacity(124, 10, 30, 3).exceedsCapacity, false); // exact fit
-  assert.equal(capacity(125, 10, 30, 3).exceedsCapacity, true);
-  assert.equal(capacity(1024, 1, 30, 1).daysToCapacity, 0);
-  assert.equal(capacity(1024, 0, 30, 1).daysToCapacity, null);
-  assert.equal(capacity(100, 10, 60, 1).daysToCapacity, 46.2); // emergency headroom
-  assert.throws(() => capacity(1025, 1, 30, 1), /existing protected/);
+  assert.deepEqual(capacity(0, 10, 30, 4), { existing: 0, planned: 1200 });
+  assert.deepEqual(capacity(10000, 1000, 30, 1), { existing: 10000, planned: 30000 });
+  assert.deepEqual(capacity(10000, 0, 30, 1), { existing: 10000, planned: 0 });
+  assert.throws(() => capacity(-1, 1, 30, 1), /existing protected/);
   const plan = costs.estimate({ ...base, devices: 10, months: 4, serverlessData: true,
     dataBytesPerDeviceMonth: 1024, dataUploadsPerDeviceMonth: 30, existingProtectedBlobs: 100, marginPercent: 1000 });
-  assert.equal(plan.protectedCapacity.remaining, 924);
-  assert.equal(plan.protectedCapacity.exceedsCapacity, true); // funding cannot fix capacity
+  assert.equal(plan.protectedCapacity.existing, 100);
+  assert.equal(plan.protectedCapacity.planned, 1200); // projection has no obsolete fleet slot cap
   assert.equal(costs.estimate(base).protectedCapacity, undefined);
-  console.log('PASS: fleet-wide retained archive capacity, exact fit, exhaustion, diagnostics and deposit independence');
+  console.log('PASS: archive growth above 1024 records and deposit-independent projections');
 }
 
 // Render the actual manager with failed/loading account reads. Fleet-wide
@@ -402,6 +399,9 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
       useFleetBudget: () => ({ budget: { ...view, paused } }),
       useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
       useSubmit: () => ({ submit: () => {}, pending: false }), useState: () => ['', () => {}],
+      useFleetTransaction: () => ({ mutateAsync: async () => { throw Error('unexpected approval'); } }),
+      useQueryClient: () => ({ invalidateQueries: async () => {} }), useDAppKit: () => ({}),
+      useRef: value => ({ current: value }),
       useQuery: () => query, sui: (value) => `${value} SUI`,
     };
     vm.runInNewContext(compiled, sandbox);
@@ -409,6 +409,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     assert.ok(html.includes(paused ? 'Resume all devices' : 'Pause all devices'));
     assert.ok(html.includes('Withdraw unallocated funds'));
     assert.ok(html.includes('Deposited 100 SUI'));
+    assert.match(html, /<button[^>]*disabled=""[^>]*>Enroll all unenrolled devices<\/button>/);
     assert.ok(html.includes(query.error ? query.error.message : 'Loading budget accounts'));
     for (const hidden of ['<table', 'not enrolled', 'Enroll with float', '999 SUI', 'No draws this period', 'days left', '<ul']) {
       assert.ok(!html.includes(hidden), `unavailable account data must not render ${hidden}`);

@@ -64,6 +64,7 @@ test-native-seal:
 # example (suifleet-edge/examples/grpc_sim_shim.rs).
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
+	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
 	$(RUN) python3 scripts/test_ota.py
 	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
@@ -82,9 +83,22 @@ test-ota:
 	$(RUN) python3 scripts/test_cloudwatch_logs.py
 	$(RUN) python3 scripts/test_console.py
 	$(RUN) python3 scripts/test_rollout.py
+	$(RUN) python3 scripts/test_cadence_ota.py
 	$(RUN) python3 scripts/test_budget_ota.py
+	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
+
+.PHONY: test-opaque
+test-opaque:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_opaque_sdk.py
+ifdef INSIDE_DEV_CONTAINER
+	python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+else
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+endif
 
 # Fleet service configuration, root only in a disposable network-none container
 # for real SO_PEERCRED principals (no host credentials or public network).
@@ -164,6 +178,13 @@ test-handover-upgrade-localnet:
 test-budget-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-upgrade
+
+# SF-130 on a disposable localnet (network none): settings added by upgrade to
+# an existing budget, owner-only changes and events, refusals, daemon/dApp reads.
+.PHONY: test-settings-localnet
+test-settings-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) python3 scripts/test_protocol_localnet.py --settings-upgrade
 
 .PHONY: test-catalog-live
 test-catalog-live:
@@ -324,6 +345,8 @@ test-manifest:
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
+	$(RUN) node scripts/test_fleet_settings.cjs
+	$(RUN) node scripts/test_budget_enrollment.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_incremental_history.cjs
@@ -334,8 +357,13 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_telemetry.cjs
+	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
+	$(RUN) node scripts/test_compact_archives.cjs
+	$(RUN) node scripts/test_archive_quilt.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_archive_envelope.py
+	$(RUN) node scripts/measure_quilt_geometry.cjs --check
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
 	$(RUN) node scripts/test_pilot_load.cjs
@@ -360,7 +388,8 @@ test-desired-state-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_desired_state_localnet.py
 
-# SF-024 fleet indexer, API and CLI (suifleet-indexer/, docs/INDEXER.md).
+# Optional customer-hosted reference integration, not a product runtime.
+# Product chain CLI: node scripts/suifleet_ops.cjs (docs/SERVERLESS_PRODUCT.md).
 .PHONY: indexer-build indexer-test test-indexer-localnet
 indexer-build:
 	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
@@ -704,3 +733,14 @@ pilot-localnet:
 pilot-public-read:
 	$(RUN) mkdir -p "$(PILOT_EVIDENCE_DIR)"
 	$(RUN) node scripts/pilot_public_read.cjs "$(PILOT_EVIDENCE_DIR)/public-read.json"
+
+# SF-128: real populated-object v1/v2 upgrades and 10->10000 protected blob gas.
+# Run only in a disposable --network none container (same as retention-upgrade).
+.PHONY: test-retention-scale-upgrade
+test-retention-scale-upgrade:
+	$(RUN) python3 scripts/test_protocol_localnet.py --retention-scale-upgrade
+
+# SF-132: use a disposable network-none container with the pinned network CLI.
+.PHONY: test-budget-enrollment-localnet
+test-budget-enrollment-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment

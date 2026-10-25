@@ -19,8 +19,10 @@ from urllib.parse import quote
 
 ACTIVE_RUN = ('claiming', 'launching', 'running')
 RETAINED = ('orphaned', 'quarantined', 'parked')
-JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined')
+QUOTA_RETRIES = 4  # Same bound as coordinator.QUOTA_RETRIES (asserted by tests).
+JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined', 'quota_wait', 'quota_launch')
 ROLE = {'review': 'review', 'fix': 'repair'}
+CI_MAX_AGE = 900
 # Dispatcher CI repair-first redirects (SF-116) that pause a live implementation.
 REDIRECT_PAUSING = ('guarding', 'interrupting', 'releasing')
 REDIRECT_PAUSED = ('stopped', 'integrating', 'resuming')
@@ -232,6 +234,61 @@ def inventory_items(items):
     return sorted(result, key=lambda r: r['number'])
 
 
+def fetch_ci(repository, prs, run, env, branch='main'):
+    """One bounded GraphQL request per 25 PRs; never infer complete partial data."""
+    owner, repo = repository.split('/')
+    result = {}
+    if len(prs) > 1000:
+        raise ValueError('CI inventory exceeds bound')
+    for offset in range(0, len(prs), 25):
+        batch = prs[offset:offset+25]
+        fields = ' '.join('p%d:pullRequest(number:%d){number state headRefOid baseRefOid baseRef{target{oid}} headRefName isDraft title commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ...on CheckRun{name status conclusion} ...on StatusContext{context state description}}}}}}}}' % (p['number'], p['number']) for p in batch)
+        query = 'query{repository(owner:%s,name:%s){testnet:object(expression:%s){oid} %s}}' % (
+            json.dumps(owner), json.dumps(repo), json.dumps(branch+':.github/workflows/testnet.yml'), fields)
+        response = json.loads(run(['api', 'graphql', '--input', '-'], env, input=json.dumps({'query': query})))
+        if response.get('errors'):
+            raise ValueError('partial CI response')
+        data = response['data']['repository']
+        for pr in batch:
+            row = data['p'+str(pr['number'])]
+            if not isinstance(row, dict) or row.get('number') != pr['number'] or row.get('state') != 'OPEN':
+                raise ValueError('PR changed during refresh')
+            if not all(re.fullmatch(r'[0-9a-f]{40}', row.get(k, '')) for k in ('headRefOid', 'baseRefOid')):
+                raise ValueError('missing CI revision')
+            # baseRefOid may retain the PR comparison base after the branch advances.
+            base = ((row.get('baseRef') or {}).get('target') or {}).get('oid')
+            if not isinstance(base, str) or not re.fullmatch(r'[0-9a-f]{40}', base):
+                raise ValueError('missing current CI base revision')
+            commits = row['commits']['nodes']
+            if len(commits) != 1 or commits[0]['commit']['oid'] != row['headRefOid']:
+                raise ValueError('CI head changed during refresh')
+            rollup = commits[0]['commit']['statusCheckRollup']
+            contexts = rollup['contexts'] if rollup else {'nodes': [], 'pageInfo': {'hasNextPage': False}}
+            if contexts['pageInfo']['hasNextPage']:
+                raise ValueError('CI context pagination exceeds bound')
+            checks = contexts['nodes']
+            if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+                raise ValueError('invalid CI contexts')
+            testnet = [c for c in checks if c.get('context') == 'testnet/package-upgrade']
+            if len(testnet) > 1:
+                raise ValueError('ambiguous testnet status')
+            status = testnet[0] if testnet else {}
+            description = status.get('description') or ''
+            prefix = 'base:'+base
+            state = str(status.get('state', 'missing')).lower()
+            if status and (not re.fullmatch(re.escape(prefix)+r'(?: class:(?:source|infrastructure|funding|uncertain))?', description)
+                           or state == 'success' and description != prefix):
+                state = 'stale-base'
+            row = {k: row[k] for k in ('number', 'title', 'headRefOid', 'baseRefOid', 'headRefName', 'isDraft')}
+            row.update(statusCheckRollup=[c for c in checks if c.get('context') != 'testnet/package-upgrade'],
+                       _testnet_required=data.get('testnet') is not None,
+                       _testnet_status={'state': state})
+            projection = project_snapshot(row, time.time())
+            projection.update(head_oid=row['headRefOid'], base_oid=base, source='GitHub')
+            result[str(pr['number'])] = projection
+    return result
+
+
 def refresh_github(paths, project=None):
     """Explicit opt-in REST inventory read. Never used by the live refresh loop.
 
@@ -251,8 +308,8 @@ def refresh_github(paths, project=None):
         name, repository, account = p.get('id'), p.get('repository'), p.get('github_account')
         if not all(isinstance(v, str) and v for v in (name, repository, account)) or not re.fullmatch(r'[\w.-]+/[\w.-]+', repository):
             raise Unavailable('project repository/account missing or invalid')
-        def run(args, env=None):
-            return subprocess.run(['gh', *args], env=env, capture_output=True, text=True, check=True, timeout=60).stdout
+        def run(args, env=None, **kwargs):
+            return subprocess.run(['gh', *args], env=env, capture_output=True, text=True, check=True, timeout=60, **kwargs).stdout
         try:
             token = run(['auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
             if not token:
@@ -268,7 +325,8 @@ def refresh_github(paths, project=None):
                 return rows
             issues = inventory_items([r for r in listing('issues') if 'pull_request' not in r])
             prs = inventory_items(listing('pulls'))
-            data = dict(schema=1, project=name, repository=repository, fetched_at=time.time(), issues=issues, prs=prs)
+            ci = fetch_ci(repository, prs, run, env, p.get('integration_branch', 'main'))
+            data = dict(schema=1, project=name, repository=repository, fetched_at=time.time(), issues=issues, prs=prs, ci=ci)
             path = inventory_path(paths['inventory'], name)
             path.parent.mkdir(parents=True, exist_ok=True)
             temporary = None
@@ -281,7 +339,7 @@ def refresh_github(paths, project=None):
                 if temporary is not None:
                     temporary.unlink(missing_ok=True)
             completed.append(name)
-        except (OSError, ValueError, subprocess.SubprocessError) as error:
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
             # gh stderr can contain credentials: report only the exception type.
             raise Unavailable(f'{safe_text(name)} refresh failed ({type(error).__name__}); previous snapshot retained') from error
     return completed
@@ -370,15 +428,46 @@ def render_inventory(model, width):
     return [part for line in lines for part in (textwrap.wrap(line, width, subsequent_indent='    ') or [''])]
 
 
-def ci_state(snapshot):
+def ci_state(snapshot, now=None):
     if not snapshot or snapshot.get('corrupt'):
         return None
+    if now is not None and now - snapshot['mtime'] > CI_MAX_AGE:
+        return 'ci-stale'
+    if snapshot.get('ci_mismatch'):
+        return 'ci-unknown'
     checks = snapshot['checks']
     if checks['failed'] or snapshot.get('testnet') in ('failure', 'error'):
         return 'ci-failed'
-    if checks['pending'] or not sum(checks.values()) or (snapshot.get('testnet') not in (None, 'success')):
+    if snapshot.get('testnet') in ('missing', 'stale-base') or not sum(checks.values()):
+        return 'ci-unknown'
+    if checks['pending'] or (snapshot.get('testnet') not in (None, 'success')):
         return 'ci-pending'
     return 'ci-passed'
+
+
+def cached_ci(paths, config, now, project):
+    result = {}
+    for p in config.get('projects', []):
+        if project is not None and p['id'] != project:
+            continue
+        raw = read_json(inventory_path(paths['inventory'], p['id']))
+        if not isinstance(raw, dict) or raw.get('schema') != 1 or raw.get('repository') != p.get('repository') or raw.get('project') != p['id']:
+            continue
+        try:
+            open_prs = {row['number'] for row in inventory_items(raw['prs'])}
+            for number, value in raw.get('ci', {}).items():
+                number = int(number)
+                if (number not in open_prs or value['pr'] != number or value.get('source') != 'GitHub'
+                        or not all(re.fullmatch(r'[0-9a-f]{40}', value[k]) for k in ('head_oid', 'base_oid'))
+                        or type(value['mtime']) not in (int, float) or not 0 < value['mtime'] <= now+300
+                        or set(value['checks']) != {'success', 'pending', 'failed'}
+                        or not all(type(v) is int and 0 <= v <= 100 for v in value['checks'].values())):
+                    continue
+                result[(p['id'], number)] = {k: value[k] for k in
+                    ('pr', 'title', 'branch', 'head', 'draft', 'checks', 'testnet', 'mtime', 'source')}
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return result
 
 
 def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
@@ -447,7 +536,11 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                                          'reason,repair_dir,resumed_as,updated FROM ci_redirects ORDER BY id')]
             capacities = []
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='capacity_retries'").fetchone():
-                capacities = [dict(r) for r in db.execute('SELECT source,state,attempt,retry_after,reason,replacement,updated FROM capacity_retries')]
+                kinds = db.execute("SELECT 1 FROM sqlite_master WHERE name='capacity_kinds'").fetchone()
+                capacities = [dict(r) for r in db.execute(
+                    "SELECT c.source,c.state,c.attempt,c.retry_after,c.reason,c.replacement,c.updated,"
+                    + ("COALESCE(k.kind,'capacity') AS kind FROM capacity_retries c LEFT JOIN capacity_kinds k ON k.source=c.source"
+                       if kinds else "'capacity' AS kind FROM capacity_retries c"))]
             return runs, backoff, redirects, capacities
         finally:
             db.close()
@@ -520,6 +613,13 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         pr_snapshot[key] = snapshot
         if snapshot.get('ticket'):
             ticket_pr[(key[0], snapshot['ticket'])] = key[1]
+    for key, snapshot in cached_ci(paths, config, now, project).items():
+        previous = pr_snapshot.get(key)
+        if previous and (snapshot['mtime'] < previous.get('mtime', 0) or snapshot['branch'] != previous.get('branch')):
+            if snapshot.get('head') != previous.get('head') or snapshot['branch'] != previous.get('branch'):
+                pr_snapshot[key] = {**previous, 'ci_mismatch': True}
+            continue
+        pr_snapshot[key] = {**(previous or {}), **snapshot}
     branch_pr = {(k[0], s.get('branch')): k[1] for k, s in pr_snapshot.items() if s.get('branch')}
 
     def pr_for(project_id, key, branch=None):
@@ -638,9 +738,11 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         capacity = capacity_for.get(run['session'])
         if run['status'] == 'capacity_wait':
             count['retained' if process == 'exited' else 'held'] += 1
-            item('attention', **base, state='capacity-backoff', since=capacity.get('updated') if capacity else since,
+            quota = bool(capacity) and capacity.get('kind') == 'quota'
+            item('attention', **base, state='quota-wait' if quota else 'capacity-backoff',
+                 since=capacity.get('updated') if capacity else since,
                  retry_after=capacity.get('retry_after') if capacity else None,
-                 summary=(f"provider capacity retry {capacity['attempt']}/3; next retry "
+                 summary=(f"provider {'quota' if quota else 'capacity'} retry {capacity['attempt']}/{QUOTA_RETRIES if quota else 3}; next retry "
                           f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(capacity['retry_after']))}: "
                           f"{safe_text(capacity['reason'])}" if capacity else 'capacity wait without retry receipt; inspect dispatcher'))
             continue
@@ -699,6 +801,8 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     for job in jobs:
         if not wanted(job['project']):
             continue
+        if (job['project'], job['pr']) in merged and job['status'] == 'retry':
+            continue
         is_latest = latest.get((job['project'], job['pr'])) is job
         if job['status'] not in JOB_OPEN and not (job['status'] == 'failed' and is_latest and (job['project'], job['pr']) not in merged):
             continue
@@ -706,7 +810,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         count = job_counts.setdefault((job['family'], role), dict(active=0, held=0, retained=0))
         snapshot = cache.get(job['directory']) or {}
         key = snapshot.get('ticket')
-        if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined'):
+        if job['status'] in ('reserved', 'running', 'orphaned', 'quarantined', 'quota_wait', 'quota_launch'):
             open_by_pr.setdefault((job['project'], job['pr']), []).append(job['id'])
         process = processes.state(job['pid'], job['started']) if job['status'] == 'running' else None
         if role == 'repair' and key and job['status'] in ('reserved', 'running'):
@@ -735,6 +839,14 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         elif job['status'] == 'retry':
             item('attention', **base, state='retry', since=since, retry_after=job['retry_after'],
                  summary=f"{task}: {safe_text(job['error'], 90) or 'retry scheduled'}")
+        elif job['status'] == 'quota_wait':
+            # Verified stopped; resumes under the same claim after the provider's stated reset.
+            count['retained'] += 1
+            item('attention', **base, state='quota-wait', since=since, retry_after=job['retry_after'],
+                 summary=f"{task}: {safe_text(job['error'], 90) or 'waiting for provider quota reset'}")
+        elif job['status'] == 'quota_launch':
+            count['held'] += 1
+            item('attention', **base, state='waiting', since=since, summary=f'{task}: quota recovery launch in progress')
         elif job['status'] == 'orphaned':
             count['held'] += 1
             item('attention', **base, state='orphaned', since=since, summary=f"{task}: {safe_text(job['error'], 90) or 'requires explicit recovery'}")
@@ -771,12 +883,13 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         elif row['status'] == 'review' and (project_id, key) not in repairing:
             pr = base['pr']
             snapshot = pr_snapshot.get((project_id, pr)) if pr else None
-            state = ci_state(snapshot) or 'review'
+            state = ci_state(snapshot, now) or 'review'
             if snapshot and not snapshot.get('corrupt'):
                 c = snapshot['checks']
                 detail = (f"checks {c['success']} ok/{c['pending']} pending/{c['failed']} failed"
                           + (f"; testnet {snapshot['testnet']}" if snapshot.get('testnet') else '')
-                          + f" (local snapshot {fmt_age(now - snapshot['mtime'])} old)")
+                          + f" ({snapshot.get('source', 'worker-start snapshot')}; observed {fmt_age(now - snapshot['mtime'])} ago"
+                          + ('; STALE' if state == 'ci-stale' else '') + ')')
                 state = 'awaiting-review' if state == 'ci-passed' else state
             else:
                 detail = 'no local PR snapshot yet' if not pr else 'PR snapshot unreadable'
@@ -826,7 +939,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
-    order = {s: i for i, s in enumerate(['ci-failed', 'ci-repair-requested', 'uncertain', 'retry', 'stale', 'lingering',
+    order = {s: i for i, s in enumerate(['ci-failed', 'ci-stale', 'ci-unknown', 'ci-repair-requested', 'uncertain', 'retry', 'quota-wait', 'stale', 'lingering',
                                           'unverified', 'orphaned', 'manual', 'pausing', 'paused', 'waiting', 'ci-pending',
                                           'awaiting-review', 'review', 'blocked', 'failed', 'quarantined', 'parked'])}
     model['attention'].sort(key=lambda x: (order.get(x['state'], 99), x['project'], str(x.get('ticket') or ''), x.get('pr') or 0))
@@ -912,6 +1025,7 @@ def render(model, width=100, delta=None, interval=None):
         else:
             sources.append(f"{name} UNAVAILABLE: {src.get('detail', '')}")
     lines.append(fit('Sources: ' + ' · '.join(sources), width))
+    lines.append(fit('Source ages measure data-file changes, not service heartbeats.', width))
     if model['ticket_refresh']:
         lines.append(fit('Ticket snapshot: ' + ' · '.join(f'{p} refreshed {fmt_age(now - t)} ago' for p, t in sorted(model['ticket_refresh'].items())), width))
     for warning in model['warnings']:
@@ -952,7 +1066,7 @@ def render(model, width=100, delta=None, interval=None):
         lines.append('  Nothing waiting.' if model['sources'].get('tickets', {}).get('state') == 'ok' else '  Unknown: ticket store unavailable.')
     for a in attention:
         when = f" for {fmt_age(now - a['since'])}" if a.get('since') else ''
-        if a['state'] == 'retry':
+        if a['state'] in ('retry', 'quota-wait'):
             due = a.get('retry_after')
             when += f' · retry in {fmt_age(due - now)}' if due and due > now else ' · retry due'
         head = ' '.join(x for x in (f"[{a['state']}]", a.get('family') or '', a['role'], a.get('ticket') or '',
@@ -1063,7 +1177,7 @@ def main(argv=None):
     mode.add_argument('--once', action='store_true', help='Print one readable snapshot and exit')
     mode.add_argument('--json', action='store_true', help='Print one machine-readable snapshot and exit')
     mode.add_argument('--live', action='store_true', help='Live terminal view (default on a terminal)')
-    parser.add_argument('--refresh-github', action='store_true', help='Explicitly update cached GitHub issue/PR counts once before viewing; never polls in live mode')
+    parser.add_argument('--refresh-github', action='store_true', help='Update cached GitHub issue/PR counts and exact-head CI once before viewing; never polls in live mode')
     parser.add_argument('--project', help='Only show this project (for example suifleet)')
     parser.add_argument('--interval', type=float, default=5.0, help='Live refresh seconds (minimum 1)')
     parser.add_argument('--width', type=int, help='Text width for --once (default: terminal width)')

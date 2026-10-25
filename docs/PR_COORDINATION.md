@@ -719,3 +719,145 @@ and the normal activation mechanism. Validation uses offline classifier/fence te
 real fake-CLI exits, surviving descendants, repeated replacement exhaustion and
 read-only matching against the preserved SF-082 incident output; no provider outage
 or shared-wallet/hardware mutation is induced for this test.
+
+### Provider quota-reset recovery and CI handoff (SF-145)
+
+Claude workers can stop on an explicit session/weekly quota limit that names its
+reset time. The shared classifier (`coordinator.quota_reset`) accepts only a final
+terminal line, or a `result` error envelope, that is exactly the observed CLI form
+`You've hit your session limit · resets 4:30pm (America/Los_Angeles)` or a weekly
+form that names the day (`resets Oct 27, 9am (Zone)`). The receipt rules match
+SF-117: a nonzero, non-signal, non-timeout exit receipt, no result receipt, and at
+most 32 KiB of output tail. The message carries no date, so the reset is anchored
+to the exit receipt's modification time and must be a valid IANA zone. A session
+reset must fall within six hours after the exit and a dated reset within eight days.
+Five minutes of clock skew before the exit is tolerated. Quoted or prefixed copies,
+assistant JSON, authentication/billing/usage text without a time, weekly limits
+without a day, unknown zones and trailing errors are rejected. Those exits keep
+their existing quarantine. A reset is never guessed. Codex usage-limit text is not
+recognized yet and remains quarantined.
+
+**Implementation workers.** A validated quota exit becomes a `capacity_retries` row
+marked `quota` in the side table `capacity_kinds`. The SF-117 table layout is unchanged,
+so an activation rollback still works; unmarked rows are capacity retries. It uses the same SF-117 fences, launch intent, single-replacement
+rule and no-replay guarantees, with a separate budget of four recoveries per claim
+token digest. The replacement is due 120 seconds after the stated reset. A reset
+that already passed is due immediately, for example after dispatcher downtime. The
+claim is asserted and heartbeated while it waits. The quota is shared by the
+account, so the project/family `backoff` row also pauses new claims for that family
+until the reset (`provider quota reset wait`). Replacement sessions/directories are
+`SOURCE-quota-N`. Exhaustion quarantines the run with the claim retained for
+explicit recovery.
+
+**Repair workers.** A coordinator fix job with a fenced `repair_claim` that stops
+on a validated quota exit becomes `quota_wait`. It keeps the PR reserved against
+new review/fix jobs. `quota_recoveries` in the review database records the source
+receipt, reset time and state. Before the reset, the coordinator only asserts and
+heartbeats the unchanged claim and makes no GitHub reads. Once the reset passes,
+it rechecks the following:
+
+- the same published In Progress token digest, key, branch, worktree, family and model;
+- an unchanged worker command;
+- a stopped original PID/start identity and session;
+- no live process carrying the claim token. A same-user process whose environment
+  cannot be read (for example a nondumpable helper) counts as carrying it, so the
+  wait continues. This includes unrelated nondumpable processes such as `ssh` or
+  `gpg-agent` started after the worker. The wait reason names each PID and command
+  so an operator can stop it or recover explicitly. The dispatcher's
+  implementation fence applies the same rule;
+- no live lock naming the claim's session or ticket;
+- no unfinished git operation;
+- an open same-repository PR on the branch;
+- available configured fix capacity.
+
+It then records a launch intent and starts one same-family worker in `quota-N/`
+under the same job and claim. Dirty, staged, untracked and already-pushed work is
+preserved for the worker to continue. A changed owner or status cancels the wait and
+quarantines the job. An interrupted or uncertain launch becomes `orphaned`, with its
+process identity cleared, so it is held for explicit recovery and never replayed or
+auto-quarantined. Each repair job gets four quota recoveries; exhaustion follows the
+existing orphaned → quarantined path. A review job that stops on a quota limit
+retries no earlier than the reset. The dispatcher treats a `quota_wait` or
+`quota_launch` repair as owning the claim's recovery. `fleet-status` shows
+`quota-wait` for both kinds with the attempt and due time.
+
+**CI handoff.** Implementation and repair prompts no longer ask models to wait for
+hosted CI. Workers finish meaningful local work and push. Implementation workers
+then mark the PR Ready and the ticket Review; repair workers post their feedback
+reply. Each records that hosted CI is pending and exits, with no sleep/watch loops,
+monitors or detached watchers. Pending CI is never approval. The coordinator still
+requires exact-head/current-base checks, fresh independent review and its merge
+gates, and dispatches the bounded SF-111/SF-116 CI repair if a check fails.
+Reviewers still perform source-only review while CI is unready.
+
+Validation is offline: `tests/test_quota_recovery.py` covers the observed message,
+past and future resets, rejected text, fences for changed ownership, live
+descendants and shared locks, budgets, restart/no-replay and the CI-handoff prompts.
+It reruns the SF-117 fence suite against quota receipts. Runtime restart and later
+advancing jobs are verified only after reviewed merged activation.
+
+## Status evidence freshness (SF-147)
+
+`fleet-status --project suifleet --refresh-github --once` refreshes both the
+complete issue/PR inventory and current PR checks, including the testnet status.
+Check requests are batched (25 PRs per GraphQL request, at most 1,000 PRs and
+100 contexts per PR); partial/error/truncated responses preserve the old cache
+and report refresh failure rather than claiming a fresh complete result.
+
+The offline display prefers matching GitHub evidence over older worker-start
+snapshots. It shows `ci-failed`, `ci-pending`, `awaiting-review`, `ci-unknown`
+(missing/mismatched testnet or revision evidence), or `ci-stale` after 15 minutes.
+Every result carries its evidence source and age. Testnet success for an old base
+is not current success. Ordinary live refresh makes no network calls; use the
+explicit refresh when current remote checks matter. This display never grants
+merge approval or changes ticket ownership.
+
+The source ages at the top are database/file modification ages, **not service
+heartbeats**. A coordinator can scan without changing job records. Historical
+retry notices for verified merged PRs are hidden without editing the review DB.
+The dashboard-only installer replaces only the CLI and its launchers, leaving
+running workers, services and their configuration untouched.
+
+### Testnet failures retain repair ownership
+
+Automatic testnet reports `testnet/package-upgrade` as a commit status, separately
+from ordinary CI check runs. The coordinator recognizes a failed status only for
+the exact PR head and current base, with a durable GitHub Actions run URL. It
+reserves an owner repair through the same deduplication, backoff and three-attempt
+failure-episode limit as other CI failures. Infrastructure, funding and uncertain
+transaction classifications retain that owner; they are not silently excluded
+from dispatch. Repairs must diagnose the linked run, preserve uncertainty and
+spending limits, and coordinate shared harness fixes rather than blindly replaying
+transactions or increasing retry counts indefinitely.
+
+Pending, cancelled, malformed, unlinked and stale-base statuses do not start a
+repair. They still cannot satisfy the merge gate. The dispatcher re-reads the
+exact-head testnet status before redirecting an existing implementation. Successful
+checks invalidate an earlier source-only review and request a final evidence
+review; failure never becomes approval. A repair-limit or ownership blocker stays
+visible with its responsible owner and requires a concrete recovery decision.
+
+### Completed repairs and independent check budgets
+
+A successful worker exit with a validated repair result is collected separately
+from the ticket handoff. If the worker omitted its handoff, the coordinator checks
+the durable exit/process identity, unchanged claim and model, stopped helpers,
+shared-resource leases, clean owner branch and current PR before returning the
+same reservation to Review. It may renew a verified stopped expired reservation
+only to finish this terminal handoff; it neither edits files nor starts a worker.
+A blocked verdict remains blocked evidence and never becomes approval. Dirty work,
+uncertain receipts or a changed owner stop the handoff and preserve the work.
+
+A failed ticket mirror is retried independently, including after service restart.
+The coordinator re-reads ownership so a locally successful Review transition is
+published without replaying the transition or worker. Normal exact-head testnet,
+source review and merge gates still apply.
+
+Repair limits and backoff apply separately to each workflow/check on a PR, across
+head, base and run changes. Three compiler failures cannot consume the first
+public-testnet repair. A combined repair counts against each failing check it
+handles; a successful full CI snapshot ends those failure episodes. Migration
+attributes historical attempts using verified saved snapshots and their existing
+repair fingerprints. Missing or corrupt history retains a conservative wildcard
+limit, rather than silently granting more retries. The legacy PR-wide counter is
+retained as history but no longer blocks unrelated checks.
