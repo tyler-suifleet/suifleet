@@ -277,6 +277,13 @@ class WalrusUploadTests(unittest.TestCase):
         blob, attempts = self.upload(TimeoutError("read timed out"), server, self.STORED)
         self.assertEqual((blob, attempts), ("blob1", ["PUT"] * 3))
 
+    def test_persistent_http_500_fails_closed_at_retry_bound(self):
+        import urllib.error
+        failure = urllib.error.HTTPError("u", 500, "Internal Server Error", {}, None)
+        error, attempts = self.upload(*[failure] * live_common.WALRUS_ATTEMPTS, self.STORED)
+        self.assertIs(error, failure)
+        self.assertEqual(attempts, ["PUT"] * live_common.WALRUS_ATTEMPTS)
+
     def test_retries_are_bounded_and_client_errors_are_not_retried(self):
         import urllib.error
         error, attempts = self.upload(*[TimeoutError("read timed out")] * 3, self.STORED)
