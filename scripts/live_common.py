@@ -35,9 +35,12 @@ CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
 # The public Walrus endpoints refuse Python's default User-Agent (HTTP 403).
 AGENT = {"User-Agent": "suifleet-acceptance/1"}
-# The public publisher occasionally stalls; uploads are retried (content-addressed).
+# Public publishers are best-effort. Keep one total attempt budget across providers.
 WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 3, 10
 WALRUS_TESTNET = ("https://publisher.walrus-testnet.walrus.space", "https://aggregator.walrus-testnet.walrus.space")
+# HTTPS Testnet publishers from https://docs.wal.app/docs/system-overview/public-aggregators-and-publishers
+WALRUS_TESTNET_FALLBACKS = ("https://publisher.walrus-testnet.h2o-nodes.com",
+                            "https://walrus-publisher-testnet.n1stake.com")
 # Move aborts as the CLI reports them: "... aborted within function
 # '0x…::module::function' at instruction N with code C", or the older
 # MoveAbort(MoveLocation { … name: Identifier("module") … function_name: Some("function") }, C).
@@ -325,11 +328,14 @@ class Walrus:
 
     def store(self, body):
         """PUT a blob to the public publisher, retrying transient failures
-        (timeouts, resets, 5xx) a bounded number of times. Blob IDs are
-        content-addressed and the publisher pays, so a retry spends nothing
-        from the run's wallet and returns the same ID."""
+        (timeouts, resets, 5xx) across independent Testnet publishers within
+        one bounded attempt budget. Blob IDs are content-addressed and the
+        publisher pays; no run-wallet transaction is replayed. Readback through
+        the configured aggregator remains mandatory in put()."""
+        publishers = (self.publisher, *WALRUS_TESTNET_FALLBACKS)
         for attempt in range(1, WALRUS_ATTEMPTS + 1):
-            request = urllib.request.Request(f"{self.publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
+            publisher = publishers[min(attempt - 1, len(publishers) - 1)]
+            request = urllib.request.Request(f"{publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
                     return json.load(response)
@@ -339,6 +345,7 @@ class Walrus:
             except OSError:
                 if attempt == WALRUS_ATTEMPTS:
                     raise
+            print(f"Walrus publisher {publisher}: transient upload failure (attempt {attempt}/{WALRUS_ATTEMPTS}); trying next Testnet publisher")
             time.sleep(WALRUS_RETRY_SECONDS * attempt)
 
     def readable(self, blob, body):
