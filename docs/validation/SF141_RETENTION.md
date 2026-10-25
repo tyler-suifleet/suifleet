@@ -367,3 +367,34 @@ independent review remain pending coordinator gates after push; this worker did
 not poll them. Deferred physical/mainnet/production-provider/manual-wallet checks
 remain unrun in #32/#159. No production deployment, hardware operation, public
 wallet mutation, issue creation, other worker or PR merge occurred.
+
+
+## PR307 dependency-blocked base refresh (2026-10-25)
+
+The latest independent review found no actionable source defect and verified the
+previous weighted-reclaim repair. Its sole blocker remains unresolved: a fresh
+`gh pr view 279 --json state,mergedAt,mergeCommit,headRefOid` returned OPEN,
+no merge commit, at `290d1b011c7699d36703d19dbd54f47a70dd1b42`.
+SF-129 must merge before SF-141 final integration; this worker cannot merge it.
+
+Integrated snapshot and fetched main
+`fdf3dd33c451f32e155a0bc768850087da8374ad` without conflicts. This adds upstream
+pricing regressions and the legacy acceptance-deployment discovery repair;
+SF-141 application sources are unchanged by the merge.
+
+Fresh checks on the merged tree (all exit zero):
+
+- `python3 -m unittest discover -s scripts/tests -p test_subscription_pricing.py`: 10 passed.
+- `python3 -m unittest discover -s scripts/tests -p test_testnet_deployment_calls.py`: 3 passed.
+- `python3 -m unittest discover -s scripts/tests -p test_testnet.py`: 36 passed (offline fixtures, no public transactions).
+- `node scripts/test_storage_reclaim.cjs`, `node scripts/test_storage_reclaim_panel.cjs`,
+  `node scripts/test_stream_retention.cjs`, `node scripts/test_stream_retention_panel.cjs`
+  and `node scripts/test_data_browser.cjs`: all passed.
+- `git diff --check` and `git diff --check origin/main`: passed.
+
+No new Move/Rust/full-OTA/browser/build/live tests were run in this refresh;
+earlier evidence above is historical. Hosted checks for the new pushed head
+remain pending coordinator enforcement and were not polled. Fresh independent
+review and dependency verification remain required. Physical/mainnet/provider/
+manual-wallet acceptance is deferred and unrun in #32/#159. No public writes,
+production deployment, hardware programming, issue creation or merge occurred.
