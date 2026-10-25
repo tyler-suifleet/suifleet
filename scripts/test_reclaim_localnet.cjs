@@ -329,6 +329,26 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
         // Unanchored ciphertext remains under fleet custody, even when expired.
         assert((await client.getDynamicField({parentId:storage,name:{type:`${storagePackage.pkg}::fleet_storage::RecordKey`,bcs:bcs.Address.serialize(loose.blob).toBytes()}})).dynamicField);
       }
+      // A finite legacy floor must not become a renewal deadline for rolling
+      // fully-paid streams. Build empty protected storage at epoch 5, with its
+      // already elapsed owner floor at epoch 1, and buy a fresh three epochs.
+      tx = new Transaction();
+      const [q] = tx.moveCall({target:`${storageHead}::fleet_storage::new_quota`,arguments:[tx.pure.u64(86400000),tx.pure.u64(1000000000),tx.pure.u64(4),tx.pure.u64(4194304),tx.pure.u64(1000000000)]});
+      tx.moveCall({target:`${storageHead}::fleet_storage::create`,arguments:[tx.object(budget),tx.object(budgetCap),q]});
+      const rollingStorage = one(await execute('create protected rolling stream fixture',tx),'::fleet_storage::FleetStorage');
+      tx = new Transaction();
+      const [rollingWal] = tx.splitCoins(tx.object(walCoin),[tx.pure.u64(1000000)]);
+      tx.moveCall({target:`${storageHead}::fleet_storage::deposit_wal`,arguments:[tx.object(rollingStorage),tx.object(budget),tx.object(budgetCap),rollingWal]});
+      tx.moveCall({target:`${storageHead}::fleet_storage::configure_retention`,arguments:[tx.object(rollingStorage),tx.object(budget),tx.object(budgetCap),tx.pure.address(owner.toSuiAddress()),tx.pure.u32(1),tx.pure.u64(0),tx.pure.u64(0),tx.pure.u64(0)]});
+      tx.moveCall({target:`${storageHead}::fleet_storage::configure_device_retention`,arguments:[tx.object(rollingStorage),tx.object(budget),tx.object(budgetCap),tx.pure.u32(1),tx.pure.u64(1000000)]});
+      await execute('configure elapsed owner floor without executor reserves',tx);
+      tx = new Transaction();
+      const [rollingBlobId] = tx.moveCall({target:`${walrusPackage.pkg}::blob::derive_blob_id`,arguments:[tx.pure.u256(6000),tx.pure.u8(1),tx.pure.u64(100)]});
+      tx.moveCall({target:`${storageHead}::fleet_storage::register_blob_for_epochs`,arguments:[tx.object(rollingStorage),tx.object(budget),tx.object(fresh[0].account),tx.object(registry),tx.object(fresh[0].cap),tx.object(system),rollingBlobId,tx.pure.u256(6000),tx.pure.u64(100),tx.pure.u8(1),tx.pure.u32(3),tx.object('0x6')]});
+      const rollingBlob = one(await execute('rolling stream continues after legacy floor with zero executor reserves',tx,fresh[0].key),'::blob::Blob');
+      const rollingRecord = RecordBcs.parse((await client.getDynamicField({parentId:rollingStorage,name:{type:`${storagePackage.pkg}::fleet_storage::RecordKey`,bcs:bcs.Address.serialize(rollingBlob).toBytes()}})).dynamicField.value.bcs);
+      assert.equal(rollingRecord.end_epoch,8);
+      await assert.rejects(client.getDynamicField({parentId:rollingStorage,name:{type:`${storagePackage.pkg}::fleet_storage::RenewalKey`,bcs:bcs.Address.serialize(rollingBlob).toBytes()}}),e=>e.reason==='notFound');
       const result = {schema:1,ticket:'SF-141',base:BASE,chain,isolated:true,network:'none',policies:[13,5,null],written:written.map(({blob,record})=>({blob,end:record.end_epoch})),unexpiredRefusal:refuse,transactions:transactions,limits:['One-member local Walrus fixture; no public epoch563 prune/rebate, production provider, wallet or hardware evidence.','SF129 must merge before final integration; hosted CI and independent review remain pending.']};
       if(process.env.SF129_RECEIPT) await fs.writeFile(process.env.SF129_RECEIPT,JSON.stringify(result,(_,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');
       console.log('SF-141 existing-object upgrade and per-stream purchase/expiry/reclaim PASS');

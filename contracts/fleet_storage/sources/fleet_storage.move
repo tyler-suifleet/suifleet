@@ -793,7 +793,9 @@ module fleet_storage::fleet_storage {
         });
         if (retained) {
             let policy: DeviceRetention = *df::borrow(&fs.id, DeviceRetentionKey {});
-            assert!(policy.target > system.epoch(), EInvalidEpochs);
+            // A fully paid rolling stream may outlive the old absolute floor.
+            // Legacy pool writes still require its still-future authorization.
+            assert!(epochs.is_some() || policy.target > system.epoch(), EInvalidEpochs);
             // Stream writes are fully paid at admission; never create work
             // for the legacy executor. An incompatible owner floor aborts.
             assert!(epochs.is_none() || policy.target <= end_epoch, EInvalidEpochs);
