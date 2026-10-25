@@ -373,6 +373,67 @@ module fleet_data::fleet_data_tests {
         ts::return_shared(fleet); ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); finish(s, system);
     }
 
+    // Identity is captured before adoption; no cap extraction or address grant is needed.
+    fun managed_scoped(mode: u8) {
+        let (mut s, system) = setup(); s.next_tx(OWNER);
+        let fleet = s.take_shared<FleetData>(); let a = s.take_shared<GasAccount>();
+        let device_id = fleet_budget::account_device_id(&a);
+        let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
+        ts::return_to_address(OWNER, cap);
+        let stream = std::hash::sha2_256(b"sensor");
+        let mut id = fleet_data::identity_prefix(&fleet);
+        id.append(device_id.to_bytes()); id.append(stream); id.append(zeros(16));
+        ts::return_shared(fleet); ts::return_shared(a);
+        let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
+        ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut b = s.take_shared_by_id<FleetBudget>(bid);
+        let cap = s.take_from_sender<BudgetOwnerCap>();
+        let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
+        customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
+        customer::set_credential(&mut c, SUPPORT, true, mode != 1, s.ctx());
+        ts::return_shared(c); ts::return_shared(b); ts::return_shared(r); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        let ids = customer::fleets(&c); let fid = ids[ids.length() - 1];
+        if (mode == 2) customer::set_credential(&mut c, SUPPORT, false, false, s.ctx());
+        if (mode == 3) {
+            // Rotate owner authority to SUPPORT; the previous owner loses access.
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx());
+        };
+        let cid = object::id(&c);
+        ts::return_shared(c); s.next_tx(SUPPORT);
+        if (mode == 6) {
+            let mut r = s.take_shared<DeviceRegistry>();
+            customer::create(&mut r, string::utf8(b"Other customer"), s.ctx()); ts::return_shared(r);
+        };
+        s.next_tx(if (mode == 3) OWNER else SUPPORT);
+        let c = if (mode == 6) {
+            let original = s.take_shared_by_id<Customer>(cid);
+            let other = s.take_shared<Customer>(); ts::return_shared(original); other
+        } else s.take_shared_by_id<Customer>(cid);
+        let fleet = s.take_shared<FleetData>();
+        let b = s.take_shared_by_id<FleetBudget>(bid);
+        let f = if (mode == 4) {
+            s.take_shared_by_id<ManagedFleet>(customer::fleets(&c)[0])
+        } else s.take_shared_by_id<ManagedFleet>(fid);
+        fleet_data::approve_scoped_customer_for_testing(id, &fleet, &b, &c, &f, device_id,
+            if (mode == 5) zeros(32) else stream, s.ctx());
+        ts::return_shared(c); ts::return_shared(fleet); ts::return_shared(b); ts::return_shared(f); finish(s, system);
+    }
+    #[test] fun managed_scoped_pre_adoption_identity() { managed_scoped(0) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_read_only_denied() { managed_scoped(1) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_revoked_denied() { managed_scoped(2) }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_scoped_rotated_owner_denied() { managed_scoped(3) }
+    #[test, expected_failure(abort_code = fleet_data::EBinding)]
+    fun managed_scoped_cross_fleet_denied() { managed_scoped(4) }
+    #[test, expected_failure(abort_code = fleet_data::EAccess)]
+    fun managed_scoped_cross_stream_denied() { managed_scoped(5) }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun managed_scoped_cross_customer_denied() { managed_scoped(6) }
+
     fun scoped(grant: bool, device_wide: bool, wrong_stream: bool, revoke: bool, legacy: bool) {
         let (mut s,system)=setup();
         ts::next_tx(&mut s,OWNER);

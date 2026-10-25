@@ -57,8 +57,22 @@ export async function readDataItem(client:SuiGrpcClient,config:FleetDataConfig,d
     ||!/^data-[0-9]{2}$/.test(value.identifier))throw Error('Opaque index bounds');
   return value;
 }
+export type ScopedAuthority = {kind:'owner';ownerCapId:string} | {kind:'reader'}
+  | {kind:'customer';customerId:string;fleetId:string};
+/** Read-only Seal calls: managed credentials never borrow the stored budget cap. */
+export function buildScopedApprovalTx(config:FleetDataConfig,identity:Uint8Array,device:string,
+  streamHash:Uint8Array,authority:ScopedAuthority):Transaction {
+  const tx=new Transaction();
+  const args=[tx.pure.vector('u8',identity),tx.object(config.fleetId)];
+  if(authority.kind==='owner')args.push(tx.object(config.budgetId),tx.object(authority.ownerCapId));
+  if(authority.kind==='customer')args.push(tx.object(config.budgetId),tx.object(authority.customerId),tx.object(authority.fleetId));
+  args.push(tx.pure.id(device),tx.pure.vector('u8',streamHash));
+  const fn=authority.kind==='customer'?'seal_approve_scoped_customer':authority.kind==='owner'?'seal_approve_scoped_owner':'seal_approve_scoped_reader';
+  tx.moveCall({target:`${config.packageId}::fleet_data::${fn}`,arguments:args});
+  return tx;
+}
 export async function scopedDecryptor(client:SuiGrpcClient,config:FleetDataConfig,settings:SealSettings,
-  session:SessionKey,device:string,stream:string,authority:{kind:'owner';ownerCapId:string}|{kind:'reader'}) {
+  session:SessionKey,device:string,stream:string,authority:ScopedAuthority) {
   if(session.isExpired()||id(session.getPackageId())!==config.typeOrigin)throw Error('Expired or foreign scoped session');
   const streamHash=await hash(new TextEncoder().encode(stream));
   const seal=new SealClient({suiClient:client,serverConfigs:settings.keyServers,verifyKeyServers:true});
@@ -69,11 +83,8 @@ export async function scopedDecryptor(client:SuiGrpcClient,config:FleetDataConfi
     if(id(object.packageId)!==config.typeOrigin||identity.length!==120||!equal(identity.slice(0,32),bcs.Address.serialize(config.fleetId).toBytes())
       ||!equal(identity.slice(40,72),bcs.Address.serialize(device).toBytes())||!equal(identity.slice(72,104),streamHash)
       ||object.threshold!==settings.threshold||object.services.map(([s])=>id(s)).sort().join()!==expected.join())throw Error('Scoped Seal binding mismatch');
-    const tx=new Transaction();tx.setSender(session.getAddress());
-    const args=[tx.pure.vector('u8',identity),tx.object(config.fleetId)];
-    if(authority.kind==='owner')args.push(tx.object(config.budgetId),tx.object(authority.ownerCapId));
-    args.push(tx.pure.id(device),tx.pure.vector('u8',streamHash));
-    tx.moveCall({target:authority.kind==='owner'?`${config.packageId}::fleet_data::seal_approve_scoped_owner`:`${config.packageId}::fleet_data::seal_approve_scoped_reader`,arguments:args});
+    const tx=buildScopedApprovalTx(config,identity,device,streamHash,authority);
+    tx.setSender(session.getAddress());
     return seal.decrypt({data:encrypted,sessionKey:session,txBytes:await tx.build({client,onlyTransactionKind:true}),checkShareConsistency:true});
   };
 }

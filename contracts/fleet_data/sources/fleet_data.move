@@ -331,6 +331,16 @@ module fleet_data::fleet_data {
         owner(fleet, budget, cap);
         assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
     }
+    /// Read-only managed authority; credential revocation is checked on every request.
+    entry fun seal_approve_scoped_customer(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet,
+        device_id: ID, stream_hash: vector<u8>, ctx: &mut TxContext) {
+        customer::assert_admin(customer, ctx);
+        customer::assert_fleet(customer, managed);
+        assert!(fleet.version == VERSION && object::id(budget) == fleet.budget_id
+            && customer::fleet_budget(managed) == fleet.budget_id, EBinding);
+        assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
+    }
     entry fun seal_approve_scoped_reader(id: vector<u8>, fleet: &FleetData,
         device_id: ID, stream_hash: vector<u8>, ctx: &TxContext) {
         assert!(scoped_identity_matches(fleet, &id, device_id, &stream_hash), EAccess);
@@ -436,6 +446,12 @@ module fleet_data::fleet_data {
     public fun identity_prefix(fleet: &FleetData): vector<u8> {
         let mut prefix = object::id(fleet).to_bytes();
         prefix.append(bcs::to_bytes(&fleet.key_epoch)); prefix
+    }
+    #[test_only]
+    public fun approve_scoped_customer_for_testing(id: vector<u8>, fleet: &FleetData,
+        budget: &FleetBudget, customer: &Customer, managed: &Fleet,
+        device_id: ID, stream_hash: vector<u8>, ctx: &mut TxContext) {
+        seal_approve_scoped_customer(id, fleet, budget, customer, managed, device_id, stream_hash, ctx)
     }
     #[test_only]
     public fun approve_customer_for_testing(id: vector<u8>, fleet: &FleetData, budget: &FleetBudget, customer: &Customer, managed: &Fleet, ctx: &mut TxContext) {

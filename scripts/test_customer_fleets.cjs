@@ -41,6 +41,21 @@ client.getObject=async request=>{
   if([F,G].includes(request.objectId))return {object:{objectId:request.objectId,type:type("Fleet"),content:wire.customer_FleetBcs.serialize({id:request.objectId,version:1,customer_id:wrongCustomer?B:C,name:"Production",budget_id:request.objectId===G?id("0xb1"):BUD,devices:request.objectId===F?[id("0xd")]:[],pending_devices:0,groups:[],deployments:[],policies:{contents:[]},enrollment_policies:[]}).toBytes()}};
   return original(request);
 };
+const opaque = loader()("lib/opaque-data.ts");
+for (const [authority, fn, count] of [
+ [{kind:"customer",customerId:C,fleetId:F},"seal_approve_scoped_customer",7],
+ [{kind:"owner",ownerCapId:CAP},"seal_approve_scoped_owner",6],
+ [{kind:"reader"},"seal_approve_scoped_reader",4],
+]) {
+ const scoped=opaque.buildScopedApprovalTx({packageId:m.call_package_id,fleetId:id("0xf0"),budgetId:BUD},new Uint8Array(120),id("0xd"),new Uint8Array(32),authority).getData();
+ assert.equal(scoped.commands.length,1);
+ assert.equal(scoped.commands[0].MoveCall.function,fn);
+ assert.equal(scoped.commands[0].MoveCall.arguments.length,count);
+ if(authority.kind==="customer") {
+  assert.deepEqual(scoped.inputs.filter(i=>i.UnresolvedObject).map(i=>i.UnresolvedObject.objectId),[id("0xf0"),BUD,C,F]);
+  assert.ok(scoped.inputs.every(i=>i.UnresolvedObject?.objectId!==CAP));
+ }
+}
 (async()=>{
  const result=await fleets.fetchCustomerFleets(client,A);
  assert.equal(result.length,2);assert.equal(result[0].name,result[1].name,"aliases need not be unique");
