@@ -209,16 +209,17 @@ class Live:
                              head=subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip())
         print(f"{self.network} chain {self.chain}, operator {self.operator}, balance {self.start_balance / 1e9:.3f} SUI")
 
-    def execute(self, label, command, *, gas, funding=0, expect="success", sender=None):
+    def execute(self, label, command, *, gas, funding=0, expect="success", sender=None, require_full=False):
         """One charged mutation. `sender` is (client.yaml, Budget) for a
         child account the run funded: its own gas is bounded by (and
         recorded against) that funding, which the run already charged."""
         self.assert_lock()
         config, ledger = sender or (None, self.ledger)
-        return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect)
+        return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect,
+                              require_full=require_full)
 
     def transaction(self, label, *ptb, budget=200_000_000, funding=0, sender=None):
-        return self.execute(label, ["ptb", *ptb], gas=budget, funding=funding, sender=sender)
+        return self.execute(label, ["ptb", *ptb], gas=budget, funding=funding, sender=sender, require_full=True)
 
     def child(self, config, funding):
         """The Budget for a child account funded with `funding` MIST."""
