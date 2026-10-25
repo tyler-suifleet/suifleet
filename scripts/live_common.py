@@ -408,6 +408,7 @@ class Walrus:
                         stored = json.load(response)
                     if publisher != self.publisher:
                         print(f"Walrus blob stored by fallback publisher {publisher}", file=sys.stderr)
+                    self.stored_by = publisher
                     return stored
                 except urllib.error.HTTPError as failure:
                     error, reason = failure, f"HTTP {failure.code}{_walrus_message(failure)}"
@@ -419,6 +420,16 @@ class Walrus:
             if not publishers:
                 break
         raise error
+
+    def working_publisher(self):
+        """A publisher that just stored a fresh probe blob which then read
+        back byte for byte through the aggregator. For uploads made outside
+        this class (the dApp in the browser), which have no fallback of their
+        own: the dApp is pointed at this publisher instead of a dry primary."""
+        if self.mode != "testnet":
+            return self.publisher
+        self.put("probe", b"suifleet publisher probe " + os.urandom(16).hex().encode())
+        return self.stored_by
 
     def readable(self, blob, body):
         try:
