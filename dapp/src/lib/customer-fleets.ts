@@ -4,6 +4,7 @@ import { normalizeStructTag } from "@mysten/sui/utils";
 import { MANIFEST, moveType, normalizeId, verifyDeployment } from "./deployment-manifest";
 import { PACKAGE_ID, REGISTRY_ID } from "./constants";
 import { configuredDataFleets, readFleetData } from "./fleet-data";
+import { hasScopedReadGrant } from "./opaque-data";
 import { allOwned, allEvents } from "./sui";
 import { customer_CustomerBcs, customer_FleetBcs, customer_MembershipBcs, customer_FleetCreatedBcs } from "./fleet-protocol";
 
@@ -24,15 +25,17 @@ export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string)
   const credentials = await allOwned(client, wallet, moveType("customer::Membership"));
   const ids = [...new Set(credentials.map(o => customer_MembershipBcs.parse(o.content).customer_id))];
   const supportBudgets = new Set<string>();
+  const readerBudgets = new Set<string>();
   for (const config of configuredDataFleets()) {
     const data = await readFleetData(client, config);
     if (data.support.some(address => normalizeId(address) === normalizeId(wallet))) supportBudgets.add(normalizeId(config.budgetId));
+    else if (await hasScopedReadGrant(client, config, wallet)) readerBudgets.add(normalizeId(config.budgetId));
   }
-  if (supportBudgets.size) {
+  if (supportBudgets.size || readerBudgets.size) {
     const events = await allEvents(client, moveType("customer::FleetCreated"));
     for (const event of events) {
       const created = customer_FleetCreatedBcs.parse(event.bcs);
-      if (supportBudgets.has(normalizeId(created.budget_id)) && !ids.includes(created.customer_id)) ids.push(created.customer_id);
+      if ((supportBudgets.has(normalizeId(created.budget_id)) || readerBudgets.has(normalizeId(created.budget_id))) && !ids.includes(created.customer_id)) ids.push(created.customer_id);
     }
   }
   const result: NamedFleet[] = [];
@@ -43,7 +46,7 @@ export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string)
     if (BigInt(c.version) !== BigInt(1)) throw Error("Customer authority version requires a newer dashboard");
     if (normalizeId(c.id) !== normalizeId(id) || normalizeId(c.registry_id) !== normalizeId(REGISTRY_ID)) throw Error("Customer registry mismatch");
     const credential = c.credentials.contents.find(entry => normalizeId(entry.key) === normalizeId(wallet));
-    if (!credential && !supportBudgets.size) continue; // Owned credentials are hints; current shared authority is decisive.
+    if (!credential && !supportBudgets.size && !readerBudgets.size) continue; // Owned credentials are hints; current shared authority is decisive.
     for (const fleetId of c.fleets) {
       const { object: fleet } = await client.getObject({ objectId: fleetId, include: { content: true } });
       if (normalizeStructTag(fleet.type) !== normalizeStructTag(moveType("customer::Fleet"))) throw Error("Unexpected fleet type");
@@ -51,7 +54,7 @@ export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string)
       if (BigInt(f.version) !== BigInt(1)) throw Error("Fleet authority version requires a newer dashboard");
       if (normalizeId(f.id) !== normalizeId(fleetId) || normalizeId(f.customer_id) !== normalizeId(id)) throw Error("Fleet customer mismatch");
       const support = supportBudgets.has(normalizeId(f.budget_id));
-      if (!credential && !support) continue;
+      if (!credential && !support && !readerBudgets.has(normalizeId(f.budget_id))) continue;
       result.push({ support, id: fleetId, customerId: id, customerName: c.name, name: f.name, budgetId: f.budget_id,
         credentials: c.credentials.contents.map(c => ({ wallet: c.key, administrator: c.value })), enrollmentPolicies: f.enrollment_policies, devices: f.devices, groups: f.groups, deployments: f.deployments, policies: f.policies.contents.map(p => ({ id: p.key, capId: p.value })), administrator: credential?.value ?? false,
         isDefault: c.default_fleet === fleetId, activeDevices: BigInt(c.active_devices), deviceLimit: BigInt(c.device_limit),

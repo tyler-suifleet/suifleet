@@ -1,4 +1,5 @@
 // SF139 producer/index reader boundary; SF140 supplies the UI.
+import { ObjectError } from '@mysten/sui/client';
 import { bcs } from '@mysten/sui/bcs';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { normalizeSuiAddress as id, normalizeStructTag, fromBase64, fromHex, toHex } from '@mysten/sui/utils';
@@ -176,4 +177,41 @@ export async function listDataItems(client:SuiGrpcClient,config:FleetDataConfig,
     items.push({batch:name.batch,item:Number(name.item),value:await readDataItem(client,config,device,name.batch,Number(name.item))});
   }
   return {items,cursor:page.cursor,hasNextPage:page.hasNextPage};
+}
+
+/** Discovery is a locator hint only. Seal checks the exact device/stream grant
+ * again on every decrypt; listing a fleet never grants customer authority. */
+export async function hasScopedReadGrant(client:SuiGrpcClient,config:FleetDataConfig,reader:string) {
+  await readFleetData(client,config);
+  const {object}=await client.getObject({objectId:config.packageId,include:{objectBcs:true}});
+  const origins=bcs.Object.parse(object.objectBcs).data.Package?.typeOriginTable;
+  const entries=origins?.filter(e=>e.moduleName==='fleet_data'&&e.datatypeName==='ReadGrantKey') ?? [];
+  if(!entries.length)return false; // Older data packages have no scoped grants.
+  if(entries.length!==1)throw Error('Read grant origin mismatch');
+  const type=`${id(entries[0].package)}::fleet_data::ReadGrantKey`;
+  const key=bcs.struct('ReadGrantKey',{device_id:bcs.Address,stream_hash:bcs.byteVector(),reader:bcs.Address});
+  let cursor:string|undefined;
+  const seen=new Set<string>();
+  for(let pages=0;pages<100;pages++) {
+    const page=await client.listDynamicFields({parentId:config.fleetId,cursor,limit:100});
+    if(page.dynamicFields.length>100||(page.hasNextPage&&(!page.cursor||seen.has(page.cursor))))throw Error('Invalid read grant page');
+    for(const field of page.dynamicFields) {
+      if(normalizeStructTag(field.name.type)!==normalizeStructTag(type))continue;
+      if(field.$kind!=='DynamicField'||field.valueType!=='bool')throw Error('Invalid read grant field');
+      const grant=key.parse(field.name.bcs);
+      if(grant.stream_hash.length!==0&&grant.stream_hash.length!==32)throw Error('Invalid read grant scope');
+      if(id(grant.reader)!==id(reader))continue;
+      // Re-read the exact key: revoked/stale index entries confer no access.
+      try {
+        await client.getDynamicField({parentId:config.fleetId,name:{type,bcs:field.name.bcs}});
+        return true;
+      } catch(error) {
+        if(error instanceof ObjectError && error.reason==='notFound')continue;
+        throw error;
+      }
+    }
+    if(!page.hasNextPage)return false;
+    cursor=page.cursor!;seen.add(cursor);
+  }
+  throw Error('Read grant discovery exceeds browser limits');
 }

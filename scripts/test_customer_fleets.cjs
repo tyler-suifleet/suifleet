@@ -68,15 +68,19 @@ for (const [authority, fn, count] of [
  const cfg={schema:1,chainIdentifier:m.chain_identifier,registryId:m.shared_objects.registry.id,packageId:id("0xf0"),typeOrigin:id("0xf0"),fleetId:id("0xf1"),budgetId:BUD,storageId:id("0xf2")};
  process.env.NEXT_PUBLIC_FLEET_DATA=JSON.stringify(cfg);
  const guestLoad=loader(), data=guestLoad("lib/fleet-data.ts"), guestRead=guestLoad("lib/customer-fleets.ts"), support=guestLoad("lib/fleet-support.ts");
- const guestClient=manifestClient(m), fallback=guestClient.getObject;let supportActive=true;
+ const guestClient=manifestClient(m), fallback=guestClient.getObject;let supportActive=true, readerActive=false;
  guestClient.listOwnedObjects=async()=>({objects:[],hasNextPage:false});
  guestClient.listEvents=async()=>({events:[{bcs:wire.customer_FleetCreatedBcs.serialize({customer_id:C,fleet_id:F,name:"Production",budget_id:BUD}).toBytes()}],hasNextPage:false});
  const W=id("0xfe"), D=id("0xd");
  guestClient.getObject=async request=>{
+  if(request.objectId===cfg.packageId)return {object:{objectBcs:appRequire("@mysten/sui/bcs").bcs.Object.serialize({data:{Package:{id:cfg.packageId,version:1,moduleMap:new Map(),linkageTable:new Map(),typeOriginTable:[{moduleName:"fleet_data",datatypeName:"ReadGrantKey",package:cfg.typeOrigin}]}},owner:{Immutable:true},previousTransaction:appRequire("@mysten/sui/utils").toBase58(new Uint8Array(32)),storageRebate:0}).toBytes()}};
   if(request.objectId===cfg.fleetId)return {object:{objectId:cfg.fleetId,owner:{$kind:"Shared"},type:`${cfg.typeOrigin}::fleet_data::FleetData`,content:data.FleetDataBcs.serialize({id:cfg.fleetId,version:1,budget_id:BUD,storage_id:cfg.storageId,registry_id:cfg.registryId,chain_identifier:cfg.chainIdentifier,key_epoch:0,support:supportActive?[B]:[],health_interval_ms:3600000,batch_interval_ms:86400000,emergency_interval_ms:300000,device_count:1}).toBytes()}};
   if(request.objectId===W)return {object:{objectId:W,owner:{$kind:"Shared"},type:`${cfg.typeOrigin}::fleet_data::DeviceData`,content:data.DeviceDataBcs.serialize({id:W,version:1,fleet_id:cfg.fleetId,device_id:D,account_id:id("0xac"),health_seq:0,health_at_ms:0,message:[],signature:[],batch_seq:0,batch_at_ms:null,emergency_at_ms:null,anchor_count:0}).toBytes()}};
   return [C,F,G].includes(request.objectId)?client.getObject(request):fallback(request);
  };
+ const bcs=appRequire("@mysten/sui/bcs").bcs;
+ const grantKey=bcs.struct("ReadGrantKey",{device_id:bcs.Address,stream_hash:bcs.byteVector(),reader:bcs.Address});
+ guestClient.listDynamicFields=async()=>({dynamicFields:readerActive?[{$kind:"DynamicField",name:{type:`${cfg.typeOrigin}::fleet_data::ReadGrantKey`,bcs:grantKey.serialize({device_id:D,stream_hash:[],reader:B}).toBytes()},valueType:"bool"}]:[],hasNextPage:false});
  guestClient.getDynamicField=async()=>({dynamicField:{value:{type:"0x2::object::ID",bcs:appRequire("@mysten/sui/bcs").bcs.Address.serialize(W).toBytes()}}});
  const guest=await guestRead.fetchCustomerFleets(guestClient,B);assert.equal(guest.length,1);assert.equal(guest[0].support,true);assert.equal(guest[0].administrator,false);
  const {Transaction}=appRequire("@mysten/sui/transactions");
@@ -90,6 +94,51 @@ for (const [authority, fn, count] of [
  await assert.rejects(()=>support.verifySupportDiagnostics(guestClient,guest[0],cfg,D,B,substituted),/binding changed/);
  supportActive=false;assert.deepEqual(await guestRead.fetchCustomerFleets(guestClient,B),[]);
  await assert.rejects(()=>support.verifySupportDiagnostics(guestClient,guest[0],cfg,D,B,diagnostic),/revoked/);
- console.log("PASS: multi-fleet discovery, aliases, revoked credentials, isolation, capability loans, read-only Seal approval and independent support authority");
+ readerActive=true;
+ const listGrants=guestClient.listDynamicFields,readField=guestClient.getDynamicField;
+ guestClient.listDynamicFields=async({cursor})=>cursor?listGrants():{dynamicFields:[],hasNextPage:true,cursor:"next"};
+ assert.equal(await guestLoad("lib/opaque-data.ts").hasScopedReadGrant(guestClient,cfg,B),true,"discovery follows grant pages");
+ guestClient.listDynamicFields=async()=>({dynamicFields:[],hasNextPage:true,cursor:"repeat"});
+ await assert.rejects(()=>guestLoad("lib/opaque-data.ts").hasScopedReadGrant(guestClient,cfg,B),/Invalid read grant page/);
+ guestClient.listDynamicFields=listGrants;
+ guestClient.getDynamicField=async()=>{throw new (appRequire("@mysten/sui/client").ObjectError)("NOT_FOUND","revoked",{reason:"notFound"});};
+ assert.equal(await guestLoad("lib/opaque-data.ts").hasScopedReadGrant(guestClient,cfg,B),false,"stale index cannot restore revoked grant");
+ guestClient.getDynamicField=readField;
+ const reader=await guestRead.fetchCustomerFleets(guestClient,B);
+ assert.equal(reader.length,1,"non-member scoped grantee discovers granting fleet");
+ assert.equal(reader[0].administrator,false);assert.equal(reader[0].support,false);
+ const authority=guestLoad("lib/data-authority.ts");
+ assert.equal(authority.selectedDataAuthority(reader,reader[0],BUD).kind,"reader");
+ assert.deepEqual(await guestRead.fetchCustomerFleets(guestClient,A),[],"another wallet cannot use the grant");
+ // Render the shipped FleetDataBrowser with a customer-enabled selection.
+ // Keep discovery and authority real; fixture only wallet/provider/storage I/O.
+ const React=appRequire("react"),{renderToString}=appRequire("react-dom/server");
+ const fixture=await require("./fixtures/data-browser.cjs")(),row=fixture.fixtures[0].row;
+ let adapter,approved,fetches=0;
+ const selection={supported:true,fleet:reader[0],identity:"grantee"};
+ const selectionHook={useFleetSelection:()=>selection};
+ const opaqueReal=guestLoad("lib/opaque-data.ts");
+ const browserLoad=loader({
+  "@mysten/dapp-kit-react":{useCurrentClient:()=>guestClient,useCurrentAccount:()=>({address:B}),useCurrentNetwork:()=>m.network,useDAppKit:()=>({stores:{$connection:{get:()=>({account:{address:B,chains:[`sui:${m.network}`]}})},$currentNetwork:{get:()=>m.network}},signPersonalMessage:async()=>({signature:"fixture"})})},
+  "@mysten/seal":{SessionKey:{create:async()=>({isExpired:()=>false,getPersonalMessage:()=>new Uint8Array(),setPersonalMessageSignature:async()=>{}})}},
+  "@/hooks/useDevices":{useDevices:()=>({data:[]})},"@/hooks/useGroups":{useGroups:()=>({data:[]})},
+  "@/hooks/useFleetTransaction":{useFleetTransaction:()=>({mutateAsync:async()=>{throw Error("reader must not mutate");}})},
+  "@/hooks/useFleetSelection":selectionHook,"./useFleetSelection":selectionHook,
+  "@/lib/customer-fleets":guestRead,"@/lib/seal":{SEAL_SETTINGS:{}},
+  "@/lib/opaque-data":{...opaqueReal,readDataItem:async()=>row.value,scopedDecryptor:async(...args)=>{approved=args[6];return ()=>{};},fetchDataItem:async()=>{fetches++;return new TextEncoder().encode("verified fixture plaintext");}},
+  "./DataBrowser":{DataBrowser:props=>{adapter=props.adapter;return React.createElement("p",null,"Data browser reachable");}},
+ });
+ guestClient.$extend=()=>({walrus:{}});
+ const Component=browserLoad("components/FleetDataBrowser.tsx").FleetDataBrowser;
+ assert.match(renderToString(React.createElement(Component)),/Data browser reachable/);
+ const opened=await adapter.open(row);
+ assert.match(new TextDecoder().decode(opened),/fixture plaintext/);
+ assert.equal(approved.kind,"reader");assert.equal(fetches,1);
+ readerActive=false;
+ await assert.rejects(()=>adapter.open(row),/revoked/);
+ assert.equal(fetches,1,"revoked reader must be refused before fetching plaintext");
+ assert.throws(()=>authority.selectedDataAuthority([],reader[0],BUD),/revoked/);
+ assert.deepEqual(await guestRead.fetchCustomerFleets(guestClient,B),[],"grant revocation removes discovery without membership");
+ console.log("PASS: multi-fleet discovery, aliases, revoked credentials, isolation, capability loans, read-only Seal approval and independent support/reader authority, pagination, stale grants and FleetDataBrowser revocation");
 
 })().catch(error=>{console.error(error);process.exitCode=1;});
