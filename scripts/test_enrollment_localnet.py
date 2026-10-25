@@ -247,7 +247,7 @@ def run(rpc_url, faucet_url):
                     state = root / f"state-{name}"
                     template = root / f"template-{name}.toml"
                     template.write_text(device_section + f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {state}/c")}\n'
-                                        f'timeout_seconds = 30\n[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 1\n')
+                                        f'timeout_seconds = 30\n[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n')
                     dm.generate(manifest, root / f"release-{name}", template)
                     log = (root / f"daemon-{name}.log").open("w")
                     process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / f"release-{name}/config.toml")},

@@ -35,6 +35,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import test_ota
+from test_ota import completed_polls
 from test_ota import CAP, DEVICE, PACKAGE, REGISTRY, TYPE_ORIGINS, UPGRADE_CAP, Simulator, start_grpc, wait_for
 
 # The run records itself, keeps a child in its group, one that escapes it with
@@ -133,7 +134,7 @@ def run(binary):
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\nmode = "privileged-helper"\n'
                 f'firmware_spool = {json.dumps(str(state_dir / "firmware"))}\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 3\n'
                 'component_stop_timeout_seconds = 3\ncomponent_max_restarts = 3\n')
             recovery = f"cp {{artifact}} {root}/recovered-artifact; cp {{artifacts}}/configuration {root}/application-config"
@@ -359,9 +360,9 @@ def run(binary):
                     pass
                 os.kill(detached, signal.SIGKILL)
                 (components / "instance.json").unlink()
-                checks = sim.chain_checks
+                polls = completed_polls(root / "daemon.log")
                 process = start()
-                wait_for(lambda: sim.chain_checks >= checks + 3, "successor did not reach polling", process)
+                wait_for(lambda: completed_polls(root / "daemon.log") >= polls + 3, "successor did not reach polling", process)
                 wait_for(lambda: outcome("0x405").get("indeterminate"), "v5's interrupted outcome was not preserved", process)
                 assert outcome("0x405").get("firmware_request") is None
                 assert outcome("0x405").get("status") is None and not outcome("0x405").get("reported") and "interrupted" in outcome("0x405")["error"], outcome("0x405")

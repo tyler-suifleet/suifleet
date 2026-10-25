@@ -57,7 +57,7 @@ def wait_for(condition, message, process=None, timeout=90):
     raise AssertionError(message)
 
 
-def run(rpc_url, faucet_url, catalog_upgrade=False):
+def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node_pid=None, poll_cache_only=False, baseline_binary=None):
     for url in (rpc_url, faucet_url):
         if urlparse(url).hostname not in ("localhost", "127.0.0.1", "::1"):
             raise ValueError("this test requires an isolated loopback node and faucet")
@@ -261,7 +261,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
                 f'device_cap_id = "{cap}"\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\n'
                 f'timeout_seconds = 30\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n')
             bundle = root / "release"
             dm.generate(manifest, bundle, template)
             config = bundle / "config.toml"
@@ -298,8 +298,8 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
 
             log = (root / "daemon.log").open("w")
 
-            def start():
-                return subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(config)},
+            def start(binary=DAEMON):
+                return subprocess.Popen([str(binary)], env={**os.environ, "EDGE_CONFIG": str(config)},
                                         stdout=log, stderr=log)
 
             def stop(process):
@@ -312,225 +312,297 @@ def run(rpc_url, faucet_url, catalog_upgrade=False):
 
             try:
                 before = deploy("0.9.0", devices=[device])  # Before enrollment: never applied.
-                process = start()
-                wait_for(lambda: journal().get("initialized"), "enrollment did not establish a cursor", process)
+                if not poll_cache_only:
+                    process = start()
+                    wait_for(lambda: journal().get("initialized"), "enrollment did not establish a cursor", process)
 
-                if catalog_upgrade:
-                    unsupported = deploy_catalog("0.9.5", devices=[device], unsupported=True)
-                    wait_for(settled(unsupported, 2), "unsupported platform did not fail and report", process)
-                    receipt_is(unsupported, 2)
-                    assert not downloads, downloads
-                    assert not outcome(unsupported).get("firmware_request")
-                    print("PASS: live unsupported platform Failed with on-chain receipt and no downloads, then valid deployment follows")
-                v1 = (deploy_catalog if catalog_upgrade else deploy)("1.0.0", devices=[device])
-                wait_for(settled(v1, 1), "direct v1 was not applied and reported", process)
-                receipt_is(v1, 1)
+                    if catalog_upgrade:
+                        unsupported = deploy_catalog("0.9.5", devices=[device], unsupported=True)
+                        wait_for(settled(unsupported, 2), "unsupported platform did not fail and report", process)
+                        receipt_is(unsupported, 2)
+                        assert not downloads, downloads
+                        assert not outcome(unsupported).get("firmware_request")
+                        print("PASS: live unsupported platform Failed with on-chain receipt and no downloads, then valid deployment follows")
+                    v1 = (deploy_catalog if catalog_upgrade else deploy)("1.0.0", devices=[device])
+                    wait_for(settled(v1, 1), "direct v1 was not applied and reported", process)
+                    receipt_is(v1, 1)
 
-                v2 = (deploy_catalog if catalog_upgrade else deploy)("2.0.0", groups=[group])
-                wait_for(settled(v2, 1), "group v2 was not applied and reported", process)
-                receipt_is(v2, 1)
+                    v2 = (deploy_catalog if catalog_upgrade else deploy)("2.0.0", groups=[group])
+                    wait_for(settled(v2, 1), "group v2 was not applied and reported", process)
+                    receipt_is(v2, 1)
 
-                if catalog_upgrade:
-                    # SF-012: dependencies resolved from the real shared catalog's BCS index.
-                    lib, app = "suifleet-dep-lib", "suifleet-dep-app"
-                    for version in ("1.0.0", "1.5.0", "2.0.0"):
-                        deploy_catalog(version, name=lib, register_only=True)
-                    with_lib = deploy_catalog("1.0.0", name=app, devices=[device],
-                                              dependencies={lib: {"versionRequirement": "^1.0.0"}})
-                    wait_for(settled(with_lib, 1), "dependency deployment was not applied and reported", process)
-                    receipt_is(with_lib, 1)
-                    installed = journal()["components"]
-                    assert (installed[lib]["version"], installed[lib]["confirmed"]) == ("1.5.0", True), installed
-                    assert (installed[app]["version"], installed[app]["confirmed"]) == ("1.0.0", True), installed
-                    for name, version in ((lib, "1.5.0"), (app, "1.0.0")):
-                        receipts_seen = (components / name / "history.jsonl").read_text().splitlines()
-                        assert [json.loads(r)["version"] for r in receipts_seen] == [version], receipts_seen
-                    conflict = deploy_catalog("2.0.0", name=app, devices=[device],
-                                              dependencies={lib: {"versionRequirement": "^2.0.0"}, "suifleet-dep-absent": {"versionRequirement": "*"}})
-                    wait_for(settled(conflict, 2), "unresolvable dependencies were not rejected and reported", process)
-                    receipt_is(conflict, 2)
-                    assert "no available version of suifleet-dep-absent" in outcome(conflict)["error"], outcome(conflict)
-                    assert not any(p.endswith(("catalog-artifact-suifleet-dep-lib-2-0-0", "catalog-artifact-suifleet-dep-app-2-0-0"))
-                                   for p in downloads), downloads
-                    assert journal()["components"] == installed, "a rejected deployment changed installed components"
-                    print("PASS: live catalog BCS index resolved a schema-1.1 dependency (highest matching 1.5.0) "
-                          "before its dependent, with on-chain receipt; unresolvable dependencies rejected before artifact downloads")
+                    if catalog_upgrade:
+                        # SF-012: dependencies resolved from the real shared catalog's BCS index.
+                        lib, app = "suifleet-dep-lib", "suifleet-dep-app"
+                        for version in ("1.0.0", "1.5.0", "2.0.0"):
+                            deploy_catalog(version, name=lib, register_only=True)
+                        with_lib = deploy_catalog("1.0.0", name=app, devices=[device],
+                                                  dependencies={lib: {"versionRequirement": "^1.0.0"}})
+                        wait_for(settled(with_lib, 1), "dependency deployment was not applied and reported", process)
+                        receipt_is(with_lib, 1)
+                        installed = journal()["components"]
+                        assert (installed[lib]["version"], installed[lib]["confirmed"]) == ("1.5.0", True), installed
+                        assert (installed[app]["version"], installed[app]["confirmed"]) == ("1.0.0", True), installed
+                        for name, version in ((lib, "1.5.0"), (app, "1.0.0")):
+                            receipts_seen = (components / name / "history.jsonl").read_text().splitlines()
+                            assert [json.loads(r)["version"] for r in receipts_seen] == [version], receipts_seen
+                        conflict = deploy_catalog("2.0.0", name=app, devices=[device],
+                                                  dependencies={lib: {"versionRequirement": "^2.0.0"}, "suifleet-dep-absent": {"versionRequirement": "*"}})
+                        wait_for(settled(conflict, 2), "unresolvable dependencies were not rejected and reported", process)
+                        receipt_is(conflict, 2)
+                        assert "no available version of suifleet-dep-absent" in outcome(conflict)["error"], outcome(conflict)
+                        assert not any(p.endswith(("catalog-artifact-suifleet-dep-lib-2-0-0", "catalog-artifact-suifleet-dep-app-2-0-0"))
+                                       for p in downloads), downloads
+                        assert journal()["components"] == installed, "a rejected deployment changed installed components"
+                        print("PASS: live catalog BCS index resolved a schema-1.1 dependency (highest matching 1.5.0) "
+                              "before its dependent, with on-chain receipt; unresolvable dependencies rejected before artifact downloads")
 
-                    # SF-075: the upgraded package accepts a macOS manifest for
-                    # the same architecture; this Linux daemon selects by OS.
-                    mixed = deploy_catalog("2.1.0", devices=[device], first=("macos", "x86_64"))
-                    wait_for(settled(mixed, 1), "a version listing a macOS manifest was not applied on Linux", process)
-                    receipt_is(mixed, 1)
-                    assert not any(p.endswith("never-download") for p in downloads), downloads
-                    print("PASS: upgraded catalog publishes a macos/x86_64 manifest; the linux/x86_64 daemon selected "
-                          "its own manifest and never fetched the macOS recipe")
+                        # SF-075: the upgraded package accepts a macOS manifest for
+                        # the same architecture; this Linux daemon selects by OS.
+                        mixed = deploy_catalog("2.1.0", devices=[device], first=("macos", "x86_64"))
+                        wait_for(settled(mixed, 1), "a version listing a macOS manifest was not applied on Linux", process)
+                        receipt_is(mixed, 1)
+                        assert not any(p.endswith("never-download") for p in downloads), downloads
+                        print("PASS: upgraded catalog publishes a macos/x86_64 manifest; the linux/x86_64 daemon selected "
+                              "its own manifest and never fetched the macOS recipe")
 
-                bad = deploy("3.0.0", devices=[device], fail="health")
-                elsewhere = deploy("3.1.0", devices=[other])
-                wait_for(settled(bad, 2), "health failure was not reported as Failed", process)
-                receipt_is(bad, 2)
-                print("PASS: real localnet over gRPC: direct and group deployments Applied, health failure Failed, "
-                      "each confirmed by on-chain receipts")
+                    bad = deploy("3.0.0", devices=[device], fail="health")
+                    elsewhere = deploy("3.1.0", devices=[other])
+                    wait_for(settled(bad, 2), "health failure was not reported as Failed", process)
+                    receipt_is(bad, 2)
+                    print("PASS: real localnet over gRPC: direct and group deployments Applied, health failure Failed, "
+                          "each confirmed by on-chain receipts")
 
-                stop(process)
-                process = None
-                offline = deploy("4.0.0", devices=[device])
-                process = start()
-                wait_for(settled(offline, 1), "deployment created while offline was not caught up", process)
-                receipt_is(offline, 1)
-                print("PASS: offline catch-up after restart")
+                    stop(process)
+                    process = None
+                    offline = deploy("4.0.0", devices=[device])
+                    process = start()
+                    wait_for(settled(offline, 1), "deployment created while offline was not caught up", process)
+                    receipt_is(offline, 1)
+                    print("PASS: offline catch-up after restart")
 
-                # Replace the cursor with the form the JSON-RPC daemon wrote, pointing
-                # at v1's event: everything after it is rescanned, nothing re-applied.
-                stop(process)
-                process = None
-                events = dm.rpc(rpc_url, "suix_queryEvents", [
-                    {"MoveEventType": f"{manifest['type_origins']['deployment_manager::DeploymentCreated']}"
-                                      "::deployment_manager::DeploymentCreated"}, None, 50, False])["data"]
-                legacy = next(e["id"] for e in events
-                              if dm.object_id(e["parsedJson"]["deployment_id"]) == dm.object_id(v1))
-                state = journal()
-                state["cursor"] = legacy
-                journal_path.write_text(json.dumps(state))
-                applied_before = len(history())
-                after_migration = deploy("5.0.0", devices=[device])
-                process = start()
-                wait_for(settled(after_migration, 1), "deployment after a migrated cursor was not applied", process)
-                stop(process)
-                process = None
-                versions = [r["version"] for r in history()]
-                assert versions == ["1.0.0", "2.0.0", *(["2.1.0"] if catalog_upgrade else []), "3.0.0", "4.0.0", "5.0.0"], versions
-                assert len(history()) == applied_before + 1, "migration replayed applied work"
-                assert "after" in journal()["cursor"], journal()["cursor"]
-                assert not outcome(before) and not outcome(elsewhere), "untargeted or pre-enrollment deployment ran"
-                assert all(r["runId"] == run_id for r in history())
-                print("PASS: JSON-RPC-era cursor migrated to a gRPC cursor without replaying applied work; "
-                      "pre-enrollment and other-device deployments never ran")
+                    # Replace the cursor with the form the JSON-RPC daemon wrote, pointing
+                    # at v1's event: everything after it is rescanned, nothing re-applied.
+                    stop(process)
+                    process = None
+                    events = dm.rpc(rpc_url, "suix_queryEvents", [
+                        {"MoveEventType": f"{manifest['type_origins']['deployment_manager::DeploymentCreated']}"
+                                          "::deployment_manager::DeploymentCreated"}, None, 50, False])["data"]
+                    legacy = next(e["id"] for e in events
+                                  if dm.object_id(e["parsedJson"]["deployment_id"]) == dm.object_id(v1))
+                    state = journal()
+                    state.pop("discovery_cursor", None)
+                    state.pop("discovery_merge_checkpoint", None)
+                    state["cursor"] = legacy
+                    journal_path.write_text(json.dumps(state))
+                    applied_before = len(history())
+                    after_migration = deploy("5.0.0", devices=[device])
+                    process = start()
+                    wait_for(settled(after_migration, 1), "deployment after a migrated cursor was not applied", process)
+                    stop(process)
+                    process = None
+                    versions = [r["version"] for r in history()]
+                    assert versions == ["1.0.0", "2.0.0", *(["2.1.0"] if catalog_upgrade else []), "3.0.0", "4.0.0", "5.0.0"], versions
+                    assert len(history()) == applied_before + 1, "migration replayed applied work"
+                    assert "after" in journal()["cursor"], journal()["cursor"]
+                    assert not outcome(before) and not outcome(elsewhere), "untargeted or pre-enrollment deployment ran"
+                    assert all(r["runId"] == run_id for r in history())
+                    print("PASS: JSON-RPC-era cursor migrated to a gRPC cursor without replaying applied work; "
+                          "pre-enrollment and other-device deployments never ran")
 
-                # Exact legacy boundary inside one transaction: A (a group the device
-                # is not in yet) precedes the cursor's event B, and C follows it.
-                # After the device joins A's group, migrating must still skip A, not
-                # replay B, and apply C exactly once.
-                late_group = created(transaction("--move-call", f"{package}::device_group::create_group",
-                                                 '"late"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
-                batch = transaction(*create_call("6.0.0", groups=[late_group]),
-                                    *create_call("6.1.0", devices=[device]),
-                                    *create_call("6.2.0", devices=[device]))
-                digest = batch["digest"]
-                records = {}
-                for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]:
-                    if e["type"].endswith("::deployment_manager::DeploymentCreated"):
-                        records[e["parsedJson"]["version"]] = (e["parsedJson"]["deployment_id"], e["id"])
-                skipped, boundary, later = (records[v] for v in ("6.0.0", "6.1.0", "6.2.0"))
-                assert boundary[1]["txDigest"] == digest and boundary[1]["eventSeq"] not in ("0", 0), boundary
-                state = journal()
-                state["cursor"] = boundary[1]
-                state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
-                journal_path.write_text(json.dumps(state))
-                add_to_group(late_group)
-                before_versions = [r["version"] for r in history()]
-                process = start()
-                wait_for(settled(later[0], 1), "event after the legacy boundary was not applied", process)
-                time.sleep(3)
-                stop(process)
-                process = None
-                versions = [r["version"] for r in history()]
-                assert versions == before_versions + ["6.2.0"], versions
-                assert not outcome(skipped[0]), "event before the legacy boundary was replayed"
-                print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
-                      "in the same transaction is not replayed and a later one is applied once")
+                    # Exact legacy boundary inside one transaction: A (a group the device
+                    # is not in yet) precedes the cursor's event B, and C follows it.
+                    # After the device joins A's group, migrating must still skip A, not
+                    # replay B, and apply C exactly once.
+                    late_group = created(transaction("--move-call", f"{package}::device_group::create_group",
+                                                     '"late"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
+                    batch = transaction(*create_call("6.0.0", groups=[late_group]),
+                                        *create_call("6.1.0", devices=[device]),
+                                        *create_call("6.2.0", devices=[device]))
+                    digest = batch["digest"]
+                    records = {}
+                    for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]:
+                        if e["type"].endswith("::deployment_manager::DeploymentCreated"):
+                            records[e["parsedJson"]["version"]] = (e["parsedJson"]["deployment_id"], e["id"])
+                    skipped, boundary, later = (records[v] for v in ("6.0.0", "6.1.0", "6.2.0"))
+                    assert boundary[1]["txDigest"] == digest and boundary[1]["eventSeq"] not in ("0", 0), boundary
+                    state = journal()
+                    state.pop("discovery_cursor", None)
+                    state.pop("discovery_merge_checkpoint", None)
+                    state["cursor"] = boundary[1]
+                    state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
+                    journal_path.write_text(json.dumps(state))
+                    add_to_group(late_group)
+                    before_versions = [r["version"] for r in history()]
+                    process = start()
+                    wait_for(settled(later[0], 1), "event after the legacy boundary was not applied", process)
+                    time.sleep(3)
+                    stop(process)
+                    process = None
+                    versions = [r["version"] for r in history()]
+                    assert versions == before_versions + ["6.2.0"], versions
+                    assert not outcome(skipped[0]), "event before the legacy boundary was replayed"
+                    print("PASS: legacy cursor resumes exactly after its event: an earlier, newly targeted deployment "
+                          "in the same transaction is not replayed and a later one is applied once")
 
-                # SF-119 ports PR53 (09bcdc9); preserve the same-transaction check above.
-                # Same boundary across transactions: two transactions in one
-                # checkpoint, both targeting a group the device is not in yet.
-                # The cursor points at the later one; once the device joins the
-                # group, the earlier one must still not run.
-                cross_group = created(transaction("--move-call", f"{package}::device_group::create_group",
-                                                  '"cross"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
-                # Concurrent transactions need distinct gas coins; earlier calls
-                # merged the operator's coins, so split two off.
-                split = transaction("--split-coins", "gas", "[5000000000, 5000000000]", "--assign", "parts",
-                                    "--transfer-objects", "[parts.0, parts.1]", f"@{operator}")
-                coins = [c["objectId"] for c in split["objectChanges"]
-                         if c["type"] == "created" and c["objectType"].endswith("::coin::Coin<0x2::sui::SUI>")]
-                assert len(coins) == 2, coins
-                pair = None
-                for attempt in range(8):
-                    results = [None, None]
-                    errors = []
+                    # SF-119 ports PR53 (09bcdc9); preserve the same-transaction check above.
+                    # Same boundary across transactions: two transactions in one
+                    # checkpoint, both targeting a group the device is not in yet.
+                    # The cursor points at the later one; once the device joins the
+                    # group, the earlier one must still not run.
+                    cross_group = created(transaction("--move-call", f"{package}::device_group::create_group",
+                                                      '"cross"', '"test"', CLOCK), "::device_group::DeviceGroup")[0]
+                    # Concurrent transactions need distinct gas coins; earlier calls
+                    # merged the operator's coins, so split two off.
+                    split = transaction("--split-coins", "gas", "[5000000000, 5000000000]", "--assign", "parts",
+                                        "--transfer-objects", "[parts.0, parts.1]", f"@{operator}")
+                    coins = [c["objectId"] for c in split["objectChanges"]
+                             if c["type"] == "created" and c["objectType"].endswith("::coin::Coin<0x2::sui::SUI>")]
+                    assert len(coins) == 2, coins
+                    pair = None
+                    for attempt in range(8):
+                        results = [None, None]
+                        errors = []
 
-                    def submit(slot, version, coin):
+                        def submit(slot, version, coin):
+                            try:
+                                result = client("ptb", *create_call(version, groups=[cross_group]),
+                                                "--gas-coin", f"@{coin}", "--gas-budget", "200000000")
+                                assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
+                                results[slot] = result
+                            except BaseException as error:
+                                errors.append(error)
+                        threads = [threading.Thread(target=submit, args=(slot, f"8.{attempt}.{slot}", coins[slot]))
+                                   for slot in (0, 1)]
+                        for thread in threads:
+                            thread.start()
+                        for thread in threads:
+                            thread.join()
+                        if errors:
+                            raise errors[0]
+                        digests = [r["digest"] for r in results]
+                        assert len(set(digests)) == 2, digests
+                        wait_for(lambda: all(dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}]).get("checkpoint")
+                                             for d in digests), "transactions were not checkpointed")
+                        checkpoints = {d: dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}])["checkpoint"] for d in digests}
+                        if len(set(checkpoints.values())) == 1:
+                            order = dm.rpc(rpc_url, "sui_getCheckpoint", [checkpoints[digests[0]]])["transactions"]
+                            pair = sorted(digests, key=order.index)
+                            break
+                    assert pair, "could not place two transactions in one checkpoint"
+
+                    def created_event(digest):
+                        [event] = [e for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]
+                                   if e["type"].endswith("::deployment_manager::DeploymentCreated")]
+                        return event["parsedJson"]["deployment_id"], event["id"]
+                    print(f"Cross-transaction fixture: checkpoint={checkpoints[pair[0]]} ordered_digests={pair}")
+                    earlier, boundary = created_event(pair[0]), created_event(pair[1])
+                    state = journal()
+                    state.pop("discovery_cursor", None)
+                    state.pop("discovery_merge_checkpoint", None)
+                    state["cursor"] = boundary[1]
+                    state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
+                    journal_path.write_text(json.dumps(state))
+                    add_to_group(cross_group)
+                    following = deploy("9.0.0", devices=[device])
+                    before_versions = [r["version"] for r in history()]
+                    process = start()
+                    wait_for(settled(following, 1), "deployment after the cross-transaction boundary was not applied",
+                             process)
+                    receipt_is(following, 1)
+                    time.sleep(3)
+                    stop(process)
+                    process = None
+                    versions = [r["version"] for r in history()]
+                    assert versions == before_versions + ["9.0.0"], versions
+                    assert "after" in journal()["cursor"], journal()["cursor"]
+                    assert receipts(earlier[0]) == {}, "earlier transaction received an on-chain receipt"
+                    print(f"Legacy boundary={boundary[1]} resumed_cursor={journal()['cursor']} following={following}")
+                    assert not outcome(earlier[0]), "earlier transaction in the cursor's checkpoint was replayed"
+                    print("PASS: legacy cursor resumes exactly after its event across transactions: an earlier "
+                          "transaction in the same checkpoint is not replayed after it becomes targeted")
+
+                    # Revocation is enforced on chain and honored by the daemon: while
+                    # revoked it applies nothing; reinstated, it catches up.
+                    transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
+                    applied_count = len(history())
+                    revoked = deploy("7.0.0", devices=[device])
+                    process = start()
+                    time.sleep(10)
+                    assert not outcome(revoked), "revoked device applied a deployment"
+                    assert len(history()) == applied_count
+                    transaction("--move-call", f"{package}::device_registry::reinstate_device", f"@{registry}", f"@{owner_cap}")
+                    wait_for(settled(revoked, 1), "reinstated device did not apply and report", process)
+                    receipt_is(revoked, 1)
+                    stop(process)
+                    process = None
+                    assert "revoked or deregistered" in (root / "daemon.log").read_text()
+                    print("PASS: on-chain revocation stops the real daemon; reinstatement resumes it with a verified receipt")
+                if poll_cache:
+                    import re
+                    config.write_text(config.read_text().replace("event_discovery_seconds = 1", "event_discovery_seconds = 3600"))
+                    metrics_start = len((root / "daemon.log").read_text())
+                    def metrics():
+                        return [(int(n), int(b)) for n,b in re.findall(r"read_requests=(\d+) response_bytes=(\d+)", re.sub(r"\x1b\[[0-9;]*m", "", (root / "daemon.log").read_text()[metrics_start:]))]
+                    if baseline_binary:
+                        process = start(baseline_binary)
+                        wait_for(lambda: len(metrics()) >= 5, "baseline read profile incomplete", process)
+                        print(f"BASELINE: localnet poll metrics (requests, protobuf response bytes): {metrics()[-3:]}")
+                        stop(process); process = None
+                        metrics_start = len((root / "daemon.log").read_text())
+                    process = start()
+                    wait_for(lambda: len(metrics()) >= 5 and all(n == 1 for n,b in metrics()[-3:]), "localnet did not reach one batched read per poll", process)
+                    print(f"PASS: localnet idle poll metrics (requests, protobuf response bytes): {metrics()[-3:]}")
+                    before = len(history())
+                    errors = (root / "daemon.log").read_text().count("revoked or deregistered")
+                    transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
+                    wait_for(lambda: (root / "daemon.log").read_text().count("revoked or deregistered") > errors, "cached poll missed live revocation", process, timeout=10)
+                    assert len(history()) == before
+                    transaction("--move-call", f"{package}::device_registry::reinstate_device", f"@{registry}", f"@{owner_cap}")
+                    time.sleep(3)
+                    transaction("--move-call", f"{package}::device_registry::rotate_device_key", f"@{registry}", f"@{owner_cap}", f"@{operator}")
+                    wait_for(lambda: "rotated away" in (root / "daemon.log").read_text()[metrics_start:], "cached poll missed live key rotation", process, timeout=10)
+                    assert len(history()) == before
+                    transaction("--move-call", f"{package}::device_registry::rotate_device_key", f"@{registry}", f"@{owner_cap}", f"@{device_address}")
+                    time.sleep(3)
+                    upgraded = client("test-upgrade", contracts, "--upgrade-capability", upgrade_cap, "--build-env", "testnet",
+                        "--pubfile-path", root / "Pub.local.toml", "--gas-budget", "500000000", "--silence-warnings")
+                    assert upgraded["effects"]["status"]["status"] == "success"
+                    wait_for(lambda: "UpgradeCap does not identify" in (root / "daemon.log").read_text()[metrics_start:], "cached poll missed live package upgrade", process, timeout=10)
+                    assert len(history()) == before
+                    print("PASS: warm localnet cache detects live revocation, rotation and package upgrade, without apply")
+                    if reset_node_pid is not None:
+                        stop(process); process = None
+                        latest = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
+                        current_manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=latest,
+                            upgrade_cap=upgrade_cap, registry=registry, network="localnet", publisher=aggregator, aggregator=aggregator))
+                        next_bundle = root / "release-after-upgrade"
+                        dm.generate(current_manifest, next_bundle, template)
+                        config = next_bundle / "config.toml"
+                        config.write_text(config.read_text().replace("event_discovery_seconds = 1", "event_discovery_seconds = 3600"))
+                        metrics_start = len((root / "daemon.log").read_text())
+                        process = start()
+                        wait_for(lambda: len(metrics()) >= 5 and all(n == 1 for n,b in metrics()[-3:]), "upgraded manifest did not warm its cache", process)
+                        os.kill(reset_node_pid, signal.SIGTERM)
+                        time.sleep(2)
+                        reset_log = (root / "reset-node.log").open("w")
+                        reset_node = subprocess.Popen(["sui", "start", "--with-faucet", "--force-regenesis"],
+                            env={**os.environ, "SUI_CONFIG_DIR": str(root / "reset-node")}, stdout=reset_log, stderr=reset_log)
                         try:
-                            result = client("ptb", *create_call(version, groups=[cross_group]),
-                                            "--gas-coin", f"@{coin}", "--gas-budget", "200000000")
-                            assert result["effects"]["status"]["status"] == "success", result["effects"]["status"]
-                            results[slot] = result
-                        except BaseException as error:
-                            errors.append(error)
-                    threads = [threading.Thread(target=submit, args=(slot, f"8.{attempt}.{slot}", coins[slot]))
-                               for slot in (0, 1)]
-                    for thread in threads:
-                        thread.start()
-                    for thread in threads:
-                        thread.join()
-                    if errors:
-                        raise errors[0]
-                    digests = [r["digest"] for r in results]
-                    assert len(set(digests)) == 2, digests
-                    wait_for(lambda: all(dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}]).get("checkpoint")
-                                         for d in digests), "transactions were not checkpointed")
-                    checkpoints = {d: dm.rpc(rpc_url, "sui_getTransactionBlock", [d, {}])["checkpoint"] for d in digests}
-                    if len(set(checkpoints.values())) == 1:
-                        order = dm.rpc(rpc_url, "sui_getCheckpoint", [checkpoints[digests[0]]])["transactions"]
-                        pair = sorted(digests, key=order.index)
-                        break
-                assert pair, "could not place two transactions in one checkpoint"
+                            # Stale objects disappear on the replacement genesis;
+                            # version NotFound must never permit the idle fast path.
+                            def replaced():
+                                try: return dm.chain_facts(rpc_url)["chain_identifier"] != chain_id
+                                except Exception: return False
+                            wait_for(replaced, "replacement local genesis did not start", reset_node)
+                            time.sleep(3)
+                            assert len(history()) == before
+                            assert "chain identifier mismatch" in (root / "daemon.log").read_text()[metrics_start:]
+                            print("PASS: actual localnet reset rejected under the warm manifest/cache; no apply")
+                        finally:
+                            reset_node.terminate(); reset_node.wait(timeout=30); reset_log.close()
+                    stop(process); process = None
 
-                def created_event(digest):
-                    [event] = [e for e in dm.rpc(rpc_url, "suix_queryEvents", [{"Transaction": digest}])["data"]
-                               if e["type"].endswith("::deployment_manager::DeploymentCreated")]
-                    return event["parsedJson"]["deployment_id"], event["id"]
-                print(f"Cross-transaction fixture: checkpoint={checkpoints[pair[0]]} ordered_digests={pair}")
-                earlier, boundary = created_event(pair[0]), created_event(pair[1])
-                state = journal()
-                state["cursor"] = boundary[1]
-                state["deployments"][boundary[0]] = {"status": 1, "reported": True, "error": None}
-                journal_path.write_text(json.dumps(state))
-                add_to_group(cross_group)
-                following = deploy("9.0.0", devices=[device])
-                before_versions = [r["version"] for r in history()]
-                process = start()
-                wait_for(settled(following, 1), "deployment after the cross-transaction boundary was not applied",
-                         process)
-                receipt_is(following, 1)
-                time.sleep(3)
-                stop(process)
-                process = None
-                versions = [r["version"] for r in history()]
-                assert versions == before_versions + ["9.0.0"], versions
-                assert "after" in journal()["cursor"], journal()["cursor"]
-                assert receipts(earlier[0]) == {}, "earlier transaction received an on-chain receipt"
-                print(f"Legacy boundary={boundary[1]} resumed_cursor={journal()['cursor']} following={following}")
-                assert not outcome(earlier[0]), "earlier transaction in the cursor's checkpoint was replayed"
-                print("PASS: legacy cursor resumes exactly after its event across transactions: an earlier "
-                      "transaction in the same checkpoint is not replayed after it becomes targeted")
-
-                # Revocation is enforced on chain and honored by the daemon: while
-                # revoked it applies nothing; reinstated, it catches up.
-                transaction("--move-call", f"{package}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
-                applied_count = len(history())
-                revoked = deploy("7.0.0", devices=[device])
-                process = start()
-                time.sleep(10)
-                assert not outcome(revoked), "revoked device applied a deployment"
-                assert len(history()) == applied_count
-                transaction("--move-call", f"{package}::device_registry::reinstate_device", f"@{registry}", f"@{owner_cap}")
-                wait_for(settled(revoked, 1), "reinstated device did not apply and report", process)
-                receipt_is(revoked, 1)
-                stop(process)
-                process = None
-                assert "revoked or deregistered" in (root / "daemon.log").read_text()
-                print("PASS: on-chain revocation stops the real daemon; reinstatement resumes it with a verified receipt")
             except BaseException:
                 log.flush()
                 print((root / "daemon.log").read_text()[-4000:])
@@ -548,5 +620,9 @@ if __name__ == "__main__":
     parser.add_argument("--rpc", default="http://127.0.0.1:9000")
     parser.add_argument("--faucet", default="http://127.0.0.1:9123/v2/gas")
     parser.add_argument("--catalog-upgrade", action="store_true")
+    parser.add_argument("--poll-cache", action="store_true")
+    parser.add_argument("--cache-reset-node-pid", type=int, help="owned disposable node PID; reset it after warm-cache checks")
+    parser.add_argument("--poll-cache-only", action="store_true", help="run warm-cache checks after fresh local fixture setup")
+    parser.add_argument("--baseline-binary", type=Path, help="optional metrics-only instrumented baseline daemon")
     args = parser.parse_args()
-    run(args.rpc, args.faucet, args.catalog_upgrade)
+    run(args.rpc, args.faucet, args.catalog_upgrade, args.poll_cache or args.poll_cache_only, args.cache_reset_node_pid, args.poll_cache_only, args.baseline_binary)
