@@ -311,6 +311,34 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
 }
 
+#[tokio::test]
+async fn a_full_poll_without_an_event_scan_keeps_discovery_due() {
+    let node = Node {
+        response: Arc::new(Mutex::new(version(Some(1)))),
+        requests: Default::default(),
+        unavailable: Default::default(),
+        wrong_chain: false,
+    };
+    let (url, _server) = serve_watch(node.clone()).await;
+    let sui = client(&url);
+    let roots = vec!["0xa".to_owned()];
+    // Announced work (SF-125) read objects only: the bound keeps running.
+    sui.begin_full_poll();
+    sui.observe("0xa", Some(1));
+    sui.finish_full_poll(false);
+    assert!(sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(sui.discovery_due(), "no scan has run yet");
+    sui.begin_full_poll();
+    sui.observe("0xa", Some(1));
+    sui.finish_full_poll(true);
+    assert!(!sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(!sui.discovery_due());
+    // A changed version (an announcement) is a full poll, not a due scan.
+    *node.response.lock().unwrap() = version(Some(2));
+    assert!(sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(!sui.discovery_due());
+}
+
 async fn serve_watch(node: Node) -> (String, Server) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());

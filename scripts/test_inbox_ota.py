@@ -180,11 +180,15 @@ def run(binary):
             print("PASS: records announced before enrollment are not applied")
 
             # 2. A device deployment that only objects know about (its event is
-            #    not served) is applied from the inbox, and reported.
+            #    not served) is applied from the inbox, and reported. The
+            #    inbox version in the SF-122 batch wakes the poll; with the
+            #    discovery bound an hour away, no event scan runs.
+            scans = sim.reads.get("ListEvents", 0)
             sim.now_ms += 1000
             sim.deploy("0x701")
             wait_for(lambda: outcome("0x701") == 1, "inbox deployment was not applied", process)
             wait_for(lambda: dict(sim.reports).get("0x701") == 1, "inbox deployment was not reported", process)
+            assert sim.reads.get("ListEvents", 0) == scans, "an announced deployment needed an event scan"
             print("PASS: a device-targeted deployment is applied from its inbox without events")
 
             # 3. Indexed group membership listed only by the inbox: no
@@ -197,6 +201,16 @@ def run(binary):
             wait_for(lambda: outcome("0x702") == 1, "group head deployment was not applied", process)
             assert GROUP in state()["groups"]
             print("PASS: an indexed group found through the inbox and its head applies a group deployment")
+
+            # 3a. Quiet polls with the inbox and a group head watched stay one
+            #     version batch each (SF-122): no inbox, head or event reads.
+            settle()
+            before = dict(sim.reads)
+            wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= before.get("BatchGetObjects", 0) + 3,
+                     "three idle polls missing", process)
+            delta = {kind: count - before.get(kind, 0) for kind, count in sim.reads.items() if count != before.get(kind, 0)}
+            assert delta == {"BatchGetObjects": 3}, delta
+            print("PASS: idle polls watching the inbox and group heads are one version batch each")
             stop()
 
             # 3b. Joined a group while offline: its head applies what was
