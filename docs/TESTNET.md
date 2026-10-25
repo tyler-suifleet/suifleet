@@ -122,6 +122,7 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 
 **Limits:**
 - Walrus is a local stand-in by default (automatic CI); pass `SUIFLEET_WALRUS=testnet` for real Walrus storage.
+- Real Walrus uploads (`scripts/live_common.py`) try Mysten's publisher first, then a pinned, ordered list of community testnet publishers from the [Walrus operator list](https://docs.wal.app/operators.json). Mysten's publisher pays from its own WAL and can run dry (run 40140128767: HTTP 500 `could not find WAL coins with sufficient balance` on every retry). A transient failure (timeout, reset, 5xx) moves to the next publisher, and a 4xx drops that publisher. The upload makes at most two passes with a 15 s backoff and stops at a 10-minute deadline. A publisher is trusted only to store: every blob ID is read back through Mysten's aggregator and compared byte for byte before use. The publisher pays, so a fallback spends nothing from the run allowance. The manifest still records Mysten's publisher/aggregator. The `wallet` gate's dApp uploads in the browser and has no fallback of its own, so before funding the browser key the gate stores a fresh probe blob this way and hands the dApp's manifest whichever publisher stored it and read back (run 40155482209); the evidence records it as `walrus_publisher`.
 - `scripts/redeploy.sh` / `scripts/publish.py` still submit through the PATH `sui` (1.81.1). On a protocol-139 network, `publish.py` upgrades would hit the same client-side check. They are not yet run against testnet (SF-006 acceptance #11) and need the same split before they are. The SF-010 suites below use the split toolchain.
 - No old-package attacks or legacy objects: that is the upgrade-security suite below. No browser wallet: that is the `wallet` gate below.
 - There is no hardware: that is the `hardware` gate (SF-031).
@@ -134,19 +135,11 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 make live-gate-upgrade-security SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/agent/client.yaml
 ```
 
-The Python live suites keep a three-attempt total upload budget. After a transient
-reference-publisher error (including exhausted service-side WAL funds), subsequent
-attempts use the public Testnet publisher `https://publisher.walrus-01.tududes.com`,
-listed in the [Walrus operator directory](https://docs.wal.app/docs/system-overview/public-aggregators-and-publishers).
-They still require exact-byte readback through the reference aggregator; exhausted
-attempts and client errors fail the run. This does not retry chain transactions,
-change the wallet allowance or substitute local storage for public storage.
-
-The wallet browser suite configures its temporary deployment manifest with the
-same independent Testnet publisher directly: its real dApp uploads do not go
-through the Python retry helper. It retains the reference aggregator and fails
-on upload or availability errors; no browser response is replaced with a fixture.
-This is test-harness configuration, not production provider selection.
+Public uploads use the bounded publisher failover and exact-byte aggregator
+readback described above. The wallet browser suite probes a working publisher
+before funding its browser key and records the selected publisher in its evidence.
+This is test-harness configuration, not production provider selection; real uploads,
+wallet allowances and transaction effects checks remain required.
 
 `scripts/live_upgrade_security.py` proves on a public network what the Move tests prove locally: existing objects survive an upgrade, later-introduced types originate in the upgrade, and older package versions — which stay callable forever — cannot be used to bypass the new authority. Recipes and artifacts go to real Walrus testnet.
 
