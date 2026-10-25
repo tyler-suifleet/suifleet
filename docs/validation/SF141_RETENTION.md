@@ -110,3 +110,38 @@ Physical, actual Mainnet, production-provider/account and manual real-wallet
 acceptance remains explicitly unrun in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## PR #307 feedback repair (2026-10-25)
+
+Merged snapshot main `3c6625c33b238914a2b22d4b7c1a3dd1a69aff27` in
+`ecd619b5`, preserving both data-usage and retention controls, both simulator
+modes and both tracked acceptance entries. Fixed the Settings browser fixture
+to supply controlled wallet hooks to the actual retention panel. The upstream
+usage panel is isolated in the Seal-session browser fixture, with usage metering
+verified separately. Production components are unchanged by the fixture repair.
+
+Fresh merged-tree checks (not the historical runs above):
+
+- `make test-contracts` passed all three packages: core 207, storage 68 and fleet-data 40.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml`: 437 passed, four existing ignored; `cargo build --locked --offline --manifest-path suifleet-edge/Cargo.toml --bins --examples` passed.
+- `make test-fleet-settings` with real Chrome passed the complete settings, cost, budget and browser suite.
+- `node scripts/test_stream_retention.cjs`, `test_stream_retention_panel.cjs`, `test_storage_reclaim.cjs`, `test_storage_reclaim_panel.cjs`, `test_fleet_data.cjs` and `test_data_metering.cjs` passed.
+- `CHROME_EXECUTABLE=/opt/google/chrome/chrome node scripts/test_data_session_browser.cjs` passed session expiry, pending reads and recovery after updating the integrated-page fixture.
+- `make dapp-typecheck dapp-build` passed with pinned Node in `suifleet-dev:sf035`, including its manifest/testnet offline prerequisites and static export.
+- Full `make test-ota` passed, including its fresh daemon build, all update/recovery/configuration/security/reporting simulators and all five archive modes (standard, idle reads, compact, compact + Quilt, compact + Quilt + stream retention).
+- `make test-retention`, 10 offline tracking tests and tracking publication dry run passed.
+- `python3 scripts/generate_interfaces.py --check` passed all 12 modules.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml --features pkcs11`: 439 passed, four existing ignored.
+- `python3 scripts/check_move_security.py` passed strict compiler/linter checks, all package tests and genuine negative authorization mutations.
+- `SF141_RETENTION=1 SF129_RECEIPT=/tmp/sf141-repair-localnet.json python3 scripts/test_reclaim_localnet.py` passed existing-object upgrade, per-stream purchase, expiry and reclaim on a disposable network-none chain. No public gas was spent. The temporary receipt was not retained; the command success and lifecycle assertions are fresh evidence, while the committed original receipt above remains historical.
+
+An initial Move attempt mounted its cache at the wrong home and failed to resolve
+a dependency with networking disabled; the corrected `/home/dev/.move` mount
+passed. The first merged Data browser run exposed the usage-widget fixture gap
+and failed; its corrected fixture passes. No failed assertion was ignored.
+
+Hosted exact-head/current-base CI, automatic Testnet and fresh independent review
+remain coordinator gates after push. SF-129 must be merged before integration.
+Deferred physical/Mainnet/provider/manual-wallet acceptance remains unrun in
+#32/#159. No production deployment, physical operation or public-wallet mutation
+was performed.
