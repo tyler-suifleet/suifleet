@@ -228,3 +228,5 @@ replay_history = false
 # The signing service needs the same [fleet_data] object bindings and archive
 # storage bindings in signer.toml. It permits only these bounded native intents;
 # the codec process receives ciphertext, never a key, PIN or signing socket.
+
+# [fleet_data.archives] stream_retention = true opts into configured per-stream retention.

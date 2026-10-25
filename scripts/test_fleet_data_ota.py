@@ -34,7 +34,7 @@ def raw(id,kind,fields,contents):
 class Simulator(budget.BudgetSimulator):
     def __init__(self,compact=False):
         self.compact=compact;self.heads=[]
-        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0;self.settings=None
+        super().__init__();self.gas=100_000_000;self.seq=0;self.at=0;self.message=b'';self.signature=b'';self.clock=int(time.time()*1000);self.health=[];self.fail_once=True;self.batchseq=0;self.batch_at=None;self.emergency_at=None;self.anchors=[];self.registered={};self.certified=set();self.tx_results={};self.uploads_paused=True;self.certify_outage=True;self.request_seq=0;self.upload_dir=None;self.key_objects={};self.gas_version=1;self.register_reply_outage=True;self.history_pruned=False;self.status_reads={};self.stale_certificate_rejections=0;self.settings=None;self.stream_writes=[]
     def fleet(self):
         return dict(id=object_id(FLEET),version='1',budget_id=object_id(budget.BUDGET),storage_id=object_id(STORAGE),registry_id=object_id(ota.REGISTRY),
             chain_identifier=self.chain,key_epoch='0',support=[],health_interval_ms='60000',batch_interval_ms='86400000',emergency_interval_ms='60000',device_count='1')
@@ -91,9 +91,13 @@ class Simulator(budget.BudgetSimulator):
             if digest in self.tx_results:return self.tx_results[digest]
             assert gas_version==self.gas_version,"stale owned gas must be reconciled before resubmission"
             if fn!='report_health':
-                if fn=='register_blob':
+                if fn in ['register_blob','register_stream_blob']:
                     assert not self.uploads_paused
-                    assert args[:6]==[STORAGE,budget.BUDGET,budget.ACCOUNT,ota.REGISTRY,ota.CAP,'0xf4']
+                    if fn=='register_stream_blob':
+                        assert args[:8]==[FLEET,WRITER,budget.BUDGET,budget.ACCOUNT,ota.REGISTRY,ota.CAP,STORAGE,'0xf4']
+                        kind=base64.b64decode(args[8]['bcs'])[0];assert kind in [0,1,2]
+                        self.stream_writes.append(kind)
+                    else:assert args[:6]==[STORAGE,budget.BUDGET,budget.ACCOUNT,ota.REGISTRY,ota.CAP,'0xf4']
                     self.registered[digest]={'blob_object_id':'0x'+hashlib.sha256(digest.encode()).hexdigest(),'end_epoch':100,'encoded_size':'66034000','write_fee':'328860'}
                 elif fn=='certify_blob':
                     if self.certify_outage:raise ConnectionError('certification transport outage')
@@ -116,7 +120,7 @@ class Simulator(budget.BudgetSimulator):
                         self.heads.append(u64(0)+u64(len(self.anchors)-1)+value+vec(previous))
                 else:raise AssertionError('unrecognized archive write')
                 result={'digest':digest,'effects':{'status':{'status':'success'}}};self.tx_results[digest]=result;self.gas_version+=1
-                if fn=='register_blob' and self.register_reply_outage:self.register_reply_outage=False;raise ConnectionError('lost response after committed registration')
+                if fn in ['register_blob','register_stream_blob'] and self.register_reply_outage:self.register_reply_outage=False;raise ConnectionError('lost response after committed registration')
                 return result
             assert module=='fleet_data' and fn=='report_health'
             if self.fail_once:self.fail_once=False;raise ConnectionError('transient submit outage')
@@ -141,7 +145,7 @@ def stopped_workspace(stop):
         try:yield temp
         finally:stop()
 
-def run(binary,shim_binary,compact=False,quilt=False):
+def run(binary,shim_binary,compact=False,quilt=False,stream_retention=False):
     ota.SHIM=shim_binary;sim=Simulator(compact)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -190,7 +194,7 @@ def run(binary,shim_binary,compact=False,quilt=False):
             archive_config=(f'[components]\nconfiguration_overlay_dir={json.dumps(str(root/"state"/"overlays"))}\n[logs]\ninterval_seconds=10\nmax_lines_per_interval=128\nbuffer_max=16\n'
                 f'[fleet_data.archives]\nstorage_package="0xf6"\nstorage_type_origin="0xf6"\nsystem_id="0xf4"\nwalrus_package="0xf7"\nkey_server_package="0xf5"\n'
                 f'key_servers = '+json.dumps([{'object_id':s['object_id'],'weight':1} for s in vectors['servers']]).replace(': ', ' = ')+ '\n'
-                f'threshold=2\ncompact_history={str(compact).lower()}\nquilt={str(quilt).lower()}\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n')
+                f'threshold=2\ncompact_history={str(compact).lower()}\nquilt={str(quilt).lower()}\nstream_retention={str(stream_retention).lower()}\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n')
             # Add source logs only after the startup reconciliation created its
             # state; the collection path is the shipped SF-020 redactor.
             with (root/'daemon.log').open('w') as log:
@@ -310,6 +314,7 @@ def run(binary,shim_binary,compact=False,quilt=False):
                 # The anchor acknowledges the archive; local cleanup follows at the next round.
                 wait(lambda:sim.seq==seq+1 and len(sim.anchors)==5);assert sim.anchors[-1]['kind']==0
                 stop()
+                if stream_retention: assert 0 in sim.stream_writes and 1 in sim.stream_writes and 2 in sim.stream_writes,sim.stream_writes
                 assert not sim.errors,sim.errors
                 print('PASS real daemon signed health -> simulated Sui -> browser verification; health/bulk retry, exhaustion, cadence, restart, revocation and diagnostics; '
                       'SF-084 encrypted shadow documents archived on change and decrypted/verified in the browser library; '
@@ -318,4 +323,4 @@ def run(binary,shim_binary,compact=False,quilt=False):
         if process:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--compact-history',action='store_true');p.add_argument('--quilt',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.compact_history,a.quilt)
+    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--compact-history',action='store_true');p.add_argument('--quilt',action='store_true');p.add_argument('--stream-retention',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.compact_history,a.quilt,a.stream_retention)

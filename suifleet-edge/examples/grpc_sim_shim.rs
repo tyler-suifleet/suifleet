@@ -418,8 +418,8 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
             }
             let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
             if matches!(call.module.as_deref(), Some("fleet_data" | "fleet_storage")) {
-                let owned = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==5, "register_blob" => index==4, _=>false };
-                let mutable = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
+                let owned = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==5, "register_stream_blob" => index==5, "register_blob" => index==4, _=>false };
+                let mutable = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==1, "register_stream_blob" => index==6 || index==7, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
                 inputs.push(builder.object(if owned { sui_transaction_builder::ObjectInput::owned(id,1,Digest::ZERO) }
                     else { sui_transaction_builder::ObjectInput::shared(id,1,mutable) }));
                 continue;

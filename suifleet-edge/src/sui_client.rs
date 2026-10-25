@@ -286,6 +286,28 @@ fn id_list(value: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Policy is read atomically by Move, rather than trusting a cached device epoch
+/// count. Pending journals pin this selector and durable_call preserves bytes.
+fn archive_registration_call(data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
+    registry: &str, cap: &str, blob_id: &str,
+    root_hash: &str, size: u64, stream: Option<u8>) -> anyhow::Result<(String, Call)> {
+    let mut args = vec![];
+    if stream.is_some() { args.extend([Arg::SharedRead(data.fleet_id.clone()), Arg::SharedRead(data.writer_id.clone())]); }
+    args.extend([Arg::Object(data.storage_id.clone()), Arg::SharedRead(data.budget_id.clone()), Arg::SharedRead(data.account_id.clone()),
+        Arg::SharedRead(registry.into()), Arg::Object(cap.into()), Arg::Object(storage.system_id.clone())]);
+    // fleet_data wrapper puts storage after the device credentials.
+    if let Some(kind) = stream {
+        anyhow::ensure!(kind <= 2, "invalid archive stream");
+        let storage_arg = args.remove(2); args.insert(6, storage_arg);
+        args.push(Arg::Pure(vec![kind]));
+    }
+    args.extend([Arg::Pure(decimal_u256(blob_id)?), Arg::Pure(decimal_u256(root_hash)?), Arg::Pure(bcs::to_bytes(&size)?)]);
+    if stream.is_none() { args.push(Arg::Pure(vec![1])); }
+    args.push(Arg::SharedRead(CLOCK.into()));
+    Ok(if stream.is_some() { (data.package_id.clone(), Call { module: "fleet_data", function: "register_stream_blob", args }) }
+       else { (storage.storage_package.clone(), Call { module: "fleet_storage", function: "register_blob", args }) })
+}
+
 impl SuiClient {
     pub fn load(config: SuiConfig, signer: std::sync::Arc<dyn identity::TxSigner>) -> anyhow::Result<Self> {
         let manifest = config
@@ -1355,14 +1377,9 @@ impl SuiClient {
         }
     }
     pub async fn register_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
-        cap: &str, blob_id: &str, root_hash: &str, size: u64, path: &std::path::Path) -> anyhow::Result<String> {
-        let call = Call { module: "fleet_storage", function: "register_blob", args: vec![
-            Arg::Object(data.storage_id.clone()), Arg::SharedRead(data.budget_id.clone()), Arg::SharedRead(data.account_id.clone()),
-            Arg::SharedRead(self.manifest().shared_objects.registry.id.clone()), Arg::Object(cap.into()), Arg::Object(storage.system_id.clone()),
-            Arg::Pure(decimal_u256(blob_id)?), Arg::Pure(decimal_u256(root_hash)?), Arg::Pure(bcs::to_bytes(&size)?),
-            Arg::Pure(vec![1]), Arg::SharedRead(CLOCK.into()),
-        ] };
-        self.durable_call(&storage.storage_package,&call,path).await
+        cap: &str, blob_id: &str, root_hash: &str, size: u64, stream: Option<u8>, path: &std::path::Path) -> anyhow::Result<String> {
+        let (package, call) = archive_registration_call(data, storage, &self.manifest().shared_objects.registry.id, cap, blob_id, root_hash, size, stream)?;
+        self.durable_call(&package, &call, path).await
     }
     pub async fn certify_archive(&self, data: &crate::fleet_data::Config, storage: &crate::fleet_archive::Config,
         blob: &str, cert: &crate::fleet_archive::Certificate, path: &std::path::Path) -> anyhow::Result<String> {
