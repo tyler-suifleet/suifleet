@@ -641,6 +641,18 @@ module fleet_storage::fleet_storage {
         event::emit(BlobExtended { storage_id: object::id(fs), blob_object_id, end_epoch, fee });
     }
 
+    /// Browser-triggered extension for a device archive. Never strands an
+    /// attached legacy renewal/prepayment; handle that policy first.
+    public fun extend_stream_blob(fs: &mut FleetStorage, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, system: &mut System, blob_object_id: ID,
+        epochs: u32, ctx: &mut TxContext) {
+        assert_owner(fs, budget, cap);
+        assert!(epochs > 0 && epochs <= 53, EInvalidEpochs);
+        assert!(blob_record(fs, blob_object_id).destroy_some().device_id.is_some(), EUnknownBlob);
+        assert!(!df::exists(&fs.id, RenewalKey { blob_object_id }), EInvalidEpochs);
+        extend_blob(fs, budget, cap, system, blob_object_id, epochs, ctx);
+    }
+
     /// Hand a fleet blob to the owner, for example to burn it after expiry
     /// and receive its Sui storage rebate.
     public fun release_blob(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, blob_object_id: ID): Blob {
@@ -699,6 +711,29 @@ module fleet_storage::fleet_storage {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
+        register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash,
+            size, encoding_type, option::none(), clock, ctx)
+    }
+
+    /// Buy the complete finite lifetime at write time. Both capacity and write
+    /// fees consume the SAME device WAL quota; no owner authority is delegated.
+    public fun register_blob_for_epochs(
+        fs: &mut FleetStorage, budget: &FleetBudget, account: &GasAccount,
+        registry: &DeviceRegistry, cap: &DeviceCap, system: &mut System,
+        blob_id: u256, root_hash: u256, size: u64, encoding_type: u8,
+        epochs: u32, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
+        assert!(epochs > 0 && epochs <= 53, EInvalidEpochs);
+        register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash,
+            size, encoding_type, option::some(epochs), clock, ctx)
+    }
+
+    fun register_impl(
+        fs: &mut FleetStorage, budget: &FleetBudget, account: &GasAccount,
+        registry: &DeviceRegistry, cap: &DeviceCap, system: &mut System,
+        blob_id: u256, root_hash: u256, size: u64, encoding_type: u8,
+        epochs: Option<u32>, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
         let retained = df::exists(&fs.id, RetentionKey {});
         assert!(!retained || df::exists(&fs.id, DeviceRetentionKey {}), EInsufficientWal);
         assert!(fs.version == VERSION, EWrongVersion);
@@ -713,13 +748,15 @@ module fleet_storage::fleet_storage {
         assert!(usage.uploads_in_period < quota.uploads_per_period, ERateLimited);
         assert!(usage.encoded_bytes_in_period + encoded_size <= quota.encoded_bytes_per_period, EOverQuota);
         assert_retention_funded(fs);
-        let storage = take_storage(fs, encoded_size, ctx);
         // The write fee comes from the WAL balance, at most the quota's rest.
         // A lowered quota can leave nothing; the registration then aborts in Walrus.
         let fee_room = if (usage.write_fees_in_period >= quota.write_fees_per_period) 0
             else quota.write_fees_per_period - usage.write_fees_in_period;
         let offered = if (fs.wal.value() < fee_room) fs.wal.value() else fee_room;
         let mut payment = coin::take(&mut fs.wal, offered, ctx);
+        let storage = if (epochs.is_some()) {
+            system.reserve_space(encoded_size, epochs.destroy_some(), &mut payment, ctx)
+        } else take_storage(fs, encoded_size, ctx);
         let blob = system.register_blob(storage, blob_id, root_hash, size, encoding_type, false, &mut payment, ctx);
         let fee = offered - payment.value();
         fs.wal.join(payment.into_balance());
@@ -757,6 +794,9 @@ module fleet_storage::fleet_storage {
         if (retained) {
             let policy: DeviceRetention = *df::borrow(&fs.id, DeviceRetentionKey {});
             assert!(policy.target > system.epoch(), EInvalidEpochs);
+            // Stream writes are fully paid at admission; never create work
+            // for the legacy executor. An incompatible owner floor aborts.
+            assert!(epochs.is_none() || policy.target <= end_epoch, EInvalidEpochs);
             if (policy.target > end_epoch) {
                 authorize_renewal_impl(fs, blob_object_id, policy.target, policy.max_fee);
                 prepay_renewal_impl(fs, system, blob_object_id, ctx);
