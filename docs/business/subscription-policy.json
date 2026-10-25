@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "sui_cost_multiple": "3",
+  "sui_cost_multiple": "10",
   "walrus_cost_multiple": "1",
   "stressed_margin_fraction": "0.80",
   "payment_fee_fraction": "0.03",

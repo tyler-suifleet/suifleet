@@ -20,34 +20,48 @@ class SubscriptionPricingTests(unittest.TestCase):
     def test_sui_only_stress_and_payment_adjusted_margin(self):
         result = calculate(self.model, self.policy)
         self.assertEqual(result['baseline_recurring_usd'], '9.00')
-        self.assertEqual(result['stressed_recurring_usd'], '25.00')
-        self.assertEqual(result['monthly_subscription_usd'], '148.83')
-        self.assertEqual(result['amount_due_usd'], '148.83')
-        for projection in result['sensitivity'][:3]:
-            self.assertGreaterEqual(Decimal(projection['infrastructure_margin_fraction']), Decimal('0.80'))
-        # The 5x scenario can breach the target; it is not a guarantee beyond 3x.
-        self.assertLess(Decimal(result['sensitivity'][3]['infrastructure_margin_fraction']), Decimal('0.80'))
+        self.assertEqual(result['stressed_recurring_usd'], '81.00')
+        self.assertEqual(result['monthly_subscription_usd'], '478.24')
+        self.assertEqual(result['amount_due_usd'], '478.24')
+        for projection in result['sensitivity']:
+            if Decimal(projection['sui_cost_multiple']) <= 10:
+                self.assertGreaterEqual(Decimal(projection['infrastructure_margin_fraction']), Decimal('0.80'))
+        # The buffer is finite: a 20x shock can breach the selected 10x target.
+        beyond = next(p for p in result['sensitivity'] if p['sui_cost_multiple'] == '20')
+        self.assertLess(Decimal(beyond['infrastructure_margin_fraction']), Decimal('0.80'))
+
+    def test_tenfold_stress_is_configurable_and_preserves_lower_scenarios(self):
+        result = calculate(self.model, self.policy)
+        self.assertEqual([p['sui_cost_multiple'] for p in result['sensitivity'][:-1]],
+                         ['1', '2', '3', '5', '10', '20'])
+        self.policy['sui_cost_multiple'] = '3'
+        self.assertEqual(calculate(self.model, self.policy)['monthly_subscription_usd'], '148.83')
+        self.policy.update(sui_cost_multiple='7', walrus_cost_multiple='2')
+        result = calculate(self.model, self.policy)
+        selected = next(p for p in result['sensitivity']
+                        if p['sui_cost_multiple'] == '7' and p['walrus_cost_multiple'] == '2')
+        self.assertGreaterEqual(Decimal(selected['infrastructure_margin_fraction']), Decimal('0.80'))
 
     def test_walrus_exposure_independent_of_sui(self):
         result = calculate(self.model, self.policy)
         self.assertEqual(Decimal(result['sensitivity'][-1]['recurring_cost_usd']), Decimal('9.50'))
         self.policy['walrus_cost_multiple'] = '2'
-        self.assertEqual(Decimal(calculate(self.model, self.policy)['stressed_recurring_usd']), Decimal('25.50'))
+        self.assertEqual(Decimal(calculate(self.model, self.policy)['stressed_recurring_usd']), Decimal('81.50'))
 
     def test_discount_never_undercuts_floor_and_fixed_fee_is_amortized(self):
         result = calculate(self.model, self.policy, annual=True)
         self.assertEqual(result['commercial_after_discount_usd'], '72.00')
-        self.assertEqual(result['monthly_subscription_usd'], '147.21')
-        self.assertEqual(result['amount_due_usd'], '1766.52')
-        self.assertGreaterEqual(Decimal(result['sensitivity'][2]['infrastructure_margin_fraction']), Decimal('0.80'))
+        self.assertEqual(result['monthly_subscription_usd'], '476.62')
+        self.assertEqual(result['amount_due_usd'], '5719.44')
+        self.assertGreaterEqual(Decimal(next(p for p in result['sensitivity'] if p['sui_cost_multiple'] == '10')['infrastructure_margin_fraction']), Decimal('0.80'))
         self.model['commercial']['candidate_monthly_usd'] = '1000'
         self.assertEqual(calculate(self.model, self.policy, annual=True)['monthly_subscription_usd'], '900.00')
 
     def test_volume_candidate_and_minimum_cannot_undercut_risk_floor(self):
         self.model['commercial']['candidate_monthly_usd'] = '30'
-        self.assertEqual(calculate(self.model, self.policy)['monthly_subscription_usd'], '148.83')
-        self.model['commercial']['monthly_minimum_usd'] = '200'
-        self.assertEqual(calculate(self.model, self.policy)['monthly_subscription_usd'], '200.00')
+        self.assertEqual(calculate(self.model, self.policy)['monthly_subscription_usd'], '478.24')
+        self.model['commercial']['monthly_minimum_usd'] = '600'
+        self.assertEqual(calculate(self.model, self.policy)['monthly_subscription_usd'], '600.00')
 
     def test_working_capital_does_not_change_recurring_price(self):
         before = calculate(self.model, self.policy)

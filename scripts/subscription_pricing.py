@@ -75,7 +75,11 @@ def _calculate(model, policy, annual):
     offered = candidate * (1 - discount if annual else 1)
     monthly = Decimal(money(max(floor, minimum, offered)))
     projections = []
-    for s, w in ((1, 1), (2, 1), (multiple, walrus_multiple), (5, 1), (1, 2)):
+    scenarios = [(s, Decimal(1)) for s in sorted({Decimal(n) for n in (1, 2, 3, 5, 10, 20)} | {multiple})]
+    if walrus_multiple != 1:
+        scenarios.append((multiple, walrus_multiple))
+    scenarios.append((Decimal(1), Decimal(2)))
+    for s, w in scenarios:
         s, w = Decimal(s), Decimal(w)
         cost = s * sui + w * walrus + services
         payment_cost = monthly * payment + fee
