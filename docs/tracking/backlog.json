@@ -2879,7 +2879,9 @@
       "area": "storage",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [],
+      "depends_on": [
+        "SF-129"
+      ],
       "paths": [
         "contracts/fleet_storage",
         "contracts/fleet_data",
@@ -2889,7 +2891,7 @@
       ],
       "resources": [],
       "description": "Let owners set a retention period per data stream (for example 6 weeks, 6 months, 1 year, or custom up to the Walrus maximum), buy that retention when data is written so no renewal process is needed, and expire data automatically with its storage deposits recovered.",
-      "evidence": "Today periodic archives buy a fixed number of epochs and protected retention relies on an owner-run renewal worker (docs/RETENTION_RENEWAL.md), which SF-137 removes from SuiFleet operations; anchors are kept permanently (docs/SERVERLESS_FLEET_DATA.md). Coordinate with SF-128/#258 (protected-blob cap) and SF-129/#264 (deposit reclaim). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization.",
+      "evidence": "Today periodic archives buy a fixed number of epochs and protected retention relies on an owner-run renewal worker (docs/RETENTION_RENEWAL.md), which SF-137 removes from SuiFleet operations; anchors are kept permanently (docs/SERVERLESS_FLEET_DATA.md). Coordinate with SF-128/#258 (protected-blob cap) and SF-129/#264 (deposit reclaim). Ticket created by Claude (claude-opus-5-5) under the user's explicit 2026-10-23 authorization. User-authorized development uses reviewed SF-129 76c186993e0a8ddf065360db5003028c3156cf04 before its merge; SF-129 remains a final integration dependency, not a reason to park local implementation.",
       "acceptance": [
         "Retention settings per stream stored on chain with bounds, shown and edited in the dApp Data section and settings page.",
         "Devices buy the configured retention at write time; retention beyond the Walrus maximum renews through a dApp-triggered or prepaid mechanism, not a SuiFleet-hosted worker.",

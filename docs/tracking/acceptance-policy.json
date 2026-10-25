@@ -599,6 +599,23 @@
         "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
         "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
       ]
+    },
+    "SF-141": {
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
+        "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes.",
+        "Final external acceptance requiring production Seal/key-provider accounts, actual IdP/prover/Slush/extension-wallet sessions, paid provider services or manually provisioned production credentials; track in SF-031/#32 and SF-087/#159. Retain implemented authentication/security behavior and automated fixtures/testnet evidence."
+      ],
+      "retained_gates": [
+        "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
+        "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
+        "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
+        "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
+      ]
     }
   },
   "development_defaults": {

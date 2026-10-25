@@ -12,6 +12,7 @@ integration acceptance. These external checks remain required in the linked tick
 merging implementation does not establish them or authorize deployment.
 
 | Implementation | Deferred integration |
+| SF-141 per-stream retention | Physical device, actual Mainnet, production Seal/provider and manual real-wallet checks remain unrun in SF-031/#32 and SF-087/#159. Move/local upgrade and expiry/reclaim lifecycle, native failure/restart, browser/software authority, normal CI/security/automatic Testnet and independent review remain required. SF-129 must merge before final integration; local evidence is not public epoch-563 prune/rebate acceptance. |
 |---|---|
 | SF-082 serverless dApp and fleet data | Final production Seal/provider/domain and manual wallet acceptance, physical target and Mainnet checks remain SF-031/#32 and SF-087/#159. Actual merged SF-083 compatibility, native simulator, isolated-chain upgrade/adversarial tests, reproducible production export, authorized Testnet data/Site effects and verified browser decryption, normal CI/testnet/security and independent review remain implementation gates. |
 | SF-091 fleet recovery and outage rehearsal | Production Seal providers, real IdP/extension-wallet sessions, physical Pi recovery and Mainnet remain unrun in SF-031/#32 and SF-087/#159. Isolated restore/outage/payment-failure drills with the real daemon, read-only Testnet restore/discovery/owner-policy decryption, the actual merged SF-082 integration and rerun, normal CI/testnet and independent review remain implementation gates. |

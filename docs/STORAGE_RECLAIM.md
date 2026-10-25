@@ -248,3 +248,13 @@ against the committed receipt.
   schedule.
 - The retention worker does not run reclaim, and reclaim does not renew
   anything.
+
+
+## SF-141 per-stream consumer
+
+When `streamRetentionOrigin` is configured, the archive panel selects only the
+chosen archive stream's indexed expired anchors. Unanchored uploads remain held
+for device recovery. New compact stream writes also keep a temporary expiry index;
+pruning its current index removes the expired compact root after the same
+exclusive-expiry check. Older compact roots without this index remain legacy
+custody. See [per-stream retention](RETENTION_RENEWAL.md) for activation and limits.
