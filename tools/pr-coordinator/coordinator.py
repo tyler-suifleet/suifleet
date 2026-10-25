@@ -346,6 +346,7 @@ class Store:
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
+          CREATE TABLE IF NOT EXISTS repair_handoffs (job INTEGER PRIMARY KEY, state TEXT, error TEXT, updated REAL);
           CREATE TABLE IF NOT EXISTS quota_recoveries (
             job INTEGER, attempt INTEGER, source TEXT, reset REAL, state TEXT, replacement TEXT,
             reason TEXT, updated REAL, PRIMARY KEY(job,attempt));
@@ -1227,6 +1228,86 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
         # Publication failures must never discard a validated worker result.
         self.publish_results(project)
+        self.reconcile_repair_handoffs(project, owners)
+
+    def reconcile_repair_handoffs(self, project, owners):
+        """Finish a verified stopped repair's ownership handoff, never approve it.
+
+        Result publication and ticket publication are separate retryable actions.
+        No worker is restarted and no worktree content is changed by this method.
+        """
+        candidates = self.store.db.execute(
+            "SELECT j.*,h.state AS handoff_state FROM jobs j LEFT JOIN repair_handoffs h ON h.job=j.id "
+            "WHERE j.project=? AND j.kind='fix' AND j.status='done' AND j.repair_claim IS NOT NULL "
+            "AND (h.state IS NULL OR h.state='pending') "
+            "AND j.id=(SELECT MAX(n.id) FROM jobs n WHERE n.project=j.project AND n.pr=j.pr AND n.kind='fix')",
+            (project['id'],)).fetchall()
+        for row in candidates:
+            try:
+                intent = json.loads(row['repair_claim'])
+                if row['handoff_state'] is None and not any(
+                        o.get('key') == intent['key'] and o.get('status') == 'in_progress' for o in owners):
+                    continue  # A worker that already handed off needs no ticket mutation.
+                self.store.db.execute("INSERT OR IGNORE INTO repair_handoffs VALUES(?,'pending',NULL,?)",
+                                      (row['id'], time.time()))
+                directory = Path(row['directory'])
+                result = normalize_result(json.loads(row['result']))
+                receipt = json.loads((directory/'exit.json').read_text())
+                identity = json.loads((directory/'process.json').read_text())
+                if (receipt.get('returncode') != 0 or identity != dict(pid=row['pid'], started=row['started'])
+                        or not worker_stopped(row['pid'], row['started'])):
+                    raise RuntimeError('repair exit/process receipt is not verified stopped')
+                owner = json.loads(self.ticket(project, 'show', intent['key']))
+                snapshot = json.loads((directory/'snapshot.json').read_text())['ticket']
+                token = owner.get('token')
+                if (not token or hashlib.sha256(token.encode()).hexdigest() != intent['claim']
+                        or any(owner.get(k) != intent[k] for k in ('key','branch','worktree'))
+                        or owner.get('agent') != row['family'] or owner.get('agent') != snapshot['agent']
+                        or owner.get('model') != snapshot['model']):
+                    raise RuntimeError('repair ownership changed; no handoff mutation')
+                if owner['status'] == 'review':
+                    # A previous mirror failure can follow a successful local transition.
+                    if owner.get('publish_pending'): self.ticket(project, 'publish', intent['key'])
+                elif owner['status'] == 'in_progress':
+                    if claim_processes(token, row['started']):
+                        raise RuntimeError('a claim helper is still live or uninspectable')
+                    for lease in json.loads(self.ticket(project, 'locks')):
+                        if lease.get('expired') or (lease.get('expires') or 0) <= time.time(): continue
+                        named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+',
+                                           f"{lease.get('session') or ''} {lease.get('purpose') or ''}".upper())
+                        if (lease.get('session') == owner.get('session')
+                                or str(lease.get('ticket') or '').split('::')[-1] == intent['key'] or intent['key'] in named):
+                            raise RuntimeError('repair still holds a shared-resource lease')
+                    if (run(['git','branch','--show-current'], cwd=intent['worktree']).strip() != intent['branch']
+                            or run(['git','status','--porcelain'], cwd=intent['worktree']).strip()):
+                        raise RuntimeError('repair worktree changed or dirty; preserve it for explicit continuation')
+                    pr = self.pr(project, row['pr'])
+                    if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr['headRefName'] != intent['branch']:
+                        raise RuntimeError('repair PR ownership is no longer current')
+                    # This is a terminal handoff under the same unchanged reservation,
+                    # not permission to edit or restart an expired implementation.
+                    self.ticket(project, 'heartbeat', intent['key'], '--token', token)
+                    self.ticket(project, 'review', intent['key'], '--token', token,
+                                '--text', 'Coordinator verified stopped repair handoff; verdict '
+                                + result['verdict'] + '. This is not approval. ' + result['evidence'])
+                else:
+                    raise RuntimeError('repair claim is not eligible for terminal handoff')
+                self.store.db.execute("UPDATE repair_handoffs SET state='complete',error=NULL,updated=? WHERE job=?",
+                                      (time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: completed repair ownership handed to Review (not approval)", flush=True)
+            except Exception as error:
+                # Keep the real result and stopped receipt; retry publication separately.
+                safe = {'repair exit/process receipt is not verified stopped',
+                        'repair ownership changed; no handoff mutation',
+                        'a claim helper is still live or uninspectable',
+                        'repair still holds a shared-resource lease',
+                        'repair worktree changed or dirty; preserve it for explicit continuation',
+                        'repair PR ownership is no longer current',
+                        'repair claim is not eligible for terminal handoff'}
+                detail = str(error) if type(error) is RuntimeError and str(error) in safe else type(error).__name__
+                self.store.db.execute("UPDATE repair_handoffs SET error=?,updated=? WHERE job=?",
+                                      ('handoff pending: '+detail, time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: terminal repair handoff pending ({detail})", flush=True)
 
     def publish_results(self, project):
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status='done' AND publication_done=0 AND (retry_after IS NULL OR retry_after<=?)", (project['id'],time.time())).fetchall()
