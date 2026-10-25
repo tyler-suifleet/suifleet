@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "kind": "read_only_quote",
+  "read_only": true,
+  "transactions_submitted": 0,
+  "observed_at_utc": "2026-10-23T21:22:19.715Z",
+  "reader": "@mysten/sui 2.36.0 / @mysten/walrus 1.2.35 gRPC",
+  "sources": {
+    "mainnet": "https://fullnode.mainnet.sui.io:443",
+    "testnet": "https://fullnode.testnet.sui.io:443",
+    "walrus_system": "0x2134d52768ea07e8c43570ef975eb3e4c27a39fa6396bef985b5abc58d03ddd2",
+    "token_market_quotes": "https://api.coingecko.com/api/v3/simple/price?ids=sui,walrus-2&vs_currencies=usd&include_last_updated_at=true"
+  },
+  "chain": {
+    "mainnet": {
+      "chain_identifier": "4btiuiMPvEENsttpZC7CZ53DruC3MAgfznDbASZ7DR6S",
+      "protocol_version": "139",
+      "reference_gas_price": "100",
+      "storage_gas_price": "76",
+      "storage_rebate_rate": "9999"
+    },
+    "testnet": {
+      "chain_identifier": "69WiPg3DAQiwdxfncX6wYQ2siKwAe6L9BZthQea3JNMD",
+      "protocol_version": "139",
+      "reference_gas_price": "1000",
+      "storage_gas_price": "76",
+      "storage_rebate_rate": "9999"
+    }
+  },
+  "walrus_mainnet": {
+    "epoch": 42,
+    "n_shards": 1000,
+    "storage_price_per_unit_size": "57389",
+    "write_price_per_unit_size": "104316"
+  },
+  "token_market_quotes": {
+    "SUI": {
+      "usd": 0.979727,
+      "last_updated_at": 1792790505
+    },
+    "WAL": {
+      "usd": 0.03634265,
+      "last_updated_at": 1792790518
+    }
+  },
+  "limits": "Indicative spot quotes exclude spread, slippage, taxes and acquisition fees. Not a Mainnet bill: no transaction ran (SF-135 measures one)."
+}

@@ -383,11 +383,13 @@ class Walrus:
         raise error
 
     def working_publisher(self):
-        """A publisher that just stored a fresh probe blob, read back through
-        Mysten's aggregator, for clients that upload themselves (the dApp
-        under test) and have no fallback of their own. Random bytes, so a
-        publisher out of WAL cannot answer from an already-certified blob."""
-        self.put("publisher-probe", b"suifleet publisher probe " + os.urandom(32).hex().encode())
+        """A publisher that just stored a fresh probe blob which then read
+        back byte for byte through the aggregator. For uploads made outside
+        this class (the dApp in the browser), which have no fallback of their
+        own: the dApp is pointed at this publisher instead of a dry primary."""
+        if self.mode != "testnet":
+            return self.publisher
+        self.put("probe", b"suifleet publisher probe " + os.urandom(16).hex().encode())
         return self.stored_by
 
     def readable(self, blob, body):
