@@ -896,8 +896,10 @@ impl Config {
         );
         anyhow::ensure!(
             (1..=86_400).contains(&cfg.runtime.poll_seconds)
-                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds),
-            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400"
+                && (1..=86_400).contains(&cfg.runtime.rollout_poll_seconds)
+                && cfg.runtime.full_revalidation_seconds > 0
+                && cfg.runtime.event_discovery_seconds > 0,
+            "poll_seconds must be 1..=86400; rollout_poll_seconds must be 1..=86400; full_revalidation_seconds and event_discovery_seconds must be positive"
         );
         anyhow::ensure!(
             cfg.apply.timeout_seconds > 0,
@@ -1029,6 +1031,8 @@ pub struct RuntimeConfig {
     pub state_dir: PathBuf,
     pub poll_seconds: u64,
     pub rollout_poll_seconds: u64,
+    pub full_revalidation_seconds: u64,
+    pub event_discovery_seconds: u64,
     pub replay_history: bool,
     /// Supervised components without a readiness command are ready once their
     /// run survives this long.
@@ -1050,6 +1054,8 @@ impl Default for RuntimeConfig {
             state_dir: "/var/lib/suifleet".into(),
             poll_seconds: 1800,
             rollout_poll_seconds: 60,
+            full_revalidation_seconds: 86_400,
+            event_discovery_seconds: 60,
             replay_history: false,
             component_startup_seconds: 3,
             component_ready_timeout_seconds: 60,

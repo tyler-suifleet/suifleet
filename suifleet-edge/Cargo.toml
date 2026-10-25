@@ -15,6 +15,7 @@ sui-sdk-types = { version = "0.4.0", features = ["serde", "hash"] }
 sui-transaction-builder = "0.4.0"
 tonic = { version = "0.14", default-features = false }
 prost-types = "0.14"
+prost = "0.14"
 bcs = "0.1"
 # Walrus aggregator downloads over HTTP
 # rustls with the system CA store: one TLS stack (tonic already uses rustls)
@@ -81,7 +82,6 @@ sd-notify = { version = "0.4", optional = true }
 tonic = { version = "0.14", features = ["transport", "router"] }
 sui-crypto = { version = "0.4.0", features = ["ed25519", "secp256r1"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-prost = "0.14"
 
 [features]
 default = ["systemd"]

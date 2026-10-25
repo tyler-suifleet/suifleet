@@ -206,7 +206,7 @@ def run(binary):
             config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{ota.DEVICE}"\ndevice_cap_id = "{ota.CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = {json.dumps(f"{sys.executable} {updater}")}\ntimeout_seconds = 2\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 f'[budget]\nbudget_id = "{BUDGET}"\nlow_water_mist = {LOW_WATER}\ndraw_mist = {DRAW}\n')
 
             def state():
@@ -231,13 +231,17 @@ def run(binary):
             try:
                 with (root / "daemon.log").open("w") as log:
                     process = start()
+                    # Idle enrollment makes no balance/budget reads. Funding
+                    # is checked only when the first receipt needs a write.
+                    ota.wait_for(lambda: state().get("initialized"), "not initialized", process)
+                    assert not sim.draws
+                    sim.add("0x201")
                     # Below low water: one draw of the float cap (asked 5000, cap 6000 → 5000).
                     ota.wait_for(lambda: funding().get("draws") == 1, "daemon did not draw from the budget", process)
                     assert sim.draws == [DRAW] and sim.gas == 500 + DRAW - DRAW_COST, (sim.draws, sim.gas)
                     assert sim.account["reserve"]["value"] == str(50_000 - DRAW) and sim.budget["balance"]["value"] == "100000"
                     assert funding()["last_draw_digest"] == "draw-1" and funding().get("blocked") is None, funding()
                     ota.wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
-                    sim.add("0x201")
                     ota.wait_for(lambda: reported("0x201"), "funded device did not report", process)
                     print("PASS: low balance drew once within the float cap, then the receipt was reported")
 
@@ -284,6 +288,8 @@ def run(binary):
                     # The owner pauses the budget.
                     sim.budget["paused"] = True
                     sim.gas = LOW_WATER - 1
+                    sim.allow_reports = False
+                    sim.add("0x206")  # Queue a write before checking funding.
                     ota.wait_for(lambda: "paused" in (funding().get("blocked") or ""), "pause not recorded", process)
                     assert len(sim.draws) == 2
                     print("PASS: a paused budget stopped draws and the reason was recorded")
@@ -295,6 +301,8 @@ def run(binary):
                     assert len(sim.draws) == 2
                     sim.account["reserve"]["value"] = str(DRAW)
                     ota.wait_for(lambda: funding().get("draws") == 3, "daemon did not draw after the refill", process)
+                    sim.allow_reports = True
+                    ota.wait_for(lambda: reported("0x206"), "funded queued receipt did not flush", process)
                     assert sim.draws == [DRAW] * 3 and funding().get("blocked") is None, funding()
                     print("PASS: an empty reserve stopped draws until the owner refilled it")
                     # Finite retention: chain metadata alone cannot restore missing bytes.

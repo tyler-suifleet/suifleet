@@ -60,6 +60,105 @@ The historical baseline has 13 passing Move tests and 10 Rust tests; counts can 
 
 If Rust files change, run `cargo fmt --manifest-path suifleet-edge/Cargo.toml` with rustfmt installed, then rerun relevant tests. The minimal container toolchain may need `rustup component add rustfmt` first. Do not silently upgrade the toolchain to make failures disappear.
 
+## Batched daemon polling (SF-122)
+
+A healthy idle poll makes one `BatchGetObjects` request with a `version` mask.
+The watch set includes mutable deployment authority, device identity/binding and
+owner cap, known groups/desired fields, deferred deployments and their control
+fields, and enabled fleet-data writer/index/diagnostic objects. An existing
+optional field's absence is watched too: its creation invalidates the snapshot.
+Deletion of a required object, changed versions, malformed/incomplete results and
+RPC errors never authorize idle success.
+
+Packages/type origins and registry type/initial shared version are cached for the
+loaded manifest. Loading a changed manifest creates a new client/cache. The
+registry remains an existence/version sentinel, and slow validation checks chain
+identity and the current UpgradeCap. Object values used for execution, final
+admission and the operator double read are **not** cached.
+
+```toml
+[runtime]
+poll_seconds = 1800 # SF-123 default; choose a shorter explicit interval as needed
+event_discovery_seconds = 60
+full_revalidation_seconds = 86400
+```
+
+Changed versions, bounded discovery, due deferred admission or queued work enter
+the fresh validation path. A quiet healthy poll does no event scan or gas-budget
+check. Discovery uses one DNF `ListEvents` query for deployment and membership
+events, with a local creator/target prefilter before authority reads. Both old
+journal cursors drain to a persisted exclusive checkpoint fence before switching
+to `discovery_cursor`; an indexer that has not reached that fence causes a retry,
+not a guessed resume point. Existing pruned-history and exact legacy-event
+boundary failures remain fail closed. A missing membership cursor starts at genesis
+when retained; on a pruned node it starts inclusively at the membership type
+origin package’s verified publication checkpoint. No event of that type could
+exist earlier. Publication metadata is cached per manifest; unavailable publication
+or pruned type history stops migration. Existing cursors are never moved forward
+to work around pruning.
+
+Fleet health and archive producers wait on monotonic due times or watch
+invalidation, collect local logs without chain reads while asleep, and revalidate
+deployment/capability/cadence before due work. Fleet settings (including an absent
+record) join the budget watch set and refresh after version invalidation; their
+check, health and routine-archive floors do not add idle validation reads.
+Empty due archives wait for local
+data; diagnostics and component crashes wake archive consideration. Fleet-budget
+balance/account checks happen before writes, so idle enrollment no longer draws
+gas merely to build a float. Failed writes stay queued with the existing funding
+and durable-transaction recovery behavior.
+
+Within an observed active maintenance window (including a completed job’s
+retained window), discovery also honors the configured faster rollout cadence.
+Outside those windows, short version-check intervals do not force event scans.
+
+Local firmware results and configuration settlement run before the idle gate;
+a result appearing in the spool does not wait for a chain change or event scan.
+
+Queued receipts validate current authority and retry before the version gate or
+fallible discovery, and new outcomes flush before the normal cadence sleep,
+reusing that poll's validation. Each receipt is attempted at most once per poll.
+Failed attempts wait eight poll intervals (bounded to 8–60 seconds), including
+failed authority/funding reads; newly produced outcomes do not wait for older
+receipts. Retry timers are local and reset on restart; durable outcomes remain
+in the journal. Idle polls between retries still use one version batch.
+Receipt and fleet-data writers share one funding lock across balance reads,
+funding decisions and draws. Each waiter re-reads balance under that lock. Their
+shared funding record is copied into the journal on each main poll for persistence
+and telemetry; there is no separate fleet-data funding record. Health/telemetry
+snapshots also read the live shared record, so they expose fleet-writer funding
+blocks even while the main poll is busy.
+RPC fallback verifies each candidate chain before use; metrics count every
+explicit read attempt, identity probe and partial event response, including retries.
+
+Each poll logs `read_requests` and `response_bytes` for daemon reads, including
+fleet producer reads between polls as well. Bytes are encoded protobuf response
+payloads, excluding request bytes, headers, transport framing/compression and RPC
+error-status payloads; they are not a full network bill. Slow scans, due writes
+and retries cost additional reads.
+
+Measured fixtures and scope are in
+[the SF-122 receipt](validation/sf122-poll-reads.json). The metrics-only
+[baseline patch](validation/sf122-baseline-metrics.patch) applies to
+`e19970e045c42aad2452d5a67294fe1b770133f9` with
+`git apply --unidiff-zero`; it changes counters/logging only. It allows the same
+simulator/localnet profiler to run the pre-cache binary.
+
+```bash
+python3 scripts/test_ota.py --poll-reads
+python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
+# Against an already started disposable loopback node/faucet:
+python3 scripts/test_daemon_localnet.py --poll-cache-only
+# Optional: pass --baseline-binary PATH for the instrumented baseline.
+# --cache-reset-node-pid PID also terminates/replaces that owned disposable node.
+```
+
+The normal full localnet harness still checks receipts and exact cursor migration.
+Use an isolated `--network none` container and a private writable copy of the
+pinned Move dependency cache for reset tests. Never pass a shared/public node PID.
+Physical, Mainnet, production-provider and manual-wallet acceptance remains
+separately unrun in SF-031/#32 and SF-087/#159; normal CI/Testnet gates still apply.
+
 ## Continuous integration
 
 Move-specific compiler/linter controls, the source audit, conditional formal
@@ -237,7 +336,7 @@ A group can carry a **desired state**: a revisioned map from component name to t
 - The dApp's firmware page creates the deployment and commits it as the groups' desired version in one transaction, by default. Targeting individual devices stays a one-shot deployment.
 
 **How the daemon reconciles each poll:**
-- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, scanned from genesis with their own journal cursor.
+- **Group discovery.** It finds its groups from `DeviceAddedToGroup` events, initially scanned from genesis (or the verified type-publication checkpoint on a pruned node) with their own journal cursor before the one-time combined-cursor merge.
 - **Membership check.** It confirms membership, and that the group's admin is the device's operator, from each group object.
 - **Authority re-check.** After reading every group's desired state it reads the operator again. If ownership changed in between, it plans nothing that poll, so a transfer cannot admit the previous operator's new desired state.
 - **Merge.** It merges the groups' current revisions. Groups naming different deployments for one component are a conflict: the component is left as installed, and the dApp shows it.

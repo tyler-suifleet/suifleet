@@ -239,7 +239,7 @@ class ActualExporters(unittest.TestCase):
         cls.config_path.write_text('[sui]\nmanifest_path = "deployment.json"\n' +
             f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n' +
             f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = "/bin/false"\n' +
-            f'[runtime]\nstate_dir = "{cls.root}/state"\npoll_seconds = 1\n' +
+            f'[runtime]\nstate_dir = "{cls.root}/state"\npoll_seconds = 1\nevent_discovery_seconds = 1\n' +
             f'[ipc]\nsocket = "{cls.socket}"\nadministrators = [0]\n' +
             '[ipc.components.untrusted]\nuid = 62003\noperations = ["stream_read", "stream_describe"]\nstreams = ["*"]\n' +
             '[ipc.components.exporter]\nuid = 62004\noperations = ["stream_read", "stream_describe", "stream_export_ack", "stream_export_status"]\nstreams = ["*"]\n' +
