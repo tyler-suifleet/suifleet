@@ -1,8 +1,13 @@
 {
-  "schema_version": 1,
-  "sui_cost_multiple": "10",
-  "walrus_cost_multiple": "1",
-  "stressed_margin_fraction": "0.80",
+  "schema_version": 2,
+  "sui_cost_multiples": ["0.25", "0.5", "1", "2", "3", "5", "10", "20"],
+  "walrus_cost_multiples": ["1", "2"],
+  "floors": [
+    {"sui_cost_multiple": "3", "walrus_cost_multiple": "1", "minimum_margin_fraction": "0.50"},
+    {"sui_cost_multiple": "10", "walrus_cost_multiple": "1", "minimum_margin_fraction": "0"}
+  ],
+  "hedge": {"term_sui_purchased_fraction": "1"},
+  "renewal_repricing_trigger_multiple": "3",
   "payment_fee_fraction": "0.03",
   "payment_fixed_usd_per_invoice": "0.30"
 }
