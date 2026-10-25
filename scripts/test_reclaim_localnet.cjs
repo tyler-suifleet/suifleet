@@ -41,8 +41,6 @@ const DEVICES = SF141 ? 6 : 4;
     const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_data/sources', 'contracts/fleet_storage/sources'], { maxBuffer: 64 * 1024 * 1024 });
     execFileSync('tar', ['-x', '-C', baseTree], { input: archive });
     const headCore = path.join(tmp, 'head-core-sources'); await fs.cp(path.join(tree, 'sources'), headCore, { recursive: true });
-    const headStorage = await fs.readFile(path.join(tree, 'fleet_storage/sources/fleet_storage.move'));
-    if (SF141) await fs.copyFile(path.join(baseTree, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(tree, 'fleet_storage/sources/fleet_storage.move'));
     const headData = await fs.readFile(path.join(tree, 'fleet_data/sources/fleet_data.move'));
     // Head storage may use core modules the base lacks: publish base storage, upgrade it after core.
     const headStorage = path.join(tmp, 'head-storage-sources'); await fs.cp(path.join(tree, 'fleet_storage/sources'), headStorage, { recursive: true });
@@ -248,15 +246,15 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     const coreHead = await upgrade('core', tree, core);
     await fs.rm(path.join(storageTree, 'sources'), { recursive: true }); await fs.cp(headStorage, path.join(storageTree, 'sources'), { recursive: true });
     const storageHead = await upgrade('storage', storageTree, storagePackage);
-    // The existing storage object moves to the head layout version explicitly.
-    tx = new Transaction(); tx.moveCall({ target: `${storageHead}::fleet_storage::migrate`, arguments: [tx.object(storage), tx.object(budget), tx.object(budgetCap)] });
-    await execute('migrate fleet storage', tx);
+    // SF-129 upgrades v2 to v3; SF-141's pinned SF-129 base is already v3.
+    // Never pretend an already-migrated object needs another migration.
+    const storageBcs = loader()('lib/fleet-budget.ts').FleetStorageBcs;
+    const liveStorage = storageBcs.parse((await client.getObject({objectId: storage, include:{content:true}})).object.content);
+    if (BigInt(liveStorage.version) < 3n) {
+      tx = new Transaction(); tx.moveCall({ target: `${storageHead}::fleet_storage::migrate`, arguments: [tx.object(storage), tx.object(budget), tx.object(budgetCap)] });
+      await execute('migrate fleet storage', tx);
+    } else assert.equal(BigInt(liveStorage.version), 3n, 'unexpected storage layout version');
     await fs.writeFile(path.join(dataTree, 'sources/fleet_data.move'), headData);
-    let storageHead = storagePackage.pkg;
-    if (SF141) {
-      await fs.writeFile(path.join(tree, 'fleet_storage/sources/fleet_storage.move'), headStorage);
-      storageHead = await upgrade('storage', path.join(tree, 'fleet_storage'), storagePackage);
-    }
     const dataHead = await upgrade('data', dataTree, dataBase);
     const dataOrigins = await origins(dataHead), coreOrigins = await origins(coreHead);
     assert.equal(dataOrigins['fleet_data::FleetData'], id(dataBase.pkg)); assert.equal(dataOrigins['fleet_data::AnchorKey'], id(dataBase.pkg));
