@@ -21,6 +21,7 @@ import { WALRUS_AGGREGATOR } from '@/lib/constants';
 import { PageHeader } from '@/components/ui';
 import { recordAccess, type AccessEntry, type LogQuery } from '@/lib/archive-search';
 import { AccessRecord, ArchiveView } from '@/components/ArchiveSearch';
+import { FleetDataBrowser } from '@/components/FleetDataBrowser';
 import { ShadowDocuments } from '@/components/ShadowDocuments';
 import { shadowDocumentsView } from '@/lib/shadow-documents';
 
@@ -150,7 +151,7 @@ export default function FleetDataPage() {
       await execute({transaction:tx, support: allowed.kind === 'support' ? { config: DATA_CONFIG, deviceId: device } : undefined});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
-  return <div className="max-w-5xl space-y-4"><DataUsage /><PageHeader title="Fleet archives" subtitle="Signed logs, diagnostics and shadow documents, verified from Sui and decrypted in this browser" />
+  return <div className="max-w-5xl space-y-4"><DataUsage /><PageHeader title="Data" subtitle="Browse device data, download verified bytes and manage scoped sharing in your browser" /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
