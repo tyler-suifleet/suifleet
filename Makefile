@@ -77,6 +77,7 @@ test-ota:
 	$(RUN) python3 scripts/test_greengrass_runtime.py
 	$(RUN) python3 scripts/test_daemon_update.py
 	$(RUN) python3 scripts/test_desired_state.py
+	$(RUN) python3 scripts/test_inbox_ota.py
 	$(RUN) python3 scripts/test_handover_ota.py
 	$(RUN) python3 scripts/test_deployment_control.py
 	$(RUN) python3 scripts/test_telemetry.py
@@ -163,6 +164,7 @@ check-interfaces:
 	$(RUN) node scripts/test_deployment_control.cjs
 	$(RUN) node scripts/test_rollout.cjs
 	$(RUN) node scripts/test_receipt_shards.cjs
+	$(RUN) node scripts/test_inbox.cjs
 
 generate-interfaces:
 	$(RUN) python3 scripts/generate_interfaces.py
@@ -533,6 +535,14 @@ test-messaging:
 test-aws-iot:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	python3 scripts/test_aws_iot.py --image "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" $(AWS_IOT_EVIDENCE)
+
+# SF-125 device inboxes, group heads and member index on a disposable localnet
+# (start it first; network-none): main's contracts upgraded in place, the real
+# daemon through a pruning gRPC proxy, judged by on-chain receipts.
+.PHONY: test-inbox-localnet
+test-inbox-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example grpc_prune_proxy
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_inbox_localnet.py
 
 # Start a disposable indexed loopback node/faucet first; network-none Docker only.
 .PHONY: test-rollout-localnet

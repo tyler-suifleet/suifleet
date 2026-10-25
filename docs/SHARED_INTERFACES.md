@@ -85,6 +85,16 @@ barrier, with the original payload schema stored in the directory. Legacy v2
 receipt signatures/layouts remain compatible; v3 uses separate immutable-deployment
 report calls and bounded shard-aware getters. See [sharded receipts](SHARDED_RECEIPTS.md)
 for migration, early-package deletion protection, rollout settlement and cleanup.
+The additive SF-125 `fleet_inbox` module (device inboxes and group heads) and the
+`device_group` member index (`MemberKey`, `IndexKey`, `GroupIndex`, `GroupIndexed`)
+are in the same reviewed ABI, with an all-or-none optional origin group
+`fleet_inbox` (`INBOX_TYPES` in both generated clients). All of these types
+originate in the introducing upgrade, so older packages cannot touch them;
+`DeviceGroup` keeps its layout and origin. The generators now map `Option<T>`
+(`Head.latest`). Inbox addresses are `sui::derived_object` IDs under the registry,
+derived identically by Move, the dApp, the daemon and the indexer. See
+[DEVICE_INBOX.md](DEVICE_INBOX.md).
+
 SF-138 adds the all-or-none optional `rollout_health` origin group for
 `deployment_manager::RolloutHealthKey` and `RolloutHealth`. Historical manifests
 and their recovery receipts remain valid without it. The new staged-rollout gate

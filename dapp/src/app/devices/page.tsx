@@ -1,7 +1,9 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useQuery } from "@tanstack/react-query";
+import { buildIndexGroupTx, existingInboxes, inboxSupported, LISTING_BATCH, unlistedMembers } from "@/lib/fleet-inbox";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
@@ -234,6 +236,7 @@ function DevicesTab() {
 
 function GroupsTab() {
   const account = useCurrentAccount();
+  const client = useCurrentClient();
   const { data: groups = [], isLoading, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
@@ -242,6 +245,16 @@ function GroupsTab() {
   const { data: desired = {}, refetch: refetchDesired } = useDesiredStates(groups.map((g) => g.objectId));
   const { data: deployments = [] } = useDeployments();
   const conflicts = desiredConflicts(groups, desired);
+  const managedGroup = groups.find((g) => g.objectId === managingGroup);
+  // Operated members whose inbox does not list the managed group yet: the
+  // index migration lists them in batches until none remain.
+  const operatedMembers = managedGroup ? devices.filter((d) => d.ownerCapId && managedGroup.deviceIds.includes(d.objectId))
+    .map((d) => ({ deviceId: d.objectId, ownerCapId: d.ownerCapId! })) : [];
+  const { data: unlisted = [], refetch: refetchUnlisted } = useQuery({
+    queryKey: ["unlisted-members", managedGroup?.objectId, operatedMembers.map((m) => m.deviceId)],
+    queryFn: () => unlistedMembers(client, managedGroup!.objectId, operatedMembers),
+    enabled: inboxSupported() && !!managedGroup && operatedMembers.length > 0,
+  });
   const label = (deploymentId: string) => {
     const deployment = deployments.find((d) => d.deploymentId === deploymentId);
     return deployment ? `v${deployment.version}` : `${deploymentId.slice(0, 10)}… (deleted or not yours)`;
@@ -270,9 +283,16 @@ function GroupsTab() {
     );
   }
 
-  function handleAddDevice(groupId: string, device: DeviceRef) {
+  /** Whether each device's inbox exists, when this deployment has inboxes. */
+  async function inboxes(deviceIds: string[]) {
+    return inboxSupported() ? await existingInboxes(client, deviceIds) : undefined;
+  }
+
+  async function handleAddDevice(groupId: string, device: DeviceRef) {
+    let known;
+    try { known = await inboxes([device.objectId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
     signAndExecute(
-      { transaction: buildAddDeviceToGroupTx(groupId, device) },
+      { transaction: buildAddDeviceToGroupTx(groupId, device, known?.has(device.objectId)) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
@@ -280,19 +300,37 @@ function GroupsTab() {
     );
   }
 
-  function handleRemoveDevice(groupId: string, deviceId: string) {
+  async function handleRemoveDevice(groupId: string, deviceId: string) {
+    let known;
+    try { known = await inboxes([deviceId]); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
     signAndExecute(
-      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId) },
+      { transaction: buildRemoveDeviceFromGroupTx(groupId, deviceId, known?.has(deviceId)) },
       {
         onSuccess: () => { setTimeout(() => refetch(), 3000); },
+        onError: (err) => alert(`Failed: ${err.message}`),
+      }
+    );
+  }
+
+  /**
+   * One batch of the member-index migration: moves unindexed members into
+   * the index and lists the group in operated members' inboxes that do not
+   * list it yet (read fresh, so repeated batches progress over every member).
+   */
+  async function handleIndex(groupId: string, unindexed: number) {
+    let pending;
+    try { pending = await unlistedMembers(client, groupId, operatedMembers); } catch (err) { alert(`Failed: ${err instanceof Error ? err.message : err}`); return; }
+    if (unindexed === 0 && pending.length === 0) { void refetchUnlisted(); return; }
+    signAndExecute(
+      { transaction: buildIndexGroupTx(groupId, pending.slice(0, LISTING_BATCH), unindexed > 0) },
+      {
+        onSuccess: () => { setTimeout(() => { void refetch(); void refetchUnlisted(); }, 3000); },
         onError: (err) => alert(`Failed: ${err.message}`),
       }
     );
   }
 
   if (!account) return <p className="text-sm text-gray-500">Connect your wallet.</p>;
-
-  const managedGroup = groups.find((g) => g.objectId === managingGroup);
 
   return (
     <>
@@ -408,6 +446,24 @@ function GroupsTab() {
                 </div>
               )}
             </div>
+
+            {inboxSupported() && (managedGroup.unindexed > 0 || unlisted.length > 0) && (
+              <div className="text-sm bg-gray-50 border border-gray-200 rounded px-3 py-2 space-y-1">
+                {managedGroup.unindexed > 0 && (
+                  <p>{managedGroup.unindexed} member(s) are not yet in the group&apos;s member index. Indexing removes the
+                    group&apos;s size limit and lets devices find it without event history, but older daemons and tools
+                    then no longer see indexed members.</p>
+                )}
+                {unlisted.length > 0 && (
+                  <p>{unlisted.length} device(s) you operate do not list this group in their inbox yet, so they need event
+                    history to find it. Each batch lists up to {LISTING_BATCH}.</p>
+                )}
+                <button disabled={isPending} onClick={() => void handleIndex(managedGroup.objectId, managedGroup.unindexed)}
+                  className="text-xs text-[#4DA2FF] hover:underline disabled:opacity-40">
+                  {managedGroup.unindexed > 0 ? "Index members" : "List group in inboxes"}
+                </button>
+              </div>
+            )}
 
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">Members</p>

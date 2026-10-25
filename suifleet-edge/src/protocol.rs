@@ -9,6 +9,7 @@ pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3, 4];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
+pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::InboxKey", "fleet_inbox::HeadKey", "fleet_inbox::Head", "fleet_inbox::InboxCreated", "fleet_inbox::Announced", "device_group::MemberKey", "device_group::IndexKey", "device_group::GroupIndex", "device_group::GroupIndexed"];
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
 pub const SHARD_TYPES: &[&str] = &["deployment_manager::ReceiptShardKey", "deployment_manager::ReceiptDirectory", "deployment_manager::ReceiptKey", "deployment_manager::ReceiptIndexKey", "deployment_manager::ShardedReceipt", "deployment_manager::ReceiptShard", "component_catalog::ShardedCatalogBindingKey", "deployment_manager::ReceiptLayoutChanged", "deployment_manager::ShardedTargetGroupsKey"];
@@ -164,6 +165,7 @@ pub mod deployment_manager {
     pub const ROLLOUT_ELIGIBLE: &str = "rollout_eligible";
     pub const ROLLOUT_POLICY: &str = "rollout_policy";
     pub const ROLLOUT_PROGRESS: &str = "rollout_progress";
+    pub const SCHEDULED_START_MS: &str = "scheduled_start_ms";
     pub const SET_CONTROL: &str = "set_control";
     pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
@@ -451,6 +453,9 @@ pub mod device_group {
     pub const DELETE_GROUP: &str = "delete_group";
     pub const DEVICE_IDS: &str = "device_ids";
     pub const GROUP_ID: &str = "group_id";
+    pub const INDEX_MEMBERS: &str = "index_members";
+    pub const IS_INDEXED: &str = "is_indexed";
+    pub const MEMBER_COUNT: &str = "member_count";
     pub const NAME: &str = "name";
     pub const REMOVE_DEVICE: &str = "remove_device";
     #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -489,6 +494,28 @@ pub mod device_group {
         pub admin: [u8; 32],
     }
     impl GroupDeleted { pub const MOVE_TYPE: &'static str = "device_group::GroupDeleted"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupIndex {
+        pub members: u64,
+    }
+    impl GroupIndex { pub const MOVE_TYPE: &'static str = "device_group::GroupIndex"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupIndexed {
+        pub group_id: [u8; 32],
+        pub moved: u64,
+        pub remaining: u64,
+    }
+    impl GroupIndexed { pub const MOVE_TYPE: &'static str = "device_group::GroupIndexed"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct IndexKey {
+        pub dummy_field: bool,
+    }
+    impl IndexKey { pub const MOVE_TYPE: &'static str = "device_group::IndexKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct MemberKey {
+        pub device_id: [u8; 32],
+    }
+    impl MemberKey { pub const MOVE_TYPE: &'static str = "device_group::MemberKey"; }
 }
 pub mod device_registry {
     use super::*;
@@ -886,6 +913,70 @@ pub mod fleet_handover {
         pub state: u8,
     }
     impl StateChanged { pub const MOVE_TYPE: &'static str = "fleet_handover::StateChanged"; }
+}
+pub mod fleet_inbox {
+    use super::*;
+    pub const MODULE: &str = "fleet_inbox";
+    pub const ADD_MEMBER: &str = "add_member";
+    pub const ANNOUNCE_DEVICE: &str = "announce_device";
+    pub const ANNOUNCE_GROUP: &str = "announce_group";
+    pub const COMPONENTS: &str = "components";
+    pub const CREATE_INBOX: &str = "create_inbox";
+    pub const FOLLOW_GROUP: &str = "follow_group";
+    pub const FORGET_GROUP: &str = "forget_group";
+    pub const GROUP_HEAD: &str = "group_head";
+    pub const INBOX_ADDRESS: &str = "inbox_address";
+    pub const INBOX_DEVICE_ID: &str = "inbox_device_id";
+    pub const INBOX_EXISTS: &str = "inbox_exists";
+    pub const INBOX_GROUPS: &str = "inbox_groups";
+    pub const INBOX_HEAD: &str = "inbox_head";
+    pub const LATEST: &str = "latest";
+    pub const NEW_INBOX: &str = "new_inbox";
+    pub const NEXT_START_MS: &str = "next_start_ms";
+    pub const REMOVE_MEMBER: &str = "remove_member";
+    pub const SEQ: &str = "seq";
+    pub const SHARE_INBOX: &str = "share_inbox";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Announced {
+        pub target: [u8; 32],
+        pub deployment_id: [u8; 32],
+        pub seq: u64,
+        pub next_start_ms: u64,
+    }
+    impl Announced { pub const MOVE_TYPE: &'static str = "fleet_inbox::Announced"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Head {
+        pub seq: u64,
+        pub latest: Option<[u8; 32]>,
+        pub next_start_ms: u64,
+        pub components: super::VecMap<String, [u8; 32]>,
+    }
+    impl Head { pub const MOVE_TYPE: &'static str = "fleet_inbox::Head"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DeviceInbox {
+        pub id: [u8; 32],
+        pub device_id: [u8; 32],
+        pub version: u64,
+        pub head: super::fleet_inbox::Head,
+        pub groups: Vec<[u8; 32]>,
+    }
+    impl DeviceInbox { pub const MOVE_TYPE: &'static str = "fleet_inbox::DeviceInbox"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct HeadKey {
+        pub dummy_field: bool,
+    }
+    impl HeadKey { pub const MOVE_TYPE: &'static str = "fleet_inbox::HeadKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct InboxCreated {
+        pub inbox_id: [u8; 32],
+        pub device_id: [u8; 32],
+    }
+    impl InboxCreated { pub const MOVE_TYPE: &'static str = "fleet_inbox::InboxCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct InboxKey {
+        pub device_id: [u8; 32],
+    }
+    impl InboxKey { pub const MOVE_TYPE: &'static str = "fleet_inbox::InboxKey"; }
 }
 pub mod fleet_settings {
     use super::*;
