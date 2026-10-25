@@ -816,3 +816,43 @@ budget/settings, recovery and all four fleet-data modes. Indexer unit tests
 passed 48/48 and its locked build passed. These are simulator/isolated-chain/host
 checks; they establish no physical, public-provider or real-wallet acceptance.
 Final `git diff --check` passed. All test/build resource locks were released.
+
+## Package reservation repair (2026-10-25)
+
+Automatic testnet run [40206647454](https://github.com/tyler-suifleet/suifleet/actions/runs/40206647454)
+failed upgrading `a3f4504f` over `2169f797`: the fixed 400M-MIST package
+transaction budget was exhausted. Its public evidence records a 386,836,000-MIST
+base publish and 396,504,956 MIST settled before the upgrade. A read-only gRPC
+lookup independently confirms failed digest
+`9naKZ55speAiQHxvKNmWJwFsRbaZc2sCVhGkJcyPu2b7`, `InsufficientGas`, checkpoint
+399098901, and 3,900,163 MIST net gas. No machine-session public-wallet mutation
+was made. The existing private checkpoint and historical quarantine are preserved
+for normal effects reconciliation; no uncertain transaction was discarded.
+
+The package reservation is now 500M MIST, capped by the unchanged 1.0-SUI suite
+allowance. Funding preflight requires a gas pool covering that reservation;
+unknown outcomes still consume their full reservation. Fresh checks:
+
+- Disposable `suifleet-dev:sf037`, network none:
+  `make INSIDE_DEV_CONTAINER=1 test-testnet` passed: 118 testnet/toolchain/
+  reconciliation tests, 45 live-common tests, authenticated-cache fixtures.
+  The initial host invocation failed only its installed-toolchain check because
+  the host has no `sui`; the pinned-container invocation passed.
+- `python3 scripts/test_protocol_localnet.py --receipt-shards` passed in the
+  disposable network-none container with the pinned Move cache, as user `dev`.
+  The compatible upgrade now explicitly uses a 500M-MIST budget. It preserved
+  70 legacy receipts, passed old-package attacks/barriers, populated 1,000
+  authoritative receipts and completed bounded cleanup. Refreshed
+  [raw evidence](sf127-localnet.json) records base `2169f797`, the actual digests
+  and maximum individual receipt gross of 10,675,200 MIST. Initial setup attempts
+  lacked the linked Git metadata or mounted the cache under the wrong home/user;
+  they failed before the tested upgrade, and the corrected run passed.
+- `node --check scripts/test_receipt_shards_localnet.cjs` and `git diff --check`
+  passed. Current/snapshot base `2169f797` is already an ancestor; merging
+  `origin/main` reported “Already up to date.”
+
+This is repair evidence, not approval or successful public-testnet rerun evidence.
+Hosted exact-head/base CI and automatic testnet remain pending; fresh independent
+review is required. No hosted CI polling/watch or manual rerun was performed.
+Physical acceptance remains in SF-031/#32; mainnet and final provider/manual-wallet
+acceptance remain in SF-087/#159, explicitly unrun.
