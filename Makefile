@@ -776,6 +776,7 @@ test-budget-enrollment-localnet:
 test-customer-fleets:
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_fleets_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/live_wallet_browser.cjs --smoke
 
 # Run in a disposable network-none container with Git history and warm Move cache.
 test-customer-upgrade-localnet:
