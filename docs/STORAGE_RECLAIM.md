@@ -91,7 +91,7 @@ the creator can still delete them individually after review.
   rescan, *Continue scan* or account change discards it, and a slow dry run of
   an earlier plan is dropped, so signing never submits a plan that was not
   simulated.
-- **Batching.** At most 64 entries per call and 256 removals per transaction.
+- **Batching.** At most 64 entries per call and 256 removals per transaction. Each anchor counts as one removal plus its SF-139 item indexes, so anchors with full item batches go about 15 per transaction. The planner counts items from a complete listing, and reads them exactly when the scan was bounded or resumed.
   Larger histories are reclaimed in successive transactions.
 - **Scanning.** The planner lists only the index entries that still exist, so
   pruned history costs no reads and never blocks later archives. Each device
