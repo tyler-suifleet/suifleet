@@ -319,3 +319,51 @@ test_repair_budgets.py` passed all five relevant regressions. Staged, worktree
 and current-base `git diff --check` passed. Both merge commits use Tyler Bush
 for author and committer. Hosted checks for the resulting pushed revision are
 pending and were not watched/polled; this is a feedback handoff, not approval.
+
+## PR307 SF129 reclaim reconciliation (2026-10-25)
+
+Integrated SF129 PR279 head `290d1b011c7699d36703d19dbd54f47a70dd1b42`
+in `bc27e7b9`. Snapshot and freshly fetched current main
+`2169f7979c1c446b838f04a46e05e31a168697d6` are ancestors. PR279 was
+still OPEN on read; its merge remains required before final SF141 integration.
+
+Resolved pruning onto SF129's contiguous `MAX_ANCHOR_ITEMS` loop, preserving
+SF141 stream retention, compact AnchorKey/reuse marker and matching CompactHead
+removal. Adopted SF129's verified item origins and complete/bounded/resumed item
+counting. Each candidate reserves `3 + items` from the 256-removal budget for
+its anchor, reuse marker, possible compact head and item indexes. Full 16-item
+batches select 13 anchors; loose blobs fill only the remaining weighted budget.
+The browser uses SF129's exact `readAnchorAt` lookup across pruned gaps.
+
+Fresh verification (all commands exited zero):
+
+- Network-none `suifleet-dev:sf035`, checkout `/workspace`, existing sf141 Move
+  cache and read-only Git metadata: `make INSIDE_DEV_CONTAINER=1 test-contracts`
+  passed core 227, storage 68 and data 50 tests.
+- Same container: `python3 scripts/check_move_security.py` passed strict
+  compiler/linters, compatibility baselines and genuine authority mutations;
+  `python3 scripts/generate_interfaces.py --check` passed all 13 modules.
+- Same container: `SF141_RETENTION=1 SF129_RECEIPT=/tmp/pr307-weighted-localnet.json
+  python3 scripts/test_reclaim_localnet.py` passed real existing-object upgrade,
+  per-stream purchase/extension/expiry/reclaim and opaque index disappearance.
+  Temporary receipt stayed inside the disposable container; committed older
+  receipts are historical. No public gas was spent.
+- Network-none same pinned image: Node fixtures `test_storage_reclaim.cjs`,
+  `test_storage_reclaim_panel.cjs`, `test_stream_retention.cjs`,
+  `test_stream_retention_panel.cjs` and `test_data_browser.cjs` passed;
+  `cd dapp && pnpm typecheck && pnpm build` passed static production export.
+- Host `node scripts/test_storage_reclaim.cjs` passed again after the final
+  assertion that 13 full batches leave room for exactly nine loose blobs.
+- Host `CHROME_EXECUTABLE=/opt/google/chrome/chrome node
+  scripts/test_data_browser_browser.cjs` passed real Chromium fixture acceptance.
+- Host `python3 -m unittest discover -s scripts/tests -p test_testnet.py`:
+  36 tests passed, covering inherited SF129 testnet allowance regressions.
+- Staged/worktree `git diff --check` passed. Tyler author/committer identity
+  verified for the reconciliation. Rust and full OTA results above are historical;
+  this repair changes no daemon code and does not claim new Rust/OTA runs.
+
+Hosted exact-head/current-base CI, automatic public-testnet checks and fresh
+independent review remain pending coordinator gates after push; this worker did
+not poll them. Deferred physical/mainnet/production-provider/manual-wallet checks
+remain unrun in #32/#159. No production deployment, hardware operation, public
+wallet mutation, issue creation, other worker or PR merge occurred.
