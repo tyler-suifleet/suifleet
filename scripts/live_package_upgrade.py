@@ -514,7 +514,9 @@ def run(args):
         return ledger.execute(client, label, command, **kwargs)
 
     def transaction(label, *ptb, budget=None, funding=0):
-        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding)
+        # Fresh publication can consume most of the run ceiling. Never submit
+        # an ordinary PTB with its configured gas budget silently reduced.
+        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]

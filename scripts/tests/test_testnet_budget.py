@@ -59,3 +59,34 @@ class BudgetTests(unittest.TestCase):
             budget.faucet(second)
         second.assert_not_called()
         self.assertEqual(budget.remaining, 7_000_000)
+
+    def test_exhausted_fresh_fixture_never_submits_clipped_deployment_batch(self):
+        # Exact allowance state before run 40206962805's InsufficientGas.
+        rows = []
+        budget = Budget(1_000_000_000, rows)
+        budget.grant(979_149_743)
+        client = Mock()
+        with self.assertRaisesRegex(Spent, 'full gas budget'):
+            budget.execute(client, 'create 3 deployments via head', ['ptb'],
+                           gas=200_000_000, require_full=True)
+        client.assert_not_called()
+        self.assertEqual(budget.used, 979_149_743)
+        self.assertEqual(rows, [])
+
+    def test_cached_fixture_can_submit_full_deployment_budget_and_settle(self):
+        budget = Budget(1_000_000_000, [])
+        budget.grant(30_000_000)
+        client = Mock(return_value=effect(cost=25_000_000))
+        budget.execute(client, 'create deployments', ['ptb'], gas=200_000_000,
+                       require_full=True)
+        self.assertEqual(client.call_args.args[-1], '200000000')
+        self.assertEqual(budget.used, 55_000_000)
+
+    def test_full_budget_reserves_funding_without_replenishment(self):
+        client = Mock()
+        budget = Budget(200_000_000, [])
+        with self.assertRaises(Spent):
+            budget.execute(client, 'fund', ['ptb'], gas=200_000_000,
+                           funding=1, require_full=True)
+        client.assert_not_called()
+        self.assertEqual(budget.used, 0)
