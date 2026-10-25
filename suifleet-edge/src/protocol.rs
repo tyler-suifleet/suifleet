@@ -9,6 +9,7 @@ pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
+pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
 /// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
 pub mod fleet_settings_values {
@@ -110,6 +111,7 @@ pub mod deployment_manager {
     use super::*;
     pub const MODULE: &str = "deployment_manager";
     pub const ADVANCE_ROLLOUT: &str = "advance_rollout";
+    pub const ADVANCE_ROLLOUT_ONCHAIN: &str = "advance_rollout_onchain";
     pub const ARTIFACT_SHA256: &str = "artifact_sha256";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
@@ -132,6 +134,7 @@ pub mod deployment_manager {
     pub const RECEIPTS_VERSION: &str = "receipts_version";
     pub const RECIPE_BLOB_ID: &str = "recipe_blob_id";
     pub const RECIPE_SHA256: &str = "recipe_sha256";
+    pub const REPORT_ROLLOUT_HEALTH: &str = "report_rollout_health";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
     pub const REPORT_VERIFIED_STATUS: &str = "report_verified_status";
@@ -271,6 +274,19 @@ pub mod deployment_manager {
         pub admitted: Vec<[u8; 32]>,
     }
     impl RolloutDecision { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutDecision"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RolloutHealth {
+        pub devices: Vec<[u8; 32]>,
+        pub healthy: Vec<bool>,
+        pub at_ms: Vec<u64>,
+        pub signers: Vec<[u8; 32]>,
+    }
+    impl RolloutHealth { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutHealth"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RolloutHealthKey {
+        pub dummy_field: bool,
+    }
+    impl RolloutHealthKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RolloutHealthKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RolloutKey {
         pub dummy_field: bool,

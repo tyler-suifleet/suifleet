@@ -22,6 +22,7 @@ MEMBERS = ['0xd1', '0xd2', '0xd3']
 def run():
     rollout = dict(state=0, members=MEMBERS, admitted_at=[0,0,0], outcomes=[0,0,0], skipped=[False]*3)
     fault = [False]
+    health_fault = [False]
     class View(Simulator):
         current_operator = OPERATOR
         gate = None
@@ -30,6 +31,8 @@ def run():
             if id == OWNER_CAP: result['data']['owner'] = {'AddressOwner':self.current_operator}
             return result
         def rpc(self, method, params):
+            if method == 'unsafe_moveCall' and params[3] == 'report_rollout_health' and health_fault[0]:
+                raise ConnectionError('injected health submission outage')
             if method == 'shim_fields':
                 return super().rpc(method, params) + [[RECORD, f"{TYPE_ORIGINS['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey", '00']]
             if method == 'suix_getDynamicFieldObject' and params[1]['type'].endswith('::RolloutKey'):
@@ -82,7 +85,7 @@ def run():
                 home=root/str(i); home.mkdir(); key=home/'device.key'; key.write_text('07'*32); key.chmod(0o600)
                 (home/'deployment.json').write_text(json.dumps(manifest(sim,url,rpc)))
                 runs=home/'runs'; updater=home/'apply.py'; updater.write_text(f"from pathlib import Path\np=Path({str(runs)!r})\np.write_text(p.read_text()+'apply\\n' if p.exists() else 'apply\\n')\n")
-                cfg=home/'config.toml'; cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{sim.cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{home}/state"\npoll_seconds=1\nreplay_history=true\n')
+                cfg=home/'config.toml'; cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{sim.cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{home}/state"\npoll_seconds=1\nevent_discovery_seconds=1\nreplay_history=true\n')
                 log=(home/'daemon.log').open('w')
                 handles.append(dict(sim=sim,server=server,shim=shim,home=home,runs=runs,cfg=cfg,log=log,process=None))
             def start(i):
@@ -106,8 +109,22 @@ def run():
             wait(lambda:all(deferred(i,'waiting for rollout eligibility') for i in (0,1)),'ungranted members not deferred')
             assert [count(i) for i in range(3)]==[0,0,0]
             # Coordinator grants only the canary, with both online devices polling.
+            handles[0]['sim'].checkpoint_pending_reads=2
+            health_fault[0]=True
             rollout['admitted_at'][0]=1
             wait(lambda:handles[0]['sim'].reports,'canary not applied/reported')
+            wait(lambda:state(0).get('deployments',{}).get(RECORD,{}).get('rollout_health_slow_retry'), 'normal-cadence health retry not durable')
+            assert state(0)['deployments'][RECORD]['reported']
+            assert state(0)['deployments'][RECORD]['rollout_health_pending']
+            wait(lambda:handles[0]['sim'].checkpoint_reads >= 3, 'receipt checkpoint barrier did not wait')
+            assert handles[0]['sim'].rollout_health == []
+            stop(0,True); start(0)
+            time.sleep(1)
+            assert count(0)==1 and len(handles[0]['sim'].reports)==1
+            health_fault[0]=False
+            wait(lambda:handles[0]['sim'].rollout_health == [(RECORD, True)],'post-apply on-chain health not reported')
+            wait(lambda:not state(0)['deployments'][RECORD]['rollout_health_pending'], 'health completion not persisted')
+            assert len(handles[0]['sim'].reports)==1
             assert [count(i) for i in range(3)]==[1,0,0]
             stop(1,True); start(1)
             wait(lambda:deferred(1,'waiting for rollout eligibility'),'restart lost deferred record')
@@ -136,7 +153,7 @@ def run():
             wait(lambda:deferred(2,'rollout aborted'),'abort not durable')
             assert [count(i) for i in range(3)]==[1,1,0]
             assert all(not h['sim'].errors for h in handles),[h['sim'].errors for h in handles]
-            print('PASS: three daemon cohorts, canary-only grants, offline member, crash/restart, pause/resume, fail-closed reads, final operator recheck and durable abort; apply counts 1/1/0')
+            print('PASS: three daemon cohorts, canary-only grants, durable health outage/restart retry without reapply or duplicate receipt, offline member, crash/restart, pause/resume, fail-closed reads, final operator recheck and durable abort; apply counts 1/1/0')
     finally:
         cleanup_workers()
 

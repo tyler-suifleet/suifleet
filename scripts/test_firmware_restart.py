@@ -78,7 +78,7 @@ def run(binary):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[apply]\ncommand = "/bin/false"\ntimeout_seconds = 2\nmode = "privileged-helper"\n'
                 f'firmware_spool = {json.dumps(str(spool))}\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(state_dir))}\npoll_seconds = 1\nevent_discovery_seconds = 60\n')
             helper_config = root / "firmware.toml"
             helper_config.write_text(f'command = {json.dumps("/bin/sh -c " + chr(39) + "echo ran >> " + str(marker) + chr(39))}\n'
                 f'timeout_seconds = 2\nspool_dir = {json.dumps(str(spool))}\nwork_dir = {json.dumps(str(root / "helper-work"))}\n')
@@ -152,6 +152,10 @@ def run(binary):
                 for id in ("0x302", "0x303", "0x306"):
                     assert outcome(id)["status"] is None and not outcome(id)["reported"], (id, outcome(id))
 
+                # Warm idle caching first: helper completion changes only local
+                # spool files and must not wait for an event scan or chain change.
+                wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= 2,
+                         "firmware recovery did not reach idle batch polling", process)
                 # The path unit's next run sweeps the abandoned claim and skips the live one.
                 helper()
                 assert not marker.exists(), "a swept or withdrawn request must never run the updater"
@@ -171,10 +175,10 @@ def run(binary):
                 process = None
 
                 # Indeterminate stays indeterminate across another restart.
-                checks = sim.chain_checks
+                batches = sim.reads.get("BatchGetObjects", 0)
                 process = start()
-                # Startup validation plus at least two poll cycles (each checks the chain).
-                wait_for(lambda: sim.chain_checks >= checks + 3, "restarted daemon did not poll", process)
+                # Startup validation followed by at least two actual idle polls.
+                wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= batches + 2, "restarted daemon did not poll", process)
                 stop(process)
                 process = None
                 assert outcome("0x303")["status"] is None and outcome("0x303")["indeterminate"]

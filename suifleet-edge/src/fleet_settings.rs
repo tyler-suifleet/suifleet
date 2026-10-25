@@ -1,8 +1,8 @@
 //! Per-fleet cost settings (SF-130, docs/FLEET_SETTINGS.md).
 //!
 //! The fleet owner keeps one `fleet_settings::Settings` record in a dynamic
-//! field of the fleet's `FleetBudget`. The daemon reads it once per check and
-//! applies it before choosing when to check next, so a change takes effect
+//! field of the fleet's `FleetBudget`. The daemon watches its version each check
+//! and refreshes it before choosing when to check next, so a change takes effect
 //! within one interval. Local configuration can only make the device slower
 //! (cheaper), never faster than the fleet allows:
 //!
@@ -106,11 +106,25 @@ pub struct Applied {
     current: Option<Settings>,
     /// The last read failed or was unusable; logged once until it recovers.
     degraded: bool,
+    generation: Option<u64>,
 }
 
 impl Applied {
     pub fn new(scope: &'static str) -> Self { Self { scope, ..Self::default() } }
     pub fn current(&self) -> Option<&Settings> { self.current.as_ref() }
+
+    /// Settings and their absence are watched with the budget. Refresh only
+    /// after invalidation; sleeping producers and idle checks do no extra reads.
+    pub async fn refresh(&mut self, sui: &crate::sui_client::SuiClient, budget: &str) {
+        let generation = sui.watch_generation();
+        if self.generation == Some(generation) { return; }
+        // Cache successful object reads even when this daemon refuses the
+        // record. Its watched version will invalidate the refusal; RPC failures
+        // remain retryable without waiting for another generation.
+        let result = sui.fleet_settings(budget).await;
+        if result.is_ok() { self.generation = Some(generation); }
+        self.update(result.and_then(|value| value.as_ref().map(Settings::from_json).transpose()));
+    }
 
     /// Apply one read: a record, its absence, or an error. Returns true when
     /// the settings in force changed.
@@ -146,15 +160,6 @@ impl Applied {
 pub fn budget_id(cfg: &crate::config::Config) -> Option<&str> {
     cfg.budget.as_ref().map(|b| b.budget_id.as_str())
         .or_else(|| cfg.fleet_data.as_ref().map(|d| d.budget_id.as_str()))
-}
-
-/// Read the fleet's record: None when the deployment predates the settings
-/// types or the owner has not created one.
-pub async fn read(sui: &crate::sui_client::SuiClient, budget_id: &str) -> anyhow::Result<Option<Settings>> {
-    match sui.fleet_settings(budget_id).await? {
-        Some(value) => Settings::from_json(&value).map(Some),
-        None => Ok(None),
-    }
 }
 
 #[cfg(test)]

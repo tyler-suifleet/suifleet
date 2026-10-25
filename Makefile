@@ -66,6 +66,7 @@ test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --poll-reads
 	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
 	$(RUN) python3 scripts/test_dependency_ota.py
@@ -88,6 +89,7 @@ test-ota:
 	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
 
@@ -247,7 +249,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-retention test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-data-metering test-retention test-fleet-settings test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -347,6 +349,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_fleet_settings.cjs
 	$(RUN) node scripts/test_budget_enrollment.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_incremental_history.cjs
@@ -356,6 +359,7 @@ test-manifest:
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
+	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
@@ -706,6 +710,14 @@ test-retention:
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
 	$(RUN) node scripts/test_retention.cjs
 
+# SF-131: estimator, price table, settings costs and deposit, and the Fleet settings page in a real browser.
+.PHONY: test-fleet-settings
+test-fleet-settings:
+	$(RUN) node scripts/test_fleet_budget.cjs
+	$(RUN) node scripts/test_fleet_settings.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_settings_browser.cjs
+
 # Run inside a disposable network-none dev container with Git history and warm Move cache.
 .PHONY: test-retention-upgrade
 test-retention-upgrade:
@@ -746,3 +758,7 @@ test-retention-scale-upgrade:
 .PHONY: test-budget-enrollment-localnet
 test-budget-enrollment-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
+
+.PHONY: test-data-metering
+test-data-metering:
+	$(RUN) node scripts/test_data_metering.cjs

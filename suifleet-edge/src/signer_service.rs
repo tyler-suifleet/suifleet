@@ -272,6 +272,16 @@ pub fn check(policy: &Policy, bytes: &[u8]) -> anyhow::Result<Intent> {
             );
             Ok(Intent::Report)
         }
+        (dm::MODULE, dm::REPORT_ROLLOUT_HEALTH) => {
+            anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "health gas owner/budget");
+            anyhow::ensure!(args.len() == 5, "unexpected health arguments");
+            anyhow::ensure!(matches!(args[0], Input::Shared(s) if s.mutability().is_mutable()), "health deployment must be mutable");
+            anyhow::ensure!(matches!(args[1], Input::Shared(s) if s.object_id() == policy.registry && !s.mutability().is_mutable()), "foreign/mutable health registry");
+            anyhow::ensure!(matches!(args[2], Input::ImmutableOrOwned(r) if *r.object_id() == policy.cap), "foreign health cap");
+            anyhow::ensure!(matches!(args[3], Input::Pure(v) if v.as_slice() == [0] || v.as_slice() == [1]), "health must be bool");
+            anyhow::ensure!(matches!(args[4], Input::Shared(s) if s.object_id() == Address::from_str("0x6")? && !s.mutability().is_mutable()), "health clock");
+            Ok(Intent::Report)
+        }
         (fleet_budget::MODULE, fleet_budget::DRAW_GAS) => {
             let Some((budget, max_draw)) = policy.budget else {
                 anyhow::bail!("gas draws are not enabled in signer.toml");
@@ -1006,25 +1016,31 @@ mod tests {
         gas_owner: &'static str,
         budget: u64,
         extra_command: bool,
+        health_clock: Option<(&'static str, bool)>,
+        registry_mutable: bool,
+        deployment_mutable: bool,
     }
     impl Default for Tx {
         fn default() -> Self {
             Tx { module: dm::MODULE, function: dm::REPORT_VERIFIED_STATUS, package: "0x3", registry: "0x13", cap: "0x11",
-                 status: 1, group: false, sender: "0xa0", gas_owner: "0xa0", budget: 10_000_000, extra_command: false }
+                 status: 1, group: false, sender: "0xa0", gas_owner: "0xa0", budget: 10_000_000, extra_command: false, health_clock: None, registry_mutable: false, deployment_mutable: true }
         }
     }
     impl Tx {
         fn bytes(&self) -> Vec<u8> {
             let a = |s: &str| Address::from_str(s).unwrap();
             let mut b = TransactionBuilder::new();
-            let record = b.object(ObjectInput::shared(a("0x10"), 1, true));
-            let registry = b.object(ObjectInput::shared(a(self.registry), 1, false));
+            let record = b.object(ObjectInput::shared(a("0x10"), 1, self.deployment_mutable));
+            let registry = b.object(ObjectInput::shared(a(self.registry), 1, self.registry_mutable));
             let cap = b.object(ObjectInput::owned(a(self.cap), 2, Digest::ZERO));
             let mut args = vec![record, registry, cap];
             if self.group {
                 args.push(b.object(ObjectInput::shared(a("0x14"), 1, false)));
             }
             args.push(b.pure(&self.status));
+            if let Some((clock, mutable)) = self.health_clock {
+                args.push(b.object(ObjectInput::shared(a(clock), 1, mutable)));
+            }
             let function = || Function::new(a(self.package), self.module.parse().unwrap(), self.function.parse().unwrap());
             b.move_call(function(), args.clone());
             if self.extra_command {
@@ -1065,6 +1081,24 @@ mod tests {
         let mut trailing = Tx::default().bytes();
         trailing.push(0);
         assert!(check(&p, &trailing).is_err(), "trailing bytes were accepted");
+    }
+
+    #[test]
+    fn signs_only_bounded_device_rollout_health_intent() {
+        let p = policy();
+        let health = || Tx { function: dm::REPORT_ROLLOUT_HEALTH, health_clock: Some(("0x6", false)), ..Tx::default() };
+        assert_eq!(check(&p, &health().bytes()).unwrap(), Intent::Report);
+        assert_eq!(check(&p, &Tx { status: 0, ..health() }.bytes()).unwrap(), Intent::Report);
+        for bad in [
+            Tx { status: 2, ..health() }, Tx { health_clock: None, ..health() },
+            Tx { health_clock: Some(("0x7", false)), ..health() },
+            Tx { health_clock: Some(("0x6", true)), ..health() },
+            Tx { registry: "0x99", ..health() }, Tx { cap: "0x99", ..health() },
+            Tx { registry_mutable: true, ..health() }, Tx { deployment_mutable: false, ..health() },
+            Tx { package: "0x99", ..health() }, Tx { gas_owner: "0x99", ..health() },
+            Tx { budget: 50_000_001, ..health() }, Tx { extra_command: true, ..health() },
+            Tx { group: true, ..health() },
+        ] { assert!(check(&p, &bad.bytes()).is_err()); }
     }
 
     struct Key;

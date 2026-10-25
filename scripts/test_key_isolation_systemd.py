@@ -251,7 +251,7 @@ def inside(args):
             f'[device]\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n' + signer +
             f'[walrus]\naggregator_url = "{url}"\n'
             '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 5\nallow_recipe_commands = true\n'
-            '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\ncomponent_startup_seconds = 1\n' + extra)
+            '[runtime]\nstate_dir = "/var/lib/suifleet"\npoll_seconds = 1\nevent_discovery_seconds = 1\ncomponent_startup_seconds = 1\n' + extra)
         sh("chown", "root:suifleet", str(path))
         path.chmod(0o640)
         return path

@@ -1,0 +1,146 @@
+{
+  "network": "disposable network-none localnet",
+  "public_network": false,
+  "checks": [
+    {
+      "check": "SF142 real localnet storage-record reconciliation after upgrade",
+      "storage": "0x57fd2a108a8455afa93bef43db1e43823d4ecf00daad51f14f3af33893a428d6",
+      "budget": "0xb5f3f5a513ad0ccd506d9e578025e90b5f14f02a98368dee035deba6e4ee40b6",
+      "typeOrigin": "0xb4628b6b4e18aa5e1aa2b9564b8eb59ce21acbc4402c2f6e16ab6d54fa7aaa4e",
+      "callPackage": "0x782b2f29b9a575c747de4506b69ecdbddf4f7e1cbc19ae188e130320e6d852e9",
+      "records": "2",
+      "logicalBytes": "21",
+      "writtenEncodedBytes": "1326800",
+      "streams": 1
+    },
+    {
+      "check": "populated-object compatible storage upgrade and old-package retirement",
+      "receipts": [
+        {
+          "label": "publish wal",
+          "digest": "CeuJ8uEmpNLajmxLP3bcKp7BdxRXnNNEBUxeSmswDtPG",
+          "gas": {
+            "computationCost": "1000000",
+            "storageCost": "24289600",
+            "storageRebate": "4890600",
+            "nonRefundableStorageFee": "49400"
+          }
+        },
+        {
+          "label": "publish walrus",
+          "digest": "CF9xXsx7TD2SKwfLSNnLCHSU6QqvRudmxVTq2CiQidZ8",
+          "gas": {
+            "computationCost": "6690000",
+            "storageCost": "677745200",
+            "storageRebate": "978120",
+            "nonRefundableStorageFee": "9880"
+          }
+        },
+        {
+          "label": "initialize isolated Walrus fixture",
+          "digest": "FHYrkoouH7BnjmHCa7oTGA6G5sQAquo97jYcPLYuauUz",
+          "gas": {
+            "computationCost": "1360000",
+            "storageCost": "24791200",
+            "storageRebate": "978120",
+            "nonRefundableStorageFee": "9880"
+          }
+        },
+        {
+          "label": "publish contracts",
+          "digest": "DJD5GuKRbefC9iEYZYwXJDSShftHUZR9y3viy1y5iqLe",
+          "gas": {
+            "computationCost": "3110000",
+            "storageCost": "339651600",
+            "storageRebate": "978120",
+            "nonRefundableStorageFee": "9880"
+          }
+        },
+        {
+          "label": "publish fleet_storage",
+          "digest": "8EmqVeLNXAvpttjAidwfgTtcf1ByJZseuqpyuxVm3VdL",
+          "gas": {
+            "computationCost": "2680000",
+            "storageCost": "76874000",
+            "storageRebate": "978120",
+            "nonRefundableStorageFee": "9880"
+          }
+        },
+        {
+          "label": "create budget",
+          "digest": "52uvC321wLbzVBSJ9kuZrSg3fdQf4qtYcNgb1Fc8A9V5",
+          "gas": {
+            "computationCost": "1000000",
+            "storageCost": "5335200",
+            "storageRebate": "978120",
+            "nonRefundableStorageFee": "9880"
+          }
+        },
+        {
+          "label": "create v1 storage",
+          "digest": "6Kxjyv1bksuAXPLQZiWvUR7ubtDJeBaGXxcGCqwKmUB9",
+          "gas": {
+            "computationCost": "1000000",
+            "storageCost": "4864000",
+            "storageRebate": "2595780",
+            "nonRefundableStorageFee": "26220"
+          }
+        },
+        {
+          "label": "populate v1 pool and wrapped blob with real registration",
+          "digest": "BRzv9p95erUXdYRJ5xRtW9XGiLvjVp6Z3kex6u6DaXys",
+          "gas": {
+            "computationCost": "1710000",
+            "storageCost": "35834000",
+            "storageRebate": "27236880",
+            "nonRefundableStorageFee": "275120"
+          }
+        },
+        {
+          "label": "compatible storage upgrade",
+          "digest": "34hrGmGvNRWWEoNVNhZJS91xEVKt5jreFm9ipa6UCcot",
+          "gas": {
+            "computationCost": "3220000",
+            "storageCost": "120536000",
+            "storageRebate": "2595780",
+            "nonRefundableStorageFee": "26220"
+          }
+        },
+        {
+          "label": "migrate existing storage",
+          "digest": "3qAbhoS8azWjecBe2mBb64MkcXwp8jmsvkWCoqZjyT3s",
+          "gas": {
+            "computationCost": "1000000",
+            "storageCost": "5228800",
+            "storageRebate": "5176512",
+            "nonRefundableStorageFee": "52288"
+          }
+        },
+        {
+          "label": "v2 registration on migrated pool with v1-origin event",
+          "digest": "4aC3JKq4tWe4gTFJnSzqqSjFX6tVbvZN1Sau1e9TWvKG",
+          "gas": {
+            "computationCost": "1630000",
+            "storageCost": "34526800",
+            "storageRebate": "26303904",
+            "nonRefundableStorageFee": "265696"
+          }
+        },
+        {
+          "label": "configure on existing object",
+          "digest": "3yCKZcyFRyXR35DqxjQT62P6HY1RS1isiJYuydFozmKG",
+          "gas": {
+            "computationCost": "1000000",
+            "storageCost": "10336000",
+            "storageRebate": "5176512",
+            "nonRefundableStorageFee": "52288"
+          }
+        },
+        {
+          "label": "old-package withdrawal rejected after migration",
+          "digest": "gnS3qoRMkJwTc5NaXCNdhBzBpXNFz23q9RaZjzAgLP5"
+        }
+      ]
+    }
+  ]
+}

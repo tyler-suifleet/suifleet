@@ -193,7 +193,7 @@ def run(args):
                 (root/'config.toml').write_text(
                     f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\n'
                     f'device_cap_id="{ota.CAP}"\n[walrus]\naggregator_url="{rpc}"\n[apply]\ncommand="true"\n[runtime]\nstate_dir={json.dumps(str(state))}\n'
-                    f'poll_seconds=1\n[components]\nconfiguration_overlay_dir={json.dumps(str(state/"overlays"))}\n'
+                    f'poll_seconds=1\nevent_discovery_seconds=1\n[components]\nconfiguration_overlay_dir={json.dumps(str(state/"overlays"))}\n'
                     '[logs]\ninterval_seconds=10\nmax_lines_per_interval=128\nbuffer_max=16\n'
                     f'[fleet_data]\npackage_id="{fleet.PACKAGE}"\ntype_origin="{fleet.PACKAGE}"\nfleet_id="{fleet.FLEET}"\nbudget_id="{budget.BUDGET}"\n'
                     f'storage_id="{fleet.STORAGE}"\nwriter_id="{fleet.WRITER}"\naccount_id="{budget.ACCOUNT}"\n'

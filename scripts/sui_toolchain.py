@@ -220,6 +220,65 @@ def verify_package_transaction(data, built, *, sender, budget, upgrade=None):
     return {'kind': 'upgrade', 'modules': len(built['modules']), 'policy': _pure(data, authorize['arguments'][1]).hex()}
 
 
+def verify_ptb_transaction(data, *, sender, budget, calls):
+    """An ordinary setup PTB from the verified wallet calling exactly `calls`."""
+    sender = normal(sender)
+    if normal(data['sender']) != sender or normal(data['gas_owner']) != sender:
+        raise NotSubmitted('transaction sender or gas owner is not the verified wallet')
+    if int(data['gas_budget']) != int(budget):
+        raise NotSubmitted('transaction gas budget differs from the reserved allowance')
+    if any(c['kind'] in ('Publish', 'Upgrade') for c in data['commands']):
+        raise NotSubmitted('an ordinary setup transaction cannot publish or upgrade')
+    actual = [f"{normal(c['package'])}::{c['module']}::{c['function']}" for c in data['commands'] if c['kind'] == 'MoveCall']
+    expected = []
+    for call in calls:
+        package, _, rest = call.partition('::')
+        expected.append(f'{normal(package)}::{rest}')
+    if actual != expected:
+        raise NotSubmitted(f'unexpected setup calls {actual}')
+    return {'kind': 'ptb', 'calls': actual}
+
+
+def identity(tx_bytes, data, budget):
+    """The exact verified unsigned transaction, persisted before it is signed.
+    Its digest is the only transaction this mutation can ever execute as."""
+    expiration = data.get('expiration') or {}
+    return {'tx_bytes': tx_bytes, 'digest': data['digest'], 'sender': normal(data['sender']),
+            'gas_budget': int(budget),
+            'gas_payment': [{'objectId': normal(p['objectId']), 'version': str(p['version'])}
+                            for p in data.get('gas_payment') or []],
+            'expiration': {'kind': expiration.get('kind', 'None'), 'max_epoch': expiration.get('max_epoch')}}
+
+
+def _persist(persist, tx_bytes, data, budget):
+    if persist is None:
+        return
+    try:
+        persist(identity(tx_bytes, data, budget))
+    except Exception as error:  # Never sign what could not be durably recorded.
+        raise NotSubmitted(f'transaction identity was not persisted: {error}') from error
+
+
+def _serialized(client, command, budget):
+    serialized = client(*command, '--gas-budget', str(budget), '--serialize-unsigned-transaction',
+                        json_output=False, check=False)
+    tx_bytes = serialized.stdout.strip().splitlines()[-1].strip() if serialized.stdout.strip() else ''
+    if serialized.returncode or not tx_bytes:
+        raise NotSubmitted(f'{command[0]} could not build a transaction:\n{serialized.stderr[-3000:]}')
+    return tx_bytes
+
+
+def ptb_submitter(client, ptb, *, sender, calls, run=subprocess.run, inspect=decode, persist=None):
+    """Callable for Budget.execute: build, verify and persist a setup PTB, then submit."""
+    def submit(budget):
+        tx_bytes = _serialized(client, ['ptb', *ptb], budget)
+        data = inspect(tx_bytes, run=run)
+        verify_ptb_transaction(data, sender=sender, budget=budget, calls=calls)
+        _persist(persist, tx_bytes, data, budget)
+        return client('serialized-tx', tx_bytes)
+    return submit
+
+
 def write_pubfile(path, chain, package_dir, package, upgrade_cap, version=1):
     """The ephemeral publication record test-upgrade reads. Serialized
     publication does not write it, so record exactly what the verified
@@ -235,8 +294,9 @@ def write_pubfile(path, chain, package_dir, package, upgrade_cap, version=1):
 
 
 def package_submitter(client, build_tool, package_dir, common, *, sender, upgrade=None, run=subprocess.run,
-                      inspect=decode, record=None):
-    """Callable for Budget.execute: compile, build, verify, then submit."""
+                      inspect=decode, record=None, persist=None):
+    """Callable for Budget.execute: compile, build, verify, persist, then submit.
+    `persist` durably records the verified transaction identity before signing."""
     def submit(budget):
         try:
             built = compile_package(build_tool, package_dir, run=run)
@@ -246,16 +306,15 @@ def package_submitter(client, build_tool, package_dir, common, *, sender, upgrad
         pinned = lock.read_bytes()
         command = ['test-publish', package_dir] if upgrade is None else \
             ['test-upgrade', package_dir, '--upgrade-capability', upgrade['cap']]
-        serialized = client(*command, *common, '--gas-budget', str(budget), '--serialize-unsigned-transaction',
-                            json_output=False, check=False)
-        if lock.read_bytes() != pinned:
-            raise NotSubmitted('network CLI changed the pinned Move.lock framework sources')
-        tx_bytes = serialized.stdout.strip().splitlines()[-1].strip() if serialized.stdout.strip() else ''
-        if serialized.returncode or not tx_bytes:
-            raise NotSubmitted(f'{command[0]} could not build a transaction:\n{serialized.stderr[-3000:]}')
-        checked = verify_package_transaction(inspect(tx_bytes, run=run), built, sender=sender, budget=budget,
-                                             upgrade=upgrade)
+        try:
+            tx_bytes = _serialized(client, [*command, *common], budget)
+        finally:
+            if lock.read_bytes() != pinned:
+                raise NotSubmitted('network CLI changed the pinned Move.lock framework sources')
+        data = inspect(tx_bytes, run=run)
+        checked = verify_package_transaction(data, built, sender=sender, budget=budget, upgrade=upgrade)
         if record is not None:
             record.update(checked, digest=bytes(built['digest']).hex())
+        _persist(persist, tx_bytes, data, budget)
         return client('serialized-tx', tx_bytes)
     return submit
