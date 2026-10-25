@@ -467,7 +467,7 @@ class PublicEnvironmentTests(unittest.TestCase):
 
     def test_keyless_probe_can_wait_through_one_hourly_quota_reset(self):
         from testnet_ci import PROBE_RETRY_BUDGET, PUBLIC_RETRY_BUDGET
-        self.assertEqual(PUBLIC_RETRY_BUDGET, 150)
+        self.assertEqual(PUBLIC_RETRY_BUDGET, 900)
         far = self.http_error(403, {'X-RateLimit-Remaining': '0',
                                   'X-RateLimit-Reset': str(1_000_000 + 3600)})
         result, sleeps, _, calls = self.retrying_read(
