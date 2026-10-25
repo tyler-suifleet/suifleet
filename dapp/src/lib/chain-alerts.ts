@@ -2,7 +2,7 @@
 // An optional relay can consume these same results; its claims are never input.
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { normalizeSuiAddress as id } from '@mysten/sui/utils';
-import { fetchDevices, fetchDeploymentEvents, type DeviceObject, type DeploymentEvent } from './sui';
+import { fetchDevices, fetchFleetDevices, fetchDeploymentEvents, type DeviceObject, type DeploymentEvent } from './sui';
 import { fetchFleetHealth, type DeviceHealth } from './telemetry';
 import { DATA_CONFIG, listFleetDeviceIds } from './fleet-data';
 import type { AlertsResult, FleetAlert, AlertKind } from './alerts';
@@ -62,19 +62,21 @@ export function deriveChainAlerts(devices: Pick<DeviceObject, 'objectId' | 'name
   items.sort((a,b)=>Number(b.severity==='critical')-Number(a.severity==='critical') || a.key.localeCompare(b.key));
   return {status:'ok',items,serverNowMs:now};
 }
-export async function fetchChainAlerts(client:SuiGrpcClient,owner:string,now=Date.now()):Promise<AlertsResult> {
+export async function fetchChainAlerts(client:SuiGrpcClient,owner:string,now=Date.now(), scope?: { fleet: import("./customer-fleets").NamedFleet; config?: import("./fleet-data").FleetDataConfig }):Promise<AlertsResult> {
   try {
-    if(!DATA_CONFIG) throw Error('Direct-chain fleet configuration required');
-    const [owned,deployments]=await Promise.all([fetchDevices(client,owner),fetchDeploymentEvents(client)]);
+    const config = scope ? scope.config : DATA_CONFIG;
+    if(!config) throw Error('Direct-chain fleet configuration required');
+    const [owned,deployments]=await Promise.all([scope ? fetchFleetDevices(client, scope.fleet.devices) : fetchDevices(client,owner),fetchDeploymentEvents(client, scope?.fleet.id ?? owner)]);
     const ids:string[]=[];let cursor:string|null= null;
     do {
-      const page=await listFleetDeviceIds(client,DATA_CONFIG,cursor);ids.push(...page.devices);
+      const page=await listFleetDeviceIds(client,config,cursor);ids.push(...page.devices);
       if(ids.length>1000 || deployments.length>10000)throw Error('Fleet alert read limit exceeded');
       if(!page.hasNextPage)break;cursor=page.cursor;
     }while(true);
     if(new Set(ids).size!==ids.length)throw Error('Duplicate fleet index device');
-    const devices=ids.map(objectId=>({objectId,name:owned.find(d=>id(d.objectId)===id(objectId))?.name ?? objectId}));
-    const health=await fetchFleetHealth(client,ids,owner);
+    const scopedIds=scope ? ids.filter(device=>scope.fleet.devices.some(current=>id(current)===id(device))) : ids;
+    const devices=scopedIds.map(objectId=>({objectId,name:owned.find(d=>id(d.objectId)===id(objectId))?.name ?? objectId}));
+    const health=await fetchFleetHealth(client,scopedIds,owner,undefined,undefined,undefined,scope ? { config } : undefined);
     return deriveChainAlerts(devices,deployments,health,now);
   } catch { return {status:'unavailable',reason:'Chain alerts could not be verified'}; }
 }

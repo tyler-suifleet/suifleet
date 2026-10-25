@@ -1,4 +1,8 @@
 "use client";
+
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { fetchManagedBudget } from "@/lib/fleet-budget";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 import { DataUsage } from "@/components/DataUsage";
 import { useEffect, useRef, useState } from 'react';
 import { useCurrentAccount, useCurrentClient, useDAppKit } from '@mysten/dapp-kit-react';
@@ -8,7 +12,7 @@ import { linkedDevice } from '@/lib/device-services';
 import { Transaction } from '@mysten/sui/transactions';
 import { useDevices } from '@/hooks/useDevices';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
-import { DATA_CONFIG, readDeviceData, readFleetData, listFleetDeviceIds } from '@/lib/fleet-data';
+import { readDeviceData, readFleetData, listFleetDeviceIds } from '@/lib/fleet-data';
 import { archiveDecryptor, fetchVerifiedArchive, readAnchorEntries, parseCompactHead, type Anchor, type Archive } from '@/lib/fleet-bulk';
 import { fetchBudgets } from '@/lib/fleet-budget';
 import { requireManifest, verifyDeployment } from '@/lib/deployment-manifest';
@@ -24,6 +28,8 @@ import { shadowDocumentsView } from '@/lib/shadow-documents';
 const noQuery:LogQuery={text:'',source:'',caseSensitive:false};
 
 export default function FleetDataPage() {
+  const DATA_CONFIG = useFleetDataConfig();
+  const selection = useFleetSelection();
   const client=useCurrentClient(), wallet=useDAppKit(), account=useCurrentAccount();
   const {data:devices=[]}=useDevices(); const {mutateAsync:execute,isPending}=useFleetTransaction();
   const [device,setDevice]=useState(''),[entries,setEntries]=useState<{index:number;anchor:Anchor}[]>([]);
@@ -64,6 +70,10 @@ export default function FleetDataPage() {
     if(!account || !DATA_CONFIG) throw Error('Connect a wallet to this fleet');
     const fleet=await readFleetData(client,DATA_CONFIG);
     const budgetId=DATA_CONFIG.budgetId;
+    if (selection.fleet?.administrator && id(selection.fleet.budgetId) === id(budgetId)) {
+      const owned = await fetchManagedBudget(client, budgetId);
+      return { kind: 'owner' as const, ownerCapId: owned.capId, managed: { customerId: selection.fleet.customerId, fleetId: selection.fleet.id } };
+    }
     const owned=(await fetchBudgets(client,account.address)).find(b=>id(b.id)===budgetId);
     if(owned) return {kind:'owner' as const,ownerCapId:owned.capId};
     if(!fleet.support.some(a=>id(a)===id(account.address))) throw Error('This account has no archive read permission');
@@ -138,7 +148,7 @@ export default function FleetDataPage() {
           tx.object(DATA_CONFIG.fleetId),tx.object(writer.id),tx.object('0x6'),
         ]});
       }
-      await execute({transaction:tx});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
+      await execute({transaction:tx, support: allowed.kind === 'support' ? { config: DATA_CONFIG, deviceId: device } : undefined});setMessage('Diagnostic request confirmed. The device will upload when online, within its emergency cadence and prepaid limits.');
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><DataUsage /><PageHeader title="Data" subtitle="Browse device data, download verified bytes and manage scoped sharing in your browser" /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>

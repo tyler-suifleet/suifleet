@@ -1,0 +1,184 @@
+{
+  "result": "PASS",
+  "chain": "253b3deb",
+  "baseRef": "18f337c8ed0611cad957717ebc35e767f103a5cf",
+  "base": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+  "head": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+  "origins": {
+    "FleetData": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "DeviceKey": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "DeviceData": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "AnchorKey": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "Anchor": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "CompactHeadKey": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "CompactHead": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "HealthUpdated": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "DataAnchored": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+    "DiagnosticKey": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "DiagnosticRequest": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "ItemKey": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "DataItem": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+    "ReadGrantKey": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165"
+  },
+  "digests": {
+    "publish core": "2TMGNwLX9VJf8SZ8WjpAkZTSNmYuhYz1z81W2fVXBReX",
+    "publish WAL": "GB9NBTDfofjAoa4qRTJTRNRhwgZpun6yG5D6451zgoCc",
+    "publish Walrus": "3h7VXxT1pyurP4ampx29dgyAZ57hHyzwJ4ezbAMbWBLu",
+    "publish storage": "GVdcqrwQDJAVMdwzYinFLMTHaLR2vqnBhV2mQDNMjBaW",
+    "publish base data": "b2FSbL5hwFprQZFmWB81JqmGNarDeREfg4UY4d4iYm1",
+    "register existing device": "FCsNpjktEGFuoiykQjCJtPXcbSjvumVDw7TmFWkAuN7n",
+    "create budget": "9HeN3bBtBXpyfvTwMABNrFcr3eButzoqyQ98SgwYvT6V",
+    "enroll account": "6QtkKLU8X5DyB2CBAobkwn92GdMTKJjovexVry1K8YSM",
+    "create actual storage": "Ap3bTJ43h4qLcmAdahrWtmwRdNMhZS1TsaQj6rokPg48",
+    "create base fleet": "7jodnRrD2rRK4StvWKZweBSEgh6iA9wTwbGXf9zpugxB",
+    "create base writer": "7u5TUAH3NW6Uo8ec9rJKM4wGFmc6CJgQ9Z8MxtmoYzEG",
+    "upgrade data": "962aqyvrWURuhCKb79ZNcvzrGwJGDJ1A4TRgsKJoQBNZ",
+    "diagnostics on existing writer": "EhXcVtz37xJHnnJsirifSm9JbRs9hSSVBZg7v5g9gmVy",
+    "legacy fleet support grant": "EiKMXHcpEmiYtUxz5vQ23AmHpNodVGREteKztmyGjTsE",
+    "scoped stream grant on existing fleet": "FqDx3YvVrezEy1KW91KmZuH74x6F1SYo85YYK26Vywyd",
+    "revoke scoped stream grant": "J5xxTEBFpuGuRneRkvjQzCPkbSew2mbJWzej91BWWGbK",
+    "serverless signed services health": "9EsNRBR67qL6oXsJgrcf6SxRU1aZwmM3YgWoukrMc7iw",
+    "revoke device": "73yf1RzUVyq3FbBjTXspuwc7XH53i3yb31B5EZst9KMp",
+    "create managed customer": "8yaAkZj4zsnKHj5EqQw6VR7TNkrJfpBQLZRVzoAVqBVE",
+    "adopt existing data budget": "3WTsP3XR7e4zaGrkunBFnH3LkBPPscgMgabFiXfQokAH",
+    "rotate managed administrator": "J75bCmNR4hRr6GuPW8kG42WhkB8xLpt6M6RWwVVghP1i"
+  },
+  "attacks": {
+    "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116": {
+      "digest": "CytK2VvdamnyftqiWs5xFSRzcNJDSoj36dBT3AaCWuy7",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xfc738a2498839f0baf181a9c7d5f6b97d65ca8496a7e56580edbefe5bd456826::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xfc738a2498839f0baf181a9c7d5f6b97d65ca8496a7e56580edbefe5bd456826",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    },
+    "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165": {
+      "digest": "9Z284TnwtGCn8QXtJJg7DN5i3aYe4VeBKg9tUe7Sosir",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0xfc738a2498839f0baf181a9c7d5f6b97d65ca8496a7e56580edbefe5bd456826::device_cap::assert_active' (instruction 13)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0xfc738a2498839f0baf181a9c7d5f6b97d65ca8496a7e56580edbefe5bd456826",
+              "module": "device_cap",
+              "function": 3,
+              "instruction": 13,
+              "functionName": "assert_active"
+            }
+          }
+        }
+      }
+    }
+  },
+  "scopedChecks": [
+    {
+      "pkg": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+      "fn": "seal_approve_owner",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0x02171ecd176c0a771201b7203bb5c006f1d8df05a74aa9cd6deec37adddca116",
+      "fn": "seal_approve_support",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_owner",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_support",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_owner",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": true
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "0000000000000000000000000000000000000000000000000000000000000000",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xdead",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "pkg": "0xb6448fd9d8cef6b57d26456bf4902f261dd6d39ed4f0193f5a04e6e047ca6165",
+      "fn": "seal_approve_scoped_reader",
+      "dev": "0xb64e67e5390876a89d865e274749c44651030e91b7602c1ff1daa81b26cddf11",
+      "stream": "ca73f61034afc26d96c85c0d2285e1f08b283b891426cef8c05eda5bf3e12ddf",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x13595ea1f1c215759d7f3634cbb149682563869a702b8d987daa92f67ac29ece",
+      "success": true
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x6e25ed5d97eb8db7481b533c925de65b2ac7202e5511ca24433fc52e6df4cc89",
+      "success": false
+    },
+    {
+      "fn": "seal_approve_scoped_customer",
+      "fleetId": "0x13595ea1f1c215759d7f3634cbb149682563869a702b8d987daa92f67ac29ece",
+      "success": false
+    }
+  ],
+  "checks": [
+    "pinned real Walrus/storage dependencies",
+    "existing-object byte preservation",
+    "later DiagnosticKey origin",
+    "new API on existing writer",
+    "old and new entry points refuse revoked device"
+  ]
+}

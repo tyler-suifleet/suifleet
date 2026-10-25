@@ -20,9 +20,10 @@ module sui_edge::enrollment {
     use std::string::String;
     use sui::clock::Clock;
     use sui::event;
+    use sui::dynamic_field as df;
     use sui::table::{Self, Table};
     use sui_edge::device_cap;
-    use sui_edge::device_registry::{Self, DeviceRegistry};
+    use sui_edge::device_registry::{Self, DeviceRegistry, DeviceOwnerCap};
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ module sui_edge::enrollment {
         enrolled: u64,
     }
 
+    public struct ManagedKey has copy, drop, store {}
     public struct PolicyCreated has copy, drop {
         policy_id: ID,
         operator: address,
@@ -83,6 +85,33 @@ module sui_edge::enrollment {
         };
         event::emit(PolicyCreated { policy_id: object::id(&policy), operator: policy.operator, registry: policy.registry });
         transfer::share_object(policy);
+    }
+
+    public(package) fun create_managed(registry: &DeviceRegistry, operator: address, quota: u64, expires_at_ms: u64, ctx: &mut TxContext): ID {
+        let mut policy = EnrollmentPolicy { id: object::new(ctx), operator, registry: object::id(registry),
+            claims: table::new(ctx), remaining: quota, expires_at_ms, open: false, enrolled: 0 };
+        df::add(&mut policy.id, ManagedKey {}, true);
+        let policy_id = object::id(&policy);
+        event::emit(PolicyCreated { policy_id, operator, registry: policy.registry });
+        transfer::share_object(policy); policy_id
+    }
+    public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
+        assert!(policy.operator == authority, ENotOperator);
+        let mut i = 0;
+        while (i < claims.length()) {
+            if (!policy.claims.contains(claims[i])) policy.claims.add(claims[i], true);
+            i = i + 1;
+        };
+    }
+    public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
+        assert!(policy.operator == authority, ENotOperator);
+        policy.claims.remove(claim);
+    }
+    public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
+        assert!(policy.operator == authority, ENotOperator);
+        assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
+        policy.remaining = quota; policy.expires_at_ms = expires_at_ms;
+        if (close) *df::borrow_mut<ManagedKey, bool>(&mut policy.id, ManagedKey {}) = false;
     }
 
     /// Add claim addresses (duplicates are ignored).
@@ -133,8 +162,19 @@ module sui_edge::enrollment {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
+        let cap = enroll_internal(policy, registry, name, arch, clock, ctx, false);
+        transfer::public_transfer(cap, policy.operator);
+    }
+    public(package) fun enroll_managed(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
+        name: String, arch: String, clock: &Clock, ctx: &mut TxContext): DeviceOwnerCap {
+        enroll_internal(policy, registry, name, arch, clock, ctx, true)
+    }
+    fun enroll_internal(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
+        name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
         assert!(object::id(registry) == policy.registry, EWrongRegistry);
-        assert!(policy.open, EClosed);
+        if (managed) {
+            assert!(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
+        } else assert!(policy.open, EClosed);
         assert!(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
         assert!(policy.remaining > 0, EQuotaExhausted);
         let sponsor = ctx.sponsor();
@@ -155,8 +195,8 @@ module sui_edge::enrollment {
             policy_id: object::id(policy), device_id, device_address, claim, operator: policy.operator,
             owner_cap: object::id(&owner_cap), device_cap: object::id(&cap),
         });
-        transfer::public_transfer(owner_cap, policy.operator);
         transfer::public_transfer(cap, device_address);
+        owner_cap
     }
 
     // ── Reads ─────────────────────────────────────────────────────────────────

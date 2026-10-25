@@ -1,3 +1,4 @@
+import type { NamedFleet } from "./customer-fleets";
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
 import { normalizeStructTag } from '@mysten/sui/utils';
@@ -18,8 +19,14 @@ export function buildPublishVersionTx(catalog:string,name:string,version:string,
   calls.component_catalog_publish_version(tx,catalogPackage(),catalog,name,version,manifests.map(m=>m.os),manifests.map(m=>m.arch),manifests.map(m=>m.recipeBlobId),manifests.map(m=>m.recipeSha256),manifests.map(m=>m.artifactSha256),'0x6');
   return tx;
 }
-export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[], initiallyPaused = false) {
+export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[], initiallyPaused = false, fleet?: NamedFleet) {
   const tx=new Transaction();
+  if (fleet) {
+    const [record] = tx.moveCall({ target: `${catalogPackage()}::customer::new_catalog_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(version), tx.pure.vector("id", groups), tx.pure.vector("id", devices), tx.object("0x6")] });
+    if (initiallyPaused) tx.moveCall({ target: `${catalogPackage()}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
+    calls.deployment_manager_share_deployment(tx, catalogPackage(), record);
+    return tx;
+  }
   if (initiallyPaused) calls.component_catalog_create_deployment_paused(tx,catalogPackage(),version,groups,devices,'0x6');
   else calls.component_catalog_create_deployment(tx,catalogPackage(),version,groups,devices,'0x6');
   return tx;

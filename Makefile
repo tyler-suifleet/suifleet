@@ -242,6 +242,7 @@ endif
 # Offline regression tests for the drift gate itself (synthetic summaries).
 test-interfaces:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_check_contract_interfaces.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_generate_interfaces.py'
 
 toolchain-versions:
 	@$(RUN) bash -c 'echo "sui: $$(sui --version)"; echo "rustc: $$(rustc --version)"; \
@@ -251,7 +252,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-data-metering test-retention test-fleet-settings test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-data-metering test-retention test-fleet-settings test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -264,6 +265,7 @@ ci:
 
 # Sequential recipe: cross-layer checks must not race over shared build artifacts.
 check:
+	$(MAKE) test-customer-fleets
 	$(MAKE) test-prospects
 	$(MAKE) indexer-test
 	$(MAKE) test-manifest
@@ -778,6 +780,17 @@ test-retention-scale-upgrade:
 test-budget-enrollment-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --budget-enrollment
 
+# SF136: offline discovery/transaction checks and actual React/Chromium isolation.
+.PHONY: test-customer-fleets test-customer-upgrade-localnet
+test-customer-fleets:
+	$(RUN) node scripts/test_customer_fleets.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_fleets_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/live_wallet_browser.cjs --smoke
+
+# Run in a disposable network-none container with Git history and warm Move cache.
+test-customer-upgrade-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
+	$(RUN) python3 scripts/test_protocol_localnet.py --customer-upgrade
 .PHONY: test-data-metering
 test-data-metering:
 	$(RUN) node scripts/test_data_metering.cjs

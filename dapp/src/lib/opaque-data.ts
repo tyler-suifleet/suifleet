@@ -1,4 +1,5 @@
 // SF139 producer/index reader boundary; SF140 supplies the UI.
+import { ObjectError } from '@mysten/sui/client';
 import { bcs } from '@mysten/sui/bcs';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { normalizeSuiAddress as id, normalizeStructTag, fromBase64, fromHex, toHex } from '@mysten/sui/utils';
@@ -57,8 +58,22 @@ export async function readDataItem(client:SuiGrpcClient,config:FleetDataConfig,d
     ||!/^data-[0-9]{2}$/.test(value.identifier))throw Error('Opaque index bounds');
   return value;
 }
+export type ScopedAuthority = {kind:'owner';ownerCapId:string} | {kind:'reader'}
+  | {kind:'customer';customerId:string;fleetId:string};
+/** Read-only Seal calls: managed credentials never borrow the stored budget cap. */
+export function buildScopedApprovalTx(config:FleetDataConfig,identity:Uint8Array,device:string,
+  streamHash:Uint8Array,authority:ScopedAuthority):Transaction {
+  const tx=new Transaction();
+  const args=[tx.pure.vector('u8',identity),tx.object(config.fleetId)];
+  if(authority.kind==='owner')args.push(tx.object(config.budgetId),tx.object(authority.ownerCapId));
+  if(authority.kind==='customer')args.push(tx.object(config.budgetId),tx.object(authority.customerId),tx.object(authority.fleetId));
+  args.push(tx.pure.id(device),tx.pure.vector('u8',streamHash));
+  const fn=authority.kind==='customer'?'seal_approve_scoped_customer':authority.kind==='owner'?'seal_approve_scoped_owner':'seal_approve_scoped_reader';
+  tx.moveCall({target:`${config.packageId}::fleet_data::${fn}`,arguments:args});
+  return tx;
+}
 export async function scopedDecryptor(client:SuiGrpcClient,config:FleetDataConfig,settings:SealSettings,
-  session:SessionKey,device:string,stream:string,authority:{kind:'owner';ownerCapId:string}|{kind:'reader'}) {
+  session:SessionKey,device:string,stream:string,authority:ScopedAuthority) {
   if(session.isExpired()||id(session.getPackageId())!==config.typeOrigin)throw Error('Expired or foreign scoped session');
   const streamHash=await hash(new TextEncoder().encode(stream));
   const seal=new SealClient({suiClient:client,serverConfigs:settings.keyServers,verifyKeyServers:true});
@@ -69,11 +84,8 @@ export async function scopedDecryptor(client:SuiGrpcClient,config:FleetDataConfi
     if(id(object.packageId)!==config.typeOrigin||identity.length!==120||!equal(identity.slice(0,32),bcs.Address.serialize(config.fleetId).toBytes())
       ||!equal(identity.slice(40,72),bcs.Address.serialize(device).toBytes())||!equal(identity.slice(72,104),streamHash)
       ||object.threshold!==settings.threshold||object.services.map(([s])=>id(s)).sort().join()!==expected.join())throw Error('Scoped Seal binding mismatch');
-    const tx=new Transaction();tx.setSender(session.getAddress());
-    const args=[tx.pure.vector('u8',identity),tx.object(config.fleetId)];
-    if(authority.kind==='owner')args.push(tx.object(config.budgetId),tx.object(authority.ownerCapId));
-    args.push(tx.pure.id(device),tx.pure.vector('u8',streamHash));
-    tx.moveCall({target:authority.kind==='owner'?`${config.packageId}::fleet_data::seal_approve_scoped_owner`:`${config.packageId}::fleet_data::seal_approve_scoped_reader`,arguments:args});
+    const tx=buildScopedApprovalTx(config,identity,device,streamHash,authority);
+    tx.setSender(session.getAddress());
     return seal.decrypt({data:encrypted,sessionKey:session,txBytes:await tx.build({client,onlyTransactionKind:true}),checkShareConsistency:true});
   };
 }
@@ -165,4 +177,41 @@ export async function listDataItems(client:SuiGrpcClient,config:FleetDataConfig,
     items.push({batch:name.batch,item:Number(name.item),value:await readDataItem(client,config,device,name.batch,Number(name.item))});
   }
   return {items,cursor:page.cursor,hasNextPage:page.hasNextPage};
+}
+
+/** Discovery is a locator hint only. Seal checks the exact device/stream grant
+ * again on every decrypt; listing a fleet never grants customer authority. */
+export async function hasScopedReadGrant(client:SuiGrpcClient,config:FleetDataConfig,reader:string) {
+  await readFleetData(client,config);
+  const {object}=await client.getObject({objectId:config.packageId,include:{objectBcs:true}});
+  const origins=bcs.Object.parse(object.objectBcs).data.Package?.typeOriginTable;
+  const entries=origins?.filter(e=>e.moduleName==='fleet_data'&&e.datatypeName==='ReadGrantKey') ?? [];
+  if(!entries.length)return false; // Older data packages have no scoped grants.
+  if(entries.length!==1)throw Error('Read grant origin mismatch');
+  const type=`${id(entries[0].package)}::fleet_data::ReadGrantKey`;
+  const key=bcs.struct('ReadGrantKey',{device_id:bcs.Address,stream_hash:bcs.byteVector(),reader:bcs.Address});
+  let cursor:string|undefined;
+  const seen=new Set<string>();
+  for(let pages=0;pages<100;pages++) {
+    const page=await client.listDynamicFields({parentId:config.fleetId,cursor,limit:100});
+    if(page.dynamicFields.length>100||(page.hasNextPage&&(!page.cursor||seen.has(page.cursor))))throw Error('Invalid read grant page');
+    for(const field of page.dynamicFields) {
+      if(normalizeStructTag(field.name.type)!==normalizeStructTag(type))continue;
+      if(field.$kind!=='DynamicField'||field.valueType!=='bool')throw Error('Invalid read grant field');
+      const grant=key.parse(field.name.bcs);
+      if(grant.stream_hash.length!==0&&grant.stream_hash.length!==32)throw Error('Invalid read grant scope');
+      if(id(grant.reader)!==id(reader))continue;
+      // Re-read the exact key: revoked/stale index entries confer no access.
+      try {
+        await client.getDynamicField({parentId:config.fleetId,name:{type,bcs:field.name.bcs}});
+        return true;
+      } catch(error) {
+        if(error instanceof ObjectError && error.reason==='notFound')continue;
+        throw error;
+      }
+    }
+    if(!page.hasNextPage)return false;
+    cursor=page.cursor!;seen.add(cursor);
+  }
+  throw Error('Read grant discovery exceeds browser limits');
 }

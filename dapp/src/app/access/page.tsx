@@ -1,5 +1,7 @@
 "use client";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+
 import Link from "next/link";
 import { isValidSuiAddress, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useState } from "react";
@@ -15,6 +17,7 @@ import { SEAL_SETTINGS } from "@/lib/seal";
 
 /** Seal access policies (SF-022): who may decrypt confidential releases. */
 export default function AccessPage() {
+  const { fleet } = useFleetSelection();
   const account = useCurrentAccount();
   const policies = useAccessPolicies();
   const { mutateAsync: execute, isPending } = useFleetTransaction();
@@ -66,7 +69,7 @@ export default function AccessPage() {
         <form className="border rounded p-4 space-y-3" onSubmit={event => {
           event.preventDefault();
           if (isPending || !name.trim()) return;
-          void run(() => buildCreatePolicyTx(name, account.address), "Policy created").then(ok => { if (ok) setName(""); });
+          void run(() => buildCreatePolicyTx(name, account.address, fleet), "Policy created").then(ok => { if (ok) setName(""); });
         }}>
           <h2 className="font-semibold">1. Create a named policy</h2>
           <p className="text-sm">Your wallet will hold its admin capability. Creating a policy grants no recipients access yet.</p>

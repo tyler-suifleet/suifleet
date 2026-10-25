@@ -30,7 +30,7 @@
     "device_registry.move::set_meta:ESL06010",
     "enrollment.move::add_claims:ESL06010",
     "enrollment.move::close:ESL06010",
-    "enrollment.move::enroll:ESL06002",
+    "enrollment.move::enroll_internal:ESL06002",
     "enrollment.move::revoke_claim:ESL06010",
     "enrollment.move::set_limits:ESL06010",
     "fleet_budget.move::assert_may_draw:ESL06010",

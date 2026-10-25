@@ -24,7 +24,8 @@ function loader(dependencies = {}) {
       return appRequire(name);
     };
     loaded._compile(ts.transpileModule(fs.readFileSync(filename, "utf8"), {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, resolveJsonModule: true },
+      fileName: filename,
+      compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true, resolveJsonModule: true },
     }).outputText, filename);
     return loaded.exports;
   }
