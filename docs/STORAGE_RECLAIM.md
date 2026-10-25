@@ -15,7 +15,7 @@ Only Sui object deposits come back.
 
 | Call | Authority | Effect |
 |---|---|---|
-| `prune_expired_anchors(fleet, writer, budget, cap, storage, system, indices)` | `BudgetOwnerCap` of the fleet's budget | Removes each listed `AnchorKey` entry and its reuse marker. A blob the fleet storage still holds must have expired: its current Walrus end epoch, including any renewal, is at most the current epoch. The blob is then released through `fleet_storage::release_blob` and burned. A blob released earlier needs only its anchored end epoch to have passed. |
+| `prune_expired_anchors(fleet, writer, budget, cap, storage, system, indices)` | `BudgetOwnerCap` of the fleet's budget | Removes each listed `AnchorKey` entry, its reuse marker and any SF-139 opaque item indexes (`ItemKey`, at most 16) of that anchor's batch. A blob the fleet storage still holds must have expired: its current Walrus end epoch, including any renewal, is at most the current epoch. The blob is then released through `fleet_storage::release_blob` and burned. A blob released earlier needs only its anchored end epoch to have passed. |
 | `burn_expired_blobs(fleet, budget, cap, storage, system, ids)` | Same | Releases and burns expired fleet blobs that no legacy anchor indexes, such as unanchored uploads or SF-121 bounded-history archives. The anchor of a blob burned here can be pruned afterwards. |
 
 - `walrus::blob::burn` does not check expiry. The guard in `fleet_data` is the
