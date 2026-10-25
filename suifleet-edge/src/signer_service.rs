@@ -388,14 +388,23 @@ fn check_fleet_transaction(policy: &Policy, tx: &Transaction,
     let cfg = policy.fleet_data.as_ref().ok_or_else(|| anyhow::anyhow!("fleet data signing is disabled"))?;
     anyhow::ensure!(call.package == Address::from_str(&cfg.package_id)? && call.type_arguments.is_empty(), "wrong fleet-data package");
     anyhow::ensure!(tx.gas_payment.owner == policy.device && tx.gas_payment.budget <= policy.max_budget, "wrong gas owner/budget");
-    if call.function.as_str() == "register_stream_blob" {
+    if matches!(call.function.as_str(), "register_stream_blob" | "register_managed_stream_blob") {
         let storage = cfg.archives.as_ref().filter(|s| s.stream_retention)
             .ok_or_else(|| anyhow::anyhow!("stream retention signing disabled"))?;
-        anyhow::ensure!(call.arguments.len() == 13 && ptb.inputs.len() <= 13, "unexpected stream inputs");
+        let managed = cfg.managed.as_ref();
+        let offset = if managed.is_some() { 2 } else { 0 };
+        anyhow::ensure!(call.function.as_str() == if managed.is_some() { "register_managed_stream_blob" } else { "register_stream_blob" }, "wrong stream charging mode");
+        anyhow::ensure!(call.arguments.len() == 13 + offset && ptb.inputs.len() <= 13 + offset, "unexpected stream inputs");
         for index in 0..ptb.inputs.len() {
             anyhow::ensure!(call.arguments.iter().any(|a| matches!(a, Argument::Input(i) if *i as usize == index)), "unused stream input");
         }
         let args: Vec<_> = call.arguments.iter().map(|a| input(&ptb.inputs, a)).collect::<anyhow::Result<_>>()?;
+        if let Some(m) = managed {
+            for (i, id, mutable) in [(0, &m.customer_id, true), (1, &m.fleet_id, false)] {
+                anyhow::ensure!(matches!(args[i], Input::Shared(s) if s.object_id() == Address::from_str(id)? && s.mutability().is_mutable() == mutable), "wrong managed stream authority");
+            }
+        }
+        let args = &args[offset..];
         for (i, id, mutable) in [(0, &cfg.fleet_id, false), (1, &cfg.writer_id, false),
             (2, &cfg.budget_id, false), (3, &cfg.account_id, false), (4, &policy.registry.to_string(), false),
             (6, &cfg.storage_id, true), (7, &storage.system_id, true), (12, &"0x6".to_string(), false)] {
@@ -1836,6 +1845,36 @@ mod fleet_intent_tests {
         assert!(check(&p, &archive_transaction("register_stream_blob", None, 0,"0xf0")).is_err());
         assert!(check(&p, &archive_transaction("register_stream_blob", None, crate::fleet_data::MAX_ARCHIVE as u64+1,"0xf0")).is_err());
         assert!(check(&p, &archive_transaction("register_stream_blob", None, 100,"0xff")).is_err());
+    }
+
+    #[test]
+    fn managed_stream_signing_requires_charged_path_and_exact_authority() {
+        let mut p = archive_policy();
+        let cfg = p.fleet_data.as_mut().unwrap();
+        cfg.archives.as_mut().unwrap().stream_retention = true;
+        cfg.managed = Some(crate::fleet_data::ManagedFleet {
+            customer_id: "0xc1".into(), fleet_id: "0xf9".into(),
+        });
+        let legacy = archive_transaction("register_stream_blob", None, 100, "0xf0");
+        assert!(check(&p, &legacy).is_err());
+        let mut tx: Transaction = bcs::from_bytes(&legacy).unwrap();
+        let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut tx.kind else { panic!() };
+        ptb.inputs.insert(0, Input::Shared(sui_sdk_types::SharedInput::new(a("0xc1"), 1, true)));
+        ptb.inputs.insert(1, Input::Shared(sui_sdk_types::SharedInput::new(a("0xf9"), 1, false)));
+        let Command::MoveCall(call) = &mut ptb.commands[0] else { panic!() };
+        const STREAM_MODULE: &str = "fleet_data";
+        call.module = STREAM_MODULE.parse().unwrap();
+        call.function = "register_managed_stream_blob".parse().unwrap();
+        for arg in &mut call.arguments { if let Argument::Input(i) = arg { *i += 2; } }
+        call.arguments.splice(0..0, [Argument::Input(0), Argument::Input(1)]);
+        assert!(check(&p, &bcs::to_bytes(&tx).unwrap()).is_ok());
+        for (index, id, mutable) in [(0,"0xc2",true),(0,"0xc1",false),(1,"0xfa",false),(1,"0xf9",true)] {
+            let mut wrong = tx.clone();
+            let sui_sdk_types::TransactionKind::ProgrammableTransaction(ptb) = &mut wrong.kind else { panic!() };
+            ptb.inputs[index] = Input::Shared(sui_sdk_types::SharedInput::new(a(id), 1, mutable));
+            assert!(check(&p, &bcs::to_bytes(&wrong).unwrap()).is_err());
+        }
+        assert!(check(&archive_policy(), &bcs::to_bytes(&tx).unwrap()).is_err());
     }
 
     #[test]

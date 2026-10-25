@@ -426,8 +426,17 @@ fn archive_registration_call(data: &crate::fleet_data::Config, storage: &crate::
     args.extend([Arg::Pure(decimal_u256(blob_id)?), Arg::Pure(decimal_u256(root_hash)?), Arg::Pure(bcs::to_bytes(&size)?)]);
     if stream.is_none() { args.push(Arg::Pure(vec![1])); }
     args.push(Arg::SharedRead(CLOCK.into()));
-    Ok(if stream.is_some() { (data.package_id.clone(), Call { module: "fleet_data", function: "register_stream_blob", args }) }
-       else { (storage.storage_package.clone(), Call { module: "fleet_storage", function: "register_blob", args }) })
+    let managed = data.managed.as_ref();
+    if let Some(m) = managed {
+        args.splice(0..0, [Arg::Object(m.customer_id.clone()), Arg::SharedRead(m.fleet_id.clone())]);
+    }
+    let (package, module, function) = match (stream.is_some(), managed.is_some()) {
+        (true, true) => (&data.package_id, "fleet_data", "register_managed_stream_blob"),
+        (true, false) => (&data.package_id, "fleet_data", "register_stream_blob"),
+        (false, true) => (&storage.storage_package, "fleet_storage", "register_managed_blob"),
+        (false, false) => (&storage.storage_package, "fleet_storage", "register_blob"),
+    };
+    Ok((package.clone(), Call { module, function, args }))
 }
 
 impl SuiClient {

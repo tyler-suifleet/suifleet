@@ -582,12 +582,14 @@ module fleet_data::fleet_data_tests {
     }
     fun managed_setup(): (ts::Scenario, System, ID, ID) {
         let (mut s, system) = setup();
+        policy(&mut s, 0, 3);
         s.next_tx(OWNER);
         let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
         transfer::public_transfer(cap, OWNER);
         let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
         ts::return_shared(r); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        fleet_storage::configure_customer_charging(&mut c, &r, s.ctx());
         customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
         let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
         customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
@@ -599,6 +601,26 @@ module fleet_data::fleet_data_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r); ts::return_shared(a);
         (s, system, fid, bid)
     }
+    #[test]
+    fun managed_stream_write_buys_live_policy_and_charges_allowance() {
+        let (mut s, mut system, fid, bid) = managed_setup(); s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let fleet = s.take_shared<FleetData>(); let writer = s.take_shared<DeviceData>();
+        let budget = s.take_shared_by_id<FleetBudget>(bid); let account = s.take_shared<GasAccount>();
+        let registry = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let mut storage = s.take_shared<FleetStorage>(); let before = fleet_storage::pool_size(&storage);
+        let clock = clock_at(&mut s, 1);
+        let blob = fleet_data::register_managed_stream_blob(&mut c, &f, &fleet, &writer,
+            &budget, &account, &registry, &cap, &mut storage, &mut system, 0,
+            blob::derive_blob_id(43, 1, 100), 43, 100, &clock, s.ctx());
+        assert!(customer::used(&c) > 0 && fleet_storage::pool_size(&storage) == before);
+        assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&storage, blob).destroy_some()) == 3);
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fleet); ts::return_shared(writer);
+        ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry); ts::return_shared(storage);
+        ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+
     #[test]
     fun customer_approval_preserves_original_archive_identity_after_adoption() {
         let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);

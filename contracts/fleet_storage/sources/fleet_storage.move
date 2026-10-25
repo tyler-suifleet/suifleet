@@ -751,6 +751,22 @@ module fleet_storage::fleet_storage {
             size, encoding_type, option::some(epochs), clock, ctx)
     }
 
+    /// Managed writes atomically charge the customer's encoded-byte allowance
+    /// and buy the entire lifetime within the device's existing WAL quota.
+    public fun register_managed_blob_for_epochs(
+        customer: &mut Customer, fleet: &Fleet, fs: &mut FleetStorage,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, system: &mut System, blob_id: u256, root_hash: u256,
+        size: u64, encoding_type: u8, epochs: u32, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
+        assert!(epochs > 0 && epochs <= 53, EInvalidEpochs);
+        assert!(customer::fleet_budget(fleet) == object::id(budget) && fs.budget_id == object::id(budget), EWrongBudget);
+        let amount = encoding::encoded_blob_length(size, encoding_type, system.n_shards());
+        customer::reserve_device_allowance(customer, fleet, budget, account, registry, cap, amount, CustomerCharge {}, ctx);
+        register_impl(fs, budget, account, registry, cap, system, blob_id, root_hash,
+            size, encoding_type, option::some(epochs), clock, ctx)
+    }
+
     fun register_impl(
         fs: &mut FleetStorage, budget: &FleetBudget, account: &GasAccount,
         registry: &DeviceRegistry, cap: &DeviceCap, system: &mut System,

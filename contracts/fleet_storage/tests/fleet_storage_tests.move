@@ -1216,5 +1216,34 @@ module fleet_storage::fleet_storage_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); ts::return_shared(r);
         ts::return_to_address(DEVICE, cap); finish(s, system);
     }
+    #[test]
+    fun managed_stream_purchase_charges_customer_and_preserves_pool() {
+        let (mut s, mut system, fid, bid) = managed_setup(POOL);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        let before = fleet_storage::pool_size(&fs);
+        fleet_storage::register_managed_blob_for_epochs(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, 3, &clock, s.ctx());
+        assert!(fleet_storage::pool_size(&fs) == before);
+        assert!(customer::used(&c) == encoded(&system, BLOB));
+        assert!(customer::active_devices(&c) == 1);
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::customer)]
+    fun managed_stream_purchase_cannot_bypass_customer_allowance() {
+        let (mut s, mut system, fid, bid) = managed_setup(0);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_managed_blob_for_epochs(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, 3, &clock, s.ctx());
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+
 
 }

@@ -137,6 +137,20 @@ module fleet_data::fleet_data {
             cap, system, blob_id, root_hash, size, 1, epochs, clock, ctx)
     }
 
+    /// Managed counterpart; customer allowance and finite WAL purchase commit together.
+    public fun register_managed_stream_blob(customer: &mut Customer, managed_fleet: &Fleet,
+        fleet: &FleetData, writer: &DeviceData, budget: &FleetBudget,
+        account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap,
+        storage: &mut FleetStorage, system: &mut System, kind: u8,
+        blob_id: u256, root_hash: u256, size: u64, clock: &Clock, ctx: &mut TxContext): ID {
+        device(fleet, writer, budget, account, registry, cap, ctx);
+        assert!(object::id(storage) == fleet.storage_id, EBinding);
+        let epochs = stream_retention(fleet, kind).destroy_some();
+        fleet_storage::register_managed_blob_for_epochs(customer, managed_fleet,
+            storage, budget, account, registry, cap, system, blob_id, root_hash,
+            size, 1, epochs, clock, ctx)
+    }
+
     public fun create(budget: &FleetBudget, cap: &BudgetOwnerCap,
         storage: &FleetStorage, chain_identifier: String, ctx: &mut TxContext) {
         fleet_budget::assert_owner(budget, cap);
