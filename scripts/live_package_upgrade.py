@@ -112,6 +112,24 @@ class FundingShortfall(RuntimeError):
     """The wallet cannot fund the whole selected run; nothing was spent."""
 
 
+def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, registry, owner_cap,
+                    groups=(), devices=(), fail="none", announce=True):
+    """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus.
+    Head-package deployments are announced to the inbox and group head (SF-125)."""
+    arguments = [*live_common.deployment_args(walrus, version, run_id, fail=fail),
+                 live_common.ids(groups), live_common.ids(devices), CLOCK]
+    if not (announce and inboxes and package == new):
+        return ["--move-call", f"{package}::deployment_manager::create_deployment_verified", *arguments]
+    name = "record_" + version.replace(".", "_")
+    ptb = ["--move-call", f"{package}::deployment_manager::new_deployment_verified", *arguments, "--assign", name]
+    for target in groups:
+        ptb += ["--move-call", f"{package}::fleet_inbox::announce_group", f"@{target}", name, CLOCK]
+    for _ in devices:
+        ptb += ["--move-call", f"{package}::fleet_inbox::announce_device", f"@{inbox}", f"@{registry}",
+                f"@{owner_cap}", name, CLOCK]
+    return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
+
+
 def gas_pools(gas):
     """(address balance, coin total). Gas selection draws one pool, never their sum."""
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
@@ -776,21 +794,10 @@ def run(args):
             wait_for(lambda: journal.exists() and json.loads(journal.read_text()).get("initialized"), "daemon did not enroll", process)
             run_id = "live-" + uuid.uuid4().hex[:10]
 
-            def call(package, version, *, groups=(), devices=(), fail="none"):
-                """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus.
-                Head-package deployments are announced to the inbox and group head (SF-125)."""
-                arguments = [*live_common.deployment_args(walrus, version, run_id, fail=fail),
-                             live_common.ids(groups), live_common.ids(devices), CLOCK]
-                if not (inboxes and package == new):
-                    return ["--move-call", f"{package}::deployment_manager::create_deployment_verified", *arguments]
-                name = "record_" + version.replace(".", "_")
-                ptb = ["--move-call", f"{package}::deployment_manager::new_deployment_verified", *arguments, "--assign", name]
-                for target in groups:
-                    ptb += ["--move-call", f"{package}::fleet_inbox::announce_group", f"@{target}", name, CLOCK]
-                for _ in devices:
-                    ptb += ["--move-call", f"{package}::fleet_inbox::announce_device", f"@{inbox}", f"@{registry}",
-                            f"@{fixture['owner_cap']}", name, CLOCK]
-                return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
+            def call(package, version, **kwargs):
+                return deployment_call(package, version, walrus=walrus, run_id=run_id, new=new,
+                                       inboxes=inboxes, inbox=fixture.get("inbox"), registry=registry,
+                                       owner_cap=fixture['owner_cap'], **kwargs)
 
             def receipts(deployment):
                 """Authoritative statuses read with the Sui CLI, independent of the daemon."""
@@ -822,11 +829,14 @@ def run(args):
             # Batched to save computation fees. One transaction cannot call two
             # versions of a package (InvalidLinkage), so the old package's
             # entry point gets its own.
+            # The base entry must exercise legacy event discovery even when
+            # identical bytecode reuses the head package ID. Otherwise its later
+            # announcement supersedes the failed deployment in the inbox head.
             by_version = {}
             for label, arguments in (
                 ("create 3 deployments via head", [*call(new, "1.0.0", devices=[device]), *call(new, "2.0.0", groups=[group]),
                                                    *call(new, "4.0.0", devices=[device], fail="health")]),
-                ("create 1 deployment via base", call(old, "3.0.0", devices=[device]))):
+                ("create 1 deployment via base", call(old, "3.0.0", devices=[device], announce=False))):
                 for record_id in created(transaction(label, *arguments), "::deployment_manager::DeploymentRecord"):
                     cleanup.append(record_id)
                     cleanup_package = new
