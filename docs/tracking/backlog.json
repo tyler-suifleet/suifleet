@@ -3096,6 +3096,30 @@
         "Commit scoped tested changes directly under Tyler identity, install committed runtime and verify actual worker dispatch."
       ],
       "validation": "Coordinator unit/regression suite, compile and diff checks, current GitHub status snapshots plus actual worker reservation/identity evidence. No mocked live acceptance."
+    },
+    {
+      "key": "SF-149",
+      "title": "Reconcile completed repair ownership and bound retry budgets per failing check",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Completed blocked repairs leave live In progress claims with no worker; a PR-wide retry budget also blocks unrelated failing checks. Reconcile stopped same-claim repairs to Review without approval and count bounded repair attempts per check.",
+      "evidence": "2026-10-24: jobs1079/1090 finished blocked but SF125/SF131 stayed In progress; SF125 expired. PR281 exhausted 3 aggregate attempts on Move compiler-lints twice and testnet-preflight once, so its first testnet/package-upgrade failure cannot dispatch.",
+      "acceptance": [
+        "Before handing off a completed repair, verify durable successful exit/result, stopped process identity, unchanged claim, branch/worktree, no claim helpers and no shared-resource lease; transition to Review without approving or discarding dirty work.",
+        "Retry a failed ownership publication separately from worker execution; never relaunch an unknown process or replace another owner.",
+        "Use separate three-attempt/backoff budgets per workflow/check, retaining deduplication and head/base-independent failure limits. Migrate verifiable historical receipts and fail closed on ambiguous history.",
+        "Recover current stopped SF125/SF131 claims and allow the first testnet repair on PR281 under the correct budget; preserve all actual testnet and review gates.",
+        "Add meaningful offline recovery, restart, safety-fence and budget regression tests; verify installed committed runtime and actual dispatch."
+      ],
+      "validation": "Full offline coordinator suite, Python compilation/diff checks, Tyler-authored scoped commits and verified runtime hashes/worker handoffs. Public testnet success remains separate."
     }
   ]
 }
