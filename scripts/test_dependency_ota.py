@@ -166,7 +166,7 @@ def run():
             def configure(policy, walrus='', apply=''):
                 config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\n'
                     f'device_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh " + str(wrapper))}\n{apply}'
-                    f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\n'
+                    f'[runtime]\nstate_dir={json.dumps(str(root / "state"))}\npoll_seconds=1\nevent_discovery_seconds=1\n'
                     f'[components]\noffline_candidates="{policy}"\n' + (f'[walrus]\n{walrus}\n' if walrus else ''))
 
             def state():

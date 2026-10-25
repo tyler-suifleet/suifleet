@@ -217,7 +217,7 @@ def run(evidence=None, firehose=False, sitewise=False):
         config.write_text('[sui]\nmanifest_path = "deployment.json"\n'
             f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
             f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = "/bin/false"\n'
-            f'[runtime]\nstate_dir = "{state}"\npoll_seconds = 1\n'
+            f'[runtime]\nstate_dir = "{state}"\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
             f'[ipc]\nsocket = "{socket_path}"\nadministrators = [0]\n'
             f'[ipc.components.producer]\nuid = {PRODUCER}\n'
             'operations = ["stream_create", "stream_delete", "stream_append", "stream_read", "stream_describe", "stream_list", "stream_export_ack"]\n'

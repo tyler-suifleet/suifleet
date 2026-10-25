@@ -68,7 +68,7 @@ def run():
                 home=root/str(i); home.mkdir(); key=home/'device.key'; key.write_text('07'*32); key.chmod(0o600)
                 (home/'deployment.json').write_text(json.dumps(manifest(sim,url,rpc)))
                 runs=home/'runs'; updater=home/'apply.py'; updater.write_text(f"from pathlib import Path\np=Path({str(runs)!r})\np.write_text(p.read_text()+'apply\\n' if p.exists() else 'apply\\n')\n")
-                cfg=home/'config.toml'; cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{sim.cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{home}/state"\npoll_seconds=1\nreplay_history=true\n')
+                cfg=home/'config.toml'; cfg.write_text('[sui]\nmanifest_path="deployment.json"\n'+f'[device]\nkeypair_path="{key}"\ndevice_object_id="{device}"\ndevice_cap_id="{sim.cap}"\n[apply]\ncommand="python3 {updater}"\ntimeout_seconds=10\n[runtime]\nstate_dir="{home}/state"\npoll_seconds=1\nevent_discovery_seconds=1\nreplay_history=true\n')
                 log=(home/'daemon.log').open('w')
                 handles.append(dict(sim=sim,server=server,shim=shim,home=home,runs=runs,cfg=cfg,log=log,process=None))
             def start(i):
