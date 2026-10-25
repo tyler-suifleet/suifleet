@@ -1,4 +1,4 @@
-import { WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER } from "./constants";
+import { NETWORK, WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER } from "./constants";
 
 /**
  * Who can renew the stored blob: only the owner of its Sui `Blob` object can
@@ -126,7 +126,32 @@ export async function protect(plaintext: Uint8Array, kind: BlobKind, sha256: str
   return sealed;
 }
 
+class TransientPublisherError extends Error {}
+
+// Only the default public Testnet service gets alternate public publishers.
+// Custom endpoints and paid fleet storage keep their explicitly chosen route.
+const TESTNET_PUBLISHERS = [
+  "https://publisher.walrus-testnet.walrus.space",
+  "https://publisher.walrus-testnet.h2o-nodes.com",
+  "https://walrus-publisher-testnet.n1stake.com",
+];
+
 async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
+  const publishers = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
+    ? TESTNET_PUBLISHERS : [WALRUS_PUBLISHER];
+  for (const [index, publisher] of publishers.entries()) {
+    try {
+      return await uploadToPublisher(publisher, body, contentType, owner, progress);
+    } catch (error) {
+      // Content-addressed bytes are unchanged, and public publishers pay for
+      // storage. Never replay a wallet transaction or retry malformed success.
+      if (!(error instanceof TransientPublisherError) || index === publishers.length - 1) throw error;
+    }
+  }
+  throw new Error("No Walrus publisher configured");
+}
+
+async function uploadToPublisher(publisher: string, body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
   const params = new URLSearchParams({ epochs: String(WALRUS_EPOCHS) });
   // Send the Blob object to the operator so they, not the publisher, can extend it.
   if (owner) params.set("send_object_to", owner);
@@ -140,32 +165,39 @@ async function uploadBlob(body: Uint8Array, contentType: string, owner: string |
         total: event.lengthComputable ? event.total : undefined,
       }));
       request.upload.addEventListener("load", () => progress({ phase: "processing", loaded: body.byteLength }));
-      request.onerror = () => reject(new Error("Walrus upload failed: network error"));
+      request.onerror = () => reject(new TransientPublisherError("Walrus upload failed: network error"));
       request.onabort = () => reject(new Error("Walrus upload cancelled"));
-      request.ontimeout = () => reject(new Error("Walrus upload timed out"));
+      request.ontimeout = () => reject(new TransientPublisherError("Walrus upload timed out"));
       request.onload = () => {
         try {
-          if (request.status < 200 || request.status >= 300) throw new Error(`Walrus upload failed: ${request.status} ${request.responseText}`);
+          if (request.status < 200 || request.status >= 300) throw new (request.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${request.status} ${request.responseText}`);
           const storage = parseStorage(JSON.parse(request.responseText), owner);
           progress({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
           resolve(storage);
         } catch (error) { reject(error); }
       };
-      request.open("PUT", `${WALRUS_PUBLISHER}/v1/blobs?${params}`);
+      request.open("PUT", `${publisher}/v1/blobs?${params}`);
+      request.timeout = 120_000;
       request.setRequestHeader("Content-Type", contentType);
       progress({ phase: "uploading", loaded: 0, total: body.byteLength });
       request.send(new Blob([body as BlobPart]));
     });
   }
   progress?.({ phase: "processing", loaded: 0 });
-  const res = await fetch(`${WALRUS_PUBLISHER}/v1/blobs?${params}`, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: new Blob([body as BlobPart]),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${publisher}/v1/blobs?${params}`, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: new Blob([body as BlobPart]),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch {
+    throw new TransientPublisherError("Walrus upload failed: network error or timeout");
+  }
 
   if (!res.ok) {
-    throw new Error(`Walrus upload failed: ${res.status} ${await res.text()}`);
+    throw new (res.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${res.status} ${await res.text()}`);
   }
   const storage = parseStorage(await res.json(), owner);
   progress?.({ phase: "complete", loaded: body.byteLength, total: body.byteLength });

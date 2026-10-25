@@ -349,6 +349,7 @@ test-manifest:
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
+	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
