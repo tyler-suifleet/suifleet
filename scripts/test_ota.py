@@ -75,6 +75,11 @@ def wait_for(condition, message, process=None, timeout=25):
     raise AssertionError(message)
 
 
+def completed_polls(log_path):
+    """Completed daemon cycles; transport reads can occur many times per cycle."""
+    return Path(log_path).read_text().count("Chain reads this poll")
+
+
 class Simulator:
     def __init__(self, device=DEVICE, cap=CAP):
         self.device, self.cap = device, cap
@@ -92,6 +97,10 @@ class Simulator:
         self.errors = []
         self.identity = {"signer": ADDRESS, "revoked": False, "owner_cap": OWNER_CAP}
         self.chain_checks = 0
+        self.reads = {}
+        self.read_bytes = {}
+        self.discovery_log = []
+        self.discovery_seen = set()
         self.truncate_next_artifact = True  # First artifact transfer drops mid-body.
         self.ranges = []
         # Desired state (SF-013): group objects, DeviceAddedToGroup events,
@@ -142,6 +151,21 @@ class Simulator:
             "content":{"type":f"{TYPE_ORIGINS[type]}::{type}","fields":fields}}}
 
     def rpc(self, method, params):
+        if method == "shim_read":
+            self.reads[params[0]] = self.reads.get(params[0], 0) + 1
+            self.read_bytes[params[0]] = self.read_bytes.get(params[0], 0) + params[1]
+            return True
+        if method == "shim_version_salt":
+            return self.chain
+        if method == "shim_discovery_events":
+            candidates = [(f"{ORIGIN}::deployment_manager::DeploymentCreated", e["parsedJson"]) for e in self.events]
+            candidates += [(f"{ORIGIN}::device_group::DeviceAddedToGroup", dict(group_id=g, device_id=d)) for g,d in self.memberships]
+            for kind, event in candidates:
+                key = (kind, json.dumps(event, sort_keys=True))
+                if key not in self.discovery_seen:
+                    self.discovery_seen.add(key)
+                    self.discovery_log.append(dict(event_type=kind, json=event))
+            return list(self.discovery_log)
         if method == "sui_getChainIdentifier":
             self.chain_checks += 1
             return self.chain
@@ -228,11 +252,13 @@ class Simulator:
         raise AssertionError(f"unexpected RPC method {method}")
 
 
-def run(binary, firmware_helper=False, daemon_user=None, platform_installer=False):
+def run(binary, firmware_helper=False, daemon_user=None, platform_installer=False, poll_reads=False, baseline_profile=False):
     """With firmware_helper, updates go through `suifleet --firmware-helper`, run
     here as the path unit would. With daemon_user (requires root), the daemon
     runs as that user while the helper keeps root, as in the systemd units."""
     sim = Simulator()
+    if poll_reads or baseline_profile:
+        sim.memberships.append((GROUP, DEVICE))
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -317,7 +343,9 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\nrange_chunk_bytes = 16\n[apply]\ncommand = {json.dumps("/bin/false" if firmware_helper else command)}\n'
                 f'timeout_seconds = 2\n{mode}'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n')
+            if poll_reads:
+                config.write_text(config.read_text().replace("event_discovery_seconds = 1", "event_discovery_seconds = 60"))
             helper_config = root / "firmware.toml"
             # Only the root-owned helper config names the real updater.
             helper_config.write_text(f'command = {json.dumps(command)}\ntimeout_seconds = 2\n'
@@ -359,6 +387,96 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 # position as a resume cursor. Compare against the latter.
                 wait_for(lambda: "after" in state().get("cursor", {}), "first event scan did not complete", process)
                 baseline = state()["cursor"]
+                if baseline_profile:
+                    checks = sim.chain_checks
+                    wait_for(lambda: sim.chain_checks >= checks + 2, "baseline did not poll", process)
+                    before, sizes = dict(sim.reads), dict(sim.read_bytes)
+                    checks = sim.chain_checks
+                    wait_for(lambda: sim.chain_checks >= checks + 3, "baseline profile incomplete", process)
+                    time.sleep(0.5)
+                    delta = {kind: count - before.get(kind, 0) for kind, count in sim.reads.items()}
+                    byte_delta = {kind: count - sizes.get(kind, 0) for kind, count in sim.read_bytes.items()}
+                    import re
+                    raw = re.sub(r"\x1b\[[0-9;]*m", "", (root / "daemon.log").read_text())
+                    metrics = re.findall(r"read_requests=(\d+) response_bytes=(\d+)", raw)
+                    print(f"BASELINE: simulator steady polls (requests, protobuf response bytes): {metrics[-3:]}")
+                    print(f"BASELINE: simulator reads across approximately 3 polls: {delta}; protobuf response bytes: {byte_delta}")
+                    stop(process)
+                    return
+                if poll_reads:
+                    wait_for(lambda: state().get("discovery_cursor") is not None and GROUP in state().get("groups", []), "cursor merge/group discovery incomplete", process)
+                    wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= 2, "version watch did not become idle", process)
+                    before, sizes = dict(sim.reads), dict(sim.read_bytes)
+                    wait_for(lambda: sim.reads.get("BatchGetObjects", 0) >= before.get("BatchGetObjects", 0) + 3, "three idle polls missing", process)
+                    delta = {kind: count - before.get(kind, 0) for kind, count in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    assert "Sync failed" not in (root / "daemon.log").read_text(), (root / "daemon.log").read_text()[-2000:]
+                    payload = sim.read_bytes["BatchGetObjects"] - sizes["BatchGetObjects"]
+                    print(f"PASS: steady polls: {delta}, {payload} protobuf response bytes across 3 polls")
+                    # Every authority change wakes full, uncached validation on
+                    # the next poll, rather than waiting for event discovery.
+                    for label, diagnostic, mutate, restore in [
+                        ("revocation", "revoked", lambda: sim.identity.update(revoked=True), lambda: sim.identity.update(revoked=False)),
+                        ("rotation", "rotated away", lambda: sim.identity.update(signer="0xbad"), lambda: sim.identity.update(signer=ADDRESS)),
+                        ("upgrade", "UpgradeCap does not identify", lambda: setattr(sim, "latest_package", object_id("0x4")), lambda: setattr(sim, "latest_package", PACKAGE)),
+                        ("reset", "chain identifier mismatch", lambda: setattr(sim, "chain", "deadbeef"), lambda: setattr(sim, "chain", manifest["chain_identifier"])),
+                        ("NotFound", "deleted or absent", lambda: sim.deleted.add(CAP), lambda: sim.deleted.remove(CAP)),
+                    ]:
+                        checks = sim.chain_checks
+                        errors_before = (root / "daemon.log").read_text().count(diagnostic)
+                        mutate()
+                        wait_for(lambda: sim.chain_checks > checks, f"{label} did not wake full validation", process, timeout=4)
+                        wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > errors_before, f"{label} did not fail closed", process, timeout=4)
+                        assert not sim.downloads and count() == 0
+                        checks = sim.chain_checks
+                        restore()
+                        wait_for(lambda: sim.chain_checks > checks, f"{label} did not recover", process, timeout=4)
+                        batches = sim.reads["BatchGetObjects"]
+                        wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 2, f"{label} did not return to batch polling", process, timeout=5)
+                        print(f"PASS: {label} revalidated within one poll; no apply or download")
+                    # Failed schema resolution leaves a historical notice;
+                    # an already reported outcome must not keep admission due.
+                    sim.schema_fields["0x200"] = {"schema_version": "99"}
+                    sim.allow_reports = True
+                    sim.fail_execution = False
+                    sim.add("0x200")
+                    sim.groups[GROUP]["device_ids"].append("0xbad")  # Wake discovery.
+                    wait_for(lambda: state().get("deployments", {}).get("0x200", {}).get("reported"),
+                             "rejected recipe did not report", process)
+                    assert state()["deployments"]["0x200"]["status"] == 2 and count() == 0
+                    batches = sim.reads["BatchGetObjects"]
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 2,
+                             "rejection did not settle", process)
+                    before = dict(sim.reads)
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= before["BatchGetObjects"] + 3,
+                             "idle polls after rejection missing", process)
+                    delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    print(f"PASS: reported rejection history returns to one batch per idle poll: {delta}")
+                    # A permanently undeliverable receipt must not turn idle
+                    # polls into authority/funding/report read amplification.
+                    sim.allow_reports = False
+                    sim.schema_fields["0x201"] = {"schema_version": "99"}
+                    sim.add("0x201")
+                    sim.groups[GROUP]["device_ids"].append("0xbeef")
+                    wait_for(lambda: state().get("deployments", {}).get("0x201", {}).get("status") == 2,
+                             "undeliverable rejection did not queue", process)
+                    wait_for(lambda: "Status report remains queued" in (root / "daemon.log").read_text(),
+                             "queued receipt was not attempted", process)
+                    batches = sim.reads["BatchGetObjects"]
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 1, "queue did not settle", process)
+                    before = dict(sim.reads)
+                    wait_for(lambda: sim.reads["BatchGetObjects"] >= before["BatchGetObjects"] + 3,
+                             "idle queued-receipt polls missing", process)
+                    delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    assert not state()["deployments"]["0x201"]["reported"]
+                    print(f"PASS: undeliverable queued receipt backs off; three idle polls use only three batches: {delta}")
+                    sim.allow_reports = True
+                    wait_for(lambda: state()["deployments"]["0x201"]["reported"], "receipt retry did not recover", process)
+                    stop(process)
+                    assert not sim.errors, sim.errors
+                    return
                 # A chain reset after enrollment must stop all downloads and cursor changes.
                 sim.chain = "deadbeef"
                 # A poll that passed its chain check before the reset may still be
@@ -411,6 +529,8 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 journal = state()
                 # Rewind with the JSON-RPC-era cursor form: migration must resume
                 # exactly after event 0 (redelivering the rest, deduplicated).
+                journal.pop("discovery_cursor", None)
+                journal.pop("discovery_merge_checkpoint", None)
                 journal["cursor"] = {"txDigest": "event-0", "eventSeq": "0"}
                 (root / "state" / "state.json").write_text(json.dumps(journal))
                 sim.add("0x108") # Deployment created while the device is offline.
@@ -424,14 +544,18 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 assert "/v1/blobs/recipe-0x101" in sim.downloads and "/v1/blobs/artifact" in sim.downloads
                 assert not sim.errors, sim.errors
                 # A revoked device stops: nothing new is applied or reported.
-                # Identity is checked once per poll: let a poll start after the
-                # revocation so one already in flight cannot see the new event.
+                # Service-info calls also occur during event discovery. Wait
+                # for an actual failed identity validation, so a poll already
+                # in flight before revocation cannot see the new event.
+                diagnostic = "device identity is revoked"
+                failures = (root / "daemon.log").read_text().count(diagnostic)
                 sim.identity = dict(sim.identity, revoked=True)
-                checks = sim.chain_checks
-                wait_for(lambda: sim.chain_checks > checks, "daemon stopped polling", process)
+                wait_for(lambda: (root / "daemon.log").read_text().count(diagnostic) > failures,
+                         "daemon did not reject the revoked identity", process)
                 sim.add("0x10e")
-                checks = sim.chain_checks
-                wait_for(lambda: sim.chain_checks >= checks + 4, "daemon stopped polling after revocation", process)
+                polls = completed_polls(root / "daemon.log")
+                wait_for(lambda: completed_polls(root / "daemon.log") >= polls + 4,
+                         "daemon stopped polling after revocation", process)
                 assert count() == 3 and "0x10e" not in state()["deployments"], "revoked device applied an update"
                 assert len(sim.reports) == 10
                 stop(process)
@@ -465,10 +589,12 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, default=Path(__file__).resolve().parents[1] / "suifleet-edge/target/debug/suifleet")
+    parser.add_argument("--baseline-profile", action="store_true", help="measure an instrumented pre-cache daemon")
+    parser.add_argument("--poll-reads", action="store_true", help="assert one batch per unchanged poll and authority invalidation")
     parser.add_argument("--firmware-helper", action="store_true", help="apply through the privileged firmware helper")
     parser.add_argument("--platform-installer", action="store_true", help="exercise the explicit Linux installer script fixture")
     parser.add_argument("--daemon-user", help="run the daemon as this user; requires root (helper stays root)")
     args = parser.parse_args()
     if args.daemon_user and os.geteuid() != 0:
         parser.error("--daemon-user requires root")
-    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user, args.platform_installer)
+    run(args.binary.resolve(), args.firmware_helper or bool(args.daemon_user), args.daemon_user, args.platform_installer, args.poll_reads, args.baseline_profile)
