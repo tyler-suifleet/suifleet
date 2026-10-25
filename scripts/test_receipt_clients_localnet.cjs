@@ -110,8 +110,10 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const log=await fs.open(logPath,'w');
     daemon=spawn(DAEMON,[],{env:{...process.env,EDGE_CONFIG:path.join(tmp,'config.toml'),NO_COLOR:'1'},stdio:['ignore',log.fd,log.fd]});
     const journal=async()=>{try{return JSON.parse(await fs.readFile(path.join(state,'state.json'),'utf8'));}catch{return{};}};
-    async function waitFor(condition,label){for(let n=0;n<240;n++){if(await condition())return;if(daemon.exitCode!==null)throw Error(label+': daemon exited');await new Promise(r=>setTimeout(r,250));}throw Error(label+'\n'+(await fs.readFile(logPath,'utf8')).slice(-3000));}
-    await waitFor(async()=>(await journal()).initialized,'daemon baseline');
+    async function waitFor(condition,label){for(let n=0;n<240;n++){if(await condition())return;if(daemon.exitCode!==null)throw Error(label+': daemon exited');await new Promise(r=>setTimeout(r,250));}throw Error(label+'\n'+JSON.stringify(await journal())+'\n'+(await fs.readFile(logPath,'utf8')).slice(-6000));}
+    // initialized is saved before the discovery fence/backfill has completed.
+    // Publish the probe only after the durable combined-discovery cursor exists.
+    await waitFor(async()=>{const s=await journal();return s.initialized && s.discovery_cursor;},'daemon discovery baseline');
     const deployment=created(await execute('new sharded failure probe',app.buildCreateDeploymentTx('probe','1','missing-recipe','ab'.repeat(32),'cd'.repeat(32),[],[device.objectId])),'::deployment_manager::DeploymentRecord');
     await waitFor(async()=>(await journal()).deployments?.[deployment]?.reported,'real daemon v3 effects-checked report');
     await waitFor(async()=>{try{return (await app.readReceipts(client,deployment)).statuses[device.objectId]===2;}catch{return false;}},'checkpointed v3 receipt');
@@ -131,6 +133,31 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const catalogOutcome=(await journal()).deployments[catalogDeployment];
     assert.match(catalogOutcome.error,/http|recipe mirror|Walrus/i,'catalog authority must resolve before the deliberate missing-recipe failure');
     assert.equal((await app.fetchDeploymentEvents(client,owner.toSuiAddress())).find(d=>d.deploymentId===catalogDeployment).schemaVersion,'2');
+    // The current main health path must resolve schema 4 through the directory.
+    // A v3 receipt settles before the device's durable health retry can succeed.
+    const rollout = load('lib/rollout.ts');
+    const rolloutDeployment = created(await execute('create sharded rollout health probe', rollout.buildRolloutTx({
+      component:'rollout.probe',version:'1',recipe:'missing-recipe',artifactSha256:'ab'.repeat(32),recipeSha256:'cd'.repeat(32),
+      cohorts:[[device.objectId]],concurrency:1,rateCount:1,rateWindowMs:1000,bakeMs:0,minimumSamples:1,failureBps:10000,offlineTimeoutMs:3600000
+    })), '::deployment_manager::DeploymentRecord');
+    await execute('admit sharded rollout health probe', await rollout.buildAdvanceRolloutTx(client,rolloutDeployment,owner.toSuiAddress(),[device.objectId]));
+    await waitFor(async()=>(await journal()).deployments?.[rolloutDeployment]?.reported,'real daemon sharded rollout report');
+    await waitFor(async()=>{try{return (await app.readReceipts(client,rolloutDeployment)).statuses[device.objectId]===2;}catch{return false;}},'sharded rollout receipt checkpoint');
+    await execute('settle sharded rollout receipt before health retry',await rollout.buildAdvanceRolloutTx(client,rolloutDeployment,owner.toSuiAddress()));
+    let health, healthDigest;
+    await waitFor(async()=>{try{
+      const {dynamicField} = await client.getDynamicField({parentId:rolloutDeployment,name:{type:`${origins['deployment_manager::RolloutHealthKey']}::deployment_manager::RolloutHealthKey`,bcs:new Uint8Array([0])}});
+      health=p.deployment_manager_RolloutHealthBcs.parse(dynamicField.value.bcs);
+      healthDigest=dynamicField.previousTransaction;
+      return health.devices.length===1;
+    }catch{return false;}},'actual device-signed health on schema-4 sharded rollout');
+    assert.ok(healthDigest);
+    const healthExecution=await client.getTransaction({digest:healthDigest,include:{effects:true}});
+    assert.equal(healthExecution.Transaction?.status.success,true);
+    digests['independently verified device rollout health']=healthDigest;
+    assert.deepEqual(health.devices,[device.objectId]);assert.deepEqual(health.healthy,[false]);assert.deepEqual(health.signers,[owner.toSuiAddress()]);
+    await waitFor(async()=>(await journal()).deployments?.[rolloutDeployment]?.rollout_health_pending===false,'durable sharded health completion');
+    await require('./receipt_test_helpers.cjs').deleteDeployment(client,tx=>execute('bounded rollout probe cleanup '+Object.keys(digests).length,tx),rolloutDeployment,'3');
     daemon.kill('SIGINT');await new Promise(resolve=>daemon.once('exit',resolve));daemon=undefined;await log.close();
     // An independent production indexer reads the exact same root/field layout.
     const indexer=path.join(root,'suifleet-indexer/target/debug/suifleet-indexer'),db=path.join(tmp,'fleet.db');
@@ -142,8 +169,8 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     await require('./receipt_test_helpers.cjs').deleteDeployment(client,tx=>execute('bounded catalog probe cleanup '+Object.keys(digests).length,tx),catalogDeployment,'2');
 
     await require('./receipt_test_helpers.cjs').deleteDeployment(client,tx=>execute('bounded probe cleanup '+Object.keys(digests).length,tx),deployment);
-    const evidence={result:'PASS',network:'isolated network-none localnet',base,old,head,digests,failures,daemon:'actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records',indexer:'actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding',catalog_probe:{deployment:catalogDeployment,version,error:catalogOutcome.error},limits:['No successful artifact installation in this probe; existing OTA simulator covers successful apply','No public-network, hardware, mainnet or manual wallet acceptance']};
+    const evidence={result:'PASS',network:'isolated network-none localnet',base,old,head,digests,failures,daemon:'actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records',indexer:'actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding',rollout_probe:{deployment:rolloutDeployment,health},catalog_probe:{deployment:catalogDeployment,version,error:catalogOutcome.error},limits:['No successful artifact installation in this probe; existing OTA simulator covers successful apply','No public-network, hardware, mainnet or manual wallet acceptance']};
     await fs.writeFile(path.join(root,'docs/validation/sf127-clients-localnet.json'),JSON.stringify(evidence,null,2)+'\n');
-    console.log('PASS: pre-identity old-package deletion rejected, actual daemon ordinary/catalog v3 report effects and independent indexer receipt/binding read, bounded cleanup');
+    console.log('PASS: pre-identity old-package deletion rejected, actual daemon ordinary/catalog v3 reports, schema-4 rollout health retry, independent indexer receipt/binding read and bounded cleanup');
   } finally {if(daemon){daemon.kill('SIGKILL');await new Promise(resolve=>daemon.once('exit',resolve));}await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1;});
