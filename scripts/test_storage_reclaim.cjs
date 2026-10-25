@@ -13,7 +13,7 @@ const load = loader();
 const reclaim = load('lib/storage-reclaim.ts'), bulk = load('lib/fleet-bulk.ts'), data = load('lib/fleet-data.ts');
 const protocol = load('lib/fleet-protocol.ts'), retention = load('lib/retention.ts');
 
-const origin = id('0x81'), compactOrigin = id('0x83'), storageOrigin = id('0x5a'), system = id('0x5e');
+const origin = id('0x81'), compactOrigin = id('0x83'), opaqueOrigin = id('0x84'), storageOrigin = id('0x5a'), system = id('0x5e');
 const config = { schema: 1, chainIdentifier: '4c78adac', registryId: id(manifest.shared_objects.registry.id), packageId: id('0x82'),
   typeOrigin: origin, fleetId: id('0xf1'), budgetId: id('0xb1'), storageId: id('0x51') };
 const device = id('0xd1'), writerId = id('0xe1'), other = id('0xd2');
@@ -23,7 +23,7 @@ const anchor = (seq, blob, end) => ({ seq: String(seq), kind: 0, blob_object_id:
 const record = (end, owner = device) => ({ device_id: owner, blob_id: '1', size: '10', encoded_size: '100', end_epoch: end, uploaded_at_ms: '1' });
 
 /** A fleet with one writer. `anchors` maps index → anchor; absent indices are pruned. */
-function world({ anchors, records, count = 6, compact }) {
+function world({ anchors, records, count = 6, compact, items }) {
   const fleet = { id: config.fleetId, version: '1', budget_id: config.budgetId, storage_id: config.storageId, registry_id: config.registryId,
     chain_identifier: config.chainIdentifier, key_epoch: '0', support: [], health_interval_ms: '86400000', batch_interval_ms: '86400000', emergency_interval_ms: '300000', device_count: '1' };
   const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: device, account_id: id('0xa1'), health_seq: '0', health_at_ms: '0',
@@ -36,6 +36,11 @@ function world({ anchors, records, count = 6, compact }) {
     { order: (Number(index) * 7919) % 1009, name: { type: `${origin}::fleet_data::AnchorKey`, bcs: bcs.u64().serialize(index).toBytes() },
       valueType: `${origin}::fleet_data::Anchor`, value: { bcs: data.AnchorBcs.serialize(a).toBytes() } },
     { order: (Number(index) * 7919 + 500) % 1009, name: { type: '0x2::object::ID', bcs: bcs.Address.serialize(a.blob_object_id).toBytes() }, valueType: 'bool', value: { bcs: bcs.bool().serialize(true).toBytes() } });
+  // SF-139 opaque item indexes, keyed by their anchor's batch sequence.
+  const itemKey = (batch, item) => bcs.struct('ItemKey', { batch: bcs.u64(), item: bcs.u64() }).serialize({ batch, item }).toBytes();
+  for (const [batch, n] of Object.entries(items ?? {})) for (let item = 0; item < n; item++) fields.push(
+    { order: (Number(batch) * 31 + item * 101) % 1009, name: { type: `${opaqueOrigin}::fleet_data::ItemKey`, bcs: itemKey(batch, item) },
+      valueType: `${opaqueOrigin}::fleet_data::DataItem`, value: { bcs: new Uint8Array() } });
   // SF-121 compact history: one CompactHeadKey field, no per-index anchors.
   if (compact) fields.push({ order: 1, name: { type: `${compactOrigin}::fleet_data::CompactHeadKey`, bcs: new Uint8Array([0]) },
     valueType: `${compactOrigin}::fleet_data::CompactHead`, value: { bcs: bulk.CompactHeadBcs.serialize(compact).toBytes() } });
@@ -44,7 +49,8 @@ function world({ anchors, records, count = 6, compact }) {
     ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(config.chainIdentifier + '00'.repeat(28), 'hex')) } }; } },
     async getObject({ objectId }) {
       if (objectId === config.packageId) return { object: { objectBcs: bcs.Object.serialize({ data: { Package: { id: config.packageId, version: '2', moduleMap: new Map(),
-        typeOriginTable: ['CompactHeadKey', 'CompactHead'].map((datatypeName) => ({ moduleName: 'fleet_data', datatypeName, package: compactOrigin })), linkageTable: new Map() } },
+        typeOriginTable: [...['CompactHeadKey', 'CompactHead'].map((datatypeName) => ({ moduleName: 'fleet_data', datatypeName, package: compactOrigin })),
+          ...(items ? ['ItemKey', 'DataItem'].map((datatypeName) => ({ moduleName: 'fleet_data', datatypeName, package: opaqueOrigin })) : [])], linkageTable: new Map() } },
         owner: { Immutable: true }, previousTransaction: '11111111111111111111111111111111', storageRebate: '0' }).toBytes() } };
       const isFleet = objectId === config.fleetId;
       return { object: { owner: { $kind: 'Shared' }, type: `${origin}::fleet_data::${isFleet ? 'FleetData' : 'DeviceData'}`,
@@ -58,6 +64,11 @@ function world({ anchors, records, count = 6, compact }) {
       if (parentId === writerId && name.type === `${compactOrigin}::fleet_data::CompactHeadKey`) {
         if (!compact) throw missing();
         return { dynamicField: { value: { type: `${compactOrigin}::fleet_data::CompactHead`, bcs: bulk.CompactHeadBcs.serialize(compact).toBytes() } } };
+      }
+      if (parentId === writerId && name.type === `${opaqueOrigin}::fleet_data::ItemKey`) {
+        const key = bcs.struct('ItemKey', { batch: bcs.u64(), item: bcs.u64() }).parse(name.bcs); reads.push(`item:${key.batch}:${key.item}`);
+        if (Number(key.item) >= ((items ?? {})[key.batch] ?? 0)) throw missing();
+        return { dynamicField: { value: { type: `${opaqueOrigin}::fleet_data::DataItem`, bcs: new Uint8Array() } } };
       }
       if (parentId === writerId) {
         const index = Number(bcs.u64().parse(name.bcs)); reads.push(index);
@@ -187,9 +198,31 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   // Large plans are split into 64-entry calls and capped per transaction.
   const many = { epoch: 10, anchors: Array.from({ length: 300 }, (_, index) => ({ ...plan.anchors[0], index })), loose: [loose], scanned: 300, truncated: false };
   const split = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, many);
-  assert.deepEqual([split.anchors, split.loose], [256, 0]);
-  assert.deepEqual(calls(split.tx), Array(4).fill('fleet_data::prune_expired_anchors'));
+  assert.deepEqual([split.anchors, split.loose], [85, 1]);
+  assert.deepEqual(calls(split.tx), [...Array(2).fill('fleet_data::prune_expired_anchors'), 'fleet_data::burn_expired_blobs']);
   assert.throws(() => reclaim.buildArchiveReclaimTx(config, id('0xca'), system, { ...plan, anchors: [], loose: [] }), /Nothing to reclaim/);
+
+  // SF-139 opaque items are deleted with their anchor, so they weigh its batch.
+  const itemHistory = { 0: anchor(1, b(1), 3), 1: anchor(2, b(2), 3), 2: anchor(3, b(3), 3), 3: anchor(4, b(4), 30) };
+  chain = world({ anchors: itemHistory, records: {}, items: { 1: 16, 3: 2, 4: 5 } });
+  const itemPlan = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10);
+  assert.deepEqual(itemPlan.anchors.map((c) => [c.index, c.items]), [[0, 16], [1, 0], [2, 2]]);
+  assert.deepEqual(chain.reads, [], 'a complete listing counts items without probing');
+  // A bounded or resumed listing may miss items, so candidates are counted exactly.
+  let itemScan = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, 3), counted = [...itemScan.anchors];
+  while (itemScan.truncated) { itemScan = await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10, 3, itemScan.resume); counted.push(...itemScan.anchors); }
+  assert.deepEqual(counted.map((c) => [c.index, c.items]).sort(), [[0, 16], [1, 0], [2, 2]]);
+  assert.ok(chain.reads.includes('item:1:15') && chain.reads.includes('item:1:16') === false && chain.reads.every((r) => !String(r).startsWith('item:4')),
+    'probes stop at the item bound and skip unexpired anchors');
+  const heavy = { epoch: 10, anchors: Array.from({ length: 40 }, (_, index) => ({ ...itemPlan.anchors[0], index })), loose: [loose], scanned: 40, truncated: false };
+  assert.deepEqual(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, heavy).anchors, 13, '13 anchors × 19 deletions include reuse markers and compact heads');
+  const filled = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, { ...heavy, loose: Array.from({ length: 20 }, (_, i) => b(100 + i)) });
+  assert.deepEqual([filled.anchors, filled.loose], [13, 9], 'loose blobs fill only the remaining weighted budget');
+  const mixed = { ...heavy, anchors: [{ ...itemPlan.anchors[1], index: 1 }, { ...itemPlan.anchors[0], index: 0 }] };
+  assert.deepEqual(Object.values(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, mixed)).slice(1), [2, 1], 'remaining weight still burns loose blobs');
+  // A package without the SF-139 types has no item origin and no item probes.
+  chain = world({ anchors: itemHistory, records: {} });
+  assert.ok((await reclaim.planArchiveReclaim(chain, config, storageOrigin, [device], 10)).anchors.every((c) => c.items === 0));
 
   // Previews report what signing would return, and failures before signing.
   const gas = { computationCost: '1000000', storageCost: '988000', storageRebate: '21000000', nonRefundableStorageFee: '0' };

@@ -190,6 +190,25 @@ class TrustTests(unittest.TestCase):
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
                 self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
 
+    def test_fresh_sf129_package_costs_leave_room_for_deployments(self):
+        # Actual settled costs/funding from run 40184514226: base publish,
+        # register, group, head upgrade, activation, device top-up (gas +
+        # funding) and the three-deployment batch. Under the former 0.8-SUI
+        # ceiling only 5,827,318 MIST remained for the base-package deployment,
+        # which failed with InsufficientGas.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING
+        observed = [349_109_200, 8_425_378, 1_243_578, 356_186_163, 8_737_163,
+                    1_988_000 + 30_000_000, 38_483_200]
+        self.assertEqual(800_000_000 - sum(observed), 5_827_318)
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        for cost in observed:
+            ledger.grant(cost)
+        # Room for the base deployment, cleanup and report-gas variance; the
+        # ceiling stays strict and non-replenishing.
+        self.assertGreaterEqual(ledger.remaining, 150_000_000)
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
         for codes, relevant, expected in (({}, False, (0, 1)), ({'live_package_upgrade.py': 3}, True, (3, 1)),

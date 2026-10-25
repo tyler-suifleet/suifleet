@@ -903,6 +903,9 @@ if __name__ == "__main__":
     # A fresh base->head fixture with SF-125 inboxes costs about 0.78 SUI before
     # the deployments (base publish 0.342 + head upgrade 0.376, run 40092917058),
     # about 0.85 SUI in total.
+    # A fresh SF-129 base->head fixture stored 0.705 SUI of packages (base
+    # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
+    # device funding, deployments and cleanup.
     parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "

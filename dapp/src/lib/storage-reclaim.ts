@@ -19,6 +19,8 @@ import type { DeploymentEvent } from "./sui";
 export const RECLAIM_BATCH = 64;
 /** Per transaction, so one signature stays well inside protocol limits. */
 export const RECLAIM_TRANSACTION_LIMIT = 256;
+/** SF-139 opaque items per anchor; pruning an anchor also deletes them. */
+export const MAX_ANCHOR_ITEMS = 16;
 /** Bounds dynamic fields listed per device and scan (about two per live
  * archive); larger histories continue from the returned cursor. */
 export const RECLAIM_SCAN_LIMIT = 1024;
@@ -85,6 +87,8 @@ export interface ArchiveCandidate {
   /** Still held by fleet storage: pruning also releases and burns the blob. */
   held: boolean;
   endEpoch: number;
+  /** SF-139 opaque item indexes deleted with the anchor; weighs its batch. */
+  items: number;
 }
 
 export interface ArchivePlan {
@@ -112,6 +116,32 @@ async function heldRecord(client: Pick<SuiGrpcClient, "getDynamicField">, config
   }
 }
 
+const ItemKeyBcs = bcs.struct("ItemKey", { batch: bcs.u64(), item: bcs.u64() });
+
+/** Verified origin of the SF-139 item index types; absent before that upgrade. */
+async function itemOrigin(client: Pick<SuiGrpcClient, "getObject">, config: FleetDataConfig) {
+  const { object } = await client.getObject({ objectId: config.packageId, include: { objectBcs: true } });
+  const origins = bcs.Object.parse(object.objectBcs).data.Package?.typeOriginTable ?? [];
+  const [key, value] = ["ItemKey", "DataItem"].map((name) => origins.filter((e) => e.moduleName === "fleet_data" && e.datatypeName === name));
+  if (!key.length && !value.length) return undefined;
+  if (key.length !== 1 || value.length !== 1 || id(key[0].package) !== id(value[0].package)) throw new Error("Opaque index origin mismatch");
+  return id(key[0].package);
+}
+
+/** Items are numbered contiguously from 0, as `anchor_items` writes them. */
+async function countItems(client: Pick<SuiGrpcClient, "getDynamicField">, writerId: string, origin: string, batch: string) {
+  let item = 0;
+  for (; item < MAX_ANCHOR_ITEMS; item++) {
+    try {
+      await client.getDynamicField({ parentId: writerId, name: { type: `${origin}::fleet_data::ItemKey`, bcs: ItemKeyBcs.serialize({ batch, item }).toBytes() } });
+    } catch (error) {
+      if (notFound(error)) break;
+      throw error;
+    }
+  }
+  return item;
+}
+
 /**
  * Find expired archives of the given devices. A blob still in fleet storage is
  * expired when its current end epoch (including renewals) has passed; one the
@@ -127,12 +157,14 @@ export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject"
   if (!Number.isSafeInteger(scanLimit) || scanLimit < 1) throw new Error("Invalid scan bound");
   const anchors: ArchiveCandidate[] = [], referenced = new Set<string>(), resume: Record<string, string> = {};
   const anchorKey = normalizeStructTag(`${config.typeOrigin}::fleet_data::AnchorKey`), anchorType = normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`);
+  const opaque = await itemOrigin(client, config), itemKey = opaque && normalizeStructTag(`${opaque}::fleet_data::ItemKey`);
   let scanned = 0;
   for (const deviceId of deviceIds) {
     const writer = await readDeviceData(client, config, deviceId);
     if (!writer) continue;
     const count = BigInt(writer.anchor_count);
     let cursor: string | null | undefined = from[id(deviceId)], listed = 0, more = true;
+    const found: ArchiveCandidate[] = [], items = new Map<string, number>(), resumed = !!cursor;
     while (more && listed < scanLimit) {
       const page = await listFields(client, writer.id, cursor, Math.min(100, scanLimit - listed));
       listed += page.dynamicFields.length;
@@ -140,6 +172,11 @@ export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject"
       cursor = page.cursor;
       for (const entry of page.dynamicFields) {
         // Reuse markers and diagnostic requests share the writer's fields.
+        if (itemKey && normalizeStructTag(entry.name.type) === itemKey) {
+          const { batch } = ItemKeyBcs.parse(entry.name.bcs);
+          items.set(batch, (items.get(batch) ?? 0) + 1);
+          continue;
+        }
         if (normalizeStructTag(entry.name.type) !== anchorKey) continue;
         if (normalizeStructTag(entry.valueType) !== anchorType) throw new Error("Invalid archive index type");
         const index = BigInt(bcs.u64().parse(entry.name.bcs));
@@ -152,9 +189,13 @@ export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject"
         if (anchor.end_epoch > epoch) continue;
         const record = await heldRecord(client, config, storageOrigin, blob);
         const endEpoch = record ? record.end_epoch : anchor.end_epoch;
-        if (endEpoch <= epoch) anchors.push({ deviceId: id(deviceId), writerId: id(writer.id), index: Number(index), anchor, held: !!record, endEpoch });
+        if (endEpoch <= epoch) found.push({ deviceId: id(deviceId), writerId: id(writer.id), index: Number(index), anchor, held: !!record, endEpoch, items: 0 });
       }
     }
+    // A complete listing counts every item; a bounded or resumed one may have
+    // missed some, so those candidates are counted exactly before batching.
+    for (const c of found) c.items = opaque && (more || resumed) ? await countItems(client, c.writerId, opaque, c.anchor.seq) : items.get(c.anchor.seq) ?? 0;
+    anchors.push(...found);
     if (more && cursor) resume[id(deviceId)] = cursor;
   }
   // Listing order is by field ID; keep each writer's batches in index order.
@@ -179,17 +220,21 @@ export async function planArchiveReclaim(client: Pick<SuiGrpcClient, "getObject"
 export function buildArchiveReclaimTx(config: FleetDataConfig, budgetCapId: string, walrusSystem: string, plan: ArchivePlan): { tx: Transaction; anchors: number; loose: number } {
   const tx = new Transaction();
   const byWriter = new Map<string, number[]>();
-  let anchors = 0;
+  // Each anchor's item indexes are deleted with it, so they count toward the
+  // per-transaction bound; an oversized first anchor still goes alone.
+  let anchors = 0, weight = 0;
   for (const c of plan.anchors) {
-    if (anchors >= RECLAIM_TRANSACTION_LIMIT) break;
+    // Anchor, blob reuse marker and at most one compact-head field.
+    const cost = 3 + c.items;
+    if (anchors > 0 && weight + cost > RECLAIM_TRANSACTION_LIMIT) break;
     byWriter.set(c.writerId, [...(byWriter.get(c.writerId) ?? []), c.index]);
-    anchors++;
+    anchors++; weight += cost;
   }
   for (const [writer, indices] of byWriter) for (const batch of chunks(indices)) {
     tx.moveCall({ target: `${config.packageId}::fleet_data::prune_expired_anchors`, arguments: [tx.object(config.fleetId), tx.object(writer),
       tx.object(config.budgetId), tx.object(budgetCapId), tx.object(config.storageId), tx.object(walrusSystem), tx.pure.vector("u64", batch)] });
   }
-  const loose = plan.loose.slice(0, Math.max(0, RECLAIM_TRANSACTION_LIMIT - anchors));
+  const loose = plan.loose.slice(0, Math.max(0, RECLAIM_TRANSACTION_LIMIT - weight));
   for (const batch of chunks(loose)) {
     tx.moveCall({ target: `${config.packageId}::fleet_data::burn_expired_blobs`, arguments: [tx.object(config.fleetId), tx.object(config.budgetId),
       tx.object(budgetCapId), tx.object(config.storageId), tx.object(walrusSystem), tx.pure.vector("address", batch)] });

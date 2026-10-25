@@ -26,6 +26,7 @@ module fleet_data::fleet_data {
     const ENotFound: u64 = 9;
     /// Bounds one reclaim transaction; callers page larger histories.
     const MAX_RECLAIM: u64 = 64;
+    const MAX_ANCHOR_ITEMS: u64 = 16;
 
     public struct FleetData has key {
         id: UID,
@@ -399,15 +400,11 @@ module fleet_data::fleet_data {
             if (df::exists(&writer.id, blob_object_id)) {
                 let _: bool = df::remove(&mut writer.id, blob_object_id);
             };
-            // Opaque batches index at most 16 items by the anchor sequence.
-            // Reclaim their fields too so readers stop listing expired data and
-            // the owner recovers the metadata storage deposits.
+            // SF-139 opaque items index this anchor as batch `seq`, numbered
+            // contiguously from 0 (at most 16); they expire with its archive.
             let mut item = 0;
-            while (item < 16) {
-                let item_key = ItemKey { batch: anchor.seq, item };
-                if (df::exists(&writer.id, item_key)) {
-                    let _: DataItem = df::remove(&mut writer.id, item_key);
-                };
+            while (item < MAX_ANCHOR_ITEMS && df::exists(&writer.id, ItemKey { batch: anchor.seq, item })) {
+                let _: DataItem = df::remove(&mut writer.id, ItemKey { batch: anchor.seq, item });
                 item = item + 1;
             };
             let compact_key = CompactHeadKey { reserved: false };
@@ -484,7 +481,7 @@ module fleet_data::fleet_data {
         cap: &DeviceCap, storage: &FleetStorage, blob_object_id: ID,
         seq: u64, kind: u8, ciphertext_sha256: vector<u8>, items: vector<vector<u8>>,
         clock: &Clock, ctx: &mut TxContext) {
-        assert!(!items.is_empty() && items.length() <= 16, EBounds);
+        assert!(!items.is_empty() && items.length() <= MAX_ANCHOR_ITEMS, EBounds);
         let anchor_index = writer.anchor_count;
         anchor_impl(fleet, writer, budget, account, registry, cap, storage,
             blob_object_id, seq, kind, ciphertext_sha256, false, vector[], clock, ctx);

@@ -652,6 +652,27 @@ module fleet_data::fleet_data_tests {
         };
         destroy(system);ts::end(s);
     }
+    #[test]
+    fun prune_removes_the_anchor_opaque_items() {
+        let (mut s,mut system)=setup();
+        let blob=upload(&mut s,&mut system,123,true);
+        ts::next_tx(&mut s,DEVICE);
+        let fleet=ts::take_shared<FleetData>(&s);let mut writer=ts::take_shared<DeviceData>(&s);
+        let budget=ts::take_shared<FleetBudget>(&s);let account=ts::take_shared<GasAccount>(&s);
+        let registry=ts::take_shared<DeviceRegistry>(&s);let storage=ts::take_shared<FleetStorage>(&s);
+        let cap=ts::take_from_address<DeviceCap>(&s,DEVICE);let clock=clock_at(&mut s,DAY);
+        let item=ItemWire {sequence:1,stream:b"sensor",key:b"raw",content_type:b"application/octet-stream",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:3,size:3,sha256:zeros(32),identifier:b"data-00",ciphertext_size:100,ciphertext_sha256:zeros(32)};
+        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,7,0,zeros(32),vector[sui::bcs::to_bytes(&item),sui::bcs::to_bytes(&item)],&clock,ts::ctx(&mut s));
+        clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
+        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);
+        prune(&mut s, 5, vector[0]);
+        ts::next_tx(&mut s,OWNER);
+        let writer=ts::take_shared<DeviceData>(&s);
+        // Both item indexes go with the archive; the anchor count is kept.
+        assert!(!fleet_data::has_anchor(&writer,0) && fleet_data::anchor_count(&writer)==1,100);
+        assert!(!fleet_data::item_exists_for_testing(&writer,7,0) && !fleet_data::item_exists_for_testing(&writer,7,1),100);
+        ts::return_shared(writer); finish(s, system);
+    }
 
     #[test] fun opaque_items_share_one_certified_anchor() { opaque_items_reclaim(0) }
     #[test] fun prune_expired_opaque_batch_removes_all_items() { opaque_items_reclaim(5) }
