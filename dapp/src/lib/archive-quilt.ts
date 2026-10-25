@@ -36,7 +36,7 @@ export function readArchiveQuilt(bytes: Uint8Array): Map<string, Uint8Array> {
     return value;
   };
   const count = uleb();
-  if (count < 3 || count > 17) throw Error('Quilt item count bounds');
+  if (count < 2 || count > 17) throw Error('Quilt item count bounds');
   let start = Math.ceil((size + 5) / column);
   const result = new Map<string,Uint8Array>();
   for (let n = 0; n < count; n++) {

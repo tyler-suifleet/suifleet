@@ -2844,7 +2844,8 @@
         "A device-side API for components (IPC and CLI) to submit opaque data items with a stream or key name, content type and optional metadata; durable streams can be configured to flush to Walrus.",
         "Items are spooled durably, batched, Seal-encrypted and written to fleet storage with an on-chain index entry per item (device, stream, key, sequence, size, content SHA-256, batch reference), bounded by the fleet's budget and storage quotas.",
         "Per-item size limits and backpressure are explicit; large files are chunked; nothing is acknowledged or dropped before certified storage and its anchor are independently verified.",
-        "Data is opaque to SuiFleet: no schema is imposed, and authorized readers can retrieve and verify each item independently of its batch."
+        "Data is opaque to SuiFleet: no schema is imposed, and authorized readers can retrieve and verify each item independently of its batch.",
+        "Enforce authenticated per-device/per-stream Seal read grants without legacy fleet-wide or old-package bypass; SF-139 owns producer/contract/reader bindings and SF-140 consumes them in the UI. Reuse SF-121 tick/Pending/schema4 Quilt descriptors and preserve batching, raw bytes, durable recovery and verified-anchor-only retirement."
       ],
       "validation": "cargo tests and OTA simulator for intake, spooling, restart and quota limits; Move unit and upgrade tests for index changes; a localnet and bounded testnet round trip storing and retrieving mixed binary and text data."
     },

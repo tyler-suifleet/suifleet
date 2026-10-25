@@ -32,9 +32,14 @@ pub struct Config {
     /// Opt in only after upgrading fleet_data and storage to the stream API.
     #[serde(default)]
     pub stream_retention: bool,
+    #[serde(default)] pub opaque: bool,
+    #[serde(default)] pub walrus_streams: Vec<String>,
 }
 impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(!self.opaque || self.quilt, "opaque storage requires Quilt");
+        anyhow::ensure!(self.walrus_streams.len() <= 64 && (self.walrus_streams.is_empty() || self.opaque)
+            && self.walrus_streams.iter().all(|s|crate::streams::valid_name(s)), "invalid Walrus streams");
         for id in [&self.storage_package, &self.storage_type_origin, &self.system_id, &self.walrus_package, &self.key_server_package] { Address::from_str(id)?; }
         anyhow::ensure!(!self.key_servers.is_empty() && self.key_servers.len() < 255 && self.threshold > 0
             && self.threshold as usize <= self.key_servers.len() && self.key_servers.iter().all(|s| s.weight == 1), "invalid archive encryption providers/threshold (equal weights required)");
@@ -65,6 +70,8 @@ struct Pending {
     #[serde(default)] size: Option<u64>,
     /// Pin the registration API across restart/config changes.
     #[serde(default)] stream_retention: bool,
+    #[serde(default)] opaque_items: Vec<crate::opaque::Index>,
+    #[serde(default)] opaque_sources: Vec<(u64, String, u64)>,
     #[serde(default)] attempts: u32,
     #[serde(default)] created_ms: u64,
     #[serde(default)] retry_at_ms: u64,
@@ -72,21 +79,11 @@ struct Pending {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Certificate { pub signature: String, pub bitmap: String, pub message: String }
 #[derive(Default, Serialize, Deserialize)]
-struct Completed {
-    crash: String,
-    #[serde(default)]
-    request_seq: u64,
-    #[serde(default)]
-    shadows: String,
-    #[serde(default)]
-    seq: u64,
-    #[serde(default)]
-    registration: Option<String>,
-    #[serde(default)]
-    certification: Option<String>,
-    #[serde(default)]
-    anchor: Option<String>,
-}
+struct Completed { crash: String, #[serde(default)] request_seq: u64,
+    #[serde(default)] opaque: bool,
+    #[serde(default)] shadows: String,
+    #[serde(default)] seq: u64, #[serde(default)] registration: Option<String>,
+    #[serde(default)] certification: Option<String>, #[serde(default)] anchor: Option<String> }
 pub(crate) fn atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::{io::Write, os::unix::fs::OpenOptionsExt};
     let temporary = path.with_extension("tmp");
@@ -337,7 +334,9 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         schedule.fingerprint = fingerprint;
         schedule.wake();
     }
-    if schedule.empty && spool.pending()?.is_empty() && !dir.join("pending.json").try_exists()? {
+    // Opaque intake and stream writes do not populate the log spool. Keep
+    // checking their local queues when opaque exports are enabled.
+    if !config.opaque && schedule.empty && spool.pending()?.is_empty() && !dir.join("pending.json").try_exists()? {
         return Ok(());
     }
     if tokio::time::Instant::now() < schedule.next_due {
@@ -414,11 +413,17 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
                 line: r.line,
             }));
         }
-        if records.is_empty() && kind == 0 && !shadows_changed { schedule.empty = true; schedule.next_due = tokio::time::Instant::now(); return Ok(()); }
+        // Urgent diagnostics/crashes retain their log payload. Under continuous
+        // routine traffic alternate opaque and log batches instead of starving logs.
+        let opaque = if config.opaque && kind == 0 && !(completed.opaque && !records.is_empty()) {
+            crate::opaque::collect_streams(task, &config.walrus_streams)?;
+            crate::opaque::Queue::open(&task.state_dir)?.items().iter().take(16).cloned().collect::<Vec<_>>()
+        } else { vec![] };
+        if records.is_empty() && kind == 0 && !shadows_changed && opaque.is_empty() { schedule.empty = true; schedule.next_due = tokio::time::Instant::now(); return Ok(()); }
         if kind != 0 && records.len() < 4096 { records.push(Record { source: "daemon".into(), line: if diagnostics { "Owner/support diagnostic request observed" } else { "Supervised component crash observed" }.into() }); }
         if records.is_empty() { records.push(Record { source: "daemon".into(), line: "Shadow state snapshot".into() }); }
         let seq = writer.batch_seq.checked_add(1).filter(|n| *n <= 9_007_199_254_740_991).ok_or_else(|| anyhow::anyhow!("archive sequence exhausted"))?;
-        let previous_head = if config.compact_history {
+        let previous_head = if config.compact_history && opaque.is_empty() {
             Some(task.sui.compact_archive_head(&task.config).await?)
         } else { None };
         let archive = Archive { kind: "fleet-data".into(), chain_identifier: fleet.chain_identifier.clone(),
@@ -430,7 +435,37 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         let mut archive = archive;
         let mut items = Vec::new();
         let groups = quilt_record_groups(&archive.records);
-        if config.quilt && groups.len() >= 2 {
+        let mut opaque_items = Vec::new();
+        let mut opaque_sources = Vec::new();
+        let mut opaque_index_bytes=1usize;
+        if !opaque.is_empty() {
+            // Dedicated opaque batch: logs stay spooled for a later cadence.
+            logs.clear(); archive.records.clear(); archive.schema = 4;
+            for (n, item) in opaque.iter().enumerate() {
+                let message = crate::opaque::Message {kind:"fleet-opaque".into(),schema:1,
+                    chain_identifier:fleet.chain_identifier.clone(),registry:fleet.registry_id.to_string(),
+                    fleet_id:fleet.id.to_string(),device_id:task.device_id.clone(),signer:task.signer.address(),batch_sequence:seq,item:item.clone()};
+                message.validate()?;
+                let message = zeroize::Zeroizing::new(serde_json::to_vec(&message)?);
+                let signature = task.signer.sign_personal_message(&message)?;
+                let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(&telemetry::Envelope {message:STANDARD.encode(&message),signature:STANDARD.encode(signature)})?);
+                let mut id = fleet.id.inner().to_vec(); id.extend(fleet.key_epoch.to_le_bytes());
+                id.extend(Address::from_str(&task.device_id)?.inner()); id.extend(Sha256::digest(item.descriptor.stream.as_bytes()));
+                use rand::RngCore; let mut nonce=[0;16]; rand::rngs::OsRng.fill_bytes(&mut nonce);id.extend(nonce);
+                let aad = format!("suifleet/opaque/v1/{}/{}/{}/{}/{}",fleet.chain_identifier,fleet.id,Address::from_str(&task.device_id)?,seq,item.sequence).into_bytes();
+                let ciphertext=crate::seal::encrypt(*Address::from_str(&task.config.type_origin)?.inner(),id,&servers,config.threshold,aad,&plaintext)?;
+                let patch=crate::fleet_data::QuiltItem {identifier:format!("data-{n:02}"),size:ciphertext.len() as u64,sha256:hex::encode(Sha256::digest(&ciphertext))};
+                let index=crate::opaque::Index::new(item,&patch)?;index.validate()?;
+                // Keep the entire pure vector below the pinned transaction input bound.
+                let index_bytes=bcs::to_bytes(&index)?.len()+2;
+                if opaque_index_bytes+index_bytes > 8192 { break; }
+                opaque_index_bytes+=index_bytes;
+                atomic(&dir.join(format!("{}.bin",patch.identifier)),&ciphertext)?;
+                opaque_sources.extend(item.source_sequence.map(|source|(item.sequence,item.descriptor.stream.clone(),source)));
+                opaque_items.push(index);items.push(patch);
+            }
+            archive.items=Some(items.clone());
+        } else if config.quilt && groups.len() >= 2 {
             // Every patch is a complete, independently signed archive with the
             // same chain sequence. Only the manifest carries history/shadows.
             // The manifest's signed digest list prevents patch substitution.
@@ -451,13 +486,13 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
             blob_id: String::new(), root_hash: String::new(), ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
             registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: None, stream_retention: config.stream_retention,
-            attempts: 0, created_ms: telemetry::now_ms(), retry_at_ms: 0 };
+            opaque_items, opaque_sources, attempts: 0, created_ms: telemetry::now_ms(), retry_at_ms: 0 };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
     // Never regenerate ciphertext or purchase again after an uncertain submit.
     anyhow::ensure!(pending.size.is_none_or(|size| size > 0 && size <= crate::fleet_data::MAX_ARCHIVE as u64), "invalid pending archive size");
     anyhow::ensure!(Sha256::digest(std::fs::read(dir.join("ciphertext.bin"))?).as_slice() == pending.ciphertext_sha256, "pending ciphertext changed");
-    anyhow::ensure!(pending.items.is_empty() || (2..=16).contains(&pending.items.len()), "invalid pending Quilt item count");
+    anyhow::ensure!(pending.items.is_empty() || (1..=16).contains(&pending.items.len()), "invalid pending Quilt item count");
     let mut item_bytes = 0u64;
     for item in &pending.items {
         item.validate()?;
@@ -473,9 +508,18 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         } else {
             task.sui.verify_archive_anchor(&task.config, pending.anchor_index, pending.seq, &pending.ciphertext_sha256).await?;
         }
+        if !pending.opaque_items.is_empty() {
+            task.sui.verify_opaque_items(&task.config,pending.seq,pending.anchor_index,&pending.opaque_items).await?;
+            // Advance source checkpoints before queue retirement; retries are idempotent.
+            for (_,stream,source) in &pending.opaque_sources {
+                let store=task.services.lock().unwrap().health_sources().streams.ok_or_else(||anyhow::anyhow!("opaque source stream unavailable"))?;
+                store.lock().unwrap().export_ack(stream,*source,telemetry::now_ms())?;
+            }
+            crate::opaque::Queue::open(&task.state_dir)?.retire(&pending.opaque_items.iter().map(|i|i.sequence).collect::<Vec<_>>())?;
+        }
         for (seq,path) in spool.pending()? { if pending.logs.contains(&seq) { std::fs::remove_file(path)?; } }
         std::fs::File::open(dir.join("logs"))?.sync_all()?;
-        atomic(&dir.join("completed.json"), &serde_json::to_vec(&Completed { crash: pending.fingerprint, request_seq: pending.request_seq, shadows: pending.shadows, seq: pending.seq, registration: pending.registration, certification: pending.certification_digest, anchor: pending.anchor_digest })?)?;
+        atomic(&dir.join("completed.json"), &serde_json::to_vec(&Completed { opaque: !pending.opaque_items.is_empty(), crash: pending.fingerprint, request_seq: pending.request_seq, shadows: pending.shadows, seq: pending.seq, registration: pending.registration, certification: pending.certification_digest, anchor: pending.anchor_digest })?)?;
         for name in ["register.bcs", "certify.bcs", "anchor.bcs", "register.checkpoint", "certify.checkpoint", "anchor.checkpoint"] {
             match std::fs::remove_file(dir.join(name)) { Ok(()) => (), Err(e) if e.kind() == std::io::ErrorKind::NotFound => (), Err(e) => return Err(e.into()) }
         }
@@ -555,7 +599,9 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
     }
     if pending.anchor_digest.is_none() {
         task.before_write().await?;
-        pending.anchor_digest=Some(if let Some(previous) = &pending.previous_head {
+        pending.anchor_digest=Some(if !pending.opaque_items.is_empty() {
+            task.sui.anchor_opaque_items(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),&pending.opaque_items,&dir.join("anchor.bcs")).await?
+        } else if let Some(previous) = &pending.previous_head {
             let hash = if previous.is_empty() { vec![] } else { Sha256::digest(previous).to_vec() };
             task.sui.anchor_archive_compact(&task.config,&task.cap,blob,pending.seq,pending.kind,pending.ciphertext_sha256.clone(),hash,&dir.join("anchor.bcs")).await?
         } else {

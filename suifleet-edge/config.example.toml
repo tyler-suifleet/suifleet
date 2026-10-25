@@ -221,6 +221,9 @@ replay_history = false
 # key_server_package = "0x<Seal key server package>"
 # key_servers = [{ object_id = "0x<public key server object>", weight = 1 }]
 # threshold = 1
+# quilt = true
+# opaque = true
+# walrus_streams = ["sensor"] # declared walrus_export File/RejectNewData stream, no TTL
 # node = "/usr/bin/node"
 # codec = "/usr/lib/suifleet/walrus-codec/walrus-device-codec.cjs"
 # codec_sha256 = "<manifest.json files.walrus-device-codec.cjs.sha256>"
