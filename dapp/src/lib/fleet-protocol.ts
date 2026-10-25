@@ -41,6 +41,10 @@ export const device_group_DeviceGroupBcs = bcs.struct("DeviceGroup", { id: bcs.A
 export const device_group_DeviceRemovedFromGroupBcs = bcs.struct("DeviceRemovedFromGroup", { group_id: bcs.Address, device_id: bcs.Address });
 export const device_group_GroupCreatedBcs = bcs.struct("GroupCreated", { group_id: bcs.Address, name: bcs.string(), admin: bcs.Address });
 export const device_group_GroupDeletedBcs = bcs.struct("GroupDeleted", { group_id: bcs.Address, admin: bcs.Address });
+export const device_group_GroupIndexBcs = bcs.struct("GroupIndex", { members: bcs.u64() });
+export const device_group_GroupIndexedBcs = bcs.struct("GroupIndexed", { group_id: bcs.Address, moved: bcs.u64(), remaining: bcs.u64() });
+export const device_group_IndexKeyBcs = bcs.struct("IndexKey", { dummy_field: bcs.bool() });
+export const device_group_MemberKeyBcs = bcs.struct("MemberKey", { device_id: bcs.Address });
 export const device_registry_CustodyKeyBcs = bcs.struct("CustodyKey", { device_id: bcs.Address });
 export const device_registry_DeviceBcs = bcs.struct("Device", { id: bcs.Address, name: bcs.string(), device_address: bcs.Address, arch: bcs.string(), meta: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.string() })) }), registered_at: bcs.u64(), schema_version: bcs.u64() });
 export const device_registry_DeviceDeregisteredBcs = bcs.struct("DeviceDeregistered", { device_id: bcs.Address, owner: bcs.Address });
@@ -74,6 +78,12 @@ export const fleet_handover_HandoverBcs = bcs.struct("Handover", { id: bcs.Addre
 export const fleet_handover_ProgressBcs = bcs.struct("Progress", { handover_id: bcs.Address, object_id: bcs.Address, kind: bcs.u64() });
 export const fleet_handover_ProposedBcs = bcs.struct("Proposed", { handover_id: bcs.Address, source: bcs.Address, recipient: bcs.Address, objects: bcs.vector(bcs.Address), kinds: bcs.vector(bcs.u64()), expires_ms: bcs.u64() });
 export const fleet_handover_StateChangedBcs = bcs.struct("StateChanged", { handover_id: bcs.Address, state: bcs.u8() });
+export const fleet_inbox_AnnouncedBcs = bcs.struct("Announced", { target: bcs.Address, deployment_id: bcs.Address, seq: bcs.u64(), next_start_ms: bcs.u64() });
+export const fleet_inbox_HeadBcs = bcs.struct("Head", { seq: bcs.u64(), latest: bcs.option(bcs.Address), next_start_ms: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }) });
+export const fleet_inbox_DeviceInboxBcs = bcs.struct("DeviceInbox", { id: bcs.Address, device_id: bcs.Address, version: bcs.u64(), head: fleet_inbox_HeadBcs, groups: bcs.vector(bcs.Address) });
+export const fleet_inbox_HeadKeyBcs = bcs.struct("HeadKey", { dummy_field: bcs.bool() });
+export const fleet_inbox_InboxCreatedBcs = bcs.struct("InboxCreated", { inbox_id: bcs.Address, device_id: bcs.Address });
+export const fleet_inbox_InboxKeyBcs = bcs.struct("InboxKey", { device_id: bcs.Address });
 export const fleet_settings_SettingsBcs = bcs.struct("Settings", { version: bcs.u64(), check_interval_ms: bcs.u64(), rollout_check_interval_ms: bcs.u64(), health_interval_ms: bcs.u64(), archive_interval_ms: bcs.u64(), archive_retention_epochs: bcs.u32() });
 export const fleet_settings_FleetSettingsChangedBcs = bcs.struct("FleetSettingsChanged", { budget_id: bcs.Address, changed_by: bcs.Address, at_ms: bcs.u64(), previous: bcs.option(fleet_settings_SettingsBcs), settings: fleet_settings_SettingsBcs });
 export const fleet_settings_SettingsKeyBcs = bcs.struct("SettingsKey", { dummy_field: bcs.bool() });
@@ -127,6 +137,7 @@ export const calls = {
   deployment_manager_rollout_eligible: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_eligible`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   deployment_manager_rollout_policy: (tx: Transaction, packageId: string, a0: number | bigint | string, a1: number | bigint | string, a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string, a5: number | bigint | string, a6: number | bigint | string) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_policy`, arguments: [tx.pure.u64(a0), tx.pure.u64(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4), tx.pure.u64(a5), tx.pure.u64(a6)] }),
   deployment_manager_rollout_progress: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::rollout_progress`, arguments: [tx.object(a0)] }),
+  deployment_manager_scheduled_start_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::scheduled_start_ms`, arguments: [tx.object(a0)] }),
   deployment_manager_set_control: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number, a2: number | bigint | string, a3: number | bigint | string, a4: number | bigint | string, a5: number | bigint | string, a6: number | bigint | string) => tx.moveCall({ target: `${packageId}::deployment_manager::set_control`, arguments: [tx.object(a0), tx.pure.u8(a1), tx.pure.u64(a2), tx.pure.u64(a3), tx.pure.u64(a4), tx.pure.u64(a5), tx.pure.u64(a6)] }),
   deployment_manager_share_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::share_deployment`, arguments: [tx.object(a0)] }),
   deployment_manager_status_applied: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_applied`, arguments: [] }),
@@ -148,6 +159,9 @@ export const calls = {
   device_group_create_group: (tx: Transaction, packageId: string, a0: string, a1: string, a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::create_group`, arguments: [tx.pure.string(a0), tx.pure.string(a1), tx.object(a2)] }),
   device_group_delete_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::delete_group`, arguments: [tx.object(a0)] }),
   device_group_group_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::group_id`, arguments: [tx.object(a0)] }),
+  device_group_index_members: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number | bigint | string) => tx.moveCall({ target: `${packageId}::device_group::index_members`, arguments: [tx.object(a0), tx.pure.u64(a1)] }),
+  device_group_is_indexed: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::is_indexed`, arguments: [tx.object(a0)] }),
+  device_group_member_count: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::member_count`, arguments: [tx.object(a0)] }),
   device_group_name: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_group::name`, arguments: [tx.object(a0)] }),
   device_group_remove_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::device_group::remove_device`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
   device_registry_activate_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::activate_device`, arguments: [tx.object(a0), tx.object(a1)] }),
@@ -247,6 +261,24 @@ export const calls = {
   fleet_handover_propose: (tx: Transaction, packageId: string, a0: string, a1: string[], a2: (number | bigint | string)[], a3: number | bigint | string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::propose`, arguments: [tx.pure.address(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.u64()).serialize(a2)), tx.pure.u64(a3), tx.object(a4)] }),
   fleet_handover_revoke_role: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::revoke_role`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2), tx.object(a3)] }),
   fleet_handover_state: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_handover::state`, arguments: [tx.object(a0)] }),
+  fleet_inbox_add_member: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::add_member`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  fleet_inbox_announce_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::announce_device`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.object(a4)] }),
+  fleet_inbox_announce_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::announce_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  fleet_inbox_components: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::components`, arguments: [tx.object(a0)] }),
+  fleet_inbox_create_inbox: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::create_inbox`, arguments: [tx.object(a0), tx.object(a1)] }),
+  fleet_inbox_follow_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::follow_group`, arguments: [tx.object(a0), tx.object(a1)] }),
+  fleet_inbox_forget_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string) => tx.moveCall({ target: `${packageId}::fleet_inbox::forget_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.address(a3)] }),
+  fleet_inbox_group_head: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::group_head`, arguments: [tx.object(a0)] }),
+  fleet_inbox_inbox_address: (tx: Transaction, packageId: string, a0: string, a1: string) => tx.moveCall({ target: `${packageId}::fleet_inbox::inbox_address`, arguments: [tx.pure.address(a0), tx.pure.address(a1)] }),
+  fleet_inbox_inbox_device_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::inbox_device_id`, arguments: [tx.object(a0)] }),
+  fleet_inbox_inbox_exists: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string) => tx.moveCall({ target: `${packageId}::fleet_inbox::inbox_exists`, arguments: [tx.object(a0), tx.pure.address(a1)] }),
+  fleet_inbox_inbox_head: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::inbox_head`, arguments: [tx.object(a0)] }),
+  fleet_inbox_latest: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::latest`, arguments: [tx.object(a0)] }),
+  fleet_inbox_new_inbox: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::new_inbox`, arguments: [tx.object(a0), tx.object(a1)] }),
+  fleet_inbox_next_start_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::next_start_ms`, arguments: [tx.object(a0)] }),
+  fleet_inbox_remove_member: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::remove_member`, arguments: [tx.object(a0), tx.object(a1)] }),
+  fleet_inbox_seq: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::seq`, arguments: [tx.object(a0)] }),
+  fleet_inbox_share_inbox: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_inbox::share_inbox`, arguments: [tx.object(a0)] }),
   fleet_settings_archive_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::archive_interval_ms`, arguments: [tx.object(a0)] }),
   fleet_settings_archive_retention_epochs: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::archive_retention_epochs`, arguments: [tx.object(a0)] }),
   fleet_settings_check_interval_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::fleet_settings::check_interval_ms`, arguments: [tx.object(a0)] }),
@@ -326,6 +358,10 @@ export const TYPES = {
   device_group_DeviceRemovedFromGroup: "device_group::DeviceRemovedFromGroup",
   device_group_GroupCreated: "device_group::GroupCreated",
   device_group_GroupDeleted: "device_group::GroupDeleted",
+  device_group_GroupIndex: "device_group::GroupIndex",
+  device_group_GroupIndexed: "device_group::GroupIndexed",
+  device_group_IndexKey: "device_group::IndexKey",
+  device_group_MemberKey: "device_group::MemberKey",
   device_registry_CustodyKey: "device_registry::CustodyKey",
   device_registry_Device: "device_registry::Device",
   device_registry_DeviceDeregistered: "device_registry::DeviceDeregistered",
@@ -359,6 +395,12 @@ export const TYPES = {
   fleet_handover_Progress: "fleet_handover::Progress",
   fleet_handover_Proposed: "fleet_handover::Proposed",
   fleet_handover_StateChanged: "fleet_handover::StateChanged",
+  fleet_inbox_Announced: "fleet_inbox::Announced",
+  fleet_inbox_Head: "fleet_inbox::Head",
+  fleet_inbox_DeviceInbox: "fleet_inbox::DeviceInbox",
+  fleet_inbox_HeadKey: "fleet_inbox::HeadKey",
+  fleet_inbox_InboxCreated: "fleet_inbox::InboxCreated",
+  fleet_inbox_InboxKey: "fleet_inbox::InboxKey",
   fleet_settings_Settings: "fleet_settings::Settings",
   fleet_settings_FleetSettingsChanged: "fleet_settings::FleetSettingsChanged",
   fleet_settings_SettingsKey: "fleet_settings::SettingsKey",

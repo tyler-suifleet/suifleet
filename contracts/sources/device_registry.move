@@ -303,6 +303,12 @@ module sui_edge::device_registry {
     }
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
 
+    /// A cap the registry's identity does not name.
+    #[test_only]
+    public fun owner_cap_for_testing(device_id: ID, ctx: &mut TxContext): DeviceOwnerCap {
+        DeviceOwnerCap { id: object::new(ctx), device_id }
+    }
+
     /// For package modules that keep state on the registry (`roles`).
     public(package) fun uid(registry: &DeviceRegistry): &UID { &registry.id }
     public(package) fun uid_mut(registry: &mut DeviceRegistry): &mut UID { &mut registry.id }

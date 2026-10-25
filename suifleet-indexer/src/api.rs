@@ -374,12 +374,14 @@ async fn transaction(
     let ids = txbuild::devices_to_check(&operation, &request);
     let read = crate::devices::read(&state.chain, &state.types, &state.registry, &ids).await?;
     let live: std::collections::BTreeMap<_, _> = ids.into_iter().zip(read).collect();
+    let inboxes = crate::devices::inboxes(&state.chain, &state.types, &state.registry,
+        &txbuild::inbox_devices(&operation, &request)).await?;
     let readers = state.readers.clone();
     let package = state.call_package.clone();
     let registry = state.registry.clone();
     let operation_name = operation.clone();
     let planned = blocking(&readers, move |db| {
-        txbuild::plan(db, &package, &registry, &operation_name, &request, &live)
+        txbuild::plan(db, &package, &registry, &operation_name, &request, &live, &inboxes)
     })
     .await?;
     let built = txbuild::build(&state.chain, planned).await?;
