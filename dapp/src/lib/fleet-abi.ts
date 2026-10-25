@@ -307,6 +307,19 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "advance_rollout_onchain": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "artifact_sha256": {
         "visibility": "Public",
         "entry": false,
@@ -701,6 +714,20 @@ export const MOVE_ABI = {
         "returns": [
           "&std::string::String"
         ]
+      },
+      "report_rollout_health": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "bool",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "report_status": {
         "visibility": "Public",
@@ -1409,6 +1436,46 @@ export const MOVE_ABI = {
           [
             "admitted",
             "vector<sui::object::ID>"
+          ]
+        ]
+      },
+      "RolloutHealth": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "devices",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "healthy",
+            "vector<bool>"
+          ],
+          [
+            "at_ms",
+            "vector<u64>"
+          ],
+          [
+            "signers",
+            "vector<address>"
+          ]
+        ]
+      },
+      "RolloutHealthKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
           ]
         ]
       },

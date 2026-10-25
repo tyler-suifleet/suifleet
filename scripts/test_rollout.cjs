@@ -11,18 +11,6 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   const {normalizeSuiAddress:n} = appRequire('@mysten/sui/utils');
   const state = {policy:{concurrency:'1',rate_count:'1',rate_window_ms:'1000',bake_ms:'100',minimum_samples:'1',failure_bps:'5000',offline_timeout_ms:'2000'},members:[n('0x1'),n('0x2')],cohorts:['0','1'],admitted_at:['100','0'],outcomes:[1,0],skipped:[false,false],cohort:'0',state:0,bake_started_ms:'0',progress_ms:'100',revision:'1'};
   const target = {componentName:'app',version:'1'};
-  const health = {[n('0x1')]:{status:'healthy',observedMs:150,components:[{name:'app',version:'1',deployment_id:'0x42',installed:true}]}};
-  assert.deepEqual(r.rolloutHealth(state,'0x42',target,health,200),{online:[n('0x1')],healthy:[n('0x1')],unhealthy:[]});
-  for (const change of [{status:'unverified'},{status:'offline'},{observedMs:99},{observedMs:201},{observedMs:0}]) {
-    assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],...change}},200).healthy.length,0);
-  }
-  assert.equal(r.rolloutHealth(state,'0x43',target,health,200).healthy.length,0);
-  for (const component of [
-    {name:'dependency',version:'1',deployment_id:'0x42',installed:true},
-    {name:'app',version:'2',deployment_id:'0x42',installed:true},
-    {name:'app',version:'1',deployment_id:'0x42',installed:false},
-  ]) assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],components:[component]}},200).healthy.length,0);
-  assert.equal(r.rolloutHealth(state,'0x42',target,{[n('0x1')]:{...health[n('0x1')],components:[{name:'dependency',version:'1',deployment_id:'0x42',installed:true},...health[n('0x1')].components]}},200).healthy.length,1);
   const record={id:n('0x42'),creator:n('0xad'),component_name:'app',version:'1',recipe_blob_id:'blob',artifact_sha256:'a'.repeat(64),created_at:'1',schema_version:'3'};
   const object={type:`${m.type_origins['deployment_manager::DeploymentRecord']}::deployment_manager::DeploymentRecord`,content:p.deployment_manager_DeploymentRecordBcs.serialize(record).toBytes()};
   assert.deepEqual(await r.readRolloutTarget({getObject:async()=>({object})},'0x42','0xad'),target);
@@ -33,5 +21,53 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   assert.deepEqual(await r.readRollout({getDynamicField:async args=>{key=args.name.type;return result;}},'0x42'),state);
   assert.equal(key,`${m.type_origins['deployment_manager::RolloutKey']}::deployment_manager::RolloutKey`);
   await assert.rejects(r.readRollout({getDynamicField:async()=>{throw Error('offline');}},'0x42'),/offline/);
-  console.log('PASS: rollout encoders, bounds, duplicate cohorts, mixed-origin BCS, health freshness/deployment binding and fail-closed reads');
+  const client = {getObject:async()=>({object}),getDynamicField:async()=>result};
+  const advance = await r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x1']);
+  const commands = advance.getData().commands;
+  assert.deepEqual(commands.map(c=>c.MoveCall.function), ['advance_rollout_onchain']);
+  assert.equal(commands[0].MoveCall.arguments.length, 4);
+  const { bcs } = appRequire('@mysten/sui/bcs');
+  const candidatesOf = tx => {
+    const data = tx.getData();
+    const arg = data.commands[0].MoveCall.arguments[2];
+    return bcs.vector(bcs.Address).parse(Buffer.from(data.inputs[arg.Input].Pure.bytes, 'base64'));
+  };
+  assert.deepEqual(candidatesOf(advance), [n('0x1')]); // Offline 0x2 is never admitted.
+  assert.deepEqual(candidatesOf(await r.buildAdvanceRolloutTx(client,'0x42','0xad')), []);
+  const skipOffline = r.buildRolloutControlTx('0x42', 0, ['0x2'], 'skip offline canary');
+  assert.equal(skipOffline.getData().commands[0].MoveCall.function, 'control_rollout');
+  await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x3']), /rollout members/);
+  await assert.rejects(r.buildAdvanceRolloutTx(client,'0x42','0xad',['0x1','0x01']), /distinct/);
+  await assert.rejects(r.buildAdvanceRolloutTx({...client,getDynamicField:async()=>{throw Error('chain offline');}},'0x42','0xad'),/chain offline/);
+  assert.equal(load('lib/deployment-manifest.ts').moveType('deployment_manager::RolloutHealthKey'), `${m.type_origins['deployment_manager::RolloutHealthKey']}::deployment_manager::RolloutHealthKey`);
+  const legacy = structuredClone(m);
+  delete legacy.type_origins['deployment_manager::RolloutHealthKey'];
+  delete legacy.type_origins['deployment_manager::RolloutHealth'];
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(legacy);
+  const legacyRollout = loader()('lib/rollout.ts');
+  legacyRollout.buildRolloutTx(input); // Existing manifests retain existing APIs.
+  await assert.rejects(legacyRollout.buildAdvanceRolloutTx(client,'0x42','0xad'), /upgraded package/);
+  legacy.type_origins['deployment_manager::RolloutHealthKey'] = m.call_package_id;
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(legacy);
+  assert.throws(()=>loader()('lib/rollout.ts'), /partial rollout health/);
+  const shardedManifest = structuredClone(m);
+  for (const name of require('../interfaces/fleet-v1.json').optional_type_origins.receipt_shards) shardedManifest.type_origins[name] = n('0x99');
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(shardedManifest);
+  const sr = loader()('lib/rollout.ts');
+  const roots = Array.from({length:16}, (_, i) => n('0x'+(256+i).toString(16)));
+  const directory = {roots, original_schema:'3', migrated:'16', ready:true, retiring:false, remaining:'16'};
+  const shardClient = {
+    getObject: async () => ({object:{...object,content:p.deployment_manager_DeploymentRecordBcs.serialize({...record,schema_version:'4'}).toBytes()}}),
+    getDynamicField: async ({name}) => name.type.endsWith('::RolloutKey') ? result : {dynamicField:{value:{
+      type:`${n('0x99')}::deployment_manager::ReceiptDirectory`, bcs:p.deployment_manager_ReceiptDirectoryBcs.serialize(directory).toBytes()}}}
+  };
+  assert.deepEqual(sr.buildRolloutTx(input).getData().commands.map(c=>c.MoveCall.function), ['rollout_policy','new_rollout_verified','begin_sharded_receipts','share_deployment']);
+  const synced = (await sr.buildAdvanceRolloutTx(shardClient,'0x42','0xad',['0x1'])).getData().commands;
+  assert.deepEqual(synced.map(c=>c.MoveCall.function), ['sync_rollout_receipts','sync_rollout_receipts','advance_rollout_onchain']);
+  for (const state of [{ready:false}, {retiring:true}]) {
+    Object.assign(directory,state);
+    await assert.rejects(sr.buildAdvanceRolloutTx(shardClient,'0x42','0xad'), /migration or retirement/);
+    Object.assign(directory,{ready:true,retiring:false});
+  }
+  console.log('PASS: rollout encoders, policy bounds, mixed-origin BCS, serverless on-chain advance, creator/type binding and fail-closed reads');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -85,3 +85,8 @@ barrier, with the original payload schema stored in the directory. Legacy v2
 receipt signatures/layouts remain compatible; v3 uses separate immutable-deployment
 report calls and bounded shard-aware getters. See [sharded receipts](SHARDED_RECEIPTS.md)
 for migration, early-package deletion protection, rollout settlement and cleanup.
+SF-138 adds the all-or-none optional `rollout_health` origin group for
+`deployment_manager::RolloutHealthKey` and `RolloutHealth`. Historical manifests
+and their recovery receipts remain valid without it. The new staged-rollout gate
+requires an upgraded package and regenerated manifest containing the group; it
+never falls back to HTTP or the legacy creator-attested gate.
