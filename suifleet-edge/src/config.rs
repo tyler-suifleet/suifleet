@@ -437,6 +437,7 @@ impl DeploymentManifest {
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
             ("fleet inbox", crate::protocol::INBOX_TYPES),
+            ("rollout health", crate::protocol::ROLLOUT_HEALTH_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
@@ -480,6 +481,7 @@ impl DeploymentManifest {
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
             .chain(crate::protocol::INBOX_TYPES)
+            .chain(crate::protocol::ROLLOUT_HEALTH_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
@@ -1088,6 +1090,16 @@ mod tests {
         }
         assert!(toml::from_str::<ShadowsConfig>("thing_name = \"d\"\nunknown = 1").is_err());
     }
+    #[test]
+    fn rollout_health_origins_are_optional_but_all_or_none() {
+        let mut manifest = fixture();
+        manifest.validate().unwrap();
+        manifest.type_origins.remove(crate::protocol::ROLLOUT_HEALTH_TYPES[0]);
+        assert!(manifest.validate().is_err());
+        manifest.type_origins.remove(crate::protocol::ROLLOUT_HEALTH_TYPES[1]);
+        manifest.validate().unwrap();
+    }
+
     #[test]
     fn mixed_origins_and_compatibility() {
         let manifest = fixture();

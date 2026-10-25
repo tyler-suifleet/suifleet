@@ -419,7 +419,7 @@ impl proto::ledger_service_server::LedgerService for Shim {
             if result.is_null(){return Err(Status::not_found("not executed"));}
             let mut status=proto::ExecutionStatus::default();status.success=Some(result["effects"]["status"]["status"]=="success");
             let mut effects=proto::TransactionEffects::default();effects.status=Some(status);
-            let mut tx=proto::ExecutedTransaction::default();tx.digest=Some(digest);tx.effects=Some(effects);tx.checkpoint=Some(0);
+            let mut tx=proto::ExecutedTransaction::default();tx.digest=Some(digest);tx.effects=Some(effects);tx.checkpoint=if result.get("checkpoint").is_some_and(Value::is_null) { None } else { Some(result["checkpoint"].as_u64().unwrap_or(0)) };
             let mut response=proto::GetTransactionResponse::default();response.transaction=Some(tx);return Ok(Response::new(response));
         }
         let index: u64 = digest

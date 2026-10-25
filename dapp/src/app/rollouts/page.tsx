@@ -13,12 +13,13 @@ import type { Transaction } from "@mysten/sui/transactions";
 
 const defaults: RolloutInput = { component: "", version: "", recipe: "", artifactSha256: "", recipeSha256: "",
   cohorts: [], concurrency: 1, rateCount: 1, rateWindowMs: 60000, bakeMs: 300000,
-  minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 600000 };
+  minimumSamples: 1, failureBps: 1000, offlineTimeoutMs: 3600000 };
 export default function RolloutsPage() {
   const client = useCurrentClient(); const account = useCurrentAccount();
   const { data: deployments = [] } = useDeployments();
   const [input, setInput] = useState(defaults); const [cohorts, setCohorts] = useState("");
   const [selected, setSelected] = useState(""); const [reason, setReason] = useState(""); const [skip, setSkip] = useState("");
+  const [candidates, setCandidates] = useState("");
   const [error, setError] = useState(""); const [preparing, setPreparing] = useState(false);
   const { mutateAsync, isPending } = useFleetTransaction();
   const { data: rollout, refetch, error: readError } = useQuery({ queryKey: ["rollout", account?.address, selected],
@@ -32,8 +33,8 @@ export default function RolloutsPage() {
   }
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Canary cohorts, bounded admission and audited health gates" />
-    <p>Keep this page available and advance after fresh telemetry arrives. Coordinator state lives on chain and survives browser restarts. No background service submits transactions. Health is verified directly from Sui.</p>
-    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Health is sampled when you advance, with a fresh signed report of this deployment installed.</p>
+    <p>Advance to admit the first cohort. After devices publish their signed post-apply health on chain, advance again to evaluate the gate. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
+    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
       <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
@@ -52,7 +53,9 @@ export default function RolloutsPage() {
     {rollout && <div className="space-y-3 border p-4">
       <p role="status">{["Active", "Paused", "Aborted permanently", "Complete"][rollout.state]} · cohort {Number(rollout.cohort) + 1} · decision {rollout.revision}</p>
       <RolloutDetail id={selected} rollout={rollout} />
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address))}>Verify current health and advance</button>
+      <label className="block">Admission candidate IDs<input className="border ml-2" value={candidates} onChange={e => setCandidates(e.target.value)} /></label>
+      <p>Choose reachable members to admit. Leave blank to evaluate health without new grants. Omitted offline members remain eligible for audited skips; admitted members retain capacity until they report.</p>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean)))}>Verify on-chain health and advance</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
       {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason))}>{label}</button>)}

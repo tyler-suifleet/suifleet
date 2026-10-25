@@ -89,3 +89,9 @@ originate in the introducing upgrade, so older packages cannot touch them;
 (`Head.latest`). Inbox addresses are `sui::derived_object` IDs under the registry,
 derived identically by Move, the dApp, the daemon and the indexer. See
 [DEVICE_INBOX.md](DEVICE_INBOX.md).
+
+SF-138 adds the all-or-none optional `rollout_health` origin group for
+`deployment_manager::RolloutHealthKey` and `RolloutHealth`. Historical manifests
+and their recovery receipts remain valid without it. The new staged-rollout gate
+requires an upgraded package and regenerated manifest containing the group; it
+never falls back to HTTP or the legacy creator-attested gate.
