@@ -326,3 +326,41 @@ watch hosted CI. Fresh exact-head/base checks and independent review remain
 required. Physical, mainnet, production-provider and manual real-wallet acceptance
 remains unrun in #32/#159. This diagnosis and regression do not constitute a fix
 of the external service or merge approval.
+
+### Publisher recovery integration (2026-10-24)
+
+Integrated main `3b7f364` into the SF-139 owner branch. Main includes the
+independently reviewed SF-146 fallback `432fa73` as `c6a3c47` and wallet
+publisher selection as `aea8038` (the implementation also supplied in
+`68942fa`). No duplicate cherry-pick or change to the SF-146 worktree was
+needed. Shared production harness files match main; opaque-data application,
+SDK and scoped-decryption interfaces are unchanged. The merge resolves the
+SF-139 persistent-500 regression to exhaust all publishers and bounded passes
+without returning a blob ID, instead of expecting single-publisher retries.
+
+Fresh scoped checks after integration:
+
+- `python3 -m unittest discover -s scripts/tests -p test_live_common.py`:
+  38 passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  80 tests OK, one skipped.
+- `test_live_fleet_data.py` and `test_opaque_sdk.py` through the same unittest
+  discovery command: one test each, passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  39 tests OK.
+- `python3 -m py_compile scripts/live_common.py scripts/live_wallet_gate.py`
+  and `git diff --check origin/main HEAD`: passed.
+- Fresh `Walrus('testnet').working_publisher()` probe: Mysten returned
+  HTTP 500, "could not find WAL coins with sufficient balance"; the pinned
+  `https://publisher.walrus-01.tududes.com` stored the fresh probe, whose bytes
+  were independently read back through Mysten's aggregator. Publishers paid;
+  no wallet, Sui transaction, funding, shared lease or run allowance was used.
+  This is publisher-selection evidence, not full wallet/feature acceptance.
+
+Existing strict spend/uncertainty accounting, certification, anchor/effects
+verification and read-back remain enforced. No new full chain, Rust, Move,
+OTA or frontend build run is claimed for this harness-only resolution.
+Exact-head/current-base hosted CI, automatic testnet (including the shared
+wallet fixture) and fresh independent review remain required after push.
+Physical acceptance (#32) and final provider/manual-wallet/mainnet acceptance
+(#159) remain deferred and unrun. No merge approval is claimed.
