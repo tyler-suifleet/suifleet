@@ -146,3 +146,89 @@ devices and Mainnet remain unrun. They are tracked in
 [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). The browser
 test uses a fixture wallet, not a manual wallet session.
+
+## Device data browser (SF-140)
+
+The **Data** navigation entry opens `/data/`. Its fleet-wide generic-data browser
+uses SF139's immutable `ItemKey` index and reviewed `opaque-data.ts` reader.
+Existing logs, diagnostics and shadow documents remain in the per-device archive
+section underneath, with their existing fleet-wide owner/support policy. Scoped
+sharing does **not** retroactively make those archives private per device/stream.
+
+Choose **Browse fleet data**, then **Load next metadata page**. Each action either
+discovers at most 100 fleet device-index fields or scans at most 32 fields for one
+device (including legacy/non-item fields), with bounded item/anchor verification.
+Devices rotate between pages; a failed device remains pending without preventing
+the next device's read. This is incremental discovery, not a background fleet crawl.
+The visit holds at most 256 devices and 512 chunks; it stops explicitly at these
+limits. Filters apply only to loaded metadata: device, current wallet-visible
+group membership, exact stream, key/content-type substring, inclusion-time range
+and literal metadata search. Missing group reads are unavailable, not evidence
+that a device never belonged to a group. Date inputs use the browser's local time;
+item times are chain inclusion times, not device sampling times. Reload restarts
+the visit; missing/unpublished history is never invented.
+
+Select an item for device/group/stream details, public custom metadata, upload
+geometry and its indexed plaintext SHA-256. Metadata, sizes and unsalted hashes
+are public and permit offline guessing of predictable content. The UI escapes all
+metadata and text; it never renders downloaded HTML. **Decrypt and verify chunk**
+uses a signed five-minute Seal session and fresh deployment/account/network
+checks. Generic readers use the scoped reader policy; a legacy support grant alone
+does not authorize scoped data. Owners use their current budget capability.
+`fetchDataItem` authenticates ciphertext, scope, AAD, device signature, descriptor,
+raw-byte digest and current availability/index before returning original verified
+buffers. No unverified copies enter assembly. **Verify complete upload** requires
+all chunks for the same device/stream/upload to have been loaded; the helper
+rejects missing, duplicate, mixed or altered chunks. Downloads are exact binary
+bytes; complete-upload downloads are labelled separately from chunk downloads.
+Text/JSON previews are at most 32 KiB and require valid UTF-8 (and valid JSON for
+JSON content types). Binary/oversize content remains downloadable without preview.
+
+The owner's **Scoped sharing** controls grant or revoke an exact stream, or all
+streams on the selected device. `setReadGrant` supplies the reviewed transaction;
+`useFleetTransaction` verifies wallet network/account and confirmed successful
+execution effects. Current authority is checked again when submitting, rather
+than trusting a previously displayed owner role. Revocation cannot recall
+plaintext or keys already obtained. Epoch rotation denies older keys, including
+owner reads; device revocation and storage availability limits still apply.
+
+**Export to your storage** sends verified chunks directly from this browser by
+HTTPS PUT to a customer-supplied presigned S3-compatible or HTTP URL. A single
+chunk can use an exact presigned URL. A filtered set (at most 16 chunks / 64 MiB)
+requires a `{name}` URL template, giving every device/batch/item a distinct path;
+the customer must provide a destination authorized for those paths. Configure
+CORS and content-type signing accordingly. Optional bearer credentials and signed
+URLs exist only in component memory; clearing credentials, unmounting, account or
+network changes discard them. Requests omit cookies/referrers, reject redirects,
+and have a 60-second deadline; scope changes abort an active export. A failed set
+may have uploaded earlier chunks; no atomic destination transaction is promised.
+Every exported chunk is freshly fetched/verified. Complete upload assembly is a
+separate download action; exports preserve chunk boundaries.
+
+Decrypted buffers are wiped on discard, account/network/session change and
+unmount, including reads that complete under a discarded scope. Parsed strings
+and copies held by the browser/download destination are subject to garbage
+collection; this is not a promise of complete memory erasure or plaintext recall.
+No application server, indexer or persistent browser credential/plaintext cache is
+introduced. Public fullnodes, Walrus and configured Seal services remain required.
+
+Verification commands (locked frontend dependencies required):
+
+```bash
+node scripts/test_data_browser.cjs
+CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell node scripts/test_data_browser_browser.cjs
+make dapp-typecheck
+make dapp-build
+```
+
+The new unit/browser tests also run in `make test-manifest`. Chromium runs the
+actual Data component with SDK-encrypted/device-signed fixtures, independent
+AES-GCM opening and the real scope/signature/digest verifier. Metadata pagination,
+provider authorization and transaction execution are fixture boundaries; grant
+tests construct real PTBs but do not submit chain transactions. Browser requests
+are intercepted; the fixture starts no HTTP server or listening port. These
+checks do not establish production providers or real extension-wallet acceptance.
+SF139 must merge before SF140 integration; current-head/base CI, automatic testnet
+and fresh independent source review remain gates. Final manual-wallet/provider,
+physical and mainnet acceptance remains unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
