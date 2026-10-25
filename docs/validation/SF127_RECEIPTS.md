@@ -424,3 +424,126 @@ unrun in #32 and #159. Coordinator-only integration and all software/security ga
 remain in force.
 
 Full post-merge coordinator regression: `python3 -m unittest discover -s tools/pr-coordinator/tests` — 391 tests passed in 122.116 seconds. `git diff --check` passed.
+
+### Current-base rollout-health integration (2026-10-25)
+
+The feedback snapshot has no outstanding actionable source finding, but requires
+base `40d104f6c2e6ccf1c4ce8aa6297ca8ad9b89911d` (SF-138 on-chain rollout health).
+The merge preserves both optional introduction-origin groups and both signer
+negative suites. The wallet settles authoritative shard outcomes before calling
+`advance_rollout_onchain`; it never substitutes creator/HTTP health. The daemon
+resolves the original payload schema from the receipt directory before sending
+post-apply health, rather than silently skipping inline-schema-4 rollouts.
+
+Three added Move cases exercise sharded healthy completion, degraded abort and
+revoked-identity rejection after receipt settlement, including bounded cleanup.
+The frontend regression checks automatic sharding, settlement-before-advance and
+migration/retirement refusal. The actual-daemon/indexer localnet probe now also
+requires a schema-4 rollout receipt, explicit settlement, a real device health
+retry and durable health completion. A Failed missing-recipe result must produce
+an authenticated unhealthy sample; this does not claim successful installation.
+
+Verification uses the pinned `suifleet-dev:sf037` compiler (1.81.1), Rust 1.94.0
+with locked dependencies, and network-none disposable local chains with temporary
+identities. No shared/public wallet was mutated. Hosted exact-head/current-base
+CI and automatic testnet remain pending/unassessed; this worker does not poll
+them. Fresh independent review is required before coordinator integration.
+
+Local checks on the merged runtime and generated interfaces:
+
+- `sui move test --path contracts`: 215 passed, including all three combined
+  sharded rollout-health cases.
+- `python3 scripts/check_move_security.py`: strict compiler/linter baselines and
+  deliberate bypass negatives passed; package suites 215/215, 61/61 and 22/22.
+- `make check-interfaces`: compiled ABI, generated clients, ten ABI/stale-file
+  negatives, independent wire vectors and frontend recipe/catalog/control/
+  rollout/shard regressions passed.
+- `cargo +1.94.0 test --locked --manifest-path suifleet-edge/Cargo.toml`: 437
+  passed, four existing OCI cases ignored; `--features pkcs11`: 439 passed with
+  the same four ignored cases. Binaries/examples rebuilt with locked dependencies.
+- Indexer locked tests: 47 passed on retry; initial run had one timestamp-order
+  assertion failure in `telemetry_routes_authenticate_by_signature_and_token`
+  (`server_time_ms >= now`). No indexer source was changed to hide it. The actual
+  indexer binary was rebuilt for the client probe.
+- dApp `pnpm typecheck && pnpm build` in the pinned dev image: passed.
+- Host offline regressions: live-common 45 passed; testnet 117 passed with one
+  installed-toolchain skip; manifest 18 passed; authenticated Node cache checks
+  passed. Setup attempts to generate interfaces on the host (no `sui`) and run
+  the container OTA target without its Rust registry cache failed before their
+  intended checks; the successful commands use the configured pinned toolchain.
+- `python3 scripts/test_protocol_localnet.py --receipt-shards`: passed against
+  current base `40d104f6c2e6ccf1c4ce8aa6297ca8ad9b89911d`, preserving 70 v2 receipts,
+  exercising real old-package attacks and complete cleanup, and populating
+  1,000 receipts. Maximum single-report gross 10,595,200 MIST is below the
+  60,000,000-MIST float. An earlier run also passed against base `58fce5b`;
+  the versioned JSON records the current-base run.
+
+The client fixture now waits for `discovery_cursor`, since `initialized` is
+persisted before baseline/fence setup finishes. Two runs using the earlier
+readiness signal timed out with no discovered deployment; one earlier run
+completed the full sharded health path. The final frozen-source evidence below uses
+the strengthened readiness fixture, including independent health effects.
+The local security fixture explicitly uses the same 700,000,000-MIST ceiling as
+`ci_testnet_wallet.py` for upgrade-security. Its previous default 600,000,000-MIST
+attempt stopped conservatively at 598,394,064 MIST before cleanup. Neither the
+live helper's default nor public CI ceilings, accounting or uncertainty handling
+was changed. Disposable localnet funding is not public spending evidence.
+
+The frozen security probe passed the complete `--receipt-security` path using
+that 700,000,000-MIST local ceiling: real compatible upgrade, old-package and
+impersonation attacks, populated v2 migration, daemon Applied reporting, durable
+v3 retry without updater replay, revocation refusal and bounded cleanup.
+Its 41 transactions used 599,496,132 MIST of non-replenishing allowance and
+0.5054 SUI net; see `sf127-upgrade-security-localnet.json`. The lower final usage
+does not invalidate the prior stop: the ledger must reserve the full next budget
+before submission, not assume its eventual smaller gas cost.
+
+The final `--receipt-clients` run passed on the frozen strengthened fixture:
+actual old-package deletion rejection, ordinary and schema-2 catalog v3 reports,
+schema-4 rollout receipt settlement, device health retry and durable completion,
+independently read successful health execution effects, production indexer
+receipt/binding reads and complete cleanup. `sf127-clients-localnet.json` includes
+the signed sample and its independently verified transaction digest. The probe
+retains the historical pre-identity base intentionally; the separate 1,000-target
+probe above verifies the current-base upgrade pair.
+
+OTA execution context matters: the host `make test-ota` passed its earlier cases
+then stopped because the non-root supervisor scanner could not inspect
+`/proc/1/cwd`. In a disposable root, network-none container, `make test-ota`
+rebuilt the debug binaries/examples and passed every command from the fixture
+signer through `test_logs.py` (including supervision, configuration, daemon
+handoff, desired state, handover, controls and telemetry). It then stopped at the
+CloudWatch adapter's deliberate refusal to run as root. No guard was weakened.
+The remaining exact target commands, from `test_cloudwatch_logs.py` through all
+four `test_fleet_data_ota.py` modes, run as the normal user in a disposable
+network-none container with `set -eu`. This is split-context verification of the
+target recipe, not a claim that a single `make test-ota` invocation passed.
+
+Main subsequently advanced to `3c6625c33b238914a2b22d4b7c1a3dd1a69aff27` with
+coordinator repair-dependency logic, tests and tracking only; it was merged in
+`51bf2dcb`. `git diff --quiet 40d104f origin/main -- contracts suifleet-edge
+suifleet-indexer dapp interfaces scripts` confirmed the entire application,
+contract and OTA-harness source is unchanged between those bases. The versioned
+current-base 1,000-target receipt therefore tests identical base bytecode; no
+identical package needs to be republished. Coordinator regressions cover the
+incoming coordinator delta separately.
+
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+tools/pr-coordinator/tests` passed all 396 tests in 78.388 seconds on the combined
+`3c6625c3` base, using offline temporary fixtures/databases and real-process
+regressions. No installed coordinator service or production database was changed.
+
+The normal-user, network-none OTA tail exited 0 with `set -eu`: CloudWatch,
+console, three-daemon rollout health retries, cadence/fallback, budget, fleet
+settings, recovery and all four fleet-data modes (normal, idle reads, compact
+history and compact history with Quilt) passed. Combined with the root prefix,
+every `test-ota` recipe command was verified successfully in its required user
+context. No successful single-invocation full-target result is claimed.
+
+Final limits: the 120,000 receipt target is a bounded-storage design, not a load
+result. V3 status reports use independent roots, while staged-rollout health
+still mutates the bounded coordinator and keeps the 512-member rollout limit.
+No public-network writes or hardware operations occurred. Hosted CI/automatic
+testnet and fresh independent exact-head/current-base review remain required
+coordinator gates. Physical acceptance stays unrun in #32; mainnet and final
+production-provider/manual-wallet acceptance stay unrun in #159.

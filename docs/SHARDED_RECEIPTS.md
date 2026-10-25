@@ -106,13 +106,20 @@ promoting a copied receipt into a future grant would bypass that admission gate.
 Only a fresh admitted v3 report marks rollout-settlement provenance. Existing
 coordinator outcomes, including sticky failures, remain intact during migration.
 
-Reports never mutate a rollout coordinator. `sync_rollout_receipts` copies proven
+V3 status reports never mutate a rollout coordinator. `sync_rollout_receipts` copies proven
 shard outcomes in chunks of at most 64 devices, retaining sticky failures; the
-active dApp appends this before `advance_rollout`. Rollout progress can therefore
-show an inflight grant between a report and its next settlement. A report still
+active dApp appends this before `advance_rollout_onchain`. The gate uses device-signed
+on-chain health and requires the optional rollout-health introduction origins.
+The daemon resolves schema 4 through the directory before sending health. Health
+requires a settled outcome, so a report awaiting settlement retains its durable
+health retry; the next operator advance settles the receipt, and a subsequent
+advance can consume the device health sample after that retry. Rollout progress
+can therefore show an inflight grant between a report and its next settlement. A report still
 requires an admitted, non-skipped rollout member. No receipt or health attestation
 bypasses admission, failure thresholds, pause/abort or the existing 512-member
-rollout snapshot limit.
+rollout snapshot limit. Device-signed rollout health still mutates the coordinator
+and keeps the bounded health collection introduced by SF-138; the receipt storage
+bound is not a claim of 120,000-member staged rollout health throughput.
 
 ## Evidence and limits
 
@@ -120,7 +127,7 @@ The versioned local receipts are [the 1,000-target upgrade/cost/cleanup run](val
 and [old-package deletion plus real daemon/indexer interoperability](validation/sf127-clients-localnet.json).
 Both ran on disposable network-none local chains. Single-report gross cost
 (computation plus storage before rebates) was 10,515,200 MIST at report 71 and
-10,585,200 MIST at report 1,000, versus the default float of 60,000,000 MIST.
+10,595,200 MIST at report 1,000 (current SF-138 base), versus the default float of 60,000,000 MIST.
 The evidence retains each measured transaction's gas, rebate and digest; batches
 use at most five reports with a float-sized total budget. These are local pricing
 measurements, not a public-network fee guarantee.
@@ -128,7 +135,8 @@ measurements, not a public-network fee guarantee.
 The client probe upgrades an actual pre-identity package, demonstrates refusal
 of its unguarded deletion path, checks a real daemon's effects-checked v3 Failed
 report after a missing recipe, and independently materializes that receipt with
-the actual indexer. The existing OTA suite covers successful artifact application.
+the actual indexer. It also verifies the device-signed unhealthy sample and its
+execution effects after a schema-4 rollout receipt is settled from its shard. The existing OTA suite covers successful artifact application.
 Public-testnet CI is extended to populated migration, old-package rejection, a
 durable Applied report retried by the real daemon through v3 without updater replay, revocation and complete
 cleanup. Its pushed-head result remains a required coordinator gate; pending CI
