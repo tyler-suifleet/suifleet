@@ -46,6 +46,8 @@ export function defaultValues(table: PriceTable): Record<SettingKey, number> {
 /** What the fleet does each month besides its settings. */
 export interface Workload {
   devices: number;
+  /** Additional non-log device data per device per month. */
+  dataBytesPerDeviceMonth?: number;
   /** Deployments each device reports a receipt for, per month. */
   deploymentsPerMonth: number;
   /** Whether devices upload logs. Off by default for new plans (BUSINESS_PLAN.md, 2026-10-23); the archive cadence and retention then cost nothing. */
@@ -59,9 +61,13 @@ export interface Workload {
 /** The business plan's typical fleet: four 50 MiB releases a month, log uploads off (10 MiB per device a month once enabled). */
 export const DEFAULT_WORKLOAD: Workload = { devices: 100, deploymentsPerMonth: 4, logUploads: false, logBytesPerDeviceMonth: 10 * 1024 * 1024, releasesPerMonth: 4, artifactBytes: 50 * 1024 * 1024 };
 
-/** Log bytes the devices actually upload per device per month: none unless log uploads are on. */
+/** Expected uploaded bytes per device per month: enabled logs plus additional device data. */
 export function uploadedLogBytes(workload: Workload): number {
-  return workload.logUploads ? workload.logBytesPerDeviceMonth : 0;
+  const extra = workload.dataBytesPerDeviceMonth ?? 0;
+  const logs = workload.logUploads ? workload.logBytesPerDeviceMonth : 0;
+  if (![extra, logs].every(n => Number.isSafeInteger(n) && n >= 0)) throw Error("Data volume must be nonnegative safe integer bytes");
+  if (!Number.isSafeInteger(logs + extra)) throw Error("Total device data exceeds safe integer bytes");
+  return logs + extra;
 }
 
 export interface NetworkCost {

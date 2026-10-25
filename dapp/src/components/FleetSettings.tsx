@@ -11,7 +11,7 @@ import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { quoteDate } from "@/lib/cost-quote";
 import { LOG_SETTING_KEYS, SETTING_KEYS, fleetPrice, loadPriceTable, type PriceTable, type SettingKey } from "@/lib/fleet-pricing";
 import {
-  DEFAULT_WORKLOAD, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings, type Workload,
+  DEFAULT_WORKLOAD, defaultValues, depositShortfall, epochDays, fleetNetworkCost, recommendDeposit, retentionEpochs, settingNetworkCost, toSettings, uploadedLogBytes, type Workload,
 } from "@/lib/fleet-settings-cost";
 import { SETTINGS_BOUNDS, fetchFleetSettings, settingsSupported, type FleetSettings } from "@/lib/fleet-settings";
 import { settingsSaver } from "@/lib/fleet-settings-tx";
@@ -25,6 +25,7 @@ const TITLES: Record<SettingKey, string> = {
   archiveRetentionDays: "Log retention",
 };
 const MIB = 1024 * 1024;
+const resultRetentionDays = (epochs: number) => epochs * epochDays(NETWORK);
 
 /** "$0.0012", "$4.20", "$1,234.50" */
 export function usd(value: number): string {
@@ -112,7 +113,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     try {
       const settings = toSettings(values, NETWORK);
       const network = fleetNetworkCost(settings, workload, quote);
-      const price = fleetPrice(table, workload.devices, { values, logUploads: workload.logUploads, encryptedDelivery: encrypted, annualPrepay: annual });
+      const price = fleetPrice(table, workload.devices, { values, logUploads: uploadedLogBytes(workload) > 0, encryptedDelivery: encrypted, annualPrepay: annual, dataBytesPerDeviceMonth: uploadedLogBytes(workload), retentionDays: resultRetentionDays(settings.archiveRetentionEpochs) });
       const deposit = recommendDeposit(settings, workload, months, quote);
       return { settings, network, price, deposit };
     } catch (cause) { return { error: (cause as Error).message }; }
@@ -156,6 +157,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
       <NumberField label="Devices" value={workload.devices} onChange={set("devices")} />
       <NumberField label="Deployments per month" value={workload.deploymentsPerMonth} onChange={set("deploymentsPerMonth")} />
       {workload.logUploads && <NumberField label="Log data per device per month (MiB)" step={0.1} value={workload.logBytesPerDeviceMonth / MIB} onChange={set("logBytesPerDeviceMonth", MIB)} />}
+      <NumberField label="Additional device data per device per month (MiB)" step={0.1} value={(workload.dataBytesPerDeviceMonth ?? 0) / MIB} onChange={set("dataBytesPerDeviceMonth", MIB)} />
       <NumberField label="Releases per month" value={workload.releasesPerMonth} onChange={set("releasesPerMonth")} />
       <NumberField label="Release artifact size (MiB)" step={0.1} value={workload.artifactBytes / MIB} onChange={set("artifactBytes", MIB)} />
       <NumberField label="Months to prepay" value={months} onChange={setMonths} />
@@ -164,7 +166,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
       Estimate with device log uploads (off for new plans). This only sizes the estimate: the saved archive cadence and retention do not turn uploads on.</label>
 
     {SETTING_KEYS.map((key) => <fieldset key={key} className="border rounded p-2">
-      <legend className="px-1 text-xs font-semibold">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads ? " (applies once log uploads are on; no cost while off)" : ""}</legend>
+      <legend className="px-1 text-xs font-semibold">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads && !(workload.dataBytesPerDeviceMonth && workload.dataBytesPerDeviceMonth > 0) ? " (applies when device data uploads are on; no cost while off)" : ""}</legend>
       <table className="w-full text-xs">
         <thead><tr className="text-left">
           <th className="p-1">Option</th><th className="p-1">Usage per device</th>
@@ -172,9 +174,9 @@ function SettingsForm({ table }: { table: PriceTable }) {
           <th className="p-1 text-right">SuiFleet price per device</th><th className="p-1 text-right">SuiFleet price per fleet</th>
         </tr></thead>
         <tbody>{table.settings[key].map((o) => {
-          const idle = LOG_SETTING_KEYS.includes(key) && !workload.logUploads;
+          const idle = LOG_SETTING_KEYS.includes(key) && !workload.logUploads && !(workload.dataBytesPerDeviceMonth && workload.dataBytesPerDeviceMonth > 0);
           const { settings, reason } = option(key, o.value);
-          const network = settings ? settingNetworkCost(key, settings, workload, quote) : undefined;
+          const network = settings && !result.error ? settingNetworkCost(key, settings, workload, quote) : undefined;
           const id = `${key}-${o.value}`;
           return <tr key={o.value} className="border-t" data-testid={id}>
             <td className="p-1"><label htmlFor={id} className="flex gap-1 items-center">
@@ -208,6 +210,8 @@ function SettingsForm({ table }: { table: PriceTable }) {
         <p className="text-xs">Base {usd(result.price.base.usd)}{result.price.base.custom ? " (custom pricing above the last tier, from this rate)" : ""}; add-ons {usd(result.price.addOns.reduce((sum, a) => sum + a.usdPerFleet, 0))}
           {result.price.minimumApplied ? `; ${usd(table.base.monthlyMinimumUsd)} monthly minimum applies` : ""}{result.price.discount ? `; annual prepay −${usd(result.price.discount)}` : ""}.</p>
         <p className="text-xs">Per fleet <strong>{usd(result.price.monthly)}</strong>; per device {usd(result.price.perDevice)}. Activation {usd(result.price.activationOneTime)} one-time.</p>
+        <p className="text-xs">Device data: {usd(result.price.data.monthlyUsd)} per month ({usd(result.price.data.writeUsd)} writes + {usd(result.price.data.storageUsd)} storage), added after the plan minimum and annual discount. {result.price.data.allowance.toLocaleString("en-US")} bytes written per month included across this fleet, with {table.data.includedRetentionDays} days storage for that allowance.</p>
+        <p className="text-xs">Proposed data rates: {usd(table.data.writeUsdPerGB)}/GB written and {usd(table.data.storageUsdPerGBMonth)}/GB-month stored (decimal GB). Steady-state storage at the selected retention; owner release uploads are excluded from this data add-on. Log and additional device-data volume both fund the recommended network deposit below.</p>
         <p className="text-xs text-gray-600">From {table.source}.</p>
       </div>
     </div>}
