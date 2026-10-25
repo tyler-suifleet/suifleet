@@ -4,6 +4,7 @@
     "Claude": ["claude", "-p", "--dangerously-skip-permissions"]
   },
   "implementation_slots": [],
+  "ci_repair_attempt_limit": 3,
   "projects": [
     {
       "id": "suifleet",

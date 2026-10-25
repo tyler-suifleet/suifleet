@@ -301,7 +301,10 @@ def gate(pr, owner, review):
 
 
 class Store:
-    def __init__(self, path, worker_limits=None):
+    def __init__(self, path, worker_limits=None, ci_repair_attempt_limit=3):
+        if type(ci_repair_attempt_limit) is not int or not 1 <= ci_repair_attempt_limit <= 100:
+            raise ValueError("ci_repair_attempt_limit must be an integer from 1 to 100")
+        self.ci_repair_attempt_limit = ci_repair_attempt_limit
         self.worker_limits = {} if worker_limits is None else worker_limits
         if not isinstance(self.worker_limits, dict):
             raise ValueError('review_worker_limits must map model families to category limits')
@@ -424,8 +427,9 @@ class Store:
         for key in ['*', *ci_check_keys(pr)]:
             budget = self.db.execute('SELECT attempts,retry_after FROM ci_check_budget '
                                      'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
-            if budget and budget['attempts'] >= 3:
-                return 'CI repair limit reached (3 attempts for this check); owner must inspect failure and explicitly recover'
+            if budget and budget['attempts'] >= self.ci_repair_attempt_limit:
+                return (f'CI repair limit reached ({self.ci_repair_attempt_limit} attempts for this check); '
+                        'owner must inspect failure and explicitly recover')
             if budget and (budget['retry_after'] or 0) > time.time():
                 return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
@@ -679,7 +683,8 @@ class Coordinator:
         self.config, self.state = config, state
         for project in config['projects']:
             network_authorization(project)
-        self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'))
+        self.store = Store(state / 'reviews.sqlite3', config.get('review_worker_limits'),
+                           config.get('ci_repair_attempt_limit', 3))
         self.children = {}
         self.immutable_reads = {}
         self.open_numbers = {}
