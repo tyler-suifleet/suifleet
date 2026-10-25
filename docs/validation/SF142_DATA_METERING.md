@@ -71,3 +71,32 @@ CI, automatic testnet and independent review remain coordinator gates after push
 they are not claimed passed here. Final physical/Mainnet/provider/manual-wallet
 acceptance remains unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+
+## PR #305 feedback repair
+
+Merged snapshot/current main `56215ecb0a6e4ee50b7a8eb58c185cc8f5eb1233`
+into the owner branch before verification. The data panel now waits for both
+budget and storage before reporting a configured-fleet mismatch, preserving the
+hook reason while either is unavailable or loading.
+
+After integration, the network-none commands above passed again:
+`make test-data-metering dapp-typecheck dapp-build` in `suifleet-dev:sf035`, and
+`make test-fleet-settings` in `suifleet-dev:sf010-chrome` (including Chromium).
+The full typecheck includes the newly merged testnet reconciliation regressions.
+
+The reviewer suggested real device-upload attribution as additional coverage.
+Existing localnet reconciliation covers owner-uploaded records; typed BCS tests
+cover device UsageKey attribution. This limitation remains explicit, with no new
+claim of a real device-upload run. The proposed longer-retention per-device add-on
+and excess-retention byte charge both remain as specified in the business plan;
+final commercial pricing is still an unapproved business decision, not changed by
+this repair. Hosted CI/testnet on the new pushed head and fresh independent review
+remain required coordinator gates. Deferred #32/#159 evidence remains unrun.
+
+The isolated `python3 scripts/test_protocol_localnet.py --retention-upgrade`
+rerun also passed (exit 0): two records, 21 logical bytes, 1,326,800 encoded
+bytes, one owner stream; compatible upgrade digest
+`12DgCgaZHjuzpDfTkSMwsxmiPefSsHm8druZrKWe66HX` and rejected old-package
+withdrawal digest `HyhVMKc2YyUiKoS5mZKxXA6i4Wuku2DZzqk5Gps3oPvp`.
+These are disposable local-chain receipts, not public-testnet evidence.

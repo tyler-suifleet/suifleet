@@ -29,7 +29,7 @@ export function DataUsage() {
     <h2 className="font-semibold">Fleet device-data usage</h2>
     <p>Authoritative storage records, refreshed every minute. Streams group all data kinds by uploading device; owner artifacts and recipes appear separately. Bytes are decimal bytes.</p>
     {(usage.error || schedule.error) && <p role="alert">Usage unavailable: {(usage.error ?? schedule.error)?.message}</p>}
-    {!result && !usage.error && <p>{(!matchesFleet ? 'The connected owner budget does not match the configured data fleet.' : reason) ?? (schedule.error ? 'Walrus schedule unavailable.' : 'Loading storage usage…')}</p>}
+    {!result && !usage.error && <p>{(budget && storage && !matchesFleet ? 'The connected owner budget does not match the configured data fleet.' : reason) ?? (schedule.error ? 'Walrus schedule unavailable.' : 'Loading storage usage…')}</p>}
     {result && !usage.error && <>
       <p>Fleet lifetime encoded writes: {number(result.writtenEncodedBytes)} bytes; currently registered and unexpired: {number(result.storedBytes)} logical bytes; held records: {number(result.retainedBytes)} logical bytes, including expired blobs.</p>
       <table className="w-full"><thead><tr className="text-left"><th>Stream (uploader)</th><th>Lifetime encoded bytes written</th><th>Unexpired logical bytes</th><th>Stored GB-month, month to date</th></tr></thead>
