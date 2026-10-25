@@ -226,6 +226,12 @@ def failed_checks(pr):
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
+def ci_check_keys(pr):
+    # A source failure episode follows the check across head/base/run changes.
+    return sorted({json.dumps([row.get('workflowName', ''), row['name']], separators=(',', ':'))
+                   for row in pr['_ci_repair']})
+
+
 def repair_feedback(pr):
     """Keep CI repair reservations independent of stable source-review receipts."""
     return hashlib.sha256(json.dumps(
@@ -345,6 +351,8 @@ class Store:
             reason TEXT, updated REAL, PRIMARY KEY(job,attempt));
         ''')
 
+        self.migrate_check_budgets()
+
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
         for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT'),('repair_claim','TEXT')]:
             if name not in columns:
@@ -365,6 +373,46 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    def migrate_check_budgets(self):
+        """Attribute legacy attempts only when durable snapshots verify their scope.
+
+        An atomic additive migration leaves an unknown-history wildcard fence;
+        it never silently grants more attempts after missing/corrupt evidence.
+        """
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_check_budget'").fetchone():
+                self.db.execute('COMMIT'); return
+            self.db.execute("CREATE TABLE ci_check_budget (project TEXT, pr INTEGER, check_key TEXT, "
+                            "attempts INTEGER, retry_after REAL, PRIMARY KEY(project,pr,check_key))")
+            for budget in self.db.execute('SELECT * FROM ci_repair_budget').fetchall():
+                count = budget['attempts']
+                receipts = self.db.execute(
+                    'SELECT r.*,j.directory FROM ci_repairs r LEFT JOIN jobs j ON j.id=r.job '
+                    'WHERE r.project=? AND r.pr=? ORDER BY r.created DESC LIMIT ?',
+                    (budget['project'], budget['pr'], count)).fetchall()
+                checks = {}
+                try:
+                    if count != len(receipts): raise ValueError('incomplete history')
+                    for receipt in receipts:
+                        snapshot = json.loads((Path(receipt['directory'])/'snapshot.json').read_text())
+                        if (snapshot['headRefOid'] != receipt['head'] or snapshot['baseRefOid'] != receipt['base']
+                                or repair_feedback(snapshot) != receipt['evidence']):
+                            raise ValueError('unverified history')
+                        keys = ci_check_keys(snapshot)
+                        if not keys: raise ValueError('missing check scope')
+                        for key in keys:
+                            old_count, old_deadline = checks.get(key, (0, 0))
+                            checks[key] = (old_count+1, max(old_deadline, receipt['retry_after'] or 0))
+                except (OSError, ValueError, KeyError, TypeError):
+                    checks = {'*': (count, budget['retry_after'])}
+                for key, (attempts, deadline) in checks.items():
+                    self.db.execute('INSERT INTO ci_check_budget VALUES(?,?,?,?,?)',
+                                    (budget['project'], budget['pr'], key, attempts, deadline))
+            self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
     def ci_repair_blocker(self, project, pr):
         rows = self.db.execute(
             'SELECT * FROM ci_repairs WHERE project=? AND pr=? AND head=? AND base=? ORDER BY created DESC',
@@ -372,12 +420,13 @@ class Store:
         evidence = repair_feedback(pr)
         if any(row['evidence'] == evidence for row in rows):
             return 'CI failure already reserved; inspect existing repair receipt (no automatic replay)'
-        budget = self.db.execute('SELECT attempts,retry_after FROM ci_repair_budget WHERE project=? AND pr=?',
-                                 (project, pr['number'])).fetchone()
-        if budget and budget['attempts'] >= 3:
-            return 'CI repair limit reached (3 attempts); owner must inspect failure and explicitly recover'
-        if budget and budget['retry_after'] > time.time():
-            return 'CI repair backoff until ' + str(budget['retry_after'])
+        for key in ['*', *ci_check_keys(pr)]:
+            budget = self.db.execute('SELECT attempts,retry_after FROM ci_check_budget '
+                                     'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+            if budget and budget['attempts'] >= 3:
+                return 'CI repair limit reached (3 attempts for this check); owner must inspect failure and explicitly recover'
+            if budget and (budget['retry_after'] or 0) > time.time():
+                return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
 
     def reserve(self, project, pr, family, kind, directory):
@@ -406,6 +455,13 @@ class Store:
                 deadline = time.time() + min(3600, 300 * 2**attempts)
                 self.db.execute('INSERT OR REPLACE INTO ci_repair_budget VALUES(?,?,?,?)',
                                 (project, pr['number'], attempts + 1, deadline))
+                for key in ci_check_keys(pr):
+                    previous_budget = self.db.execute('SELECT attempts FROM ci_check_budget '
+                        'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+                    check_attempts = previous_budget['attempts'] if previous_budget else 0
+                    check_deadline = time.time() + min(3600, 300 * 2**check_attempts)
+                    self.db.execute('INSERT OR REPLACE INTO ci_check_budget VALUES(?,?,?,?,?)',
+                        (project, pr['number'], key, check_attempts+1, check_deadline))
                 self.db.execute('INSERT INTO ci_repairs VALUES(?,?,?,?,?,?,?,?)',
                     (project, pr['number'], pr['headRefOid'], pr['baseRefOid'], fingerprint,
                      cursor.lastrowid, time.time(), deadline))
@@ -1237,6 +1293,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # A verified green snapshot ends this failure episode; head/base
                     # movement and cancelled/pending runs never reset the budget.
                     self.store.db.execute('DELETE FROM ci_repair_budget WHERE project=? AND pr=?',
+                                          (project['id'], pr['number']))
+                    self.store.db.execute('DELETE FROM ci_check_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
                 repair = {**pr, '_ci_repair': failures} if failures else None
