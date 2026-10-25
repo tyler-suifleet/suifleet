@@ -139,9 +139,12 @@ const TESTNET_PUBLISHERS = [
 async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
   const publishers = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
     ? TESTNET_PUBLISHERS : [WALRUS_PUBLISHER];
+  // Bound fallback attempts, allowing transfer time at 128 KiB/s plus two
+  // minutes for certification. Explicit custom/mainnet routes retain no deadline.
+  const timeoutMs = publishers.length > 1 ? 120_000 + Math.ceil(body.byteLength / 131_072) * 1_000 : undefined;
   for (const [index, publisher] of publishers.entries()) {
     try {
-      return await uploadToPublisher(publisher, body, contentType, owner, progress);
+      return await uploadToPublisher(publisher, body, contentType, owner, progress, timeoutMs);
     } catch (error) {
       // Content-addressed bytes are unchanged, and public publishers pay for
       // storage. Never replay a wallet transaction or retry malformed success.
@@ -151,7 +154,7 @@ async function uploadBlob(body: Uint8Array, contentType: string, owner: string |
   throw new Error("No Walrus publisher configured");
 }
 
-async function uploadToPublisher(publisher: string, body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
+async function uploadToPublisher(publisher: string, body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver, timeoutMs?: number): Promise<StorageInfo> {
   const params = new URLSearchParams({ epochs: String(WALRUS_EPOCHS) });
   // Send the Blob object to the operator so they, not the publisher, can extend it.
   if (owner) params.set("send_object_to", owner);
@@ -177,7 +180,7 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
         } catch (error) { reject(error); }
       };
       request.open("PUT", `${publisher}/v1/blobs?${params}`);
-      request.timeout = 120_000;
+      if (timeoutMs !== undefined) request.timeout = timeoutMs;
       request.setRequestHeader("Content-Type", contentType);
       progress({ phase: "uploading", loaded: 0, total: body.byteLength });
       request.send(new Blob([body as BlobPart]));
@@ -190,7 +193,7 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
       method: "PUT",
       headers: { "Content-Type": contentType },
       body: new Blob([body as BlobPart]),
-      signal: AbortSignal.timeout(120_000),
+      ...(timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(timeoutMs) }),
     });
   } catch {
     throw new TransientPublisherError("Walrus upload failed: network error or timeout");

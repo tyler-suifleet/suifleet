@@ -8,6 +8,9 @@ const file = () => new File([bytes], 'a.bin');
 const response = () => Response.json({ alreadyCertified: { blobId: 'stored' } });
 (async () => {
   let calls = [];
+  const deadlines = [];
+  const originalTimeout = AbortSignal.timeout;
+  AbortSignal.timeout = ms => { deadlines.push(ms); return originalTimeout(ms); };
   global.fetch = async (url, init) => {
     calls.push({ url, body: new Uint8Array(await init.body.arrayBuffer()) });
     return calls.length < 3 ? new Response('publisher WAL exhausted', { status: 500 }) : response();
@@ -18,6 +21,7 @@ const response = () => Response.json({ alreadyCertified: { blobId: 'stored' } })
   assert.equal(result.blobId, 'stored');
   assert.equal(seals, 1);
   assert.equal(calls.length, 3);
+  assert.deepEqual(deadlines, [121000, 121000, 121000]);
   assert.equal(new Set(calls.map(c => new URL(c.url).origin)).size, 3);
   for (const c of calls) { assert.deepEqual(c.body, encrypted); assert.match(c.url, /epochs=1&send_object_to=0xa/); }
   for (const status of [400, 403, 429, 500, 503]) {
@@ -36,17 +40,24 @@ const response = () => Response.json({ alreadyCertified: { blobId: 'stored' } })
   assert.equal(calls.length, 1);
   for (const config of [{ ...constants, NETWORK: 'mainnet' }, { ...constants, WALRUS_PUBLISHER: 'https://custom.invalid' }]) {
     calls = [];
-    global.fetch = async url => { calls.push(url); return new Response('failure', { status: 500 }); };
+    const previousDeadlines = deadlines.length;
+    global.fetch = async (url, init) => { assert.equal(init.signal, undefined); calls.push(url); return new Response('failure', { status: 500 }); };
     await assert.rejects(load(config).uploadArtifact(file(), null, { kind: 'public' }));
     assert.equal(calls.length, 1);
+    assert.equal(deadlines.length, previousDeadlines);
   }
+  // Large Testnet transfers get transfer time in addition to certification time.
+  global.fetch = async () => response();
+  await load().uploadArtifact({ arrayBuffer: async () => new ArrayBuffer(200 * 1024 * 1024) }, null, { kind: "public" });
+  assert.equal(deadlines.at(-1), 1720000);
+  AbortSignal.timeout = originalTimeout;
   let uploads = [];
   global.XMLHttpRequest = class {
     upload = new EventTarget();
     open(method, url) { this.url = url; }
     setRequestHeader() {}
     send(body) {
-      uploads.push({ url: this.url, body });
+      uploads.push({ url: this.url, body, timeout: this.timeout });
       this.status = uploads.length < 3 ? 500 : 200;
       this.responseText = this.status === 200 ? JSON.stringify({ alreadyCertified: { blobId: 'xhr' } }) : 'WAL exhausted';
       queueMicrotask(() => this.onload());
@@ -56,7 +67,16 @@ const response = () => Response.json({ alreadyCertified: { blobId: 'stored' } })
   assert.equal((await load().uploadArtifact(file(), '0xa', { kind: 'public' }, p => progress.push(p))).blobId, 'xhr');
   assert.equal(uploads.length, 3);
   assert.equal(progress.filter(p => p.phase === 'complete').length, 1);
-  for (const c of uploads) assert.deepEqual(new Uint8Array(await c.body.arrayBuffer()), bytes);
+  for (const c of uploads) {
+    assert.deepEqual(new Uint8Array(await c.body.arrayBuffer()), bytes);
+    assert.equal(c.timeout, 121000);
+  }
+  for (const config of [{ ...constants, NETWORK: "mainnet" }, { ...constants, WALRUS_PUBLISHER: "https://custom.invalid" }]) {
+    uploads = [];
+    await assert.rejects(load(config).uploadArtifact(file(), null, { kind: "public" }, () => {}), /500/);
+    assert.equal(uploads.length, 1);
+    assert.equal(uploads[0].timeout, undefined);
+  }
   uploads = [];
   global.XMLHttpRequest.prototype.send = function () { uploads.push(this); queueMicrotask(() => this.onabort()); };
   await assert.rejects(load().uploadArtifact(file(), null, { kind: 'public' }, () => {}), /cancelled/);
