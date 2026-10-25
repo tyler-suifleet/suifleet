@@ -83,6 +83,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python3 "$RUNNER_TEMP/testnet_fixture_cache.py" --destination encrypted-live-state
       - name: Build testnet dependencies without signing credentials
+        id: dependencies
         if: steps.plan.outputs.run == 'true'
         run: |
           docker run --rm -e CARGO_BUILD_JOBS=2 \
@@ -98,6 +99,7 @@ jobs:
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --recheck
       - name: Run bounded testnet acceptance
+        id: acceptance
         if: steps.plan.outputs.run == 'true'
         env:
           SUIFLEET_TESTNET_KEY: ${{ secrets.SUIFLEET_TESTNET_KEY }}
@@ -131,7 +133,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TEST_HEAD: ${{ steps.plan.outputs.head }}
           BASE_REF: ${{ steps.plan.outputs.base }}
-          RESULT: ${{ job.status == 'success' && 'success' || 'failure' }}
+          # A cancelled run is an `error`, never a repairable failure. The trusted
+          # controller classifies failures (source/infrastructure/funding/uncertain)
+          # for repair scheduling only; any non-success still blocks merge.
+          RESULT: ${{ job.status == 'success' && 'success' || (job.status == 'cancelled' && 'error' || 'failure') }}
+          ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}
+          DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --status "$RESULT"
   # Bounded retention of this workflow's own fixture snapshots. Only this job
   # can delete artifacts; it runs main-sourced code, no test revision or secret,
