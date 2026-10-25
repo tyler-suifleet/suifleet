@@ -615,3 +615,80 @@ mutations or live/hardware tests were performed. Hosted exact-head/current-base
 CI and automatic testnet acceptance remain pending for the coordinator after
 push, along with fresh independent review. Deferred acceptance remains unrun in
 SF-031/#32 and SF-087/#159. This repair is not approval.
+
+## Current-base integration and client-fixture repair (2026-10-25)
+
+Integrated main `82591d81a130e8eb03f2e176590cf991347aed30` (SF-139 opaque
+storage) into the owner branch. The only manual merge resolutions preserve both
+SF-127/SF-139 acceptance sections and policy entries, and retain the existing
+bounded persistent-publisher-failure test. No runtime or contract behavior was
+changed by the resolutions. The latest independent snapshot review found no
+unresolved source/security defect; hosted checks were pending and the newer base
+was missing, so that review remains source evidence rather than approval.
+
+The refreshed client harness exposed two timing assumptions: its 60-second wait
+could expire at the default 60-second event discovery tick, and a health object's
+previous-transaction digest could appear before transaction indexing. The local
+fixture now explicitly configures one-second discovery and waits for indexing
+before independently checking health effects. It retains all report, identity,
+catalog, rollout health, indexer and cleanup assertions. The first attempt failed
+at daemon reporting; the second reached health but returned transaction NotFound;
+the corrected rerun passed. These findings are addressed within SF-127/PR #301.
+
+Executed on the merged tree, in disposable `suifleet-dev:sf037` containers with
+`--network none` (Cargo cache mounted with `CARGO_NET_OFFLINE=true`; Move cache
+mounted for compilation; repository metadata mounted read-only for localnet
+base archives):
+
+- `INSIDE_DEV_CONTAINER=1 make test-contracts check-interfaces dapp-typecheck dapp-build`
+  passed: Move 215 core / 61 storage / 29 fleet-data tests, compiled ABI checks
+  (776 references, zero drift), generated interfaces, independent wire/frontend
+  fixtures, frontend typecheck and production static build.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_common.py`
+  passed 45 tests, including bounded read retry and persistent publisher failure.
+- `python3 scripts/test_protocol_localnet.py --receipt-shards` passed compatible
+  upgrade, real old-package attacks, 70 preserved v2 receipts, all 1,000 v3
+  receipts and complete bounded cleanup. Refreshed effects are in
+  [sf127-localnet.json](sf127-localnet.json): maximum individual gross
+  10,595,200 MIST < 60,000,000 MIST float. Computation 1,080,000, storage
+  9,515,200 and rebate 4,378,968 match the existing client cost model.
+- `python3 scripts/test_protocol_localnet.py --receipt-clients` passed actual
+  daemon ordinary/catalog reports, device-signed rollout health with independent
+  successful effects, production-indexer binding/receipt reads and full cleanup.
+  Refreshed effects are in [sf127-clients-localnet.json](sf127-clients-localnet.json).
+
+The first uncached Move invocation failed resolving dependencies with networking
+disabled; rerunning with the existing Move cache passed. The first localnet
+invocation lacked the linked worktree's Git metadata mount and failed before
+publication; rerunning with read-only metadata completed. These setup failures
+are not test passes. Local runtime suite completion is recorded below.
+
+No public wallet mutations, production deployment, hardware or mainnet actions.
+Hosted exact-head/current-base ordinary/security CI and automatic testnet remain
+pending/unassessed at repair handoff; no hosted CI polling. Fresh independent
+review and coordinator merge gates remain required. Physical acceptance remains
+unrun in SF-031/#32; mainnet/final provider/manual-wallet acceptance remains unrun
+in SF-087/#159. The 120,000 figure remains a storage bound, not a load benchmark;
+reports serialize within each root and migration/cleanup remain operator-funded.
+
+Runtime completion:
+
+- `INSIDE_DEV_CONTAINER=1 make edge-test test-ota test-opaque` completed both
+  locked Rust suites: 447 default and 449 PKCS#11 tests passed, four existing OCI
+  integration tests ignored in each. It rebuilt all daemon bins/examples and
+  passed the entire `test-ota` target, including both strict three-batch receipt
+  idle checks, rollout health retries and all four fleet-data modes. Opaque SDK
+  unittest also passed (one test). The combined command then exited 2 because
+  the opaque IPC admin fixture requires root and this container ran as `dev`;
+  that final precondition failure is not counted as an opaque runtime pass.
+- Logs are local `/tmp/sf127-base-integration.log`, `/tmp/sf127-base-static.log`,
+  `/tmp/sf127-base-localnet.log` and `/tmp/sf127-base-clients.log`. They are not
+  public artifacts; sanitized effects are committed instead.
+- Corrected opaque runtime invocation: `docker run --rm --network none --user
+  0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$PWD:/workspace" -w /workspace
+  suifleet-dev:sf037 python3 scripts/test_opaque_ota.py --binary
+  suifleet-edge/target/debug/suifleet --shim
+  suifleet-edge/target/debug/examples/grpc_sim_shim` passed (exit 0). No test or
+  fixture precondition was bypassed. `git diff --check` passed. Freshly fetched
+  main is still `82591d81a130e8eb03f2e176590cf991347aed30` and is an ancestor of
+  the repair head.
