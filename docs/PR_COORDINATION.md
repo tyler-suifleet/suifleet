@@ -151,8 +151,8 @@ CI repair uses a separate reservation fingerprint containing the exact head,
 integration base and failed run links/outcomes. It does not change source-review
 fingerprints, discard feedback or count as approval. One attempt per fingerprint
 is recorded atomically with the normal PR/family reservation in `ci_repairs`.
-`ci_repair_budget` persists a maximum of three CI repair attempts per PR failure
-episode, with 5/10/20 minute backoff deadlines. New head/base/run evidence can
+`ci_check_budget` persists the configured attempt ceiling per failing check
+episode, with exponential backoff from five minutes up to one hour. New head/base/run evidence can
 receive a new attempt after backoff, but does not reset the episode budget.
 Only a fresh snapshot with every check successful (including current-base testnet
 when required) clears that budget. Duplicate scans, restarts and pending or
@@ -823,7 +823,7 @@ running workers, services and their configuration untouched.
 Automatic testnet reports `testnet/package-upgrade` as a commit status, separately
 from ordinary CI check runs. The coordinator recognizes a failed status only for
 the exact PR head and current base, with a durable GitHub Actions run URL. It
-reserves an owner repair through the same deduplication, backoff and three-attempt
+reserves an owner repair through the same deduplication, backoff and configured
 failure-episode limit as other CI failures. Infrastructure, funding and uncertain
 transaction classifications retain that owner; they are not silently excluded
 from dispatch. Repairs must diagnose the linked run, preserve uncertainty and
@@ -883,3 +883,15 @@ head, empty process receipts and un-crossed launch boundary. This is retained
 repair ownership, not proof of a running worker. An uncertain spawn without a
 process receipt is still retained for explicit recovery. Extra CI metadata does
 not invalidate otherwise verified core ownership proof for a live repair.
+
+
+### CI repair attempt ceiling
+
+The top-level private configuration key `ci_repair_attempt_limit` sets the maximum
+repair attempts per failing workflow/check, across head, base and run changes.
+It accepts an integer from 1 to 100 and defaults to 3. This installation uses 8
+under the user's explicit authorization. Restart the coordinator after changing
+it. Raising the ceiling preserves existing attempt counts, exponential backoff,
+identical-run deduplication, ownership and all review/merge gates. It does not
+increase any testnet spending allowance or automatically replay uncertain
+transactions. A fully successful CI snapshot ends the failure episode as before.
