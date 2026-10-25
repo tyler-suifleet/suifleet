@@ -2,80 +2,80 @@
   "result": "PASS",
   "network": "isolated network-none localnet",
   "base": "14b351b9389c058117297343ced34f262db6f3c3",
-  "old": "0x9ff39f8ed2dc518a9eab3669332c0b063c583f23969ec32f52ce7f09ac5176c0",
-  "head": "0x2a6bae46e21faf5f88afe707008a11f14c052ba52c91ed7665e1eb9673c26953",
+  "old": "0x76fc853edd74c1f162b4cfbf6f58a75b5428c1d60eaf9bd58ea3de1205870e8d",
+  "head": "0xbb7354b81eb5e7230a2ea7ab82e8dc86b1ee712e15f3452f12c7fb337b6ad183",
   "digests": {
-    "publish pre-identity package": "DHQ9K7qy184f1R1DXAKt7vqzTuC4xuJ5pQMKYk4qAYgE",
-    "create on old package": "71cXpA62kHwCFNrnk92PHkvyWKJJZuN6be4Er3TB6P6m",
-    "compatible pre-identity upgrade": "BoZNVygsM8Egd1rq4ifMasVLtdLdVvsWoavuTwrqnu84",
-    "protect oldest deletion path": "Ffj7QAbFSunWCb8QzYcRsngVgDPEsWZxuumTGQxTcQVt",
-    "bounded legacy cleanup 4": "4qZcxzoSC19AiJRaZ5aWeBipsD8UrDJCHSon2UKVZCAG",
-    "bounded legacy cleanup 5": "EEkgWKomuJzY2oPy3NdxheV3jotZHQrFg78FkknQgNbR",
-    "bounded legacy cleanup 6": "3cfKws9gWfGoqaK3JFHnDSN8TqHPqLPWuSCmyXojWr3a",
-    "bounded legacy cleanup 7": "4VQPryoV84WoUw5iTsbp8J8919c83SnjeK3nXBzLfYDq",
-    "bounded legacy cleanup 8": "763cBwX4FPpY9PRwPiezQHhPoQLzPnK5XsuAXPxxDTzh",
-    "bounded legacy cleanup 9": "6fe9Fers5SMphbHtBWH1BMH1s2JgWK7JB4aHEKybDSnm",
-    "activate probe device": "Tt8Hu6b7XPQFMTyGTBMREKPnnW7nQCRGMR4eXw8aPMQ",
-    "new sharded failure probe": "7amYZNT7edRc1Timbd9rmLakATwXy7QFnRfB8DuNNfyY",
-    "create catalog client probe": "5XxrFiTRb2wMoraggYzEDFRGjb5wCWXe8UzyLsEiSxMB",
-    "publish catalog client probe": "EmiKAYHvVqqdMgLKHbfGKP6Qocd4wZ1ct3rAw81PXMks",
-    "create paused catalog client probe": "EK88bbafpVuATvcMpJCTXjZtsv5VnKWvNPaaifvJnvhh",
-    "shard catalog client probe": "21T91YnnsBUsVPbyarRLHptt4gRzjvoCNBz1bqdadPTb",
-    "unpause catalog client probe": "GFkYQiW9QjrceNJcs3uJbY3TKZqEx7B5DoFDmjUCSyPL",
-    "create sharded rollout health probe": "DE76Ar1RXJBnoMfoGFPnuSdZMTzPnCAs3ihSZwVA9QN1",
-    "admit sharded rollout health probe": "83jwpiRUeQkfVq1iNNm7kxYPtp7HEoxfUnwdneAAzrMN",
-    "settle sharded rollout receipt before health retry": "DJpE7pmG3yVoKjBG4QmUi8NY75RaYWfLu7h6x8wPQyFf",
-    "independently verified device rollout health": "8KGdBGMPjnyx5JM5s36WFgmd9sqUJUecA1oBxiq1Wc7q",
-    "bounded rollout probe cleanup 21": "8yrkEiJqmVXWd81vJ1dJVQSwSC5i8WwyZJy5ghgf14B6",
-    "bounded rollout probe cleanup 22": "BxzdR1M9YsRjcveEJN7YorR8uoYHN1b3k5ZE64LWkBGq",
-    "bounded rollout probe cleanup 23": "FZ4ww5tjMSUV6r58WyphE8nAwJbMQDc45Fi7eqkDVPRH",
-    "bounded rollout probe cleanup 24": "CTtMcXppqz6YNp7pv7awqgxBYNWdH6kEi7UfQevDvGWr",
-    "bounded rollout probe cleanup 25": "DNYzxnmpbqEJNsTfkxZxYVmG1rtDhivQ2vMgjGi6Pu8A",
-    "bounded rollout probe cleanup 26": "HeLuCERGE21WY6Rwr6UNVJfJvTQtjJVh7vsWvU3JPSyC",
-    "bounded rollout probe cleanup 27": "51jD4MFZJeNFvmWVSZ62jBiWxDcXYyK4rPKhj8psK1gn",
-    "bounded catalog probe cleanup 28": "4QwnV8UcFfn5AuSF1B93TLJ5V8n4Q2PdYMb2d2fhEAyz",
-    "bounded catalog probe cleanup 29": "92WzY5pzdr12FnqHi9RFdvd57yTJUihasmoxKDmXqwce",
-    "bounded catalog probe cleanup 30": "E5h9yqmWiFdNAvwN1uQRwLctL4DZHJfzwZWwiuvyjCRU",
-    "bounded catalog probe cleanup 31": "7CiPdG2iBRKwySUKDDv4m72cMf62XeRG2HJ5MtMfZern",
-    "bounded catalog probe cleanup 32": "6gnaC1YDTHtZKNjBJVGZ9MfBzZWQrHaQmRNRULDzS69q",
-    "bounded catalog probe cleanup 33": "C4wSXPD7GJfFNtk2gcHfhUEyYu5y9y7doEUqs21DqhKu",
-    "bounded catalog probe cleanup 34": "J9Py2o2XgDq1TbZqjSNKExwUZQDQANsug4kfbY7m9W46",
-    "bounded probe cleanup 35": "7ao4A9zX6rVDAw3BiriDsJnwMyBtj7tiMjzNC6RSnu1k",
-    "bounded probe cleanup 36": "D5vdY2kuoKapjqvf1d297jPFMRe4VgQTMXzquNiYmgSu",
-    "bounded probe cleanup 37": "4nxx8b9HxPRitauHYJfcD5xsreCtzrfQLbjSnmBZuLc9",
-    "bounded probe cleanup 38": "BPBp1AHX7Sjqcwt9Z1hPZp6KQh9PrLC3w3YiuXhaUouE",
-    "bounded probe cleanup 39": "AqjZBcUH69WGHeabWiYuFrjcvv4NgbjxA6sGguojHw48",
-    "bounded probe cleanup 40": "2WMpFEphUPxiCSSCiBoGsbjNftr9qirSkrHqdyq6vydC",
-    "bounded probe cleanup 41": "2Y4ZCwJGF9njc7ZswWRqBd4xJQUCgeyqVW8KFeEnyPYR"
+    "publish pre-identity package": "EGW64WwkP7Eo1mFTtgD1nRW38CbiUTixkFGnqEGe2P8e",
+    "create on old package": "2qy9zjU42dKL4xbS7aFCRg37TBQN477V19ZhouRV29CD",
+    "compatible pre-identity upgrade": "3KzXHi28k8UtjCVdi97jpytVjYPLf6S1UKknDkwuZMKJ",
+    "protect oldest deletion path": "46JvVvErzC2Uf9fP9bNcV21KLg8ghoMxU8wEhrvpBdXe",
+    "bounded legacy cleanup 4": "Ys5nKkLDxq3QCdUABEgZHbtATiRgN6tMCD3pgSYu65N",
+    "bounded legacy cleanup 5": "AJa3BB8KKBkEqSWsNCnoc8vknX7TWVJmNu7uRppqasaN",
+    "bounded legacy cleanup 6": "CaCHgQ2uhTfyT1X12vmMtXYrKR3GVw4qUE54UGYjaFGA",
+    "bounded legacy cleanup 7": "F5eEGYHeYd2CYXxZDXcjq57z7GqYGYVU9uo2B3XXowLF",
+    "bounded legacy cleanup 8": "6zftDiyLW5qnn4Y63zB9cFnnpHxbR4yfFPNrPj86hZiN",
+    "bounded legacy cleanup 9": "83fASeMkk2u5QqfKQ3mdSzjRHP6bJo8qqRGrQ96tfkp",
+    "activate probe device": "BP1y3q1QymqCrPDqcrnpgB1TqUnY4GtYtsysPVAGwRNJ",
+    "new sharded failure probe": "3Vw9yQDg6bqeKJes7XKV6K1pPYTkq15cfVGwcobJTQPC",
+    "create catalog client probe": "oBKLBMTTYB619qb2cLyz67TVof7DmMGwTSJchTCJVL3",
+    "publish catalog client probe": "DUkqwmqH56c2tNW31rjLmHhwj7vQJ9sgPSozVjBjZ5tQ",
+    "create paused catalog client probe": "6MS9R9LtHXt1yiNuvper4cmTsiyoNsEcH1UwpiVjFvXw",
+    "shard catalog client probe": "8p1AmzGaH1hCw5ehMkTkrLQMG2zxPUMCpSNjfcnV5sTV",
+    "unpause catalog client probe": "F6JFoZXsEFxK8aY4dVEFp1sw51SdQnimRfr66RqGEjed",
+    "create sharded rollout health probe": "2pMcwTnHEQfYjxEsBsyfmNuoScZzCFzsCQJoVx1ToJ89",
+    "admit sharded rollout health probe": "26bnrcStnU99cYLVfEKXtvzf8T695hAgN2bv2EFuQMof",
+    "settle sharded rollout receipt before health retry": "2trVvZmTrPEfvcvDvdPC6JdMU5f59mRYQ623ob1G5Ug8",
+    "independently verified device rollout health": "7qXSy91EXbUFUyJD13fjfegs6decq71Sr83onUQQxXRw",
+    "bounded rollout probe cleanup 21": "CFekp1NTsQr9MZuAAeE7uhvxGtqJexq63uWsY1CTgPMu",
+    "bounded rollout probe cleanup 22": "A5Nh8uMYRfK8wJ453WXGWzXzuNEp7yNC6nbc79z6KT2",
+    "bounded rollout probe cleanup 23": "Bi6DJFyWjzob8pKGcuTt3japqUubn4XZmt8aPogNb1jb",
+    "bounded rollout probe cleanup 24": "J3fLyQ6FCug5xJq8veZvsH96Ur69qFNuqBHJNKp3FvtM",
+    "bounded rollout probe cleanup 25": "8ostDm79ZxQicWfh6bM4DBLU4NGjEXB6e7hLXhra5yhd",
+    "bounded rollout probe cleanup 26": "E6Jm3aXbNPhY5BKbtdqJMV1EM4VMLtJXLySEGHM8wq3C",
+    "bounded rollout probe cleanup 27": "6d4hyWEqdd4vN3RkVrsdsBHLTsvzjMUyZzKwRZ42Rd6V",
+    "bounded catalog probe cleanup 28": "5VJEqaGu38zHbL3kPe7X3YkVxXrMX2CteqWTaHmAXoHs",
+    "bounded catalog probe cleanup 29": "H8g2TULsSoGmffPYcaSq29QFXUvowDvtkYcWye4tef2r",
+    "bounded catalog probe cleanup 30": "cRXPJFTfx9mM5F6FUK5UGdJFgZdin4CnpzSj6hjTALR",
+    "bounded catalog probe cleanup 31": "4AWh1orbAG1Gc9NhFff7nuiy9ku333fQoomMB5a7yDfm",
+    "bounded catalog probe cleanup 32": "2ACnRcm4v43LAAEbPS5aWPpBrepcg2rTtma1Tw91FUe7",
+    "bounded catalog probe cleanup 33": "8tnLuXJdo7pD2JuDUFhUgq9c3c98eFzBVoaEE6B9ozv3",
+    "bounded catalog probe cleanup 34": "GUHHxNJvitG1PyKzVVb78DzdsZdwhQLqbAUp4pXnHPns",
+    "bounded probe cleanup 35": "4MP3CzbyUNDeUwY7GswRML1RwcNxirEzLTp4mkXqstyQ",
+    "bounded probe cleanup 36": "7sMKYQR2iqYnFMaVUepX7Zpa3tE4Eh3t3T2U8iMv87dj",
+    "bounded probe cleanup 37": "8EKSGEGMLg1gG2aXLtngrpUJaZMSiiPLovispv1AhoJB",
+    "bounded probe cleanup 38": "6FBV7ThdzD3DVCd2S9HPtvp7WMjagxV5HSyZu5AB98uS",
+    "bounded probe cleanup 39": "Hkb9hTMWUqcX4vwhUYLMFfVFugtBgivohN67R5W3ceMa",
+    "bounded probe cleanup 40": "AgiTdGJK9mr91APRGJ24PfXNDQn7jSyE99whhV4nsRhM",
+    "bounded probe cleanup 41": "CTkX8bbo1Tp1VrenmproxHLbiarxSMuZDstBDRVwyAF5"
   },
   "failures": {
     "old no-schema-check delete blocked": {
-      "digest": "AYAeYeH3rkswaHwddp1DfwLTck8WJvPLebtFcC9ALqBP",
+      "digest": "By3xnm18ubmgCj6vqsGJnzwnU3VfXTjc6SVaXc12ABWG",
       "status": "MoveAbort in 1st command, abort code: 1, in '0x0000000000000000000000000000000000000000000000000000000000000002::dynamic_field::remove_child_object' (instruction 0)"
     }
   },
   "daemon": "actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records",
   "indexer": "actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding",
   "rollout_probe": {
-    "deployment": "0x2fb9c1e2bc960d0b5b7f9d368ae5dc6ed5ca71fc092fe5f5cd36f5542683c262",
+    "deployment": "0x28a8bf2f663b4e40b6c111c6f3ac39b2d9dfc83260d4b61856ee55ca154899f5",
     "health": {
       "devices": [
-        "0x8d9d077789f47a4dde9c77083b664e36ca7fc8650a549a8b3c23c198d7a0ec06"
+        "0x71ca03b831da2863894d6d5710cbdc7468220f49d7f6a9d412826a2d2c17b3ab"
       ],
       "healthy": [
         false
       ],
       "at_ms": [
-        "1792937708915"
+        "1792969070198"
       ],
       "signers": [
-        "0xbdc65c1471ced755e7afe3997a89a13569e7fbdf8afeab48cb9bd2de1c2e443d"
+        "0xfcf6a478c95d63a77614eebee3a2938bb7f084cf903f05525913a754a6b4fb2a"
       ]
     }
   },
   "catalog_probe": {
-    "deployment": "0xee5f88e3e479d3a9ad483987219573ad972d05b5139ceb605665138cb33f6ad6",
-    "version": "0x97aabb4f0237392e6f871fc094c46547b5c9050f8ea7fc7dc5901851a774be17",
+    "deployment": "0x403cc4d0f26ad35e80af7a8129f25d8ef335f76351160961e8960b5b178aad75",
+    "version": "0x2eac93c6f2c88b438a45555c7054183264fb65e076fb6ca6ddd7be5e6293b14c",
     "error": "blob missing-recipe: transfer failed after 1 attempts: error sending request for url (http://127.0.0.1:9/v1/blobs/missing-recipe): client error (Connect): tcp connect error: Connection refused (os error 111)"
   },
   "limits": [
