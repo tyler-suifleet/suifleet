@@ -106,7 +106,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const key=path.join(tmp,'probe.key');await fs.writeFile(key,Buffer.from(decodeSuiPrivateKey(owner.getSecretKey()).secretKey).toString('hex'),{mode:0o600});
     await fs.writeFile(path.join(tmp,'deployment.json'),JSON.stringify(manifest));
     const state=path.join(tmp,'state'),logPath=path.join(tmp,'daemon.log');
-    await fs.writeFile(path.join(tmp,'config.toml'),`[sui]\nmanifest_path = "deployment.json"\n[device]\nkeypair_path = ${JSON.stringify(key)}\ndevice_object_id = "${device.objectId}"\ndevice_cap_id = "${deviceCap}"\n[walrus]\ndownload_attempts = 1\ndownload_timeout_seconds = 2\n[apply]\ncommand = "/bin/false"\n[runtime]\nstate_dir = ${JSON.stringify(state)}\npoll_seconds = 1\n`);
+    await fs.writeFile(path.join(tmp,'config.toml'),`[sui]\nmanifest_path = "deployment.json"\n[device]\nkeypair_path = ${JSON.stringify(key)}\ndevice_object_id = "${device.objectId}"\ndevice_cap_id = "${deviceCap}"\n[walrus]\ndownload_attempts = 1\ndownload_timeout_seconds = 2\n[apply]\ncommand = "/bin/false"\n[runtime]\nstate_dir = ${JSON.stringify(state)}\npoll_seconds = 1\nevent_discovery_seconds = 1\n`);
     const log=await fs.open(logPath,'w');
     daemon=spawn(DAEMON,[],{env:{...process.env,EDGE_CONFIG:path.join(tmp,'config.toml'),NO_COLOR:'1'},stdio:['ignore',log.fd,log.fd]});
     const journal=async()=>{try{return JSON.parse(await fs.readFile(path.join(state,'state.json'),'utf8'));}catch{return{};}};
@@ -152,6 +152,8 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
       return health.devices.length===1;
     }catch{return false;}},'actual device-signed health on schema-4 sharded rollout');
     assert.ok(healthDigest);
+    // Object reads may precede transaction indexing on the disposable node.
+    await client.waitForTransaction({digest:healthDigest});
     const healthExecution=await client.getTransaction({digest:healthDigest,include:{effects:true}});
     assert.equal(healthExecution.Transaction?.status.success,true);
     digests['independently verified device rollout health']=healthDigest;
