@@ -1,5 +1,9 @@
 # Sui/Walrus fleet data
 
+SF-139 adds [opaque component data](OPAQUE_DATA.md): bounded IPC/CLI chunk
+custody, durable-stream flush, scoped Seal patches and independent item indexes
+on the existing archive lifecycle. Legacy log archives remain fleet-wide.
+
 The daemon can publish signed health directly to Sui and encrypted, batched logs
 and diagnostics to fleet-prepaid Walrus storage. The static dApp discovers and
 verifies the chain index, decrypts authorized archives and derives alerts locally.
