@@ -447,3 +447,49 @@ automatic public-testnet validation and fresh independent review remain required
 after push. Hosted CI was not polled. Deferred physical acceptance (#32) and final
 provider/manual-wallet/mainnet acceptance (#159) remain unrun. No production
 service deployment, wallet mutation, physical programming or mainnet operation.
+
+### Fleet-data metering base integration (2026-10-25)
+
+Merged snapshot/current main `58fce5b1d73ffc3d1b75c378a8e668124416e3a9`
+(SF-142) cleanly. The latest independent review found no actionable source or
+security defect; pending hosted checks are not approval. `git diff --exit-code
+ec8f035 HEAD -- suifleet-edge contracts sdk interfaces` passed: daemon, contracts,
+SDK and interfaces are unchanged by this integration.
+
+Fresh network-none checks in pinned `suifleet-dev:sf037` containers:
+
+- `node scripts/test_data_metering.cjs` and `node scripts/test_archive_quilt.cjs`:
+  passed, including typed metering failures and actual pinned Quilt geometry.
+- From `dapp/`, `node node_modules/typescript/bin/tsc --noEmit` and
+  `node node_modules/next/dist/bin/next build`: passed; static pages exported.
+- `node scripts/test_fleet_settings_browser.cjs` in `suifleet-dev:sf010-chrome`
+  with `CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell`:
+  passed, actual Chromium settings/pricing/deposit/transaction/failure cases.
+- `python3 scripts/test_opaque_ota.py --binary /build/debug/suifleet --shim
+  /build/debug/examples/grpc_sim_shim`: passed with the prior verified private
+  debug build mounted read-only at `/build`; daemon sources are unchanged.
+  Real IPC/chunk intake, stream batches, outage/restart custody, immutable
+  ciphertext/purchase reuse, verified indexes and independent pinned-SDK
+  signature/Seal binary/text retrieval all passed.
+- Offline `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  41 OK; `-p 'test_testnet*.py'`: 116 OK, 1 skipped;
+  `-p test_opaque_sdk.py`: 1 OK; `-p test_tracking.py`: 10 OK.
+- `git diff --check`: passed.
+
+Initial browser attempt lacked Chromium in sf037; the browser-equipped pinned
+image passed. Initial non-root Next build could not unlink existing root-owned
+output; disposable root container passed. Initial opaque attempt required root
+for its IPC admin fixture; the root container passed. No test failure was ignored.
+
+The review's nonblocking opt-in opaque idle-read limitation is retained: empty
+opaque-enabled queues bypass the log-only idle shortcut and can repeat chain
+reads each poll after the interval. Default-device idle savings remain intact.
+A future cheap durable queue/stream wake check must preserve post-idle discovery,
+stream checkpoints and restart recovery; no such optimization is claimed here.
+Record this within existing SF-139/#284 rather than create an unauthorized issue.
+
+No fresh Rust compilation, Move/local-chain or public-testnet execution is claimed
+for this frontend-base integration. Prior evidence remains historical. Hosted
+exact-head/current-base CI, automatic testnet and fresh independent review remain
+required after push; no hosted CI was watched or polled. Physical #32 and final
+provider/manual-wallet/mainnet #159 acceptance remain deferred and unrun.
