@@ -296,7 +296,7 @@ export function BudgetManager() {
 }
 
 /** The live Walrus epoch and storage price, from the pinned Testnet system (fleet storage builds only). */
-function useWalrusState(config?: StorageConfig) {
+export function useWalrusState(config?: StorageConfig) {
   const client = useCurrentClient();
   return useQuery({
     queryKey: ["walrus-state", NETWORK, config?.walrus.system],

@@ -241,7 +241,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-retention test-fleet-settings test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-data-metering test-retention test-fleet-settings test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -760,3 +760,6 @@ test-customer-fleets:
 test-customer-upgrade-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_protocol_localnet.py --customer-upgrade
+.PHONY: test-data-metering
+test-data-metering:
+	$(RUN) node scripts/test_data_metering.cjs
