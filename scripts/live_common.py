@@ -104,6 +104,20 @@ def plain(value):
     return value
 
 
+def run_client_command(full, command):
+    # Only known reads may be retried. A failed submission can have an
+    # unknown on-chain outcome; executor/Budget must reconcile it instead.
+    read_only = command and command[0] in {"object", "dynamic-field", "tx-block", "gas"}
+    for attempt in range(3):
+        result = subprocess.run(full, text=True, capture_output=True, timeout=600)
+        diagnostic = (result.stderr + result.stdout).lower()
+        throttled = "429" in diagnostic and "too many requests" in diagnostic
+        if not (read_only and result.returncode and throttled and attempt < 2):
+            break
+        time.sleep(2 ** attempt)
+    return result
+
+
 class Live:
     """A funded wallet on a live network. Every mutation goes through a
     `Budget` (testnet_budget): its gas budget and any funding it sends are
@@ -125,16 +139,7 @@ class Live:
         full = [self.network_sui, "client", "--client.config", str(config or self.wallet), *map(str, command)]
         if json_output:
             full.append("--json")
-        # Only known reads may be retried. A failed submission can have an
-        # unknown on-chain outcome; executor/Budget must reconcile it instead.
-        read_only = command and command[0] in {"object", "dynamic-field", "tx-block", "gas"}
-        for attempt in range(3):
-            result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-            diagnostic = (result.stderr + result.stdout).lower()
-            throttled = "429" in diagnostic and "too many requests" in diagnostic
-            if not (read_only and result.returncode and throttled and attempt < 2):
-                break
-            time.sleep(2 ** attempt)
+        result = run_client_command(full, command)
         if result.returncode and check:
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output or result.returncode:

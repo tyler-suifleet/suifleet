@@ -444,6 +444,19 @@ def transaction_gas_budget(value):
     return value
 
 
+def package_client(network_sui, wallet, *command, json_output=True, check=True):
+    full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
+    if json_output:
+        full.append("--json")
+    result = live_common.run_client_command(full, command)
+    if result.returncode and check and not (json_output and '"effects"' in result.stdout):
+        raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
+    if not json_output:
+        return result
+    out = result.stdout
+    return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+
+
 def run(args):
     ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
     os.umask(0o077)
@@ -457,17 +470,8 @@ def run(args):
     tools = toolchain.check_tools(args.build_sui, args.network_sui)
     network_sui = tools["network"]["path"]
 
-    def client(*command, json_output=True, check=True):
-        full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
-        if json_output:
-            full.append("--json")
-        result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-        if result.returncode and check and not (json_output and '"effects"' in result.stdout):
-            raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
-        if not json_output:
-            return result
-        out = result.stdout
-        return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+    def client(*command, **kwargs):
+        return package_client(network_sui, wallet, *command, **kwargs)
 
     def balance():
         gas = client("gas")
