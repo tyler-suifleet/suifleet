@@ -252,3 +252,70 @@ without opaque-item cleanup. SF129 PR279 was OPEN on read; final integration
 still requires its merge. Hosted checks/automatic testnet are pending and were
 not watched. Fresh independent review remains required. Physical, mainnet,
 production-provider and manual-wallet checks remain unrun in #32/#159.
+
+
+## PR307 device-inbox base integration (2026-10-25)
+
+Integrated snapshot/current main `f076a6334d75539ef3ba447484924cfa2896cb38`
+in merge `4be054f033bba4f5c721f9c602e5babd63385c4d`. The only conflicts
+were the reviewed ABI catalog and generated bindings: both SF129/SF141's
+`deployment_manager::schema_version` and main's `scheduled_start_ms` are
+preserved. Regenerated bindings match all 13 compiled modules. Existing source
+review found no actionable defect; its dependency and pending-gate notes remain.
+
+Fresh checks on the combined tree, using network-none `suifleet-dev:sf035`
+with the existing dedicated caches (browser checks used host Chrome):
+
+- `make test-contracts`: core 227/227, storage 68/68, data 49/49 passed.
+- `python3 scripts/check_move_security.py`: strict compiler/linter and negative
+  authority mutations passed, including inbox announcement/member negatives.
+- `python3 scripts/generate_interfaces.py --check`: 13 modules passed.
+- `cargo test --locked --offline --manifest-path suifleet-edge/Cargo.toml`:
+  456 passed, zero failed, four existing ignores. Same command with
+  `--features pkcs11`: 458 passed, zero failed, four existing ignores.
+- `cd dapp && pnpm typecheck && pnpm build`: passed static production export.
+- Node fixtures `test_stream_retention.cjs`, `test_stream_retention_panel.cjs`,
+  `test_storage_reclaim.cjs`, `test_storage_reclaim_panel.cjs`, `test_inbox.cjs`
+  and `test_fleet_ops.cjs`: all passed.
+- Host `CHROME_EXECUTABLE=/opt/google/chrome/chrome node scripts/TEST.cjs`
+  for `test_data_session_browser`, `test_data_browser_browser` and
+  `test_fleet_settings_browser`: all real Chromium harnesses passed.
+- `make test-retention`: 15 Python tests and SDK/BCS/expiry fixtures passed.
+- `python3 -m unittest discover -s scripts/tests -p test_deployment_manifest.py`:
+  19 passed.
+- `SF141_RETENTION=1 SF129_RECEIPT=/tmp/pr307-current-localnet.json python3
+  scripts/test_reclaim_localnet.py`: real existing-object upgrade, stream
+  purchase, extension, expiry and reclaim passed on disposable isolated localnet.
+  Temporary receipt stayed in the container; committed older receipt is historical.
+
+Initial interface generation mounted the Move cache at the wrong home directory
+and failed offline resolution; corrected `/home/dev/.move` passed. The first
+localnet attempt lacked the linked-worktree Git metadata mount and failed before
+the lifecycle; adding read-only common/worktree metadata mounts passed. Neither
+setup failure was treated as success.
+
+SF129 PR279 remains open and must merge before final integration, with its
+merged source reconciled against this branch. Existing review notes about
+opaque items awaiting explicit reclaim and the prior scope limitations remain
+recorded, not silently relabeled fixed. No public expiry-window rebate evidence
+is claimed. Hosted exact-head/current-base ordinary/security CI, automatic
+testnet and fresh independent review remain coordinator gates after push.
+Physical/mainnet/production-provider/manual-wallet acceptance stays deferred
+and unrun in #32/#159. No public writes, deployment, hardware, issue creation,
+merge or other worker launch occurred.
+
+The complete `INSIDE_DEV_CONTAINER=1 CARGO_NET_OFFLINE=true make test-ota`
+then passed (outer exit 0), including a fresh locked bins/examples build,
+all updater/supervision/configuration/recovery/reporting/budget scenarios, the
+new inbox simulator and all five archive modes, ending with compact + Quilt +
+stream retention. A disconnected simulator client emitted a BrokenPipe traceback
+during log testing; its assertions and the complete suite subsequently passed.
+
+Main advanced during the run to `2169f7979c1c446b838f04a46e05e31a168697d6`
+with only coordinator repair-ceiling code/docs/tracking changes. Integrated it
+cleanly in `5a78468a`; no application code changed after the application checks.
+`python3 -m unittest discover -s tools/pr-coordinator/tests -p
+test_repair_budgets.py` passed all five relevant regressions. Staged, worktree
+and current-base `git diff --check` passed. Both merge commits use Tyler Bush
+for author and committer. Hosted checks for the resulting pushed revision are
+pending and were not watched/polled; this is a feedback handoff, not approval.
