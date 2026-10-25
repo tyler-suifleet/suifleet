@@ -289,3 +289,40 @@ New checks after base integration (all passed):
 No new full simulator, frontend build, Move/localnet or live roundtrip was run in
 this integration repair, since those sources did not change. Hosted CI and
 public-testnet checks for the pushed head remain pending and were not watched.
+
+## Repeated publisher outage diagnosis (2026-10-24)
+
+Repair worker inspected failed automatic run
+[40148688146](https://github.com/tyler-suifleet/suifleet/actions/runs/40148688146)
+once. Despite the status's `source` classification, its traceback is an external
+HTTP 500 from the configured public Walrus publisher in `Walrus.store`, reached
+while preparing the upgrade-security legacy deployment. The existing three
+bounded attempts were exhausted. This is the same failure location as the prior
+run, not a failed opaque-data assertion or a package compatibility failure.
+
+The run reports chain `4c78adac`, dedicated CI operator `0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`,
+reused verified package fixtures, successful deployment/receipt checks and
+independent gRPC effects checks before the outage. Historical log reports:
+package-upgrade allowance 63,853,114 MIST (three transactions), upgrade-security
+allowance 53,225,847 MIST (four transactions), with the latter reporting 0.0113
+SUI net spent. These are log reports, not a fresh independent spend reconciliation
+or a successful complete automatic run. Existing fixture/recovery/spend records
+must remain intact.
+
+Offline reproduction added in `scripts/tests/test_live_common.py` confirms that
+three publisher HTTP 500 responses propagate failure rather than acknowledge
+storage or return a blob ID. `python3 -m unittest discover -s scripts/tests -p
+test_live_common.py -v`: **36 passed**. No production code, retry limits, spend
+limits, provider configuration or acceptance gates changed. `git merge --no-edit
+origin/main` reports already up to date at snapshot/current base
+`de238f73a6b12b9fccca8e257be6fc1a3b265714`.
+
+The provider failure is **unresolved**. The next step is recovery of the configured
+public publisher followed by a genuine bounded automatic testnet run; any endpoint
+replacement needs verified public-testnet storage/certification compatibility and
+source review, not an arbitrary fallback or local stand-in. This worker made no
+new wallet mutation, blindly replayed transaction or hosted-CI rerun and did not
+watch hosted CI. Fresh exact-head/base checks and independent review remain
+required. Physical, mainnet, production-provider and manual real-wallet acceptance
+remains unrun in #32/#159. This diagnosis and regression do not constitute a fix
+of the external service or merge approval.
