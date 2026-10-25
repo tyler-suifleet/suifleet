@@ -32,7 +32,7 @@ import tempfile
 from types import SimpleNamespace
 
 import deployment_manifest as dm
-from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET, pending_key, recover_key, sweep
+from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET, WALRUS_TESTNET_FALLBACK, pending_key, recover_key, sweep
 from live_package_upgrade import contracts_digest, fixture_key, load_state
 
 FUNDING = 100_000_000  # 0.1 SUI for the test key; swept back afterwards.
@@ -56,7 +56,11 @@ def run(args):
     fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
     if not fixture or not fixture.get("owner_cap"):
         sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first")
-    publisher, aggregator = WALRUS_TESTNET
+    # The reference publisher can run out of WAL (HTTP 500). Python uploads
+    # already fail over to this independent public Testnet operator; the browser
+    # uploads directly through the dApp and therefore needs its own manifest
+    # configured with that publisher. Keep real uploads and aggregator checks.
+    publisher, aggregator = WALRUS_TESTNET_FALLBACK, WALRUS_TESTNET[1]
     manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=fixture["head_package"],
                                           upgrade_cap=fixture["upgrade_cap"], registry=fixture["registry"], network=args.network,
                                           publisher=publisher, aggregator=aggregator))

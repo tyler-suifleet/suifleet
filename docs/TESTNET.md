@@ -142,6 +142,12 @@ They still require exact-byte readback through the reference aggregator; exhaust
 attempts and client errors fail the run. This does not retry chain transactions,
 change the wallet allowance or substitute local storage for public storage.
 
+The wallet browser suite configures its temporary deployment manifest with the
+same independent Testnet publisher directly: its real dApp uploads do not go
+through the Python retry helper. It retains the reference aggregator and fails
+on upload or availability errors; no browser response is replaced with a fixture.
+This is test-harness configuration, not production provider selection.
+
 `scripts/live_upgrade_security.py` proves on a public network what the Move tests prove locally: existing objects survive an upgrade, later-introduced types originate in the upgrade, and older package versions — which stay callable forever — cannot be used to bypass the new authority. Recipes and artifacts go to real Walrus testnet.
 
 The base package and its upgrade to head are cached in the fixture state (`live-state.json` beside the wallet, `security_fixtures`), keyed by the content hashes of the base and head contracts and the release compiler (as the package-upgrade fixture is). Every `sui client` command runs on the pinned transaction CLI after the read-only protocol check, and the publish and upgrade sign only bytecode verified against the release compiler's output (`scripts/sui_toolchain.py`). Before reuse the suite re-reads the UpgradeCap — still the operator's, at version 2 and pointing at the cached head, so no other upgrade was chained on top — and the shared registry, and the manifest's type origins must still split between base and head. A reused pair creates the legacy state through the base package's entry points, which older packages keep after an upgrade; the objects and types are the same as those created before it. A cached run costs about 0.03 SUI net. The allowance is charged about 0.105 SUI, because the device's 0.04 SUI of funding counts in full even though most of it is swept back. `FRESH=1` (`--fresh`) publishes a new pair (about 0.22 SUI) so the legacy state is created before the upgrade; do that for release candidates and contract-security changes.
