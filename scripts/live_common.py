@@ -122,6 +122,8 @@ class Live:
         self.ledger = Budget(max_spend_mist, self.evidence["transactions"])
 
     def client(self, *command, json_output=True, check=True, config=None):
+        if command[0] == "serialized-tx":  # Execute exactly the verified bytes (see toolchain.exact_execution).
+            command = toolchain.exact_execution(self.network_sui, config or self.wallet, command[1])
         full = [self.network_sui, "client", "--client.config", str(config or self.wallet), *map(str, command)]
         if json_output:
             full.append("--json")

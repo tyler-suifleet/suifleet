@@ -55,6 +55,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -130,6 +131,22 @@ def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, re
         ptb += ["--move-call", f"{package}::fleet_inbox::announce_device", f"@{inbox}", f"@{registry}",
                 f"@{owner_cap}", name, CLOCK]
     return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
+
+
+def executed_facts(rpc, digest, attempts=10, delay=3, chain=None):
+    """Executed facts for a just-submitted digest once the fullnode indexes it,
+    or None (the outcome then stays unknown and fully charged)."""
+    chain = chain or reconciler.Chain(rpc)
+    for attempt in range(attempts):
+        try:
+            facts = chain.transaction(digest)
+        except reconciler.Uncertain:
+            facts = None
+        if facts:
+            return facts
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+    return None
 
 
 def gas_pools(gas):
@@ -457,10 +474,21 @@ def run(args):
     network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
+        exact = command[0] == "serialized-tx"
+        if exact:
+            command = toolchain.exact_execution(network_sui, wallet, command[1])
         full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
+        if exact and result.returncode and '"effects"' not in result.stdout:
+            # The signature pins the digest, so a reported one is the only
+            # transaction this can be; adopt its effects (a failed execution
+            # is then known and charged, not left uncertain).
+            found = re.search(r"transaction '([1-9A-HJ-NP-Za-km-z]{43,44})'", result.stderr + result.stdout)
+            facts = found and executed_facts(rpc_url, found.group(1))
+            if facts:
+                return reconciler.cli_result(facts)
         if result.returncode and check and not (json_output and '"effects"' in result.stdout):
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output:
@@ -621,11 +649,13 @@ def run(args):
                                 marker, chain=facts_reader, operator=operator, inspect=toolchain.decode, verify=verify,
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
                         except Exception:
-                            # Only a resubmission with failed execution effects is known.
-                            if ledger.evidence and ledger.evidence[-1].get("label") == retry \
-                                    and ledger.evidence[-1].get("status") == "failure":
-                                publication.pop("pending_operation")
-                            raise
+                            # Only a resubmission with failed execution effects is known:
+                            # it created nothing, exactly like a reconciled failure.
+                            failed = ledger.evidence[-1] if ledger.evidence else {}
+                            if failed.get("label") != retry or failed.get("status") != "failure":
+                                raise
+                            outcome, value = "failed", {"digest": failed.get("digest"), "gas_mist": failed.get("gas_mist"),
+                                                        "effects": {"status": {"status": "failure"}}}
                         finally:
                             save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
                         entry = {"label": label, "outcome": outcome, "legacy": bool(marker.get("legacy"))}
