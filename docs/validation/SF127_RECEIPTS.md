@@ -856,3 +856,39 @@ Hosted exact-head/base CI and automatic testnet remain pending; fresh independen
 review is required. No hosted CI polling/watch or manual rerun was performed.
 Physical acceptance remains in SF-031/#32; mainnet and final provider/manual-wallet
 acceptance remain in SF-087/#159, explicitly unrun.
+
+## CI repair — stale retained upgrade input (2026-10-25)
+
+Automatic testnet run [40212697287](https://github.com/tyler-suifleet/suifleet/actions/runs/40212697287)
+failed before execution: its retained upgrade referenced UpgradeCap
+`0x0b6418fe27af14a9a19ef7d207be99b2fd3d91986fed5da1e673cc5199acbb79`
+at version 1, while chain state was version 2. The public effects artifact records
+400,000,000 MIST conservatively reserved as unknown, zero balance delta and no
+successful upgrade. No private checkpoint or historical reservation was cleared.
+
+The reconciler previously proved death from expiration or moved gas coins only.
+Address-balance gas leaves no coin reference to expose a stale owned input. The
+transaction decoder now retains owned input versions; reconciliation checks them
+directly from verified bytes. It still checks executed effects first and again
+after the death proof, enforces the history window and never treats a shared
+object's version as proof of death. Only a proven absent transaction permits a
+new build under the existing authority, bytecode and spending checks.
+
+Validation for this repair:
+
+- `docker run --rm --network none -v "$PWD:/workspace" -w /workspace suifleet-dev:sf037 bash -lc 'make INSIDE_DEV_CONTAINER=1 test-testnet'`: PASS, 122 testnet/toolchain/reconciliation tests, 45 live-common tests and authenticated-cache roundtrip/tampering checks.
+- The stale-cap regression fails with the old gas-only death check (attempted
+  resubmission), then passes with the repair. Additional tests cover real SDK
+  upgrade bytes, effects appearing during reconciliation, the history limit,
+  unchanged owned inputs and shared inputs.
+- `node --check scripts/sui_tx_inspect.cjs` and `git diff --check`: PASS.
+- Read-only gRPC checks confirmed cap version 2 owned by the dedicated CI wallet
+  and failed transaction `9naKZ55speAiQHxvKNmWJwFsRbaZc2sCVhGkJcyPu2b7`
+  with `InsufficientGas`, checkpoint 399098901, net gas 3,900,163 MIST.
+
+No public mutations, CI reruns or hardware operations were performed. The
+application/contract source is unchanged in this repair, so its full suites were
+not repeated. Hosted exact-head/current-base CI, automatic public-testnet success
+and fresh independent review remain required after push. Physical acceptance
+remains unrun in SF-031/#32; mainnet and final provider/manual-wallet acceptance
+remain unrun in SF-087/#159.
