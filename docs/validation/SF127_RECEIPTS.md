@@ -692,3 +692,39 @@ Runtime completion:
   fixture precondition was bypassed. `git diff --check` passed. Freshly fetched
   main is still `82591d81a130e8eb03f2e176590cf991347aed30` and is an ancestor of
   the repair head.
+
+
+### Data browser base integration (2026-10-25)
+
+The latest independent source review of `4da4c622` found no actionable defects.
+The new snapshot base `9b3799fe3838d6b4e94bd116f4ecbe181b8294c4`
+adds the reviewed SF-140 Data browser. It merges without conflicts; contracts,
+shared interfaces, daemon, indexer and receipt harnesses are unchanged by this
+integration. No prior runtime or local-chain result is claimed as a new run.
+
+Fresh checks on the merged tree:
+
+- Network-none `suifleet-dev:sf037`, with the existing Move cache mounted:
+  `INSIDE_DEV_CONTAINER=1 make check-interfaces` passed: 776 client references,
+  14 compiled modules, zero drift; generated ABI and receipt-shard fixtures pass.
+- Network-none `suifleet-dev:sf010-chrome`, with `/opt/sui-network` copied from
+  `suifleet-dev:sf037` and mounted read-only: frontend verification uses
+  `INSIDE_DEV_CONTAINER=1 make dapp-typecheck dapp-build`. Its prerequisite
+  offline suites include 117 testnet-toolchain tests, 45 live-common tests,
+  18 manifest tests and the Data unit/real Chromium browser flows.
+- Initial setup attempts lacked the Move cache, Chrome or the pinned network
+  CLI respectively. These are setup failures, not passes; no check was weakened.
+  Any automatically generated wallet was disposable, unfunded container state.
+- Local logs: `/tmp/sf127-data-base-retry.log` and
+  `/tmp/sf127-data-frontend-final.log`. No public-wallet mutations.
+
+Hosted exact-head/current-base CI and automatic public-testnet acceptance remain
+pending/unassessed at handoff; no CI watch or polling. Fresh independent review
+and coordinator-only merge remain mandatory. Physical acceptance remains unrun
+in SF-031/#32; mainnet and final provider/manual-wallet acceptance remain unrun in
+SF-087/#159. The 120,000 figure is a storage bound; reports serialize within a
+root and migration/cleanup remain operator-funded.
+
+Completion: the combined frontend command above exited 0; all prerequisites,
+TypeScript typecheck and the production static build passed. `git diff --check`
+also passed. The fetched base is an ancestor of the integrated head.
