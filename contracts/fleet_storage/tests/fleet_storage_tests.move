@@ -135,11 +135,12 @@ module fleet_storage::fleet_storage_tests {
         let clock = clock_at(s, 10);
         let before_pool = fleet_storage::pool_size(&fs);
         let before_wal = fleet_storage::wal_balance(&fs);
+        let before_fees = fleet_storage::total_write_fees(&fs);
         let id = fleet_storage::register_blob_for_epochs(&mut fs, &budget, &account, &registry, &cap,
             system, blob_id(BLOB), ROOT, BLOB, RS2, epochs, &clock, ts::ctx(s));
         assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&fs, id).destroy_some()) == system.epoch() + epochs);
         assert!(fleet_storage::pool_size(&fs) == before_pool);
-        assert!(before_wal - fleet_storage::wal_balance(&fs) == fleet_storage::total_write_fees(&fs));
+        assert!(before_wal - fleet_storage::wal_balance(&fs) == fleet_storage::total_write_fees(&fs) - before_fees);
         clock::destroy_for_testing(clock); ts::return_shared(fs); ts::return_shared(budget);
         ts::return_shared(account); ts::return_shared(registry); ts::return_to_address(DEVICE, cap); id
     }
@@ -989,6 +990,32 @@ module fleet_storage::fleet_storage_tests {
         fleet_storage::configure_device_retention(&mut fs, &budget, &cap, 8, 1_000_000);
         owner_end(fs, budget, cap);
         (scenario, system)
+    }
+
+    #[test]
+    fun stream_full_purchase_keeps_protected_reserves_and_creates_no_executor_work() {
+        let (mut s, mut system) = device_retention_fixture();
+        let (fs, budget, cap) = owner(&mut s);
+        let (before_wal, before_gas) = fleet_storage::retention_balances(&fs);
+        owner_end(fs, budget, cap);
+        let id = stream_upload(&mut s, &mut system, 13);
+        let (fs, budget, cap) = owner(&mut s);
+        let (after_wal, after_gas) = fleet_storage::retention_balances(&fs);
+        assert!(before_wal == after_wal && before_gas == after_gas);
+        assert!(fleet_storage::renewal(&fs, id).is_none());
+        owner_end(fs, budget, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun stream_purchase_never_creates_future_work_for_an_incompatible_legacy_floor() {
+        let (mut s, mut system) = device_retention_fixture();
+        stream_upload(&mut s, &mut system, 3); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun browser_extension_cannot_strand_existing_prepaid_capacity() {
+        let (mut s, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut s);
+        fleet_storage::extend_stream_blob(&mut fs, &budget, &cap, &mut system, id, 1, ts::ctx(&mut s));
+        owner_end(fs, budget, cap); finish(s, system);
     }
 
     #[test]

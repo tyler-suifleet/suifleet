@@ -8,9 +8,10 @@ const { createHash } = require('node:crypto');
 const { appRequire, loader } = require('./frontend_test_utils.cjs');
 const { SuiGrpcClient } = appRequire('@mysten/sui/grpc'), { Transaction } = appRequire('@mysten/sui/transactions'), { Ed25519Keypair } = appRequire('@mysten/sui/keypairs/ed25519');
 const { requestSuiFromFaucetV2 } = appRequire('@mysten/sui/faucet'), { bcs } = appRequire('@mysten/sui/bcs'), { fromBase58, toHex, normalizeSuiAddress: id } = appRequire('@mysten/sui/utils');
-const BASE = process.env.SF129_BASE_REF || 'e19970e045c42aad2452d5a67294fe1b770133f9';
+const SF141 = process.env.SF141_RETENTION === '1';
+const BASE = process.env.SF129_BASE_REF || (SF141 ? '76c186993e0a8ddf065360db5003028c3156cf04' : 'e19970e045c42aad2452d5a67294fe1b770133f9');
 const STORAGE_EPOCHS = 3; // default retention: each new archive buys three epochs
-const DEVICES = 4;
+const DEVICES = SF141 ? 6 : 4;
 
 (async () => {
   assert.equal(process.env.PROTOCOL_TEST_DISPOSABLE, '1'); assert.deepEqual((await fs.readdir('/sys/class/net')).sort(), ['lo']);
@@ -37,9 +38,11 @@ const DEVICES = 4;
     const tree = path.join(tmp, 'contracts'); await fs.cp(path.join(root, 'contracts'), tree, { recursive: true, filter: (p) => !['build', 'Published.toml'].includes(path.basename(p)) });
     const baseTree = path.join(tmp, 'base'); await fs.mkdir(baseTree);
     assert.match(BASE, /^[0-9a-f]{40}$/, 'SF129_BASE_REF must be a full commit hash');
-    const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_data/sources'], { maxBuffer: 64 * 1024 * 1024 });
+    const archive = execFileSync('git', ['-C', root, 'archive', BASE, 'contracts/sources', 'contracts/fleet_data/sources', 'contracts/fleet_storage/sources'], { maxBuffer: 64 * 1024 * 1024 });
     execFileSync('tar', ['-x', '-C', baseTree], { input: archive });
     const headCore = path.join(tmp, 'head-core-sources'); await fs.cp(path.join(tree, 'sources'), headCore, { recursive: true });
+    const headStorage = await fs.readFile(path.join(tree, 'fleet_storage/sources/fleet_storage.move'));
+    if (SF141) await fs.copyFile(path.join(baseTree, 'contracts/fleet_storage/sources/fleet_storage.move'), path.join(tree, 'fleet_storage/sources/fleet_storage.move'));
     const headData = await fs.readFile(path.join(tree, 'fleet_data/sources/fleet_data.move'));
     const cache = '/home/dev/.move/git', pin = 'https___github_com_MystenLabs_walrus_git_c68b530e0b1e522b4a3896190d883e4312a1cf0e';
     assert((await fs.readdir(cache)).includes(pin), 'pinned Walrus source cache missing');
@@ -90,7 +93,7 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
       const r = await client.signAndExecuteTransaction({ transaction: tx, signer, include: { effects: true, objectTypes: true, events: true } });
       assert(r.Transaction?.status.success, `${label}: ${JSON.stringify(r.FailedTransaction?.status)}`);
       await client.waitForTransaction({ digest: r.Transaction.digest });
-      transactions.push({ label, digest: r.Transaction.digest, gas: gasOf(r.Transaction) });
+      transactions.push({ label, digest: r.Transaction.digest, gas: gasOf(r.Transaction), ...(SF141 ? {netMist:net(gasOf(r.Transaction))} : {}) });
       return r.Transaction;
     }
     /** Fully resolved inputs: rejection is a real failed effect, not a simulation. */
@@ -202,7 +205,7 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     // Every device: one periodic archive and one diagnostic archive, anchored
     // under the base package. Device 0 also keeps one unanchored upload.
     const archives = [];
-    for (const [i, d] of fleetDevices.entries()) {
+    for (const [i, d] of (SF141 ? fleetDevices.slice(0,4) : fleetDevices).entries()) {
       for (const [kind, seq] of [[0, 1], [1, 2]]) {
         const u = await upload(d, 1000 + 10 * i + kind, `device ${i} archive ${seq}`);
         const anchored = await anchor(d, u.blob, seq, kind, `device ${i} archive ${seq}`);
@@ -239,15 +242,20 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     await fs.rm(path.join(tree, 'sources'), { recursive: true }); await fs.cp(headCore, path.join(tree, 'sources'), { recursive: true });
     const coreHead = await upgrade('core', tree, core);
     await fs.writeFile(path.join(dataTree, 'sources/fleet_data.move'), headData);
+    let storageHead = storagePackage.pkg;
+    if (SF141) {
+      await fs.writeFile(path.join(tree, 'fleet_storage/sources/fleet_storage.move'), headStorage);
+      storageHead = await upgrade('storage', path.join(tree, 'fleet_storage'), storagePackage);
+    }
     const dataHead = await upgrade('data', dataTree, dataBase);
     const dataOrigins = await origins(dataHead), coreOrigins = await origins(coreHead);
     assert.equal(dataOrigins['fleet_data::FleetData'], id(dataBase.pkg)); assert.equal(dataOrigins['fleet_data::AnchorKey'], id(dataBase.pkg));
-    assert.equal(dataOrigins['fleet_data::AnchorsPruned'], id(dataHead)); assert.equal(dataOrigins['fleet_data::ExpiredBlobsBurned'], id(dataHead));
+    assert.equal(dataOrigins['fleet_data::AnchorsPruned'], id(SF141 ? dataBase.pkg : dataHead)); assert.equal(dataOrigins['fleet_data::ExpiredBlobsBurned'], id(SF141 ? dataBase.pkg : dataHead));
     assert.equal(coreOrigins['deployment_manager::DeploymentRecord'], id(core.pkg)); assert.equal(coreOrigins['desired_state::DesiredState'], id(core.pkg));
-    assert.equal(coreOrigins['desired_state::Retirement'], id(coreHead));
+    assert.equal(coreOrigins['desired_state::Retirement'], id(SF141 ? core.pkg : coreHead));
     for (const [i, objectId] of [fleet, fleetDevices[0].writer, superseded].entries()) assert.deepEqual((await client.getObject({ objectId, include: { content: true } })).object.content, before[i], 'upgrade must not change existing objects');
     // Old package versions have no reclaim entry points.
-    await assert.rejects(client.getMoveFunction({ packageId: dataBase.pkg, moduleName: 'fleet_data', name: 'prune_expired_anchors' }));
+    if (!SF141) await assert.rejects(client.getMoveFunction({ packageId: dataBase.pkg, moduleName: 'fleet_data', name: 'prune_expired_anchors' }));
     // Devices keep registering through the existing storage after the upgrade;
     // this upload stays unanchored and is reclaimed as a loose expired blob.
     const late = await upload(fleetDevices[1], 2999, 'device 1 post-upgrade upload');
@@ -258,7 +266,74 @@ public fun reclaim_fixture_epoch(system: &mut System, epoch: u32) { system.inner
     for (const name of Object.keys(manifest.type_origins)) manifest.type_origins[name] = core.pkg;
     process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
     const load = loader(), reclaim = load('lib/storage-reclaim.ts'), data = load('lib/fleet-data.ts'), bulk = load('lib/fleet-bulk.ts');
-    const config = data.parseDataConfig(JSON.stringify({ schema: 1, chainIdentifier: chain, registryId: registry, packageId: dataHead, typeOrigin: dataBase.pkg, fleetId: fleet, budgetId: budget, storageId: storage }));
+    const config = data.parseDataConfig(JSON.stringify({ schema: 1, chainIdentifier: chain, registryId: registry, packageId: dataHead, typeOrigin: dataBase.pkg, fleetId: fleet, budgetId: budget, storageId: storage, ...(SF141 ? { streamRetentionOrigin: dataHead, compactHistoryOrigin: dataBase.pkg } : {}) }));
+    if (SF141) {
+      const policy = load('lib/stream-retention.ts');
+      assert.equal(dataOrigins['fleet_data::StreamRetentionKey'], id(dataHead));
+      assert.equal(dataOrigins['fleet_data::StreamRetention'], id(dataHead));
+      assert.deepEqual(await policy.readStreamPolicies(client, config), [undefined, undefined, undefined]);
+      await execute('set logs retention to three epochs', policy.setStreamRetentionTx(config, budgetCap, 0, 3));
+      await execute('set diagnostics retention to five epochs', policy.setStreamRetentionTx(config, budgetCap, 1, 5));
+      assert.deepEqual(await policy.readStreamPolicies(client, config), [3, 5, undefined]);
+      const fresh = fleetDevices.slice(4), written = [];
+      for (const [kind, d] of fresh.entries()) {
+        const root = 5000 + kind;
+        tx = new Transaction();
+        const [blobId] = tx.moveCall({ target: `${walrusPackage.pkg}::blob::derive_blob_id`, arguments: [tx.pure.u256(root), tx.pure.u8(1), tx.pure.u64(100)] });
+        tx.moveCall({ target: `${dataHead}::fleet_data::register_stream_blob`, arguments: [tx.object(fleet), tx.object(d.writer), tx.object(budget), tx.object(d.account), tx.object(registry), tx.object(d.cap), tx.object(storage), tx.object(system), tx.pure.u8(kind), blobId, tx.pure.u256(root), tx.pure.u64(100), tx.object('0x6')] });
+        const registered = await execute(`stream ${kind}: buy live policy at write`, tx, d.key), blob = one(registered, '::blob::Blob');
+        const field = await client.getDynamicField({ parentId: storage, name: { type: `${storagePackage.pkg}::fleet_storage::RecordKey`, bcs: bcs.Address.serialize(blob).toBytes() } });
+        const record = RecordBcs.parse(field.dynamicField.value.bcs);
+        assert.equal(record.end_epoch, kind === 0 ? 3 : 5);
+        const message = new Uint8Array([1, 0, 3, ...u32(0), ...u256(record.blob_id), 0]);
+        const signature = bls12_381.longSignatures.sign(bls12_381.longSignatures.hash(message), secretKey).toBytes();
+        tx = new Transaction();
+        tx.moveCall({ target: `${storagePackage.pkg}::fleet_storage::certify_blob`, arguments: [tx.object(storage), tx.object(system), tx.pure.address(blob), tx.pure.vector('u8', Array.from(signature)), tx.pure.vector('u8', [1]), tx.pure.vector('u8', Array.from(message))] });
+        await execute(`stream ${kind}: certify`, tx, d.key);
+        if (kind === 0) {
+          tx = new Transaction();
+          tx.moveCall({target:`${dataHead}::fleet_data::anchor_compact`,arguments:[tx.object(fleet),tx.object(d.writer),tx.object(budget),tx.object(d.account),tx.object(registry),tx.object(d.cap),tx.object(storage),tx.pure.address(blob),tx.pure.u64(1),tx.pure.u8(kind),tx.pure.vector('u8',Array.from(createHash('sha256').update(blob).digest())),tx.pure.vector('u8',[]),tx.object('0x6')]});
+          await execute('stream logs: compact root with temporary expiry index',tx,d.key);
+        } else await anchor(d, blob, 1, kind, `stream ${kind}`, dataHead);
+        written.push({d, blob, record});
+      }
+      await execute('owner browser extends logs before expiry',policy.extendStreamArchiveTx(config,{packageId:storageHead,walrus:{system}},budgetCap,written[0].blob,1));
+      // A later policy edit applies only to subsequent writes, never metadata.
+      await execute('change future logs retention', policy.setStreamRetentionTx(config, budgetCap, 0, 13));
+      assert.deepEqual(await policy.readStreamPolicies(client, config), [13, 5, undefined]);
+      let plan = await reclaim.planArchiveReclaim(client, config, storagePackage.pkg, fresh.map(d => d.deviceId), 0);
+      assert.equal(policy.streamExpiryPlan(plan, 0).anchors.length, 0);
+      const refuse = await executeFailing('stream prune before expiry', async (tx, shared, owned) => tx.moveCall({ target: `${dataHead}::fleet_data::prune_expired_anchors`, arguments: [await shared(fleet), await shared(fresh[0].writer,true), await shared(budget), await owned(budgetCap), await shared(storage,true), await shared(system), tx.pure.vector('u64',[0])] }), owner, /burn_expired.*8|MoveAbort.*8/);
+      tx = new Transaction(); tx.moveCall({target:`${walrusPackage.pkg}::system::reclaim_fixture_epoch`,arguments:[tx.object(system),tx.pure.u32(3)]});
+      await execute('advance to original logs expiry; owner extension remains live',tx);
+      plan = await reclaim.planArchiveReclaim(client,config,storagePackage.pkg,fresh.map(d=>d.deviceId),3);
+      assert.equal(policy.streamExpiryPlan(plan,0).anchors.length,0,'actual extension takes precedence over original anchor expiry');
+      for (const [kind, epoch] of [[0,4],[1,5]]) {
+        tx = new Transaction(); tx.moveCall({ target: `${walrusPackage.pkg}::system::reclaim_fixture_epoch`, arguments: [tx.object(system),tx.pure.u32(epoch)] });
+        await execute(`advance to stream ${kind} expiry`, tx);
+        plan = await reclaim.planArchiveReclaim(client, config, storagePackage.pkg, fresh.map(d => d.deviceId), epoch);
+        const selected = policy.streamExpiryPlan(plan, kind);
+        assert.equal(selected.anchors.length, 1); assert.deepEqual(selected.loose, []);
+        const entries = (await bulk.readAnchorEntries(client, config, fresh[kind].deviceId,0,8)).entries;
+        assert.equal((await policy.liveArchiveEntries(client,config,fresh[kind].deviceId,entries,epoch)).length,0);
+        if (kind === 0) {
+          const other = (await bulk.readAnchorEntries(client, config, fresh[1].deviceId,0,8)).entries;
+          assert.equal((await policy.liveArchiveEntries(client,config,fresh[1].deviceId,other,epoch)).length,1);
+        }
+        const preview = await reclaim.previewReclaim(client,reclaim.buildArchiveReclaimTx(config,budgetCap,system,selected).tx,owner.toSuiAddress());
+        assert(preview.ok,preview.error);
+        const result = await execute(`reclaim expired stream ${kind}`,reclaim.buildArchiveReclaimTx(config,budgetCap,system,selected).tx);
+        assert.equal(preview.netMist,-net(gasOf(result)));
+        assert.equal(await bulk.readAnchorAt(client,config,fresh[kind].deviceId,0),undefined);
+        assert.equal((await policy.streamExpiryPlan(await reclaim.planArchiveReclaim(client,config,storagePackage.pkg,fresh.map(d=>d.deviceId),epoch),kind)).anchors.length,0,'restart/rescan is a no-op');
+        // Unanchored ciphertext remains under fleet custody, even when expired.
+        assert((await client.getDynamicField({parentId:storage,name:{type:`${storagePackage.pkg}::fleet_storage::RecordKey`,bcs:bcs.Address.serialize(loose.blob).toBytes()}})).dynamicField);
+      }
+      const result = {schema:1,ticket:'SF-141',base:BASE,chain,isolated:true,network:'none',policies:[13,5,null],written:written.map(({blob,record})=>({blob,end:record.end_epoch})),unexpiredRefusal:refuse,transactions:transactions,limits:['One-member local Walrus fixture; no public epoch563 prune/rebate, production provider, wallet or hardware evidence.','SF129 must merge before final integration; hosted CI and independent review remain pending.']};
+      if(process.env.SF129_RECEIPT) await fs.writeFile(process.env.SF129_RECEIPT,JSON.stringify(result,(_,v)=>typeof v==='bigint'?v.toString():v,2)+'\n');
+      console.log('SF-141 existing-object upgrade and per-stream purchase/expiry/reclaim PASS');
+      return;
+    }
     const deviceIds = fleetDevices.map((d) => d.deviceId);
     // Before expiry nothing is selected, and a forced prune fails on chain.
     let plan = await reclaim.planArchiveReclaim(client, config, storagePackage.pkg, deviceIds, 0);
