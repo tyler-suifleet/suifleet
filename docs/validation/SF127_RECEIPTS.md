@@ -575,3 +575,43 @@ Hosted CI and automatic public-testnet checks on the repaired head remain pendin
 for the coordinator, together with fresh independent review. This is no approval
 or network acceptance claim. Physical acceptance remains deferred in #32;
 mainnet and final provider/manual-wallet acceptance remain deferred in #159.
+
+
+### CI poll-read measurement repair (2026-10-25)
+
+CI run `40182958348`, job `121137937172`, reached the final queued-receipt
+idle assertion with three batch reads plus one service-info and five object
+reads. The earlier deliberately unknown-schema record had a delivered receipt
+but still-pending post-receipt health: schema resolution correctly fails closed
+and retains its retry. That independent retry can overlap the following idle
+measurement. Local runs of the original harness passed, including controlled
+scheduling variations; the hosted failure is timing-dependent.
+
+The harness now explicitly verifies that the unknown schema retains a slow
+health retry, restores the fixture to a readable ordinary schema, and waits for
+actual health settlement before measuring idle reads. The rejected status and
+zero applies are still required, as are exactly three batch reads and zero other
+reads for both idle measurements. No daemon retry behavior or assertions were
+relaxed. This isolates receipt backoff from a distinct health retry.
+
+Verification for the poll-read repair:
+
+- `docker run --rm --network none -v "$PWD:/workspace" -v /home/tyler/.cargo:/home/dev/.cargo -w /workspace -e CARGO_NET_OFFLINE=true suifleet-dev:sf037 bash -lc 'INSIDE_DEV_CONTAINER=1 make test-ota'`
+  passed (exit 0), including the locked daemon/examples build, receipt idle-read
+  assertions, all OTA/lifecycle/control/recovery scenarios and all four fleet-data
+  modes. This uses real local daemon/shim processes and simulated chain/Walrus.
+- `python3 -m py_compile scripts/test_ota.py` and `git diff --check` passed.
+- A direct host `make test-ota` first needed `RUSTUP_TOOLCHAIN=1.94.0`; with
+  that pin it passed the repaired receipt check but stopped in the supervisor
+  harness because the non-root host user cannot inspect `/proc/1/cwd`. The
+  isolated container run above passed that supervisor check and the entire suite.
+  An initial container attempt without dependency caches failed offline dependency
+  resolution; the successful command mounts the existing cache and enforces offline
+  Cargo resolution. No check was skipped or weakened.
+
+Snapshot and freshly fetched current base remain `3c6625c33b238914a2b22d4b7c1a3dd1a69aff27`;
+`git merge --no-edit origin/main` was already up to date. No public-network
+mutations or live/hardware tests were performed. Hosted exact-head/current-base
+CI and automatic testnet acceptance remain pending for the coordinator after
+push, along with fresh independent review. Deferred acceptance remains unrun in
+SF-031/#32 and SF-087/#159. This repair is not approval.
