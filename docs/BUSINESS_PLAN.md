@@ -2,7 +2,7 @@
 
 Decision basis: 2026-10-16. This records Tyler's original commercial thesis, not a newly discovered positioning idea. Product implementation and hardware acceptance remain separate from business hypotheses.
 
-Updated 2026-10-23 with a [proposed price list and cost model](#pricing-and-cost-model-proposal-2026-10-23) for a low-cost, Sui-stack-only product, prepared at the user's request. Its prices are derived from estimated cost to serve, not from an arbitrary subscription; its margins stay estimates until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) measures a Mainnet bill.
+Updated 2026-10-25: the user selected a subscription floor based on a multiple of SUI-sensitive recurring cost. The [current planning policy](business/SUBSCRIPTION_PRICING.md) uses configurable 10× SUI-cost stress and an 80% infrastructure margin target under stress. The user requested the 10× exposure case; the margin target remains a planning assumption, and final tariffs and production margins remain unapproved and unmeasured until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267). The 2026-10-23 prices below are historical commercial candidates, subject to this floor.
 
 ## The opportunity
 
@@ -11,6 +11,40 @@ SuiFleet can potentially replace recurring fleet-platform charges with low margi
 Do not begin with an arbitrary per-device SaaS subscription or use assumed engineering labor to manufacture savings. Establish the network-only bill first. Separately measure any paid delivery, RPC, indexing, hosting and key services needed for the chosen operating model; optional managed hosting and support can be distinct offers. The 2026-10-23 proposal below sets a per-device price from the estimated cost to serve; no production saving percentage or gross margin is established until it is measured on Mainnet.
 
 A fleet with many devices and relatively infrequent releases is the initial economic hypothesis. Idle devices do not themselves require a periodic Sui transaction, although retained objects, active integrations and selected services can have costs. Receipts still scale with device activity: one shared artifact does not make 1,000 device reports one transaction.
+
+## Subscription pricing decision (2026-10-25)
+
+For a fixed, bounded workload, separate monthly SUI-sensitive recurring cost `S`,
+WAL expense `W` and other recurring services `O`. Apply the configurable stress
+multiple to `S`, then price for the chosen margin under that stress:
+
+```text
+risk floor = (10 × S + W + O + fixed payment fee) / (1 − 0.80 − payment fee fraction)
+subscription = max(risk floor, monthly minimum, commercial price after discounts)
+```
+
+The current planning inputs are 10× SUI-cost stress, 80% stressed infrastructure
+margin and provisional payment fees of 3% + $0.30 per invoice. Annual fixed fees
+are amortized over 12 months. Volume/annual discounts cannot undercut the floor.
+Refundable deposits and gas float remain separate working capital; unknown
+required provider costs must be quoted rather than counted as zero. The multiple
+covers total SUI-cost exposure, not a separate 10× token shock and 10× gas shock.
+WAL stress is independently configurable; its baseline multiplier is 1× under
+USD-targeted storage pricing.
+
+The [reproducible policy and calculator](business/SUBSCRIPTION_PRICING.md) show the
+formula, source requirements and sensitivity at 1×/2×/3×/5×/10× SUI cost, plus a
+20× boundary case. An explicitly
+synthetic $9/month cost split ($8 SUI-sensitive plus $1 other) yields a $478.24
+monthly floor with these assumptions, preserving about 80% infrastructure margin
+at 10× SUI cost. This is arithmetic, not a measured cost split or a final tariff.
+Customer prices remain fixed for purchased terms; a token move does not generate
+an automatic usage invoice. Reassess quotes and renewals against current costs.
+
+The historical prices, AWS comparisons, profit and margin tables below were
+calculated without this new stress floor. They are not current customer quotes or
+margin promises. The dApp price table is still a historical commercial candidate;
+final reviewed tariffs must satisfy this policy before being published.
 
 ## Pricing and cost model (proposal, 2026-10-23)
 
@@ -239,7 +273,7 @@ Validation: [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267)
 
 ### Risks
 
-- **Token prices.** Network fees are about $0.0086 of the $0.04–0.08 platform price at reference prices. SUI ranged $0.65–1.26 over the last 90 days, so a doubling of SUI costs about 11 points of margin at $0.08 and about 21 points at $0.04. Walrus storage has targeted a fixed USD price since May 2026.
+- **Token and fee exposure.** Use the [stressed subscription floor](business/SUBSCRIPTION_PRICING.md), not a fixed margin deduction extrapolated from the historical price table. SUI-sensitive recurring costs are stressed independently of WAL/USD-service expense. Walrus targets USD storage prices with periodic adjustments, not instantaneous repricing; test an independent WAL shock where needed. A shock beyond the selected assumptions can still compress margins. Refundable deposits/gas float also create capital exposure, separately from recurring expense.
 - **No Mainnet measurement yet** (SF-135).
 - **The public endpoint is guidance-limited** and not intended for production; move paying fleets off it before relying on it.
 - **The weekly-archive figure** depends on deposit reclaim (SF-129) and on SF-121's archive work.

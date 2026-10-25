@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "sui_cost_multiple": "10",
+  "walrus_cost_multiple": "1",
+  "stressed_margin_fraction": "0.80",
+  "payment_fee_fraction": "0.03",
+  "payment_fixed_usd_per_invoice": "0.30"
+}
