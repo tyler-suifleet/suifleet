@@ -26,6 +26,7 @@ import {
 import { enrollBudgetDevices, enrollmentReads, prepareEnrollment, type EnrollmentProgress } from "@/lib/budget-enrollment";
 
 import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { ArchiveReclaimPanel } from "@/components/StorageReclaim";
 import { buildAuthorizeRenewalTx, buildConfigureRetentionTx, buildFundRetentionTx, buildMigrateRetentionTx,
@@ -325,6 +326,7 @@ const MIB = 1024 * 1024;
 export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint }) {
   const account = useCurrentAccount(), client = useCurrentClient();
   const { budget, storage, config, reason } = useFleetStorage();
+  const dataConfig = useFleetDataConfig();
   const walrusState = useWalrusState(config);
   const { submit, message, error, pending } = useSubmit();
   const [suiAmount, setSuiAmount] = useState("1"), [slippage, setSlippage] = useState(100);
@@ -362,7 +364,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
     </div>}
     {storage && <>
       <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />
-      {DATA_CONFIG?.storageId === storage.id && DATA_CONFIG.budgetId === budget.id && <ArchiveReclaimPanel config={config} capId={budget.capId} epoch={walrusState.data?.epoch} />}
+      {dataConfig?.storageId === storage.id && dataConfig.budgetId === budget.id && <ArchiveReclaimPanel config={config} capId={budget.capId} epoch={walrusState.data?.epoch} />}
       <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p>
       {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
         <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.text}</li>)}</ul>}

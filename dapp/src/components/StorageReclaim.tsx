@@ -9,10 +9,13 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { PACKAGE_ID } from "@/lib/constants";
-import { DATA_CONFIG, listFleetDeviceIds } from "@/lib/fleet-data";
-import type { StorageConfig } from "@/lib/fleet-budget";
+import { listFleetDeviceIds } from "@/lib/fleet-data";
+import { fetchManagedBudget, type StorageConfig } from "@/lib/fleet-budget";
+import { fetchCustomerFleets, withManagedBudgetCap } from "@/lib/customer-fleets";
 import type { DeploymentEvent } from "@/lib/sui";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
+import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
+import { useFleetSelection } from "@/hooks/useFleetSelection";
 import {
   buildArchiveReclaimTx, buildRetireDeploymentsTx, formatReclaim, netReclaim, planArchiveReclaim, planDeploymentReclaim, previewReclaim,
   type ArchivePlan, type DeploymentReclaim, type ReclaimPreview,
@@ -21,10 +24,13 @@ import {
 /** A dry run applies only to the plan, transaction context, account and
  * network it simulated: `deps` names the plan and context `build` reads. Any
  * change hides the preview, a late simulation of an earlier plan is dropped,
- * and signing refuses without a successful preview of the current plan. */
+ * and signing refuses without a successful preview of the current plan.
+ * A managed fleet's cap stays in customer custody: signing borrows it for the
+ * transaction (useFleetTransaction), so the dry run simulates that same loan. */
 export function useReclaim(deps: readonly unknown[], build: () => Transaction) {
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient(), mutation = useFleetTransaction();
-  const context = [...deps, account?.address, client];
+  const selection = useFleetSelection(), fleet = selection.supported ? selection.fleet : undefined;
+  const context = [...deps, account?.address, client, selection.identity, fleet?.id];
   const [dry, setDry] = useState<{ context: unknown[]; preview: ReclaimPreview }>(), [result, setResult] = useState<string>(), [error, setError] = useState<string>();
   const current = useRef(context), request = useRef(0);
   current.current = context;
@@ -34,7 +40,13 @@ export function useReclaim(deps: readonly unknown[], build: () => Transaction) {
     const simulated = context, seq = ++request.current;
     setDry(undefined); setResult(undefined); setError(undefined);
     try {
-      const outcome = await previewReclaim(client, build(), account!.address);
+      let tx = build();
+      if (fleet) {
+        const current = (await fetchCustomerFleets(client, account!.address)).find((f) => f.id === fleet.id && f.customerId === fleet.customerId);
+        if (!current?.administrator) throw new Error("Fleet access was revoked or is read-only");
+        tx = withManagedBudgetCap(tx, current, (await fetchManagedBudget(client, current.budgetId)).capId);
+      }
+      const outcome = await previewReclaim(client, tx, account!.address);
       if (seq === request.current && same(simulated, current.current)) setDry({ context: simulated, preview: outcome });
     } catch (cause) {
       if (seq === request.current && same(simulated, current.current)) setError(cause instanceof Error ? cause.message : String(cause));
@@ -69,9 +81,9 @@ function PreviewLine({ preview }: { preview: ReclaimPreview }) {
 
 /** Expired archive anchors and blobs of this fleet's devices. */
 export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageConfig; capId: string; epoch?: number }) {
-  const client = useCurrentClient();
+  const client = useCurrentClient(), DATA_CONFIG = useFleetDataConfig();
   const [plan, setPlan] = useState<ArchivePlan>(), [scanError, setScanError] = useState<string>(), [scanning, setScanning] = useState(false);
-  const reclaim = useReclaim([plan, capId, config.walrus.system], () => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
+  const reclaim = useReclaim([plan, capId, config.walrus.system, DATA_CONFIG], () => buildArchiveReclaimTx(DATA_CONFIG!, capId, config.walrus.system, plan!).tx);
   if (!DATA_CONFIG) return null;
   // `resume` continues a bounded scan past the history it already listed.
   async function scan(resume?: Record<string, string>) {
