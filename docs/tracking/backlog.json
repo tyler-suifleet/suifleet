@@ -3156,6 +3156,28 @@
         "Add offline merge-guard and no-resume dependency regression tests. Install verified committed source and observe both repairs start."
       ],
       "validation": "Coordinator regression suite, compile/diff checks, concrete ticket assert diagnostics and verified actual worker dispatch. Preserve claim identities, dirty work, CI/testnet/review gates and user authorship."
+    },
+    {
+      "key": "SF-151",
+      "title": "Make automatic CI repair attempt limit configurable",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requests raising the automatic repair limit so remaining implementations keep progressing. Replace the hardcoded three-attempt per-check ceiling with a validated configurable ceiling, preserving durable attempt counts, backoff and duplicate-run protection.",
+      "evidence": "User explicitly requested: Get things moving. Bump the repair limit. Four existing PR repair workers are running; PR301 has exhausted its three-attempt testnet-check budget.",
+      "acceptance": [
+        "Configurable validated per-check attempt ceiling defaults to three for existing installations.",
+        "Set this installation to eight attempts per failing check without resetting attempt history or bypassing duplicate evidence, ownership, testnet spending, independent review or merge checks.",
+        "Add offline boundary and invalid-configuration tests; install verified committed source while preserving running workers."
+      ],
+      "validation": "Offline coordinator tests, compilation, configuration validation and verified running service/worker status."
     }
   ]
 }
