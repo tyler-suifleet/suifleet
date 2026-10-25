@@ -122,6 +122,7 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 
 **Limits:**
 - Walrus is a local stand-in by default (automatic CI); pass `SUIFLEET_WALRUS=testnet` for real Walrus storage.
+- Real Walrus uploads (`scripts/live_common.py`) try Mysten's publisher first, then a pinned, ordered list of community testnet publishers from the [Walrus operator list](https://docs.wal.app/operators.json). Mysten's publisher pays from its own WAL and can run dry (run 40140128767: HTTP 500 `could not find WAL coins with sufficient balance` on every retry). A transient failure (timeout, reset, 5xx) moves to the next publisher, and a 4xx drops that publisher. The upload makes at most two passes with a 15 s backoff and stops at a 10-minute deadline. A publisher is trusted only to store: every blob ID is read back through Mysten's aggregator and compared byte for byte before use. The publisher pays, so a fallback spends nothing from the run allowance. The manifest still records Mysten's publisher/aggregator.
 - `scripts/redeploy.sh` / `scripts/publish.py` still submit through the PATH `sui` (1.81.1). On a protocol-139 network, `publish.py` upgrades would hit the same client-side check. They are not yet run against testnet (SF-006 acceptance #11) and need the same split before they are. The SF-010 suites below use the split toolchain.
 - No old-package attacks or legacy objects: that is the upgrade-security suite below. No browser wallet: that is the `wallet` gate below.
 - There is no hardware: that is the `hardware` gate (SF-031).

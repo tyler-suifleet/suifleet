@@ -258,7 +258,8 @@ class WalrusUploadTests(unittest.TestCase):
         attempts = []
 
         def urlopen(request, timeout):
-            attempts.append(request.get_method())
+            attempts.append(request.full_url.removesuffix("/v1/blobs?epochs=1"))
+            self.assertEqual(request.get_method(), "PUT")
             outcome = outcomes[len(attempts) - 1]
             if isinstance(outcome, BaseException):
                 raise outcome
@@ -271,26 +272,70 @@ class WalrusUploadTests(unittest.TestCase):
             except (OSError, urllib.error.HTTPError) as error:
                 return error, attempts
 
-    def test_transient_publisher_failures_are_retried(self):
+    PUBLISHERS = [live_common.WALRUS_TESTNET[0], *live_common.WALRUS_FALLBACK_PUBLISHERS]
+
+    def test_transient_publisher_failures_fall_back_to_the_next_publisher(self):
+        import io
         import urllib.error
         server = urllib.error.HTTPError("u", 503, "busy", {}, None)
         blob, attempts = self.upload(TimeoutError("read timed out"), server, self.STORED)
-        self.assertEqual((blob, attempts), ("blob1", ["PUT"] * 3))
+        self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS[:3]))
+        # CI run 40140128767: Mysten's publisher ran out of WAL and returned
+        # 500 on every retry. The next publisher stores the blob.
+        dry = urllib.error.HTTPError("u", 500, "internal", {}, io.BytesIO(
+            b'{"error":{"code":500,"message":"could not find WAL coins with sufficient balance"}}'))
+        with patch("sys.stderr", new_callable=io.StringIO) as log:
+            blob, attempts = self.upload(dry, self.STORED)
+        self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS[:2]))
+        self.assertIn("could not find WAL coins with sufficient balance", log.getvalue())
+        self.assertIn(f"stored by fallback publisher {self.PUBLISHERS[1]}", log.getvalue())
+        # A full pass of failures is retried once after the backoff.
+        blob, attempts = self.upload(*[server] * len(self.PUBLISHERS), self.STORED)
+        self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS + self.PUBLISHERS[:1]))
 
     def test_persistent_http_500_fails_closed_at_retry_bound(self):
         import urllib.error
         failure = urllib.error.HTTPError("u", 500, "Internal Server Error", {}, None)
-        error, attempts = self.upload(*[failure] * live_common.WALRUS_ATTEMPTS, self.STORED)
+        count = live_common.WALRUS_PASSES * len(self.PUBLISHERS)
+        error, attempts = self.upload(*[failure] * count, self.STORED)
         self.assertIs(error, failure)
-        self.assertEqual(attempts, ["PUT"] * live_common.WALRUS_ATTEMPTS)
+        self.assertEqual(attempts, self.PUBLISHERS * live_common.WALRUS_PASSES)
 
-    def test_retries_are_bounded_and_client_errors_are_not_retried(self):
+    def test_uploads_are_bounded_and_client_errors_drop_the_publisher(self):
         import urllib.error
-        error, attempts = self.upload(*[TimeoutError("read timed out")] * 3, self.STORED)
+        error, attempts = self.upload(*[TimeoutError("read timed out")] * (live_common.WALRUS_PASSES * len(self.PUBLISHERS)), self.STORED)
         self.assertIsInstance(error, TimeoutError)
-        self.assertEqual(len(attempts), live_common.WALRUS_ATTEMPTS)
-        error, attempts = self.upload(urllib.error.HTTPError("u", 413, "too large", {}, None), self.STORED)
-        self.assertEqual((error.code, len(attempts)), (413, 1))
+        self.assertEqual(attempts, self.PUBLISHERS * live_common.WALRUS_PASSES)
+        # A 4xx is never retried on the same publisher.
+        rejected = urllib.error.HTTPError("u", 413, "too large", {}, None)
+        error, attempts = self.upload(*[rejected] * len(self.PUBLISHERS), self.STORED)
+        self.assertEqual((error.code, attempts), (413, self.PUBLISHERS))
+        busy = urllib.error.HTTPError("u", 503, "busy", {}, None)
+        blob, attempts = self.upload(rejected, *[busy] * (len(self.PUBLISHERS) - 1), self.STORED)
+        self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS + self.PUBLISHERS[1:2]))
+        # The deadline stops the upload even mid-pass.
+        clock = iter([0, 0, live_common.WALRUS_DEADLINE_SECONDS + 1])
+        with patch.object(live_common.time, "monotonic", lambda: next(clock)):
+            error, attempts = self.upload(TimeoutError("read timed out"), self.STORED)
+        self.assertEqual((type(error), attempts), (TimeoutError, self.PUBLISHERS[:1]))
+
+    def test_a_publisher_blob_id_is_only_used_after_aggregator_read_back(self):
+        import io
+        walrus, reads = live_common.Walrus("testnet"), []
+
+        def wait_for(condition, message, timeout):
+            if not condition():
+                raise AssertionError(message)
+
+        def urlopen(request, timeout):
+            reads.append(request.full_url)
+            return nullcontext(io.BytesIO(b"other bytes"))
+        # A fallback publisher's blob ID whose aggregator bytes differ is refused.
+        with patch.object(walrus, "store", return_value={"newlyCreated": {"blobObject": {"blobId": "forged"}}}), \
+                patch.object(live_common, "wait_for", wait_for), patch.object(live_common.urllib.request, "urlopen", urlopen):
+            with self.assertRaisesRegex(AssertionError, "forged not readable"):
+                walrus.put("recipe", b"body")
+        self.assertEqual(reads, [f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged"])
 
 
 class WalletFixtureTests(unittest.TestCase):
