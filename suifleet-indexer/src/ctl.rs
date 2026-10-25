@@ -249,12 +249,13 @@ async fn expected_calls(
     let ids = txbuild::devices_to_check(operation, request);
     let read = crate::devices::read(&chain, &types, &registry, &ids).await?;
     let live: BTreeMap<_, _> = ids.into_iter().zip(read).collect();
-    txbuild::calls(operation, request, &registry, &crate::devices::owner_caps(&live))
+    let inboxes = crate::devices::inboxes(&chain, &types, &registry, &txbuild::inbox_devices(operation, request)).await?;
+    txbuild::calls(operation, request, &registry, &crate::devices::owner_caps(&live), &inboxes)
 }
 
 async fn bulk(api: &Api, args: &Args, operation: &str, request: txbuild::Request) -> anyhow::Result<()> {
     // Reject a malformed request before asking the API.
-    txbuild::calls(operation, &request, "", &BTreeMap::new())?;
+    txbuild::calls(operation, &request, "", &BTreeMap::new(), &None)?;
     let built = api
         .post(
             &format!("/v1/transactions/{operation}"),
@@ -581,6 +582,7 @@ mod tests {
             },
             &hex(60),
             &BTreeMap::new(),
+            &None,
         )
         .unwrap()
     }
@@ -740,7 +742,7 @@ mod tests {
             ..Default::default()
         };
         let caps = BTreeMap::from([(hex(4), cap.clone())]);
-        let expected = txbuild::calls("add-devices", &request, &registry, &caps).unwrap();
+        let expected = txbuild::calls("add-devices", &request, &registry, &caps, &None).unwrap();
         let in_module = |module: &str, function: &str, arguments: Vec<Argument>| {
             Command::MoveCall(MoveCall {
                 package: address(PACKAGE),
@@ -781,7 +783,7 @@ mod tests {
             assert!(error.contains(needle), "{error} does not mention {needle}");
         }
         // Without custody the same request is a direct add_device: a borrow is refused.
-        let direct = txbuild::calls("add-devices", &request, &registry, &BTreeMap::new()).unwrap();
+        let direct = txbuild::calls("add-devices", &request, &registry, &BTreeMap::new(), &None).unwrap();
         assert!(check(&build(&cap, device, loan), &direct).is_err());
     }
 
@@ -798,7 +800,7 @@ mod tests {
             ..Default::default()
         };
         let expected =
-            txbuild::calls("create-deployment", &request, &hex(60), &BTreeMap::new()).unwrap();
+            txbuild::calls("create-deployment", &request, &hex(60), &BTreeMap::new(), &None).unwrap();
         let pure = |v: &str| Input::Pure(bcs::to_bytes(&v.to_owned()).unwrap());
         let build = |recipe: &str, groups: Vec<Address>, clock_mutable: bool| {
             let inputs = vec![

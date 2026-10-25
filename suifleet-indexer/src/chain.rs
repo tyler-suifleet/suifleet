@@ -349,6 +349,39 @@ impl Chain {
             .map(|field| field.fields["value"].clone()))
     }
 
+    /// The key type and key BCS of every dynamic field of `parent`, across
+    /// pages (indexed group members, SF-125).
+    pub async fn field_names(&self, parent: &str) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
+        let mut names = Vec::new();
+        let mut token = None;
+        loop {
+            let mut request = proto::ListDynamicFieldsRequest::default();
+            request.parent = Some(parent.to_owned());
+            request.page_size = Some(1000);
+            request.page_token = token.clone();
+            request.read_mask = Some(mask(&["name"]));
+            let page = self
+                .rpc
+                .clone()
+                .state_client()
+                .list_dynamic_fields(request)
+                .await
+                .map_err(status)?
+                .into_inner();
+            for field in page.dynamic_fields {
+                let name = field.name.ok_or_else(|| anyhow::anyhow!("dynamic field of {parent} without a name"))?;
+                names.push((name.name.unwrap_or_default(), name.value.map(|v| v.to_vec()).unwrap_or_default()));
+            }
+            match page.next_page_token {
+                Some(next) if !next.is_empty() => {
+                    anyhow::ensure!(token.as_ref() != Some(&next), "dynamic field listing of {parent} made no progress");
+                    token = Some(next);
+                }
+                _ => return Ok(names),
+            }
+        }
+    }
+
     /// One page of `event_type` events after `cursor` (None = genesis).
     /// Fails when the node no longer holds the resume checkpoint: pruned
     /// history is an operator decision, never skipped silently.

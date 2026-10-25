@@ -111,7 +111,7 @@ async fn unchanged_is_one_version_request_and_errors_never_authorize_idle() {
     let roots = vec!["0xa".to_owned()];
     sui.begin_full_poll();
     sui.observe("0xa", Some(1));
-    sui.finish_full_poll();
+    sui.finish_full_poll(true);
     assert!(!sui.poll_changed(&roots, &[], 86400, 60).await.unwrap());
     assert_eq!(*node.requests.lock().unwrap(), 1);
     assert_eq!(sui.read_stats().0, 1);
@@ -171,13 +171,13 @@ async fn concurrent_reads_do_not_hide_changes_and_unused_group_fields_are_pruned
     sui.observe(&desired, Some(2)); // Later read must not erase the earlier observation.
     sui.watch_child(&writer, &fleet);
     sui.observe(&writer, Some(3));
-    sui.finish_full_poll();
+    sui.finish_full_poll(true);
     assert_eq!(sui.poll.lock().unwrap().versions[&desired], Some(1));
 
     sui.begin_full_poll();
     // No longer a member of group A: reconciliation does not use DesiredKey.
     sui.observe(&group, Some(4));
-    sui.finish_full_poll();
+    sui.finish_full_poll(true);
     let watch = sui.poll.lock().unwrap();
     assert!(!watch.versions.contains_key(&desired));
     assert_eq!(watch.versions[&writer], Some(3)); // Sleeping fleet producer retained.
@@ -311,6 +311,34 @@ async fn missing_membership_cursor_uses_verified_type_birth_without_skipping_pru
     assert_eq!(node.starts.lock().unwrap().len(), 2); // No query may silently jump over missing membership history.
 }
 
+#[tokio::test]
+async fn a_full_poll_without_an_event_scan_keeps_discovery_due() {
+    let node = Node {
+        response: Arc::new(Mutex::new(version(Some(1)))),
+        requests: Default::default(),
+        unavailable: Default::default(),
+        wrong_chain: false,
+    };
+    let (url, _server) = serve_watch(node.clone()).await;
+    let sui = client(&url);
+    let roots = vec!["0xa".to_owned()];
+    // Announced work (SF-125) read objects only: the bound keeps running.
+    sui.begin_full_poll();
+    sui.observe("0xa", Some(1));
+    sui.finish_full_poll(false);
+    assert!(sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(sui.discovery_due(), "no scan has run yet");
+    sui.begin_full_poll();
+    sui.observe("0xa", Some(1));
+    sui.finish_full_poll(true);
+    assert!(!sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(!sui.discovery_due());
+    // A changed version (an announcement) is a full poll, not a due scan.
+    *node.response.lock().unwrap() = version(Some(2));
+    assert!(sui.poll_changed(&roots, &[], 86400, 3600).await.unwrap());
+    assert!(!sui.discovery_due());
+}
+
 async fn serve_watch(node: Node) -> (String, Server) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -331,7 +359,7 @@ async fn version_batch_fallback_counts_attempts_and_verifies_chain_before_readin
     let mut config = base.config.clone(); config.rpc_urls.push(backup_url);
     let sui = SuiClient::load(config.clone(), base.signer.clone()).unwrap();
     sui.verified[0].store(true, std::sync::atomic::Ordering::Release);
-    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll();
+    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll(true);
     assert!(!sui.poll_changed(&["0xa".into()], &[], 86400, 60).await.unwrap());
     assert_eq!(*primary.requests.lock().unwrap(), 1);
     assert_eq!(*backup.requests.lock().unwrap(), 1);
@@ -347,7 +375,7 @@ async fn version_batch_fallback_counts_attempts_and_verifies_chain_before_readin
     let sui = SuiClient::load(config, base.signer.clone()).unwrap();
     sui.verified[0].store(true, std::sync::atomic::Ordering::Release);
     *primary.unavailable.lock().unwrap() = true;
-    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll();
+    sui.begin_full_poll(); sui.observe("0xa", Some(1)); sui.finish_full_poll(true);
     let error = sui.poll_changed(&["0xa".into()], &[], 86400, 60).await.err().unwrap();
     assert!(error.to_string().contains("chain identifier mismatch"), "{error}");
     assert_eq!(*wrong.requests.lock().unwrap(), 0); // No unverified object read.

@@ -7,7 +7,8 @@ import subprocess
 import sys
 
 ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
-PACKAGE_UPGRADE_CEILING = 800_000_000
+# A fresh SF-125 inbox base->head fixture costs about 0.85 SUI (run 40092917058).
+PACKAGE_UPGRADE_CEILING = 1_000_000_000
 # SF-010 suites after the package-upgrade gate, each with its own strict
 # allowance (run ceiling: 0.6 + 0.5 + 0.15 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
