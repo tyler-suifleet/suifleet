@@ -179,7 +179,7 @@ def serve():
         text = ('[sui]\nmanifest_path = "deployment.json"\n'
             f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
             f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = "/bin/false"\n'
-            f'[runtime]\nstate_dir = "{state}"\npoll_seconds = 1\n'
+            f'[runtime]\nstate_dir = "{state}"\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
             f'[ipc]\nsocket = "{socket}"\nadministrators = [0]\n'
             f'[ipc.components.app]\nuid = {APP}\n'
             'operations = ["publish", "subscribe", "receive", "ack", "shadow_get", "shadow_update", "shadow_delete"]\n'

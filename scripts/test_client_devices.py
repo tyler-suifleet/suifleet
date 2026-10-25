@@ -147,7 +147,7 @@ def serve():
     (root / "config.toml").write_text('[sui]\nmanifest_path = "deployment.json"\n'
         f'[device]\nkeypair_path = "{key}"\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
         f'[walrus]\naggregator_url = "{url}"\n[apply]\ncommand = "/bin/false"\n'
-        f'[runtime]\nstate_dir = "{root / "state"}"\npoll_seconds = 1\n'
+        f'[runtime]\nstate_dir = "{root / "state"}"\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
         f'[ipc]\nsocket = "{ipc_socket}"\nadministrators = [0]\n'
         f'[ipc.components.pub]\nuid = {PUB_UID}\noperations = ["publish"]\n'
         '[[ipc.components.pub.pubsub_policies]]\noperations = ["aws.greengrass#PublishToTopic"]\nresources = ["sensors/*"]\n'
