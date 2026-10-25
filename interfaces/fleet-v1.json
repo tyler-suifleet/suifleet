@@ -6658,15 +6658,6 @@
       "device_group::IndexKey",
       "device_group::GroupIndex",
       "device_group::GroupIndexed"
-    ],
-    "rollout_health": [
-      "deployment_manager::RolloutHealthKey",
-      "deployment_manager::RolloutHealth"
-    ],
-    "fleet_settings": [
-      "fleet_settings::SettingsKey",
-      "fleet_settings::Settings",
-      "fleet_settings::FleetSettingsChanged"
     ]
   },
   "supported_deployment_schema_versions": [
