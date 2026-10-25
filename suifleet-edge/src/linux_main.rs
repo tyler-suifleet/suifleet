@@ -478,6 +478,7 @@ async fn main() -> anyhow::Result<()> {
         let mut cadence = cadence::Cadence::default();
         let mut fleet_settings = fleet_settings::Applied::new("checks");
         loop {
+            cadence.begin_poll(telemetry::now_ms());
             let cycle = poll(
                 &cfg,
                 &sui,
@@ -521,13 +522,13 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             let checks = fleet_settings::runtime(&cfg.runtime, fleet_settings.current());
-            let delay = tokio::time::sleep(cadence.delay(
+            let delay = tokio::time::sleep(cadence.post_apply_delay(&checks, cadence.delay(
                 &checks,
                 journal.state.deferred.iter().filter_map(|(id, d)|
                     (!journal.state.deployments.contains_key(id)).then_some(d)),
                 telemetry::now_ms(),
                 journal.state.check_window,
-            ));
+            ), pending_rollout_health(&cfg, &journal)));
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -555,7 +556,7 @@ async fn main() -> anyhow::Result<()> {
                         }
                         if let Err(error) = &result { warn!(operation = pending.request.operation, %error, "Local IPC request failed"); }
                         let needs_report = pending.request.operation == "install" && result.is_ok()
-                            && journal.state.deployments.values().any(|o| o.status.is_some() && !o.reported);
+                            && journal.state.deployments.values().any(|o| o.status.is_some() && (!o.reported || o.fast_rollout_health_pending()));
                         let _ = pending.reply.send(ipc::response(result));
                         // A local request can discover a scheduled record while
                         // the normal check sleeps. Only shorten the wakeup;
@@ -563,8 +564,8 @@ async fn main() -> anyhow::Result<()> {
                         let next = tokio::time::Instant::now() + if needs_report {
                             Duration::ZERO
                         } else {
-                            cadence.delay(&checks, journal.state.deferred.iter().filter_map(|(id, d)|
-                    (!journal.state.deployments.contains_key(id)).then_some(d)), telemetry::now_ms(), journal.state.check_window)
+                            cadence.post_apply_delay(&checks, cadence.delay(&checks, journal.state.deferred.iter().filter_map(|(id, d)|
+                    (!journal.state.deployments.contains_key(id)).then_some(d)), telemetry::now_ms(), journal.state.check_window), pending_rollout_health(&cfg, &journal))
                         };
                         if next < delay.deadline() { delay.as_mut().reset(next); }
                     }
@@ -817,7 +818,7 @@ async fn poll(
     // Independent receipt delivery precedes even a failed watch/discovery read.
     // The helper validates current authority and funds only actual writes.
     let prior_receipts = journal.state.deployments.iter()
-        .filter(|(_, o)| !o.reported && o.status.is_some())
+        .filter(|(_, o)| (!o.reported || o.rollout_health_pending) && o.status.is_some())
         .map(|(id, _)| id.clone()).collect::<std::collections::BTreeSet<_>>();
     flush_funded_reports(cfg, sui, journal, false, &Default::default()).await?;
     let mut watch_roots = vec![
@@ -1005,6 +1006,12 @@ async fn poll(
     // Report new outcomes before the long normal sleep.
     flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await
 }
+fn pending_rollout_health(cfg: &Config, journal: &Journal) -> bool {
+    cfg.sui.manifest.as_ref().is_some_and(|m| protocol::ROLLOUT_HEALTH_TYPES.iter()
+        .all(|name| m.type_origins.contains_key(*name)))
+        && journal.state.deployments.values().any(|o| o.fast_rollout_health_pending())
+}
+
 /// Retry only real queued writes, with fresh authority, before fallible watch
 /// or discovery work. Reporting failures remain independent of event cadence.
 async fn flush_funded_reports(
@@ -1017,7 +1024,7 @@ async fn flush_funded_reports(
     let now = std::time::Instant::now();
     let retry_at = now + std::time::Duration::from_secs(cfg.runtime.poll_seconds.saturating_mul(8).clamp(8, 60));
     let pending: Vec<_> = journal.state.deployments.iter()
-        .filter(|(id, o)| !o.reported && o.status.is_some()
+        .filter(|(id, o)| (!o.reported || o.rollout_health_pending) && o.status.is_some()
             && !attempted_before_work.contains(*id)
             && sui.receipt_retries.lock().unwrap().get(*id).is_none_or(|next| now >= *next))
         .map(|(id, o)| (id.clone(), o.status.unwrap()))
@@ -1055,28 +1062,51 @@ async fn flush_funded_reports(
             Err(error) => warn!(%error, "Gas top-up check failed; retrying after receipt backoff"),
         }
     }
-    flush_reports(sui, journal, &cfg.device.device_cap_id, pending).await
+    flush_reports(cfg, sui, journal, pending).await
 }
 /// Keep durable receipt retries independent of later discovery/reconciliation.
 /// Report failures remain queued without poisoning discovery cadence: a deleted
 /// deployment or lost targeting can make a receipt permanently undeliverable.
 /// Journal I/O failures still abort the cycle immediately.
 async fn flush_reports(
+    cfg: &Config,
     sui: &SuiClient,
     journal: &mut Journal,
-    cap: &str,
     pending: Vec<(String, u8)>,
 ) -> anyhow::Result<()> {
     for (id, status) in pending {
-        match sui.report_status(&id, cap, status).await {
-            Ok(_) => {
+        let reported = journal.state.deployments[&id].reported;
+        let result = if reported { Ok(String::new()) } else {
+            sui.report_status(&id, &cfg.device.device_cap_id, status).await
+        };
+        match result {
+            Ok(digest) => {
+                if !reported {
+                    let outcome = journal.state.deployments.get_mut(&id).unwrap();
+                    outcome.reported = true;
+                    outcome.rollout_health_pending = true;
+                    journal.save()?;
+                }
+                let mut inventory = telemetry::inventory(&cfg.runtime.state_dir);
+                if let Some(runtime) = &cfg.services {
+                    let sources = runtime.lock().unwrap().health_sources();
+                    let now = telemetry::now_ms();
+                    if let Some(services) = service_health::collect(&sources, &mut service_health::Tracker::default(), 0, now) {
+                        inventory.reasons.extend(service_health::reasons(&services, 60, now));
+                    }
+                }
+                if let Err(error) = sui.report_rollout_health(&id, &cfg.device.device_cap_id, status == protocol::STATUS_APPLIED, &inventory, (!reported).then_some(digest.as_str())).await {
+                    journal.state.deployments.get_mut(&id).unwrap().rollout_health_slow_retry = true;
+                    journal.save()?;
+                    warn!(%id, %error, "Post-apply health remains queued at normal cadence");
+                    continue;
+                }
+                journal.state.deployments.get_mut(&id).unwrap().rollout_health_pending = false;
                 sui.receipt_retries.lock().unwrap().remove(&id);
-                journal.state.deployments.get_mut(&id).unwrap().reported = true;
+
                 journal.save()?;
             }
-            Err(error) => {
-                warn!(%id, %error, "Status report remains queued");
-            }
+            Err(error) => warn!(%id, %error, "Status report remains queued"),
         }
     }
     Ok(())
@@ -1180,6 +1210,7 @@ async fn execute(
         firmware::acknowledge(&cfg.apply.firmware_spool, &firmware::request_id(&event.deployment_id));
     }
     let _ = std::fs::remove_dir_all(&directory);
+    flush_funded_reports(cfg, sui, journal, false, &Default::default()).await?;
     Ok(status)
 }
 
