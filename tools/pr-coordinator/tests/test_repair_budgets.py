@@ -58,3 +58,38 @@ class RepairBudgets(unittest.TestCase):
             store = self.legacy(directory, False)
             row = store.db.execute("SELECT attempts FROM ci_check_budget WHERE check_key='*'").fetchone()
             self.assertEqual(row['attempts'], 3)
+
+
+class ConfigurableRepairLimit(unittest.TestCase):
+    def test_raise_limit_preserves_attempts_backoff_and_duplicate_protection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine, project, pr, _ = repairs.CIRepairs().setup(directory)
+            for run in range(1, 4):
+                pr['statusCheckRollup'] = [repairs.failure(run)]
+                with patch.object(c.time, 'time', return_value=run*10000):
+                    self.assertIsNotNone(repairs.CIRepairs().reserve(engine, project, pr))
+                repairs.CIRepairs().finish(engine)
+            engine.store.db.close()
+            config = {**engine.config, 'ci_repair_attempt_limit': 8}
+            engine = c.Coordinator(config, Path(directory))
+            self.assertEqual(engine.store.db.execute('SELECT attempts FROM ci_check_budget').fetchone()[0], 3)
+            with patch.object(c.time, 'time', return_value=30001):
+                self.assertIsNone(repairs.CIRepairs().reserve(engine, project, pr))
+                pr['statusCheckRollup'] = [repairs.failure(4)]
+                self.assertIsNone(repairs.CIRepairs().reserve(engine, project, pr))
+            for run in range(4, 9):
+                pr['statusCheckRollup'] = [repairs.failure(run)]
+                with patch.object(c.time, 'time', return_value=run*10000):
+                    self.assertIsNotNone(repairs.CIRepairs().reserve(engine, project, pr))
+                repairs.CIRepairs().finish(engine)
+            pr['statusCheckRollup'] = [repairs.failure(9)]
+            with patch.object(c.time, 'time', return_value=100000):
+                self.assertIsNone(repairs.CIRepairs().reserve(engine, project, pr))
+                self.assertIn('8 attempts', engine.store.ci_repair_blocker(project['id'], {**pr, '_ci_repair': c.failed_checks(pr)}))
+            self.assertEqual(engine.store.db.execute('SELECT attempts FROM ci_check_budget').fetchone()[0], 8)
+
+    def test_invalid_limits_rejected(self):
+        for limit in (None, True, False, 0, -1, 101, 3.5, '8'):
+            with self.subTest(limit=limit), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(ValueError, 'ci_repair_attempt_limit'):
+                    c.Store(Path(directory)/'state.sqlite3', ci_repair_attempt_limit=limit)
