@@ -222,13 +222,21 @@ class Dispatcher:
                 return False  # Historical jobs have no fenced same-claim proof.
             expected = dict(claim=hashlib.sha256(claim['token'].encode()).hexdigest(),
                             key=claim['key'], branch=claim['branch'], worktree=claim['worktree'])
-            for job in db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL",
-                                  (project['id'],)):
+            columns = {r[1] for r in db.execute('PRAGMA table_info(jobs)')}
+            condition = '(repair_claim IS NOT NULL OR launch_intent IS NOT NULL)' if 'launch_intent' in columns else 'repair_claim IS NOT NULL'
+            for job in db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND " + condition, (project['id'],)):
+                intent = json.loads(job['launch_intent']) if 'launch_intent' in columns and job['launch_intent'] else None
+                if (job['status'] == 'reserved' and intent
+                        and all(intent.get(key) == value for key, value in expected.items())
+                        and intent.get('head') and intent['head'] == job['head'] and not job['pid'] and not job['started']
+                        and not any((Path(job['directory'])/name).exists() for name in ('process.json','exit.json','result.json'))):
+                    return True  # Pre-spawn same-claim intent owns recovery; it is not an active worker.
+                if not job['repair_claim']:
+                    continue
                 proof = json.loads(job['repair_claim'])
-                proof.pop('head', None)
                 if job['status'] in ('quota_wait', 'quota_launch') and proof.get('claim') == expected['claim']:
                     return True  # SF-145: a deferred same-claim repair owns this claim's recovery.
-                if proof != expected or not job['pid'] or not job['started']:
+                if any(proof.get(key) != value for key, value in expected.items()) or not job['pid'] or not job['started']:
                     continue
                 if int(job['started']) <= int(identity['started']):
                     continue
