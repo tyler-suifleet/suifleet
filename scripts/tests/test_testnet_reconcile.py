@@ -126,6 +126,56 @@ class Reconcile(unittest.TestCase):
         self.assertEqual(outcome, 'absent')
         self.assertIn('moved past version 5', reason)
 
+    def test_stale_upgrade_cap_with_balance_gas_is_dead_without_resubmission(self):
+        # Run 40212697287: retained upgrade spends cap v1, but chain has v2.
+        cap = {'kind': 'ImmOrOwnedObject', 'objectId': CAP, 'version': '1'}
+        data = decoded()('BYTES')
+        data['inputs'] = [cap]
+        chain = FakeChain(versions={CAP: '2'})
+        outcome, reason = self.decide(pending(), chain, inspect=lambda _: data)
+        self.assertEqual(outcome, 'absent')
+        self.assertIn('moved past version 1', reason)
+        self.assertEqual(chain.reads, [('transaction', 'D1'), ('transaction', 'D1')])
+
+    @unittest.skipUnless(HAVE_SDK, 'requires installed pinned Sui SDK')
+    def test_real_upgrade_bytes_expose_the_owned_cap_version_for_death_proof(self):
+        raw = build(BUILDER, sender=OPERATOR, budget=500_000_000,
+                    modules=MODULES, dependencies=DEPS, digest=BUILT['digest'],
+                    upgrade={'cap': CAP, 'package': PACKAGE})
+        data = tc.decode(raw)
+        tc.verify_package_transaction(data, BUILT, sender=OPERATOR, budget=500_000_000,
+                                      upgrade={'cap': CAP, 'package': PACKAGE})
+        owned = [p for p in data['inputs'] if p['kind'] == 'ImmOrOwnedObject']
+        self.assertEqual(owned, [{'kind': 'ImmOrOwnedObject', 'objectId': CAP, 'version': '1'}])
+        marker = {'label': 'upgrade to head', 'created': 1000,
+                  'tx': tc.identity(raw, data, 500_000_000)}
+        outcome, reason = self.decide(marker, FakeChain(versions={CAP: '2', tc.normal('0x' + '9' * 64): '1'}),
+                                      inspect=tc.decode)
+        self.assertEqual(outcome, 'absent')
+        self.assertIn(CAP, reason)
+
+    def test_owned_input_death_rechecks_effects_and_preserves_history_limit(self):
+        data = decoded()('BYTES')
+        data['inputs'] = [{'kind': 'ImmOrOwnedObject', 'objectId': CAP, 'version': '1'}]
+        chain = FakeChain(versions={CAP: '2'})
+        chain.transaction = Mock(side_effect=[None, facts(success=False)])
+        outcome, result = self.decide(pending(), chain, inspect=lambda _: data)
+        self.assertEqual(outcome, 'failed')
+        self.assertTrue(result['reconciled'])
+        with self.assertRaisesRegex(rc.Uncertain, 'history window'):
+            self.decide(pending(created=1), FakeChain(versions={CAP: '2'}),
+                        inspect=lambda _: data, now=rc.RETENTION_SECONDS + 2)
+
+    def test_unchanged_owned_input_and_shared_inputs_do_not_prove_death(self):
+        data = decoded()('BYTES')
+        data['inputs'] = [{'kind': 'ImmOrOwnedObject', 'objectId': CAP, 'version': '1'},
+                          {'kind': 'SharedObject', 'objectId': REGISTRY, 'initialSharedVersion': '1'}]
+        sent = Mock(return_value={'digest': 'D1'})
+        outcome, _ = self.decide(pending(), FakeChain(versions={CAP: '1', REGISTRY: '5'}),
+                                 inspect=lambda _: data, resubmit=sent)
+        self.assertEqual(outcome, 'executed')
+        sent.assert_called_once()
+
     def test_still_executable_transaction_resubmits_identical_bytes_once(self):
         sent = Mock(return_value={'digest': 'D1', 'effects': {'status': {'status': 'success'}}, 'objectChanges': []})
         outcome, result = self.decide(pending(), FakeChain(epoch=8), resubmit=sent)
