@@ -139,7 +139,7 @@ def run(args):
                 cap=live.created(live.executed(registration),'::device_cap::DeviceCap')[0]
             state_dir=root/'state';overlays=root/'overlays';overlays.mkdir(exist_ok=True);(overlays/'fixture.json').write_text(json.dumps({'/password':'sf082-private-fixture-value'}))
             (state_dir/'supervised'/'fixture').mkdir(parents=True,exist_ok=True);(state_dir/'supervised'/'fixture'/'component.log').write_text('fixture sf082-private-fixture-value must be redacted\n')
-            template=root/'template.toml';template.write_text(f'[device]\nkeypair_path={json.dumps(str(root/"device/test.key"))}\ndevice_object_id="{device_id}"\ndevice_cap_id="{cap}"\n[apply]\ncommand="/bin/false"\n[runtime]\nstate_dir={json.dumps(str(state_dir))}\npoll_seconds=3\n'
+            template=root/'template.toml';template.write_text(f'[device]\nkeypair_path={json.dumps(str(root/"device/test.key"))}\ndevice_object_id="{device_id}"\ndevice_cap_id="{cap}"\n[apply]\ncommand="/bin/false"\n[runtime]\nstate_dir={json.dumps(str(state_dir))}\npoll_seconds=3\nevent_discovery_seconds=1\n'
                 f'[components]\nconfiguration_overlay_dir={json.dumps(str(overlays))}\n[logs]\ninterval_seconds=10\nbuffer_max=32\n[fleet_data]\npackage_id="{data_pkg}"\ntype_origin="{data_pkg}"\nfleet_id="{fleet}"\nbudget_id="{budget}"\nstorage_id="{storage}"\nwriter_id="{writer}"\naccount_id="{account}"\n'
                 f'[fleet_data.archives]\nstorage_package="{storage_pkg}"\nstorage_type_origin="{storage_pkg}"\nsystem_id="{SYSTEM}"\nwalrus_package="{WALRUS_PACKAGE}"\nkey_server_package="{KEY_PACKAGE}"\n'
                 'key_servers=['+','.join('{object_id="'+s+'",weight=1}' for s in SERVERS)+']\nthreshold=2\n'

@@ -15,6 +15,27 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
 const A=id("0xa"), B=id("0xb"), C=id("0xc"), F=id("0xf"), G=id("0x10"), BUD=id("0xb0"), CAP=id("0xc0");
 const base = { id:F, customerId:C, customerName:"Customer", name:"Production", budgetId:BUD,
   devices:[],groups:[],deployments:[],policies:[],enrollmentPolicies:[],credentials:[],administrator:true,isDefault:true,activeDevices:0n,deviceLimit:2n,allowance:10n,used:0n };
+// Customer and SF-125 inbox origins coexist; managed builders must retain
+// object authority rather than treating inbox arguments as a fleet scope.
+{
+ const both=structuredClone(m);
+ for(const name of protocol.optional_type_origins.fleet_inbox) both.type_origins[name]=id("0x125");
+ process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(both);
+ const combined=loader(), sui=combined("lib/sui.ts"), ops=combined("lib/fleet-ops.ts");
+ const fns=tx=>tx.getData().commands.map(c=>`${c.MoveCall.module}::${c.MoveCall.function}`);
+ assert.deepEqual(fns(sui.buildAddDeviceToGroupTx(G,{objectId:A},false,base)),["customer::add_to_group"]);
+ assert.deepEqual(fns(sui.buildRemoveDeviceFromGroupTx(G,A,true,base)),["customer::remove_from_group"]);
+ assert.deepEqual(fns(sui.buildCreateDeploymentTx("app","1","blob","a".repeat(64),"b".repeat(64),[G],[A],true,undefined,base)),
+  ["customer::new_deployment","customer::set_control","deployment_manager::share_deployment"]);
+ const input={component:"app",version:"1",recipe:"blob",artifactSha256:"a".repeat(64),recipeSha256:"b".repeat(64),
+  cohorts:[[A]],concurrency:1,rateCount:1,rateWindowMs:1000,bakeMs:0,minimumSamples:1,failureBps:1000,offlineTimeoutMs:1000};
+ assert.deepEqual(fns(combined("lib/rollout.ts").buildRolloutTx(input,undefined,base)),
+  ["deployment_manager::rollout_policy","customer::new_rollout","deployment_manager::share_deployment"]);
+ const group={objectId:G,admin:F,deviceIds:[]}, device={objectId:A};
+ assert.deepEqual(fns(ops.planOperation({command:"add-devices",sender:B,group:G,devices:[A]},[device],[group],new Set(),new Set(),base)),["customer::add_to_group"]);
+ assert.throws(()=>ops.planOperation({command:"add-devices",sender:B,group:G,devices:[A]},[device],[{...group,admin:C}],new Set(),new Set(),base),/admin/);
+ process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(m);
+}
 assert.equal(fleets.selectFleet([base], null), base);
 assert.equal(fleets.selectFleet([base], G), undefined, "stale preference cannot substitute a fleet");
 assert.notEqual(fleets.selectionKey(A), fleets.selectionKey(B));

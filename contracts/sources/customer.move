@@ -333,7 +333,30 @@ module sui_edge::customer {
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0, EBinding);
         let ids = *device_group::device_ids(group);
+        adopt_group_members(fleet, group, ids, ctx);
+    }
+
+    /// Explicit complete membership snapshot for an SF-125 indexed group.
+    /// Count, uniqueness and on-chain membership prevent hidden foreign members.
+    public fun adopt_indexed_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        members: vector<ID>, ctx: &mut TxContext) {
+        assert_admin(customer, ctx);
+        assert_fleet(customer, fleet);
+        assert!(fleet.pending_devices == 0, EBinding);
+        adopt_group_members(fleet, group, members, ctx);
+    }
+
+    fun adopt_group_members(fleet: &mut Fleet, group: &mut DeviceGroup,
+        ids: vector<ID>, ctx: &mut TxContext) {
+        assert!(device_group::member_count(group) == ids.length(), EBinding);
         let mut i = 0;
+        while (i < ids.length()) {
+            assert!(device_group::contains_device(group, ids[i]), EBinding);
+            let mut j = 0;
+            while (j < i) { assert!(ids[j] != ids[i], EBinding); j = j + 1; };
+            i = i + 1;
+        };
+        i = 0;
         while (i < ids.length()) { assert!(fleet.devices.contains(&ids[i]), EBinding); i = i + 1; };
         device_group::handover(group, object::id(fleet).to_address(), ctx);
         i = 0;
@@ -413,7 +436,7 @@ module sui_edge::customer {
         assert_admin(customer, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, &group);
-        assert!(device_group::device_ids(&group).is_empty(), EBinding);
+        assert!(device_group::member_count(&group) == 0, EBinding);
         let (_, index) = fleet.groups.index_of(&object::id(&group));
         fleet.groups.swap_remove(index);
         device_group::delete_managed(group);

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Resolve and verify Sui deployment metadata over gRPC; never publishes or spends gas."""
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -15,10 +16,11 @@ CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
 SEAL_POLICY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["seal_policy"])
 HANDOVER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_handover"])
 BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
+INBOX_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_inbox"])
 ROLLOUT_HEALTH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_health"])
 CUSTOMER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["customer"])
 SETTINGS_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_settings"])
-OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "customer": CUSTOMER_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES}
+OPTIONAL_GROUPS = {"fleet inbox": INBOX_TYPES, "catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "customer": CUSTOMER_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES}
 
 def manifest_types(manifest):
     types = REQUIRED_TYPES
@@ -36,6 +38,35 @@ def object_id(value):
     if not isinstance(value, str) or not re.fullmatch(r"0x[0-9a-fA-F]{1,64}", value):
         raise ValueError("invalid Sui ID")
     return "0x" + value[2:].lower().zfill(64)
+
+
+def _uleb(n):
+    out = bytearray()
+    while True:
+        byte, n = n & 0x7F, n >> 7
+        out.append(byte | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _struct_tag(address, module, name, params=()):
+    """BCS of TypeTag::Struct (variant 7)."""
+    out = bytes([7]) + bytes.fromhex(object_id(address)[2:])
+    for ident in (module, name):
+        out += _uleb(len(ident)) + ident.encode()
+    return out + _uleb(len(params)) + b"".join(params)
+
+
+def inbox_id(registry, inbox_key_origin, device):
+    """A device inbox's derived address (SF-125): the dynamic-field child ID of
+    the registry keyed DerivedObjectKey<InboxKey { device_id }>, computed
+    independently of Move, the SDKs and the daemon."""
+    key_type = _struct_tag("0x2", "derived_object", "DerivedObjectKey",
+                           [_struct_tag(inbox_key_origin, "fleet_inbox", "InboxKey")])
+    key = bytes.fromhex(object_id(device)[2:])
+    digest = hashlib.blake2b(bytes([0xF0]) + bytes.fromhex(object_id(registry)[2:])
+                             + len(key).to_bytes(8, "little") + key + key_type, digest_size=32)
+    return "0x" + digest.hexdigest()
 
 
 def version(value):
@@ -190,7 +221,7 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + SETTINGS_TYPES + CUSTOMER_TYPES + ROLLOUT_HEALTH_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + INBOX_TYPES + SETTINGS_TYPES + CUSTOMER_TYPES + ROLLOUT_HEALTH_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.1", "max_exclusive": "0.3.0"}},

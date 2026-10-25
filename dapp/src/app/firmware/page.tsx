@@ -17,6 +17,7 @@ import { UploadProgress } from "@/components/UploadProgress";
 import { DeploymentProgress, type DeploymentPhase } from "@/components/DeploymentProgress";
 import { DeliveryFields } from "@/components/DeliveryFields";
 import { buildCreateDeploymentTx } from "@/lib/sui";
+import { announcementsFor, existingInboxes, inboxSupported } from "@/lib/fleet-inbox";
 import { buildDesiredRevisionTx } from "@/lib/desired-state";
 import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@/lib/catalog";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
@@ -145,7 +146,10 @@ export default function FirmwarePage() {
               artifactSha256: artifact!.sha256, recipeSha256: recipeUpload.sha256,
             }, [], selectedFleet)
           : buildCreateDeploymentTx(componentName, version, recipeUpload.blobId,
-              artifact!.sha256, recipeUpload.sha256, [...selectedGroups], [...selectedDevices], initiallyPaused, selectedFleet);
+              artifact!.sha256, recipeUpload.sha256, [...selectedGroups], [...selectedDevices], initiallyPaused,
+              // Announce to the device inboxes and group heads (SF-125).
+              !selectedFleet && account && inboxSupported() ? announcementsFor(groups, devices, account.address, [...selectedGroups],
+                [...selectedDevices], await existingInboxes(client, [...selectedDevices])) : undefined, selectedFleet);
       }
       const result = await signAndExecute({ transaction, onProgress: setDeployPhase });
       succeeded = true;

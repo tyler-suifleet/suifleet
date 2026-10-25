@@ -420,4 +420,84 @@ module sui_edge::customer_tests {
     #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
     fun managed_onchain_rollout_rejects_revoked_wallet() { managed_onchain_tick(false, true); }
 
+    // SF-125 integration: indexed members must participate in adoption and
+    // managed group accounting, including when the old vector is empty.
+    fun indexed_group(): (ts::Scenario, ID, ID, ID, ID) {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 3);
+        let da = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let db = register(&mut s, a, @0xD2); s.next_tx(OWNER);
+        let dc = register(&mut s, b, @0xD3); s.next_tx(OWNER);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        sui_edge::device_group::create_group(utf8(b"Indexed"), utf8(b""), &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); s.next_tx(OWNER);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        sui_edge::device_group::legacy_add_for_testing(&mut g, da);
+        sui_edge::device_group::legacy_add_for_testing(&mut g, db);
+        sui_edge::device_group::index_members(&mut g, 200, s.ctx());
+        assert!(sui_edge::device_group::device_ids(&g).is_empty());
+        ts::return_shared(g); s.next_tx(OWNER);
+        (s, a, da, db, dc)
+    }
+    #[test]
+    fun adopt_indexed_group_preserves_members_and_managed_mutations() {
+        let (mut s, fid, da, db, _) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, db], s.ctx());
+        assert!(sui_edge::device_group::member_count(&g) == 2);
+        customer::remove_from_group(&c, &mut f, &mut g, da, s.ctx());
+        assert!(!sui_edge::device_group::contains_device(&g, da));
+        customer::add_to_group(&c, &mut f, &mut g, da, s.ctx());
+        assert!(sui_edge::device_group::member_count(&g) == 2);
+        customer::remove_from_group(&c, &mut f, &mut g, da, s.ctx());
+        customer::remove_from_group(&c, &mut f, &mut g, db, s.ctx());
+        customer::delete_group(&c, &mut f, g, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun legacy_adoption_cannot_hide_indexed_members() {
+        let (mut s, fid, _, _, _) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_group(&c, &mut f, &mut g, s.ctx());
+        ts::return_shared(g); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun indexed_adoption_rejects_duplicate_snapshot() {
+        let (mut s, fid, da, _, _) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, da], s.ctx());
+        ts::return_shared(g); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun indexed_adoption_rejects_foreign_member_substitution() {
+        let (mut s, fid, da, _, dc) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, dc], s.ctx());
+        ts::return_shared(g); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun indexed_adoption_rejects_actual_foreign_fleet_member() {
+        let (mut s, fid, da, db, dc) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        sui_edge::device_group::legacy_add_for_testing(&mut g, dc);
+        sui_edge::device_group::index_members(&mut g, 200, s.ctx());
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, db, dc], s.ctx());
+        ts::return_shared(g); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun indexed_managed_group_cannot_be_deleted_with_members() {
+        let (mut s, fid, da, db, _) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, db], s.ctx());
+        customer::delete_group(&c, &mut f, g, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+
 }

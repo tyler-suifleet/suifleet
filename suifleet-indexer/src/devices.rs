@@ -133,6 +133,33 @@ pub async fn read(
         .collect()
 }
 
+/// The inboxes (SF-125) of `ids`: derived from the registry and each device
+/// ID, and whether each exists. None when the package has no inboxes.
+pub async fn inboxes(
+    chain: &Chain,
+    types: &BTreeMap<String, String>,
+    registry: &str,
+    ids: &[String],
+) -> anyhow::Result<crate::txbuild::Inboxes> {
+    let (Some(key), Some(inbox_type)) = (types.get("fleet_inbox::InboxKey"), types.get("fleet_inbox::DeviceInbox")) else {
+        return Ok(None);
+    };
+    let key = format!("0x2::derived_object::DerivedObjectKey<{key}>");
+    let inbox_ids = ids
+        .iter()
+        .map(|id| chain::field_id(registry, &key, &chain::id_bytes(id)?))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    let objects = chain.objects(&inbox_ids).await?;
+    let mut found = BTreeMap::new();
+    for ((device, id), object) in ids.iter().zip(inbox_ids).zip(objects) {
+        if let Some(object) = &object {
+            anyhow::ensure!(chain::same_type(&object.object_type, inbox_type), "{id} is not the inbox of {device}");
+        }
+        found.insert(device.clone(), crate::txbuild::Inbox { id, exists: object.is_some() });
+    }
+    Ok(Some(found))
+}
+
 /// Owner caps of the activated devices among `devices` (device → cap).
 pub fn owner_caps(devices: &BTreeMap<String, Option<Device>>) -> BTreeMap<String, String> {
     devices

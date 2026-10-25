@@ -185,7 +185,19 @@ APIs and preserve the original external type origins.
    Once every indexed account is adopted or retired, capability loans and budget
    withdrawals/settings resume. Re-enrollment is a separate authorized operation.
 4. Adopt groups with `adopt_group` only after all their members are assigned to
-   the same fleet. Adopt native/rollout records with `adopt_deployment` after
+   the same fleet. For SF-125 indexed groups, finish `index_members` under the
+   existing wallet admin first, then call `adopt_indexed_group(customer, fleet,
+   group, members)` with the complete distinct member IDs from the index.
+   The contract checks the member count, every membership and every fleet
+   assignment before handing over authority; omitted, duplicate or foreign
+   members abort atomically. `adopt_group` rejects hidden indexed members.
+   Managed add/remove/delete operations preserve the index and device accounting.
+   New managed groups retain vector membership; the legacy wallet-only index
+   migration control is hidden for them. Managed deployments/rollouts continue
+   using the daemon's bounded event scan: legacy inbox announcement functions
+   require wallet-owned caps/admin and cannot impersonate a managed fleet.
+   Existing legacy fleets keep SF-125 inbox announcements and index migration.
+   Adopt native/rollout records with `adopt_deployment` after
    verifying all targets. This preserves their payload, controls and authoritative
    historical receipts while sealing future reporting. Catalog-bound legacy
    deployments must be superseded with a managed deployment of the immutable

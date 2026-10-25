@@ -40,6 +40,7 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
    "retired pending account cannot release capacity twice": [1, "customer::retire_pending_device"],
    "pending migration cannot lend cap": [1, "customer::borrow_budget_cap"],
    "old group mutation after adoption": [0, "device_group::remove_device"],
+   "legacy adoption cannot hide indexed members": [1, "customer::adopt_group_members"],
    "old budget mutation with borrowed cap": /InvalidLinkage|invalid linkage/i,
    "old gas draw after adoption": [0, "fleet_budget::assert_may_draw"],
    "cross fleet onchain rollout": [1, "customer::advance_rollout_onchain"],
@@ -86,6 +87,7 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::enroll_device`,arguments:[tx.object(budget),tx.object(cap),tx.object(registry),tx.object(ownerCap),tx.pure.u64(0),tx.pure.u64(100_000_000),tx.object("0x6")]});const legacyAccount=created(await execute("legacy enrollment",tx),"::fleet_budget::GasAccount");
   tx=new Transaction();tx.moveCall({target:`${old}::device_group::create_group`,arguments:[tx.pure.string("Existing group"),tx.pure.string(""),tx.object("0x6")]});const group=created(await execute("legacy group",tx),"::device_group::DeviceGroup");
   tx=new Transaction();const [borrowed,loan]=tx.moveCall({target:`${old}::device_registry::borrow_device`,arguments:[tx.object(registry),tx.object(ownerCap)]});tx.moveCall({target:`${old}::device_group::add_device`,arguments:[tx.object(group),borrowed]});tx.moveCall({target:`${old}::device_registry::return_device`,arguments:[tx.object(registry),borrowed,loan]});await execute("legacy membership",tx);
+  tx=new Transaction();tx.moveCall({target:`${old}::device_group::index_members`,arguments:[tx.object(group),tx.pure.u64(200)]});await execute("index legacy membership",tx);
   // Ordinary legacy deregistration leaves an indexed budget account behind.
   tx=new Transaction();const [staleDevice]=tx.moveCall({target:`${old}::device_registry::register_device`,arguments:[tx.object(registry),tx.pure.string("Deregistered legacy device"),tx.pure.address(delegate.toSuiAddress()),tx.pure.string("x86_64"),tx.object("0x6")]});
   const [staleCap]=tx.moveCall({target:`${old}::device_registry::activate_device`,arguments:[tx.object(registry),staleDevice]});tx.transferObjects([staleCap],owner.toSuiAddress());
@@ -107,7 +109,8 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   await execute("reconcile device",call("adopt_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(legacyAccount),t.object(registry),t.object(ownerCap)]));
   await execute("retire stale pending account",call("retire_pending_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(staleAccount)]));
   await reject("retired pending account cannot release capacity twice",call("retire_pending_device",t=>[t.object(customer),t.object(fleet),t.object(budget),t.object(staleAccount)]));
-  await execute("adopt populated group",call("adopt_group",t=>[t.object(customer),t.object(fleet),t.object(group)]));
+  await reject("legacy adoption cannot hide indexed members",call("adopt_group",t=>[t.object(customer),t.object(fleet),t.object(group)]));
+  await execute("adopt populated indexed group",call("adopt_indexed_group",t=>[t.object(customer),t.object(fleet),t.object(group),t.pure.vector("id",[deviceId])]));
   tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::draw_gas`,arguments:[tx.object(budget),tx.object(legacyAccount),tx.object(registry),tx.object(deviceCap),tx.pure.u64(1000000),tx.object("0x6")]});await reject("old gas draw after adoption",tx,device);
   tx=new Transaction();tx.moveCall({target:`${old}::device_group::remove_device`,arguments:[tx.object(group),tx.pure.id(deviceId)]});await reject("old group mutation after adoption",tx);
   tx=new Transaction();const [borrowCap,borrowLoan]=tx.moveCall({target:`${head}::customer::borrow_budget_cap`,arguments:[tx.object(customer),tx.object(fleet)]});tx.moveCall({target:`${old}::fleet_budget::set_paused`,arguments:[tx.object(budget),borrowCap,tx.pure.bool(true)]});tx.moveCall({target:`${head}::customer::return_budget_cap`,arguments:[tx.object(fleet),borrowCap,borrowLoan]});await reject("old budget mutation with borrowed cap",tx);

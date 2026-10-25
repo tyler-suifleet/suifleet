@@ -12,6 +12,7 @@ import { normalizeStructTag } from "@mysten/sui/utils";
 import { DeviceBcs, DeviceOwnerCapBcs, GroupBcs, GroupCreatedBcs, DeploymentCreatedBcs, DeploymentBcs, ReceiptsBcs } from "./move-bcs";
 import { bcs } from "@mysten/sui/bcs";
 import { PACKAGE_ID, REGISTRY_ID, DEVICE_TYPE, DEVICE_OWNER_CAP_TYPE, DEVICE_GROUP_TYPE, DEPLOYMENT_CREATED_EVENT } from "./constants";
+import { announce, inboxId as inboxIdFor, inboxSupported, indexedMembers, withInbox, type Announcements } from "./fleet-inbox";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,10 @@ export interface DeviceGroup {
   name: string;
   description: string;
   admin: string;
+  /** Every member: `device_ids` plus the MemberKey index (SF-125). */
   deviceIds: string[];
+  /** Members still in `device_ids`; indexing moves them into the index. */
+  unindexed: number;
 }
 
 export interface DeploymentEvent {
@@ -184,22 +188,43 @@ export function buildCreateGroupTx(name: string, description: string, fleet?: Na
   return tx;
 }
 
-export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef, fleet?: NamedFleet): Transaction {
+/**
+ * With inboxes (SF-125), `inboxExists` says whether the activated device's
+ * inbox exists: the group is then listed in it (creating it if needed), so
+ * the device finds the group without event history.
+ */
+export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef, inboxExists?: boolean, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
   if (fleet) {
     tx.moveCall({ target: `${PACKAGE_ID}::customer::add_to_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(device.objectId)] });
     return tx;
   }
-  withDevice(tx, device, (target) => calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, target));
+  const ownerCapId = device.ownerCapId;
+  if (inboxSupported() && ownerCapId && inboxExists !== undefined) {
+    // A new inbox is created before the custody loan: new_inbox requires
+    // the device to be in the registry's custody.
+    withInbox(tx, { deviceId: device.objectId, ownerCapId, exists: inboxExists }, (inbox) =>
+      withDevice(tx, device, (target) => calls.fleet_inbox_add_member(tx, PACKAGE_ID, groupObjectId, inbox, target)));
+  } else {
+    withDevice(tx, device, (target) => calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, target));
+  }
   return tx;
 }
 
-export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string, fleet?: NamedFleet): Transaction {
+/** Also unlists the group from the device's inbox when it exists. */
+export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string, inboxExists = false, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_from_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(deviceId)] });
-  else calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_from_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(deviceId)] });
+    return tx;
+  }
+  if (inboxSupported() && inboxExists) {
+    calls.fleet_inbox_remove_member(tx, PACKAGE_ID, groupObjectId, inboxIdFor(deviceId));
+  } else {
+    calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
+  }
   return tx;
 }
 
@@ -222,6 +247,7 @@ export function buildCreateDeploymentTx(
   targetGroupIds: string[],
   targetDeviceIds: string[] = [],
   initiallyPaused = false,
+  announcements?: Announcements,
   fleet?: NamedFleet,
 ): Transaction {
   requireManifest();
@@ -234,9 +260,10 @@ export function buildCreateDeploymentTx(
     calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
     return tx;
   }
-  if (initiallyPaused) {
+  if (initiallyPaused || announcements) {
     const [record] = calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
-    calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+    if (initiallyPaused) calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+    if (announcements) announce(tx, record, announcements);
     calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   } else {
     calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
@@ -308,12 +335,15 @@ export async function fetchGroups(client: SuiGrpcClient, owner: string): Promise
   const ids = events.map((event) => GroupCreatedBcs.parse(event.bcs))
     .map((event) => event.group_id);
   const objects = await objectsInBatches(client, [...new Set(ids)]);
-  return objects.map((object) => {
+  const groups = objects.map((object) => {
     const fields = GroupBcs.parse(object.content);
     if (fields.schema_version !== "1") throw new Error("Unsupported DeviceGroup schema");
     return { objectId: object.objectId, name: fields.name, description: fields.description,
-      admin: fields.admin, deviceIds: fields.device_ids };
+      admin: fields.admin, deviceIds: fields.device_ids, unindexed: fields.device_ids.length };
   }).filter((group) => group.admin === owner);
+  return Promise.all(groups.map(async (group) => inboxSupported()
+    ? { ...group, deviceIds: [...new Set([...group.deviceIds, ...await indexedMembers(client, group.objectId)])] }
+    : group));
 }
 
 export { incrementalEvents as allEvents } from "./event-history";
@@ -367,12 +397,15 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
   });
   const groups = await objectsInBatches(client, [...new Set(currentEvents.flatMap((event) => event.target_groups))]);
   const groupsById = new Map(groups.map((group) => [group.objectId, supportedTargetGroup(group)]));
+  // Indexed members (SF-125) are dynamic fields, not `device_ids`.
+  const indexed = new Map(inboxSupported() ? await Promise.all([...groupsById].filter(([, group]) => group)
+    .map(async ([id]) => [id, await indexedMembers(client, id)] as const)) : []);
   return Promise.all(currentEvents.map(async (event) => {
     const record = live.get(event.deployment_id)!;
     if (!SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS.some(v => BigInt(v) === BigInt(record.schema_version))) throw new Error("Unsupported DeploymentRecord schema");
     const resolvedDeviceIds = [...new Set([...event.target_devices, ...event.target_groups.flatMap((id) => {
       const group = groupsById.get(id);
-      return group && group.admin === record.creator ? group.device_ids : [];
+      return group && group.admin === record.creator ? [...group.device_ids, ...indexed.get(id) ?? []] : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
     return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, schemaVersion: record.schema_version, componentName: record.component_name, version: record.version,

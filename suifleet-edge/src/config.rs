@@ -436,6 +436,7 @@ impl DeploymentManifest {
             ("catalog", crate::catalog::TYPES),
             ("seal policy", crate::protocol::SEAL_POLICY_TYPES),
             ("fleet budget", crate::protocol::BUDGET_TYPES),
+            ("fleet inbox", crate::protocol::INBOX_TYPES),
             ("rollout health", crate::protocol::ROLLOUT_HEALTH_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
             ("customer", crate::protocol::CUSTOMER_TYPES),
@@ -480,6 +481,7 @@ impl DeploymentManifest {
             .iter()
             .chain(crate::protocol::SEAL_POLICY_TYPES)
             .chain(crate::protocol::BUDGET_TYPES)
+            .chain(crate::protocol::INBOX_TYPES)
             .chain(crate::protocol::ROLLOUT_HEALTH_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
             .chain(crate::protocol::CUSTOMER_TYPES)

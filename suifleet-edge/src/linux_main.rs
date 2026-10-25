@@ -24,6 +24,7 @@ mod fleet_settings;
 mod fleet_archive;
 mod opaque;
 mod handoff;
+mod heads;
 mod identity;
 mod iotcore;
 mod defender;
@@ -529,13 +530,20 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
             let checks = fleet_settings::runtime(&cfg.runtime, fleet_settings.current());
-            let delay = tokio::time::sleep(cadence.post_apply_delay(&checks, cadence.delay(
+            let now_ms = telemetry::now_ms();
+            let mut wait = cadence.post_apply_delay(&checks, cadence.delay(
                 &checks,
                 journal.state.deferred.iter().filter_map(|(id, d)|
                     (!journal.state.deployments.contains_key(id)).then_some(d)),
-                telemetry::now_ms(),
+                now_ms,
                 journal.state.check_window,
-            ), pending_rollout_health(&cfg, &journal)));
+            ), pending_rollout_health(&cfg, &journal));
+            // Wake for an announced scheduled start (SF-125) rather than a
+            // whole check interval late.
+            if let Some(until) = journal.state.heads.as_ref().and_then(|h| heads::until_start(now_ms, h.next_start_ms)) {
+                wait = wait.min(Duration::from_millis(until));
+            }
+            let delay = tokio::time::sleep(wait);
             tokio::pin!(delay);
             let mut stopped = false;
             loop {
@@ -854,6 +862,12 @@ async fn poll(
         cfg.device.device_cap_id.clone(),
         cfg.device.device_object_id.clone(),
     ];
+    // The inbox, even before it exists, and each group with its head field
+    // (SF-125): an announcement changes one of their versions.
+    let objects = sui.has_inbox();
+    if objects {
+        watch_roots.push(sui.inbox_id(&cfg.device.device_object_id)?);
+    }
     watch_roots.extend(journal.state.groups.iter().cloned());
     watch_roots.extend(journal.state.deferred.iter().filter_map(|(id, notice)| {
         (!notice.terminal && !journal.state.deployments.contains_key(id)).then(|| id.clone())
@@ -911,6 +925,11 @@ async fn poll(
         if !cfg.runtime.replay_history {
             journal.state.cursor = sui.latest_cursor().await?;
         }
+        if objects {
+            // The same baseline for announced deployments as for events.
+            let since_ms = if cfg.runtime.replay_history { 0 } else { sui.chain_time_ms().await? };
+            journal.state.heads = Some(heads::Heads { since_ms, ..Default::default() });
+        }
         journal.state.initialized = true;
         journal.save()?;
     }
@@ -929,6 +948,196 @@ async fn poll(
     } else {
         None
     });
+    // Announced deployments come straight from objects (SF-125); the event
+    // scan becomes a bounded safety net for older packages and clients.
+    if objects && journal.state.heads.is_none() {
+        // A journal from before inboxes (an older daemon or package): heads
+        // start where its event path stopped, so records created while the
+        // device was offline still apply after the upgrade.
+        heads_baseline(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
+    }
+    if objects {
+        announced(cfg, sui, walrus, runner, store, configs, supervisor, journal).await?;
+    }
+    // With inboxes the version batch already covers announced work, so the
+    // event scan runs only at the bounded discovery cadence (SF-122), and
+    // until the combined discovery cursor exists.
+    let scan = !objects || journal.state.discovery_cursor.is_none() || sui.discovery_due();
+    if scan {
+        match scan_events(cfg, sui, walrus, runner, store, configs, supervisor, journal).await {
+            Err(error) if objects && error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
+                warn!(%error, "Event history is pruned; resynchronized from the inbox and group heads, \
+                    unannounced deployments in the pruned range are not applied");
+                let tip = sui.latest_cursor().await?;
+                heads::skip_pruned_deployments(&mut journal.state, tip);
+                journal.save()?;
+            }
+            result => result?,
+        }
+    }
+    // Deferred one-shot events survive cursor advancement and restarts.
+    for id in journal.state.deferred.keys().cloned().collect::<Vec<_>>() {
+        if journal.state.deferred[&id].terminal || journal.state.deployments.contains_key(&id)
+            || journal.state.managed.values().any(|managed| managed == &id) {
+            // Reconciliation owns managed notices, including their durable timer.
+            continue;
+        }
+        let Some((event, record)) = sui.deployment(&id).await? else {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+            continue;
+        };
+        if sui.is_managed(&id).await? {
+            journal.state.deferred.remove(&id);
+            journal.save()?;
+        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
+            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
+        }
+    }
+    reconcile(
+        cfg, sui, walrus, runner, store, configs, supervisor, journal,
+    )
+    .await?;
+    if journal.state.discovery_cursor.is_none() {
+        journal.state.discovery_cursor = Some(
+            serde_json::json!({"checkpoint": journal.state.discovery_merge_checkpoint.take().ok_or_else(|| anyhow::anyhow!("missing discovery merge fence"))?}),
+        );
+        journal.save()?;
+        sui.set_event_limit(None);
+    }
+    sui.finish_full_poll(scan);
+    // Report new outcomes before the long normal sleep.
+    flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await
+}
+
+/// Apply what the device inbox and its groups' heads newly announce. Each
+/// candidate is checked exactly as a DeploymentCreated event would be.
+#[allow(clippy::too_many_arguments)]
+async fn announced(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    store: Option<&components::Store>,
+    configs: &configuration::Store,
+    supervisor: &mut supervisor::Supervisor,
+    journal: &mut Journal,
+) -> anyhow::Result<()> {
+    let device = &cfg.device.device_object_id;
+    let inbox_id = sui.inbox_id(device)?;
+    let inbox_key = inbox_id.clone();
+    // Taken before the inbox read: groups it does not list were joined later.
+    let now_chain = sui.chain_time_ms().await?;
+    let inbox = sui.inbox(device).await?;
+    if let Some(inbox) = &inbox {
+        for group in &inbox.groups {
+            if journal.state.groups.insert(group.clone()) {
+                info!(group, "Inbox lists a group; following its desired state");
+            }
+        }
+    }
+    // A head first seen applies records from then on: the inbox and groups
+    // known when heads began from that baseline, later groups from the last
+    // poll that did not list them (so records announced while the device
+    // was offline still apply).
+    anyhow::ensure!(journal.state.heads.is_some(), "announced records have no baseline");
+    let mut targets = Vec::new();
+    if let Some(inbox) = inbox {
+        targets.push((inbox_id, inbox.head));
+    }
+    for group in journal.state.groups.clone() {
+        targets.push((group.clone(), sui.group_head(&group).await?));
+    }
+    let mut next_start_ms = 0;
+    for (target, head) in targets {
+        if head.next_start_ms != 0 && (next_start_ms == 0 || head.next_start_ms < next_start_ms) {
+            next_start_ms = head.next_start_ms;
+        }
+        let heads = journal.state.heads.as_ref().unwrap();
+        let seen = match heads.seen.get(&target) {
+            Some(seen) => seen.clone(),
+            None if target == inbox_key => heads::Seen { since_ms: heads.since_ms, ..Default::default() },
+            None => heads::Seen { since_ms: heads.baseline(), ..Default::default() },
+        };
+        for id in heads::changed(&head, &seen) {
+            if journal.state.deployments.contains_key(&id) || journal.state.deferred.contains_key(&id) {
+                continue;
+            }
+            // Deleted records and records older than this head's baseline
+            // are never applied from a head.
+            let Some((event, record)) = sui.deployment(&id).await? else { continue };
+            let created = record.fields["created_at"].as_u64()
+                .or_else(|| record.fields["created_at"].as_str().and_then(|v| v.parse().ok()))
+                .ok_or_else(|| anyhow::anyhow!("deployment {id} has no creation time"))?;
+            if created < seen.since_ms || !sui.authorized_target(&event, device).await? {
+                continue;
+            }
+            if sui.is_managed(&id).await? {
+                info!(deployment = id, "Managed by desired state; left to reconciliation");
+                continue;
+            }
+            info!(deployment = id, target, "Announced deployment");
+            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
+        }
+        let heads = journal.state.heads.as_mut().unwrap();
+        heads.seen.insert(target, heads::Seen { seq: head.seq, since_ms: seen.since_ms, components: head.components });
+        journal.save()?;
+    }
+    let heads = journal.state.heads.as_mut().unwrap();
+    heads.next_start_ms = next_start_ms;
+    heads.polled_ms = Some(now_chain);
+    journal.save()?;
+    Ok(())
+}
+
+/// Where announced records apply from for a journal without heads. The
+/// event path handled every record created before its cursor, so the
+/// baseline is that boundary, never the upgrade time. A scan first brings
+/// the cursor to the tip; with pruned history the cursor's own checkpoint
+/// time is the boundary, and the cursor moves past the pruned range in the
+/// same journal write that installs it. When neither is knowable the poll fails rather
+/// than skip or replay records.
+#[allow(clippy::too_many_arguments)]
+async fn heads_baseline(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    store: Option<&components::Store>,
+    configs: &configuration::Store,
+    supervisor: &mut supervisor::Supervisor,
+    journal: &mut Journal,
+) -> anyhow::Result<()> {
+    let before = sui.chain_time_ms().await?;
+    let (pruned_tip, since_ms) = match scan_events(cfg, sui, walrus, runner, store, configs, supervisor, journal).await {
+        // An indexer may lag the tip: the scanned position bounds it too.
+        // An interrupted scan leaves an earlier cursor, which a retry rescans.
+        Ok(()) => (None, sui.cursor_time_ms(&journal.state.cursor).await.map_or(before, |at| at.min(before))),
+        Err(error) if error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
+            let since_ms = sui.cursor_time_ms(&journal.state.cursor).await.map_err(|time| anyhow::anyhow!(
+                "{error:#}; announced records have no safe baseline either ({time:#})"))?;
+            warn!(%error, since_ms, "Event history is pruned; the device inbox and group heads apply \
+                records from the event cursor's checkpoint time");
+            (Some(sui.latest_cursor().await?), since_ms)
+        }
+        Err(error) => return Err(error),
+    };
+    info!(since_ms, "Reading the device inbox and group heads from the event cursor's boundary");
+    heads::begin(journal, since_ms, pruned_tip)
+}
+
+/// The DeploymentCreated event scan from the journal cursor.
+#[allow(clippy::too_many_arguments)]
+async fn scan_events(
+    cfg: &Config,
+    sui: &SuiClient,
+    walrus: &WalrusClient,
+    runner: &ApplyRunner,
+    store: Option<&components::Store>,
+    configs: &configuration::Store,
+    supervisor: &mut supervisor::Supervisor,
+    journal: &mut Journal,
+) -> anyhow::Result<()> {
     loop {
         let combined = journal.state.discovery_cursor.is_some();
         let page_start = if combined {
@@ -992,46 +1201,13 @@ async fn poll(
             journal.save()?;
         }
         if !page.has_more {
-            break;
+            return Ok(());
         }
         anyhow::ensure!(
             progressed,
             "event stream claims more data without advancing"
         );
     }
-    // Deferred one-shot events survive cursor advancement and restarts.
-    for id in journal.state.deferred.keys().cloned().collect::<Vec<_>>() {
-        if journal.state.deferred[&id].terminal || journal.state.deployments.contains_key(&id)
-            || journal.state.managed.values().any(|managed| managed == &id) {
-            // Reconciliation owns managed notices, including their durable timer.
-            continue;
-        }
-        let Some((event, record)) = sui.deployment(&id).await? else {
-            journal.state.deferred.remove(&id);
-            journal.save()?;
-            continue;
-        };
-        if sui.is_managed(&id).await? {
-            journal.state.deferred.remove(&id);
-            journal.save()?;
-        } else if sui.authorized_target(&event, &cfg.device.device_object_id).await? {
-            execute(cfg, sui, walrus, runner, store, configs, supervisor, journal, &event, &record).await?;
-        }
-    }
-    reconcile(
-        cfg, sui, walrus, runner, store, configs, supervisor, journal,
-    )
-    .await?;
-    if journal.state.discovery_cursor.is_none() {
-        journal.state.discovery_cursor = Some(
-            serde_json::json!({"checkpoint": journal.state.discovery_merge_checkpoint.take().ok_or_else(|| anyhow::anyhow!("missing discovery merge fence"))?}),
-        );
-        journal.save()?;
-        sui.set_event_limit(None);
-    }
-    sui.finish_full_poll();
-    // Report new outcomes before the long normal sleep.
-    flush_funded_reports(cfg, sui, journal, true, &prior_receipts).await
 }
 fn pending_rollout_health(cfg: &Config, journal: &Journal) -> bool {
     cfg.sui.manifest.as_ref().is_some_and(|m| protocol::ROLLOUT_HEALTH_TYPES.iter()
@@ -1091,6 +1267,7 @@ async fn flush_funded_reports(
     }
     flush_reports(cfg, sui, journal, pending).await
 }
+
 /// Keep durable receipt retries independent of later discovery/reconciliation.
 /// Report failures remain queued without poisoning discovery cadence: a deleted
 /// deployment or lost targeting can make a receipt permanently undeliverable.
@@ -1361,8 +1538,19 @@ async fn reconcile(
     let device = &cfg.device.device_object_id;
     // Groups that ever added this device, scanned from genesis: membership
     // can predate enrollment. Each group object is the authority below.
+    // Until the combined discovery cursor exists. With inboxes (SF-125) the
+    // inbox lists groups, so pruned history resumes from the merge fence.
     while journal.state.discovery_cursor.is_none() {
-        let page = sui.memberships(&journal.state.membership_cursor).await?;
+        let page = match sui.memberships(&journal.state.membership_cursor).await {
+            Err(error) if sui.has_inbox() && error.downcast_ref::<sui_client::HistoryPruned>().is_some() => {
+                warn!(%error, "Membership history is pruned; following the groups the inbox lists");
+                let tip = sui.latest_cursor().await?;
+                heads::skip_pruned_memberships(&mut journal.state, tip);
+                journal.save()?;
+                break;
+            }
+            page => page?,
+        };
         for (group, member) in page.events {
             if sui_client::same_id(&member, device) && journal.state.groups.insert(group.clone()) {
                 info!(group, "Device was added to a group; following its desired state");

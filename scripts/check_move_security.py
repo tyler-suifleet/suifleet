@@ -189,6 +189,12 @@ def main():
             ("device_cap.move", "assert!(device_registry::is_active_signer(registry, cap.device_id, ctx.sender()), EInactiveIdentity);",
              "let _ = device_registry::is_active_signer(registry, cap.device_id, ctx.sender());",
              "test_revoked_device_cannot_report"),
+            ("fleet_inbox.move", "assert!(device_group::admin(group) == creator, ENotAdmin);",
+             "let _ = device_group::admin(group);", "a_foreign_creator_cannot_announce_to_a_group"),
+            ("fleet_inbox.move", "assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);",
+             "let _ = deployment_manager::target_devices(deployment);", "an_untargeted_device_cannot_be_announced"),
+            ("device_group.move", "if (df::exists(&group.id, MemberKey { device_id })) return true;",
+             "if (df::exists(&group.id, IndexKey {})) return true;", "a_non_member_cannot_follow_a_group"),
         ]
         for filename, before, after, test in mutations:
             path = package / "sources" / filename
