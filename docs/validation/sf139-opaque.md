@@ -364,3 +364,32 @@ Exact-head/current-base hosted CI, automatic testnet (including the shared
 wallet fixture) and fresh independent review remain required after push.
 Physical acceptance (#32) and final provider/manual-wallet/mainnet acceptance
 (#159) remain deferred and unrun. No merge approval is claimed.
+
+### Current-base recovery integration (2026-10-25)
+
+Integrated snapshot/current main `56215ecb0a6e4ee50b7a8eb58c185cc8f5eb1233`
+(SF-146 reconciliation and per-suite funding) after the independent review of
+`1dab86f` reported no actionable source/security findings. The merge was clean;
+`git diff --exit-code 1dab86f HEAD -- suifleet-edge contracts dapp sdk interfaces`
+passed, confirming no application, contract, SDK or interface change.
+
+Fresh offline checks after integration:
+
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  116 tests OK, 1 skipped.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  39 tests OK (publisher errors and synthetic transaction logs are test fixtures,
+  not live transactions or effects evidence).
+- `python3 -m unittest discover -s scripts/tests -p test_opaque_sdk.py`:
+  1 test OK; corresponding `test_tracking.py`: 10 tests OK.
+- `python3 -m py_compile scripts/ci_testnet_wallet.py scripts/live_package_upgrade.py scripts/sui_toolchain.py scripts/testnet_ci.py scripts/testnet_reconcile.py`:
+  passed. `node --check` for `scripts/sui_tx_inspect.cjs` and
+  `scripts/testnet_reconcile.cjs`: passed. `git diff --check`: passed.
+
+Rust, Move, OTA, frontend and public testnet were not rerun by this repair;
+previous evidence remains historical. This resolves base drift only. Exact-head
+hosted CI, automatic testnet including shared-wallet fixtures, and fresh
+independent evidence review remain required and pending coordinator collection.
+No hosted CI polling, live-wallet mutation, production deployment or hardware
+operation occurred. Deferred physical and final provider/manual-wallet/mainnet
+acceptance remains unrun in #32 and #159.
