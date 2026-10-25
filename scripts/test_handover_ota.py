@@ -2,6 +2,7 @@
 """Real daemon: staged authority migration, old-owner rejection and restart.
 Chain mutations are simulator inputs; Move/live tests establish their authorization.
 """
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -43,7 +44,18 @@ def run(binary):
     shim, rpc_url = start_grpc(f'http://127.0.0.1:{server.server_port}')
     process = None
     try:
-        with tempfile.TemporaryDirectory(prefix='sf089-ota-') as tmp:
+        with tempfile.TemporaryDirectory(prefix='sf089-ota-') as tmp, ExitStack() as cleanup:
+            # Stop the writer before TemporaryDirectory removes its journal,
+            # including when an assertion fails or after the restart below.
+            def stop_daemon():
+                if process and process.poll() is None:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=10)
+            cleanup.callback(stop_daemon)
             root = Path(tmp)
             key = root/'device.key'; key.write_text('07'*32); key.chmod(0o600)
             applied = root/'applied'

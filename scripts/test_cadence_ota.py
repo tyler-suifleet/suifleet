@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """SF-123: real-daemon default-cadence deadlines and ordered gRPC faults."""
 import json
+from contextlib import ExitStack
 import os
 from pathlib import Path
 import subprocess
@@ -91,11 +92,23 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
         servers = [ThreadingHTTPServer(('127.0.0.1', 0), handler(primary)) for primary in (True, False)]
         shims = []
         process = None
+        def stop_daemon():
+            if process and process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=10)
         try:
             for server in servers:
                 threading.Thread(target=server.serve_forever, daemon=True).start()
                 shims.append(start_grpc(f'http://127.0.0.1:{server.server_port}'))
-            with tempfile.TemporaryDirectory(prefix='cadence-ota-') as tmp:
+            with ExitStack() as resources:
+                tmp = resources.enter_context(tempfile.TemporaryDirectory(prefix='cadence-ota-'))
+                # Stop the current (possibly restarted) writer before deleting
+                # its state, including when an assertion fails.
+                resources.callback(stop_daemon)
                 root = Path(tmp)
                 key = root/'device.key'
                 key.write_text('07'*32)
@@ -145,6 +158,9 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
                             print((root/'daemon.log').read_text(), flush=True)
                             print(state(), flush=True)
                             raise
+                        if fault == 'discovery-outage':
+                            wait_for(lambda: outages[0] > 0 and counts[1] > 0,
+                                'later discovery outage did not exercise fallback', process)
                         assert applied.exists() and sim.reports and (fault == 'completed-window' or counts[1] > 0)
                         assert not sim.errors, sim.errors
                         if fault == 'completed-window':
