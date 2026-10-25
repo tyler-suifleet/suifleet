@@ -32,7 +32,7 @@ import tempfile
 from types import SimpleNamespace
 
 import deployment_manifest as dm
-from live_common import DAEMON, ROOT, Budget, Live, Spent, WALRUS_TESTNET, pending_key, recover_key, sweep
+from live_common import DAEMON, ROOT, Budget, Live, Spent, Walrus, pending_key, recover_key, sweep
 from live_package_upgrade import contracts_digest, fixture_key, load_state
 
 FUNDING = 100_000_000  # 0.1 SUI for the test key; swept back afterwards.
@@ -56,7 +56,10 @@ def run(args):
     fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
     if not fixture or not fixture.get("owner_cap"):
         sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first")
-    publisher, aggregator = WALRUS_TESTNET
+    # The dApp uploads through the manifest's one publisher, so pick one that
+    # is storing blobs now: Mysten's can run dry (CI run 40156238429).
+    walrus = Walrus("testnet")
+    publisher, aggregator = walrus.working_publisher(), walrus.aggregator
     manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=fixture["head_package"],
                                           upgrade_cap=fixture["upgrade_cap"], registry=fixture["registry"], network=args.network,
                                           publisher=publisher, aggregator=aggregator))

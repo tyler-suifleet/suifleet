@@ -329,6 +329,31 @@ class WalrusUploadTests(unittest.TestCase):
                 walrus.put("recipe", b"body")
         self.assertEqual(reads, [f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged"])
 
+    def test_working_publisher_is_one_that_just_stored_a_verified_probe(self):
+        import io
+        import urllib.error
+        # CI run 40156238429: the dApp uploaded through Mysten's dry publisher
+        # and the wallet suite failed; the gate now hands it a working one.
+        dry = urllib.error.HTTPError("u", 500, "internal", {}, io.BytesIO(b"{}"))
+        walrus, attempts = live_common.Walrus("testnet"), []
+
+        def urlopen(request, timeout):
+            attempts.append(request.full_url.removesuffix("/v1/blobs?epochs=1"))
+            if len(attempts) == 1:
+                raise dry
+            return nullcontext(io.BytesIO(self.STORED))
+        with patch.object(live_common.urllib.request, "urlopen", urlopen), patch("sys.stderr", new_callable=io.StringIO), \
+                patch.object(walrus, "readable", return_value=True) as readable:
+            self.assertEqual(walrus.working_publisher(), self.PUBLISHERS[1])
+        self.assertEqual(attempts, self.PUBLISHERS[:2])
+        self.assertTrue(readable.call_args.args[1].startswith(b"suifleet publisher probe "))
+        # No publisher is returned unless the probe reads back intact.
+        with patch.object(walrus, "store", return_value={"newlyCreated": {"blobObject": {"blobId": "forged"}}}), \
+                patch.object(walrus, "readable", return_value=False), \
+                patch.object(live_common, "wait_for", side_effect=AssertionError("not readable")):
+            with self.assertRaises(AssertionError):
+                walrus.working_publisher()
+
 
 class WalletFixtureTests(unittest.TestCase):
     def test_head_fixture_is_keyed_by_release_compiler(self):
