@@ -49,3 +49,6 @@ export const parseCompactHead = () => { throw Error('This session fixture has no
 
 // The policy panel has its own authority/async tests; this fixture isolates sessions.
 export const StreamRetentionPanel = () => null;
+
+// Usage metering is covered by test_data_metering.cjs; isolate Seal session lifetime here.
+export const DataUsage = () => null;
