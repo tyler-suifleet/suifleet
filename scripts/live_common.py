@@ -267,7 +267,10 @@ class Live:
         built = self.evidence.setdefault("verified_package_transactions", {})
         result = self.execute(label, toolchain.package_submitter(
             client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
-            record=built.setdefault(label, {})), gas=400_000_000)
+            record=built.setdefault(label, {})),
+            # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
+            # existing allowance; effects settle actual cost, never replenishing it.
+            gas=self.ledger.remaining if upgrade is not None else 400_000_000)
         if upgrade is None:
             toolchain.write_pubfile(pubfile, self.chain, package_dir, self.published(result),
                                     self.created(result, "::package::UpgradeCap")[0])

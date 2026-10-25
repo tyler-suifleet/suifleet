@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from testnet_budget import Budget, Spent
 
@@ -90,3 +90,46 @@ class BudgetTests(unittest.TestCase):
                            funding=1, require_full=True)
         client.assert_not_called()
         self.assertEqual(budget.used, 0)
+
+
+class LivePublicationBudgetTests(unittest.TestCase):
+    def test_large_upgrade_uses_remaining_ceiling_and_settles_actual_effects(self):
+        from live_common import Live
+        live = Live.__new__(Live)
+        live.ledger = Budget(700_000_000, [])
+        live.ledger.grant(135_436_148)
+        live.evidence = {}
+        live.operator, live.build_sui = "0xa", "sui"
+        live.assert_lock = Mock()
+        live.executor = Mock(return_value=Mock())
+        # Run 40212571323 exhausted the old 400M transaction budget. A
+        # successful head upgrade costs 533M, within the unchanged suite cap.
+        observed = []
+        def submit(gas):
+            observed.append(gas)
+            return effect(cost=533_318_963)
+        with patch("live_common.toolchain.package_submitter", return_value=submit):
+            live.publish("upgrade to head", Path("package"), Path("pubfile"),
+                         upgrade={"cap": "0xb", "package": "0xc"})
+        self.assertEqual(observed, [564_563_852])
+        self.assertEqual(live.ledger.used, 668_755_111)
+        self.assertEqual(live.ledger.remaining, 31_244_889)
+        self.assertEqual(live.ledger.limit, 700_000_000)
+        live.assert_lock.assert_called_once()
+
+    def test_upgrade_cannot_submit_when_allowance_exhausted(self):
+        from live_common import Live
+        live = Live.__new__(Live)
+        live.ledger = Budget(700_000_000, [])
+        live.ledger.grant(699_000_000)
+        live.evidence = {}
+        live.operator, live.build_sui = "0xa", "sui"
+        live.assert_lock = Mock()
+        live.executor = Mock(return_value=Mock())
+        submit = Mock()
+        with patch("live_common.toolchain.package_submitter", return_value=submit):
+            with self.assertRaises(Spent):
+                live.publish("upgrade to head", Path("package"), Path("pubfile"),
+                             upgrade={"cap": "0xb", "package": "0xc"})
+        submit.assert_not_called()
+        self.assertEqual(live.ledger.used, 699_000_000)
