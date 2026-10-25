@@ -20,6 +20,10 @@ async function main() {
   assert(await isValidPersonalMessageSignature(Buffer.from(JSON.stringify(base)),JSON.parse(signed.stdout).signature,{address:key.toSuiAddress()}));
   for (const change of [{chain_identifier:'35834a8a'},{fleet_id:'0xff'},{device_id:'0xff'},{signer:'0xff'},{schema:99},
     {kind:'transaction'},{records:[{line:'non-fixture private message'}]}]) assert.notEqual(run({...base,...change}).status,0);
+  const opaque={...base,kind:'fleet-opaque',item:{data:Buffer.from([0,255,128,0,10]).toString('base64')}};
+  assert.equal(run(opaque).status,0);
+  assert.notEqual(run({...opaque,schema:4}).status,0);
+  assert.notEqual(run({...opaque,item:{data:Buffer.from('non-fixture private bytes').toString('base64')}}).status,0);
   console.log('PASS bounded testnet fixture signer, real personal signature, foreign chain/fleet/device/signer/schema/content refusals; no network');
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1}).finally(()=>fs.rmSync(dir,{recursive:true,force:true}));

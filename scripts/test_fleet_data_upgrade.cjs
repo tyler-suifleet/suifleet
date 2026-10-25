@@ -28,7 +28,7 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   }
   function compile(directory){
    let text;try{text=execFileSync('sui',['move','build','--path',directory,'--build-env','sf082','--no-tree-shaking','--dump-bytecode-as-base64'],{env,encoding:'utf8',maxBuffer:30*1024*1024,stdio:['ignore','pipe','pipe']});}
-   catch(error){throw Error('isolated source compilation failed: '+String(error.stderr).slice(-1500));}
+   catch(error){throw Error('isolated source compilation failed: status='+error.status+' signal='+error.signal+' '+String(error.stderr).slice(-1500)+' '+String(error.stdout).slice(-500));}
    return JSON.parse(text.slice(text.indexOf('{')));
   }
   const digests={};
@@ -58,6 +58,33 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
   for(let i=0;i<2;i++)assert.deepEqual((await client.getObject({objectId:[fleet,writer][i],include:{content:true}})).object.content,before[i]);
   tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::request_diagnostics`,arguments:[tx.object(fleet),tx.object(writer),tx.object(budget),tx.object(budgetCap),tx.object('0x6')]});await execute('diagnostics on existing writer',tx);
   const field=await client.getDynamicField({parentId:writer,name:{type:`${head}::fleet_data::DiagnosticKey`,bcs:bcs.bool().serialize(false).toBytes()}});assert.equal(bcs.struct('DiagnosticRequest',{seq:bcs.u64(),at_ms:bcs.u64()}).parse(field.dynamicField.value.bcs).seq,'1');
+  // SF139: use existing objects and both callable package versions. A fleet-wide
+  // support grant must never authorize the new scoped identities.
+  assert.equal(origins.ItemKey,head);assert.equal(origins.DataItem,head);assert.equal(origins.ReadGrantKey,head);
+  const stream=Buffer.from(require('node:crypto').createHash('sha256').update('sensor').digest());
+  const scoped=Buffer.concat([Buffer.from(bcs.Address.serialize(fleet).toBytes()),Buffer.alloc(8),Buffer.from(bcs.Address.serialize(deviceId).toBytes()),stream,Buffer.alloc(16)]);
+  tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::set_support`,arguments:[tx.object(fleet),tx.object(budget),tx.object(budgetCap),tx.pure.address(owner.toSuiAddress()),tx.pure.bool(true)]});await execute('legacy fleet support grant',tx);
+  const scopedChecks=[];
+  async function approve(pkg,fn,dev=deviceId,hash=stream,success=false) {
+   const probe=new Transaction();probe.setSender(owner.toSuiAddress());
+   const args=[probe.pure.vector('u8',scoped),probe.object(fleet)];
+   if(fn==='seal_approve_owner'||fn==='seal_approve_scoped_owner')args.push(probe.object(budget),probe.object(budgetCap));
+   if(fn.startsWith('seal_approve_scoped'))args.push(probe.pure.id(dev),probe.pure.vector('u8',hash));
+   probe.moveCall({target:`${pkg}::fleet_data::${fn}`,arguments:args});
+   const result=await client.simulateTransaction({transaction:probe,checksEnabled:false,include:{effects:true}});
+   assert.equal(Boolean(result.Transaction?.status.success),success,JSON.stringify(result));
+   scopedChecks.push({pkg,fn,dev,stream:Buffer.from(hash).toString('hex'),success});
+  }
+  for(const pkg of [base.pkg,head])for(const fn of ['seal_approve_owner','seal_approve_support'])await approve(pkg,fn);
+  await approve(head,'seal_approve_scoped_owner',deviceId,stream,true);
+  await approve(head,'seal_approve_scoped_reader');
+  tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::set_read_grant`,arguments:[tx.object(fleet),tx.object(budget),tx.object(budgetCap),tx.pure.id(deviceId),tx.pure.vector('u8',stream),tx.pure.address(owner.toSuiAddress()),tx.pure.bool(true)]});await execute('scoped stream grant on existing fleet',tx);
+  await approve(head,'seal_approve_scoped_reader',deviceId,stream,true);
+  await approve(head,'seal_approve_scoped_reader',deviceId,Buffer.alloc(32));
+  await approve(head,'seal_approve_scoped_reader','0xdead',stream);
+  tx=new Transaction();tx.moveCall({target:`${head}::fleet_data::set_read_grant`,arguments:[tx.object(fleet),tx.object(budget),tx.object(budgetCap),tx.pure.id(deviceId),tx.pure.vector('u8',stream),tx.pure.address(owner.toSuiAddress()),tx.pure.bool(false)]});await execute('revoke scoped stream grant',tx);
+  await approve(head,'seal_approve_scoped_reader');
+  console.log('PASS old/new fleet-wide approvals refuse scoped keys; owner/stream grant/revocation and cross-device/cross-stream isolated upgrade probes');
   // SF-137: signed services survive the serverless chain path, including an
   // existing writer after upgrade. No indexer/HTTP ingress process is started.
   const coreMetadata=bcs.Object.parse((await client.getObject({objectId:core.pkg,include:{objectBcs:true}})).object.objectBcs).data.Package;
@@ -95,6 +122,6 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
    assert.equal(result.$kind,'FailedTransaction');assert.match(JSON.stringify(result.FailedTransaction.status),/device_cap::assert_active/);
    await client.waitForTransaction({digest:result.FailedTransaction.digest});attacks[pkg]={digest:result.FailedTransaction.digest,status:result.FailedTransaction.status};
   }
-  console.log(JSON.stringify({result:'PASS',chain,baseRef,base:base.pkg,head,origins,digests,attacks,checks:['pinned real Walrus/storage dependencies','existing-object byte preservation','later DiagnosticKey origin','new API on existing writer','old and new entry points refuse revoked device']}));
+  console.log(JSON.stringify({result:'PASS',chain,baseRef,base:base.pkg,head,origins,digests,attacks,scopedChecks,checks:['pinned real Walrus/storage dependencies','existing-object byte preservation','later DiagnosticKey origin','new API on existing writer','old and new entry points refuse revoked device']}));
  }finally{await fs.rm(tmp,{recursive:true,force:true});}
 })().catch(e=>{console.error(e.stack);process.exitCode=1});

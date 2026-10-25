@@ -106,12 +106,13 @@ impl Shim {
                 return Err(Status::not_found(format!("dynamic field {id} not found")));
             }
             let mut object = proto::Object::default();
-            if key.ends_with("::fleet_data::CompactHeadKey") {
+            if key.ends_with("::fleet_data::CompactHeadKey") || key.ends_with("::fleet_data::ItemKey") {
                 let head = hex::decode(value["bcs_hex"].as_str().ok_or_else(|| Status::internal("missing compact head bytes"))?)
                     .map_err(|e| Status::internal(e.to_string()))?;
                 let mut contents = id.inner().to_vec(); contents.extend(&key_bcs); contents.extend(head);
                 let origin = key.split("::").next().unwrap_or_default();
-                let tag = format!("0x2::dynamic_field::Field<{key}, {origin}::fleet_data::CompactHead>");
+                let name=if key.ends_with("::ItemKey") {"DataItem"} else {"CompactHead"};
+                let tag = format!("0x2::dynamic_field::Field<{key}, {origin}::fleet_data::{name}>");
                 let structure = MoveStruct::new(StructTag::from_str(&tag).map_err(|e| Status::internal(e.to_string()))?, false, 1, contents)
                     .ok_or_else(|| Status::internal("compact field has no UID"))?;
                 let full = Object::new(ObjectData::Struct(structure), sui_sdk_types::Owner::Object(parent_id), Digest::ZERO, 0);
@@ -611,8 +612,8 @@ impl proto::transaction_execution_service_server::TransactionExecutionService fo
             }
             let id = Address::from_str(arguments[index].as_str().unwrap_or("")).map_err(|e| Status::internal(e.to_string()))?;
             if matches!(call.module.as_deref(), Some("fleet_data" | "fleet_storage")) {
-                let owned = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==5, "register_blob" => index==4, _=>false };
-                let mutable = match function.as_str() { "report_health" | "anchor" | "anchor_compact" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
+                let owned = match function.as_str() { "report_health" | "anchor" | "anchor_compact" | "anchor_items" => index==5, "register_blob" => index==4, _=>false };
+                let mutable = match function.as_str() { "report_health" | "anchor" | "anchor_compact" | "anchor_items" => index==1, "register_blob" => index==0 || index==5, "certify_blob" => index==0, _=>false };
                 inputs.push(builder.object(if owned { sui_transaction_builder::ObjectInput::owned(id,1,Digest::ZERO) }
                     else { sui_transaction_builder::ObjectInput::shared(id,1,mutable) }));
                 continue;

@@ -1,4 +1,7 @@
 """SuiFleet native IPC v1 SDK. Python 3.10+, standard library only."""
+import base64
+import hashlib
+import os
 import argparse
 import json
 import socket
@@ -10,6 +13,13 @@ MAX_FRAME = 65536
 
 class IpcError(RuntimeError):
     """Rejected request. A transport timeout has an unknown mutation outcome."""
+
+
+class DataPutError(IpcError):
+    """Preserve upload identity and failed chunk for retry after backpressure."""
+    def __init__(self, upload, chunk, cause):
+        self.upload, self.chunk = upload, chunk
+        super().__init__(f'upload {upload} chunk {chunk}: {cause}')
 
 
 class Client:
@@ -41,6 +51,31 @@ class Client:
         if value.get('ok') is not True:
             raise IpcError(value.get('error', 'request_failed'))
         return value['data']
+
+    def put_data(self, stream, key, data, content_type='application/octet-stream', metadata=None, upload=None, start_chunk=0):
+        """Queue raw bytes in bounded chunks. Returns custody receipts, never a storage ack.
+
+        Preserve upload across an uncertain retry. Each chunk is independently readable.
+        """
+        if len(data) > 64 * 1024 * 1024:
+            raise ValueError('file exceeds 64 MiB')
+        upload = upload or os.urandom(32).hex()
+        chunks = max(1, (len(data) + 24575) // 24576)
+        if not isinstance(start_chunk, int) or not 0 <= start_chunk < chunks:
+            raise ValueError('invalid start_chunk')
+        receipts = []
+        for chunk in range(start_chunk, chunks):
+            part = data[chunk * 24576:(chunk + 1) * 24576]
+            descriptor = dict(stream=stream, key=key, content_type=content_type,
+                              metadata=metadata or {}, upload=upload, chunk=chunk,
+                              chunks=chunks, total_size=len(data), size=len(part),
+                              sha256=list(hashlib.sha256(part).digest()))
+            try:
+                receipts.append(self.request('data_put', topic=stream, payload=dict(
+                    descriptor=descriptor, data_base64=base64.b64encode(part).decode())))
+            except (IpcError, OSError) as error:
+                raise DataPutError(upload, chunk, error) from error
+        return dict(upload=upload, start_chunk=start_chunk, chunks=receipts)
 
     def install(self, deployment):
         return self.request('install', payload=deployment)
@@ -165,15 +200,30 @@ def main():
                                             'restart', 'status', 'logs', 'config',
                                             'health', 'publish', 'receive',
                                             'subscribe', 'unsubscribe', 'ack',
-                                            'messaging', 'stream_create',
+                                            'messaging', 'data_put', 'stream_create',
                                             'stream_delete', 'stream_append', 'stream_read',
                                             'stream_describe', 'stream_list',
                                             'shadow_get', 'shadow_update', 'shadow_delete',
                                             'shadow_list', 'shadows'])
+    parser.add_argument('--file', help='raw file for data_put (stream in --topic)')
+    parser.add_argument('--key', default='data')
+    parser.add_argument('--content-type', default='application/octet-stream')
+    parser.add_argument('--metadata', default='{}', help='public JSON object for file data_put')
+    parser.add_argument('--start-chunk', type=int, default=0, help='resume after partial backpressure')
+    parser.add_argument('--upload', help='stable 64 hex retry identifier')
     parser.add_argument('--topic', default='')
     parser.add_argument('--payload', help='JSON value; install takes a quoted deployment ID')
     args = parser.parse_args()
     try:
+        if args.file:
+            if args.operation != 'data_put':
+                raise ValueError('--file requires data_put')
+            with open(args.file, 'rb') as source:
+                data = source.read(64 * 1024 * 1024 + 1)
+            result = Client(args.socket, args.component).put_data(args.topic, args.key, data,
+                args.content_type, metadata=json.loads(args.metadata), upload=args.upload, start_chunk=args.start_chunk)
+            print(json.dumps(result, indent=2))
+            return
         result = Client(args.socket, args.component).request(
             args.operation, topic=args.topic,
             payload=json.loads(args.payload) if args.payload is not None else None)

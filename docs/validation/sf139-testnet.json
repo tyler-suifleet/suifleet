@@ -1,0 +1,298 @@
+{
+  "result": "PASS",
+  "chain": "4c78adac",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "source_sha256": "c39185b477d8d2a26e3b76c50c6868e140ebb38ae2c823b7160d40f467ecf6ef",
+  "package": "0x104ae91b3e6a8a22c7d58d48c1db9ebca83a3943023c3b6e26fe5a0dd0397d46",
+  "upgrade_cap": "0x9be380220a26dc84e0519e438d2924d8325642d0fa1c9cc3ad27ceb57525b623",
+  "allowance_used_mist": 111475710,
+  "transactions": [
+    {
+      "label": "SF139 publish isolated scoped-data fixture",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "5sj2U1bdzBmawHGxC2CbQXidpnha8G6m2s9ybgqHmgMn",
+      "gas_mist": 73914400,
+      "allowance_used_mist": 73914400,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "72914400",
+        "storageRebate": "0",
+        "nonRefundableStorageFee": "0"
+      },
+      "actual_net_gas_mist": 73914400
+    },
+    {
+      "label": "SF139 create isolated data fleet",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "CQibmLGgSdRrbaboRGWXy1YGVz1LWPzQzzY29hkho3HF",
+      "gas_mist": 3508163,
+      "allowance_used_mist": 77422563,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "4142000",
+        "storageRebate": "1633837",
+        "nonRefundableStorageFee": "163"
+      },
+      "actual_net_gas_mist": 3508163
+    },
+    {
+      "label": "SF139 enroll writer and legacy support",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "D2KJbESvPLGvfEsYxbnwEQbstoPydLVJcXkJ1jZYDtAU",
+      "gas_mist": 6221614,
+      "allowance_used_mist": 83644177,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "9363200",
+        "storageRebate": "4141586",
+        "nonRefundableStorageFee": "414"
+      },
+      "actual_net_gas_mist": 6221614
+    },
+    {
+      "label": "SF139 register opaque batch",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "9KvVnQpY6XCdjTgZk9KVAi2KFXEKZQyfMP3RVHxVU2eW",
+      "gas_mist": 8847473,
+      "allowance_used_mist": 92491650,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "126570400",
+        "storageRebate": "118722927",
+        "nonRefundableStorageFee": "11873"
+      },
+      "actual_net_gas_mist": 8847473
+    },
+    {
+      "label": "SF139 certify opaque batch",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "EL5pEoRYKGSKqVi2jYWfH5kdjDgyWFR5E4RsLzKV7Kno",
+      "gas_mist": 1030822,
+      "allowance_used_mist": 93522472,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "4248400",
+        "storageRebate": "4217578",
+        "nonRefundableStorageFee": "422"
+      },
+      "actual_net_gas_mist": 1030822
+    },
+    {
+      "label": "SF139 anchor two independent items",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "GK8Pv7SaRwPaHtv3Zt6N6RTVsW12QTtBWHy2UsZrgxnb",
+      "gas_mist": 14429599,
+      "allowance_used_mist": 107952071,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "17419200",
+        "storageRebate": "3989601",
+        "nonRefundableStorageFee": "399"
+      },
+      "actual_net_gas_mist": 14429599
+    },
+    {
+      "label": "SF139 grant binary stream only",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "G4uBJcLVFJF72tt7wEMJRYUHdmBZywwSL5u5yR3yZC8e",
+      "gas_mist": 3523639,
+      "allowance_used_mist": 111475710,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "6908400",
+        "storageRebate": "4384761",
+        "nonRefundableStorageFee": "439"
+      },
+      "actual_net_gas_mist": 3523639
+    },
+    {
+      "label": "SF139 revoke binary stream",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "APBmWSt91vLXNRpNTNtLL3Vsygq1iWBsDEYjfbdGBu3b",
+      "gas_mist": 0,
+      "allowance_used_mist": 111475710,
+      "effects_gas": {
+        "computationCost": "1000000",
+        "storageCost": "4385200",
+        "storageRebate": "6907709",
+        "nonRefundableStorageFee": "691"
+      },
+      "actual_net_gas_mist": -1522509
+    }
+  ],
+  "encoding": {
+    "blob_id": "24214385015607263546852629380938759839467680319545090362612455619053284287360",
+    "root_hash": "57596456231678781234574009920074227142241298213014528210912901549721619440022",
+    "size": 445556,
+    "items": [
+      {
+        "identifier": "manifest",
+        "size": 1589,
+        "sha256": "51112a1503138375a24cf154ee2ae5d609dd1bc7f70341ac4ac07526116a4176"
+      },
+      {
+        "identifier": "data-00",
+        "size": 1885,
+        "sha256": "c4c02533fbfd9ce2712d7101219423ce2b73046fe5a65f919d73a8b89fd0a355"
+      },
+      {
+        "identifier": "data-01",
+        "size": 1909,
+        "sha256": "b9d7a10c9fd602d17ef71f2e89adc1428824e129e0442f7ceb3a088d0bf31aec"
+      }
+    ]
+  },
+  "config": {
+    "schema": 1,
+    "chainIdentifier": "4c78adac",
+    "registryId": "0xd3afc908876326367294ba95d13cbac5775dd1370a23fb3ba8ba29b25daeaf41",
+    "packageId": "0x104ae91b3e6a8a22c7d58d48c1db9ebca83a3943023c3b6e26fe5a0dd0397d46",
+    "typeOrigin": "0x104ae91b3e6a8a22c7d58d48c1db9ebca83a3943023c3b6e26fe5a0dd0397d46",
+    "fleetId": "0xc43d1b1dcc6859c3ce141eb00a768e23fa4182df0e0c415465f7906e77ac07ed",
+    "budgetId": "0x608926d7acc22accb32a7a08bcb150dece58d4ca3176c46154ba79169aaf0d89",
+    "storageId": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2"
+  },
+  "writer": "0xfe76f6cf8b17c91158a26249c9b9126325bf6eb5649adf3e6c25b790095fe140",
+  "device": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+  "blob": "0xdd63461599ae974b056cb72bf22ae04ea5a4a533f1e6ae14b1327255755d02de",
+  "readback": {
+    "result": {
+      "ownerVerified": true,
+      "items": [
+        {
+          "stream": "public-binary",
+          "size": 5,
+          "sha256": "168525a370cddab69559d4431142fdb8f0cc3eae49737c9e95f459e02b273f96",
+          "readerDenied": false,
+          "index_bcs_bytes": 239
+        },
+        {
+          "stream": "public-text",
+          "size": 29,
+          "sha256": "216672ad58abf60b7e79372d253d8d782e198a75cd79b642731e8c85871328c5",
+          "readerDenied": true,
+          "index_bcs_bytes": 223
+        }
+      ],
+      "scopedRevocation": false
+    }
+  },
+  "revoked": {
+    "result": {
+      "ownerVerified": true,
+      "items": [
+        {
+          "stream": "public-binary",
+          "size": 5,
+          "sha256": "168525a370cddab69559d4431142fdb8f0cc3eae49737c9e95f459e02b273f96",
+          "readerDenied": true,
+          "index_bcs_bytes": 239
+        },
+        {
+          "stream": "public-text",
+          "size": 29,
+          "sha256": "216672ad58abf60b7e79372d253d8d782e198a75cd79b642731e8c85871328c5",
+          "readerDenied": true,
+          "index_bcs_bytes": 223
+        }
+      ],
+      "scopedRevocation": true
+    }
+  },
+  "anchor_gas": {
+    "computationCost": "1000000",
+    "storageCost": "17419200",
+    "storageRebate": "3989601",
+    "nonRefundableStorageFee": "399"
+  },
+  "anchor_net_gas_mist": 14429599,
+  "item_index_bcs_bytes": [
+    239,
+    223
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf121-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf121-tools/network-sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1262,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "registration_events": [
+    {
+      "at_limit": false,
+      "blob_id": "24214385015607263546852629380938759839467680319545090362612455619053284287360",
+      "blob_object_id": "0xdd63461599ae974b056cb72bf22ae04ea5a4a533f1e6ae14b1327255755d02de",
+      "device_id": "0x6c104e2b144ab982833a090289ce5895d3dc48136246ecde63769c7f463f2672",
+      "encoded_bytes_in_period": "66034000",
+      "encoded_size": "66034000",
+      "end_epoch": 562.0,
+      "pool_size": "0",
+      "size": "445556",
+      "storage_id": "0x0a73c883935abbfbb2cc6fdb6798fc3ab51fb25d44e655d7934f27570f14f2d2",
+      "uploads_in_period": "1",
+      "wal_balance": "16539536",
+      "write_fee": "363951"
+    }
+  ],
+  "read_only_revalidation": {
+    "result": {
+      "ownerVerified": true,
+      "items": [
+        {
+          "stream": "public-binary",
+          "size": 5,
+          "sha256": "168525a370cddab69559d4431142fdb8f0cc3eae49737c9e95f459e02b273f96",
+          "readerDenied": true,
+          "index_bcs_bytes": 239
+        },
+        {
+          "stream": "public-text",
+          "size": 29,
+          "sha256": "216672ad58abf60b7e79372d253d8d782e198a75cd79b642731e8c85871328c5",
+          "readerDenied": true,
+          "index_bcs_bytes": 223
+        }
+      ],
+      "scopedRevocation": true
+    }
+  },
+  "verified_source_digest": "345150f27f3d7600a55366f60ca25a88b3be0d001682c71324e2f3747a03820e",
+  "max_spend_mist": 500000000,
+  "actual_signed_net_gas_mist": 109953201
+}
