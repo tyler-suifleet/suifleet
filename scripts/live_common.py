@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -35,9 +36,25 @@ CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
 # The public Walrus endpoints refuse Python's default User-Agent (HTTP 403).
 AGENT = {"User-Agent": "suifleet-acceptance/1"}
-# The public publisher occasionally stalls; uploads are retried (content-addressed).
-WALRUS_ATTEMPTS, WALRUS_RETRY_SECONDS = 3, 10
 WALRUS_TESTNET = ("https://publisher.walrus-testnet.walrus.space", "https://aggregator.walrus-testnet.walrus.space")
+# Mysten's publisher pays for storage from its own WAL and can run dry (CI run
+# 40140128767: five HTTP 500 "could not find WAL coins with sufficient
+# balance"), which no retry fixes. Uploads then fall back, in order, to
+# community testnet publishers from https://docs.wal.app/operators.json (each
+# stored and served a probe blob on 2026-10-24). A publisher is only trusted to
+# store: every blob is read back through Mysten's aggregator and compared byte
+# for byte before use, and the publisher pays, so a fallback spends nothing.
+WALRUS_FALLBACK_PUBLISHERS = (
+    "https://publisher.walrus-01.tududes.com",
+    "https://wal-publisher-testnet.staketab.org",
+    "https://walrus-testnet-publisher.nodes.guru",
+    "https://sui-walrus-testnet-publisher.bwarelabs.com",
+    "https://testnet-publisher.walrus.graphyte.dev",
+    "https://publisher.walrus.banansen.dev",
+)
+# Each pass tries every publisher once; passes are separated by a backoff and
+# the whole upload stops at the deadline.
+WALRUS_PASSES, WALRUS_RETRY_SECONDS, WALRUS_DEADLINE_SECONDS = 2, 15, 600
 # Move aborts as the CLI reports them: "... aborted within function
 # '0x…::module::function' at instruction N with code C", or the older
 # MoveAbort(MoveLocation { … name: Identifier("module") … function_name: Some("function") }, C).
@@ -285,6 +302,15 @@ class Live:
               f"evidence: {path or '(not written)'}")
 
 
+def _walrus_message(error):
+    """The publisher's error message, bounded and single-line, for the log."""
+    try:
+        message = json.loads(error.read() or b"{}").get("error", {}).get("message", "")
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return f": {' '.join(str(message).split())[:160]}" if message else ""
+
+
 class Walrus:
     """Blob storage for recipes and artifacts: the public Walrus testnet
     publisher/aggregator (real storage, paid by the publisher, 1 epoch), or
@@ -324,22 +350,47 @@ class Walrus:
         return blob
 
     def store(self, body):
-        """PUT a blob to the public publisher, retrying transient failures
-        (timeouts, resets, 5xx) a bounded number of times. Blob IDs are
-        content-addressed and the publisher pays, so a retry spends nothing
-        from the run's wallet and returns the same ID."""
-        for attempt in range(1, WALRUS_ATTEMPTS + 1):
-            request = urllib.request.Request(f"{self.publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
-            try:
-                with urllib.request.urlopen(request, timeout=120) as response:
-                    return json.load(response)
-            except urllib.error.HTTPError as error:
-                if error.code < 500 or attempt == WALRUS_ATTEMPTS:
-                    raise
-            except OSError:
-                if attempt == WALRUS_ATTEMPTS:
-                    raise
-            time.sleep(WALRUS_RETRY_SECONDS * attempt)
+        """PUT a blob to the testnet publishers, primary first. Transient
+        failures (timeouts, resets, 5xx) move on to the next publisher; a 4xx
+        drops that publisher for the rest of the upload. Bounded by passes and
+        a deadline. Blob IDs are content-addressed and the caller verifies the
+        bytes through the aggregator, so any publisher's ID is checked."""
+        publishers = [self.publisher, *WALRUS_FALLBACK_PUBLISHERS]
+        deadline, error = time.monotonic() + WALRUS_DEADLINE_SECONDS, None
+        for attempt in range(1, WALRUS_PASSES + 1):
+            if attempt > 1:
+                time.sleep(WALRUS_RETRY_SECONDS)
+            for publisher in list(publishers):
+                if time.monotonic() > deadline:
+                    raise error
+                request = urllib.request.Request(f"{publisher}/v1/blobs?epochs=1", data=body, method="PUT", headers=AGENT)
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as response:
+                        stored = json.load(response)
+                    if publisher != self.publisher:
+                        print(f"Walrus blob stored by fallback publisher {publisher}", file=sys.stderr)
+                    self.stored_by = publisher
+                    return stored
+                except urllib.error.HTTPError as failure:
+                    error, reason = failure, f"HTTP {failure.code}{_walrus_message(failure)}"
+                    if failure.code < 500:
+                        publishers.remove(publisher)
+                except OSError as failure:
+                    error, reason = failure, type(failure).__name__
+                print(f"Walrus publisher {publisher} pass {attempt}/{WALRUS_PASSES} failed ({reason})", file=sys.stderr)
+            if not publishers:
+                break
+        raise error
+
+    def working_publisher(self):
+        """A publisher that just stored a fresh probe blob which then read
+        back byte for byte through the aggregator. For uploads made outside
+        this class (the dApp in the browser), which have no fallback of their
+        own: the dApp is pointed at this publisher instead of a dry primary."""
+        if self.mode != "testnet":
+            return self.publisher
+        self.put("probe", b"suifleet publisher probe " + os.urandom(16).hex().encode())
+        return self.stored_by
 
     def readable(self, blob, body):
         try:
