@@ -8,16 +8,19 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptance ${version} ${run}\nexit 0\n`;
 (async () => {
+  const smoke = process.argv.includes("--smoke");
   const evidence = { checks: [], transactions: [], blobs: [] };
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "suifleet-live-browser-"));
   let server, browser;
   try {
-    const manifest = JSON.parse(fsSync.readFileSync(process.env.LIVE_MANIFEST_FILE));
+    const manifest = JSON.parse(fsSync.readFileSync(smoke ? path.resolve(__dirname, "../manifests/fixture.localnet.json") : process.env.LIVE_MANIFEST_FILE));
     const bundle = path.join(dir, "app.js");
     await build({ entryPoints: [path.resolve(__dirname, "browser/live-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle,
       jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") },
-      define: { "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)),
-        "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"1"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined", "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", LIVE_MANIFEST: JSON.stringify(manifest), LIVE_SEED: JSON.stringify(process.env.LIVE_SEED) },
+      // Next.js replaces public configuration reads; this standalone bundle must
+      // also make unset configuration undefined without exposing the host env.
+      define: { "process.env": "{}", "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)),
+        "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"1"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined", "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", LIVE_MANIFEST: JSON.stringify(manifest), LIVE_SEED: JSON.stringify(smoke ? "01".repeat(32) : process.env.LIVE_SEED) },
       logLevel: "warning" });
     server = http.createServer(async (req, res) => {
       res.setHeader("Content-Type", req.url === "/app.js" ? "text/javascript" : "text/html");
@@ -26,6 +29,14 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
+    // This mode only boots the real bundle. Any external request is a failure;
+    // no wallet funding, chain signing or network fixture is needed.
+    const externalRequests = [];
+    if (smoke) await page.route("**/*", (route) => {
+      if (new URL(route.request().url()).hostname === "127.0.0.1") return route.continue();
+      externalRequests.push(route.request().url());
+      return route.abort();
+    });
     const errors = [], logs = [];
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (message) => logs.push(`${message.type()}: ${message.text()}`));
@@ -35,6 +46,13 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     } catch (error) {
       console.error("page did not become ready", JSON.stringify({ errors, logs: logs.slice(-20) }, null, 2));
       throw error;
+    }
+    if (smoke) {
+      assert.deepEqual(errors, []);
+      assert.deepEqual(externalRequests, []);
+      assert.equal(await page.evaluate(() => typeof process), "undefined");
+      console.log("PASS: live wallet bundle boots offline with no Node process global or external requests");
+      return;
     }
     const pass = (label) => { evidence.checks.push(label); console.log("PASS:", label); };
     const live = (fn, ...args) => page.evaluate(fn, ...args);

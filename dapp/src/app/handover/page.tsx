@@ -1,5 +1,7 @@
 "use client";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+import { CustomerAccess } from "@/components/CustomerAccess";
 import { useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
@@ -12,6 +14,10 @@ const KINDS = ["Device owner capability", "Device group", "Native deployment", "
 const STATES = ["Awaiting recipient confirmation", "Confirmed; transfer in progress", "Cancelled", "Finished"];
 
 export default function HandoverPage() {
+  const { supported } = useFleetSelection();
+  return supported ? <CustomerAccess /> : <LegacyHandoverPage />;
+}
+function LegacyHandoverPage() {
   const account = useCurrentAccount();
   const client = useCurrentClient();
   const mutation = useFleetTransaction();

@@ -175,6 +175,20 @@ support membership grants **no** scoped read access. Grant revocation does not
 recall plaintext or keys already obtained; rotating the fleet epoch denies older
 keys, including owner reads. Shared batches never share payload encryption keys.
 
+Managed customer administrators use the read-only
+`seal_approve_scoped_customer(id,fleet,budget,customer,managed,device_id,stream_hash)`.
+The customer credential must currently be an administrator, the managed fleet must
+belong to that customer, and its budget must match the data fleet. This preserves
+pre-adoption scoped identities without extracting the stored budget capability.
+Use `scopedDecryptor` with `{kind:'customer',customerId,fleetId}` (the managed fleet
+ID); it builds only that approval call. Read-only, revoked and rotated-away
+credentials cannot use this path. Owner-cap and reader approvals remain compatible.
+
+Do not self-grant address-based reader access as a substitute for managed admin
+approval. Reader grants are independent delegated authority: they survive customer
+credential revocation/rotation and must be explicitly revoked with `set_read_grant`.
+Revocation cannot erase keys or plaintext already obtained.
+
 `dapp/src/lib/opaque-data.ts` exports the SF139-owned reader boundary for SF140:
 `listDataItems` (32-field bounded cursor page), `readDataItem`, `scopedDecryptor`,
 `fetchDataItem`, `openDataItem`, `assembleDataItems`, `setReadGrant`, and

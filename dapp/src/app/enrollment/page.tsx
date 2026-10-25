@@ -1,5 +1,7 @@
 "use client";
 
+import { useFleetSelection } from "@/hooks/useFleetSelection";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
@@ -39,13 +41,14 @@ function download(name: string, body: Uint8Array | string, type: string) {
 }
 
 export default function EnrollmentPage() {
+  const selection = useFleetSelection(), fleet = selection.fleet;
   const account = useCurrentAccount();
   const client = useCurrentClient();
   const { mutateAsync } = useFleetTransaction();
   const [selected, setSelected] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selected], queryFn: () => fetchPolicies(client, account!.address, selected ? [selected] : []),
+  const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selection.identity, selected], queryFn: () => fetchPolicies(client, fleet?.id ?? account!.address, selected ? [selected] : [], fleet),
     enabled: !!account?.address, refetchInterval: 60_000 });
   const policy = policies.data?.find((p) => p.id === selected);
 
@@ -60,7 +63,7 @@ export default function EnrollmentPage() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const days = Number(fd.get("days"));
-    const result = await run(buildCreatePolicyTx(BigInt(fd.get("quota") as string), days > 0 ? BigInt(Date.now() + days * 86_400_000) : BigInt(0)));
+    const result = await run(buildCreatePolicyTx(BigInt(fd.get("quota") as string), days > 0 ? BigInt(Date.now() + days * 86_400_000) : BigInt(0), fleet));
     if (!result) return;
     setSelected(await createdPolicy(client, result.digest));
     await policies.refetch();
@@ -88,7 +91,7 @@ export default function EnrollmentPage() {
         </form>
         {policy && <PolicyControls policy={policy} busy={busy} run={async (tx) => { if (await run(tx)) await policies.refetch(); }} />}
       </section>
-      {policy && <JobPanel key={policy.id} policy={policy} operator={account.address} onError={setError} />}
+      {policy && <JobPanel key={policy.id} policy={policy} operator={fleet?.id ?? account.address} onError={setError} />}
     </div>
   );
 }
@@ -112,8 +115,8 @@ function PolicyControls({ policy, busy, run }: { policy: PolicyState; busy: bool
       {policy.open && <div className="flex flex-wrap gap-2 items-end">
         <label>Remaining quota <input value={quota} onChange={(e) => setQuota(e.target.value)} type="number" min={0} className={`${input} w-28 ml-1`} /></label>
         <label>Valid for days from now (0 = no expiry) <input value={days} onChange={(e) => setDays(e.target.value)} type="number" min={0} className={`${input} w-20 ml-1`} /></label>
-        <button disabled={busy} className={button} onClick={() => run(buildSetLimitsTx(policy.id, BigInt(quota || 0), Number(days) > 0 ? BigInt(Date.now() + Number(days) * 86_400_000) : BigInt(0)))}>Set limits</button>
-        <button disabled={busy} className={`${button} text-red-600`} onClick={() => confirm("Close this policy permanently? No device can enroll under it afterwards.") && run(buildClosePolicyTx(policy.id))}>Close policy</button>
+        <button disabled={busy} className={button} onClick={() => run(buildSetLimitsTx(policy.id, BigInt(quota || 0), Number(days) > 0 ? BigInt(Date.now() + Number(days) * 86_400_000) : BigInt(0), policy.fleet))}>Set limits</button>
+        <button disabled={busy} className={`${button} text-red-600`} onClick={() => confirm("Close this policy permanently? No device can enroll under it afterwards.") && run(buildClosePolicyTx(policy.id, policy.fleet))}>Close policy</button>
       </div>}
     </div>
   );
@@ -136,11 +139,11 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
   const stop = useRef(false);
   const chain = useQuery({
     queryKey: ["enrollment-job", NETWORK, policy.id, job.entries.length],
-    queryFn: () => snapshot(client, jobRef.current),
+    queryFn: () => snapshot(client, jobRef.current, policy.fleet),
     refetchInterval: 60_000,
   });
   const views = useMemo(() => chain.data ? entryStatuses(job, chain.data) : [], [job, chain.data]);
-  const steps = chain.data ? plan(job, views, chain.data) : [];
+  const steps = chain.data ? plan(job, views, chain.data, policy.fleet) : [];
   const counts = views.reduce((c, v) => ({ ...c, [v.status]: (c[v.status] ?? 0) + 1 }), {} as Partial<Record<EntryStatus, number>>);
   const accepting = policyAccepting(policy);
   // Claims cannot be registered under a policy that no longer accepts
@@ -206,7 +209,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     // Mark first: an interrupted revocation must never be re-registered automatically.
     markEntries(new Set(unused.map((v) => v.entry.claim)), { revoked: true });
     runSteps(chunk(unused, LIMITS.revokesPerTx).map((part, i, all) => ({ label: `Revoke claims ${i + 1}/${all.length}`, entries: part.map((v) => v.entry),
-      build: () => buildRevokeClaimsTx(policy.id, part.map((v) => v.entry.claim)) })));
+      build: () => buildRevokeClaimsTx(policy.id, part.map((v) => v.entry.claim), policy.fleet) })));
   }
   function forgetReserved() {
     const reserved = new Set(views.filter((v) => v.status === "unregistered" || v.status === "withdrawn" || v.status === "revoked").map((v) => v.entry.claim));
@@ -225,7 +228,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
       const known = new Set(job.entries.map((e) => e.claim));
       const fresh = imported.entries.filter((e) => !known.has(e.claim));
       const check = checkReservations(fresh.map((e, i) => ({ line: i + 1, serial: e.serial, alias: e.alias, group: e.group ?? e.groupId })),
-        { devices, groups, reserved: [...storedReservations(localStorage), ...job.entries] });
+        { devices, groups, reserved: [...storedReservations(localStorage, job.operator), ...job.entries] });
       // Join by input row, never by serial: a rejected duplicate shares its serial with an accepted row.
       const added = check.accepted.map((a) => { const { group: _, ...e } = fresh[a.line - 1]; return { ...e, groupId: a.groupId }; });
       setJob({ ...job, claimFundMist: job.entries.length ? job.claimFundMist : imported.claimFundMist, entries: [...job.entries, ...added] });
@@ -302,7 +305,7 @@ function AddReservations({ job, policy, devices, groups, onAdd, onImport }: {
     if (!mist || mist > MIST / BigInt(10)) return alert("Enrollment gas per claim must be more than 0 and at most 0.1 SUI");
     const { entries, credentials } = generateCredentials(check.accepted);
     // The archive is the only copy of the claim keys: they are not stored.
-    download(`suifleet-enrollment-${policy.id.slice(2, 10)}-${Date.now()}.tar`, credentialArchive(credentials, policy.id, JSON.stringify(requireManifest(), null, 2)), "application/x-tar");
+    download(`suifleet-enrollment-${policy.id.slice(2, 10)}-${Date.now()}.tar`, credentialArchive(credentials, policy.id, JSON.stringify(requireManifest(), null, 2), undefined, policy.fleet), "application/x-tar");
     credentials.length = 0;
     onAdd(entries, mist.toString());
     setStart(start + entries.length);

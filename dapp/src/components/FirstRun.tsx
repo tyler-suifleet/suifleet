@@ -11,6 +11,7 @@ import { displaySui, formatSui, onboardingConfig, onboardingProgress, registrati
 import { budgetSupported, buildRegisterAndEnrollTx, defaultReserve } from "@/lib/fleet-budget";
 import { formatToken, type Estimate } from "@/lib/network-costs";
 import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/components/FleetBudget";
+import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 
@@ -32,6 +33,7 @@ const BADGE: Record<StepState, string> = {
 const STATUS_TEXT: Record<StepState, string> = { done: "text-green-800", current: "text-blue-800", blocked: "text-red-800", upcoming: "text-gray-600" };
 
 export function FirstRun({ connect }: { connect: ReactNode }) {
+  const { fleet } = useFleetSelection();
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient();
   const wallet = useDAppKit(), currentWallet = useCurrentWallet();
   const devices = useDevices(), mutation = useFleetTransaction();
@@ -185,7 +187,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
             const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
               reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
-            void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding));
+            void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding, fleet));
           } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
         }}>
           <label className="block font-medium">Device name

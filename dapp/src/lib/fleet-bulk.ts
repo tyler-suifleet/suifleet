@@ -254,8 +254,21 @@ export async function requireArchiveReadable(client: SuiGrpcClient, config: Flee
 /** Build a transaction kind for Seal evaluation only; never submits a chain write.
  * A session that expires before use throws Seal's `ExpiredSessionKeyError`, as
  * a key server would, so callers can ask for a new session rather than retry. */
+export type ArchiveAuthority = { kind: 'owner'; ownerCapId: string; managed?: { customerId: string; fleetId: string } } | { kind: 'support' };
+/** Seal-compatible approval only: no capability borrowing or mutable calls. */
+export function buildArchiveApprovalTx(config: FleetDataConfig, identity: Uint8Array, authority: ArchiveAuthority): Transaction {
+  const tx = new Transaction();
+  if (authority.kind === 'owner') {
+    tx.moveCall({ target: `${config.packageId}::fleet_data::${authority.managed ? 'seal_approve_customer' : 'seal_approve_owner'}`, arguments: [
+      tx.pure.vector('u8', identity), tx.object(config.fleetId), tx.object(config.budgetId),
+      ...(authority.managed ? [tx.object(authority.managed.customerId), tx.object(authority.managed.fleetId)] : [tx.object(authority.ownerCapId)]),
+    ] });
+  } else tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_support`, arguments: [tx.pure.vector('u8', identity), tx.object(config.fleetId)] });
+  return tx;
+}
+
 export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataConfig, settings: SealSettings,
-  sessionKey: SessionKey, authority: { kind: 'owner'; ownerCapId: string } | { kind: 'support' }) {
+  sessionKey: SessionKey, authority: ArchiveAuthority) {
   if (sessionKey.isExpired() || id(sessionKey.getPackageId()) !== config.typeOrigin) throw Error('Expired or foreign Seal session');
   const seal = new SealClient({ suiClient: client, serverConfigs: settings.keyServers, verifyKeyServers: true });
   return async (encrypted: Uint8Array) => {
@@ -265,18 +278,8 @@ export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataC
     const servers = settings.keyServers.flatMap(s => Array(s.weight).fill(id(s.objectId))).sort();
     const actual = object.services.map(([server]) => id(server)).sort();
     if (object.threshold !== settings.threshold || servers.join() !== actual.join()) throw new ArchiveSealBindingError('Archive Seal provider/threshold mismatch');
-    const tx = new Transaction();
+    const tx = buildArchiveApprovalTx(config, new Uint8Array(decodeHex(object.id)), authority);
     tx.setSender(sessionKey.getAddress());
-    if (authority.kind === 'owner') {
-      tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_owner`, arguments: [
-        tx.pure.vector('u8', decodeHex(object.id)), tx.object(config.fleetId),
-        tx.object(config.budgetId), tx.object(authority.ownerCapId),
-      ] });
-    } else {
-      tx.moveCall({ target: `${config.packageId}::fleet_data::seal_approve_support`, arguments: [
-        tx.pure.vector('u8', decodeHex(object.id)), tx.object(config.fleetId),
-      ] });
-    }
     const txBytes = await tx.build({ client, onlyTransactionKind: true });
     return seal.decrypt({ data: encrypted, sessionKey, txBytes, checkShareConsistency: true });
   };

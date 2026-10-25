@@ -1,3 +1,5 @@
+import type { NamedFleet } from "./customer-fleets";
+import { customer_FleetBcs } from "./fleet-protocol";
 // Address-free bulk enrollment (SF-100) on the SF-021 claim foundation.
 //
 // An operator reserves aliases and serial numbers, generates one single-use
@@ -21,7 +23,7 @@ import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { calls, enrollment_DeviceEnrolledBcs, enrollment_EnrollmentPolicyBcs, enrollment_PolicyCreatedBcs } from "./fleet-protocol";
 import { moveType, normalizeId, requireManifest, verifyDeployment } from "./deployment-manifest";
 import { PACKAGE_ID, REGISTRY_ID } from "./constants";
-import { ALIAS_META_KEY, SERIAL_META_KEY, allEvents, fetchDevices, fetchGroups, objectsInBatches, type DeviceGroup, type DeviceObject } from "./sui";
+import { ALIAS_META_KEY, SERIAL_META_KEY, allEvents, fetchDevices, fetchFleetDevices, fetchGroups, objectsInBatches, type DeviceGroup, type DeviceObject } from "./sui";
 
 // ── Limits ────────────────────────────────────────────────────────────────────
 
@@ -230,13 +232,17 @@ export function loadJob(storage: Storage, operator: string, policyId: string): E
   return text ? parseJob(text, { operator, policyId }) : undefined;
 }
 /** Reservations in every stored job of this network, for conflict checks. */
-export function storedReservations(storage: Storage): { serial: string; alias: string }[] {
+export function storedReservations(storage: Storage, operator?: string): { serial: string; alias: string }[] {
   const prefix = `suifleet.enrollment.${requireManifest().network}.`;
   const out: { serial: string; alias: string }[] = [];
   for (let i = 0; i < storage.length; i++) {
     const name = storage.key(i);
     if (!name?.startsWith(prefix)) continue;
-    try { for (const e of JSON.parse(storage.getItem(name) ?? "{}").entries ?? []) if (!e.revoked) out.push({ serial: e.serial, alias: e.alias }); }
+    try {
+      const job = JSON.parse(storage.getItem(name) ?? "{}");
+      if (operator && job.operator !== normalizeId(operator)) continue;
+      for (const e of job.entries ?? []) if (!e.revoked) out.push({ serial: e.serial, alias: e.alias });
+    }
     catch { /* an unreadable job is reported when opened */ }
   }
   return out;
@@ -260,7 +266,7 @@ export function generateCredentials(reservations: ReservationCheck["accepted"]):
 }
 
 /** `enroll.toml` for `suifleet --enroll` on the device's provisioning media. */
-export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyId: string, keypairPath = "/etc/suifleet/device.key"): string {
+export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyId: string, keypairPath = "/etc/suifleet/device.key", fleet?: NamedFleet): string {
   return [
     `# SuiFleet enrollment for ${c.alias} (serial ${c.serial}).`,
     "# claim.key is a single-use enrollment credential: keep this media private",
@@ -270,6 +276,7 @@ export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyI
     `claim_key_path = "claim.key"`,
     `name = "${c.alias}"`,
     `keypair_path = "${keypairPath.replace(/["\\]/g, "")}"`,
+    ...(fleet ? ["[managed]", `customer_id = "${normalizeId(fleet.customerId)}"`, `fleet_id = "${normalizeId(fleet.id)}"`, `budget_id = "${normalizeId(fleet.budgetId)}"`] : []),
     "",
   ].join("\n");
 }
@@ -278,7 +285,7 @@ export function enrollToml(c: Pick<ClaimCredential, "serial" | "alias">, policyI
  * A POSIX ustar archive: `enrollment/<serial>/{enroll.toml,claim.key,deployment.json}`
  * per device, with private (0600/0700) modes.
  */
-export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string): Uint8Array {
+export function credentialArchive(credentials: ClaimCredential[], policyId: string, manifestJson: string, keypairPath?: string, fleet?: NamedFleet): Uint8Array {
   const encoder = new TextEncoder(), blocks: Uint8Array[] = [];
   const mtime = Math.floor(Date.now() / 1000);
   const octal = (value: number, width: number) => value.toString(8).padStart(width - 1, "0") + "\0";
@@ -297,7 +304,7 @@ export function credentialArchive(credentials: ClaimCredential[], policyId: stri
   const manifest = encoder.encode(manifestJson.endsWith("\n") ? manifestJson : manifestJson + "\n");
   for (const c of credentials) {
     entry(`enrollment/${c.serial}/`, null, 0o700);
-    entry(`enrollment/${c.serial}/enroll.toml`, encoder.encode(enrollToml(c, policyId, keypairPath)), 0o600);
+    entry(`enrollment/${c.serial}/enroll.toml`, encoder.encode(enrollToml(c, policyId, keypairPath, fleet)), 0o600);
     entry(`enrollment/${c.serial}/claim.key`, encoder.encode(c.seedHex + "\n"), 0o600);
     entry(`enrollment/${c.serial}/deployment.json`, manifest, 0o644);
   }
@@ -311,6 +318,7 @@ export function credentialArchive(credentials: ClaimCredential[], policyId: stri
 // ── Chain reads ───────────────────────────────────────────────────────────────
 
 export interface PolicyState {
+  fleet?: NamedFleet;
   id: string;
   operator: string;
   registry: string;
@@ -334,8 +342,16 @@ function parsePolicy(object: { objectId: string; type: string; content: Uint8Arr
 }
 
 /** The connected operator's policies for this fleet's registry, newest first. */
-export async function fetchPolicies(client: SuiGrpcClient, operator: string, include: string[] = []): Promise<PolicyState[]> {
+export async function fetchPolicies(client: SuiGrpcClient, operator: string, include: string[] = [], fleet?: NamedFleet): Promise<PolicyState[]> {
   await verifyDeployment(client);
+  if (fleet) {
+    const { object } = await client.getObject({ objectId: fleet.id, include: { content: true } });
+    if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Fleet"))) throw Error("Unexpected fleet inventory");
+    const current = customer_FleetBcs.parse(object.content);
+    if (current.customer_id !== fleet.customerId) throw Error("Fleet customer mismatch");
+    const scope = { ...fleet, enrollmentPolicies: current.enrollment_policies };
+    return Promise.all(scope.enrollmentPolicies.map(id => readPolicy(client, id, scope)));
+  }
   const ids = (await allEvents(client, policyCreatedType(), operator)).map((e) => enrollment_PolicyCreatedBcs.parse(e.bcs))
     .filter((e) => e.operator === normalizeId(operator) && e.registry === normalizeId(REGISTRY_ID)).map((e) => e.policy_id);
   // `include`: e.g. a policy just created, before its event is indexed.
@@ -343,9 +359,16 @@ export async function fetchPolicies(client: SuiGrpcClient, operator: string, inc
     .filter((p) => p.operator === normalizeId(operator) && p.registry === normalizeId(REGISTRY_ID));
 }
 
-export async function readPolicy(client: SuiGrpcClient, policyId: string): Promise<PolicyState> {
+export async function readPolicy(client: SuiGrpcClient, policyId: string, fleet?: NamedFleet): Promise<PolicyState> {
   const { object } = await client.getObject({ objectId: normalizeId(policyId), include: { content: true } });
-  return parsePolicy(object);
+  const policy = parsePolicy(object);
+  if (fleet) {
+    if (!fleet.enrollmentPolicies.includes(policyId) || policy.operator !== fleet.id || policy.registry !== normalizeId(REGISTRY_ID)) throw Error("Enrollment policy belongs to another fleet");
+    const { dynamicField } = await client.getDynamicField({ parentId: policyId, name: { type: moveType("enrollment::ManagedKey"), bcs: bcs.bool().serialize(false).toBytes() } });
+    if (dynamicField.value.type !== "bool") throw Error("Unexpected enrollment authority state");
+    policy.open = bcs.bool().parse(dynamicField.value.bcs); policy.fleet = fleet;
+  }
+  return policy;
 }
 
 export function policyAccepting(policy: PolicyState, nowMs = Date.now()): string | undefined {
@@ -433,9 +456,16 @@ export interface ChainSnapshot {
  * including the operator's devices and groups: a plan built from stale
  * membership would re-add devices and abort.
  */
-export async function snapshot(client: SuiGrpcClient, job: EnrollmentJob): Promise<ChainSnapshot> {
+export async function snapshot(client: SuiGrpcClient, job: EnrollmentJob, fleet?: NamedFleet): Promise<ChainSnapshot> {
   await verifyDeployment(client);
-  const [policy, devices, groups] = await Promise.all([readPolicy(client, job.policyId), fetchDevices(client, job.operator), fetchGroups(client, job.operator)]);
+  if (fleet) {
+    const { object } = await client.getObject({ objectId: fleet.id, include: { content: true } });
+    if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Fleet"))) throw Error("Unexpected fleet inventory");
+    const current = customer_FleetBcs.parse(object.content);
+    if (current.customer_id !== fleet.customerId) throw Error("Fleet customer mismatch");
+    fleet = { ...fleet, devices: current.devices, groups: current.groups, enrollmentPolicies: current.enrollment_policies };
+  }
+  const [policy, devices, groups] = await Promise.all([readPolicy(client, job.policyId, fleet), fleet ? fetchFleetDevices(client, fleet.devices) : fetchDevices(client, job.operator), fetchGroups(client, job.operator)]);
   if (policy.operator !== job.operator) throw new Error("This policy belongs to another operator");
   if (policy.registry !== normalizeId(REGISTRY_ID)) throw new Error("This policy belongs to another fleet registry");
   const enrollments = await fetchEnrollments(client, job.policyId);
@@ -468,7 +498,7 @@ export function entryStatuses(job: EnrollmentJob, chain: ChainSnapshot): EntryVi
       return { entry, enrollment, status: "untrusted", detail: "enrolled under another operator or policy" };
     }
     const device = byId.get(enrollment.deviceId);
-    if (!device || device.ownerCapId !== enrollment.ownerCap) {
+    if (!device || (!device.managed && device.ownerCapId !== enrollment.ownerCap)) {
       return { entry, enrollment, status: "untrusted", detail: "this wallet does not hold the device's owner cap (transferred or deregistered)" };
     }
     const other = chain.devices.find((d) => d.objectId !== device.objectId &&
@@ -494,24 +524,27 @@ export function chunk<T>(items: T[], size: number): T[][] {
 // ── Transactions ──────────────────────────────────────────────────────────────
 
 /** quota: enrollments allowed; expiresAtMs: clock milliseconds, 0 = never. */
-export function buildCreatePolicyTx(quota: bigint | number, expiresAtMs: bigint | number): Transaction {
+export function buildCreatePolicyTx(quota: bigint | number, expiresAtMs: bigint | number, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.enrollment_create_policy(tx, PACKAGE_ID, REGISTRY_ID, quota, expiresAtMs);
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::create_enrollment_policy`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(REGISTRY_ID), tx.pure.u64(quota), tx.pure.u64(expiresAtMs)] });
+  else calls.enrollment_create_policy(tx, PACKAGE_ID, REGISTRY_ID, quota, expiresAtMs);
   return tx;
 }
 
-export function buildSetLimitsTx(policyId: string, quota: bigint | number, expiresAtMs: bigint | number): Transaction {
+export function buildSetLimitsTx(policyId: string, quota: bigint | number, expiresAtMs: bigint | number, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.enrollment_set_limits(tx, PACKAGE_ID, policyId, quota, expiresAtMs);
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::configure_enrollment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(policyId), tx.pure.u64(quota), tx.pure.u64(expiresAtMs), tx.pure.bool(false)] });
+  else calls.enrollment_set_limits(tx, PACKAGE_ID, policyId, quota, expiresAtMs);
   return tx;
 }
 
-export function buildClosePolicyTx(policyId: string): Transaction {
+export function buildClosePolicyTx(policyId: string, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  calls.enrollment_close(tx, PACKAGE_ID, policyId);
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::configure_enrollment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(policyId), tx.pure.u64(0), tx.pure.u64(0), tx.pure.bool(true)] });
+  else calls.enrollment_close(tx, PACKAGE_ID, policyId);
   return tx;
 }
 
@@ -521,11 +554,14 @@ export function buildClosePolicyTx(policyId: string): Transaction {
  * resumed run tops up only underfunded claims. This sponsorship pays the
  * enrollment transaction only; ongoing device gas is `buildTransferTx`.
  */
-export function buildClaimsTx(policyId: string, register: string[], fund: { claim: string; mist: bigint }[]): Transaction {
+export function buildClaimsTx(policyId: string, register: string[], fund: { claim: string; mist: bigint }[], fleet?: NamedFleet): Transaction {
   requireManifest();
   if (register.length > LIMITS.claimsPerTx || fund.length > LIMITS.transfersPerTx) throw new Error("Too many claims for one transaction");
   const tx = new Transaction();
-  if (register.length) calls.enrollment_add_claims(tx, PACKAGE_ID, policyId, register);
+  if (register.length) {
+    if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::add_claims`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(policyId), tx.pure.vector("address", register)] });
+    else calls.enrollment_add_claims(tx, PACKAGE_ID, policyId, register);
+  }
   if (fund.length) {
     const coins = tx.splitCoins(tx.gas, fund.map((f) => tx.pure.u64(f.mist)));
     fund.forEach((f, i) => tx.transferObjects([coins[i]], tx.pure.address(f.claim)));
@@ -533,22 +569,30 @@ export function buildClaimsTx(policyId: string, register: string[], fund: { clai
   return tx;
 }
 
-export function buildRevokeClaimsTx(policyId: string, claims: string[]): Transaction {
+export function buildRevokeClaimsTx(policyId: string, claims: string[], fleet?: NamedFleet): Transaction {
   requireManifest();
   if (claims.length > LIMITS.revokesPerTx) throw new Error("Too many claims for one transaction");
   const tx = new Transaction();
-  for (const claim of claims) calls.enrollment_revoke_claim(tx, PACKAGE_ID, policyId, claim);
+  for (const claim of claims) {
+    if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::revoke_claim`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(policyId), tx.pure.address(claim)] });
+    else calls.enrollment_revoke_claim(tx, PACKAGE_ID, policyId, claim);
+  }
   return tx;
 }
 
 /** Bind enrolled devices: write alias and serial metadata and join their groups. */
-export function buildBindTx(views: EntryView[]): Transaction {
+export function buildBindTx(views: EntryView[], fleet?: NamedFleet): Transaction {
   requireManifest();
   if (views.length > LIMITS.bindsPerTx) throw new Error("Too many devices for one transaction");
   const tx = new Transaction();
   for (const v of views) {
-    if (v.status !== "binding" || !v.device?.ownerCapId) throw new Error(`${v.entry.alias} is not ready to bind`);
-    const [device, loan] = calls.device_registry_borrow_device(tx, PACKAGE_ID, REGISTRY_ID, v.device.ownerCapId);
+    if (v.status !== "binding" || (!v.device?.ownerCapId && !v.device?.managed)) throw new Error(`${v.entry.alias} is not ready to bind`);
+    if (fleet) {
+      if (v.needsMeta) tx.moveCall({ target: `${PACKAGE_ID}::customer::bind_device_metadata`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(REGISTRY_ID), tx.pure.id(v.device!.objectId), tx.pure.string(v.entry.alias), tx.pure.string(v.entry.serial)] });
+      if (v.needsGroup && v.entry.groupId) tx.moveCall({ target: `${PACKAGE_ID}::customer::add_to_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(v.entry.groupId), tx.pure.id(v.device!.objectId)] });
+      continue;
+    }
+    const [device, loan] = calls.device_registry_borrow_device(tx, PACKAGE_ID, REGISTRY_ID, v.device!.ownerCapId!);
     if (v.needsMeta) {
       calls.device_registry_set_meta(tx, PACKAGE_ID, device, ALIAS_META_KEY, v.entry.alias);
       calls.device_registry_set_meta(tx, PACKAGE_ID, device, SERIAL_META_KEY, v.entry.serial);
@@ -590,7 +634,7 @@ export interface Step {
 }
 
 /** The remaining work, in transaction-sized steps, recomputed from statuses. */
-export function plan(job: EnrollmentJob, views: EntryView[], chain: Pick<ChainSnapshot, "balances">): Step[] {
+export function plan(job: EnrollmentJob, views: EntryView[], chain: Pick<ChainSnapshot, "balances">, fleet?: NamedFleet): Step[] {
   const fund = BigInt(job.claimFundMist);
   const pending = views.filter((v) => v.status === "unregistered" || v.status === "unfunded");
   const steps: Step[] = chunk(pending, LIMITS.claimsPerTx).map((part, i, all) => ({
@@ -598,10 +642,10 @@ export function plan(job: EnrollmentJob, views: EntryView[], chain: Pick<ChainSn
     registers: part.filter((v) => v.status === "unregistered").map((v) => v.entry),
     build: () => buildClaimsTx(job.policyId,
       part.filter((v) => v.status === "unregistered").map((v) => v.entry.claim),
-      part.map((v) => ({ claim: v.entry.claim, mist: fund - (chain.balances.get(v.entry.claim) ?? BigInt(0)) })).filter((f) => f.mist > BigInt(0))),
+      part.map((v) => ({ claim: v.entry.claim, mist: fund - (chain.balances.get(v.entry.claim) ?? BigInt(0)) })).filter((f) => f.mist > BigInt(0)), fleet),
   }));
   const binding = views.filter((v) => v.status === "binding");
   steps.push(...chunk(binding, LIMITS.bindsPerTx).map((part, i, all) => ({
-    kind: "bind" as const, label: `Name and group devices ${i + 1}/${all.length}`, entries: part.map((v) => v.entry), build: () => buildBindTx(part) })));
+    kind: "bind" as const, label: `Name and group devices ${i + 1}/${all.length}`, entries: part.map((v) => v.entry), build: () => buildBindTx(part, fleet) })));
   return steps;
 }

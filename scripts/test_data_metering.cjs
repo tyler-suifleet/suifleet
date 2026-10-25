@@ -29,6 +29,37 @@ assert(costs.recommendDeposit(settings, workload, 3, MAINNET_QUOTE).walDepositFr
 assert.equal(costs.uploadedLogBytes({ ...workload, logUploads: true }), 20_000_000 + workload.logBytesPerDeviceMonth);
 console.log('PASS data allowance, decimal GB, retention, configured rates, invalid inputs, minimum/discount separation and prepaid volume');
 
+// Render the real usage panel while switching selected fleets. Configuration
+// and query identity must follow selection rather than the deployment default.
+{
+ const React = appRequire('react');
+ const { renderToStaticMarkup } = appRequire('react-dom/server');
+ let selected, identity = 'account-a:fleet-a', query;
+ const budget = { id: id('0x10') }, storage = { id: id('0x20') };
+ const { DataUsage } = loader({
+   '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
+   '@tanstack/react-query': { useQuery: options => { query = options; return {}; } },
+   '@/hooks/useFleetStorage': { useFleetStorage: () => ({ budget, storage, config: { packageId: id('0x30') } }) },
+   './FleetBudget': { useWalrusState: () => ({ data: { epoch: 1 } }) },
+   '@/hooks/useFleetDataConfig': { useFleetDataConfig: () => selected },
+   '@/hooks/useFleetSelection': { useFleetSelection: () => ({ identity }) },
+ })('components/DataUsage.tsx');
+ selected = { budgetId: budget.id, storageId: storage.id };
+ renderToStaticMarkup(React.createElement(DataUsage));
+ assert.equal(query.enabled, true);
+ const firstKey = query.queryKey;
+ selected = { budgetId: id('0x11'), storageId: id('0x21') };
+ assert.match(renderToStaticMarkup(React.createElement(DataUsage)), /does not match/);
+ assert.equal(query.enabled, false);
+ budget.id = selected.budgetId; storage.id = selected.storageId;
+ identity = 'account-b:fleet-b';
+ renderToStaticMarkup(React.createElement(DataUsage));
+ assert.equal(query.enabled, true);
+ assert.notDeepEqual(query.queryKey, firstKey);
+ assert(query.queryKey.includes(identity));
+ console.log('PASS selected-fleet usage panel, transitional binding refusal and account/fleet query isolation');
+}
+
 (async () => {
  const { readDataMeter } = load('lib/data-metering.ts');
  const { FleetStorageBcs } = load('lib/fleet-budget.ts');

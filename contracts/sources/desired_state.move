@@ -65,8 +65,11 @@ module sui_edge::desired_state {
 
     /// Start a revision from the group's current desired state. Admin only.
     public fun begin(group: &DeviceGroup, ctx: &TxContext): RevisionPlan {
-        let admin = device_group::admin(group);
-        assert!(ctx.sender() == admin, ENotAdmin);
+        begin_as(group, ctx.sender())
+    }
+
+    public(package) fun begin_as(group: &DeviceGroup, admin: address): RevisionPlan {
+        assert!(device_group::admin(group) == admin, ENotAdmin);
         let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             (state.revision, state.components)
@@ -100,9 +103,13 @@ module sui_edge::desired_state {
 
     /// Store the revision on the group. Aborts if the group changed since `begin`.
     public fun commit(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
+        commit_as(plan, group, clock, ctx.sender());
+    }
+
+    public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
         assert!(device_group::group_id(group) == group_id, EWrongGroup);
-        assert!(ctx.sender() == admin && device_group::admin(group) == admin, ENotAdmin);
+        assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
         assert!(revision(group) == base_revision, EStaleRevision);
         let state = DesiredState { revision: base_revision + 1, components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();

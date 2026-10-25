@@ -51,6 +51,7 @@ module sui_edge::fleet_budget {
 
     /// Package gate for mutating calls; bump on any upgrade that changes them.
     const VERSION: u64 = 1;
+    const MANAGED_VERSION: u64 = 2;
     /// Version of the documented read interface (getters and events).
     const INTERFACE_VERSION: u64 = 1;
     /// Upper bound for any single limit or reserve, a sanity check against
@@ -124,6 +125,8 @@ module sui_edge::fleet_budget {
 
     /// Dynamic field on the budget: the device's current `GasAccount` ID.
     /// Removing it (or re-enrolling) retires the old account at once.
+    public struct CustomerManagedKey has copy, drop, store {}
+
     public struct DeviceKey has copy, drop, store { device_id: ID }
 
     /// One device's shared account: its limits, usage and the reserve it
@@ -258,6 +261,15 @@ module sui_edge::fleet_budget {
         low_balance_threshold: u64,
         ctx: &mut TxContext,
     ): BudgetOwnerCap {
+        let (budget, cap) = new_budget(registry, deposit, default_limits, low_balance_threshold, ctx);
+        transfer::share_object(budget);
+        cap
+    }
+
+    public(package) fun share_managed(budget: FleetBudget) { transfer::share_object(budget); }
+
+    public(package) fun new_budget(registry: &DeviceRegistry, deposit: Coin<SUI>,
+        default_limits: Limits, low_balance_threshold: u64, ctx: &mut TxContext): (FleetBudget, BudgetOwnerCap) {
         assert_valid(&default_limits);
         let id = object::new(ctx);
         let budget_id = id.to_inner();
@@ -281,8 +293,7 @@ module sui_edge::fleet_budget {
         };
         event::emit(BudgetCreated { budget_id, registry_id: budget.registry_id, owner_cap_id: budget.owner_cap_id, owner: ctx.sender() });
         if (amount > 0) event::emit(Deposited { budget_id, amount, balance: amount });
-        transfer::share_object(budget);
-        cap
+        (budget, cap)
     }
 
     public fun deposit(budget: &mut FleetBudget, cap: &BudgetOwnerCap, coin: Coin<SUI>) {
@@ -336,6 +347,22 @@ module sui_edge::fleet_budget {
         reserve: u64,
         clock: &Clock,
         ctx: &mut TxContext,
+    ): ID {
+        assert!(budget.version == VERSION, EWrongVersion);
+        enroll_internal(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
+    }
+
+    public(package) fun enroll_managed(
+        budget: &mut FleetBudget, cap: &BudgetOwnerCap, registry: &DeviceRegistry,
+        owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
+    ): ID {
+        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
+        enroll_internal(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
+    }
+
+    fun enroll_internal(
+        budget: &mut FleetBudget, cap: &BudgetOwnerCap, registry: &DeviceRegistry,
+        owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
         assert_owner(budget, cap);
         assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
@@ -442,6 +469,14 @@ module sui_edge::fleet_budget {
     /// Remove a device (for example after a handover to another owner): its
     /// account is closed for good and its reserve returns to the budget.
     public fun remove_device(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
+        assert!(budget.version == VERSION, EWrongVersion);
+        remove_internal(budget, cap, account);
+    }
+    public(package) fun remove_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
+        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
+        remove_internal(budget, cap, account);
+    }
+    fun remove_internal(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
         assert_owner(budget, cap);
         assert_current(budget, account);
         let _: ID = df::remove(&mut budget.id, DeviceKey { device_id: account.device_id });
@@ -515,7 +550,7 @@ module sui_edge::fleet_budget {
     /// registry identity still bound to the enrolled owner cap. Reads only.
     /// Used by `fleet_storage`.
     public fun assert_may_draw(budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap, ctx: &TxContext) {
-        assert!(budget.version == VERSION, EWrongVersion);
+        assert!(budget.version == VERSION || (budget.version == MANAGED_VERSION && df::exists(&budget.id, CustomerManagedKey {})), EWrongVersion);
         assert!(!budget.paused, EPaused);
         assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
         assert!(account.device_id == device_cap::device_id(cap), EWrongAccount);
@@ -528,8 +563,15 @@ module sui_edge::fleet_budget {
 
     /// Abort unless `cap` manages `budget` (for `fleet_storage`).
     public fun assert_owner(budget: &FleetBudget, cap: &BudgetOwnerCap) {
-        assert!(budget.version == VERSION, EWrongVersion);
+        assert!(budget.version == VERSION || (budget.version == MANAGED_VERSION && df::exists(&budget.id, CustomerManagedKey {})), EWrongVersion);
         assert!(object::id(cap) == budget.owner_cap_id && cap.budget_id == object::id(budget), ENotOwner);
+    }
+
+    /// Adoption seals out all older package versions before capability custody.
+    public(package) fun adopt_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap) {
+        assert_owner(budget, cap);
+        budget.version = MANAGED_VERSION;
+        df::add(&mut budget.id, CustomerManagedKey {}, true);
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
@@ -660,6 +702,16 @@ module sui_edge::fleet_budget {
     public fun account_last_draw_ms(account: &GasAccount): u64 { account.last_draw_ms }
     public fun account_total_drawn(account: &GasAccount): u64 { account.total_drawn }
     public fun account_enrolled_at_ms(account: &GasAccount): u64 { account.enrolled_at_ms }
+
+    /// Adoption keeps the account ID/reserve/limits but binds it to the new
+    /// custodied capability; unrelated old accounts remain retired by identity.
+    public(package) fun rebind_account(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
+        assert_current(budget, account);
+        assert!(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
+        let identity = device_registry::identity(registry, account.device_id).destroy_some();
+        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
+        account.owner_cap_id = object::id(cap);
+    }
 
     /// For per-fleet records kept by other modules of this package
     /// (`fleet_settings`); each module owns its own dynamic-field key types.
