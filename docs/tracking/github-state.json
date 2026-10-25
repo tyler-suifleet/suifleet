@@ -64,7 +64,7 @@
       "filter": "agent:Unassigned"
     }
   },
-  "dependency_count": 71,
+  "dependency_count": 72,
   "issues": {
     "SF-001": {
       "number": 1,
