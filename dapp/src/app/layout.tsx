@@ -19,7 +19,7 @@ const NAV = [
   { href: "/",            label: "Dashboard" },
   { href: "/devices",     label: "Devices" },
   { href: "/services",    label: "Device services" },
-  { href: "/data",        label: "Logs and diagnostics" },
+  { href: "/data",        label: "Data" },
   { href: "/enrollment",  label: "Enrollment" },
   { href: "/deployments", label: "Deployments" },
   { href: "/rollouts",    label: "Rollouts" },
