@@ -116,19 +116,6 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   await reject("cross fleet group insertion",call("add_to_group",t=>[t.object(customer),t.object(second),t.object(group),t.pure.id(deviceId)]),delegate);
   await execute("revoke second wallet",call("set_credential",t=>[t.object(customer),t.pure.address(delegate.toSuiAddress()),t.pure.bool(false),t.pure.bool(false)]));
   await reject("revoked wallet creates fleet",call("create_fleet",t=>[t.object(customer),t.object(registry),t.pure.string("Bypass")]),delegate);
-  tx=new Transaction();
-  const [rolloutPolicy]=tx.moveCall({target:`${head}::deployment_manager::rollout_policy`,arguments:[tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(100),tx.pure.u64(1),tx.pure.u64(10000),tx.pure.u64(200000000)]});
-  const [rolloutRecord]=tx.moveCall({target:`${head}::customer::new_rollout`,arguments:[tx.object(customer),tx.object(fleet),tx.pure.string("app"),tx.pure.string("1"),tx.pure.string("blob"),tx.pure.string("a".repeat(64)),tx.pure.string("b".repeat(64)),tx.pure.vector("id",[deviceId]),tx.pure.vector("u64",[0]),rolloutPolicy,tx.object("0x6")]});
-  tx.moveCall({target:`${head}::deployment_manager::share_deployment`,arguments:[rolloutRecord]});
-  const rolloutId=created(await execute("managed onchain rollout creation",tx),"::deployment_manager::DeploymentRecord");
-  const tick=(selected,candidates)=>call("advance_rollout_onchain",t=>[t.object(customer),t.object(selected),t.object(rolloutId),t.object(registry),t.pure.vector("id",candidates),t.object("0x6")]);
-  await execute("managed onchain rollout admission",tick(fleet,[deviceId]));
-  await execute("managed onchain rollout no fabricated health",tick(fleet,[]));
-  const rolloutState=await client.getDynamicField({parentId:rolloutId,name:{type:`${old}::deployment_manager::RolloutKey`,bcs:bcs.bool().serialize(false).toBytes()}});
-  const protocol=loader()("lib/fleet-protocol.ts");
-  assert.equal(protocol.deployment_manager_RolloutBcs.parse(rolloutState.dynamicField.value.bcs).state,0);
-  await reject("cross fleet onchain rollout",tick(second,[]));
-  await reject("revoked wallet advances rollout",tick(fleet,[]),delegate);
   // Existing device draws still work through the new code after adoption.
   const account=await client.getDynamicField({parentId:budget,name:{type:`${old}::fleet_budget::DeviceKey`,bcs:bcs.Address.serialize(deviceId).toBytes()}});const accountId=bcs.Address.parse(account.dynamicField.value.bcs);
   tx=new Transaction();tx.moveCall({target:`${head}::fleet_budget::draw_gas`,arguments:[tx.object(budget),tx.object(accountId),tx.object(registry),tx.object(deviceCap),tx.pure.u64(1000000),tx.object("0x6")]});await execute("managed device gas draw",tx,device);
@@ -163,6 +150,19 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   }
   assert.ok(reported,"real daemon did not submit its managed Failed receipt");await stopDaemon();
   console.log("PASS localnet: real daemon signed and submitted a managed receipt with checked chain state");
+  tx=new Transaction();
+  const [rolloutPolicy]=tx.moveCall({target:`${head}::deployment_manager::rollout_policy`,arguments:[tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(100),tx.pure.u64(1),tx.pure.u64(10000),tx.pure.u64(200000000)]});
+  const [rolloutRecord]=tx.moveCall({target:`${head}::customer::new_rollout`,arguments:[tx.object(customer),tx.object(fleet),tx.pure.string("app"),tx.pure.string("1"),tx.pure.string("blob"),tx.pure.string("a".repeat(64)),tx.pure.string("b".repeat(64)),tx.pure.vector("id",[deviceId]),tx.pure.vector("u64",[0]),rolloutPolicy,tx.object("0x6")]});
+  tx.moveCall({target:`${head}::deployment_manager::share_deployment`,arguments:[rolloutRecord]});
+  const rolloutId=created(await execute("managed onchain rollout creation",tx),"::deployment_manager::DeploymentRecord");
+  const tick=(selected,candidates)=>call("advance_rollout_onchain",t=>[t.object(customer),t.object(selected),t.object(rolloutId),t.object(registry),t.pure.vector("id",candidates),t.object("0x6")]);
+  await execute("managed onchain rollout admission",tick(fleet,[deviceId]));
+  await execute("managed onchain rollout no fabricated health",tick(fleet,[]));
+  const rolloutState=await client.getDynamicField({parentId:rolloutId,name:{type:`${old}::deployment_manager::RolloutKey`,bcs:bcs.bool().serialize(false).toBytes()}});
+  const protocol=loader()("lib/fleet-protocol.ts");
+  assert.equal(protocol.deployment_manager_RolloutBcs.parse(rolloutState.dynamicField.value.bcs).state,0);
+  await reject("cross fleet onchain rollout",tick(second,[]));
+  await reject("revoked wallet advances rollout",tick(fleet,[]),delegate);
   await execute("clear source group before reassignment",call("remove_from_group",t=>[t.object(customer),t.object(fleet),t.object(group),t.pure.id(deviceId)]));
   const secondView=discovered.find(f=>f.id===second);
   await execute("explicit atomic reassignment",call("reassign_device",t=>[t.object(customer),t.object(fleet),t.object(second),t.object(budget),t.object(secondView.budgetId),t.object(accountId),t.object(registry),t.pure.id(deviceId),t.object("0x6")]));
