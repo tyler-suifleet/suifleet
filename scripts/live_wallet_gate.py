@@ -56,14 +56,15 @@ def run(args):
     fixture = head_fixture(state, contracts_digest(ROOT / "contracts"))
     if not fixture or not fixture.get("owner_cap"):
         sys.exit("no activated package-upgrade fixture for these contracts; run make live-gate-package-upgrade first")
-    # The dApp uploads through the manifest's one publisher, so pick one that
-    # is storing blobs now: Mysten's can run dry (CI run 40156238429).
+    # The dApp uploads with no publisher fallback, and Mysten's publisher can
+    # run out of WAL (CI run 40155482209). Before anything is spent, point the
+    # dApp at a publisher that just stored a probe the aggregator read back.
     walrus = Walrus("testnet")
     publisher, aggregator = walrus.working_publisher(), walrus.aggregator
     manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url, package=fixture["head_package"],
                                           upgrade_cap=fixture["upgrade_cap"], registry=fixture["registry"], network=args.network,
                                           publisher=publisher, aggregator=aggregator))
-    live.evidence.update(package=fixture["head_package"], registry=fixture["registry"])
+    live.evidence.update(package=fixture["head_package"], registry=fixture["registry"], walrus_publisher=publisher)
     with tempfile.TemporaryDirectory(prefix="suifleet-live-wallet-") as temporary:
         root = Path(temporary)
         (root / "deployment.json").write_text(json.dumps(manifest))

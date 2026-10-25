@@ -383,10 +383,12 @@ class Walrus:
         raise error
 
     def working_publisher(self):
-        """A publisher that just stored a fresh probe blob, read back byte for
-        byte through the aggregator, for code that uploads by itself (the
-        dApp in the wallet suite) and so cannot fall back on its own. The
-        publisher pays for the probe's storage."""
+        """A publisher that just stored a fresh probe blob which then read
+        back byte for byte through the aggregator. For uploads made outside
+        this class (the dApp in the browser), which have no fallback of their
+        own: the dApp is pointed at this publisher instead of a dry primary."""
+        if self.mode != "testnet":
+            return self.publisher
         self.put("probe", b"suifleet publisher probe " + os.urandom(16).hex().encode())
         return self.stored_by
 

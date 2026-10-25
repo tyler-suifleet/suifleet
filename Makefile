@@ -238,7 +238,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-retention test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-retention test-fleet-settings test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -338,6 +338,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_fleet_settings.cjs
 	$(RUN) node scripts/test_budget_enrollment.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) node scripts/test_deployment_receipts.cjs
 	$(RUN) node scripts/test_frontend_queries.cjs
 	$(RUN) node scripts/test_incremental_history.cjs
@@ -694,6 +695,14 @@ live-fleet-recovery:
 test-retention:
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_retention*.py' -v
 	$(RUN) node scripts/test_retention.cjs
+
+# SF-131: estimator, price table, settings costs and deposit, and the Fleet settings page in a real browser.
+.PHONY: test-fleet-settings
+test-fleet-settings:
+	$(RUN) node scripts/test_fleet_budget.cjs
+	$(RUN) node scripts/test_fleet_settings.cjs
+	$(RUN) node scripts/test_fleet_settings_cost.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_settings_browser.cjs
 
 # Run inside a disposable network-none dev container with Git history and warm Move cache.
 .PHONY: test-retention-upgrade
