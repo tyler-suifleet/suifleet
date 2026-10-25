@@ -6,6 +6,8 @@ import { calls, deployment_manager_DeploymentRecordBcs, deployment_manager_Rollo
 import { PACKAGE_ID } from "./constants";
 import { ROLLOUT_HEALTH_TYPES } from "./protocol-version";
 import { moveType, requireManifest } from "./deployment-manifest";
+import { announce, announcementsFor, existingInboxes, inboxSupported, type Announcements } from "./fleet-inbox";
+import { fetchDevices } from "./sui";
 
 export type Rollout = ReturnType<typeof deployment_manager_RolloutBcs.parse>;
 export interface RolloutInput {
@@ -25,7 +27,18 @@ export function validateRollout(input: RolloutInput) {
   }
   if (!input.component || !input.version || !input.recipe || !/^[a-f0-9]{64}$/.test(input.artifactSha256) || !/^[a-f0-9]{64}$/.test(input.recipeSha256)) throw new Error("Provide component, version, recipe blob and SHA-256 digests");
 }
-export function buildRolloutTx(input: RolloutInput) {
+/**
+ * Members the sender operates whose inbox exists (SF-125); others learn of the
+ * rollout from their event scan. Inboxes are not created here so a 512-member
+ * rollout stays within one transaction.
+ */
+export async function rolloutAnnouncements(client: SuiGrpcClient, sender: string, members: string[]): Promise<Announcements | undefined> {
+  if (!inboxSupported()) return undefined;
+  const inboxes = await existingInboxes(client, members);
+  const targets = announcementsFor([], await fetchDevices(client, sender), sender, [], members, inboxes);
+  return targets && { groups: [], devices: targets.devices.filter(device => device.exists) };
+}
+export function buildRolloutTx(input: RolloutInput, announcements?: Announcements) {
   requireManifest(); validateRollout(input);
   const tx = new Transaction();
   const [policy] = calls.deployment_manager_rollout_policy(tx, PACKAGE_ID, input.concurrency, input.rateCount,
@@ -33,6 +46,7 @@ export function buildRolloutTx(input: RolloutInput) {
   const [record] = calls.deployment_manager_new_rollout_verified(tx, PACKAGE_ID, input.component, input.version,
     input.recipe, input.artifactSha256, input.recipeSha256, [], input.cohorts.flat(),
     input.cohorts.flatMap((cohort, i) => cohort.map(() => i)), policy, "0x6");
+  if (announcements) announce(tx, record, announcements);
   calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   return tx;
 }

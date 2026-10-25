@@ -12,7 +12,10 @@ never reads a default wallet, never prints keys. Each run:
   4. runs the real daemon (gRPC) with the SF-030 test updater and a local
      Walrus stand-in, and deploys through the NEW package (direct target,
      the pre-upgrade group) and through the OLD package's entry point
-     (mixed versions), plus an injected health failure;
+     (mixed versions), plus an injected health failure. With SF-125 device
+     inboxes in the head package, the pre-upgrade group is first indexed in
+     place and the device given an inbox (once per fixture), and the
+     head-package deployments are announced to the inbox and group head;
   5. checks each outcome from on-chain receipts read with the Sui CLI
      (independently of the daemon) and the component run history;
   6. deletes the deployments (storage rebate) and writes evidence JSON:
@@ -735,13 +738,36 @@ def run(args):
                             fixture=key_name, type_origins=manifest["type_origins"])
             check(f"head package {new} (package version {manifest['package_version']}); manifest verified over gRPC")
 
+            # SF-125: index the pre-upgrade group in place and give the device
+            # its inbox, once per fixture (the inbox address can be claimed once).
+            inboxes = all(name in manifest["type_origins"] for name in dm.INBOX_TYPES)
+            inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device) if inboxes else None
+            if inboxes and not fixture.get("inbox"):
+                # An earlier run whose outcome was lost may already have claimed
+                # the derived address; adopt that inbox (free read, verified
+                # below) rather than abort on it every run.
+                if owner_of(client, inbox) != "shared":
+                    made = transaction("index group + create device inbox (head)",
+                        "--move-call", f"{new}::device_group::index_members", f"@{group}", "10",
+                        "--move-call", f"{new}::fleet_inbox::new_inbox", f"@{registry}", f"@{fixture['owner_cap']}", "--assign", "inbox",
+                        "--move-call", f"{new}::fleet_inbox::follow_group", "inbox", f"@{group}",
+                        "--move-call", f"{new}::fleet_inbox::share_inbox", "inbox")
+                    assert created(made, "::fleet_inbox::DeviceInbox") == [inbox], "inbox is not at its derived address"
+                fixture["inbox"] = inbox
+                save_state(state_path, state)
+            if inboxes:
+                indexed = plain(client("object", group)["content"])
+                assert indexed["device_ids"] == [], indexed
+                assert plain(client("object", inbox)["content"])["groups"] == [dm.object_id(group)]
+                check("pre-upgrade group indexed in place; device inbox at its derived address lists the group")
+
             # 4. Daemon and deployments.
             components = root / "state" / "test-components"
             template = root / "device-template.toml"
             template.write_text(
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{device}"\ndevice_cap_id = "{cap}"\n'
                 f'[apply]\ncommand = {json.dumps(f"/bin/sh {component.UPDATER} --root {components}")}\ntimeout_seconds = 60\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\n')
+                f'[runtime]\nstate_dir = {json.dumps(str(root / "state"))}\npoll_seconds = 3\nevent_discovery_seconds = 1\n')
             dm.generate(manifest, root / "release", template)
             log = (root / "daemon.log").open("w")
             process = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release/config.toml")},
@@ -751,10 +777,20 @@ def run(args):
             run_id = "live-" + uuid.uuid4().hex[:10]
 
             def call(package, version, *, groups=(), devices=(), fail="none"):
-                """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus."""
-                return ["--move-call", f"{package}::deployment_manager::create_deployment_verified",
-                        *live_common.deployment_args(walrus, version, run_id, fail=fail),
-                        live_common.ids(groups), live_common.ids(devices), CLOCK]
+                """PTB arguments creating one verified deployment, its recipe and artifact stored in Walrus.
+                Head-package deployments are announced to the inbox and group head (SF-125)."""
+                arguments = [*live_common.deployment_args(walrus, version, run_id, fail=fail),
+                             live_common.ids(groups), live_common.ids(devices), CLOCK]
+                if not (inboxes and package == new):
+                    return ["--move-call", f"{package}::deployment_manager::create_deployment_verified", *arguments]
+                name = "record_" + version.replace(".", "_")
+                ptb = ["--move-call", f"{package}::deployment_manager::new_deployment_verified", *arguments, "--assign", name]
+                for target in groups:
+                    ptb += ["--move-call", f"{package}::fleet_inbox::announce_group", f"@{target}", name, CLOCK]
+                for _ in devices:
+                    ptb += ["--move-call", f"{package}::fleet_inbox::announce_device", f"@{inbox}", f"@{registry}",
+                            f"@{fixture['owner_cap']}", name, CLOCK]
+                return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
 
             def receipts(deployment):
                 """Authoritative statuses read with the Sui CLI, independent of the daemon."""
@@ -806,6 +842,15 @@ def run(args):
             settled(failed, 2)
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
+            if inboxes:
+                # A head keeps the latest deployment per component; all of
+                # these share one component, announced in PTB order.
+                heads = json.loads(journal.read_text())["heads"]["seen"]
+                latest = {dm.object_id(target): {dm.object_id(d) for d in seen["components"].values()} for target, seen in heads.items()}
+                assert latest.get(dm.object_id(inbox)) == {dm.object_id(failed)}, heads
+                assert latest.get(dm.object_id(group)) == {dm.object_id(via_group)}, heads
+                check("head-package deployments announced to the device inbox and the indexed group's head; "
+                      "group report authorized by the member index")
             evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
             if args.network == 'testnet':
                 proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
@@ -855,7 +900,10 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    # A fresh SF-129 base->head fixture stores 0.705 SUI of packages (base
+    # A fresh base->head fixture with SF-125 inboxes costs about 0.78 SUI before
+    # the deployments (base publish 0.342 + head upgrade 0.376, run 40092917058),
+    # about 0.85 SUI in total.
+    # A fresh SF-129 base->head fixture stored 0.705 SUI of packages (base
     # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
     # device funding, deployments and cleanup.
     parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)

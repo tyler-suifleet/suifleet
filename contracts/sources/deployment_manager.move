@@ -105,6 +105,12 @@ module sui_edge::deployment_manager {
         });
     }
 
+    /// When the deployment may first start (0: immediately). Devices arm a
+    /// local timer for it (SF-125 announcements carry the earliest).
+    public fun scheduled_start_ms(deployment: &DeploymentRecord): u64 {
+        control(deployment).not_before_ms
+    }
+
     public fun control(deployment: &DeploymentRecord): Control {
         if (df::exists(&deployment.id, ControlKey {})) {
             *df::borrow(&deployment.id, ControlKey {})

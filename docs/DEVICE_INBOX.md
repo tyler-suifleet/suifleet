@@ -1,0 +1,184 @@
+# Device inboxes, group heads and the member index (SF-125)
+
+Devices read their current state from objects instead of reconstructing it
+from event history. That lets a fleet run on a node that keeps only a short
+event history (Mysten's public nodes keep about 14 days and answer older
+ranges with `OUT_OF_RANGE`), removes package-wide scans across tenants, and
+lifts the group size limit of the `device_ids` vector (about 7,800 members in
+the 256 KB object limit).
+
+This is an additive package upgrade. Existing public signatures, layouts and
+abilities are unchanged; every new type is introduced by the upgrade, so older
+package versions can neither read nor write it.
+
+## Objects
+
+| Object | Where | Contents |
+|---|---|---|
+| `fleet_inbox::DeviceInbox` | One shared object per device, at the address `sui::derived_object` derives from the registry and `InboxKey { device_id }` | `head` (below) and `groups`, the groups the device was added to through the inbox |
+| `fleet_inbox::Head` | `head` of each inbox; a `HeadKey` dynamic field on each group | `seq` (+1 per announcement), `latest`, `next_start_ms` (earliest announced future scheduled start, 0 for none) and `components` (component name → latest announced deployment, at most 64; the oldest entry is evicted beyond that) |
+| `device_group::MemberKey { device_id }` | Dynamic field (`true`) on an indexed group, per member | Membership |
+| `device_group::IndexKey` → `GroupIndex` | Dynamic field on an indexed group | Number of indexed members |
+
+Clients compute the inbox address without a lookup: the dynamic-field ID of
+the registry with key type `0x2::derived_object::DerivedObjectKey<InboxKey>`
+and the device ID's 32 bytes as key (`fleet_inbox::inbox_address`, the
+SDK's `deriveObjectID`, `SuiClient::inbox_id`).
+
+## Authority
+
+- `create_inbox`/`new_inbox`: the device's operator only, proven by the
+  DeviceOwnerCap the registry identity names, while the device is in custody.
+  Once per device. `new_inbox` returns the inbox so the same transaction can
+  announce or list a group before `share_inbox`.
+- `announce_group(group, record)`: the record's creator only, who must be the
+  group's admin, and only for a group the record targets.
+- `announce_device(inbox, registry, cap, record)`: the record's creator only,
+  holding the device's current DeviceOwnerCap, and only for a device the
+  record targets.
+- `add_member`/`remove_member`: `device_group::add_device`/`remove_device`
+  (group admin; adding needs the custodied Device), also listing or unlisting
+  the group in the inbox. `follow_group` lists a group the device already
+  belongs to and is permissionless (it records verified membership only).
+  `forget_group` is operator-only.
+- `index_members(group, limit)`: the group admin, resumable; moves up to
+  `limit` members from `device_ids` into `MemberKey` fields and marks the
+  group indexed. New members of an indexed group go to the index.
+
+Announcements and inbox group lists are hints, never authority. A device
+applies a deployment only after the same record, creator, target, operator
+and membership checks as for a `DeploymentCreated` event, and the chain
+checks reports as before.
+
+## Compatibility and migration
+
+- `contains_device` checks the index first, then `device_ids`: O(1) once an
+  indexed group's vector is empty. Group reports and Seal policy use it.
+- Older packages still see only `device_ids`. Their `add_device` on an indexed
+  group puts the device in the vector (still a member); `remove_device` clears
+  both places; `index_members` drops such duplicates. Their
+  `remove_device` cannot remove an indexed member, and their group reports
+  reject indexed members (fail closed).
+- Older daemons and dApps do not see indexed members. Index a group only once
+  its devices and tools run SF-125 clients (the dApp's group panel warns).
+- `delete_group` removes the index marker; remaining `MemberKey` fields are
+  orphaned with the group (remove members first to reclaim their storage).
+- The manifest records all-or-none optional type origins `fleet_inbox`
+  (`INBOX_TYPES`). Without them every client keeps its previous behaviour.
+
+## Who announces
+
+- dApp: one-shot deployments announce to target groups the sender
+  administers and target devices it operates, creating a missing inbox in the
+  same transaction; staged rollouts announce to members' existing inboxes;
+  adding an activated device to a group lists the group in its inbox,
+  creating a missing inbox before the custody loan (`new_inbox` needs the
+  device in custody). The group panel's "Index members" runs one bounded
+  batch and lists the group in up to 100 operated members' inboxes that do
+  not list it yet; the panel stays, as "List group in inboxes", until every
+  operated member's inbox lists the group, even after the vector is empty.
+- Indexer API and `suifleet-indexer ctl`: create-deployment announces to
+  every target group and activated target device; add/remove-devices use
+  `add_member`/`remove_member`. `ctl` rebuilds the same calls from its own
+  chain reads before signing.
+- Serverless operations CLI (`scripts/suifleet_ops.cjs build`, via
+  `dapp/src/lib/fleet-ops.ts`): the same dApp rules. Create-deployment
+  announces to administered target groups and operated target devices;
+  add-devices lists the group in each activated device's inbox, creating a
+  missing one before the custody loan; remove-devices unlists it when the
+  inbox exists.
+- Not announced: catalog deployments (`component_catalog::create_deployment`
+  shares the record internally), delegated role deployments (the delegate is
+  not the creator) and deployments from older clients or packages. Devices
+  find these with the bounded event scan below. Desired-state revisions are
+  read from the group on every poll.
+
+## Daemon
+
+With `fleet_inbox` origins in the manifest, every poll that leaves the
+SF-122 idle path (a changed watched version, due discovery or local work):
+
+1. reads the device's inbox at its derived address and follows the groups it
+   lists;
+2. reads every followed group's head;
+3. for each head whose `seq` changed, applies the components whose deployment
+   changed since it last acted, through the ordinary checks. A record created
+   before the head's baseline is not applied: the enrollment baseline (chain
+   time), the event path's boundary for a journal from before inboxes, or, for a group
+   followed later, the chain time taken before the last completed poll read
+   the inbox (which did not list it yet). A group joined while the daemon
+   was stopped therefore applies what was announced since then — matching
+   the event baseline;
+4. runs the combined `DeploymentCreated`/`DeviceAddedToGroup` discovery scan
+   (SF-122) only when its `runtime.event_discovery_seconds` bound is due
+   (default 60, or the faster rollout cadence in an active maintenance
+   window), and until the one-time combined-cursor migration completes, so
+   unannounced deployments still arrive within a minute, as a safety net.
+   Without inbox origins every changed poll scans events as before.
+
+A journal written before inboxes (an older daemon, or a deployment without
+inbox origins at enrollment) has no heads. Its event path handled every record
+created before its cursor, so heads start from that boundary, never from the
+upgrade: records created while the device was offline still apply. The daemon
+first scans events to the tip and starts heads at the chain time taken before
+the scan (or the scanned checkpoint's time, if earlier). If that history is
+pruned, it starts heads at the time of the checkpoint before the cursor's
+(`GetCheckpoint`; a JSON-RPC-era cursor is located through its transaction),
+and moves the cursor past the pruned range in the same journal write that
+stores the heads: the combined discovery cursor to the tip, or, before the
+SF-122 cursor migration, the deployment cursor to the migration's fence. A journal therefore never holds the moved cursor without the baseline
+taken from the old one, so an interruption cannot shift that baseline. When neither is available the poll fails with an explicit error instead of
+skipping or replaying records.
+
+If the node has pruned the history at the device's cursor (or rejects the
+range with `OUT_OF_RANGE`), a device with inbox origins logs it, moves the
+cursor to the tip (the migration fence for a cursor not yet merged, and
+likewise for the membership cursor) and continues from objects: it resynchronizes from its inbox
+and group heads alone. Unannounced deployments created in the pruned range are
+not applied. Without inbox origins pruned history still stops polling with an
+explicit error.
+
+The daemon sleeps until the earliest announced scheduled start or deferral
+admission change (scheduled start, window bounds, end of notice, expiry)
+when that comes before the next poll, so scheduled rollouts start on time
+whatever the poll interval.
+
+Indexed membership is read as the group's `MemberKey` field for this device
+(one derived-ID read), so a group read is about 0.2 KB instead of the whole
+member vector.
+
+SF-122 batches the daemon's steady-state reads into one version check. The
+inbox object (watched even before it exists, so its creation counts) and each
+followed group's `HeadKey` field (a watched child of the group) are the
+watch-set entries this feature adds. An announcement changes one of their
+versions, so the next poll leaves the idle path and reads the inbox, heads
+and announced records directly; a quiet poll stays one `BatchGetObjects`
+request.
+
+## Tests
+
+- Move: `contracts/tests/fleet_inbox_tests.move` (authority, targets, custody,
+  derivation, head bounds and scheduling, migration, indexed reports), plus
+  three authority mutations in `scripts/check_move_security.py`.
+- Simulator (`make test-ota`): `scripts/test_inbox_ota.py` — baseline, inbox
+  and indexed-group deployments without events, a group joined while the
+  daemon was stopped, an on-time scheduled start
+  with a 60 s poll, resync after pruned history, a journal without heads
+  resuming from its event boundary (history pruned, also killed after the
+  migration, and retained), the event
+  safety net.
+- dApp: `scripts/test_inbox.cjs` (in `make check-interfaces`).
+- Operations CLI: `scripts/test_fleet_ops.cjs` call shapes with and without inbox origins.
+- Indexer: `txbuild` unit test of announced call shapes.
+- Real localnet across an upgrade of main's contracts:
+  `make test-inbox-localnet` (start a disposable node first) — origins,
+  in-place indexing of an existing group, old-package report fails closed,
+  a first membership creating the inbox in the builders' order (the reverse
+  aborts), stranger announcement aborts, and the real daemon through
+  `examples/grpc_prune_proxy.rs`: inbox and group-head deployments, resync
+  beyond pruned history and the event safety net, judged by on-chain
+  receipts.
+
+Public-testnet acceptance runs through the automatic testnet package-upgrade
+gate ([TESTNET.md](TESTNET.md)); physical and mainnet acceptance stay in
+SF-031/#32 and SF-087/#159.

@@ -26,10 +26,33 @@ assert.throws(() => planOperation(deployment, devices, [group], new Set()), /aut
 const tx = planOperation(deployment, devices, [group], new Set([id('0xd1')]));
 assert.equal(tx.getData().commands[0].MoveCall.function, 'create_deployment_verified');
 assert.throws(() => planOperation({ ...deployment, recipeSha256: '' }, devices, [group], new Set([id('0xd1')])), /digests/);
+// With inbox origins (SF-125) the same intents list/unlist groups in device
+// inboxes (creating a missing one before the custody loan) and announce
+// deployments to group heads and operated device inboxes.
+{
+  const manifest = require('../manifests/fixture.localnet.json'), protocol = require('../interfaces/fleet-v1.json');
+  const withInbox = structuredClone(manifest);
+  for (const name of protocol.optional_type_origins.fleet_inbox) withInbox.type_origins[name] = id('0x125');
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(withInbox);
+  const inboxLoad = loader(), plan = inboxLoad('lib/fleet-ops.ts').planOperation, inboxId = inboxLoad('lib/fleet-inbox.ts').inboxId;
+  const fns = tx => tx.getData().commands.map(c => `${c.MoveCall.module}::${c.MoveCall.function}`);
+  const fresh = plan(add, devices, [group], new Set(), new Set());
+  assert.deepEqual(fns(fresh), ['fleet_inbox::new_inbox', 'device_registry::borrow_device', 'fleet_inbox::add_member',
+    'device_registry::return_device', 'fleet_inbox::share_inbox', 'device_group::add_device']);
+  const existing = plan(add, devices, [group], new Set(), new Set([id('0xd1')]));
+  assert.deepEqual(fns(existing), ['device_registry::borrow_device', 'fleet_inbox::add_member', 'device_registry::return_device', 'device_group::add_device']);
+  assert.equal(existing.getData().inputs.find(i => i.UnresolvedObject?.objectId === inboxId(id('0xd1'))) !== undefined, true);
+  assert.deepEqual(fns(plan({ ...add, command: 'remove-devices' }, devices, [populated], new Set(), new Set([id('0xd1')]))),
+    ['fleet_inbox::remove_member', 'device_group::remove_device']);
+  assert.deepEqual(fns(plan(deployment, devices, [group], new Set([id('0xd1')]), new Set())),
+    ['deployment_manager::new_deployment_verified', 'fleet_inbox::announce_group', 'fleet_inbox::new_inbox',
+      'fleet_inbox::announce_device', 'fleet_inbox::share_inbox', 'deployment_manager::share_deployment']);
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
+}
 assert.equal(load('lib/telemetry.ts').TELEMETRY_URL, '', 'a legacy URL must not configure product reads');
 (async () => {
   const result = await load('lib/telemetry.ts').fetchFleetHealth({}, [id('0xd1')], owner, undefined, '', () => { throw Error('HTTP must not be used'); });
   assert.equal(result[id('0xd1')].status, 'unavailable');
   assert.match(result[id('0xd1')].reasons[0], /on-chain fleet/);
-  console.log('PASS: serverless default ignores legacy URL; locally planned bulk custody/return, membership, authority, digest and active-identity checks');
+  console.log('PASS: serverless default ignores legacy URL; locally planned bulk custody/return, membership, inbox listing/announcement, authority, digest and active-identity checks');
 })().catch(error => { console.error(error); process.exitCode = 1; });
