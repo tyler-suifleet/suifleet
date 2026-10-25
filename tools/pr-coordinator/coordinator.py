@@ -226,6 +226,12 @@ def failed_checks(pr):
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
+def ci_check_keys(pr):
+    # A source failure episode follows the check across head/base/run changes.
+    return sorted({json.dumps([row.get('workflowName', ''), row['name']], separators=(',', ':'))
+                   for row in pr['_ci_repair']})
+
+
 def repair_feedback(pr):
     """Keep CI repair reservations independent of stable source-review receipts."""
     return hashlib.sha256(json.dumps(
@@ -340,10 +346,13 @@ class Store:
           CREATE TABLE IF NOT EXISTS integrations (
             project TEXT, pr INTEGER, head TEXT, commit_id TEXT, reconciled INTEGER DEFAULT 0,
             PRIMARY KEY(project,pr));
+          CREATE TABLE IF NOT EXISTS repair_handoffs (job INTEGER PRIMARY KEY, state TEXT, error TEXT, updated REAL);
           CREATE TABLE IF NOT EXISTS quota_recoveries (
             job INTEGER, attempt INTEGER, source TEXT, reset REAL, state TEXT, replacement TEXT,
             reason TEXT, updated REAL, PRIMARY KEY(job,attempt));
         ''')
+
+        self.migrate_check_budgets()
 
         columns = {row[1] for row in self.db.execute('PRAGMA table_info(jobs)')}
         for name, declaration in [('retry_after','REAL'),('attempts','INTEGER DEFAULT 0'),('comment_id','TEXT'),('review_id','TEXT'),('publication_done','INTEGER DEFAULT 0'),('publication_attempts','INTEGER DEFAULT 0'),('launch_intent','TEXT'),('repair_claim','TEXT')]:
@@ -365,6 +374,46 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    def migrate_check_budgets(self):
+        """Attribute legacy attempts only when durable snapshots verify their scope.
+
+        An atomic additive migration leaves an unknown-history wildcard fence;
+        it never silently grants more attempts after missing/corrupt evidence.
+        """
+        self.db.execute('BEGIN IMMEDIATE')
+        try:
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_check_budget'").fetchone():
+                self.db.execute('COMMIT'); return
+            self.db.execute("CREATE TABLE ci_check_budget (project TEXT, pr INTEGER, check_key TEXT, "
+                            "attempts INTEGER, retry_after REAL, PRIMARY KEY(project,pr,check_key))")
+            for budget in self.db.execute('SELECT * FROM ci_repair_budget').fetchall():
+                count = budget['attempts']
+                receipts = self.db.execute(
+                    'SELECT r.*,j.directory FROM ci_repairs r LEFT JOIN jobs j ON j.id=r.job '
+                    'WHERE r.project=? AND r.pr=? ORDER BY r.created DESC LIMIT ?',
+                    (budget['project'], budget['pr'], count)).fetchall()
+                checks = {}
+                try:
+                    if count != len(receipts): raise ValueError('incomplete history')
+                    for receipt in receipts:
+                        snapshot = json.loads((Path(receipt['directory'])/'snapshot.json').read_text())
+                        if (snapshot['headRefOid'] != receipt['head'] or snapshot['baseRefOid'] != receipt['base']
+                                or repair_feedback(snapshot) != receipt['evidence']):
+                            raise ValueError('unverified history')
+                        keys = ci_check_keys(snapshot)
+                        if not keys: raise ValueError('missing check scope')
+                        for key in keys:
+                            old_count, old_deadline = checks.get(key, (0, 0))
+                            checks[key] = (old_count+1, max(old_deadline, receipt['retry_after'] or 0))
+                except (OSError, ValueError, KeyError, TypeError):
+                    checks = {'*': (count, budget['retry_after'])}
+                for key, (attempts, deadline) in checks.items():
+                    self.db.execute('INSERT INTO ci_check_budget VALUES(?,?,?,?,?)',
+                                    (budget['project'], budget['pr'], key, attempts, deadline))
+            self.db.execute('COMMIT')
+        except BaseException:
+            self.db.execute('ROLLBACK'); raise
+
     def ci_repair_blocker(self, project, pr):
         rows = self.db.execute(
             'SELECT * FROM ci_repairs WHERE project=? AND pr=? AND head=? AND base=? ORDER BY created DESC',
@@ -372,12 +421,13 @@ class Store:
         evidence = repair_feedback(pr)
         if any(row['evidence'] == evidence for row in rows):
             return 'CI failure already reserved; inspect existing repair receipt (no automatic replay)'
-        budget = self.db.execute('SELECT attempts,retry_after FROM ci_repair_budget WHERE project=? AND pr=?',
-                                 (project, pr['number'])).fetchone()
-        if budget and budget['attempts'] >= 3:
-            return 'CI repair limit reached (3 attempts); owner must inspect failure and explicitly recover'
-        if budget and budget['retry_after'] > time.time():
-            return 'CI repair backoff until ' + str(budget['retry_after'])
+        for key in ['*', *ci_check_keys(pr)]:
+            budget = self.db.execute('SELECT attempts,retry_after FROM ci_check_budget '
+                                     'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+            if budget and budget['attempts'] >= 3:
+                return 'CI repair limit reached (3 attempts for this check); owner must inspect failure and explicitly recover'
+            if budget and (budget['retry_after'] or 0) > time.time():
+                return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
 
     def reserve(self, project, pr, family, kind, directory):
@@ -406,6 +456,13 @@ class Store:
                 deadline = time.time() + min(3600, 300 * 2**attempts)
                 self.db.execute('INSERT OR REPLACE INTO ci_repair_budget VALUES(?,?,?,?)',
                                 (project, pr['number'], attempts + 1, deadline))
+                for key in ci_check_keys(pr):
+                    previous_budget = self.db.execute('SELECT attempts FROM ci_check_budget '
+                        'WHERE project=? AND pr=? AND check_key=?', (project, pr['number'], key)).fetchone()
+                    check_attempts = previous_budget['attempts'] if previous_budget else 0
+                    check_deadline = time.time() + min(3600, 300 * 2**check_attempts)
+                    self.db.execute('INSERT OR REPLACE INTO ci_check_budget VALUES(?,?,?,?,?)',
+                        (project, pr['number'], key, check_attempts+1, check_deadline))
                 self.db.execute('INSERT INTO ci_repairs VALUES(?,?,?,?,?,?,?,?)',
                     (project, pr['number'], pr['headRefOid'], pr['baseRefOid'], fingerprint,
                      cursor.lastrowid, time.time(), deadline))
@@ -1171,6 +1228,86 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
 
         # Publication failures must never discard a validated worker result.
         self.publish_results(project)
+        self.reconcile_repair_handoffs(project, owners)
+
+    def reconcile_repair_handoffs(self, project, owners):
+        """Finish a verified stopped repair's ownership handoff, never approve it.
+
+        Result publication and ticket publication are separate retryable actions.
+        No worker is restarted and no worktree content is changed by this method.
+        """
+        candidates = self.store.db.execute(
+            "SELECT j.*,h.state AS handoff_state FROM jobs j LEFT JOIN repair_handoffs h ON h.job=j.id "
+            "WHERE j.project=? AND j.kind='fix' AND j.status='done' AND j.repair_claim IS NOT NULL "
+            "AND (h.state IS NULL OR h.state='pending') "
+            "AND j.id=(SELECT MAX(n.id) FROM jobs n WHERE n.project=j.project AND n.pr=j.pr AND n.kind='fix')",
+            (project['id'],)).fetchall()
+        for row in candidates:
+            try:
+                intent = json.loads(row['repair_claim'])
+                if row['handoff_state'] is None and not any(
+                        o.get('key') == intent['key'] and o.get('status') == 'in_progress' for o in owners):
+                    continue  # A worker that already handed off needs no ticket mutation.
+                self.store.db.execute("INSERT OR IGNORE INTO repair_handoffs VALUES(?,'pending',NULL,?)",
+                                      (row['id'], time.time()))
+                directory = Path(row['directory'])
+                result = normalize_result(json.loads(row['result']))
+                receipt = json.loads((directory/'exit.json').read_text())
+                identity = json.loads((directory/'process.json').read_text())
+                if (receipt.get('returncode') != 0 or identity != dict(pid=row['pid'], started=row['started'])
+                        or not worker_stopped(row['pid'], row['started'])):
+                    raise RuntimeError('repair exit/process receipt is not verified stopped')
+                owner = json.loads(self.ticket(project, 'show', intent['key']))
+                snapshot = json.loads((directory/'snapshot.json').read_text())['ticket']
+                token = owner.get('token')
+                if (not token or hashlib.sha256(token.encode()).hexdigest() != intent['claim']
+                        or any(owner.get(k) != intent[k] for k in ('key','branch','worktree'))
+                        or owner.get('agent') != row['family'] or owner.get('agent') != snapshot['agent']
+                        or owner.get('model') != snapshot['model']):
+                    raise RuntimeError('repair ownership changed; no handoff mutation')
+                if owner['status'] == 'review':
+                    # A previous mirror failure can follow a successful local transition.
+                    if owner.get('publish_pending'): self.ticket(project, 'publish', intent['key'])
+                elif owner['status'] == 'in_progress':
+                    if claim_processes(token, row['started']):
+                        raise RuntimeError('a claim helper is still live or uninspectable')
+                    for lease in json.loads(self.ticket(project, 'locks')):
+                        if lease.get('expired') or (lease.get('expires') or 0) <= time.time(): continue
+                        named = re.findall(r'[A-Z][A-Z0-9]*-[0-9]+',
+                                           f"{lease.get('session') or ''} {lease.get('purpose') or ''}".upper())
+                        if (lease.get('session') == owner.get('session')
+                                or str(lease.get('ticket') or '').split('::')[-1] == intent['key'] or intent['key'] in named):
+                            raise RuntimeError('repair still holds a shared-resource lease')
+                    if (run(['git','branch','--show-current'], cwd=intent['worktree']).strip() != intent['branch']
+                            or run(['git','status','--porcelain'], cwd=intent['worktree']).strip()):
+                        raise RuntimeError('repair worktree changed or dirty; preserve it for explicit continuation')
+                    pr = self.pr(project, row['pr'])
+                    if pr['state'] != 'OPEN' or pr.get('isCrossRepository') or pr['headRefName'] != intent['branch']:
+                        raise RuntimeError('repair PR ownership is no longer current')
+                    # This is a terminal handoff under the same unchanged reservation,
+                    # not permission to edit or restart an expired implementation.
+                    self.ticket(project, 'heartbeat', intent['key'], '--token', token)
+                    self.ticket(project, 'review', intent['key'], '--token', token,
+                                '--text', 'Coordinator verified stopped repair handoff; verdict '
+                                + result['verdict'] + '. This is not approval. ' + result['evidence'])
+                else:
+                    raise RuntimeError('repair claim is not eligible for terminal handoff')
+                self.store.db.execute("UPDATE repair_handoffs SET state='complete',error=NULL,updated=? WHERE job=?",
+                                      (time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: completed repair ownership handed to Review (not approval)", flush=True)
+            except Exception as error:
+                # Keep the real result and stopped receipt; retry publication separately.
+                safe = {'repair exit/process receipt is not verified stopped',
+                        'repair ownership changed; no handoff mutation',
+                        'a claim helper is still live or uninspectable',
+                        'repair still holds a shared-resource lease',
+                        'repair worktree changed or dirty; preserve it for explicit continuation',
+                        'repair PR ownership is no longer current',
+                        'repair claim is not eligible for terminal handoff'}
+                detail = str(error) if type(error) is RuntimeError and str(error) in safe else type(error).__name__
+                self.store.db.execute("UPDATE repair_handoffs SET error=?,updated=? WHERE job=?",
+                                      ('handoff pending: '+detail, time.time(), row['id']))
+                print(f"{project['id']} PR#{row['pr']}: terminal repair handoff pending ({detail})", flush=True)
 
     def publish_results(self, project):
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND status='done' AND publication_done=0 AND (retry_after IS NULL OR retry_after<=?)", (project['id'],time.time())).fetchall()
@@ -1237,6 +1374,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # A verified green snapshot ends this failure episode; head/base
                     # movement and cancelled/pending runs never reset the budget.
                     self.store.db.execute('DELETE FROM ci_repair_budget WHERE project=? AND pr=?',
+                                          (project['id'], pr['number']))
+                    self.store.db.execute('DELETE FROM ci_check_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
                 repair = {**pr, '_ci_repair': failures} if failures else None
