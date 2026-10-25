@@ -272,6 +272,90 @@ remains separately tracked, not established by local fixtures.
   - pool, expiry, WAL and blob totals, with alerts for no space, no WAL or an
     expiring or expired pool.
 
+**Fleet settings page** (`/settings`, SF-131). The owner chooses the
+settings that drive the fleet's cost and sees each option's cost before
+saving:
+
+- **Settings.** Update check, rollout fast-check, on-chain health, log
+  archive cadence and log retention: SF-130's fields
+  ([#265](https://github.com/tyler-suifleet/suifleet/issues/265),
+  [FLEET_SETTINGS.md](FLEET_SETTINGS.md)), within the contract's bounds. The
+  page starts from the fleet's saved settings when every saved value is one of
+  the listed options, and shows the saved values either way. Retention is chosen in days and saved as whole Walrus
+  epochs, rounded up: six weeks is 3 Mainnet epochs and 42 Testnet epochs. An
+  option beyond the 53-epoch bound on the connected network (a year on
+  Testnet) is disabled.
+- **Each option's cost.** Every option shows its usage, its network cost per
+  device and per fleet, and its SuiFleet price per device and per fleet.
+  Update and rollout checks are chain reads with no network fee. Health
+  reports and archives are device transactions, and retention is the Walrus
+  storage the archives keep. The workload (fleet size, deployments, log data,
+  releases and artifact size) is editable; the fleet size starts from the
+  enrolled devices.
+- **Log uploads off by default.** New plans default to disabled log uploads
+  ([BUSINESS_PLAN.md](BUSINESS_PLAN.md), 2026-10-23). Until the owner ticks
+  "Estimate with device log uploads", the archive cadence and retention show
+  "log uploads off": no network cost, no deposit and no SuiFleet add-on
+  charge. Ticking it estimates 10 MiB of logs per device a month (editable).
+  SF-130's settings have no "archives off" value, so a saved cadence and
+  retention stay within the contract bounds and do not by themselves turn
+  device uploads on.
+- **Network cost and price kept apart.** One panel shows the monthly network
+  cost at cost, paid from the fleet budget. A separate panel shows the
+  SuiFleet price: graduated base tiers, add-ons, the monthly minimum, the
+  annual-prepay discount and the one-time activation. The two are never
+  added together.
+- **One price table** (`lib/fleet-pricing.ts`). Every default and price
+  comes from the 2026-10-23 proposal in [BUSINESS_PLAN.md](BUSINESS_PLAN.md)
+  (merged in [PR #268](https://github.com/tyler-suifleet/suifleet/pull/268)),
+  which is not yet an approved price. A build can replace the whole table with
+  `NEXT_PUBLIC_FLEET_PRICE_TABLE` (JSON of the same shape). A malformed table
+  is refused whole and the page shows why, rather than partial prices.
+- **Mainnet-rescaled estimator** (`lib/network-costs.ts`). The gas
+  measurements were paid at Testnet's 1,000 MIST reference gas price.
+  Mainnet's is 100. Storage gas is the same protocol constant (76) on both,
+  so only the computation part of each measured fee is rescaled. Each
+  measurement keeps its effects breakdown for this. The recorded Mainnet
+  quote is a read-only snapshot,
+  [docs/business/sf131/mainnet-quote.json](business/sf131/mainnet-quote.json)
+  (`node scripts/quote_fleet_settings.mjs`; no transaction). A recurring
+  health report uses the upper median of the recorded recurring reports, not
+  their maximum. The maximum includes the summary object's one-time growth
+  after the first report.
+- **Live quotes, dated.** The page reads the connected network's reference
+  gas price and Walrus storage and write prices (Mainnet or Testnet) over
+  gRPC. USD spot prices come from CoinGecko only when the owner asks. Each
+  part shows its source and date; whatever is not read live keeps the
+  recorded Mainnet snapshot, labelled "recorded". The Network budget
+  estimate uses the same quote, and its defaults now follow the default
+  settings: daily health and four receipts a month, with log uploads off
+  as new fleets default. The Fleet settings page starts from the same
+  default and sizes archives from the chosen cadence and retention only once
+  log uploads are on.
+- **Deposit sized from the settings.** The recommended SUI and WAL deposit
+  covers the chosen settings, fleet size and prepaid months. Per-month counts
+  round up to whole reports and archives, with 20% headroom. It is compared
+  with the budget balance and, when the deployment has fleet storage, the
+  storage's WAL.
+- **Warning before signing.** Saving with too little deposit shows a warning
+  first, with the shortfall and a link to deposit; nothing is signed. "Save
+  anyway" then signs only the chosen settings. Changing a choice withdraws
+  the warning, so it is checked again.
+- **Saving on chain.** Save signs one SF-130 `fleet_settings::set` call
+  with the fleet budget, its owner cap, the clock and the chosen values
+  (`lib/fleet-settings-tx.ts`, via `buildSetFleetSettingsTx`). It is offered
+  only when the deployment manifest records the settings type origins and
+  the wallet holds a budget's owner cap; otherwise the page says why, the
+  Save button stays disabled and prices and the deposit still work. A wallet
+  refusal or failed transaction reports that nothing was saved.
+
+Until deposit reclaim
+([SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264)), a
+weekly archive's Walrus storage deposit dominates the network cost once log
+uploads are on.
+That is about $0.10 per device a month at the recorded quote, above the
+proposed $0.08 first-tier base price, as the business plan notes.
+
 **Fleet-paid uploads** (`lib/fleet-upload.ts`). On the Releases page, the
 Components publisher and the Greengrass import, "Pay Walrus storage from the
 fleet's prepaid storage" sends the (Seal-encrypted or explicitly public)
@@ -378,6 +462,8 @@ sui move test --path contracts/fleet_storage      # 39 tests against Walrus test
 make edge-test                                    # funding, exact-draw check (immutable budget), signer draw policy
 python3 scripts/test_budget_ota.py                # in make test-ota: real daemon vs simulator
 node scripts/test_fleet_budget.cjs                # in make test-manifest: estimate vs SF-054, on-ramp, builders, alerts, fleet-paid upload flow
+node scripts/test_fleet_settings_cost.cjs         # in make test-manifest: Mainnet rescaling vs quote snapshot, price table, per-setting cost, deposit, live quotes
+make test-fleet-settings                          # in make ci: the above, SF-130's test_fleet_settings.cjs and the real-browser settings page (scripts/test_fleet_settings_browser.cjs)
 make test-budget-localnet                         # network none: upgrade, read-only budget, parallel draws, refusals, version gate, daemon draws
 make test-budget-testnet SUIFLEET_WALLET=…        # public testnet, dedicated agent wallet, lock required
 ```
@@ -474,8 +560,11 @@ epoch needs a pool at least one Walrus epoch (one Testnet day) old.
 
 ## Outstanding acceptance
 
-Real card checkout and real wallet sessions are deferred to final external
-acceptance in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159)
+The settings page's browser test signs through a controlled wallet that
+decodes the real `fleet_settings::set` transaction; SF-130's localnet test
+executes that call on chain. Signing it from a real wallet session is final
+external acceptance. Real card checkout and real wallet sessions
+are deferred to final external acceptance in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159)
 and [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32). So
 are Mainnet deposits, swaps and uploads, and physical devices. None of them
 has run.
