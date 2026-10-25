@@ -52,3 +52,6 @@ export const StreamRetentionPanel = () => null;
 
 // Usage metering is covered by test_data_metering.cjs; isolate Seal session lifetime here.
 export const DataUsage = () => null;
+
+// Generic browsing has its own real-browser harness; isolate archive sessions here.
+export const FleetDataBrowser = () => null;

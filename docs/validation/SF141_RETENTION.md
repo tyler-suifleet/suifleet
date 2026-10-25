@@ -219,3 +219,36 @@ fresh independent review remain coordinator gates; this worker neither watches
 nor polls hosted CI. Physical/Mainnet/production-provider/manual-wallet checks
 remain explicitly unrun in #32/#159. No public wallet mutation, production
 deployment, physical operation, new issue or other worker was started.
+
+
+## PR307 current-base Data browser integration (2026-10-25)
+
+Merged snapshot/current main `9b3799fe3838d6b4e94bd116f4ecbe181b8294c4`.
+The shared Data page retains both FleetDataBrowser and StreamRetentionPanel.
+The archive-session fixture isolates the newly imported generic browser, whose
+own real Chromium harness remains exercised separately.
+
+Fresh checks passed:
+- Network-none `suifleet-dev:sf035`, `cd dapp && pnpm typecheck && pnpm build`.
+- Host `make INSIDE_DEV_CONTAINER=1 test-manifest` (complete prerequisites).
+- Node fixtures: test_stream_retention.cjs, test_stream_retention_panel.cjs,
+  test_data_browser.cjs, test_storage_reclaim.cjs, test_storage_reclaim_panel.cjs.
+- Host Chrome test_data_browser_browser.cjs and test_data_session_browser.cjs:
+  real generic browsing/export/sharing and archive session-expiry checks passed.
+- `git diff --check` passed.
+
+Initial container `make dapp-typecheck dapp-build` passed test-testnet but
+stopped in test-manifest because Chrome is installed only on the host. The
+complete manifest prerequisites then passed on the host, and explicit pinned
+container typecheck/build passed. The session harness initially timed out when
+the newly imported browser attempted to use providers outside this fixture;
+a scoped component fake restored its intended archive-session isolation, and
+the full session assertions then passed. No failed assertion was ignored.
+
+No contract/daemon code changed; their previous results are historical, not new
+runs. Latest independent source review reports the opaque pruning fix resolved.
+Its SF129 upgrade-order note remains relevant: do not publish SF129 pruning
+without opaque-item cleanup. SF129 PR279 was OPEN on read; final integration
+still requires its merge. Hosted checks/automatic testnet are pending and were
+not watched. Fresh independent review remains required. Physical, mainnet,
+production-provider and manual-wallet checks remain unrun in #32/#159.
