@@ -75,7 +75,8 @@ def run(faults=(429, 408, 503, 'wrong-chain', 'discovery-outage', 'completed-win
                     # the exact read used to reconcile its operator. It cannot
                     # be picked up until a subsequent check.
                     if fault == 'completed-window' and injection['armed']:
-                        if req['method'] == 'shim_events' and req['params'][0].endswith('::DeploymentCreated'):
+                        if (req['method'] == 'shim_discovery_events' or
+                                (req['method'] == 'shim_events' and req['params'][0].endswith('::DeploymentCreated'))):
                             injection['scanned'] = True
                         if (injection['scanned'] and req['method'] == 'sui_getObject'
                                 and int(req['params'][0], 16) == int(OWNER_CAP, 16)):

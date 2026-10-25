@@ -95,7 +95,7 @@ def run(binary, wheels):
                 f'[device]\nkeypair_path = {json.dumps(str(key))}\ndevice_object_id = "{DEVICE}"\ndevice_cap_id = "{CAP}"\n'
                 f'[walrus]\naggregator_url = "{url}"\n'
                 '[apply]\ncommand = "/bin/false"\ntimeout_seconds = 20\nallow_recipe_commands = true\n'
-                f'[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 1\n'
+                f'[runtime]\nstate_dir = {json.dumps(str(state))}\npoll_seconds = 1\nevent_discovery_seconds = 1\n'
                 'component_startup_seconds = 1\ncomponent_ready_timeout_seconds = 15\ncomponent_stop_timeout_seconds = 3\n')
 
             def journal():

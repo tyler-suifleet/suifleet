@@ -152,7 +152,7 @@ def stopped_workspace(stop):
         try:yield temp
         finally:stop()
 
-def run(binary,shim_binary,compact=False,quilt=False):
+def run(binary,shim_binary,idle_reads=False,compact=False,quilt=False):
     ota.SHIM=shim_binary;sim=Simulator(compact)
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass
@@ -178,7 +178,9 @@ def run(binary,shim_binary,compact=False,quilt=False):
             manifest=dict(schema_version=1,protocol_version=1,network='localnet',chain_identifier=sim.chain,rpc_url=rpc,call_package_id=ota.PACKAGE,upgrade_cap_id=ota.UPGRADE_CAP,package_version='3',type_origins=ota.TYPE_ORIGINS,
                 shared_objects={'registry':{'id':ota.REGISTRY,'initial_shared_version':'1'}},supported_clients={'dapp':{'min':'0.0.1','max_exclusive':'0.3.0'},'edge':{'min':'0.1.0','max_exclusive':'0.3.0'}},walrus={'publisher_url':rpc,'aggregator_url':rpc})
             (root/'deployment.json').write_text(json.dumps(manifest));config=root/'config.toml'
-            config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[walrus]\naggregator_url="{rpc}"\n[apply]\ncommand="true"\n[runtime]\nstate_dir={json.dumps(str(root/"state"))}\npoll_seconds=1\n[fleet_data]\npackage_id="{PACKAGE}"\ntype_origin="{PACKAGE}"\nfleet_id="{FLEET}"\nbudget_id="{budget.BUDGET}"\nstorage_id="{STORAGE}"\nwriter_id="{WRITER}"\naccount_id="{budget.ACCOUNT}"\n')
+            # Accelerate the full watchdog too: this fixture jumps chain time
+            # by days without advancing the daemon monotonic clock.
+            config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[walrus]\naggregator_url="{rpc}"\n[apply]\ncommand="true"\n[runtime]\nstate_dir={json.dumps(str(root/"state"))}\npoll_seconds=1\nevent_discovery_seconds=1\nfull_revalidation_seconds=1\n[fleet_data]\npackage_id="{PACKAGE}"\ntype_origin="{PACKAGE}"\nfleet_id="{FLEET}"\nbudget_id="{budget.BUDGET}"\nstorage_id="{STORAGE}"\nwriter_id="{WRITER}"\naccount_id="{budget.ACCOUNT}"\n')
             vectors=json.loads(Path('interfaces/seal-vectors.json').read_text());sim.upload_dir=root/'uploaded';sim.upload_dir.mkdir()
             for server_key in vectors['servers']:
                 id=server_key['object_id'];content=addr(id)+u64(1)+u64(1)
@@ -202,6 +204,10 @@ def run(binary,shim_binary,compact=False,quilt=False):
                 f'[fleet_data.archives]\nstorage_package="0xf6"\nstorage_type_origin="0xf6"\nsystem_id="0xf4"\nwalrus_package="0xf7"\nkey_server_package="0xf5"\n'
                 f'key_servers = '+json.dumps([{'object_id':s['object_id'],'weight':1} for s in vectors['servers']]).replace(': ', ' = ')+ '\n'
                 f'threshold=2\ncompact_history={str(compact).lower()}\nquilt={str(quilt).lower()}\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n')
+            if idle_reads:
+                sim.batchseq = 1; sim.batch_at = sim.clock; sim.emergency_at = sim.clock
+                config.write_text(config.read_text().replace("event_discovery_seconds=1", "event_discovery_seconds=60")
+                    .replace("full_revalidation_seconds=1", "full_revalidation_seconds=86400") + archive_config)
             # Add source logs only after the startup reconciliation created its
             # state; the collection path is the shipped SF-020 redactor.
             with (root/'daemon.log').open('w') as log:
@@ -211,6 +217,25 @@ def run(binary,shim_binary,compact=False,quilt=False):
                     process.send_signal(signal.SIGINT);process.wait(timeout=10);assert process.returncode==0;process=None
                 process=start();wait(lambda:sim.seq==1);assert len(sim.health)==1 and not sim.fail_once
                 time.sleep(2);assert len(sim.health)==1,'local polls must not reset chain cadence'
+                if idle_reads:
+                    wait(lambda: sim.reads.get("BatchGetObjects", 0) >= 5)
+                    before, sizes = dict(sim.reads), dict(sim.read_bytes)
+                    wait(lambda: sim.reads["BatchGetObjects"] >= before["BatchGetObjects"] + 3)
+                    delta = {kind: n - before.get(kind, 0) for kind,n in sim.reads.items()}
+                    assert delta["BatchGetObjects"] == 3 and sum(delta.values()) == 3, delta
+                    assert len(sim.health) == 1 and not sim.registered
+                    print(f"PASS: health + archives enabled and not due: {delta}; {sim.read_bytes['BatchGetObjects']-sizes['BatchGetObjects']} protobuf response bytes across 3 polls")
+                    # An upgraded core package invalidates the manifest for
+                    # background writers too, even when their own cap is valid.
+                    sim.latest_package = object_id("0x4"); sim.clock += 60000
+                    wait(lambda: "Direct-chain health pending" in (root/"daemon.log").read_text())
+                    time.sleep(2)
+                    assert len(sim.health) == 1 and not sim.registered, "stale manifest allowed background writes"
+                    print("PASS: watched core upgrade also blocks due health/archive writers")
+                    stop()
+                    assert not sim.errors, sim.errors
+                    return
+
                 stop();process=start();time.sleep(3);assert len(sim.health)==1,'restart must not reset sequence/cadence'
                 sim.clock+=60000;wait(lambda:sim.seq==2)
                 sim.identity['revoked']=True;sim.clock+=60000;time.sleep(3);assert sim.seq==2,'revoked device must not submit'
@@ -329,4 +354,4 @@ def run(binary,shim_binary,compact=False,quilt=False):
         if process:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--compact-history',action='store_true');p.add_argument('--quilt',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.compact_history,a.quilt)
+    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--idle-reads',action='store_true');p.add_argument('--compact-history',action='store_true');p.add_argument('--quilt',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.idle_reads,a.compact_history,a.quilt)

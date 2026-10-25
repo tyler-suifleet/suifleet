@@ -301,7 +301,42 @@ class WalrusUploadTests(unittest.TestCase):
         self.assertIs(error, failure)
         self.assertEqual(attempts, self.PUBLISHERS * live_common.WALRUS_PASSES)
 
-    def test_retries_are_bounded_and_client_errors_are_not_retried(self):
+    def test_persistent_primary_outage_uses_other_publishers_with_same_bytes(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        server = urllib.error.HTTPError("u", 500, "Internal Server Error", {}, None)
+        with patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                server, server, nullcontext(io.BytesIO(self.STORED))]) as upload, \
+                patch.object(live_common.time, "sleep"), \
+                patch.object(walrus, "readable", return_value=True) as readback:
+            self.assertEqual(walrus.put("artifact", b"authenticated artifact"), "blob1")
+        requests = [call.args[0] for call in upload.call_args_list]
+        self.assertEqual([r.full_url for r in requests], [
+            f"{p}/v1/blobs?epochs=1" for p in
+            (walrus.publisher, *live_common.WALRUS_FALLBACK_PUBLISHERS)[:3]])
+        self.assertTrue(all(r.data == b"authenticated artifact" and r.method == "PUT" for r in requests))
+        readback.assert_called_once_with("blob1", b"authenticated artifact")
+
+    def test_fallback_upload_does_not_bypass_aggregator_integrity(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+
+        def require_readable(check, *args, **kwargs):
+            if not check():
+                raise AssertionError("unreadable")
+
+        with patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                urllib.error.HTTPError("u", 500, "down", {}, None),
+                nullcontext(io.BytesIO(self.STORED))]), \
+                patch.object(live_common.time, "sleep"), \
+                patch.object(walrus, "readable", return_value=False), \
+                patch.object(live_common, "wait_for", side_effect=require_readable):
+            with self.assertRaisesRegex(AssertionError, "unreadable"):
+                walrus.put("artifact", b"body")
+
+    def test_uploads_are_bounded_and_client_errors_drop_the_publisher(self):
         import urllib.error
         error, attempts = self.upload(*[TimeoutError("read timed out")] * (live_common.WALRUS_PASSES * len(self.PUBLISHERS)), self.STORED)
         self.assertIsInstance(error, TimeoutError)

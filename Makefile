@@ -66,6 +66,7 @@ test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
 	$(RUN) python3 scripts/test_ota.py
+	$(RUN) python3 scripts/test_ota.py --poll-reads
 	$(RUN) python3 scripts/test_ota.py --platform-installer
 	$(RUN) python3 scripts/test_catalog_ota.py
 	$(RUN) python3 scripts/test_dependency_ota.py
@@ -88,6 +89,7 @@ test-ota:
 	$(RUN) python3 scripts/test_fleet_settings_ota.py
 	$(RUN) python3 scripts/test_recovery_ota.py
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
 
@@ -357,6 +359,7 @@ test-manifest:
 	$(RUN) node scripts/test_desired_state.cjs
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
+	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
