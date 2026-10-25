@@ -200,6 +200,22 @@ public fun sf128_set_epoch(system: &mut System, epoch: u32) {
     const upload = loader()('lib/fleet-upload.ts');
     const info = upload.registeredBlob(registered.events, { config: { packageId: head, storageOrigin: base.pkg }, storageId: oldStorage }, BigInt(bcs.u256().parse(emitted.bcs.slice(64, 96))));
     assert.equal(info.endEpoch, 5);
+    // SF142: reconcile the real browser meter against populated, upgraded
+    // original-origin storage records and its lifetime encoded-write counter.
+    const metering = loader()('lib/data-metering.ts');
+    const observed = Date.now();
+    const meter = await metering.readDataMeter(client, oldStorage, budget, base.pkg,
+      { fromMs: 0, toMs: observed, epoch: 0, firstEpochStartMs: observed, epochDurationMs: 86400000 });
+    assert.equal(meter.records, 2n);
+    assert.equal(meter.retainedBytes, 21n);
+    assert.equal(meter.storedBytes, 21n);
+    const actualStorage = loader()('lib/fleet-budget.ts').FleetStorageBcs.parse((await client.getObject({objectId:oldStorage,include:{content:true}})).object.content);
+    assert.equal(meter.writtenEncodedBytes, BigInt(actualStorage.total_encoded_bytes));
+    assert.equal(meter.streams.length, 1);
+    assert.equal(meter.streams[0].device, null);
+    assert(meter.storedByteMs >= 0n);
+    console.log(JSON.stringify({check:'SF142 real localnet storage-record reconciliation after upgrade',storage:oldStorage,budget,typeOrigin:base.pkg,callPackage:head,records:meter.records.toString(),logicalBytes:meter.retainedBytes.toString(),writtenEncodedBytes:meter.writtenEncodedBytes.toString(),streams:meter.streams.length}));
+
     tx = new Transaction(); tx.moveCall({ target: `${head}::fleet_storage::configure_retention`, arguments: [tx.object(oldStorage), tx.object(budget), tx.object(ownerCap), tx.pure.address(signer.toSuiAddress()), tx.pure.u32(2), tx.pure.u64(100), tx.pure.u64(10), tx.pure.u64(1)] });
     await execute('configure on existing object', tx);
     // Resolve explicit refs to force an on-chain failure rather than dry-run refusal.
