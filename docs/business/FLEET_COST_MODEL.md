@@ -329,3 +329,11 @@ stress, with payment fees accounted for. They do not convert this historical,
 incomplete SF-054 scenario into a measured production bill. Supply missing costs
 before pricing; never use Testnet balances or assumed refunds as recurring revenue.
 The example is synthetic and intentionally distinct from the frozen observations.
+
+## Resumable observation preparation (SF-155)
+
+Use the [collector and two-week procedure](FLEET_COST_COLLECTION.md) to preserve
+actual effects, WAL retention, request/provider observations, capital and balance
+reconciliation. Its export uses this accounting schema. Missing services,
+unresolved outcomes and interval coverage remain incomplete; final bill acceptance
+stays in SF-135/#267 and production acceptance in SF-087/#159.
