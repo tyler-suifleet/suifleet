@@ -817,3 +817,58 @@ obtain actual exact-head/current-base CI and automatic testnet results and fresh
 independent review. Hosted checks were not watched or polled. No approval is
 claimed. Physical/mainnet/provider/manual-wallet acceptance remains unrun in
 #32/#159. No deployment, hardware programming or production credentials were used.
+
+## 2026-10-26 reviewed SF-129 source reconciliation
+
+Reconciled exact independently reviewed SF-129 head
+`e5e5c452753b33e2a7bc538cc20c12a0510b223a` on this SF-141 branch.
+Freshly fetched main remains `8ab0aefa96223d974775f08d0a6314ea27b411c1`
+and was already an ancestor. SF-129 remains a merge-only dependency; preparing
+its source does not claim PR #279 merged or satisfy its public expiry acceptance.
+The supplied latest free planner evidence is epoch 562, no eligible anchors,
+expiry 563. No new public reads/writes or expiry/rebate result is claimed here.
+
+The merge keeps the newer funding/unknown-outcome accounting and all three
+funding regressions in `test_testnet.py` (the remaining content conflict).
+Previously reviewed resolutions preserve strict full-budget reservations and
+faucet balance-change evidence. The funding controller, toolchain and package
+runner have no net changes from the prior SF-141 head. Retention contracts,
+opaque-item cleanup, managed-customer authority, daemon source and generated
+bindings likewise have no net changes. Incoming fixes select receipt-directory
+schema for retirement, refuse live receipt roots, recover bounded partially
+pruned history, and reconcile throttled submissions using the same signed bytes
+and a verified digest while retaining unknown reservations.
+
+Fresh scoped checks on the combined tree:
+
+- Pinned `suifleet-dev:sf035`, network none, `make INSIDE_DEV_CONTAINER=1
+  test-contracts check-interfaces`: core 290, storage 74, data 60 passed;
+  1077 ABI references, zero drift, 14 generated modules and interface negative
+  tests passed, including receipt-shard/managed cleanup compatibility fixtures.
+- Same image/network, `cd dapp && pnpm typecheck && pnpm build`: passed.
+- Same image/network, `SF141_RETENTION=1 SF129_RECEIPT=/tmp/pr307-reconcile.json
+  python3 scripts/test_reclaim_localnet.py`: real existing-object upgrade,
+  purchase, expiry, opaque-item cleanup and reclaim passed. Receipt and keys
+  remained disposable; no new public-chain evidence was committed.
+- Host `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  73 passed. `test_testnet*.py`: 145 passed with one existing skip.
+  `test_retention*.py`: 15 passed. These tests use offline fixtures.
+- Host Node fixtures: `test_storage_reclaim.cjs`,
+  `test_storage_reclaim_panel.cjs`, `test_incremental_history.cjs`,
+  `test_receipt_shards.cjs`, `test_stream_retention.cjs` and
+  `test_stream_retention_panel.cjs`: passed.
+
+Rust/OTA and real-browser suites were not rerun: their code and retained
+production UI are unchanged in this delta; earlier results above are historical.
+Hosted exact-head/current-base CI, automatic public-testnet and fresh independent
+review remain mandatory and pending at handoff, without polling. SF-129 verified
+merge remains required before final integration. Physical/mainnet/production
+provider/manual-wallet checks remain unrun in #32/#159. No deployment,
+hardware operation, production credentials or SF-129 owner-worktree edits ran.
+
+- `python3 scripts/check_move_security.py` in the same pinned network-none
+  image: exit 0; strict compiler/linter, public-signature compatibility and
+  genuine negative authority mutations passed, with no FAIL diagnostics.
+- Integration merge `5b4ca9a5dce6be838dabc944f0e87f3f8cda2743` has both
+  the prior SF-141 head and exact SF-129 pin as parents; ancestor checks for
+  that pin and fetched main passed. Whitespace checks passed.
