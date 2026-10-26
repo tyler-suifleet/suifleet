@@ -3201,6 +3201,35 @@
         "Provide tested implementation in a PR for independent review; do not silently alter live customer pricing or spending allowances."
       ],
       "validation": "Offline pricing sensitivity and input validation regression tests, CLI examples and documentation consistency checks; no network mutation required."
+    },
+    {
+      "key": "SF-154",
+      "title": "Prepare and rehearse the production release path without production writes",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-010",
+        "SF-050"
+      ],
+      "paths": [
+        "scripts",
+        "docs",
+        "deployments",
+        "manifests"
+      ],
+      "resources": [],
+      "description": "Runnable preparation split from deferred SF-087/#159 acceptance. Build a reviewed production release planner and exercise the shared pipeline on isolated/testnet infrastructure without waiting for final production signing/Pi acceptance.",
+      "evidence": "User asks to get backlog work moving. Current scripts/publish.py refuses mainnet entirely; SF087 preparation is grouped behind SF042 production-signing/hardware acceptance even though scripts, plans and rehearsals can be developed now.",
+      "acceptance": [
+        "Prepare explicit chain/account/UpgradeCap custody, manifest/type-origin, compatibility/migration, client generation and rollout checks with a concrete reviewable release plan and cost/exposure limits.",
+        "Mainnet mode is read-only/unsigned planning only: do not sign, submit, transfer capabilities, provision production secrets or weaken the existing mainnet publication refusal. Keep actual production execution in SF087/#159 and signing/device trust acceptance in SF042/#62.",
+        "Exercise the common planning/upgrade/migration/client-config path with offline negative tests and an isolated or bounded dedicated-account testnet rehearsal; reuse identical cached bytecode, verify effects and preserve old-package attack checks.",
+        "Document exact revision, commands, artifacts, effects where executed, rollback/abort boundaries and outstanding real production/hardware checks. Do not claim a production release occurred.",
+        "Commit only SF154 tracking entries from canonical catalog; link Closes to the published issue, return Review and let the single orchestrator integrate."
+      ],
+      "validation": "Offline planner and failure-path tests, relevant compatibility checks and isolated/testnet rehearsal evidence. Dedicated testnet mutations require the existing resource lease, wallet preflight and strict allowance; no mainnet or production credential operations."
     }
   ]
 }
