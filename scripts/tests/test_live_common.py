@@ -164,14 +164,14 @@ class PackageTransactionTests(unittest.TestCase):
     """Publish/upgrade go through sui_toolchain's verify-before-sign submitter."""
 
     def submitter(self, calls, refuse=False):
-        def make(client, build_tool, package_dir, common, *, sender, upgrade=None, record=None):
+        def make(client, build_tool, package_dir, common, *, sender, sign, upgrade=None, record=None):
             calls.append(dict(build_tool=build_tool, package_dir=package_dir, sender=sender, upgrade=upgrade))
 
             def submit(budget):
                 if refuse:
                     raise sui_toolchain.NotSubmitted("bytecode differs")
                 record.update(kind="upgrade" if upgrade else "publish")
-                return client("serialized-tx", "VERIFIEDBYTES")
+                return client("execute-signed-tx", "--tx-bytes", "VERIFIEDBYTES", "--signatures", "SIG")
             return submit
         return make
 
@@ -187,7 +187,7 @@ class PackageTransactionTests(unittest.TestCase):
         with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)), \
                 patch.object(live_common.toolchain, "write_pubfile") as pubfile:
             run.publish("publish base", "/tmp/package", "/tmp/pub.toml")
-        self.assertEqual(chain.calls[0][0][:2], ("serialized-tx", "VERIFIEDBYTES"))
+        self.assertEqual(chain.calls[0][0][:3], ("execute-signed-tx", "--tx-bytes", "VERIFIEDBYTES"))
         self.assertEqual(calls[0]["sender"], OPERATOR)
         pubfile.assert_called_once_with("/tmp/pub.toml", "4c78adac", "/tmp/package", "0x" + "a" * 64, "0xcap")
         self.assertEqual(run.ledger.used, 85_000_000)

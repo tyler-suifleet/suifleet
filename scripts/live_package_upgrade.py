@@ -80,9 +80,7 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
-# Base publish budget: the largest fixed gas reservation. After SF-136 a fresh
-# main base publish costs ~0.55 SUI; 0.4 SUI failed InsufficientGas (run 40238821132).
-PACKAGE_GAS = 700_000_000
+PACKAGE_GAS = live_common.PACKAGE_GAS  # Base publish budget: the largest fixed gas reservation.
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
@@ -110,6 +108,14 @@ QUARANTINE_INCIDENTS = {
 }
 
 
+class UnreadableExecution(RuntimeError):
+    """The CLI named an executed digest whose effects never became readable."""
+
+    def __init__(self, executed):
+        super().__init__(f"transaction {executed} not readable")
+        self.executed = executed
+
+
 class FundingShortfall(RuntimeError):
     """The wallet cannot fund the whole selected run; nothing was spent."""
 
@@ -130,22 +136,6 @@ def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, re
         ptb += ["--move-call", f"{package}::fleet_inbox::announce_device", f"@{inbox}", f"@{registry}",
                 f"@{owner_cap}", name, CLOCK]
     return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
-
-
-def executed_facts(rpc, digest, attempts=10, delay=3, chain=None):
-    """Executed facts for a just-submitted digest once the fullnode indexes it,
-    or None (the outcome then stays unknown and fully charged)."""
-    chain = chain or reconciler.Chain(rpc)
-    for attempt in range(attempts):
-        try:
-            facts = chain.transaction(digest)
-        except reconciler.Uncertain:
-            facts = None
-        if facts:
-            return facts
-        if attempt + 1 < attempts:
-            time.sleep(delay)
-    return None
 
 
 def gas_pools(gas):
@@ -273,6 +263,19 @@ def quarantine_summary(state):
             for name, record in state.get("quarantine", {}).items()}
 
 
+def other_execution(marker, error):
+    """Record on the marker a digest, other than its verified one, that the CLI
+    reported as executed (or executed-but-unreadable). Automatic reconciliation
+    then refuses the marker in every later run: neither expiry nor absence of
+    the verified digest settles a mutation that executed under another."""
+    executed = getattr(error, "executed", False)
+    if executed is False or (isinstance(error, UnreadableExecution)
+                             and executed == (marker.get("tx") or {}).get("digest")):
+        return False
+    marker.setdefault("other_executions", []).append(executed)
+    return True
+
+
 def checkpoint_setup(state_path, state, publication, label, action, ledger, now=time.time):
     """Persist intent before a mutation, and its verified transaction identity
     before signing (`action(persist)`); never repeat an unknown outcome."""
@@ -290,7 +293,8 @@ def checkpoint_setup(state_path, state, publication, label, action, ledger, now=
         known = isinstance(error, toolchain.NotSubmitted) or (
             ledger.evidence and ledger.evidence[-1].get("label") == label
             and ledger.evidence[-1].get("status") in ("failure", "not_submitted"))
-        if known:
+        # Another executed digest stays with the marker for every later run.
+        if not other_execution(marker, error) and known:
             publication.pop("pending_operation", None)
         save_state(state_path, state)
         raise
@@ -473,33 +477,35 @@ def run(args):
     network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
-        exact = command[0] == "serialized-tx"
-        if exact:
-            # Decode before signing/submitting: NotSubmitted is safe only before
-            # a transaction can reach the network. Never decode again afterwards.
-            digest = toolchain.decode(command[1])["digest"]
-            command = toolchain.exact_execution(network_sui, wallet, command[1])
         full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-        if exact and result.returncode and '"effects"' not in result.stdout:
-            # Read the digest derived from the signed bytes, never one parsed
-            # from a CLI diagnostic. A submission by this run consumes this
-            # run's allowance even when its effects arrive through gRPC.
-            facts = executed_facts(rpc_url, digest)
-            if facts:
-                if facts["digest"] != digest:
-                    raise reconciler.Uncertain("submission lookup returned a different transaction digest")
-                _, recovered = reconciler.settle(facts, operator)
-                recovered.pop("reconciled")
-                return recovered
         if result.returncode and check and not (json_output and '"effects"' in result.stdout):
+            submitted = live_common.DIGEST.search(result.stderr + result.stdout)
+            if json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
+                # The CLI exits non-zero without effects when execution fails
+                # (runs 40261665249, 40266575477: InsufficientGas). Read the
+                # failure back by digest so it is charged and known, not unknown.
+                found = {}
+                try:
+                    wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
+                             f"transaction {submitted.group(1)} not readable", timeout=60)
+                except AssertionError as error:
+                    raise UnreadableExecution(submitted.group(1)) from error
+                return found
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output:
             return result
         out = result.stdout
         return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+
+    def executed(digest):
+        try:
+            found = client("tx-block", digest, check=False)
+        except ValueError:  # Not readable yet: no JSON output.
+            return {}
+        return found if isinstance(found, dict) and "effects" in found else {}
 
     def balance():
         gas = client("gas")
@@ -509,6 +515,8 @@ def run(args):
     envs, active_env = client("envs")
     rpc_url = next(e["rpc"] for e in envs if e["alias"] == active_env)
     operator = dm.object_id(client("active-address", json_output=False).stdout.strip().split()[-1])
+    # Every setup mutation signs and executes exactly its verified bytes.
+    sign = toolchain.keystore_signer(network_sui, wallet, operator)
     facts = dm.chain_facts(rpc_url)
     chain = facts["chain_identifier"]
     expected = CHAINS.get(args.network)
@@ -638,7 +646,8 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            return client("serialized-tx", tx["tx_bytes"])  # Signs and submits these exact bytes.
+                            # Exactly the retained bytes, so only the retained digest can execute.
+                            return toolchain.execute_exact(client, sign, tx["tx_bytes"], tx["digest"])
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
@@ -655,16 +664,23 @@ def run(args):
                             outcome, value = reconciler.reconcile(
                                 marker, chain=facts_reader, operator=operator, inspect=toolchain.decode, verify=verify,
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
-                        except Exception:
-                            # Only a resubmission with failed execution effects is known:
-                            # it created nothing, exactly like a reconciled failure.
-                            failed = ledger.evidence[-1] if ledger.evidence else {}
-                            if failed.get("label") != retry or failed.get("status") != "failure":
+                        except Exception as error:
+                            # Only a resubmission with failed execution effects is known.
+                            # A failure of any other digest proves nothing about the retained one.
+                            if other_execution(marker, error):
+                                save_state(state_path, state)
                                 raise
-                            outcome, value = "failed", {"digest": failed.get("digest"), "gas_mist": failed.get("gas_mist"),
+                            last = ledger.evidence[-1] if ledger.evidence else {}
+                            if last.get("label") != retry or last.get("status") != "failure" \
+                                    or last.get("digest") != marker["tx"]["digest"]:
+                                save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
+                                raise
+                            # It executed and failed, so it created nothing (for example
+                            # bytes built with an older, insufficient budget). Like a
+                            # failure from an earlier run, it permits one fresh submission.
+                            outcome, value = "failed", {"digest": last.get("digest"), "gas_mist": last.get("gas_mist"),
                                                         "effects": {"status": {"status": "failure"}}}
-                        finally:
-                            save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
+                        save_state(state_path, state)
                         entry = {"label": label, "outcome": outcome, "legacy": bool(marker.get("legacy"))}
                         if outcome == "absent":
                             entry["reason"] = value
@@ -681,7 +697,7 @@ def run(args):
 
                 def setup_ptb(label, calls, *ptb):
                     return step(label, lambda persist: mutate(label, toolchain.ptb_submitter(
-                        client, ptb, sender=operator, calls=calls, persist=persist), gas=ptb_budget),
+                        client, ptb, sender=operator, calls=calls, sign=sign, persist=persist), gas=ptb_budget),
                         lambda data, tx: toolchain.verify_ptb_transaction(data, sender=operator, budget=tx["gas_budget"], calls=calls))
 
                 def package_proof(compiled, kind):
@@ -694,7 +710,7 @@ def run(args):
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                 def publish_base():
                     return step("publish base", lambda persist: mutate("publish base", toolchain.package_submitter(
-                        client, tools["build"]["path"], package_dir, common, sender=operator,
+                        client, tools["build"]["path"], package_dir, common, sender=operator, sign=sign,
                         record=built.setdefault("base", {}), persist=persist), gas=PACKAGE_GAS),
                         lambda data, tx: toolchain.verify_package_transaction(data, base_built, sender=operator, budget=tx["gas_budget"]),
                         legacy=lambda marker: reconciler.legacy_publication(
@@ -753,7 +769,7 @@ def run(args):
                         shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                         target = {"cap": upgrade_cap, "package": old}
                         upgraded = step("upgrade to head", lambda persist: mutate("upgrade to head", toolchain.package_submitter(
-                            client, tools["build"]["path"], package_dir, common, sender=operator,
+                            client, tools["build"]["path"], package_dir, common, sender=operator, sign=sign,
                             upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=ledger.remaining),
                             lambda data, tx: toolchain.verify_package_transaction(data, head_built, sender=operator,
                                                                                   budget=tx["gas_budget"], upgrade=target),
@@ -954,14 +970,7 @@ if __name__ == "__main__":
     # A fresh base->head fixture with SF-125 inboxes costs about 0.78 SUI before
     # the deployments (base publish 0.342 + head upgrade 0.376, run 40092917058),
     # about 0.85 SUI in total.
-    # A fresh SF-129 base->head fixture stored 0.705 SUI of packages (base
-    # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
-    # device funding, deployments and cleanup. After SF-136 a fresh pair is
-    # ~0.55 + ~0.56 SUI of packages, about 1.2 SUI in total (run 40238821132).
-    # SF-127 run 40246935467 settled 1.221 SUI of current-main packages and setup
-    # before its base deployment; the full 0.2-SUI deployment and cleanup
-    # reservations must still fit.
-    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
+    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")

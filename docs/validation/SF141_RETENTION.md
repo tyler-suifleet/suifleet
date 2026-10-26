@@ -651,3 +651,31 @@ retry loop, higher allowance, removed reservation or fabricated success was
 introduced. Hosted CI was not watched or polled. Independent review, current
 CI/testnet and verified SF-129 merge remain gates. Physical/mainnet/provider/
 manual-wallet checks remain unrun in #32/#159. The coordinator owns next dispatch.
+
+## 2026-10-25 current-main reconciliation after independent review
+
+Reconciled main `7d6607d451d1469c32a5a9debaf0f9826e29fcfe` into the owner
+branch. Main's shared `PACKAGE_GAS`, 1.5-SUI upgrade-security ceiling,
+`execute_exact` signing and digest-bound result/other-execution quarantine paths
+supersede this branch's earlier parallel harness implementation. Kept the public
+faucet balance diagnostics and their regression; kept the historical package/full
+reservation regressions, updating the selected-suite total to main's 3.25 SUI.
+The obsolete `exact_execution` helper/test and serialized-tx adapter were removed
+in favor of main's tested signer/submitter paths. Product source is unchanged by
+this reconciliation.
+
+Fresh host checks: `python3 -m unittest discover -s scripts/tests -p
+ 'test_testnet*.py'`: 141 tests OK, one skip; `test_live*.py`: 53 OK;
+`test_release*.py`: 27 OK. An initial merge-resolution run exposed a stale test
+calling the superseded helper; the final runs above passed after reconciling that
+test and its adapter with main. No Move/Rust/frontend/OTA/localnet/browser suites
+rerun for this harness/base reconciliation; earlier evidence is historical.
+
+SF-129 PR #279 is still OPEN, with no merge commit, so verified SF-129 merge
+remains required before SF-141 integration. No public expiry-window rebate,
+physical/mainnet/provider/manual-wallet result is claimed (#32/#159 retain the
+external acceptance). No shared-wallet mutation, faucet, deployment or hardware
+operation ran. Hosted checks for the pushed reconciliation remain pending and
+unpolled; the coordinator must enforce exact-head/current-base CI/testnet and
+fresh independent review. This handoff is blocked on the genuine merge
+prerequisite, not approval.

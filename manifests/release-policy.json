@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "comment": "SF-154 release-planning policy read by scripts/release_plan.py; see docs/RELEASE_PLANNING.md. Mainnet execution stays forbidden here: actual mainnet publication/upgrade requires explicit user authorization under SF-087/#159.",
+  "networks": {
+    "mainnet": {
+      "execution": "forbidden",
+      "max_gas_budget_mist": 800000000,
+      "max_run_spend_mist": 1000000000,
+      "plan_validity_seconds": 86400,
+      "require_bytecode_digest": true,
+      "forbidden_custody": [
+        "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"
+      ]
+    },
+    "testnet": {
+      "execution": "rehearsal",
+      "max_gas_budget_mist": 800000000,
+      "max_run_spend_mist": 1000000000,
+      "plan_validity_seconds": 86400,
+      "require_bytecode_digest": true,
+      "forbidden_custody": []
+    },
+    "devnet": {
+      "execution": "disposable",
+      "max_gas_budget_mist": 2000000000,
+      "max_run_spend_mist": 5000000000,
+      "plan_validity_seconds": 86400,
+      "require_bytecode_digest": false,
+      "forbidden_custody": []
+    },
+    "localnet": {
+      "execution": "disposable",
+      "max_gas_budget_mist": 2000000000,
+      "max_run_spend_mist": 5000000000,
+      "plan_validity_seconds": 86400,
+      "require_bytecode_digest": false,
+      "forbidden_custody": []
+    }
+  },
+  "estimates_mist": {
+    "comment": "Measured on the SF-154 localnet rehearsal at b819cb2: publish 532,828,600 and upgrade 536,150,620 MIST net, almost all non-refundable package storage.",
+    "publish": 550000000,
+    "upgrade": 550000000
+  },
+  "rollout": {
+    "stages": [
+      {"name": "canary", "max_devices": 1, "min_soak_minutes": 60},
+      {"name": "pilot", "max_fraction": 0.05, "min_soak_minutes": 240},
+      {"name": "fleet", "max_fraction": 1.0, "min_soak_minutes": 0}
+    ],
+    "halt_on": [
+      "any failed or missing device report in the current stage",
+      "daemon --check-config rejects the generated config or the manifest",
+      "frontend manifest verification fails after the rebuild",
+      "an old-package entry point changes authoritative receipts"
+    ]
+  }
+}

@@ -226,34 +226,6 @@ class VerifyBeforeSign(unittest.TestCase):
                     tc.verify_package_transaction(transaction(**spec), BUILT, sender=SENDER, budget=400_000_000,
                                                   upgrade=expected)
 
-    def test_exact_execution_signs_the_verified_bytes_only(self):
-        # `sui client serialized-tx` re-derived a fresh ValidDuring nonce, so
-        # the retained digest never executed (runs 40238821132/40243584986).
-        with tempfile.TemporaryDirectory() as root:
-            wallet = Path(root) / 'client.yaml'
-            wallet.write_text(f"keystore:\n  File: {root}/sui.keystore\nenvs: []\nactive_address: '{SENDER}'\n")
-            calls = []
-
-            def signer(raw=None, address=SENDER, code=0):
-                def run(command, **kwargs):
-                    calls.append(command)
-                    data = command[command.index('--data') + 1]
-                    return SimpleNamespace(returncode=code, stderr='refused', stdout=json.dumps(
-                        {'suiAddress': address, 'rawTxData': raw or data, 'suiSignature': 'SIG'}))
-                return run
-            self.assertEqual(tc.exact_execution('/n/sui', wallet, 'BYTES', run=signer()),
-                             ['execute-signed-tx', '--tx-bytes', 'BYTES', '--signatures', 'SIG'])
-            self.assertEqual(calls[0][:4], ['/n/sui', 'keytool', '--keystore-path', f'{root}/sui.keystore'])
-            self.assertEqual(calls[0][calls[0].index('--address') + 1], tc.normal(SENDER))
-            for run, message in ((signer(raw='OTHER'), 'exact verified bytes'),
-                                 (signer(address='0x' + '0f' * 32), 'exact verified bytes'),
-                                 (signer(code=1), 'could not be signed')):
-                with self.assertRaisesRegex(tc.NotSubmitted, message):
-                    tc.exact_execution('/n/sui', wallet, 'BYTES', run=run)
-            wallet.write_text("keystore:\n  File: relative.keystore\nactive_address: '" + SENDER + "'\n")
-            with self.assertRaisesRegex(tc.NotSubmitted, 'absolute'):
-                tc.exact_execution('/n/sui', wallet, 'BYTES', run=signer())
-
     def test_submitter_signs_only_verified_bytes(self):
         with tempfile.TemporaryDirectory() as root:
             package = Path(root)
@@ -263,35 +235,67 @@ class VerifyBeforeSign(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True, check=True).stdout
             build = SimpleNamespace(returncode=0, stdout=json.dumps(dict(BUILT, digest=DIGEST)), stderr='')
             calls = []
+            executed = {'digest': tc.decode(tx_bytes)['digest'], 'effects': {}}
+
+            def sign(data):
+                calls.append('sign')
+                self.assertEqual(data, tx_bytes)
+                return 'SIG'
 
             def client(*command, json_output=True, check=True):
                 calls.append(command[0])
-                if command[0] == 'serialized-tx':
-                    self.assertEqual(command[1], tx_bytes)
-                    return {'effects': {}}
+                if command[0] == 'execute-signed-tx':
+                    self.assertEqual(command[1:], ('--tx-bytes', tx_bytes, '--signatures', 'SIG'))
+                    return executed
                 return SimpleNamespace(returncode=0, stdout=tx_bytes + '\n', stderr='')
 
             def run(command, **kwargs):
                 return build if command[1] == 'move' else subprocess.run(command, **kwargs)
 
             record = {}
-            submit = tc.package_submitter(client, '/b/sui', package, [], sender=SENDER, run=run, record=record)
+            submit = tc.package_submitter(client, '/b/sui', package, [], sender=SENDER, sign=sign, run=run, record=record)
             submit(400_000_000)
-            self.assertEqual(calls, ['test-publish', 'serialized-tx'])
+            self.assertEqual(calls, ['test-publish', 'sign', 'execute-signed-tx'])
             self.assertEqual(record['digest'], bytes(DIGEST).hex())
+            # An execution under any other digest is not the verified transaction.
+            verified, executed['digest'] = executed['digest'], 'BpaugV8b82Fz7NfVBaopt4AmFbzHnVJzrie5kBSg1jCN'
+            with self.assertRaisesRegex(tc.DigestMismatch, verified):
+                submit(400_000_000)
+            executed['digest'] = verified
             calls.clear()
             tampered = dict(BUILT, modules=MODULES[:2])
             build.stdout = json.dumps(tampered)
             with self.assertRaises(tc.NotSubmitted):
-                tc.package_submitter(client, '/b/sui', package, [], sender=SENDER, run=run)(400_000_000)
-            self.assertNotIn('serialized-tx', calls)
+                tc.package_submitter(client, '/b/sui', package, [], sender=SENDER, sign=sign, run=run)(400_000_000)
+            self.assertNotIn('sign', calls)
+            self.assertNotIn('execute-signed-tx', calls)
 
             def relocking(*command, **kwargs):
                 (package / 'Move.lock').write_text('re-pinned framework\n')
                 return SimpleNamespace(returncode=0, stdout=tx_bytes, stderr='')
             build.stdout = json.dumps(BUILT)
             with self.assertRaisesRegex(tc.NotSubmitted, 'Move.lock'):
-                tc.package_submitter(relocking, '/b/sui', package, [], sender=SENDER, run=run)(400_000_000)
+                tc.package_submitter(relocking, '/b/sui', package, [], sender=SENDER, sign=sign, run=run)(400_000_000)
+
+    def test_keystore_signer_signs_exact_bytes_or_refuses_before_submission(self):
+        with tempfile.TemporaryDirectory() as root:
+            config = Path(root) / 'client.yaml'
+            config.write_text(f'keystore:\n  File: "{root}/sui.keystore"\nenvs: []\n')
+            seen = []
+
+            def run(command, **kwargs):
+                seen.append(command)
+                self.assertEqual(kwargs['env']['SUI_CONFIG_DIR'], str(Path(root).resolve()))
+                return SimpleNamespace(returncode=0, stdout=json.dumps({'suiSignature': 'SIG'}), stderr='')
+            self.assertEqual(tc.keystore_signer('/n/sui', config, '0xa', run=run)('BYTES'), 'SIG')
+            self.assertEqual(seen, [['/n/sui', 'keytool', '--keystore-path', f'{root}/sui.keystore', 'sign',
+                                     '--address', tc.normal('0xa'), '--data', 'BYTES', '--json']])
+            failed = lambda command, **kwargs: SimpleNamespace(returncode=1, stdout='', stderr='no key')
+            with self.assertRaisesRegex(tc.NotSubmitted, 'no key'):
+                tc.keystore_signer('/n/sui', config, '0xa', run=failed)('BYTES')
+            config.write_text('keystore:\n  InMem: {}\n')
+            with self.assertRaisesRegex(tc.NotSubmitted, 'no file keystore'):
+                tc.keystore_signer('/n/sui', config, '0xa', run=run)('BYTES')
 
 
 class Pubfile(unittest.TestCase):

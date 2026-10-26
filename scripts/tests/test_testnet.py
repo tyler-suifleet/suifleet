@@ -201,12 +201,29 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '850000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[1], '1500000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
                 self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
+
+    def test_fresh_sf136_packages_fit_their_budgets(self):
+        # A fresh base publish of current main settled 532,828,600 MIST and its
+        # unchanged head upgrade 536,150,620 (SF-154 localnet rehearsal); the
+        # former 0.4-SUI base budget failed InsufficientGas (run 40261665249).
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
+        from live_common import PACKAGE_GAS
+        base, head = 532_828_600, 536_150_620
+        self.assertGreater(PACKAGE_GAS, base)
+        security = dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security']
+        for ceiling, setup in ((PACKAGE_UPGRADE_CEILING, 60_000_000), (security, 40_000_000 + 30_000_000)):
+            ledger = Budget(ceiling, [])
+            ledger.grant(base)
+            ledger.grant(setup)  # Setup PTBs and device funding before the upgrade.
+            ledger.grant(head)
+            # Later operator PTBs still reserve their whole 0.2-SUI budget.
+            self.assertGreaterEqual(ledger.remaining, 200_000_000)
 
     def test_fresh_sf129_package_costs_leave_room_for_deployments(self):
         # Actual settled costs/funding from run 40184514226: base publish,
@@ -311,7 +328,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 2_600_000_000)
+        self.assertEqual(required_balance(SUITES), 3_250_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
@@ -528,22 +545,6 @@ class PublicEnvironmentTests(unittest.TestCase):
             self.retrying_read(outcomes, attempts=3)
         self.assertEqual(len(outcomes), 7)
 
-    def test_keyless_probe_can_wait_through_one_hourly_quota_reset(self):
-        from testnet_ci import PROBE_RETRY_BUDGET, PUBLIC_RETRY_BUDGET
-        self.assertEqual(PUBLIC_RETRY_BUDGET, 900)
-        far = self.http_error(403, {'X-RateLimit-Remaining': '0',
-                                  'X-RateLimit-Reset': str(1_000_000 + 3600)})
-        result, sleeps, _, calls = self.retrying_read(
-            [far, self.branches()], budget=PROBE_RETRY_BUDGET)
-        self.assertEqual(result, self.branches())
-        self.assertEqual(sleeps, [3601.0])
-        self.assertEqual(len(calls), 2)
-        # Persistently unavailable metadata still fails at the fixed deadline.
-        outcomes = [self.http_error(429, {'Retry-After': '3601'}) for _ in range(3)]
-        with self.assertRaisesRegex(RuntimeError, r'after 2 attempt\(s\).*budget 3700s'):
-            self.retrying_read(outcomes, budget=PROBE_RETRY_BUDGET)
-        self.assertEqual(len(outcomes), 1)
-
     def test_ordinary_denials_are_not_retried(self):
         for error in (self.http_error(403, {'X-RateLimit-Remaining': '42'}, b'{"message":"Resource not accessible by integration"}'),
                       self.http_error(404, {}, b'{"message":"Not Found"}'),
@@ -676,6 +677,29 @@ class BytecodeFixtureTests(unittest.TestCase):
             self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda persist:{'id':'known'},ledger),{'id':'known'})
             self.assertNotIn('pending_operation',p)
             self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_fresh_execution_under_another_digest_is_recorded_durably(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        for error in (live.toolchain.DigestMismatch('other', 'retained'), live.UnreadableExecution('other')):
+            with self.subTest(type(error).__name__), tempfile.TemporaryDirectory() as d:
+                path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+                ledger=SimpleNamespace(evidence=[{'label':'publish base','status':'unknown'}])
+                def executed_elsewhere(persist):
+                    persist({'digest':'retained','tx_bytes':'AAAA'})
+                    raise error
+                with self.assertRaises(type(error)):live.checkpoint_setup(path,state,p,'publish base',executed_elsewhere,ledger)
+                marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+                self.assertEqual((marker['tx']['digest'],marker['other_executions']),('retained',['other']))
+        # An unreadable outcome of the verified digest itself is ordinary uncertainty.
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            def unreadable(persist):
+                persist({'digest':'retained','tx_bytes':'AAAA'})
+                raise live.UnreadableExecution('retained')
+            with self.assertRaises(live.UnreadableExecution):
+                live.checkpoint_setup(path,state,p,'publish base',unreadable,SimpleNamespace(evidence=[]))
+            marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+            self.assertNotIn('other_executions',marker)
     def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
         import tempfile, live_package_upgrade as live
         with tempfile.TemporaryDirectory() as d:
