@@ -646,8 +646,29 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            # Exactly the retained bytes, so only the retained digest can execute.
-                            return toolchain.execute_exact(client, sign, tx["tx_bytes"], tx["digest"])
+                            try:
+                                return toolchain.execute_exact(client, sign, tx["tx_bytes"], tx["digest"])
+                            except (toolchain.NotSubmitted, toolchain.DigestMismatch, UnreadableExecution):
+                                raise
+                            except RuntimeError:
+                                # A failed CLI exit can still mean executed effects.
+                                # Indexing can lag the execution response. Bound
+                                # read-only observations; never replay the mutation.
+                                facts = None
+                                for attempt in range(4):
+                                    if attempt:
+                                        time.sleep(1)
+                                    facts = facts_reader.transaction(tx["digest"])
+                                    if facts is not None:
+                                        break
+                                if facts is None:
+                                    raise reconciler.Uncertain(
+                                        "resubmission outcome not indexed; retained transaction and full reservation")
+                                _, result = reconciler.settle(facts, operator)
+                                if result["digest"] != tx["digest"]:
+                                    raise reconciler.Uncertain("resubmission effects have a different digest")
+                                result.pop("reconciled")  # This run reserved the replay.
+                                return result
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
