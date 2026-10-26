@@ -73,7 +73,12 @@ refuse output. Reobserve the same unresolved digest until settled.
 SQLite FULL synchronization and one write transaction bind source checkpoints,
 records and history together. Process death rolls back the batch. Repeated digests
 charge once; unknown outcomes can advance to settled effects with audit history.
-Conflicting settled effects and renamed duplicate economic events refuse ingestion.
+Repeat unknown reads cannot replace settled effects. Reobservations with the same
+status, category, sender, gas owner, gas, checkpoint and timestamp preserve the
+original record even if endpoint or raw adapter metadata changes; each approved
+source pin is still checkpointed. Conflicting settled effects and renamed duplicate
+economic events refuse ingestion. A failed WAL payment is reported separately from
+an unresolved payment; its gas remains charged without recording a WAL purchase.
 Each invocation rechecks hashes even for consumed sources. Back up using SQLite's
 backup API, or while stopped, together with run/source files.
 

@@ -185,13 +185,20 @@ def ingest(run_path, database):
                 old = db.execute('SELECT json FROM records WHERE kind=? AND id=?', key).fetchone()
                 if old and old[0] != value:
                     prior = json.loads(old[0])
-                    if (row['type'] == 'transaction' and prior['status'] == row['status'] == 'unknown'
-                            and prior['category'] == row['category']):
-                        continue
-                    # Only an unresolved digest can advance to final effects.
-                    if not (row['type'] == 'transaction' and prior['status'] == 'unknown'
-                            and row['status'] != 'unknown'
-                            and all(prior[k] == row[k] for k in ('id', 'type', 'category'))):
+                    if row['type'] == 'transaction' and prior['category'] == row['category']:
+                        # A failed repeat read cannot revoke already verified effects.
+                        if row['status'] == 'unknown':
+                            continue
+                        if prior['status'] != 'unknown':
+                            fields = ('status', 'category', 'sender', 'gas_owner', 'gas', 'checkpoint')
+                            if (all(prior.get(k) == row.get(k) for k in fields)
+                                    and timestamp(prior['at']) == timestamp(row['at'])):
+                                # Keep the original evidence; endpoint/raw adapter metadata
+                                # may change without changing this digest's final effects.
+                                continue
+                            raise ValueError('conflicting duplicate observation')
+                        # An unresolved digest can advance to final effects.
+                    else:
                         raise ValueError('conflicting duplicate observation')
                 if not old or old[0] != value:
                     db.execute('INSERT OR REPLACE INTO records VALUES (?,?,?)', (*key, value))
@@ -238,7 +245,9 @@ def report(database, connection=None):
     for row in rows:
         if row['type'] == 'walrus':
             tx = txs.get(row['digest'])
-            if row['frost'] is None or not tx or tx['status'] != 'success':
+            if tx and tx['status'] == 'failure':
+                gaps.append('failed WAL payment transaction: ' + row['id'])
+            elif row['frost'] is None or not tx or tx['status'] != 'success':
                 gaps.append('unsettled WAL observation: ' + row['id'])
             else:
                 lines.append(dict(name=row['id'], category=row['category'], kind='measured',

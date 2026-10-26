@@ -92,6 +92,54 @@ class CollectorTests(unittest.TestCase):
         with sqlite3.connect(self.db) as db:
             self.assertEqual(db.execute('select count(*) from history').fetchone()[0], 2)
 
+    def test_settled_then_unknown_batch_commits_and_resumes(self):
+        for status in ('success', 'failure'):
+            with self.subTest(status=status):
+                self.tx['status'] = status
+                self.db = self.root / (status + '.sqlite')
+                self.run['sources'] = []
+                self.source([self.tx])
+                self.collect()
+                unknown = {k: self.tx[k] for k in ('type', 'id', 'at', 'source', 'category')}
+                unknown.update(status='unknown', error='temporary read failure')
+                self.source([unknown, dict(self.tx, id='3'*43)])
+                result = self.collect()
+                self.assertEqual(len(result['records']), 2)
+                self.assertTrue(all(r['status'] == status for r in result['records']))
+                self.assertEqual(result, self.collect())
+                self.source([self.tx, dict(self.tx, id='4'*43)])
+                self.assertEqual(len(self.collect()['records']), 3)
+                with sqlite3.connect(self.db) as db:
+                    self.assertEqual(db.execute('select count(*) from sources').fetchone()[0], 3)
+
+    def test_settled_metadata_changes_preserve_original_effects(self):
+        self.source([self.tx])
+        original = self.collect()
+        self.source([dict(self.tx, source='https://other-fullnode', raw={'adapter': 'changed'},
+                          at='2026-10-02T00:00:00.000+00:00')])
+        result = self.collect()
+        self.assertEqual(original['records'], result['records'])
+        self.assertEqual(original['accounting_model'], result['accounting_model'])
+        with sqlite3.connect(self.db) as db:
+            self.assertEqual(db.execute('select count(*) from history').fetchone()[0], 1)
+            self.assertEqual(db.execute('select count(*) from sources').fetchone()[0], 2)
+
+    def test_settled_identity_and_effect_conflicts_rejected(self):
+        self.source([self.tx])
+        self.collect()
+        for change in (dict(status='failure'), dict(category='renewal'), dict(sender=B),
+                       dict(gas_owner=B), dict(checkpoint='123'),
+                       dict(at='2026-10-03T00:00:00Z')):
+            with self.subTest(change=change):
+                pins = copy.deepcopy(self.run['sources'])
+                self.source([dict(self.tx, **change)])
+                with self.assertRaisesRegex(ValueError, 'conflicting'):
+                    self.collect()
+                self.run['sources'] = pins
+        self.source([dict(self.tx, status='unknown', category='renewal')])
+        with self.assertRaisesRegex(ValueError, 'conflicting'):
+            self.collect()
+
     def test_conflict_rolls_back_whole_batch(self):
         self.source([self.tx])
         self.collect()
@@ -201,6 +249,16 @@ c.ingest(sys.argv[2], sys.argv[3])
         self.assertEqual(result['accounting']['subtotals']['localnet:measured:FROST'], '120')
         self.assertEqual(result['capital_snapshots'][0]['amount'], 500)
         self.assertIn('unavailable provider charge: download-window', result['incomplete'])
+
+    def test_failed_walrus_payment_is_distinct_from_unsettled(self):
+        self.source([dict(self.tx, status='failure'),
+                     self.row('walrus', 'failed-renew', operation='renewal', category='renewal',
+                              encoded_bytes=100, start_epoch=10, end_epoch=11,
+                              frost=10, digest=D, blob_id='blob')])
+        result = self.collect()
+        self.assertIn('failed WAL payment transaction: failed-renew', result['incomplete'])
+        self.assertNotIn('localnet:measured:FROST', result['accounting']['subtotals'])
+        self.assertEqual(result['accounting']['subtotals']['localnet:measured:MIST'], '250')
 
     def test_unknown_walrus_payment_not_zero(self):
         self.source([self.row('walrus', 'renew', operation='renewal', category='renewal',
