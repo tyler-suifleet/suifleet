@@ -44,6 +44,7 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       for (const route of routes) {
         await page.goto(base+route,{waitUntil:'networkidle'});
         await page.locator('h1').waitFor();
+        assert.doesNotMatch(await page.locator('main').textContent(), /SF-\d{3}|docs\/[A-Z_]+\.md/, `${route}: no internal tracker/document references, even in collapsed details`);
         assert.equal(await page.locator('h1').count(),1,`${route}: one page title`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${route}: no page overflow at ${width}`);
         const current=page.locator('nav[aria-label="Main"]:visible [aria-current="page"]');

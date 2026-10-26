@@ -6,6 +6,7 @@ needed, its cost, its result and the next useful step.
 
 - Prefer network fees, storage, permissions, device client, private releases and
   verified device reports over gas, blobs, capabilities, daemon, Seal and on-chain.
+- Never render engineering ticket references, internal document paths or project planning notes in customer UI, including technical disclosures. Keep engineering provenance in repository docs.
 - Keep exact identifiers, digests, checkpoints, protocol versions, epoch counters,
   base token units and command-line instructions in labeled technical disclosures.
 - Where payment requires SUI or WAL, name the real asset and explain its purpose.
