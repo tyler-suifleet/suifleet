@@ -419,6 +419,45 @@ class RunFlow(unittest.TestCase):
                 'pending_operation': marker}}}
         return state
 
+    def test_failed_publish_reconciles_before_reserving_remaining_allowance(self):
+        # Run 40260572156: retained 400M publish executed with InsufficientGas.
+        # Read effects first; a new transaction may use only the unchanged run cap.
+        marker = pending()
+        marker['tx']['sender'] = tc.normal(ADDRESS)
+        failed = facts(sender=tc.normal(ADDRESS), success=False)
+        failed['error'] = 'InsufficientGas'
+        failed['gas_used'] = {'computationCost': '5010000', 'storageCost': '0',
+                              'storageRebate': '0'}
+        chain = FakeChain(epoch=8, transactions={'D1': failed})
+        reservations = []
+
+        def submitter(*args, **kwargs):
+            def submit(budget):
+                reservations.append(budget)
+                raise tc.NotSubmitted('stop before signing recovered publish')
+            return submit
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, key, patches, commands = self.harness(root, self.state_with(marker))
+            with self.assertRaisesRegex(tc.NotSubmitted, 'stop before signing recovered publish'):
+                self.run_flow(args, patches, [
+                    patch.object(live.reconciler, 'Chain', return_value=chain),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
+                    patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'}),
+                    patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
+            evidence = json.loads((root / 'evidence.json').read_text())
+            saved = json.loads((root / 'state.json').read_text())['publications'][key]
+            self.assertEqual(reservations, [args.max_spend_mist])
+            self.assertNotIn('pending_operation', saved)
+            self.assertNotIn('base_package', saved)
+            self.assertEqual(evidence['reconciliations'][0]['outcome'], 'failed')
+            self.assertEqual(evidence['reconciliations'][0]['gas_mist'], 5_010_000)
+            self.assertEqual(evidence['reconciliations'][0]['charged_by'], 'earlier run')
+            self.assertEqual(evidence['transactions'][0]['status'], 'not_submitted')
+            self.assertEqual(evidence['allowance_used_mist'], 0)
+            self.assertFalse(any('serialized-tx' in c for c in commands))
+
     def test_restart_adopts_unknown_but_executed_publish_without_republishing(self):
         marker = pending()
         marker['tx']['sender'] = tc.normal(ADDRESS)

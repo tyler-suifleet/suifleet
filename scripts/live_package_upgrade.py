@@ -654,9 +654,11 @@ def run(args):
                     save_state(state_path, state)
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                 def publish_base():
+                    # Base packages can also exceed 0.4 SUI. Reserve only the
+                    # unchanged remaining run allowance, as for head upgrades.
                     return step("publish base", lambda persist: mutate("publish base", toolchain.package_submitter(
                         client, tools["build"]["path"], package_dir, common, sender=operator,
-                        record=built.setdefault("base", {}), persist=persist), gas=PACKAGE_GAS),
+                        record=built.setdefault("base", {}), persist=persist), gas=ledger.remaining),
                         lambda data, tx: toolchain.verify_package_transaction(data, base_built, sender=operator, budget=tx["gas_budget"]),
                         legacy=lambda marker: reconciler.legacy_publication(
                             marker, chain=facts_reader, operator=operator, built=base_built,
