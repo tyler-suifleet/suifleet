@@ -3201,6 +3201,32 @@
         "Provide tested implementation in a PR for independent review; do not silently alter live customer pricing or spending allowances."
       ],
       "validation": "Offline pricing sensitivity and input validation regression tests, CLI examples and documentation consistency checks; no network mutation required."
+    },
+    {
+      "key": "SF-153",
+      "title": "Review and integrate existing SUI pricing sensitivity follow-up PR312",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-152"
+      ],
+      "paths": [
+        "docs/BUSINESS_PLAN.md",
+        "docs/business",
+        "scripts"
+      ],
+      "resources": [],
+      "description": "Existing Claude-authored PR312 is outside atomic tracking and therefore receives no automated owner repair or independent review. Track its existing scope, preserve original branch and implementation family, integrate current main, and complete reciprocal review.",
+      "evidence": "PR312 already exists on pricing/sui-cost-sensitivity at dfab5df1273305f2e433c74ee10f0451530fe6ef. Its previous checks passed but current base is not included. User requests review workers and continued progress.",
+      "acceptance": [
+        "Preserve the existing PR and Claude implementation ownership; adopt it into the central atomic workflow without duplicate implementation owners or a duplicate PR.",
+        "Integrate current main on the owner branch, resolve pricing/model/documentation differences and run offline subscription/accounting/tracking regressions.",
+        "Independent Codex review checks financial algebra, cost provenance, hedge limitations, renewal terms and fail-closed unknown inputs; resolve actionable findings.",
+        "All required exact-head/current-base CI and independent review pass before the sole orchestrator merges; PR closes this issue and tracker reconciles Done."
+      ],
+      "validation": "Read-only source review, offline pricing/accounting/tracking tests and current-head CI. No live tariff installation, hedge purchase, mainnet operation or wallet spending is authorized by this planning task."
     }
   ]
 }
