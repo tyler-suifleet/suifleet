@@ -1,13 +1,12 @@
-const { loader, appRequire } = require('./frontend_test_utils.cjs');
-const { ObjectError } = appRequire('@mysten/sui/client');
+const { loader } = require('./frontend_test_utils.cjs');
 async function deleteDeployment(client, execute, id, schema = '1') {
-  const sui = loader()('lib/sui.ts');
-  for (let step = 0; step < 100; step++) {
-    try { await client.getObject({ objectId: id }); }
-    catch (error) { if (error instanceof ObjectError && error.reason === 'notFound') return; throw error; }
-    await execute(await sui.buildDeleteDeploymentStepTx(client, id, schema));
-  }
-  throw Error('Deletion did not finish in 100 bounded steps');
+  const { buildCleanupStep } = loader()('../../scripts/browser/receipt-cleanup.ts');
+  await require('./browser/receipt-cleanup-loop.cjs').cleanupDeployment({ deploymentId: id, schemaVersion: schema }, undefined, async (deployment, fleet) => {
+    const tx = await buildCleanupStep(client, deployment, fleet);
+    if (!tx) return { done: true };
+    await execute(tx);
+    return { done: false };
+  });
 }
 async function report(client, tx, packageId, deployment, registry, cap, device, status) {
   const load = loader(), p = load('lib/fleet-protocol.ts'), shards = load('lib/receipt-shards.ts');

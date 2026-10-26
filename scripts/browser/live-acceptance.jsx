@@ -14,6 +14,7 @@ import { Transaction } from "@mysten/sui/transactions";
 import { fromHex, toBase64 } from "@mysten/sui/utils";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import * as sui from "@/lib/sui";
+import { buildCleanupStep } from "./receipt-cleanup";
 import * as walrus from "@/lib/walrus";
 
 const m = LIVE_MANIFEST;
@@ -91,6 +92,11 @@ function App() {
     window.live.submit = async (builder, ...args) => {
       const transaction = typeof builder === "function" ? builder() : sui[builder](...args);
       return mutation.mutateAsync({ transaction });
+    };
+    window.live.deleteDeploymentStep = async (deployment, fleet) => {
+      const transaction = await buildCleanupStep(client, deployment, fleet);
+      if (!transaction) return { done: true };
+      return { done: false, ...await mutation.mutateAsync({ transaction }) };
     };
     // A transaction that executes and aborts on chain. The SDK simulates any
     // transaction that still needs resolution and refuses an abort before

@@ -147,7 +147,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     tx = new Transaction(); tx.moveCall({target:`${head}::component_catalog::begin_sharded_receipts`,arguments:[tx.object(catalogDeployment)]});await execute("shard catalog with inline schema 2",tx);
     await attack("sharded catalog rejects old handover",owner,oldHandover,code(5,"handover"));
     await attack("sharded catalog rejects old catalog delete",owner,async t => t.moveCall({target:`${old}::component_catalog::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),/dynamic_field/);
-    await attack("sharded catalog rejects old ordinary delete",owner,async t => t.moveCall({target:`${old}::deployment_manager::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),code(5,"delete_deployment"));
+    await attack("sharded catalog rejects old ordinary delete",owner,async t => t.moveCall({target:`${old}::deployment_manager::delete_deployment`,arguments:[await shared(t,catalogDeployment,true)]}),code(5,"delete_as"));
     await attack("sharded catalog rejects old reports",owner,async t => t.moveCall({target:`${old}::deployment_manager::report_verified_status`,arguments:[await shared(t,catalogDeployment,true),await shared(t,registry,false),await owned(t,caps[0]),t.pure.u8(1)]}),code(5,"receipts_mut"));
     const catalogDirectory = await shards.readReceiptDirectory(client,catalogDeployment);
     assert.equal(catalogDirectory.original_schema,"2");assert.equal(catalogDirectory.ready,false);
@@ -167,7 +167,7 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const directory = await shards.readReceiptDirectory(client, deployment), roots = directory.roots;
     assert.equal(roots.length, 16); assert.equal(directory.ready, false);
     await attack("old package report blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::report_verified_status`, arguments: [await shared(t, deployment, true), await shared(t, registry, false), await owned(t, caps[0]), t.pure.u8(2)] }), code(5, "receipts_mut"));
-    await attack("old delete blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::delete_deployment`, arguments: [await shared(t, deployment, true)] }), code(5, "delete_deployment"));
+    await attack("old delete blocked", owner, async t => t.moveCall({ target: `${old}::deployment_manager::delete_deployment`, arguments: [await shared(t, deployment, true)] }), code(5, "delete_as"));
     await attack("legacy read rejects v3", owner, async t => call(t, "receipt_status", [await shared(t, deployment, false), t.pure.id(devices[0])]), code(5, "receipt_status"));
     assert.equal((await app.readReceipts(client, deployment)).verified, false);
     tx = new Transaction();
@@ -197,17 +197,14 @@ const SUI = 1_000_000_000n, MINUTE = 60_000n, DAY = 86_400_000n;
     const statuses = await app.readReceipts(client, deployment);
     assert.equal(statuses.verified, true); assert.equal(Object.keys(statuses.statuses).length, 1000);
     assert.ok(Object.values(statuses.statuses).every(s => s === 1));
-    tx = new Transaction(); call(tx, "begin_receipt_cleanup", [tx.object(deployment)]); await execute("begin retirement", tx);
-    assert.equal((await app.readReceipts(client, deployment)).verified, false);
-    // Drain in bounded resumable chunks, then retire all 16 roots.
-    for (let round = 0; round < Math.ceil(Math.max(...roots.map((_, i) => devices.filter(d => shards.receiptShardIndex(d) === i).length)) / 64); round++) {
-      for (let offset = 0; offset < roots.length; offset += 4) {
-        tx = new Transaction(); for (const root of roots.slice(offset, offset + 4)) call(tx, "cleanup_receipt_chunk", [tx.object(deployment), tx.object(root), tx.pure.u64(64)]);
-        await execute(`cleanup ${round}/${offset}`, tx);
-      }
-    }
-    tx = new Transaction(); for (const root of roots) call(tx, "retire_receipt_shard", [tx.object(deployment), tx.object(root)]);
-    call(tx, "delete_deployment", [tx.object(deployment)]); await execute("retire roots and delete", tx);
+    // The previous browser's direct final delete must fail on the real chain.
+    await attack("old browser skips retirement", owner, async t => call(t, "delete_deployment", [await shared(t, deployment, true)]), code(17, "finish_receipt_cleanup"));
+    await require('./receipt_test_helpers.cjs').deleteDeployment(client, t => execute('browser phased cleanup ' + Object.keys(digests).length, t), deployment);
+    // Legacy unsharded deployments still take the final-delete path directly.
+    tx = new Transaction(); call(tx, "create_deployment_verified", [tx.pure.string('legacy cleanup'), tx.pure.string('1'), tx.pure.string('recipe'), tx.pure.string('aa'.repeat(32)), tx.pure.string('bb'.repeat(32)), tx.pure.vector('id', []), tx.pure.vector('id', [devices[0]]), tx.object('0x6')]);
+    const legacyCleanup = created(await execute('unsharded browser cleanup fixture', tx), '::deployment_manager::DeploymentRecord');
+    assert.equal(await shards.readReceiptDirectory(client, legacyCleanup), undefined);
+    await require('./receipt_test_helpers.cjs').deleteDeployment(client, t => execute('browser legacy cleanup', t), legacyCleanup);
     for (const root of roots) { const r = await client.getObjects({ objectIds: [root] }); assert.ok(r.objects[0] instanceof Error); }
     const evidence = { result: "PASS", network: "isolated network-none localnet", base, old, head, deployment, targets: 1000, receipt_shards: 16, preserved_v2_receipts: 70, receipt_transactions: gas, digests, failures, max_single_receipt_gross: String(gas.filter(g => g.count === 1).reduce((m, g) => BigInt(g.gross) > m ? BigInt(g.gross) : m, 0n)), float: 60000000, limits: ["No public-network, wallet extension, hardware or mainnet evidence", "120000 capacity follows fixed root and per-entry storage; this run populates 1000"] };
     await fs.mkdir(path.join(root, "docs/validation"), { recursive: true });

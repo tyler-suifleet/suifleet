@@ -164,6 +164,7 @@ check-interfaces:
 	$(RUN) node scripts/test_deployment_control.cjs
 	$(RUN) node scripts/test_rollout.cjs
 	$(RUN) node scripts/test_receipt_shards.cjs
+	$(RUN) node scripts/test_browser_receipt_cleanup.cjs
 	$(RUN) node scripts/test_inbox.cjs
 
 generate-interfaces:
