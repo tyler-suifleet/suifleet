@@ -335,3 +335,12 @@ The same follow-up also repairs [run 38692509474](https://github.com/tyler-suifl
 **Fixture history growth (SF-115).** Every executed run uploads a new fixture artifact, so [run 39859678522](https://github.com/tyler-suifleet/suifleet/actions/runs/39859678522) stopped before tests once 501 accumulated beyond the old five-page scan. Restore now reads the complete name-filtered history up to 10,000 artifacts (more than 90 days of routine uploads without pruning) and selects the newest trusted snapshot by creation time. It fails closed when `total_count` changes, IDs repeat, pages come back short, the response is malformed or a lookup/download fails; a shifted listing is rescanned once. None of these failures falls back to publication. A separate `prune-fixture-history` job runs after a successful executed `validate` in the same serialized concurrency group. It checks out only main (`github.workflow_sha`), has no environment, secret or test revision, and is the only job holding `actions: write`. It keeps the 10 newest trusted snapshots and the current run's artifact, then deletes older `encrypted-testnet-fixture` artifacts from this repository's main testnet workflow, oldest first and at most 50 per run. Untrusted, expired and differently named artifacts are left alone, and a deletion failure fails the job. Ciphertext is never decrypted or rewritten.
 
 The first SF-045 machine test at head `532ffd4a588f` on base `38beecd423ff` passed all application and independent receipt-writing effects checks. Its low-balance retry exercised automatic one-attempt faucet replenishment (return code 0, balance after credit 1,491,061,660 MIST), then spent 138,470,100 MIST net within a 187,399,364 MIST conservative allowance. Contract trees were identical, so this run deliberately skipped upgrade and tested a fresh current package. That is genuine machine evidence, not successful full Actions execution, and a later repaired head must obtain its own exact-head receipt/status before integration.
+
+## Read-only fleet cost collection (SF-155)
+
+The [resumable cost collector](business/FLEET_COST_COLLECTION.md) observes existing
+transaction digests using pinned SDK gRPC v2 and ingests authenticated, hash-pinned
+evidence into a durable local journal. The SF-082 fixture smoke creates no objects
+or transactions and needs no shared-wallet mutation lock. It never funds, signs,
+submits, uploads or purchases. Testnet costs remain Testnet observations; final
+Mainnet bill and production acceptance stay in SF-135/#267 and SF-087/#159.
