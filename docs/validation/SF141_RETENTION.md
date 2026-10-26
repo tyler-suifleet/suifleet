@@ -699,3 +699,27 @@ SF-141 integration, then obtain exact-head/current-base CI/testnet and fresh
 independent review. Hosted checks remain pending and were not polled. No live
 mutation or hardware operation ran. Public expiry-window rebate and deferred
 physical/mainnet/provider/manual-wallet acceptance (#32/#159) remain unclaimed.
+
+## 2026-10-26 second feedback/base reconciliation
+
+The independent review of `310c1fc5` reported no actionable source defects.
+Integrated current main `bffb2c9010a0a215ffa2da02ac585bf7403aca01`
+without conflicts; this is also the snapshot base. Incoming changes
+include testnet reconciliation, cost collection and coordinator test maintenance.
+No Move, daemon or frontend product source changed in this integration.
+
+Fresh offline commands `python3 -m unittest discover -s scripts/tests -p PATTERN`
+passed for `test_testnet*.py` (143 tests, one skip), `test_live*.py` (53),
+`test_release*.py` (27), `test_subscription_pricing.py` (21),
+`test_fleet_cost_collector.py` (21), and `test_observe_fleet_costs.py` (5).
+`python3 -m unittest discover -s tools/pr-coordinator/tests -p
+ 'test_quota_recovery.py'` passed 55 tests. `git diff --check origin/main HEAD`
+passed. No application, localnet or browser suite was rerun for this integration.
+
+Read-only metadata reports SF-129 PR #279 OPEN at `698b5649`, with no merge
+commit. This genuine merge dependency remains blocking; do not substitute its
+older source pin for a verified merge. The coordinator must reconcile its eventual
+merged form, enforce exact-head/current-base CI and automatic testnet, and obtain
+fresh independent review. Hosted CI is pending and was not polled. No live writes
+or hardware operations ran. Public expiry-window rebate and deferred physical,
+mainnet, provider and manual-wallet evidence remain unclaimed (#32/#159).
