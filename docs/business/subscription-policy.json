@@ -6,6 +6,12 @@
     {"sui_cost_multiple": "3", "walrus_cost_multiple": "1", "minimum_margin_fraction": "0.50"},
     {"sui_cost_multiple": "10", "walrus_cost_multiple": "1", "minimum_margin_fraction": "0"}
   ],
+  "combined_shocks": [
+    {"token_price_multiple": "10", "token_quantity_multiple": "1"},
+    {"token_price_multiple": "1", "token_quantity_multiple": "5.5"},
+    {"token_price_multiple": "1", "token_quantity_multiple": "10"},
+    {"token_price_multiple": "2", "token_quantity_multiple": "5"}
+  ],
   "hedge": {"term_sui_purchased_fraction": "1"},
   "renewal_repricing_trigger_multiple": "3",
   "payment_fee_fraction": "0.03",

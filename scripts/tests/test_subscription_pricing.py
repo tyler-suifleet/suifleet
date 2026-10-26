@@ -29,6 +29,19 @@ def scenario(result, sui_multiple, walrus_multiple='1'):
                 if row['sui_cost_multiple'] == sui_multiple and row['walrus_cost_multiple'] == walrus_multiple)
 
 
+def shock(result, token_price, token_quantity):
+    return next(row for row in result['combined_sensitivity']
+                if (row['token_price_multiple'], row['token_quantity_multiple']) == (token_price, token_quantity))
+
+
+def fixed_quantity(policy):
+    """The policy with floors that assume the token quantity stays at the basis."""
+    bounded = copy.deepcopy(policy)
+    for floor in bounded['floors']:
+        floor['max_token_quantity_multiple'] = '1'
+    return bounded
+
+
 class SubscriptionPricingTests(unittest.TestCase):
     def setUp(self):
         self.model = load(EXAMPLES['1k'])
@@ -66,7 +79,8 @@ class SubscriptionPricingTests(unittest.TestCase):
         result = calculate(self.model, self.policy)
         self.assertAlmostEqual(Decimal(result['breakeven']['sui_cost_multiple']), Decimal('12.3833'), places=3)
         self.assertAlmostEqual(Decimal(result['breakeven']['implied_sui_usd']), Decimal('12.2224'), places=3)
-        self.assertIsNone(result['breakeven']['hedged_sui_cost_multiple'])
+        self.assertIsNone(result['breakeven']['hedged_token_price_multiple'])
+        self.assertEqual(result['breakeven']['hedged_token_quantity_multiple'], result['breakeven']['sui_cost_multiple'])
         headroom = {h['minimum_margin_fraction']: h for h in result['headroom']}
         self.assertEqual(set(headroom), {'0', '0.5'})
         self.assertAlmostEqual(Decimal(headroom['0.5']['sui_cost_multiple']), Decimal('5.7167'), places=3)
@@ -93,25 +107,78 @@ class SubscriptionPricingTests(unittest.TestCase):
         self.policy['floors'][0]['walrus_cost_multiple'] = '2'
         self.assertEqual(calculate(self.model, self.policy)['floors'][0]['floor_unhedged_usd'], '51.71')
 
-    def test_hedge_locks_the_term_and_removes_breakeven(self):
+    def test_hedge_fixes_token_price_but_not_token_quantity(self):
         result = calculate(self.model, self.policy, annual=True, hedged=True)
-        self.assertEqual([f['floor_hedged_usd'] for f in result['floors']], ['19.21', '9.31'])
-        self.assertEqual(result['risk_floor_monthly_usd'], '19.21')
+        # Unbounded, a floor's whole multiple may be a gas-price rise the hedge cannot cover.
+        self.assertEqual([f['max_token_quantity_multiple'] for f in result['floors']], ['3', '10'])
+        self.assertEqual([f['floor_hedged_usd'] for f in result['floors']], [f['floor_unhedged_usd'] for f in result['floors']])
+        self.assertEqual([f['floor_hedged_usd'] for f in result['floors']], ['44.74', '64.98'])
         self.assertEqual(result['hedge_purchase_usd'], '72.00')
-        self.assertEqual(scenario(result, '10')['hedged_margin_fraction'], '0.8447')
-        self.assertEqual(scenario(result, '10')['infrastructure_margin_fraction'], '0.0947')
-        self.assertIsNone(result['breakeven']['hedged_sui_cost_multiple'])
+        ten = scenario(result, '10')
+        self.assertEqual((ten['hedged_recurring_cost_token_price_usd'], ten['hedged_margin_token_price_fraction']), ('9.00', '0.8447'))
+        self.assertEqual((ten['hedged_recurring_cost_token_quantity_usd'], ten['hedged_margin_token_quantity_fraction']), ('63.00', '0.0947'))
+        self.assertEqual(ten['infrastructure_margin_fraction'], '0.0947')
+        self.assertIsNone(result['breakeven']['hedged_token_price_multiple'])
+        self.assertEqual(result['breakeven']['hedged_token_quantity_multiple'], result['breakeven']['sui_cost_multiple'])
+        bounded = calculate(self.model, fixed_quantity(self.policy), annual=True, hedged=True)
+        self.assertEqual([f['floor_hedged_usd'] for f in bounded['floors']], ['19.21', '9.31'])
+        self.assertEqual(bounded['risk_floor_monthly_usd'], '19.21')
         self.policy['hedge']['term_sui_purchased_fraction'] = '0.5'
         partial = calculate(self.model, self.policy, annual=True, hedged=True)
         self.assertEqual(partial['hedge_purchase_usd'], '36.00')
-        self.assertAlmostEqual(Decimal(partial['breakeven']['hedged_sui_cost_multiple']), Decimal('21.2717'), places=3)
-        self.assertEqual(scenario(partial, '10')['hedged_recurring_cost_usd'], '36.00')
+        self.assertAlmostEqual(Decimal(partial['breakeven']['hedged_token_price_multiple']), Decimal('21.2717'), places=3)
+        self.assertEqual(scenario(partial, '10')['hedged_recurring_cost_token_price_usd'], '36.00')
+        self.assertEqual(scenario(partial, '10')['hedged_recurring_cost_token_quantity_usd'], '63.00')
         # Without --hedged the policy's hedge is still reported, but it does not move the floors.
-        unhedged = calculate(self.model, self.policy, annual=True)
+        unhedged = calculate(self.model, fixed_quantity(self.policy), annual=True)
         self.assertFalse(unhedged['hedge_applied_to_floors'])
         self.assertEqual(unhedged['hedge_purchase_usd'], '36.00')
-        self.assertEqual(scenario(unhedged, '10')['hedged_recurring_cost_usd'], '36.00')
+        self.assertEqual(scenario(unhedged, '10')['hedged_recurring_cost_token_price_usd'], '36.00')
         self.assertEqual(unhedged['risk_floor_monthly_usd'], '64.98')
+
+    def test_token_only_gas_only_and_combined_shocks_against_the_hedge(self):
+        model = load(EXAMPLES['100k'])
+        result = calculate(model, fixed_quantity(self.policy), annual=True, hedged=True)
+        self.assertEqual(result['monthly_subscription_usd'], '4770.00')
+        # Token price 10x: the pre-bought SUI pays for the term and capital is revalued.
+        token = shock(result, '10', '1')
+        self.assertEqual((token['hedged_recurring_cost_usd'], token['hedged_margin_fraction']), ('1470.00', '0.6618'))
+        self.assertEqual(token['sui_denominated_capital_value_usd'], '89220.00')
+        # Gas price 10x at the same token price: the extra 9x of SUI is bought at market.
+        gas = shock(result, '1', '10')
+        self.assertEqual((gas['recurring_cost_usd'], gas['hedged_recurring_cost_usd']), ('6870.00', '6870.00'))
+        self.assertEqual(gas['hedged_margin_fraction'], '-0.4703')
+        self.assertEqual(gas['sui_denominated_capital_value_usd'], '8922.00')
+        self.assertEqual(shock(result, '1', '5.5')['hedged_margin_fraction'], '0.0958')
+        # Token 2x and gas 5x: 600 pre-bought plus 4 x 600 more at twice the price, plus 870 WAL and services.
+        both = shock(result, '2', '5')
+        self.assertEqual((both['sui_cost_multiple'], both['hedged_recurring_cost_usd']), ('10', '6270.00'))
+        self.assertEqual((both['infrastructure_margin_fraction'], both['hedged_margin_fraction']), ('-0.4703', '-0.3445'))
+        self.assertEqual(both['sui_denominated_capital_value_usd'], '17844.00')
+        self.assertAlmostEqual(Decimal(result['breakeven']['hedged_token_quantity_multiple']), Decimal('6.2615'), places=3)
+        self.assertIsNone(result['breakeven']['hedged_token_price_multiple'])
+        # The policy as written therefore floors the hedged volume term at the unhedged price.
+        floored = calculate(model, self.policy, annual=True, hedged=True)
+        self.assertEqual((floored['monthly_subscription_usd'], floored['binding_constraint']), ('7082.50', 'risk_floor'))
+        self.assertGreaterEqual(Decimal(shock(floored, '1', '10')['hedged_margin_fraction']), Decimal(0))
+        # A floor bounded at 5x quantity covers the remaining 2x with the hedge.
+        partial = copy.deepcopy(self.policy)
+        partial['floors'][1]['max_token_quantity_multiple'] = '5'
+        bounded = calculate(model, partial, annual=True, hedged=True)
+        self.assertEqual(bounded['floors'][1]['floor_hedged_usd'], '6463.95')
+        self.assertGreaterEqual(Decimal(shock(bounded, '2', '5')['hedged_margin_fraction']), Decimal(0))
+
+    def test_hedge_share_is_measured_against_the_discounted_annual_invoice(self):
+        cases = [('1k', self.policy, '72.00', '864.00', '0.0833'), ('10k', self.policy, '720.00', '8640.00', '0.0833'),
+                 ('100k', fixed_quantity(self.policy), '7200.00', '57240.00', '0.1258'),
+                 ('100k', self.policy, '7200.00', '84990.00', '0.0847')]
+        for name, policy, purchase, due, share in cases:
+            result = calculate(load(EXAMPLES[name]), policy, annual=True, hedged=True)
+            with self.subTest(example=name, due=due):
+                self.assertEqual((result['hedge_purchase_usd'], result['amount_due_usd'], result['hedge_share_of_invoice']),
+                                 (purchase, due, share))
+                self.assertEqual(Decimal(result['hedge_share_of_invoice']),
+                                 (Decimal(purchase) / Decimal(due)).quantize(Decimal('0.0001')))
 
     def test_monthly_billing_refuses_hedged_floors(self):
         # A monthly price persists below the renewal trigger while a monthly hedge covers one month.
@@ -152,7 +219,7 @@ class SubscriptionPricingTests(unittest.TestCase):
         result = calculate(self.model, self.policy)
         self.assertEqual((result['monthly_subscription_usd'], result['binding_constraint']), ('600.00', 'monthly_minimum'))
 
-    def test_volume_tier_floor_binds_unhedged_and_releases_when_hedged(self):
+    def test_volume_tier_floor_binds_unless_token_quantity_is_fixed(self):
         model = load(EXAMPLES['100k'])
         result = calculate(model, self.policy)
         self.assertEqual([f['floor_unhedged_usd'] for f in result['floors']], ['5681.49', '7082.79'])
@@ -169,7 +236,7 @@ class SubscriptionPricingTests(unittest.TestCase):
         headroom = {h['minimum_margin_fraction']: h for h in unfloored['headroom']}
         self.assertAlmostEqual(Decimal(headroom['0']['sui_cost_multiple']), Decimal('7.1178'), places=3)
         self.assertAlmostEqual(Decimal(headroom['0.5']['sui_cost_multiple']), Decimal('2.7012'), places=3)
-        annual = calculate(model, self.policy, annual=True, hedged=True)
+        annual = calculate(model, fixed_quantity(self.policy), annual=True, hedged=True)
         self.assertEqual([f['floor_hedged_usd'] for f in annual['floors']], ['3127.72', '1515.49'])
         self.assertEqual((annual['monthly_subscription_usd'], annual['binding_constraint']), ('4770.00', 'list_price'))
         self.assertAlmostEqual(Decimal(annual['breakeven']['sui_cost_multiple']), Decimal('6.2615'), places=3)
@@ -228,6 +295,10 @@ class SubscriptionPricingTests(unittest.TestCase):
             dict(renewal_repricing_trigger_multiple='0.5'), dict(floors='3'), dict(floors=[{'sui_cost_multiple': '0.5', 'minimum_margin_fraction': '0.5'}]),
             dict(floors=[{'sui_cost_multiple': '3', 'minimum_margin_fraction': '0.98'}]),
             dict(floors=[{'sui_cost_multiple': '3'}]), dict(schema_version=1),
+            dict(floors=[{'sui_cost_multiple': '3', 'minimum_margin_fraction': '0.5', 'max_token_quantity_multiple': '4'}]),
+            dict(floors=[{'sui_cost_multiple': '3', 'minimum_margin_fraction': '0.5', 'max_token_quantity_multiple': '0.5'}]),
+            dict(combined_shocks={}), dict(combined_shocks=[{'token_price_multiple': '2'}]),
+            dict(combined_shocks=[{'token_price_multiple': '0', 'token_quantity_multiple': '1'}]),
         ]
         for change in bad_policies:
             with self.subTest(change=change), self.assertRaises(ValueError):
@@ -267,8 +338,14 @@ class SubscriptionPricingTests(unittest.TestCase):
                                        annual_discount_fraction=str(generator.uniform(0, 0.5)))
             policy = copy.deepcopy(self.policy)
             policy['payment_fee_fraction'] = str(generator.uniform(0, 0.1))
-            policy['floors'] = [dict(sui_cost_multiple=str(generator.uniform(1, 20)), walrus_cost_multiple=str(generator.uniform(1, 3)),
-                                     minimum_margin_fraction=str(generator.uniform(0, 0.85))) for _ in range(generator.randint(0, 3))]
+            policy['floors'] = []
+            for _ in range(generator.randint(0, 3)):
+                multiple = generator.uniform(1, 20)
+                floor = dict(sui_cost_multiple=str(multiple), walrus_cost_multiple=str(generator.uniform(1, 3)),
+                             minimum_margin_fraction=str(generator.uniform(0, 0.85)))
+                if generator.random() < 0.5:
+                    floor['max_token_quantity_multiple'] = str(generator.uniform(1, multiple))
+                policy['floors'].append(floor)
             policy['hedge'] = {'term_sui_purchased_fraction': str(generator.uniform(0, 1))}
             annual = generator.random() < 0.5
             hedged = annual and generator.random() < 0.5
@@ -277,12 +354,23 @@ class SubscriptionPricingTests(unittest.TestCase):
             self.assertGreaterEqual(price, Decimal(result['risk_floor_monthly_usd']))
             self.assertGreaterEqual(price, Decimal(result['monthly_minimum_usd']))
             self.assertGreaterEqual(price, Decimal(result['commercial_after_discount_usd']))
+            if not price:
+                continue
+            # Recompute independently over every token x quantity split each floor allows.
+            costs = {key: Decimal(value) for key, value in model['recurring_costs'].items()}
+            covered = Decimal(policy['hedge']['term_sui_purchased_fraction']) if hedged else Decimal(0)
+            fee = Decimal(policy['payment_fee_fraction'])
+            fixed = Decimal(policy['payment_fixed_usd_per_invoice']) / (12 if annual else 1)
             for floor in result['floors']:
-                row = scenario(result, floor['sui_cost_multiple']) if floor['walrus_cost_multiple'] == '1' else None
-                if row is None or not price:
-                    continue
-                margin = Decimal(row['hedged_margin_fraction' if hedged else 'infrastructure_margin_fraction'])
-                self.assertGreaterEqual(margin, Decimal(floor['minimum_margin_fraction']) - Decimal('0.0002'))
+                multiple = Decimal(floor['sui_cost_multiple'])
+                bound = Decimal(floor['max_token_quantity_multiple'])
+                for step in range(11):
+                    quantity = 1 + (bound - 1) * step / 10
+                    token = multiple / quantity
+                    sui = (covered + max(quantity - covered, Decimal(0)) * token) * costs['sui_sensitive_usd']
+                    recurring = sui + Decimal(floor['walrus_cost_multiple']) * costs['walrus_usd'] + costs['services_usd']
+                    margin = (price - recurring - price * fee - fixed) / price
+                    self.assertGreaterEqual(margin, Decimal(floor['minimum_margin_fraction']) - Decimal('1e-9'))
 
     def test_cli_prints_json_or_table_and_refuses_unquoted_costs(self):
         command = [sys.executable, str(ROOT / 'scripts/subscription_pricing.py')]
@@ -303,9 +391,11 @@ class SubscriptionPricingTests(unittest.TestCase):
 
     def test_documented_tables_match_the_calculator(self):
         document = (BUSINESS / 'SUBSCRIPTION_PRICING.md').read_text()
-        cases = [('1k', False, False), ('10k', False, False), ('100k', False, False), ('100k', True, True)]
-        for name, annual, hedged in cases:
-            result = calculate(load(EXAMPLES[name]), self.policy, annual=annual, hedged=hedged)
+        bounded = fixed_quantity(self.policy)
+        cases = [('1k', self.policy, False, False), ('10k', self.policy, False, False),
+                 ('100k', self.policy, False, False), ('100k', bounded, True, True)]
+        for name, policy, annual, hedged in cases:
+            result = calculate(load(EXAMPLES[name]), policy, annual=annual, hedged=hedged)
             with self.subTest(example=name, annual=annual, hedged=hedged):
                 self.assertIn(table(result), document)
                 self.assertIn(f"${Decimal(result['monthly_subscription_usd']):,.2f}", document)

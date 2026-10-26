@@ -3,9 +3,14 @@
 
 The model prices a fixed USD subscription for a bounded monthly workload and
 reports what happens to cost, gross profit and margin when the USD cost of
-SUI-denominated operations moves (token price or validator gas-price votes),
-how far the price can absorb such a move, and what a term hedge (buying the
-term's SUI when the invoice is paid) changes.
+SUI-denominated operations moves, how far the price can absorb such a move, and
+what a term hedge (buying the term's SUI when the invoice is paid) changes.
+
+The USD cost multiple is the product of a token price multiple and a token
+quantity multiple (reference gas price, storage price or gas units per operation).
+A hedge buys a quantity of SUI at the basis price, so it removes token price
+exposure for that quantity only; additional tokens required by a quantity rise
+are bought at the shocked token price.
 """
 import argparse
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_HALF_EVEN, localcontext
@@ -89,7 +94,23 @@ def _validate_floors(floors, payment):
         margin = amount(floor.get('minimum_margin_fraction'), f'{name}.minimum_margin_fraction', maximum=ONE)
         if margin + payment >= ONE:
             raise ValueError(f'{name}: minimum margin plus payment fee fraction must be less than one')
-        result.append((sui_multiple, wal_multiple, margin))
+        # Unless the policy bounds it, the whole cost multiple may be a token quantity rise.
+        quantity = amount(floor.get('max_token_quantity_multiple', sui_multiple), f'{name}.max_token_quantity_multiple',
+                          minimum=ONE, maximum=sui_multiple)
+        result.append((sui_multiple, wal_multiple, margin, quantity))
+    return result
+
+
+def _shocks(shocks):
+    if not isinstance(shocks, list):
+        raise ValueError('policy.combined_shocks must be a list')
+    result = []
+    for index, shock in enumerate(shocks):
+        if not isinstance(shock, dict):
+            raise ValueError(f'policy.combined_shocks[{index}] must be an object')
+        name = f'policy.combined_shocks[{index}]'
+        result.append(tuple(amount(shock.get(key), f'{name}.{key}', minimum=Decimal('0.01'), maximum=Decimal(1000))
+                            for key in ('token_price_multiple', 'token_quantity_multiple')))
     return result
 
 
@@ -142,6 +163,7 @@ def _calculate(model, policy, annual, hedged):
     sui_multiples = multiples(policy.get('sui_cost_multiples'), 'sui_cost_multiples', Decimal('0.01'))
     wal_multiples = multiples(policy.get('walrus_cost_multiples', ['1']), 'walrus_cost_multiples', Decimal('0.01'))
     floors = _validate_floors(policy.get('floors'), payment)
+    shocks = _shocks(policy.get('combined_shocks', []))
     hedge = policy.get('hedge', {})
     if not isinstance(hedge, dict):
         raise ValueError('policy.hedge must be an object')
@@ -169,21 +191,26 @@ def _calculate(model, policy, annual, hedged):
     # The policy's hedge is always reported in the hedged_* fields; it is applied to
     # the floors, and therefore to the price, only when `hedged` is requested.
 
-    def cost(sui_multiple, wal_multiple, locked=ZERO):
-        """Recurring USD cost when SUI-denominated cost is at `sui_multiple` times the basis.
+    def cost(token_price, token_quantity, wal_multiple, locked=ZERO):
+        """Recurring USD cost when the SUI token price and the SUI quantity the workload
+        requires are at the given multiples of the basis.
 
-        `locked` is the fraction of the term's SUI spend already bought at the basis
-        price, which therefore does not move with the multiple."""
-        return (locked + (ONE - locked) * sui_multiple) * sui + wal_multiple * walrus + services
+        `locked` is the fraction of the basis quantity bought at the basis price. It pays
+        for that quantity whatever the token does (unused purchased SUI earns no credit);
+        any additional quantity is bought at the shocked token price."""
+        sui_multiple = locked + max(token_quantity - locked, ZERO) * token_price
+        return sui_multiple * sui + wal_multiple * walrus + services
 
     def price_for(margin, recurring):
         return (recurring + fee) / (ONE - margin - payment)
 
     floor_rows, applied = [], []
-    for sui_multiple, wal_multiple, margin in floors:
-        unhedged_floor = price_for(margin, cost(sui_multiple, wal_multiple))
-        hedged_floor = price_for(margin, cost(sui_multiple, wal_multiple, covered))
+    for sui_multiple, wal_multiple, margin, quantity in floors:
+        unhedged_floor = price_for(margin, cost(sui_multiple, ONE, wal_multiple))
+        # Hedged cost rises with the quantity share of the move, so the bound is the worst case.
+        hedged_floor = price_for(margin, cost(sui_multiple / quantity, quantity, wal_multiple, covered))
         floor_rows.append(dict(sui_cost_multiple=plain(sui_multiple), walrus_cost_multiple=plain(wal_multiple),
+                               max_token_quantity_multiple=plain(quantity),
                                minimum_margin_fraction=plain(margin), floor_unhedged_usd=money(unhedged_floor),
                                floor_hedged_usd=money(hedged_floor)))
         applied.append(hedged_floor if hedged else unhedged_floor)
@@ -193,44 +220,84 @@ def _calculate(model, policy, annual, hedged):
     monthly = Decimal(money(max(candidates.values())))
     binding = next(name for name, value in candidates.items() if Decimal(money(value)) == monthly)
     payment_cost = monthly * payment + fee
-    margins = sorted({margin for _, _, margin in floors} | {ZERO})
+    margins = sorted({margin for _, _, margin, _ in floors} | {ZERO})
 
-    def multiple_for(margin, locked):
-        """SUI cost multiple at which the margin falls to `margin`; None when no multiple reaches it."""
-        if sui == ZERO or locked >= ONE:
+    def margin_of(recurring):
+        return fraction((monthly - recurring - payment_cost) / monthly) if monthly else None
+
+    def target_multiple(margin):
+        """SUI-sensitive cost, in multiples of the basis, at which the margin falls to `margin`."""
+        return (monthly * (ONE - margin - payment) - fee - walrus - services) / sui
+
+    def multiple_for(margin):
+        """Unhedged SUI cost multiple at which the margin falls to `margin`; None when no multiple reaches it."""
+        if sui == ZERO:
             return None
-        target = monthly * (ONE - margin - payment) - fee - walrus - services
-        multiple = (target / sui - locked) / (ONE - locked)
+        multiple = target_multiple(margin)
         return multiple if multiple >= ZERO else None
 
+    def hedged_price_multiple_for(margin):
+        """Token price multiple, at the basis token quantity, at which the hedged margin falls to `margin`."""
+        if sui == ZERO or covered >= ONE:
+            return None
+        multiple = (target_multiple(margin) - covered) / (ONE - covered)
+        return multiple if multiple >= ZERO else None
+
+    def hedged_quantity_multiple_for(margin):
+        """Token quantity multiple, at the basis token price, at which the hedged margin falls to `margin`.
+
+        Additional tokens cost what they did unhedged, so a quantity rise erodes the
+        margin exactly as an unhedged move does once it exceeds the purchased quantity."""
+        if sui == ZERO:
+            return None
+        multiple = target_multiple(margin)
+        return multiple if multiple >= covered else None
+
     def row(sui_multiple, wal_multiple):
-        recurring = cost(sui_multiple, wal_multiple)
-        hedged_recurring = cost(sui_multiple, wal_multiple, covered)
+        recurring = cost(sui_multiple, ONE, wal_multiple)
+        hedged_token = cost(sui_multiple, ONE, wal_multiple, covered)
+        hedged_quantity = cost(ONE, sui_multiple, wal_multiple, covered)
         profit = monthly - recurring - payment_cost
         return dict(
             sui_cost_multiple=plain(sui_multiple), walrus_cost_multiple=plain(wal_multiple),
             implied_sui_usd=fraction(sui_multiple * sui_usd),
-            recurring_cost_usd=cents(recurring), hedged_recurring_cost_usd=cents(hedged_recurring),
+            recurring_cost_usd=cents(recurring),
+            hedged_recurring_cost_token_price_usd=cents(hedged_token),
+            hedged_recurring_cost_token_quantity_usd=cents(hedged_quantity),
             payment_cost_usd=cents(payment_cost), gross_profit_usd=cents(profit),
-            infrastructure_margin_fraction=fraction(profit / monthly) if monthly else None,
-            hedged_margin_fraction=fraction((monthly - hedged_recurring - payment_cost) / monthly) if monthly else None,
+            infrastructure_margin_fraction=margin_of(recurring),
+            hedged_margin_token_price_fraction=margin_of(hedged_token),
+            hedged_margin_token_quantity_fraction=margin_of(hedged_quantity),
+            # Capital is a token position: this is its value if the move is in the token price.
             sui_denominated_capital_value_usd=cents(sui_capital * sui_multiple),
             price_for_margin={plain(margin): money(price_for(margin, recurring)) for margin in margins})
 
-    scenarios = sorted(set(sui_multiples) | {m for m, _, _ in floors} | ({trigger} if trigger is not None else set()))
+    def combined(token_price, token_quantity):
+        recurring = cost(token_price, token_quantity, ONE)
+        hedged_recurring = cost(token_price, token_quantity, ONE, covered)
+        return dict(
+            token_price_multiple=plain(token_price), token_quantity_multiple=plain(token_quantity),
+            sui_cost_multiple=plain(token_price * token_quantity), implied_sui_usd=fraction(token_price * sui_usd),
+            recurring_cost_usd=cents(recurring), hedged_recurring_cost_usd=cents(hedged_recurring),
+            infrastructure_margin_fraction=margin_of(recurring), hedged_margin_fraction=margin_of(hedged_recurring),
+            sui_denominated_capital_value_usd=cents(sui_capital * token_price))
+
+    scenarios = sorted(set(sui_multiples) | {m for m, _, _, _ in floors} | ({trigger} if trigger is not None else set()))
     rows = [row(m, ONE) for m in scenarios]
     rows += [row(ONE, w) for w in wal_multiples if w != ONE]
+    combined_rows = [combined(t, q) for t, q in shocks]
 
-    breakeven = multiple_for(ZERO, ZERO)
-    hedged_breakeven = multiple_for(ZERO, covered)
+    breakeven = multiple_for(ZERO)
+    hedged_price_breakeven = hedged_price_multiple_for(ZERO)
+    hedged_quantity_breakeven = hedged_quantity_multiple_for(ZERO)
     headroom = []
     for margin in margins:
-        multiple = multiple_for(margin, ZERO)
+        multiple = multiple_for(margin)
         headroom.append(dict(minimum_margin_fraction=plain(margin), sui_cost_multiple=fraction(multiple),
                              implied_sui_usd=fraction(multiple * sui_usd) if multiple is not None else None))
     repricing = None
     if trigger is not None:
-        at_trigger = cost(trigger, ONE)
+        at_trigger = cost(trigger, ONE, ONE)
         repricing = dict(trigger_multiple=plain(trigger), implied_sui_usd=fraction(trigger * sui_usd),
                          infrastructure_margin_fraction=fraction((monthly - at_trigger - payment_cost) / monthly) if monthly else None,
                          price_for_margin={plain(margin): money(price_for(margin, at_trigger)) for margin in margins})
@@ -260,15 +327,17 @@ def _calculate(model, policy, annual, hedged):
         binding_constraint=binding, monthly_subscription_usd=money(monthly),
         effective_per_device_month_usd=fraction(monthly / devices, 5), amount_due_usd=money(monthly * term),
         term_sui_spend_usd=cents(sui * term), hedge_purchase_usd=cents(covered * sui * term),
+        hedge_share_of_invoice=fraction(covered * sui * term / (monthly * term)) if monthly else None,
         breakeven=dict(sui_cost_multiple=fraction(breakeven),
                        implied_sui_usd=fraction(breakeven * sui_usd) if breakeven is not None else None,
-                       hedged_sui_cost_multiple=fraction(hedged_breakeven),
-                       hedged_implied_sui_usd=fraction(hedged_breakeven * sui_usd) if hedged_breakeven is not None else None),
+                       hedged_token_price_multiple=fraction(hedged_price_breakeven),
+                       hedged_implied_sui_usd=fraction(hedged_price_breakeven * sui_usd) if hedged_price_breakeven is not None else None,
+                       hedged_token_quantity_multiple=fraction(hedged_quantity_breakeven)),
         headroom=headroom, renewal_repricing=repricing, comparison=comparison_result,
         working_capital_usd=dict(sui_denominated={k: plain(v) for k, v in groups['sui_denominated'].items()},
                                  usd_denominated={k: plain(v) for k, v in groups['usd_denominated'].items()},
                                  sui_denominated_total_usd=cents(sui_capital), sui_denominated_total_sui=fraction(sui_capital_sui, 2)),
-        sensitivity=rows)
+        sensitivity=rows, combined_sensitivity=combined_rows)
 
 
 def usd(text):
@@ -283,16 +352,25 @@ def percent(text):
 
 def table(result):
     """Markdown sensitivity table at the priced subscription."""
-    lines = ['| SUI cost multiple | Implied SUI price | Recurring cost | Gross profit | Margin | Hedged margin | SUI-denominated capital |',
-             '|---:|---:|---:|---:|---:|---:|---:|']
+    lines = ['| SUI cost multiple | Implied SUI price | Recurring cost | Gross profit | Margin '
+             '| Hedged margin, token price move | Hedged margin, gas/quantity move | SUI-denominated capital |',
+             '|---:|---:|---:|---:|---:|---:|---:|---:|']
     for row in result['sensitivity']:
         label = f"{row['sui_cost_multiple']}×"
         if row['walrus_cost_multiple'] != '1':
             label += f" SUI, {row['walrus_cost_multiple']}× WAL"
         lines.append('| ' + ' | '.join([
             label, usd(row['implied_sui_usd']), usd(row['recurring_cost_usd']), usd(row['gross_profit_usd']),
-            percent(row['infrastructure_margin_fraction']), percent(row['hedged_margin_fraction']),
-            usd(row['sui_denominated_capital_value_usd'])]) + ' |')
+            percent(row['infrastructure_margin_fraction']), percent(row['hedged_margin_token_price_fraction']),
+            percent(row['hedged_margin_token_quantity_fraction']), usd(row['sui_denominated_capital_value_usd'])]) + ' |')
+    if result['combined_sensitivity']:
+        lines += ['', '| Token price × quantity | SUI cost multiple | Recurring cost | Margin | Hedged margin | SUI-denominated capital |',
+                  '|---:|---:|---:|---:|---:|---:|']
+        for row in result['combined_sensitivity']:
+            lines.append('| ' + ' | '.join([
+                f"{row['token_price_multiple']}× × {row['token_quantity_multiple']}×", f"{row['sui_cost_multiple']}×",
+                usd(row['recurring_cost_usd']), percent(row['infrastructure_margin_fraction']),
+                percent(row['hedged_margin_fraction']), usd(row['sui_denominated_capital_value_usd'])]) + ' |')
     return '\n'.join(lines)
 
 
