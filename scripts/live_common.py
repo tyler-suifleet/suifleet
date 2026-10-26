@@ -112,13 +112,15 @@ def run_client_command(full, command):
     # Only known reads may be retried. A failed submission can have an
     # unknown on-chain outcome; executor/Budget must reconcile it instead.
     read_only = command and command[0] in {"object", "dynamic-field", "tx-block", "gas"}
-    for attempt in range(3):
+    # Give the public fullnode a bounded cooldown (75 seconds total).
+    # Three immediate reads with only 1s/2s gaps can exhaust one throttle window.
+    for attempt in range(5):
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
         diagnostic = (result.stderr + result.stdout).lower()
         throttled = "429" in diagnostic and "too many requests" in diagnostic
-        if not (read_only and result.returncode and throttled and attempt < 2):
+        if not (read_only and result.returncode and throttled and attempt < 4):
             break
-        time.sleep(2 ** attempt)
+        time.sleep(5 * 2 ** attempt)
     return result
 
 

@@ -267,10 +267,10 @@ class ReadThrottleTests(unittest.TestCase):
         for command in ("object", "dynamic-field", "tx-block", "gas"):
             with self.subTest(command=command):
                 client = self.client()
-                with patch.object(live_common.subprocess, "run", side_effect=[self.failure, self.failure, CompletedProcess([], 0, '{"verified": true}', "")]) as ran, patch.object(live_common.time, "sleep") as sleep:
+                with patch.object(live_common.subprocess, "run", side_effect=[self.failure] * 4 + [CompletedProcess([], 0, '{"verified": true}', "")]) as ran, patch.object(live_common.time, "sleep") as sleep:
                     self.assertEqual(client(command, "id"), {"verified": True})
-                self.assertEqual(ran.call_count, 3)
-                self.assertEqual([call.args[0] for call in sleep.call_args_list], [1, 2])
+                self.assertEqual(ran.call_count, 5)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20, 40])
                 self.assertTrue(all(call == ran.call_args for call in ran.call_args_list))
 
     def test_persistent_throttling_fails_at_bound(self):
@@ -278,8 +278,8 @@ class ReadThrottleTests(unittest.TestCase):
         with patch.object(live_common.subprocess, "run", return_value=self.failure) as ran, patch.object(live_common.time, "sleep") as sleep:
             with self.assertRaisesRegex(RuntimeError, "429"):
                 client("dynamic-field", "root")
-        self.assertEqual(ran.call_count, 3)
-        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(ran.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
 
     def test_mutations_and_other_errors_are_never_replayed(self):
         for command, failure in (("ptb", self.failure), ("serialized-tx", self.failure), ("publish", self.failure), ("faucet", self.failure), ("unknown", self.failure), ("object", CompletedProcess([], 1, "", "not found"))):
