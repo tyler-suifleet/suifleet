@@ -324,7 +324,8 @@ The [SUI cost sensitivity analysis](SUBSCRIPTION_PRICING.md) separates SUI-sensi
 expense, WAL expense, USD/service expense and SUI-denominated working capital, and
 reports margin, breakeven and price floors as the USD cost of SUI operations moves
 between 0.25× and 20× of the quote basis. Its policy is 50% margin at 3× and
-breakeven at 10× without a hedge, a term hedge bought at invoice, and renewal
+breakeven at 10× without a hedge, a term hedge bought at invoice (which covers
+token-price but not gas-price moves), and renewal
 repricing from 3×. Its examples use the business plan's typical-profile estimates,
 not this historical, incomplete SF-054 scenario, and they do not establish a
 measured production bill. Supply missing costs before pricing; never use Testnet

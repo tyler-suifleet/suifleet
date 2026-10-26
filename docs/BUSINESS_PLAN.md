@@ -2,7 +2,7 @@
 
 Decision basis: 2026-10-16. This records Tyler's original commercial thesis, not a newly discovered positioning idea. Product implementation and hardware acceptance remain separate from business hypotheses.
 
-Updated 2026-10-25 with a [SUI cost sensitivity analysis and subscription policy](business/SUBSCRIPTION_PRICING.md): what happens to cost, margin and revenue as the USD cost of SUI operations moves between 0.25× and 20× of the quote basis, and the controls that keep fixed USD subscriptions safe (price floors of 50% margin at 3× and breakeven at 10×, a term hedge bought at invoice, and bounded renewal repricing). The 2026-10-23 prices below stand: the $0.08 tier clears the floors outright and the volume tiers clear them on prepaid annual terms with the hedge. Final tariffs and margins remain estimates until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) measures a Mainnet bill.
+Updated 2026-10-25 with a [SUI cost sensitivity analysis and subscription policy](business/SUBSCRIPTION_PRICING.md): what happens to cost, margin and revenue as the USD cost of SUI operations moves between 0.25× and 20× of the quote basis, and the controls that keep fixed USD subscriptions safe (price floors of 50% margin at 3× and breakeven at 10×, a term hedge against token-price moves bought at invoice, and bounded renewal repricing). The 2026-10-23 prices below stand: the $0.08 tier clears the floors outright, while volume prices below about $0.07 per device need customer-funded SUI network costs, because the hedge cannot cover a gas-price rise. Final tariffs and margins remain estimates until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) measures a Mainnet bill.
 
 ## The opportunity
 
@@ -32,9 +32,10 @@ controls:
   not lose money at 10×, measured without a hedge. Discounts, volume tiers and
   partner prices cannot undercut a floor or the $49 minimum.
 - **Term hedge.** When a prepaid annual invoice is paid, SuiFleet would buy the SUI
-  the term's operations will consume: 7.5% of an $0.08-tier invoice, 12.6% of a
-  volume-tier invoice. The paid-for operations then no longer depend on the token.
-  Monthly billing is priced against the unhedged floors.
+  the term's operations will consume at the current gas price: 8.3% of an annual
+  $0.08-tier invoice. That quantity of SUI then no longer depends on the token
+  price, but a validator gas-price rise still requires extra SUI bought at market,
+  so the hedge does not lower the floors. Monthly billing is never hedged.
 - **Renewal repricing.** If the SUI-cost basis at renewal is 3× or more above the
   quote basis, the renewal is requoted with at least 30 days' notice. Prices never
   change mid-term, and a fall in SUI never cuts them automatically.
@@ -51,12 +52,12 @@ payment fees):
 | 1,000 devices, monthly | $80 ($0.08) | $9 (67%) | 85% / 70% / 55% / 18% | 12.4× (SUI ≈ $12.22) | No |
 | 10,000 devices, monthly | $800 ($0.08) | $139 (43%) | 80% / 65% / 50% / 12% | 11.6× (≈ $11.46) | No |
 | 100,000 devices, monthly, unhedged | $7,082.79 ($0.071) | $1,470 (41%) | 76% / 59% / 42% / 0% | 10.0× | Yes: the $5,300 list would break even at 7.1× and fall below 50% from 2.7× |
-| 100,000 devices, prepaid annual, hedged | $4,770 ($0.048) | $1,470 (41%) | 66% at any multiple | none within the term | No |
+| 100,000 devices, prepaid annual, hedged | $7,082.50 ($0.071) | $1,470 (41%) | 76% / 59% / 42% / 0% (gas-price move); 76% through any token move | 10.0× | Yes: the $4,770 discounted list keeps 66% through any token move but breaks even at a 6.3× gas-price rise |
 
 Consequences for the price list: the $0.08 tier is unchanged. Volume prices below
-about $0.07 per device are sold on prepaid annual terms with the hedge, or to
-customers who fund their own network costs in SUI through the fleet budget
-([SF-083](FLEET_BUDGET.md)); a month-to-month volume fleet pays the floor. Even a
+about $0.07 per device are sold only to customers who fund their own network costs
+in SUI through the fleet budget ([SF-083](FLEET_BUDGET.md)); other volume fleets,
+monthly or prepaid annual, pay the floor. Even a
 renewal repriced to hold 50% margin at 10× SUI cost ($134.69 for 1,000 devices,
 $0.135 per device) stays 48% below Greengrass's $0.26 for the same workload;
 parity would need roughly 20× SUI cost. Pricing instead for a guaranteed 80% margin at
@@ -293,7 +294,7 @@ Validation: [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267)
 
 ### Risks
 
-- **Token and fee exposure.** About two-thirds of the 1,000-device cost to serve is paid in SUI, and both the token price and the validator-voted reference gas price move: SUI rose 9.9× in the twelve months to January 2025 and fell to 0.16× in the twelve months to July 2026, and the reference gas price fell from about 550 to 100 MIST in April 2026. The [SUI cost sensitivity analysis](business/SUBSCRIPTION_PRICING.md) shows the $0.08 tier breaks even at about 12× SUI cost and holds 50% margin to about 5.7×, while the volume tier needs the term hedge. Walrus prices storage in USD terms with periodic adjustment, so WAL is stressed separately. SUI-denominated deposits and gas float gain when the token rises and lose when it falls; they are capital, not revenue.
+- **Token and fee exposure.** About two-thirds of the 1,000-device cost to serve is paid in SUI, and both the token price and the validator-voted reference gas price move: SUI rose 9.9× in the twelve months to January 2025 and fell to 0.16× in the twelve months to July 2026, and the reference gas price fell from about 550 to 100 MIST in April 2026. The [SUI cost sensitivity analysis](business/SUBSCRIPTION_PRICING.md) shows the $0.08 tier breaks even at about 12× SUI cost and holds 50% margin to about 5.7×, while the volume tier needs its floor or customer-funded SUI network costs; the term hedge covers token-price moves but not gas-price votes. Walrus prices storage in USD terms with periodic adjustment, so WAL is stressed separately. SUI-denominated deposits and gas float gain when the token rises and lose when it falls; they are capital, not revenue.
 - **No Mainnet measurement yet** (SF-135).
 - **The public endpoint is guidance-limited** and not intended for production; move paying fleets off it before relying on it.
 - **The weekly-archive figure** depends on deposit reclaim (SF-129) and on SF-121's archive work.
