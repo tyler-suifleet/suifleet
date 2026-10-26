@@ -951,7 +951,10 @@ if __name__ == "__main__":
     # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
     # device funding, deployments and cleanup. After SF-136 a fresh pair is
     # ~0.55 + ~0.56 SUI of packages, about 1.2 SUI in total (run 40238821132).
-    parser.add_argument("--max-spend-mist", type=int, default=1_400_000_000)
+    # SF-127 run 40246935467 settled 1.221 SUI of current-main packages and setup
+    # before its base deployment; the full 0.2-SUI deployment and cleanup
+    # reservations must still fit.
+    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")
