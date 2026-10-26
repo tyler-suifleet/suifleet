@@ -117,6 +117,9 @@ def _calculate(model, policy, annual, hedged):
     for flag, name in ((annual, 'annual'), (hedged, 'hedged')):
         if type(flag) is not bool:
             raise ValueError(f'{name} must be boolean')
+    if hedged and not annual:
+        # Below the renewal trigger a monthly price persists, but a monthly hedge covers one month.
+        raise ValueError('hedged floors apply only to prepaid annual terms; price monthly billing unhedged')
     devices = model.get('devices')
     if type(devices) is not int or not 1 <= devices <= 1_000_000_000:
         raise ValueError('devices must be a positive whole number up to 1 billion')
@@ -197,7 +200,8 @@ def _calculate(model, policy, annual, hedged):
         if sui == ZERO or locked >= ONE:
             return None
         target = monthly * (ONE - margin - payment) - fee - walrus - services
-        return (target / sui - locked) / (ONE - locked)
+        multiple = (target / sui - locked) / (ONE - locked)
+        return multiple if multiple >= ZERO else None
 
     def row(sui_multiple, wal_multiple):
         recurring = cost(sui_multiple, wal_multiple)
@@ -236,7 +240,11 @@ def _calculate(model, policy, annual, hedged):
         for margin in margins:
             if sui != ZERO:
                 multiple = (comparison * (ONE - margin - payment) - fee - walrus - services) / sui
-                parity[plain(margin)] = dict(sui_cost_multiple=fraction(multiple), implied_sui_usd=fraction(multiple * sui_usd))
+                if multiple < ZERO:
+                    # The comparison price misses this margin even if SUI operations were free.
+                    parity[plain(margin)] = dict(sui_cost_multiple=None, implied_sui_usd=None)
+                else:
+                    parity[plain(margin)] = dict(sui_cost_multiple=fraction(multiple), implied_sui_usd=fraction(multiple * sui_usd))
         comparison_result = dict(label=terms.get('comparison_label'), monthly_usd=plain(comparison),
                                  price_ratio=fraction(monthly / comparison) if comparison else None,
                                  parity_multiple_for_margin=parity)
