@@ -679,3 +679,23 @@ operation ran. Hosted checks for the pushed reconciliation remain pending and
 unpolled; the coordinator must enforce exact-head/current-base CI/testnet and
 fresh independent review. This handoff is blocked on the genuine merge
 prerequisite, not approval.
+
+## 2026-10-26 feedback/base reconciliation
+
+Integrated snapshot/current main `79cfd1cb7645aaa294dd327cbee017acc95c8c75`
+without conflicts. The incoming changes cover subscription pricing and tracking;
+this integration changes no Move, daemon or frontend product source.
+Fresh offline host checks: `python3 -m unittest discover -s scripts/tests -p
+ 'test_testnet*.py'` (141 OK, one skip), `test_live*.py` (53 OK),
+`test_release*.py` (27 OK), and `test_subscription_pricing.py` (21 OK).
+`git diff --check origin/main HEAD` passed. No application/localnet/browser
+suite was rerun for this base-only integration; prior evidence remains historical.
+
+Read-only GitHub metadata still reports SF-129 PR #279 OPEN at
+`457dd49f6423b90ae2d5f6db6d70fc7753ea4ca0`, with no merge commit.
+The review reported no new code defects; this genuine merge prerequisite remains
+blocking. The coordinator must integrate verified merged SF-129 before final
+SF-141 integration, then obtain exact-head/current-base CI/testnet and fresh
+independent review. Hosted checks remain pending and were not polled. No live
+mutation or hardware operation ran. Public expiry-window rebate and deferred
+physical/mainnet/provider/manual-wallet acceptance (#32/#159) remain unclaimed.
