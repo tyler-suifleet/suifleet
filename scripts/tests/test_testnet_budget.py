@@ -99,7 +99,7 @@ class LivePublicationBudgetTests(unittest.TestCase):
         live.ledger = Budget(700_000_000, [])
         live.ledger.grant(135_436_148)
         live.evidence = {}
-        live.operator, live.build_sui = "0xa", "sui"
+        live.operator, live.build_sui, live.network_sui, live.wallet = "0xa", "sui", "sui", Path("client.yaml")
         live.assert_lock = Mock()
         live.executor = Mock(return_value=Mock())
         # Run 40212571323 exhausted the old 400M transaction budget. A
@@ -123,7 +123,7 @@ class LivePublicationBudgetTests(unittest.TestCase):
         live.ledger = Budget(700_000_000, [])
         live.ledger.grant(699_000_000)
         live.evidence = {}
-        live.operator, live.build_sui = "0xa", "sui"
+        live.operator, live.build_sui, live.network_sui, live.wallet = "0xa", "sui", "sui", Path("client.yaml")
         live.assert_lock = Mock()
         live.executor = Mock(return_value=Mock())
         submit = Mock()
