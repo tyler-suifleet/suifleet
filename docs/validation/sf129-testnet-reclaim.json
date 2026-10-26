@@ -1,0 +1,124 @@
+{
+  "started": "2026-10-26T23:06:38Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "prune expired archives and burn their blobs",
+      "gas_budget_mist": 50000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "3rNCChJAxBnsTbVQS3ykxswbqEMy4B43A7T66617VSRU",
+      "gas_mist": 0,
+      "allowance_used_mist": 0
+    }
+  ],
+  "checks": [
+    "Testnet chain/account, data UpgradeCap and fleet budget owner cap verified",
+    "data package version 2 0xfe96657423749003cb4ab8f50298c930081841a1588fe7c8b0511f6c56d3385c already carries this source; not republished",
+    "in-place upgrade: verified bytecode, introduction origins kept, existing objects unchanged",
+    "pruned 2 expired archive(s); 31750638 MIST returned net of fees"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf129-bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf129-bin/sui-network",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1265,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 919229556,
+  "max_spend_mist": 50000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "9dbb9ff6e7c88598fb8a4f9f3dfd5090f3c02c4c",
+  "walrus_epoch": 563,
+  "plan": {
+    "epoch": 563,
+    "scanned": 2,
+    "truncated": false,
+    "resume": {},
+    "loose": [],
+    "anchors": [
+      {
+        "deviceId": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
+        "writerId": "0x5e6cf2a541bef3ecd20ab14a374c06e4a5fb93f3a5048c89981e9c86a9ca38e4",
+        "index": 0,
+        "endEpoch": 563,
+        "held": true,
+        "blob": "0x25d6a1ea30757485e52d57997d50ed797cfcbf324c60154119e527af46c3e4df"
+      },
+      {
+        "deviceId": "0xddab1bfc4b37b3c47037fda79a1582207a54b07be050b68e57ca4e3156df3cc4",
+        "writerId": "0x5e6cf2a541bef3ecd20ab14a374c06e4a5fb93f3a5048c89981e9c86a9ca38e4",
+        "index": 1,
+        "endEpoch": 563,
+        "held": true,
+        "blob": "0xf2e02cac1a3b8fcf0faa2072b33a86b8b2c90ebcd787b641c4027a8b7aa3aa09"
+      }
+    ]
+  },
+  "reclaim": {
+    "indices": [
+      0,
+      1
+    ],
+    "net_returned_mist": 31750638,
+    "gas": {
+      "computationCost": "1000000",
+      "storageCost": "20862000",
+      "storageRebate": "53612638",
+      "nonRefundableStorageFee": "5362"
+    }
+  },
+  "fixture": {
+    "head": "0xfe96657423749003cb4ab8f50298c930081841a1588fe7c8b0511f6c56d3385c",
+    "version": "2",
+    "base": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "cap": "0x6a9318f286763be1d62112104d4218f33a3f86a9b464ece8542d8bfb84746937",
+    "budget_cap": "0xffb183d8e4a7bbc944d173856295b3e193e94a498ab4d588397e630b474ca19b"
+  },
+  "origins": {
+    "fleet_data::FleetData": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::DeviceKey": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::DeviceData": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::AnchorKey": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::Anchor": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::HealthUpdated": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::DataAnchored": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::AnchorsPruned": "0xfe96657423749003cb4ab8f50298c930081841a1588fe7c8b0511f6c56d3385c",
+    "fleet_data::ExpiredBlobsBurned": "0xfe96657423749003cb4ab8f50298c930081841a1588fe7c8b0511f6c56d3385c",
+    "fleet_data::DiagnosticKey": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673",
+    "fleet_data::DiagnosticRequest": "0xb96ff2bb45d7baf4225329622d4943ca2f60f267aa7cbef83fd01d11bf328673"
+  },
+  "source_sha256": "90e6fa9377ae324d0c54c72118bb74eaf812ee2fb2846f16df811464bb849bae",
+  "compiled_digest": "542a755f2d7c0a57f256c69a291abd6cedf4f81b0cbcb8de0da5a4af4ac0d686",
+  "source_revision": "176ff469bf74f63bb09c39b70608d83d8543e92f",
+  "end_balance_mist": 950980194,
+  "spent_mist": -31750638,
+  "allowance_used_mist": 0,
+  "finished": "2026-10-26T23:06:56Z"
+}
