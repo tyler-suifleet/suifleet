@@ -872,3 +872,30 @@ hardware operation, production credentials or SF-129 owner-worktree edits ran.
 - Integration merge `5b4ca9a5dce6be838dabc944f0e87f3f8cda2743` has both
   the prior SF-141 head and exact SF-129 pin as parents; ancestor checks for
   that pin and fetched main passed. Whitespace checks passed.
+
+## 2026-10-26 current-base readiness reconciliation
+
+Merged snapshot/current main `6ae9d2cfb32291c69806dc901c243dd4c5b0fa43`
+without conflicts. The incoming delta is only SF-156 acceptance-readiness tooling,
+its tests, operational documentation and tracker records (7 files); retention,
+Move, daemon, frontend and testnet runner sources are unchanged from `df112c61`.
+The independent review found no actionable defect and no open threads.
+
+Fresh host checks, all exit 0:
+- `python3 -m unittest discover -s tools/pr-coordinator/tests -p 'test_acceptance_watch.py'`: 11 passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`: 73 passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`: 145 tests OK, one existing skip.
+- `python3 -m unittest discover -s scripts/tests -p 'test_retention*.py'`: 15 passed.
+- `git diff --check` and `git diff --check origin/main HEAD`: passed.
+
+These are offline fixture tests; their printed transaction/faucet diagnostics are
+simulations, not public execution evidence. No readiness service was installed or
+started. Product builds, Move/Rust/OTA/browser/localnet tests were not rerun for
+this tooling/documentation-only integration; prior runs above remain historical.
+SF-129 PR #279 was checked read-only and remains OPEN at `e5e5c452`, mergedAt
+null. Its exact reviewed source remains included, but verified merge is still a
+final integration prerequisite. Public expiry/rebate evidence is not claimed.
+Hosted checks for the pushed head are pending and will not be polled by this
+worker; fresh independent review and actual exact-head/current-base CI/testnet
+remain required. Physical/mainnet/provider/manual-wallet acceptance stays unrun
+in #32/#159. No public mutations, deployment, hardware or other workers ran.
