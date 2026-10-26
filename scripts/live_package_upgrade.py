@@ -601,7 +601,20 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            return client("serialized-tx", tx["tx_bytes"])  # Same digest: executes at most once.
+                            try:
+                                return client("serialized-tx", tx["tx_bytes"])  # Same digest: executes at most once.
+                            except RuntimeError:
+                                # A failed CLI exit can still mean executed effects.
+                                # One read, no replay: settle verified effects or
+                                # retain the full uncertain reservation and marker.
+                                facts = facts_reader.transaction(tx["digest"])
+                                if facts is None:
+                                    raise
+                                _, result = reconciler.settle(facts, operator)
+                                if result["digest"] != tx["digest"]:
+                                    raise reconciler.Uncertain("resubmission effects have a different digest")
+                                result.pop("reconciled")  # This run reserved the replay.
+                                return result
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 

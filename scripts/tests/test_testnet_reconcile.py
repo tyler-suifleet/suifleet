@@ -458,6 +458,51 @@ class RunFlow(unittest.TestCase):
             self.assertEqual(evidence['allowance_used_mist'], 0)
             self.assertFalse(any('serialized-tx' in c for c in commands))
 
+    def test_retained_publish_cli_failure_settles_newly_visible_effects(self):
+        # Run 40265702929: not found before replay, then CLI InsufficientGas.
+        # One follow-up read must settle effects without another mutation.
+        for mode in ('failed', 'missing', 'wrong_sender', 'wrong_digest'):
+            visible = mode == 'failed'
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = pending()
+                marker['tx']['sender'] = tc.normal(ADDRESS)
+                chain = FakeChain(epoch=8)
+                failed = facts(sender=tc.normal(ADDRESS), success=False, created=[])
+                failed['error'] = 'InsufficientGas'
+                failed['gas_used'] = {'computationCost': '5010000', 'storageCost': '0', 'storageRebate': '0'}
+                sent = []
+
+                def serialized(argv):
+                    sent.append(argv[-2])
+                    if mode != 'missing':
+                        chain.transactions['D1'] = dict(failed)
+                        if mode == 'wrong_sender':
+                            chain.transactions['D1']['sender'] = OTHER
+                        if mode == 'wrong_digest':
+                            chain.transactions['D1']['digest'] = 'OTHER'
+                    raise RuntimeError('CLI InsufficientGas')
+
+                args, key, patches, _ = self.harness(root, self.state_with(marker), serialized=serialized)
+                expected = {'failed': 'execution effects', 'missing': 'CLI InsufficientGas',
+                            'wrong_sender': 'not sent and paid', 'wrong_digest': 'different digest'}[mode]
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    self.run_flow(args, patches, [
+                        patch.object(live.reconciler, 'Chain', return_value=chain),
+                        patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
+                        patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})])
+                saved = json.loads((root / 'state.json').read_text())['publications'][key]
+                evidence = json.loads((root / 'evidence.json').read_text())
+                self.assertEqual(sent, ['BYTES'])
+                self.assertEqual(len(chain.reads), 2)
+                self.assertEqual('pending_operation' in saved, not visible)
+                self.assertNotIn('base_package', saved)
+                entry = evidence['transactions'][0]
+                self.assertEqual(entry['status'], 'failure' if visible else 'unknown')
+                self.assertEqual(evidence['allowance_used_mist'], 5_010_000 if visible else 400_000_000)
+                if visible:
+                    self.assertEqual(entry['digest'], 'D1')
+
     def test_restart_adopts_unknown_but_executed_publish_without_republishing(self):
         marker = pending()
         marker['tx']['sender'] = tc.normal(ADDRESS)
