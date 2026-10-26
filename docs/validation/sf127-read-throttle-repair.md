@@ -43,3 +43,35 @@ not poll hosted CI or merge. Physical acceptance remains unrun in SF-031/#32;
 mainnet/final production-provider/manual-wallet acceptance remains deferred and
 unrun in SF-087/#159 and SF-031/#32. Existing public leftovers are not claimed
 reconciled.
+
+## Review correction: connect the runtime adapter
+
+Independent review of `9841c915` found that the main merge had restored a direct
+`subprocess.run` inside `live_package_upgrade.run()`. The helper tests above
+passed, but the runtime path bypassed the read cooldown. The earlier claim that
+this repair reached the final receipt reads was therefore incorrect.
+
+The runtime adapter now delegates to `package_client`, which uses the shared
+bounded read retry. The extracted helper retains main's failed `ptb` and
+`execute-signed-tx` digest readback, including `UnreadableExecution` when effects
+cannot be recovered; it never resubmits the mutation. New offline regressions
+verify the runtime delegation, failed-effects recovery without replay, and the
+unknown-execution failure path. The existing helper regressions exercise four
+429s followed by a real dynamic-field response, persistent throttling and
+non-retryable commands/errors.
+
+Verification for this correction:
+
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`: 54 passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  142 tests OK, one installed-toolchain skip on host.
+- `python3 -m unittest discover -s scripts/tests -p 'test_release_plan.py'`:
+  27 passed.
+- `git diff --check`: passed.
+- `git merge --no-edit origin/main`: already up to date at `7d6607d4`;
+  the snapshot/current base is already an ancestor of this branch.
+
+No frontend, Move, Rust, simulator or live-chain tests were rerun for this Python
+adapter correction. Hosted CI and automatic public-testnet acceptance on the
+new head remain pending, and fresh independent review is required. The deferred
+external checks and unreconciled public leftovers described above remain unrun.
