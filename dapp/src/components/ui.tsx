@@ -75,3 +75,12 @@ export function ConnectionRequired({ title, description }: { title: string; desc
     </section>
   </div>;
 }
+
+export function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-5">
+    <div className="flex items-start gap-3">
+      <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-blue-700 ring-1 ring-blue-100">i</span>
+      <div className="min-w-0"><h2 className="text-sm font-semibold text-slate-900">{title}</h2><div className="mt-2 space-y-2 text-sm leading-relaxed text-slate-600">{children}</div></div>
+    </div>
+  </section>;
+}
