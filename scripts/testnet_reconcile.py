@@ -141,6 +141,11 @@ def reconcile(pending, *, chain, operator, inspect, verify, resubmit, now, legac
     """
     operator = toolchain.normal(operator)
     pending = normal_pending(pending)
+    if pending.get('other_executions'):
+        # Neither expiry nor absence of the retained digest settles a mutation
+        # that already executed under another digest.
+        raise Uncertain(f'pending {pending["label"]!r} also executed as {pending["other_executions"]}; '
+                        'explicit reconciliation required')
     tx = pending.get('tx')
     if pending.get('legacy'):
         if legacy is None:

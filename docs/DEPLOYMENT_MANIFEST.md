@@ -56,6 +56,7 @@ All chain reads go over gRPC.
 - **Refusals:**
   - A recorded deployment without a `Published.toml` section is refused, because a fresh publish would orphan its fleet.
   - An unrecorded upgrade needs `--registry ID` to adopt the existing registry.
+- **Release plan** (`--plan PLAN.json`, SF-154): the reviewed plan from `scripts/release_plan.py` must describe this exact transaction: network, chain, account, action, deployment, contract sources and gas budget. It must also be intact, ready and unexpired. Testnet publication requires one; see [RELEASE_PLANNING.md](RELEASE_PLANNING.md).
 
 ### Transaction and failure handling
 
@@ -74,6 +75,7 @@ All chain reads go over gRPC.
    - `deployment.json`
    - `frontend.env`
    - the device `config.toml` template (`[sui]` plus the device sections of `suifleet-edge/config.example.toml`, or `--device-template`)
+   - `transaction.json` (digest, effects status and gas used) and, when one admitted it, `release-plan.json`
 4. **Switch both clients together.** The new `dapp/.env.local` is written in full beside the old one first: it gets `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`, the legacy `NEXT_PUBLIC_*_ID`/`NETWORK` lines are dropped, and every other line is kept. Next, a synced journal `deployments/ENV/activating.json` names the release. Then two renames activate `deployments/ENV/current` and `.env.local`, and the journal is removed.
    - If the second rename raises an error, the first is undone, and the undo is synced before the journal is removed.
    - If both renames succeed but syncing them fails, nothing is undone and the journal stays, so the switch is finished as below.
