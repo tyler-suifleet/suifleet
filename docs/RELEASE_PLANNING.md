@@ -51,9 +51,34 @@ including `--dry-run`, the publisher refuses unless all of these hold:
 - the contract sources still have the planned digest;
 - `--gas-budget` is within the planned budget.
 
+Source equality does not prove bytecode equality, so a plan that pins a
+bytecode digest (required on testnet and mainnet) is also bound to the exact
+transaction before anything is signed, including for `--dry-run`:
+1. The CLI builds the transaction unsigned (`--serialize-unsigned-transaction`).
+2. The pinned frontend SDK decodes it (`scripts/sui_tx_inspect.cjs`).
+3. The package digest of the transaction's own modules and dependencies
+   (Blake2b-256, as `sui move build` reports it) must equal the plan's. A
+   different compiler, framework or build environment, or a wrong
+   operator-supplied `--bytecode-digest`, is refused here.
+4. `sui_toolchain.verify_package_transaction` checks the sender and gas owner,
+   gas budget and command shape. A publish must transfer only its UpgradeCap to
+   the custody account. An upgrade must authorize the planned digest with the
+   recorded UpgradeCap and commit to the recorded package.
+5. Only those bytes are signed (`sui keytool sign` with the client config's
+   keystore) and executed (`sui client execute-signed-tx`); a dry run simulates
+   them with `serialized-tx --dry-run`, which signs nothing. (`serialized-tx`
+   is not used to execute: the real localnet rehearsal showed it can rebuild
+   the gas data and so execute a different digest.) The publisher then writes
+   `[published.ENV]` in `Published.toml` from the verified effects, because
+   `execute-signed-tx` records nothing. `--recover` writes it too, and refuses an executed digest other
+   than the verified one.
+
+Plans without a pinned digest are possible only on localnet/devnet; they keep
+the CLI's one-step publish.
+
 Testnet publication requires `--plan`; a testnet dry run does not. The admitted plan is kept:
 - in the pending record;
-- in the release as `release-plan.json`, beside `transaction.json` (digest, effects status and gas used). `--recover` keeps both.
+- in the release as `release-plan.json`, beside `transaction.json` (digest, effects status, gas used and, for a pinned plan, `verified_before_signing`: kind, bytecode digest and unsigned transaction digest). `--recover` keeps both.
 
 ## Commands
 
@@ -70,13 +95,13 @@ scripts/redeploy.sh --expect-address 0xCUSTODY --plan plan.json --gas-budget N
 Other options:
 - `--package-id/--upgrade-cap/--registry` plan an adopted deployment without records.
 - `--fixture-state` reads the testnet fixture cache (`live-state.json`, read-only) for identical bytecode.
-- `--bytecode-digest` supplies a digest computed elsewhere.
+- `--bytecode-digest` supplies a digest computed elsewhere. Execution still requires the signing CLI to build exactly that digest.
 
 ## Abort and rollback boundaries
 
 | Phase | Boundary |
 |---|---|
-| Before the transaction | Every check and plan refusal changes nothing and spends no gas. |
+| Before the transaction | Every check and plan refusal, including the unsigned-transaction bytecode check, changes nothing and spends no gas. |
 | Executed, failed effects | Gas is charged. Package, records, `Published.toml` and client configs are unchanged. |
 | Executed, recording failed | The chain changed and cannot be rolled back. `pending-DIGEST.json` (with the plan) is kept. `--recover` records it without another transaction, and the prior configs stay active. |
 | Activation interrupted | The journal rolls forward (`--reconcile`), and `make dapp-build` refuses until then. |
@@ -87,8 +112,8 @@ Other options:
 
 | Command | Covers |
 |---|---|
-| `make test-publish` | Offline (also runs `scripts/tests/test_release_plan.py`):<br>• fresh and upgrade plans, and admission through the real publisher with a fake CLI and chain<br>• replayed, superseded, tampered, expired, over-budget and wrong-account plans<br>• changed sources<br>• dropped types and new optional groups<br>• stale, foreign and non-address-owned caps; stale manifests; orphans<br>• identical bytecode, against the current release and the fixture cache<br>• scratch compilation, compiler failures and missing lock pins<br>• policy validation<br>• mainnet planning-only: forbidden execution, forbidden development custody, and publish.py's own refusal with or without a plan<br>• `--recover` keeping the plan |
-| `make test-release-rehearsal-localnet` | Real localnet, contracts, CLI and both clients: plan, refusals with no write and no gas, publish under a plan, replay refused, a compatible upgrade adding a type (dry run, then execute) whose origin is the upgrade, the stale superseded release, dropped-type and edited plans refused, identical bytecode flagged, then the `scripts/identity_lifecycle_localnet.py` old-package attacks from the historical pre-identity package (`d3acb1e`, as in `test_move_security_localnet.py`) into the rehearsed head, on the same chain. `REHEARSAL_ARGS="--evidence FILE"` writes the evidence. |
+| `make test-publish` | Offline (also runs `scripts/tests/test_release_plan.py`):<br>• fresh and upgrade plans, and admission through the real publisher with a fake CLI and chain<br>• replayed, superseded, tampered, expired, over-budget and wrong-account plans<br>• changed sources<br>• dropped types and new optional groups<br>• stale, foreign and non-address-owned caps; stale manifests; orphans<br>• identical bytecode, against the current release and the fixture cache<br>• scratch compilation, compiler failures and missing lock pins<br>• policy validation<br>• mainnet planning-only: forbidden execution, forbidden development custody, and publish.py's own refusal with or without a plan<br>• `--recover` keeping the plan<br>• pinned bytecode verified in the unsigned transaction and only those bytes signed: a wrong operator digest, other modules (compiler) or dependencies (build environment), sender, gas owner, budget, command shape, UpgradeCap transfer, authorized digest, cap and package are refused before signing; `Published.toml` recorded from verified effects, also by `--recover`; an executed digest other than the verified one is never recorded |
+| `make test-release-rehearsal-localnet` | Real localnet, contracts, CLI and both clients: plan, refusals with no write and no gas (including a plan pinning bytecode the CLI does not build), publish and upgrade signing only the verified unsigned bytes, replay refused, a compatible upgrade adding a type (dry run, then execute) whose origin is the upgrade, the stale superseded release, dropped-type and edited plans refused, identical bytecode flagged, then the `scripts/identity_lifecycle_localnet.py` old-package attacks from the historical pre-identity package (`d3acb1e`, as in `test_move_security_localnet.py`) into the rehearsed head, on the same chain. `REHEARSAL_ARGS="--evidence FILE"` writes the evidence. |
 
 The automatic testnet package-upgrade and upgrade-security gates
 ([TESTNET.md](TESTNET.md)) remain the public-network upgrade evidence for
@@ -97,25 +122,29 @@ old-package attacks.
 
 ## Rehearsal evidence (2026-10-25)
 
-Code revision `195220e0ce945b98e882e961641d3f2c131e0e6d`; release compiler `sui 1.81.1-e04cf9aa915c`
-(`suifleet-dev:sf037`). Full JSON: [`validation/sf154-release-rehearsal.json`](validation/sf154-release-rehearsal.json).
+Localnet rehearsal at code revision `77fe0e68e2f959e018cdb9e6f9cd65f7ebc44155` (after the PR #317
+review fix); release compiler `sui 1.81.1-e04cf9aa915c` (`suifleet-dev:sf037`). The read-only public
+plans below were made at `195220e0`; planning is unchanged since. Full JSON:
+[`validation/sf154-release-rehearsal.json`](validation/sf154-release-rehearsal.json).
 No mainnet or production transaction, signature, capability transfer or credential
 operation occurred. No testnet state was mutated.
 
-**Isolated localnet** (`--network none`, disposable chain `b565b295`): all seven steps passed.
-- **Plans.** Fresh publish `sha256:700ccdc9…` and upgrade `sha256:30411e1d…`, both ready. Head bytecode `b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d`.
+**Isolated localnet** (`--network none`, disposable chain `cf32f118`): all seven steps passed.
+- **Plans.** Fresh publish `sha256:a573207f…` and upgrade `sha256:c0199b43…`, both ready. Head bytecode `b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d`; upgrade bytecode `6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd`.
 - **Refusals.** None wrote anything or spent gas:
   - another custody account;
   - a plan over the policy budget;
   - a gas budget above the plan's;
+  - a plan pinning bytecode the CLI does not build (all-zero digest), executed and dry run, refused in the unsigned transaction;
   - the replayed publish plan;
   - a plan whose sources dropped `release_rehearsal::RehearsalMarker`;
   - an edited plan.
-- **Publish.** `CG8n8WUwrQuircaWTkajKTcHbPpSf2E7VhY9dzVE75kG` succeeded. Net 532,828,600 MIST, equal to the account's balance change.
-- **Compatible upgrade.** Dry run, then `BnV7ZZ4NCAqCSzr8hhU2q9ynBz1hUJNaZ8NVxVXyb9Z9` succeeded. Net 536,150,620 MIST.
+- **Publish.** `BXG4bJfwYGqdvCXvRKkFky4XXr5cDk1NBv6EpetpCtem` succeeded: the verified unsigned digest, carrying the planned bytecode. Net 532,828,600 MIST, equal to the account's balance change.
+- **Compatible upgrade.** Dry run, then `6G29db1PzYeuimy3DekupnCcAWaVXvTNXcxJj4EqKYVH` succeeded: the verified unsigned digest, authorizing the planned digest. It read the `Published.toml` section the publisher recorded. Net 536,150,620 MIST.
   - `RehearsalMarker` originates in v2.
   - Every other origin, the registry and the UpgradeCap are unchanged.
   - Daemon `--check-config` and the frontend manifest check accept v2 and reject v1 as stale.
+- **Finding during the fix.** Executing the verified bytes with `sui client serialized-tx` executed a different digest on this localnet, which the publisher refused to record. Execution therefore signs with `sui keytool sign` and submits with `execute-signed-tx`.
 - **Old-package attacks.** `identity_lifecycle_localnet.py` from `d3acb1e` into the rehearsed head: **47/47**.
 
 **Read-only public plans** (gRPC reads only; nothing signed):

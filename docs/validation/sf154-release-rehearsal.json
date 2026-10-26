@@ -4,13 +4,13 @@
   "statement": "Rehearsal and read-only planning evidence only. No production or mainnet transaction, signature, capability transfer or credential operation occurred; no testnet mutation was made.",
   "localnet_rehearsal": {
     "ticket": "SF-154",
-    "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
-    "chain": "b565b295",
+    "revision": "77fe0e68e2f959e018cdb9e6f9cd65f7ebc44155",
+    "chain": "cf32f118",
     "rpc": "http://127.0.0.1:9000",
     "sui": "sui 1.81.1-e04cf9aa915c",
     "plans": {
       "plan-publish": {
-        "digest": "sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538",
+        "digest": "sha256:a573207fbf34a4e683066521d57e5e5410abbcff0f532583592497858caa74bf",
         "ready": true,
         "action": "publish",
         "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
@@ -19,7 +19,7 @@
         "removed_types": []
       },
       "plan-other-custody": {
-        "digest": "sha256:fd34211e200602400b6a4dd61a7626a6ee90c0e514e5f62b8e013289e2228767",
+        "digest": "sha256:7542f549911eee4d5d8621c6027ed4a46fd80fd6943a978e3392e4f244e2639b",
         "ready": true,
         "action": "publish",
         "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
@@ -28,7 +28,7 @@
         "removed_types": []
       },
       "plan-over-budget": {
-        "digest": "sha256:db394b7f8382d5573e5b5e3d4411c31b8ae95b039e30c2b1b3cbb1086f5b1f70",
+        "digest": "sha256:8b5813f4dc014e4bfb501e295cb58c392f1e92aac02a796595d92c115c4943f8",
         "ready": false,
         "action": "publish",
         "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
@@ -39,8 +39,17 @@
         "new_types": 114,
         "removed_types": []
       },
+      "plan-other-bytecode": {
+        "digest": "sha256:ec6d541ccbe972513753abd793bc2096bed585c37d3e3b1c2d03c19c7ca61527",
+        "ready": true,
+        "action": "publish",
+        "bytecode": "0000000000000000000000000000000000000000000000000000000000000000",
+        "findings": [],
+        "new_types": 114,
+        "removed_types": []
+      },
       "plan-upgrade": {
-        "digest": "sha256:30411e1dc1ef0bcce6bbda2716c303e0167094cc60f48f2cc8f114b7ed5c2865",
+        "digest": "sha256:c0199b43869e33d42bf0f21ecc2f3f53e87ad41cb92b251ea999a61354366134",
         "ready": true,
         "action": "upgrade",
         "bytecode": "6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd",
@@ -53,7 +62,7 @@
         "removed_types": []
       },
       "plan-dropped-type": {
-        "digest": "sha256:159e3c80612d31c0ed103d0f41b30b3ff08a3117b4254b0b6371b0eee8551263",
+        "digest": "sha256:982021e156569edd56e8a86154dd389a165f42407b319651e423587910d0a814",
         "ready": false,
         "action": "upgrade",
         "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
@@ -66,7 +75,7 @@
         ]
       },
       "plan-reupgrade": {
-        "digest": "sha256:b7c8214e5559365cf31ea11a7abf0e9e86948872e0a52e552367943bd902d7f9",
+        "digest": "sha256:0145c947197a8d3f7aa7a734f257f741d7af435066eba33626a86c96ab01bda7",
         "ready": true,
         "action": "upgrade",
         "bytecode": "6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd",
@@ -79,7 +88,7 @@
     },
     "transactions": {
       "publish": {
-        "digest": "CG8n8WUwrQuircaWTkajKTcHbPpSf2E7VhY9dzVE75kG",
+        "digest": "BXG4bJfwYGqdvCXvRKkFky4XXr5cDk1NBv6EpetpCtem",
         "status": "success",
         "gas_used": {
           "computationCost": "5020000",
@@ -89,10 +98,16 @@
         },
         "net_gas_mist": 532828600,
         "balance_change_mist": -532828600,
-        "plan": "sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538"
+        "plan": "sha256:a573207fbf34a4e683066521d57e5e5410abbcff0f532583592497858caa74bf",
+        "verified_before_signing": {
+          "kind": "publish",
+          "modules": 14,
+          "bytecode_digest": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+          "unsigned_digest": "BXG4bJfwYGqdvCXvRKkFky4XXr5cDk1NBv6EpetpCtem"
+        }
       },
       "upgrade": {
-        "digest": "BnV7ZZ4NCAqCSzr8hhU2q9ynBz1hUJNaZ8NVxVXyb9Z9",
+        "digest": "6G29db1PzYeuimy3DekupnCcAWaVXvTNXcxJj4EqKYVH",
         "status": "success",
         "gas_used": {
           "computationCost": "6070000",
@@ -102,13 +117,20 @@
         },
         "net_gas_mist": 536150620,
         "balance_change_mist": -536150620,
-        "plan": "sha256:30411e1dc1ef0bcce6bbda2716c303e0167094cc60f48f2cc8f114b7ed5c2865"
+        "plan": "sha256:c0199b43869e33d42bf0f21ecc2f3f53e87ad41cb92b251ea999a61354366134",
+        "verified_before_signing": {
+          "kind": "upgrade",
+          "modules": 15,
+          "policy": "00",
+          "bytecode_digest": "6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd",
+          "unsigned_digest": "6G29db1PzYeuimy3DekupnCcAWaVXvTNXcxJj4EqKYVH"
+        }
       }
     },
     "refusals": [
       {
         "case": "plan for another custody account",
-        "error": "error: release plan refused: plan is for ('localnet', 'sf-rehearse', 'b565b295', '0xabababababababababababababababababababababababababababababababab'), not ('localnet', 'sf-rehearse', 'b565b295', '0xed7d161efa85a0ade2dcfb9cd61e89120a133c51f7e1ebe151438422053b20de')"
+        "error": "error: release plan refused: plan is for ('localnet', 'sf-rehearse', 'cf32f118', '0xabababababababababababababababababababababababababababababababab'), not ('localnet', 'sf-rehearse', 'cf32f118', '0xaff06b2bcd278761fa4240a1ff63ba9b92983dcbaeea81da724a026d42bc6dab')"
       },
       {
         "case": "plan exceeding the policy budget",
@@ -117,6 +139,14 @@
       {
         "case": "gas budget above the plan's",
         "error": "error: release plan refused: gas budget 3000000000 exceeds the planned 2000000000"
+      },
+      {
+        "case": "plan pinning bytecode the CLI does not build",
+        "error": "error: release plan refused the transaction before signing: transaction bytecode digest b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d is not the planned 0000000000000000000000000000000000000000000000000000000000000000: the signing CLI's compiler, framework or build environment dif"
+      },
+      {
+        "case": "plan pinning bytecode the CLI does not build (dry run)",
+        "error": "error: release plan refused the transaction before signing: transaction bytecode digest b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d is not the planned 0000000000000000000000000000000000000000000000000000000000000000: the signing CLI's compiler, framework or build environment dif"
       },
       {
         "case": "replayed publish plan",
@@ -132,23 +162,24 @@
       }
     ],
     "checks": [
-      "fresh-publish plan ready (sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538), bytecode b6eededde08cb498\u2026",
-      "custody, readiness and budget mismatches refused before any transaction; nothing written, no gas",
-      "published 0x52d6b2e76d5a7365283cb1926a70cb0eb2bf100eff5cb48769f91d5b5128cbf0 under the plan; transaction CG8n8WUwrQuircaWTkajKTcHbPpSf2E7VhY9dzVE75kG succeeded; both clients verify the generated configs",
+      "fresh-publish plan ready (sha256:a573207fbf34a4e683066521d57e5e5410abbcff0f532583592497858caa74bf), bytecode b6eededde08cb498\u2026",
+      "custody, readiness, budget and bytecode mismatches refused before any signature; nothing written, no gas",
+      "published 0xaf74553eb045e39e65031a7e2155d4d9446c756dc5126e87896111d9b32fdaeb under the plan; only the verified unsigned transaction BXG4bJfwYGqdvCXvRKkFky4XXr5cDk1NBv6EpetpCtem was signed and succeeded; both clients verify the generated configs",
       "replayed publish plan refused once the deployment exists",
-      "upgrade to 0xe98d312cb4edf201bc21b64d32ce4d8b81df2fc4bf4c3ec3d9811b26a007fd80 (v2) under the plan; release_rehearsal::RehearsalMarker originates in v2, existing origins, registry and UpgradeCap kept; the v1 release is rejected as stale",
+      "upgrade to 0xcee03f7e79eec3c95102df4dd739bead9fac4bf24473f0ccef7164e29235cdbb (v2) under the plan; release_rehearsal::RehearsalMarker originates in v2, existing origins, registry and UpgradeCap kept; the v1 release is rejected as stale",
       "dropped-type plan and edited plan refused; identical bytecode to the current release is flagged",
       "old-package identity attacks from d3acb1e to the rehearsed head: 47/47 checks passed"
     ],
     "old_package_checks": "47/47 checks passed",
     "records": {
-      "v1": "0x52d6b2e76d5a7365283cb1926a70cb0eb2bf100eff5cb48769f91d5b5128cbf0",
-      "v2": "0xe98d312cb4edf201bc21b64d32ce4d8b81df2fc4bf4c3ec3d9811b26a007fd80",
-      "upgrade_cap": "0x802a16bd5d9152cedd47ef77abec6d6d99f3ac7a35af272eeba7906f5b21f978",
-      "registry": "0x6f1ec1b252c4411c693afb50fd1bf343902c1ccff1cd188dcfb2a3fbfb1aa7d7"
+      "v1": "0xaf74553eb045e39e65031a7e2155d4d9446c756dc5126e87896111d9b32fdaeb",
+      "v2": "0xcee03f7e79eec3c95102df4dd739bead9fac4bf24473f0ccef7164e29235cdbb",
+      "upgrade_cap": "0xe7d4ab1f5fd42aae1b9714866358333f442ad21aa0b38bd2159d7dc5becd4b6a",
+      "registry": "0xade8ac672ddb63e3ce6506207db85307d83b9eced074fe54fefed6a7e8241ab1"
     },
     "spent_mist": 1068979220,
-    "command": "make test-release-rehearsal-localnet REHEARSAL_ARGS='--evidence FILE' in suifleet-dev:sf037 --network none against a disposable `sui start --with-faucet --force-regenesis` localnet"
+    "command": "make test-release-rehearsal-localnet REHEARSAL_ARGS='--evidence FILE' in suifleet-dev:sf037 --network none against a disposable `sui start --with-faucet --force-regenesis` localnet",
+    "note": "Rerun after the PR #317 review fix: pinned bytecode verified in the unsigned transaction, signed with keytool and executed with execute-signed-tx. Supersedes the 195220e0 run."
   },
   "read_only_public_plans": {
     "testnet_fixture_upgrade": {
