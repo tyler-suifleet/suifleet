@@ -463,12 +463,24 @@ def transaction_gas_budget(value):
     return value
 
 
-def package_client(network_sui, wallet, *command, json_output=True, check=True):
+def package_client(network_sui, wallet, *command, json_output=True, check=True, executed=None):
     full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
     if json_output:
         full.append("--json")
     result = live_common.run_client_command(full, command)
     if result.returncode and check and not (json_output and '"effects"' in result.stdout):
+        submitted = live_common.DIGEST.search(result.stderr + result.stdout)
+        if executed is not None and json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
+            # The CLI exits non-zero without effects when execution fails
+            # (runs 40261665249, 40266575477: InsufficientGas). Read the
+            # failure back by digest so it is charged and known, not unknown.
+            found = {}
+            try:
+                wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
+                         f"transaction {submitted.group(1)} not readable", timeout=60)
+            except AssertionError as error:
+                raise UnreadableExecution(submitted.group(1)) from error
+            return found
         raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
     if not json_output:
         return result
@@ -490,28 +502,8 @@ def run(args):
     network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
-        full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
-        if json_output:
-            full.append("--json")
-        result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-        if result.returncode and check and not (json_output and '"effects"' in result.stdout):
-            submitted = live_common.DIGEST.search(result.stderr + result.stdout)
-            if json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
-                # The CLI exits non-zero without effects when execution fails
-                # (runs 40261665249, 40266575477: InsufficientGas). Read the
-                # failure back by digest so it is charged and known, not unknown.
-                found = {}
-                try:
-                    wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
-                             f"transaction {submitted.group(1)} not readable", timeout=60)
-                except AssertionError as error:
-                    raise UnreadableExecution(submitted.group(1)) from error
-                return found
-            raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
-        if not json_output:
-            return result
-        out = result.stdout
-        return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+        return package_client(network_sui, wallet, *command, json_output=json_output,
+                              check=check, executed=executed)
 
     def executed(digest):
         try:

@@ -297,6 +297,49 @@ class PackageReadThrottleTests(ReadThrottleTests):
             "/pinned/sui", "/explicit/client.yaml", *args, **kwargs)
 
 
+class PackageClientWiringTests(unittest.TestCase):
+    def test_run_uses_shared_package_client_and_execution_reader(self):
+        # Stop at the first read: no chain, wallet or mutation is needed to
+        # verify that run's real adapter delegates to the retrying helper.
+        from types import SimpleNamespace
+        args = SimpleNamespace(network="testnet", evidence=None, max_spend_mist=1,
+                               wallet="/explicit/client.yaml", build_sui="/compiler",
+                               network_sui="/pinned/sui")
+        with patch.object(live_package_upgrade.os, "umask"), \
+                patch.object(live_package_upgrade.toolchain, "check_tools",
+                             return_value={"network": {"path": "/pinned/sui"}}), \
+                patch.object(live_package_upgrade, "package_client", side_effect=RuntimeError("stop at read")) as client:
+            with self.assertRaisesRegex(RuntimeError, "stop at read"):
+                live_package_upgrade.run(args)
+        self.assertEqual(client.call_args.args, ("/pinned/sui", Path(args.wallet), "envs"))
+        self.assertTrue(callable(client.call_args.kwargs["executed"]))
+
+    def test_failed_submission_reads_effects_without_replaying_mutation(self):
+        digest = "1" * 43
+        failure = CompletedProcess([], 1, "", f"transaction '{digest}' failed")
+        recovered = effects(status="failure", digest=digest)
+        executed = Mock(return_value=recovered)
+        for command in ("execute-signed-tx", "ptb"):
+            with self.subTest(command=command), \
+                    patch.object(live_common.subprocess, "run", return_value=failure) as ran, \
+                    patch.object(live_common.time, "sleep") as sleep:
+                self.assertEqual(live_package_upgrade.package_client(
+                    "/pinned/sui", "/explicit/client.yaml", command, executed=executed), recovered)
+                ran.assert_called_once()
+                sleep.assert_not_called()
+                executed.assert_called_with(digest)
+
+    def test_unreadable_failed_submission_preserves_unknown_execution(self):
+        digest = "1" * 43
+        failure = CompletedProcess([], 1, "", f"transaction '{digest}' failed")
+        with patch.object(live_common.subprocess, "run", return_value=failure) as ran, \
+                patch.object(live_package_upgrade, "wait_for", side_effect=AssertionError("not indexed")):
+            with self.assertRaises(live_package_upgrade.UnreadableExecution):
+                live_package_upgrade.package_client(
+                    "/pinned/sui", "/explicit/client.yaml", "ptb", executed=Mock(return_value={}))
+        ran.assert_called_once()
+
+
 class FleetPreflightFundingTests(unittest.TestCase):
     def test_one_pinned_faucet_credit_preserves_used_allowance(self):
         run = Live("/nonexistent/client.yaml", "testnet", 100)
