@@ -422,6 +422,13 @@ test-publish-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_publish_localnet.py
 
+# SF-154 release rehearsal against a disposable localnet (start it first):
+# plan, refusals, publish and compatible upgrade under plans, old-package attacks.
+.PHONY: test-release-rehearsal-localnet
+test-release-rehearsal-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_release_rehearsal_localnet.py $(REHEARSAL_ARGS)
+
 # SF-021 on a disposable localnet (start it first): claim enrollment, delegated
 # deployer roles and a SoftHSM2 PKCS#11 signer (needs softhsm2 + opensc).
 .PHONY: test-enrollment-localnet
