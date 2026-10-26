@@ -3311,6 +3311,30 @@
         "Add offline readiness, duplicate/restart and invalid/unknown evidence regression tests, and document operation and limitations."
       ],
       "validation": "Offline watcher regressions, read-only live probe at epoch562, installed timer/service checks and source provenance. No paid unexpired prune or hardware/mainnet operation."
+    },
+    {
+      "key": "SF-157",
+      "title": "Polish every dApp page and relocate technical history diagnostics",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src",
+        "scripts",
+        "docs"
+      ],
+      "resources": [],
+      "description": "Deliver a consistent professional UI across every existing page. Replace the persistent technical checkpoint banner with accessible, plain-language history coverage information and expandable diagnostics in a secondary location. Preserve truthful incomplete-history status and all wallet/authority/error boundaries.",
+      "evidence": "User feedback 2026-10-26: inconsistent page quality and an ugly globally repeated History unavailable before checkpoint warning. Latest local main UI confirms the notice precedes every page.",
+      "acceptance": [
+        "Audit all existing routes and unify shell, typography, spacing, cards, forms, tables, empty/loading/error states and responsive navigation; preserve existing workflows and wallet safety.",
+        "Remove the checkpoint alert from the top of every page. Provide a discoverable secondary history coverage control with plain-language impact, actionable guidance and expandable technical details; never claim incomplete inventory/history is complete.",
+        "Verify representative populated, disconnected, loading/error and narrow-screen layouts in a real browser; ensure all routes render without horizontal page overflow or inaccessible controls.",
+        "Run frontend typecheck, production build and relevant browser/regression checks. Preview the implementation locally for user feedback, label unmerged preview accurately, and open a linked PR for independent review."
+      ],
+      "validation": "Frontend typecheck and production build, existing history regressions plus browser route/diagnostic/viewport verification; record screenshots and exact results. No contract/device deployment or testnet spend needed."
     }
   ]
 }
