@@ -61,6 +61,9 @@ DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no
 
 DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
 CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
+# Operator PTBs settle at most ~14M MIST (run 40252593790). Each reserves its whole
+# budget, so the default 0.2 SUI would not fit after a fresh head upgrade.
+OPERATOR_GAS = 50_000_000
 
 
 def fixture_valid(live, fixture):
@@ -122,7 +125,7 @@ def run(args):
                     "--transfer-objects", "[device, minted]", f"@{live.operator}",
                     "--move-call", f"{old}::device_group::create_group", '"legacy"', '"sf010"', CLOCK,
                     "--split-coins", "gas", f"[{DEVICE_FUNDING}]", "--assign", "fee",
-                    "--transfer-objects", "[fee]", f"@{device_address}", funding=DEVICE_FUNDING)
+                    "--transfer-objects", "[fee]", f"@{device_address}", funding=DEVICE_FUNDING, budget=OPERATOR_GAS)
                 device = live.created(registered, "::device_registry::Device")[0]
                 caps = live.created(registered, "::device_cap::DeviceCap")
                 group = live.created(registered, "::device_group::DeviceGroup")[0]
@@ -132,9 +135,11 @@ def run(args):
                     live.readable(cap_id)
                 cap = next(c for c in caps if dm.object_id(live.owner(c)) == dm.object_id(device_address))
                 minted = next(c for c in caps if c != cap)
-                live.transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}")
+                live.transaction("add legacy device to group (base)", "--move-call", f"{old}::device_group::add_device", f"@{group}", f"@{device}",
+                                 budget=OPERATOR_GAS)
                 d0 = live.created(live.transaction("deployment via base", "--move-call", f"{old}::deployment_manager::create_deployment_verified",
-                                                   *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK),
+                                                   *deployment_args(walrus, "0.9.0", run_id), "vector[]", ids([device]), CLOCK,
+                                                   budget=OPERATOR_GAS),
                                   "::deployment_manager::DeploymentRecord")[0]
                 made["base_records"].append(d0)
                 live.transaction("legacy device reports Applied via base", "--move-call", f"{old}::deployment_manager::report_status",
@@ -181,7 +186,8 @@ def run(args):
 
             # 3. Attacks (each must abort exactly as intended).
             d1 = live.created(live.transaction("deployment via head", "--move-call", f"{new}::deployment_manager::create_deployment_verified",
-                                               *deployment_args(walrus, "1.0.0", run_id), "vector[]", ids([device]), CLOCK),
+                                               *deployment_args(walrus, "1.0.0", run_id), "vector[]", ids([device]), CLOCK,
+                                               budget=OPERATOR_GAS),
                               "::deployment_manager::DeploymentRecord")[0]
             made["head_records"].append(d1)
             # The device holds DEVICE_FUNDING: its budgets stay well below that.
@@ -200,7 +206,8 @@ def run(args):
 
             # 4. Activation, the real daemon (paying from the device's charged funding), revocation.
             activated = live.transaction("activate the legacy device (head)", "--move-call", f"{new}::device_registry::activate_device",
-                                         f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}")
+                                         f"@{registry}", f"@{device}", "--assign", "owner", "--transfer-objects", "[owner]", f"@{live.operator}",
+                                         budget=OPERATOR_GAS)
             owner_cap = live.created(activated, "::device_registry::DeviceOwnerCap")[0]
             made["owner_cap"] = owner_cap
             live.readable(owner_cap)
@@ -208,14 +215,16 @@ def run(args):
                                               f'device_object_id = "{device}"\ndevice_cap_id = "{cap}"\n')
             d2 = live.created(live.transaction("deployment via head (after activation)",
                                                "--move-call", f"{new}::deployment_manager::create_deployment_verified",
-                                               *deployment_args(walrus, "2.0.0", run_id), "vector[]", ids([device]), CLOCK),
+                                               *deployment_args(walrus, "2.0.0", run_id), "vector[]", ids([device]), CLOCK,
+                                               budget=OPERATOR_GAS),
                               "::deployment_manager::DeploymentRecord")[0]
             made["head_records"].append(d2)
             wait_for(lambda: live.receipts(d2) == {dm.object_id(device): 1}, "activated legacy device did not report Applied", daemon)
             assert history(components) == ["2.0.0"], history(components)
             live.check("activated legacy device: the real daemon applied the new deployment (artifact from "
                        f"{'Walrus testnet' if args.walrus == 'testnet' else 'local stand-in'}); its existing bound cap reported Applied")
-            live.transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
+            live.transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}",
+                             budget=OPERATOR_GAS)
             attack("verified report after revocation", "--move-call", f"{new}::deployment_manager::report_verified_status",
                    f"@{d2}", f"@{registry}", f"@{cap}", "2u8", module="device_cap", function="assert_active", code=2)
             assert live.receipts(d2) == {dm.object_id(device): 1}, "revoked device changed its receipt"
@@ -289,7 +298,7 @@ if __name__ == "__main__":
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", default=DEFAULT_BASE, help=f"pre-upgrade contracts (default {DEFAULT_BASE})")
     parser.add_argument("--walrus", default="testnet", choices=["testnet", "local"])
-    parser.add_argument("--max-spend-mist", type=int, default=600_000_000, help="strict run allowance, including device funding")
+    parser.add_argument("--max-spend-mist", type=int, default=950_000_000, help="strict run allowance, including device funding")
     parser.add_argument("--evidence", help="write evidence JSON here")
     parser.add_argument("--state", help="fixture cache (default: live-state.json beside the wallet)")
     parser.add_argument("--fresh", action="store_true", help="ignore the cache: publish and upgrade a new fixture")

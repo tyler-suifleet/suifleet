@@ -201,7 +201,7 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '850000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[1], '950000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
@@ -311,7 +311,47 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 2_600_000_000)
+        self.assertEqual(required_balance(SUITES), 2_700_000_000)
+
+    def test_fresh_upgrade_security_pair_reserves_every_remaining_ptb(self):
+        from ci_testnet_wallet import SUITES
+        import live_upgrade_security as security
+        # Run 40252593790 (head 7b04f38): settled allowance through the fresh
+        # head upgrade, including the device's charged funding.
+        observed = (67_629_200, 12_970_178 + security.DEVICE_FUNDING, 1_243_570, 13_593_200, 543_760_163)
+        self.assertEqual(sum(observed), 679_196_311)
+
+        def settled(cost, status='success'):
+            return lambda *args: dict(digest='offline', effects=dict(status=dict(status=status),
+                                      gasUsed=dict(computationCost=str(cost), storageCost='0', storageRebate='0')))
+        # The former 0.85-SUI allowance with 0.2-SUI operator budgets refused
+        # the next deployment before invoking the client.
+        old, refused = Budget(850_000_000, []), Mock()
+        old.grant(sum(observed))
+        with self.assertRaises(Spent):
+            old.execute(refused, 'deployment via head', ['ptb'], gas=200_000_000, require_full=True)
+        refused.assert_not_called()
+        ceiling = dict((name, limit) for name, _, limit in SUITES)['upgrade-security']
+        ledger = Budget(ceiling, [])
+        ledger.grant(sum(observed))
+        # The rest of the suite with full reservations: deployments at the
+        # measured ~14M, the operator's impersonation abort, activation, and
+        # a revocation whose outcome is unknown (whole budget kept), then
+        # every cleanup step unknown too and the device sweep.
+        ledger.execute(settled(14_000_000), 'deployment via head', ['ptb'], gas=security.OPERATOR_GAS, require_full=True)
+        ledger.execute(settled(2_000_000, 'failure'), 'impersonation abort', ['ptb'], gas=50_000_000, expect='failure')
+        ledger.execute(settled(14_000_000), 'activate', ['ptb'], gas=security.OPERATOR_GAS, require_full=True)
+        ledger.execute(settled(14_000_000), 'deployment after activation', ['ptb'], gas=security.OPERATOR_GAS,
+                       require_full=True)
+        for label, gas in (('revoke', security.OPERATOR_GAS),) + (('cleanup', security.CLEANUP_GAS),) * 3:
+            with self.assertRaises(TimeoutError):
+                ledger.execute(Mock(side_effect=TimeoutError()), label, ['ptb'], gas=gas, require_full=True)
+        ledger.execute(settled(1_000_099), 'sweep', ['ptb'], gas=3_000_000)
+        self.assertEqual([e['status'] for e in ledger.evidence],
+                         ['success', 'failure', 'success', 'success'] + ['unknown'] * 4 + ['success'])
+        self.assertGreaterEqual(ledger.remaining, 80_000_000)  # Headroom for a larger head package.
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile

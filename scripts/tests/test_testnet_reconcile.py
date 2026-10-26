@@ -343,7 +343,7 @@ class Funding(unittest.TestCase):
 
     def test_ci_controller_requires_every_selected_suite_up_front(self):
         from ci_testnet_wallet import execute
-        for relevant, required in ((True, '2600000000'), (False, '1600000000')):
+        for relevant, required in ((True, '2700000000'), (False, '1600000000')):
             with tempfile.TemporaryDirectory() as root:
                 calls = []
 
