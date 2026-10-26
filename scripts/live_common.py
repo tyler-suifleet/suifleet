@@ -116,12 +116,17 @@ def run_client_command(full, command):
     # Three immediate reads with only 1s/2s gaps can exhaust one throttle window.
     for attempt in range(5):
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-        diagnostic = (result.stderr + result.stdout).lower()
-        throttled = "429" in diagnostic and "too many requests" in diagnostic
-        if not (read_only and result.returncode and throttled and attempt < 4):
+        diagnostic = result.stderr + result.stdout
+        if not (read_only and result.returncode and throttled(diagnostic) and attempt < 4):
             break
         time.sleep(5 * 2 ** attempt)
     return result
+
+
+def throttled(diagnostic):
+    """The public fullnode's rate limit (HTTP 429), which refuses a request."""
+    diagnostic = diagnostic.lower()
+    return "429" in diagnostic and "too many requests" in diagnostic
 
 
 class Live:
@@ -130,6 +135,10 @@ class Live:
     reserved against the run's ceiling before execution and settled from
     the effects, so failures, aborts and unknown outcomes are charged and
     rebates never replenish the allowance."""
+
+    # PTB submissions refused by the fullnode's rate limit, and the wait for a
+    # submitted digest to become readable.
+    SUBMIT_ATTEMPTS, READ_BACK_SECONDS = 5, 60
 
     def __init__(self, wallet, network, max_spend_mist, build_sui="sui",
                  network_sui=os.environ.get("SUIFLEET_NETWORK_SUI", toolchain.NETWORK_DEFAULT)):
@@ -159,24 +168,93 @@ class Live:
         digest means an unknown outcome (the reservation stays charged)."""
         def execute(*command):
             result = self.client(*command, check=False, config=config)
-            if isinstance(result, dict) and "effects" in result:
-                return result
-            text = result.stderr + result.stdout if hasattr(result, "stderr") else json.dumps(result)
-            if '"effects"' in getattr(result, "stdout", ""):
-                try:
-                    parsed = json.loads(result.stdout[result.stdout.find("{"):])
-                    if "effects" in parsed:
-                        return parsed
-                except ValueError:
-                    pass
+            parsed, text = self.outcome(result)
+            if parsed:
+                return parsed
             digest = DIGEST.search(text)
             if not digest:
                 raise RuntimeError(f"sui client {command[0]}: no execution outcome\n{text[-3000:]}")
-            found = {}
-            wait_for(lambda: found.update(self.executed(digest.group(1), config)) or bool(found),
-                     f"transaction {digest.group(1)} not readable", timeout=60)
+            found = self.read_back(digest.group(1), config)
+            if not found:
+                raise AssertionError(f"transaction {digest.group(1)} not readable")
             return found
         return execute
+
+    @staticmethod
+    def outcome(result):
+        """(execution result, diagnostic text) of a submission's CLI output."""
+        if isinstance(result, dict) and "effects" in result:
+            return result, ""
+        text = result.stderr + result.stdout if hasattr(result, "stderr") else json.dumps(result)
+        if '"effects"' in getattr(result, "stdout", ""):
+            try:
+                parsed = json.loads(result.stdout[result.stdout.find("{"):])
+                if "effects" in parsed:
+                    return parsed, text
+            except ValueError:
+                pass
+        return None, text
+
+    def read_back(self, digest, config=None):
+        """The digest's execution result, or {} if it never became readable."""
+        found = self.executed(digest, config)
+        if not found:
+            try:
+                wait_for(lambda: found.update(self.executed(digest, config)) or bool(found),
+                         f"transaction {digest} not readable", timeout=self.READ_BACK_SECONDS)
+            except AssertionError:
+                pass
+        return found
+
+    def exact_ptb(self, ptb, config=None):
+        """Callable for Budget.execute: build the PTB's unsigned bytes, sign
+        them and execute exactly those bytes. The digest is known before
+        submission, so a throttled (HTTP 429) submission is reconciled by
+        reading that digest and only the same signed bytes are resubmitted.
+        One digest executes at most once; a rebuilt transaction never is."""
+        def submit(budget):
+            for attempt in range(self.SUBMIT_ATTEMPTS):
+                # Building only reads; nothing is signed yet.
+                built = self.client("ptb", *ptb, "--gas-budget", str(budget), "--serialize-unsigned-transaction",
+                                    json_output=False, check=False, config=config)
+                if not (built.returncode and throttled(built.stderr + built.stdout)) or attempt + 1 == self.SUBMIT_ATTEMPTS:
+                    break
+                time.sleep(5 * 2 ** attempt)
+            lines = built.stdout.strip().splitlines()
+            tx_bytes = lines[-1].strip() if lines else ""
+            if built.returncode or not tx_bytes:
+                raise toolchain.NotSubmitted(f"ptb could not build a transaction:\n{(built.stderr + built.stdout)[-3000:]}")
+            data = self.decode(tx_bytes)
+            if int(data["gas_budget"]) != int(budget):
+                raise toolchain.NotSubmitted("transaction gas budget differs from the reserved allowance")
+            if config is None and toolchain.normal(data["sender"]) != toolchain.normal(self.operator):
+                raise toolchain.NotSubmitted("transaction sender is not the verified wallet")
+            digest = data["digest"]
+            signature = self.signer(config, data["sender"])(tx_bytes)
+            for attempt in range(self.SUBMIT_ATTEMPTS):
+                result = self.client("execute-signed-tx", "--tx-bytes", tx_bytes, "--signatures", signature,
+                                     check=False, config=config)
+                parsed, text = self.outcome(result)
+                if parsed:
+                    return toolchain.bound(parsed, digest)
+                if not throttled(text):
+                    found = self.read_back(digest, config)
+                    if not found:
+                        raise RuntimeError(f"transaction {digest}: no execution outcome\n{text[-3000:]}")
+                    return toolchain.bound(found, digest)
+                time.sleep(5 * 2 ** attempt)
+                found = self.executed(digest, config)
+                if found:
+                    return toolchain.bound(found, digest)
+            raise RuntimeError(f"transaction {digest}: no execution outcome after {self.SUBMIT_ATTEMPTS} "
+                               f"throttled submissions of the same signed bytes\n{text[-3000:]}")
+        return submit
+
+    def decode(self, tx_bytes):
+        return toolchain.decode(tx_bytes)
+
+    def signer(self, config, address):
+        return toolchain.keystore_signer(self.network_sui, config or self.wallet, address)
 
     def executed(self, digest, config=None):
         result = self.client("tx-block", digest, check=False, config=config)
@@ -235,6 +313,8 @@ class Live:
         recorded against) that funding, which the run already charged."""
         self.assert_lock()
         config, ledger = sender or (None, self.ledger)
+        if isinstance(command, list) and command[:1] == ["ptb"]:
+            command = self.exact_ptb(command[1:], config)
         return ledger.execute(self.executor(config), label, command, gas=gas, funding=funding, expect=expect,
                               require_full=require_full)
 
