@@ -133,6 +133,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.match(quote, /CoinGecko spot \(recorded\), 2026-10-23 21:21 UTC/);
       assert.deepEqual(usdRequests, []);
       const before = await text("deposit");
+      await page.getByText("Technical cost assumptions and exchange rates", { exact: true }).click();
       await page.getByRole("button", { name: "Fetch live USD prices from CoinGecko" }).click();
       await waitText("CoinGecko spot (live)");
       assert.match(await text("quote"), /SUI \$2\.5, WAL \$0\.05, CoinGecko spot \(live\), 2026-10-2\d \d\d:\d\d UTC/);
@@ -149,7 +150,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       // Saving warns first and signs nothing.
       await page.getByRole("button", { name: "Save settings" }).click();
       await waitText("Not enough deposit for these settings");
-      assert.match(await page.getByRole("alert").first().textContent(), /Nothing has been signed/);
+      assert.match(await page.getByRole("alert").first().textContent(), /You have not approved any changes yet/);
       assert.equal((await control()).signed.length, 0);
       assert.match(await text("saved"), /No settings saved yet/);
       assert.deepEqual((await control()).settingsReads.slice(0, 1), [BUDGET], "the saved record is read from the fleet budget");

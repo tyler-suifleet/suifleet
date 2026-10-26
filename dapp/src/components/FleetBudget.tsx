@@ -67,17 +67,17 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
       <NumberField label="Artifact size (MiB)" value={input.artifactBytes / 1024 / 1024} step={0.1} onChange={set("artifactBytes")} />
       <NumberField label="Archive uploads per device per month (weekly = 5, daily = 31; add diagnostics/crashes)" value={input.dataUploadsPerDeviceMonth ?? 1} onChange={set("dataUploadsPerDeviceMonth")} />
       <NumberField label="Device data stored per month (MiB)" value={input.dataBytesPerDeviceMonth / 1024 / 1024} step={0.1} onChange={set("dataBytesPerDeviceMonth")} />
-      <NumberField label={`Storage epochs (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
+      <NumberField label={`Storage periods (~${epochDays} day(s) each)`} value={input.storageEpochs} onChange={set("storageEpochs")} />
     </div>
-    {input.serverlessData && <p>Defaults follow the default fleet settings (daily health) with log archives disabled; enabling archives in this estimate does not configure the device, and existing fleets keep their on-chain settings. The Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p>}
+    {input.serverlessData && <details><summary>Advanced estimate assumptions</summary><p>Defaults follow the default fleet settings (daily health) with log archives disabled; enabling archives in this estimate does not configure the device, and existing fleets keep their on-chain settings. The Fleet settings page sizes this from your chosen settings. Includes observed first-use and recurring health gas plus registration, certification and anchoring for each archive. Cadence and payload growth affect fees; include diagnostic/crash headroom. These Testnet measurements are fixture observations, not a gas ceiling. Migrated v3 storage uses keyed protection without a history scan or fleet-wide slot cap; localnet registration gas stayed flat from 10 to 10,000 protected blobs. Unmigrated v2 storage retains the scan and 1,024-slot limit. Protocol transaction limits and funding still apply.</p></details>}
     {result.estimate?.protectedCapacity && <p role="status">Projected archives: {result.estimate.protectedCapacity.planned}; existing covered blobs entered: {result.estimate.protectedCapacity.existing}. Migrated v3 storage has no fleet-wide protection slot cap. Archives purchased through their full owner-approved target need no renewal reserve. Releases and recipes still require finite renewal authorization. Check actual coverage, reserves and per-blob expiry before funding.</p>}
     {result.error && <p role="alert">{result.error}</p>}
     {result.estimate && <table className="w-full text-xs border">
       <tbody>
-        <tr><td className="p-1">Device gas for {result.estimate.deviceTransactions} receipts/anchors and {result.estimate.draws} top-up draws</td><td className="p-1 text-right">{sui(result.estimate.gasMist)}</td></tr>
-        <tr><td className="p-1">Initial device floats (part of the deposit, sent to devices at registration)</td><td className="p-1 text-right">{sui(result.estimate.floatsMist)}</td></tr>
+        <tr><td className="p-1">Network fees for {result.estimate.deviceTransactions} device reports and {result.estimate.draws} balance refills</td><td className="p-1 text-right">{sui(result.estimate.gasMist)}</td></tr>
+        <tr><td className="p-1">Starting device balances (included in the deposit and sent when devices are added)</td><td className="p-1 text-right">{sui(result.estimate.floatsMist)}</td></tr>
         <tr className="font-semibold"><td className="p-1">Network-cost deposit in SUI, with {input.marginPercent}% headroom</td><td className="p-1 text-right">{sui(result.estimate.suiDepositMist)}</td></tr>
-        <tr><td className="p-1">Walrus storage and write fees for releases{input.dataBytesPerDeviceMonth ? " and device data" : ""} (gross, before any subsidy)</td><td className="p-1 text-right">{wal(result.estimate.walDepositFrost)}</td></tr>
+        <tr><td className="p-1">Storage and upload fees for releases{input.dataBytesPerDeviceMonth ? " and device data" : ""} (gross, before any subsidy)</td><td className="p-1 text-right">{wal(result.estimate.walDepositFrost)}</td></tr>
         <tr><td className="p-1">SUI→WAL swap</td><td className="p-1">{route.explanation}{route.route ? " Exchange fee: none beyond the posted rate; network gas applies." : ""}</td></tr>
         <tr><td className="p-1">Card or on-ramp fees</td><td className="p-1">{FEE_NOTES.onramp}</td></tr>
         <tr><td className="p-1">Regional availability</td><td className="p-1">{FEE_NOTES.regions}</td></tr>
@@ -85,7 +85,7 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
         <tr><td className="p-1">Indicative value ({quote.usdSource}, {quoteDate(quote.usdObservedAt)})</td><td className="p-1 text-right">≈ ${result.estimate.usd.total.toFixed(2)}</td></tr>
       </tbody>
     </table>}
-    <p className="text-xs text-gray-600">From SF-054 Testnet and SF-127 isolated-localnet measurements rescaled to {quote.referenceGasPrice.toString()} MIST gas ({quote.gasSource}, {quoteDate(quote.gasObservedAt)}): a status receipt costs about {sui(rescaled(quote).receiptNetMist)} net. Walrus {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} FROST per MiB written ({quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}). An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p>
+    <p className="text-xs text-gray-600">This is an estimate. Your approval app shows the actual fee before you confirm. SUI pays for device activity; WAL pays for storage.</p><details className="text-xs text-gray-600"><summary>Technical fee calculations</summary><p>From SF-054 Testnet and SF-127 isolated-localnet measurements rescaled to {quote.referenceGasPrice.toString()} MIST gas ({quote.gasSource}, {quoteDate(quote.gasObservedAt)}): a status receipt costs about {sui(rescaled(quote).receiptNetMist)} net. Walrus {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} FROST per MiB written ({quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}). An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p></details>
   </div>;
 }
 
@@ -171,7 +171,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
   const { submit, message, error, pending } = useSubmit();
   const [amount, setAmount] = useState("");
   if (!account) return null;
-  if (!budgetSupported()) return <p className="text-xs">This deployment&apos;s contracts have no fleet budget yet; devices pay their own gas.</p>;
+  if (!budgetSupported()) return <p className="text-xs">Shared fleet funding is not available in this setup. Devices must cover their own network fees.</p>;
   if (isLoading) return <p className="text-xs">Loading your fleet budget…</p>;
   if (readError) return <p role="alert" className="text-xs">Budget unavailable: {readError.message}</p>;
   const value = amount || (suggestedMist ? formatToken(suggestedMist) : "");
@@ -182,7 +182,7 @@ export function DepositForm({ suggestedMist }: { suggestedMist?: bigint }) {
     void submit(() => budget ? buildDepositTx(budget.id, budget.capId, mist)
       : buildCreateBudgetTx(mist, DEFAULT_LIMITS, mist / BigInt(5), account.address));
   }}>
-    <p>{budget ? `Fleet budget balance: ${sui(budget.balance)}.` : "No fleet budget yet. Your first deposit creates it; you hold its owner capability."} The budget is separate from your wallet&apos;s gas: devices draw from it only within on-chain limits.</p>
+    <p>{budget ? `Fleet budget balance: ${sui(budget.balance)}.` : "No fleet budget yet. Your first deposit creates one that your account manages."} This budget is separate from your account balance. Devices can use it only within the spending limits you set.</p>
     <label className="block">{budget ? "Deposit (SUI)" : "Initial deposit (SUI)"} <input className="border p-1" value={value} onChange={(e) => setAmount(e.target.value)} /></label>
     <button className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending}>{budget ? "Deposit" : "Create budget and deposit"}</button>
     {message && <p role="status">{message}</p>}
@@ -243,7 +243,7 @@ export function BudgetManager() {
   const alerts = budgetAlerts(budget, enrolled, now, runway);
   return <div className="space-y-3 text-xs">
     <p>Unallocated {sui(budget.balance)} (spendable {sui(budget.balance)}; reserved 0) {accountsReady && <>and {sui(reserves)} in device reserves.</>} Deposited {sui(budget.totalDeposited)}, withdrawn {sui(budget.totalWithdrawn)}, paid straight to devices {sui(budget.totalPaid)}, allocated to reserves {sui(budget.totalAllocated)}, reclaimed {sui(budget.totalReclaimed)}. {accountsReady && (runway === null ? "No draws this period." : `About ${runway.toFixed(1)} days left at this period's rate.`)}</p>
-    <p>Each device draws only from its own reserve, through its own on-chain account, so devices never wait on each other or on the fleet budget. Refill reserves from the budget; reclaim unused reserves before withdrawing.</p>
+    <p>Each device spends from its own reserved balance. Refill these balances from the fleet budget, and recover unused funds before withdrawing.</p>
     {accountsReady && alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
       <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.deviceId ? `Device ${alert.deviceId.slice(0, 10)}…: ` : ""}{alert.text}</li>)}</ul>}
     <div className="flex gap-2 items-center flex-wrap">
@@ -355,13 +355,13 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
   const alerts = storage ? storageAlerts(storage, walrusState.data?.epoch) : [];
   return <div className="space-y-3 text-xs">
     {!storage && <div className="space-y-2">
-      <p>No fleet storage yet. Create it to prepay Walrus storage for releases and device uploads: blobs it pays for stay fleet-owned, and no device or upload can delete or shorten them.</p>
+      <p>No fleet storage budget yet. Create one to prepay software and device-data uploads. Devices cannot delete paid uploads or shorten their storage period.</p>
       <p>Each device may upload up to {(Number(DEFAULT_QUOTA.encodedBytesPerPeriod) / MIB).toFixed(0)} MiB encoded in {DEFAULT_QUOTA.uploadsPerPeriod.toString()} uploads per day, at most {(Number(DEFAULT_QUOTA.maxBlobSize) / MIB).toFixed(0)} MiB per blob and {wal(DEFAULT_QUOTA.writeFeesPerPeriod)} in write fees.</p>
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={pending} onClick={() => void submit(() => buildCreateStorageTx(config, budget.id, budget.capId, DEFAULT_QUOTA))}>Create fleet storage</button>
     </div>}
     {storage && <>
       <RetentionPanel config={config} storage={storage.id} version={storage.version} budget={budget.id} cap={budget.capId} epoch={walrusState.data?.epoch} schedule={walrusState.data} />
-      <p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p>
+      <p>Available storage funds: {wal(storage.walBalance)}. These funds pay for uploads and retention.</p><details><summary>Prepaid storage balances and exact storage periods</summary><p>Prepaid storage: {(Number(storage.poolSize) / MIB).toFixed(2)} MiB encoded{storage.endEpoch !== undefined ? `, Walrus epochs ${storage.startEpoch}–${storage.endEpoch}` : ""} (current epoch {walrusState.data?.epoch ?? "…"}). WAL for fees and purchases: {wal(storage.walBalance)}. {storage.blobCount.toString()} fleet blob(s), {(Number(storage.totalEncodedBytes) / MIB).toFixed(2)} MiB encoded, {wal(storage.totalWriteFees)} in write fees so far.</p></details>
       {alerts.length > 0 && <ul role="alert" className="list-disc ml-5">{alerts.map((alert, index) =>
         <li key={index} className={alert.severity === "critical" ? "text-red-700" : "text-amber-700"}>{alert.text}</li>)}</ul>}
       <fieldset className="border rounded p-2 space-y-2" disabled={pending}>
@@ -390,14 +390,14 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
         </div>
         {plan && <p>The pool will hold {(Number(plan.poolSize) / MIB).toFixed(2)} MiB encoded for Walrus epochs {plan.startEpoch}–{plan.endEpoch}, for about {wal(plan.cost)} at the current price, paid from the fleet&apos;s WAL; no WAL leaves the fleet.{plan.droppedBytes > BigInt(0) ? ` The expired pool's unused ${(Number(plan.droppedBytes) / MIB).toFixed(2)} MiB are dropped.` : ""}</p>}
         {planError && <p role="alert">{planError}</p>}
-        <p>Walrus joins storage only over the same epochs, so a refill first drops the pool&apos;s elapsed epochs, keeps its unused space and cannot end before the pool does. Walrus encodes a blob to about {(Number(encodedBlobLength(MIB)) / MIB).toFixed(1)}× its size: a 1 MiB artifact needs that many MiB of storage.</p>
+        <details><summary>How storage top-ups are calculated</summary><p>Walrus joins storage only over the same epochs, so a refill first drops the pool&apos;s elapsed epochs, keeps its unused space and cannot end before the pool does. Walrus encodes a blob to about {(Number(encodedBlobLength(MIB)) / MIB).toFixed(1)}× its size: a 1 MiB artifact needs that many MiB of storage.</p></details>
         <div className="flex flex-wrap gap-2 items-end">
           <label>Withdraw WAL <input className="border p-1 w-24 block" value={withdrawWal} onChange={(e) => setWithdrawWal(e.target.value)} /></label>
           <button type="button" className="border rounded px-2 py-1" onClick={() => void submit(() => buildWithdrawWalTx(config, storage.id, budget.id, budget.capId, parseToken(withdrawWal), account.address))}>Withdraw unused WAL</button>
         </div>
       </fieldset>
     </>}
-    {walrusState.error && <p role="alert">Walrus state unavailable: {walrusState.error.message}</p>}
+    {walrusState.error && <p role="alert">Storage information unavailable: {walrusState.error.message}</p>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
