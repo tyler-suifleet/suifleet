@@ -1,26 +1,38 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "devices": 1000,
+  "profile": "typical",
   "basis": {
-    "kind": "illustrative",
-    "as_of": "2026-10-25",
+    "kind": "estimated",
+    "as_of": "2026-10-23",
+    "sui_usd": "0.987",
+    "reference_gas_price_mist": 100,
     "sources": [
-      "docs/business/SUBSCRIPTION_PRICING.md: synthetic sensitivity example, not a measured fleet bill"
+      "docs/BUSINESS_PLAN.md#cost-to-serve-margin-and-greengrass-comparison-by-profile: typical profile, 1,000 devices, cost to serve ~$9, list revenue $80, Greengrass $259",
+      "docs/BUSINESS_PLAN.md cost components per device per month: daily health $0.003, four receipts $0.0014, weekly logs kept 6 weeks $0.004 (after SF-129 deposit reclaim), four 50 MB release uploads ~$0.12 per fleet",
+      "docs/business/SUBSCRIPTION_PRICING.md#cost-split: SUI-sensitive $6.00 (health $3.00, receipts $1.40, archive anchors and non-refundable storage ~$1.10, retry allowance ~$0.50); Walrus $3.00; services $0 on the public endpoint or Chainstack free tier",
+      "Reference prices 2026-10-23: SUI $0.987, WAL $0.0368 (CoinGecko); mainnet reference gas price 100 MIST, storage price 76 MIST, storage rebate 99.99% (protocol config, epoch 1291)",
+      "Testnet-rescaled estimates; SF-135/#267 replaces them with a measured Mainnet bill"
     ]
   },
   "unquoted_costs": [],
   "recurring_costs": {
-    "sui_sensitive_usd": "8",
-    "walrus_usd": "0.50",
-    "services_usd": "0.50"
+    "sui_sensitive_usd": "6.00",
+    "walrus_usd": "3.00",
+    "services_usd": "0"
   },
   "commercial": {
-    "candidate_monthly_usd": "80",
+    "list_monthly_usd": "80",
     "monthly_minimum_usd": "49",
-    "annual_discount_fraction": "0.10"
+    "annual_discount_fraction": "0.10",
+    "comparison_monthly_usd": "259",
+    "comparison_label": "AWS IoT Greengrass, typical profile, us-east-1 list prices 2026-10-23"
   },
   "working_capital": {
-    "refundable_storage_deposits_usd": "30",
-    "device_gas_float_usd": "60"
+    "sui_denominated": {
+      "refundable_storage_deposits_usd": "30",
+      "device_gas_float_usd": "59.22"
+    },
+    "usd_denominated": {}
   }
 }
