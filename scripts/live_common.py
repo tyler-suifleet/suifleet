@@ -265,13 +265,14 @@ class Live:
         execute = self.executor()
 
         def client(*command, json_output=True, check=True):
-            # The verified bytes are executed like any other mutation.
-            if command[0] == "serialized-tx":
+            # The verified, signed bytes are executed like any other mutation.
+            if command[0] == "execute-signed-tx":
                 return execute(*command)
             return self.client(*command, json_output=json_output, check=check)
         built = self.evidence.setdefault("verified_package_transactions", {})
+        sign = toolchain.keystore_signer(self.network_sui, self.wallet, self.operator)
         result = self.execute(label, toolchain.package_submitter(
-            client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
+            client, self.build_sui, package_dir, common, sender=self.operator, sign=sign, upgrade=upgrade,
             record=built.setdefault(label, {})),
             # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
             # existing allowance; effects settle actual cost, never replenishing it.

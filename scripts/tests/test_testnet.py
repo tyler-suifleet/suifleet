@@ -572,6 +572,29 @@ class BytecodeFixtureTests(unittest.TestCase):
             self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda persist:{'id':'known'},ledger),{'id':'known'})
             self.assertNotIn('pending_operation',p)
             self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_fresh_execution_under_another_digest_is_recorded_durably(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        for error in (live.toolchain.DigestMismatch('other', 'retained'), live.UnreadableExecution('other')):
+            with self.subTest(type(error).__name__), tempfile.TemporaryDirectory() as d:
+                path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+                ledger=SimpleNamespace(evidence=[{'label':'publish base','status':'unknown'}])
+                def executed_elsewhere(persist):
+                    persist({'digest':'retained','tx_bytes':'AAAA'})
+                    raise error
+                with self.assertRaises(type(error)):live.checkpoint_setup(path,state,p,'publish base',executed_elsewhere,ledger)
+                marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+                self.assertEqual((marker['tx']['digest'],marker['other_executions']),('retained',['other']))
+        # An unreadable outcome of the verified digest itself is ordinary uncertainty.
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            def unreadable(persist):
+                persist({'digest':'retained','tx_bytes':'AAAA'})
+                raise live.UnreadableExecution('retained')
+            with self.assertRaises(live.UnreadableExecution):
+                live.checkpoint_setup(path,state,p,'publish base',unreadable,SimpleNamespace(evidence=[]))
+            marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+            self.assertNotIn('other_executions',marker)
     def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
         import tempfile, live_package_upgrade as live
         with tempfile.TemporaryDirectory() as d:

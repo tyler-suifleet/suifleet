@@ -108,6 +108,14 @@ QUARANTINE_INCIDENTS = {
 }
 
 
+class UnreadableExecution(RuntimeError):
+    """The CLI named an executed digest whose effects never became readable."""
+
+    def __init__(self, executed):
+        super().__init__(f"transaction {executed} not readable")
+        self.executed = executed
+
+
 class FundingShortfall(RuntimeError):
     """The wallet cannot fund the whole selected run; nothing was spent."""
 
@@ -255,6 +263,19 @@ def quarantine_summary(state):
             for name, record in state.get("quarantine", {}).items()}
 
 
+def other_execution(marker, error):
+    """Record on the marker a digest, other than its verified one, that the CLI
+    reported as executed (or executed-but-unreadable). Automatic reconciliation
+    then refuses the marker in every later run: neither expiry nor absence of
+    the verified digest settles a mutation that executed under another."""
+    executed = getattr(error, "executed", False)
+    if executed is False or (isinstance(error, UnreadableExecution)
+                             and executed == (marker.get("tx") or {}).get("digest")):
+        return False
+    marker.setdefault("other_executions", []).append(executed)
+    return True
+
+
 def checkpoint_setup(state_path, state, publication, label, action, ledger, now=time.time):
     """Persist intent before a mutation, and its verified transaction identity
     before signing (`action(persist)`); never repeat an unknown outcome."""
@@ -272,7 +293,8 @@ def checkpoint_setup(state_path, state, publication, label, action, ledger, now=
         known = isinstance(error, toolchain.NotSubmitted) or (
             ledger.evidence and ledger.evidence[-1].get("label") == label
             and ledger.evidence[-1].get("status") in ("failure", "not_submitted"))
-        if known:
+        # Another executed digest stays with the marker for every later run.
+        if not other_execution(marker, error) and known:
             publication.pop("pending_operation", None)
         save_state(state_path, state)
         raise
@@ -461,13 +483,16 @@ def run(args):
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
         if result.returncode and check and not (json_output and '"effects"' in result.stdout):
             submitted = live_common.DIGEST.search(result.stderr + result.stdout)
-            if json_output and command[0] in ("serialized-tx", "ptb") and submitted:
+            if json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
                 # The CLI exits non-zero without effects when execution fails
                 # (runs 40261665249, 40266575477: InsufficientGas). Read the
                 # failure back by digest so it is charged and known, not unknown.
                 found = {}
-                wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
-                         f"transaction {submitted.group(1)} not readable", timeout=60)
+                try:
+                    wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
+                             f"transaction {submitted.group(1)} not readable", timeout=60)
+                except AssertionError as error:
+                    raise UnreadableExecution(submitted.group(1)) from error
                 return found
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output:
@@ -490,6 +515,8 @@ def run(args):
     envs, active_env = client("envs")
     rpc_url = next(e["rpc"] for e in envs if e["alias"] == active_env)
     operator = dm.object_id(client("active-address", json_output=False).stdout.strip().split()[-1])
+    # Every setup mutation signs and executes exactly its verified bytes.
+    sign = toolchain.keystore_signer(network_sui, wallet, operator)
     facts = dm.chain_facts(rpc_url)
     chain = facts["chain_identifier"]
     expected = CHAINS.get(args.network)
@@ -617,8 +644,8 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            # Only an execution as the retained digest reconciles it.
-                            return toolchain.bound(client("serialized-tx", tx["tx_bytes"]), tx["digest"])
+                            # Exactly the retained bytes, so only the retained digest can execute.
+                            return toolchain.execute_exact(client, sign, tx["tx_bytes"], tx["digest"])
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
@@ -635,9 +662,12 @@ def run(args):
                             outcome, value = reconciler.reconcile(
                                 marker, chain=facts_reader, operator=operator, inspect=toolchain.decode, verify=verify,
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
-                        except Exception:
+                        except Exception as error:
                             # Only a resubmission with failed execution effects is known.
                             # A failure of any other digest proves nothing about the retained one.
+                            if other_execution(marker, error):
+                                save_state(state_path, state)
+                                raise
                             last = ledger.evidence[-1] if ledger.evidence else {}
                             if last.get("label") != retry or last.get("status") != "failure" \
                                     or last.get("digest") != marker["tx"]["digest"]:
@@ -665,7 +695,7 @@ def run(args):
 
                 def setup_ptb(label, calls, *ptb):
                     return step(label, lambda persist: mutate(label, toolchain.ptb_submitter(
-                        client, ptb, sender=operator, calls=calls, persist=persist), gas=ptb_budget),
+                        client, ptb, sender=operator, calls=calls, sign=sign, persist=persist), gas=ptb_budget),
                         lambda data, tx: toolchain.verify_ptb_transaction(data, sender=operator, budget=tx["gas_budget"], calls=calls))
 
                 def package_proof(compiled, kind):
@@ -678,7 +708,7 @@ def run(args):
                 shutil.copytree(staging / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                 def publish_base():
                     return step("publish base", lambda persist: mutate("publish base", toolchain.package_submitter(
-                        client, tools["build"]["path"], package_dir, common, sender=operator,
+                        client, tools["build"]["path"], package_dir, common, sender=operator, sign=sign,
                         record=built.setdefault("base", {}), persist=persist), gas=PACKAGE_GAS),
                         lambda data, tx: toolchain.verify_package_transaction(data, base_built, sender=operator, budget=tx["gas_budget"]),
                         legacy=lambda marker: reconciler.legacy_publication(
@@ -737,7 +767,7 @@ def run(args):
                         shutil.copytree(ROOT / "contracts", package_dir, ignore=shutil.ignore_patterns("build", "Published.toml"))
                         target = {"cap": upgrade_cap, "package": old}
                         upgraded = step("upgrade to head", lambda persist: mutate("upgrade to head", toolchain.package_submitter(
-                            client, tools["build"]["path"], package_dir, common, sender=operator,
+                            client, tools["build"]["path"], package_dir, common, sender=operator, sign=sign,
                             upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=ledger.remaining),
                             lambda data, tx: toolchain.verify_package_transaction(data, head_built, sender=operator,
                                                                                   budget=tx["gas_budget"], upgrade=target),

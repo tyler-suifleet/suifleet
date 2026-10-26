@@ -19,8 +19,9 @@ fixtures kept passing while every fresh fixture failed after publishing.
 A package transaction is built by NETWORK, then decoded and compared with
 BUILD's output before signing: the exact modules, dependencies and upgrade
 digest, sender, gas owner/budget and command shape. Only those verified bytes
-are signed and executed. So changing PATH or upgrading NETWORK cannot
-silently change the compiler, framework or fixture bytecode.
+are signed (`keytool sign`) and executed (`execute-signed-tx`), so the
+executed digest is the verified one. So changing PATH or upgrading NETWORK
+cannot silently change the compiler, framework or fixture bytecode.
 """
 import base64
 import hashlib
@@ -61,15 +62,54 @@ class NotSubmitted(RuntimeError):
 
 class DigestMismatch(RuntimeError):
     """Something executed, but not as the verified transaction digest. Its
-    outcome says nothing about the verified transaction, which stays uncertain."""
+    outcome says nothing about the verified transaction, which stays uncertain;
+    `executed` is the other digest, which must be recorded durably."""
+
+    def __init__(self, executed, digest):
+        super().__init__(f'executed transaction {executed} is not the verified transaction {digest}')
+        self.executed, self.digest = executed, digest
 
 
 def bound(result, digest):
     """The execution result, only if it is the verified transaction itself."""
     executed = result.get('digest') if isinstance(result, dict) else None
     if executed != digest:
-        raise DigestMismatch(f'executed transaction {executed} is not the verified transaction {digest}')
+        raise DigestMismatch(executed, digest)
     return result
+
+
+def keystore_signer(network_tool, client_config, address, run=subprocess.run):
+    """Signs exactly the given bytes with the client config's file keystore."""
+    def sign(tx_bytes):
+        try:
+            found = re.search(r'(?m)^keystore:\s*\n\s+File:\s*(.+?)\s*$', Path(client_config).read_text())
+        except OSError as error:
+            raise NotSubmitted(f'cannot read {client_config}: {error}') from error
+        if not found:
+            raise NotSubmitted(f'{client_config} names no file keystore to sign with')
+        keystore = found[1].strip('"\'')
+        # keytool also loads a client config; keep it on this wallet's own.
+        env = {**os.environ, 'SUI_CONFIG_DIR': str(Path(client_config).resolve().parent)}
+        result = run([str(network_tool), 'keytool', '--keystore-path', keystore, 'sign', '--address', normal(address),
+                      '--data', tx_bytes, '--json'], capture_output=True, text=True, timeout=120, env=env)
+        signature = None
+        if not result.returncode:
+            try:
+                signature = json.loads(result.stdout).get('suiSignature')
+            except (ValueError, AttributeError):
+                signature = None
+        if not signature:
+            raise NotSubmitted(f'keytool could not sign the verified transaction: {result.stderr.strip()[-500:]}')
+        return signature
+    return sign
+
+
+def execute_exact(client, sign, tx_bytes, digest):
+    """Sign and execute exactly the verified bytes. Unlike `serialized-tx`,
+    which may rebuild gas data, the executed digest is the verified one; the
+    result is still bound to it."""
+    signature = sign(tx_bytes)
+    return bound(client('execute-signed-tx', '--tx-bytes', tx_bytes, '--signatures', signature), digest)
 
 
 def run_version(tool, run=subprocess.run):
@@ -293,14 +333,15 @@ def _serialized(client, command, budget):
     return tx_bytes
 
 
-def ptb_submitter(client, ptb, *, sender, calls, run=subprocess.run, inspect=decode, persist=None):
-    """Callable for Budget.execute: build, verify and persist a setup PTB, then submit."""
+def ptb_submitter(client, ptb, *, sender, calls, sign, run=subprocess.run, inspect=decode, persist=None):
+    """Callable for Budget.execute: build, verify and persist a setup PTB, then
+    sign and execute exactly those bytes."""
     def submit(budget):
         tx_bytes = _serialized(client, ['ptb', *ptb], budget)
         data = inspect(tx_bytes, run=run)
         verify_ptb_transaction(data, sender=sender, budget=budget, calls=calls)
         _persist(persist, tx_bytes, data, budget)
-        return bound(client('serialized-tx', tx_bytes), data['digest'])
+        return execute_exact(client, sign, tx_bytes, data['digest'])
     return submit
 
 
@@ -318,10 +359,11 @@ def write_pubfile(path, chain, package_dir, package, upgrade_cap, version=1):
         f'upgrade-capability = "{normal(upgrade_cap)}"\n')
 
 
-def package_submitter(client, build_tool, package_dir, common, *, sender, upgrade=None, run=subprocess.run,
+def package_submitter(client, build_tool, package_dir, common, *, sender, sign, upgrade=None, run=subprocess.run,
                       inspect=decode, record=None, persist=None):
-    """Callable for Budget.execute: compile, build, verify, persist, then submit.
-    `persist` durably records the verified transaction identity before signing."""
+    """Callable for Budget.execute: compile, build, verify, persist, then sign
+    and execute exactly those bytes. `persist` durably records the verified
+    transaction identity before signing."""
     def submit(budget):
         try:
             built = compile_package(build_tool, package_dir, run=run)
@@ -341,5 +383,5 @@ def package_submitter(client, build_tool, package_dir, common, *, sender, upgrad
         if record is not None:
             record.update(checked, digest=bytes(built['digest']).hex())
         _persist(persist, tx_bytes, data, budget)
-        return bound(client('serialized-tx', tx_bytes), data['digest'])
+        return execute_exact(client, sign, tx_bytes, data['digest'])
     return submit
