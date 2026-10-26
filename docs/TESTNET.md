@@ -353,3 +353,21 @@ sequence preflight requires 2.4 SUI. These supersede the smaller historical
 figures above. Reservations settle against actual effects; failed/unknown charges,
 non-replenishing allowances, chain/authority checks and single-shot submission
 are unchanged. No live result is implied by the budget projection regressions.
+
+**SF-127 full-reservation repair (run 40246935467).** The effects artifact records
+536,721,200 MIST for base publication (`nugr1oBVkWNSDbnq7C6cLQcTdZBCJeLoRA6TvLoB2MG`)
+and 583,442,163 MIST for the compatible upgrade (`HsGi515cuVWZPKJH48PdGWBAYaDkmKV2X25UkFDmrMQ2`).
+Eight successful transactions plus device funding consumed 1,221,160,708 MIST.
+The 178,839,292 MIST remainder under the 1.4-SUI ceiling could not reserve the
+required 200,000,000 MIST for either the base deployment or bounded abort
+cleanup; both were refused before submission. This was allowance exhaustion,
+not a faucet or wallet-balance failure. The package gate now has a strict
+1.6-SUI allowance (CLI default and CI); upgrade-security remains 0.85 SUI and
+wallet 0.15 SUI, for a 2.6-SUI selected-suite preflight, plus any retained
+quarantine reservation. This supersedes the 1.4/2.4 figures immediately above.
+An offline regression replays the exact settled charges, reproduces both old
+refusals and verifies full deployment/cleanup reservations with a synthetic
+50M deployment cost, retained unknown cleanup charge and strict overspend
+refusal. No new live success is claimed; current-head CI/testnet and independent
+review remain required. The existing encrypted fixture and historical uncertain
+reservations must be preserved; no blind replay or identical publication.

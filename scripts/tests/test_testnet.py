@@ -252,7 +252,7 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[0], '1400000000', 'evidence/package-upgrade.json'),
+            for command, ceiling, evidence in ((calls[0], '1600000000', 'evidence/package-upgrade.json'),
                                                (calls[1], '850000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
@@ -302,6 +302,39 @@ class TrustTests(unittest.TestCase):
         for cost in (6_608 * rate, head, 104_743_694):
             security.grant(cost)
         self.assertGreaterEqual(security.remaining, 100_000_000)
+
+    def test_sf127_current_main_reserves_full_base_ptb_and_cleanup(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, required_balance, SUITES
+        # Settled effects plus device funding from run 40246935467. The
+        # refused base PTB and abort cleanup have no submitted transaction.
+        observed = (536_721_200, 8_425_378, 1_243_578, 583_442_163,
+                    8_737_163, 31_000_099, 9_588_562, 42_002_565)
+        self.assertEqual(sum(observed), 1_221_160_708)
+        old = Budget(1_400_000_000, [])
+        old.grant(sum(observed))
+        refused = Mock()
+        for label in ('base deployment', 'bounded abort cleanup'):
+            with self.assertRaises(Spent):
+                old.execute(refused, label, ['ptb'], gas=200_000_000, require_full=True)
+        refused.assert_not_called()
+        self.assertEqual(old.evidence, [])
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        ledger.grant(sum(observed))
+        # Synthetic 50M cost for the remaining single deployment exceeds the
+        # measured three-deployment batch. Cleanup still reserves its full
+        # 200M even if its eventual rebate would make the net cost zero.
+        def effects(*args):
+            return dict(digest='offline', effects=dict(status=dict(status='success'),
+                        gasUsed=dict(computationCost='50000000', storageCost='0', storageRebate='0')))
+        ledger.execute(effects, 'base deployment', ['ptb'], gas=200_000_000, require_full=True)
+        with self.assertRaises(TimeoutError):
+            ledger.execute(Mock(side_effect=TimeoutError()), 'cleanup unknown', ['ptb'],
+                           gas=200_000_000, require_full=True)
+        self.assertEqual(ledger.used, sum(observed) + 250_000_000)
+        self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+        self.assertEqual(required_balance(SUITES), 2_600_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile

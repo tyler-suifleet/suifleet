@@ -918,9 +918,9 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    # SF-127 fresh package storage alone cost 0.720 SUI (run 40125390496);
-    # setup, device funding, reports and cleanup also need allowance.
-    parser.add_argument("--max-spend-mist", type=int, default=1_400_000_000)
+    # SF-127 current-main package storage cost 1.120 SUI (run 40246935467);
+    # setup, device funding and full deployment/cleanup reservations also fit.
+    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")
