@@ -5,7 +5,7 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
@@ -69,7 +69,7 @@ export default function EnrollmentPage() {
     await policies.refetch();
   }
 
-  if (!account) return <p className="text-sm text-gray-500">Connect your wallet to enroll devices.</p>;
+  if (!account) return <ConnectionRequired title="Enrollment" description="Prepare device batches and securely enroll devices with single-use credentials." />;
   return (
     <div className="space-y-4 max-w-5xl text-sm">
       <PageHeader title="Enrollment" subtitle="Reserve device names and serial numbers; devices enroll themselves with single-use credentials" />

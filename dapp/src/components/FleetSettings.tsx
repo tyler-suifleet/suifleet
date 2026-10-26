@@ -203,7 +203,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
       <div className="border rounded p-2" data-testid="network-cost">
         <h3 className="font-semibold text-xs">Network cost per month, at cost (paid from your fleet budget)</h3>
         <p className="text-xs">Per device {usd(result.network.usdPerDevice)}; per fleet {usd(result.network.usdPerFleet)}, including {usd(result.network.base.releasesUsdPerFleet)} of release uploads.</p>
-        <p className="text-xs text-gray-600">Sui gas and Walrus fees only. SuiFleet adds no markup to this deposit.</p>
+        <p className="text-xs text-gray-600">Device activity and storage fees only. This deposit is separate from the SuiFleet subscription and has no SuiFleet markup.</p>
       </div>
       <div className="border rounded p-2" data-testid="suifleet-price">
         <h3 className="font-semibold text-xs">SuiFleet price per month</h3>
@@ -216,18 +216,19 @@ function SettingsForm({ table }: { table: PriceTable }) {
       </div>
     </div>}
 
-    <div className="text-xs text-gray-700 border rounded p-2" data-testid="quote">
+    <p className="text-xs text-gray-600">Estimated costs can change. Your account approval app shows the actual network fee before you confirm.</p>
+    <details className="text-xs text-gray-700 border rounded p-2" data-testid="quote"><summary>Technical cost assumptions and exchange rates</summary>
       <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: SF-127 isolated-localnet receipt and Testnet health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
       <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${walrusError})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
       <p>USD: SUI ${quote.usd.SUI}, WAL ${quote.usd.WAL}, {quote.usdSource}, {quoteDate(quote.usdObservedAt)}.{" "}
         <button type="button" className="underline" disabled={usdLoading} onClick={() => void refreshUsd()}>Fetch live USD prices from CoinGecko</button>
         {usdError && <span role="alert"> {usdError}</span>}</p>
       <p>Estimates, not quotes: the wallet shows each transaction&apos;s actual cost before approval.</p>
-    </div>
+    </details>
 
     {result.deposit && shortfall && <div className="border rounded p-2 text-xs" data-testid="deposit">
       <h3 className="font-semibold">Recommended deposit for {months} month(s) of these settings</h3>
-      <p>{formatToken(result.deposit.suiDepositMist)} SUI (device gas and floats, 20% headroom) and {formatToken(result.deposit.walDepositFrost)} WAL (Walrus storage and writes), about {usd(result.deposit.usd.total)}.</p>
+      <p>{formatToken(result.deposit.suiDepositMist)} SUI (device activity and starting balances, with 20% headroom) and {formatToken(result.deposit.walDepositFrost)} WAL (storage and uploads), about {usd(result.deposit.usd.total)}.</p>
       <p>Your fleet budget holds {budget ? `${formatToken(budget.balance)} SUI` : "nothing yet (no budget)"}{walCounted ? `; fleet storage holds ${storage ? `${formatToken(storage.walBalance)} WAL` : "nothing yet"}` : "; this deployment has no fleet storage, so Walrus fees are paid by each upload's wallet"}.</p>
       {shortfall.enough ? <p role="status">The current deposit covers this plan.</p>
         : <p>Short by {formatToken(shortfall.suiMist)} SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} WAL` : ""}. <a className="underline" href="/budget/">Deposit on the Network budget page</a>.</p>}
@@ -238,18 +239,18 @@ function SettingsForm({ table }: { table: PriceTable }) {
       {saver.reason && <p>{saver.reason}</p>}
       {saved.error && <p role="alert">Saved settings unavailable: {saved.error.message}</p>}
       {saved.data === null && <p data-testid="saved">No settings saved yet: devices keep their local configuration until you save.</p>}
-      {saved.data && <p data-testid="saved">Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p>}
+      {saved.data && <details data-testid="saved"><summary>Current saved reporting and storage settings</summary><p>Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p></details>}
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
         onClick={() => void save(false)}>Save settings</button>
       {warning && shortfall && !shortfall.enough && <div role="alert" className="border border-amber-500 bg-amber-50 rounded p-2 space-y-1">
         <p>Not enough deposit for these settings: the fleet needs {formatToken(shortfall.suiMist)} more SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} more WAL` : ""} to run {months} month(s).
-          Devices stop sending health reports and archives when their gas runs out. Nothing has been signed.</p>
+          Devices stop sending health reports and archives when they cannot pay network fees. You have not approved any changes yet.</p>
         <div className="flex gap-2">
           <a className="underline" href="/budget/">Deposit first</a>
           <button type="button" className="border rounded px-2 py-1" disabled={mutation.isPending} onClick={() => void save(true)}>Save anyway</button>
         </div>
       </div>}
-      {message && <p role="status">{message}</p>}
+      {message && <div><p role="status">Settings saved. Devices apply them at their next check.</p><details><summary>Confirmation details</summary><p className="break-all">{message}</p></details></div>}
       {error && <p role="alert">{error}</p>}
     </div>
   </div>;

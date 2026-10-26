@@ -31,10 +31,10 @@ assert.equal(shortAddress('0xa'), '0xa');
 const ok = (value) => ({ status: 'success', value }), pending = { status: 'pending' }, failed = { status: 'error' };
 const states = (...args) => onboardingProgress(...args).map((step) => `${step.state}:${step.status}`);
 assert.deepEqual(states(false, pending, pending), ['current:Not connected', 'upcoming:Waiting for sign-in', 'upcoming:Waiting for sign-in', 'upcoming:Needs a registered device']);
-assert.deepEqual(states(true, ok('0'), ok(0)), ['done:Connected', 'current:Not funded', 'upcoming:Needs gas first', 'upcoming:Needs a registered device']);
-assert.deepEqual(states(true, failed, ok(0)), ['done:Connected', 'blocked:Balance unavailable', 'upcoming:Needs gas first', 'upcoming:Needs a registered device']);
+assert.deepEqual(states(true, ok('0'), ok(0)), ['done:Connected', 'current:Not funded', 'upcoming:Needs funds first', 'upcoming:Needs a registered device']);
+assert.deepEqual(states(true, failed, ok(0)), ['done:Connected', 'blocked:Balance unavailable', 'upcoming:Needs funds first', 'upcoming:Needs a registered device']);
 assert.deepEqual(states(true, ok('5'), failed).slice(2), ['blocked:Inventory unavailable', 'upcoming:Needs a registered device']);
-assert.deepEqual(states(true, ok('5'), ok(0)).slice(1), ['done:Gas available', 'current:No devices yet', 'upcoming:Needs a registered device']);
+assert.deepEqual(states(true, ok('5'), ok(0)).slice(1), ['done:Funds available', 'current:No devices yet', 'upcoming:Needs a registered device']);
 // Registration is inventory only: the update step never reports done (no installation/health claim).
 assert.deepEqual(states(true, ok('0'), ok(2)).slice(1), ['current:Not funded', 'done:2 registered', 'current:Ready to deploy']);
 for (const step of onboardingProgress(true, ok('5'), ok(3))) assert.doesNotMatch(step.status, /online|healthy|installed/i);
