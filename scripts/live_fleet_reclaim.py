@@ -10,14 +10,20 @@ executed rebate.
 Never runs on mainnet; the caller holds network:suifleet-testnet. The
 UpgradeCap, not the cache, decides reuse: a latest version whose bytecode
 matches this source is reused, so identical code is never republished.
+`--source-revision` builds the contracts of a committed revision instead of
+the working tree, so a version deployed from that revision is verified
+byte for byte and reused when the working tree no longer links against the
+fixture's published dependencies.
 """
 import argparse
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 
 from live_common import Live, ROOT, plain, stage
@@ -64,6 +70,15 @@ def check_origins(head, base, head_origins, base_origins, introduced, previous=N
     return head_origins
 
 
+def contracts_at(revision, directory):
+    """The committed contracts tree of `revision`, extracted under `directory`."""
+    archive = subprocess.run(['git', '-C', str(ROOT), 'archive', '--format=tar', revision, 'contracts'],
+                             check=True, capture_output=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+        tar.extractall(directory, filter='data')
+    return Path(directory) / 'contracts'
+
+
 def run(args):
     assert os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'), 'machine mutation lock required'
     os.umask(0o077)
@@ -75,7 +90,9 @@ def run(args):
     state = Path(args.cache)
     state.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     cache = json.loads(state.read_text()) if state.exists() else {}
-    head_source = (ROOT / 'contracts/fleet_data/sources/fleet_data.move').read_bytes()
+    source_dir = tempfile.TemporaryDirectory(prefix='sf129-source-')
+    contracts = contracts_at(args.source_revision, source_dir.name) if args.source_revision else ROOT / 'contracts'
+    head_source = (contracts / 'fleet_data/sources/fleet_data.move').read_bytes()
     try:
         # Authority: this wallet holds the data UpgradeCap and the fleet's budget cap.
         facts = dm.chain_facts(live.rpc_url, cap, CORE_CAP, data['fleetId'], data['writerId'])
@@ -96,7 +113,7 @@ def run(args):
         before = {name: plain(live.object(data[name])['content']) for name in ('fleetId', 'writerId')}
         with tempfile.TemporaryDirectory(prefix='sf129-live-') as directory:
             tree = Path(directory) / 'contracts'
-            stage(ROOT / 'contracts', tree)
+            stage(contracts, tree)
             record_publication(tree, live.chain, CORE, CORE_CAP)
             record_publication(tree / 'fleet_storage', live.chain, storage_package['package'], storage_package['cap'])
             record_publication(tree / 'fleet_data', live.chain, base, cap, published_at=cap_package, version=cap_version)
@@ -159,8 +176,10 @@ def run(args):
                 live.evidence['reclaim'] = {'indices': [i for i, _ in expired], 'net_returned_mist': -net_gas(result), 'gas': gas}
                 live.check(f'pruned {len(expired)} expired archive(s); {-net_gas(result)} MIST returned net of fees')
             live.evidence.update(fixture=dict(fixture, head=head, version=version, base=base, cap=cap, budget_cap=budget_cap), origins=origins,
-                                 source_sha256=hashlib.sha256(head_source).hexdigest(), compiled_digest=bytes(built['digest']).hex())
+                                 source_sha256=hashlib.sha256(head_source).hexdigest(), compiled_digest=bytes(built['digest']).hex(),
+                                 source_revision=args.source_revision or 'working tree')
     finally:
+        source_dir.cleanup()
         live.finish(args.evidence)
 
 
@@ -171,6 +190,7 @@ if __name__ == '__main__':
     parser.add_argument('--evidence', required=True)
     parser.add_argument('--auto-fund', action='store_true', help='One faucet request if the balance is below the ceiling')
     parser.add_argument('--reclaim', action='store_true', help='Also prune archives whose storage has ended')
+    parser.add_argument('--source-revision', help='Build contracts from this committed revision instead of the working tree')
     parser.add_argument('--max-spend-mist', type=int, default=150_000_000)
     parser.add_argument('--upgrade-budget', type=int, default=120_000_000)
     parser.add_argument('--build-sui', default='sui')
