@@ -460,9 +460,9 @@ class RunFlow(unittest.TestCase):
 
     def test_retained_publish_cli_failure_settles_newly_visible_effects(self):
         # Run 40265702929: not found before replay, then CLI InsufficientGas.
-        # One follow-up read must settle effects without another mutation.
-        for mode in ('failed', 'missing', 'wrong_sender', 'wrong_digest'):
-            visible = mode == 'failed'
+        # Bounded follow-up reads settle indexed effects without another mutation.
+        for mode in ('failed', 'delayed', 'missing', 'wrong_sender', 'wrong_digest'):
+            visible = mode in ('failed', 'delayed')
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 marker = pending()
@@ -475,7 +475,7 @@ class RunFlow(unittest.TestCase):
 
                 def serialized(argv):
                     sent.append(argv[-2])
-                    if mode != 'missing':
+                    if mode not in ('missing', 'delayed'):
                         chain.transactions['D1'] = dict(failed)
                         if mode == 'wrong_sender':
                             chain.transactions['D1']['sender'] = OTHER
@@ -484,17 +484,31 @@ class RunFlow(unittest.TestCase):
                     raise RuntimeError('CLI InsufficientGas')
 
                 args, key, patches, _ = self.harness(root, self.state_with(marker), serialized=serialized)
-                expected = {'failed': 'execution effects', 'missing': 'CLI InsufficientGas',
+                reads = []
+                original_read = chain.transaction
+
+                def read(digest):
+                    reads.append(digest)
+                    if mode == 'delayed' and len(reads) == 4:
+                        chain.transactions['D1'] = dict(failed)
+                    return original_read(digest)
+
+                chain.transaction = read
+                expected = {'failed': 'execution effects', 'delayed': 'execution effects',
+                            'missing': 'outcome not indexed',
                             'wrong_sender': 'not sent and paid', 'wrong_digest': 'different digest'}[mode]
-                with self.assertRaisesRegex(RuntimeError, expected):
+                with self.assertRaisesRegex(RuntimeError, expected) as raised:
                     self.run_flow(args, patches, [
                         patch.object(live.reconciler, 'Chain', return_value=chain),
+                        patch.object(live.time, 'sleep'),
                         patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
                         patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})])
                 saved = json.loads((root / 'state.json').read_text())['publications'][key]
                 evidence = json.loads((root / 'evidence.json').read_text())
                 self.assertEqual(sent, ['BYTES'])
-                self.assertEqual(len(chain.reads), 2)
+                if mode == 'missing':
+                    self.assertEqual(live.failure_class(raised.exception), 'uncertain')
+                self.assertEqual(len(chain.reads), 5 if mode == 'missing' else 4 if mode == 'delayed' else 2)
                 self.assertEqual('pending_operation' in saved, not visible)
                 self.assertNotIn('base_package', saved)
                 entry = evidence['transactions'][0]

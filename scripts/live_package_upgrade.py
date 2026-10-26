@@ -605,11 +605,18 @@ def run(args):
                                 return client("serialized-tx", tx["tx_bytes"])  # Same digest: executes at most once.
                             except RuntimeError:
                                 # A failed CLI exit can still mean executed effects.
-                                # One read, no replay: settle verified effects or
-                                # retain the full uncertain reservation and marker.
-                                facts = facts_reader.transaction(tx["digest"])
+                                # Indexing can lag the execution response. Bound
+                                # read-only observations; never replay the mutation.
+                                facts = None
+                                for attempt in range(4):
+                                    if attempt:
+                                        time.sleep(1)
+                                    facts = facts_reader.transaction(tx["digest"])
+                                    if facts is not None:
+                                        break
                                 if facts is None:
-                                    raise
+                                    raise reconciler.Uncertain(
+                                        "resubmission outcome not indexed; retained transaction and full reservation")
                                 _, result = reconciler.settle(facts, operator)
                                 if result["digest"] != tx["digest"]:
                                     raise reconciler.Uncertain("resubmission effects have a different digest")
