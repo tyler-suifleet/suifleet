@@ -28,17 +28,22 @@ AGENT = "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
 
 class PlannedCli(Cli):
     """Also builds unsigned package transactions (their "bytes" encode the
-    decoded TransactionData) and executes them with serialized-tx, which,
-    like the real CLI, records nothing in Published.toml."""
+    decoded TransactionData), dry-runs them with serialized-tx and executes
+    signed ones with execute-signed-tx, which, like the real CLI, record
+    nothing in Published.toml."""
     MODULES, DEPENDENCIES = ["oRzrCwYAAAAB", "oRzrCwYAAAAC"], ["0x1", "0x2"]
 
     def __init__(self, test, **options):
         super().__init__(test, **options)
         self.modules, self.dependencies, self.tamper, self.executed_digest = list(self.MODULES), list(self.DEPENDENCIES), None, None
-        self.built = {}
+        self.built, self.signed = {}, []
 
     def version(self):
         return "1.81.1"
+
+    def sign(self, address, tx_bytes):
+        self.signed.append((address, tx_bytes))
+        return "SIG:" + tx_bytes
 
     def __call__(self, *args, check=True):
         args = [str(a) for a in args]
@@ -51,10 +56,13 @@ class PlannedCli(Cli):
             tx = base64.b64encode(json.dumps(data).encode()).decode()
             self.built[tx] = args
             return out("Serialized unsigned transaction:\n" + tx + "\n")
-        if args[0] != "serialized-tx":
+        if args[0] not in ("serialized-tx", "execute-signed-tx"):
             return super().__call__(*args, check=check)
         self.calls.append(args)
-        data, built = json.loads(base64.b64decode(args[1])), self.built[args[1]]
+        tx = args[1] if args[0] == "serialized-tx" else args[args.index("--tx-bytes") + 1]
+        if args[0] == "execute-signed-tx":
+            assert args[args.index("--signatures") + 1] == "SIG:" + tx, "executes only what was signed"
+        data, built = json.loads(base64.b64decode(tx)), self.built[tx]
         replay = built[:built.index("--gas-budget")] + ["--json"] + (["--dry-run"] if "--dry-run" in args else [])
         written, self.write_published = self.write_published, False
         try:
@@ -159,7 +167,7 @@ class Base(unittest.TestCase):
 
     def transactions(self):
         """Signed or simulated transactions; building unsigned bytes is neither."""
-        return [c for c in self.cli.calls if c[0] == "serialized-tx"
+        return [c for c in self.cli.calls if c[0] in ("serialized-tx", "execute-signed-tx")
                 or (c[0] in ("publish", "upgrade") and "--serialize-unsigned-transaction" not in c)]
 
     def assert_refused(self, plan, pattern, *extra, network="localnet"):
@@ -386,13 +394,15 @@ class TestnetPlanTests(Base):
         built = [c for c in self.cli.calls if "--serialize-unsigned-transaction" in c]
         signed = self.transactions()[-1]
         self.assertEqual(built[-1][0], "publish")
-        self.assertEqual(signed[0], "serialized-tx")
-        self.assertEqual(self.cli.built[signed[1]], built[-1], "exactly the verified bytes are signed")
+        self.assertEqual(signed[0], "execute-signed-tx")
+        tx = signed[signed.index("--tx-bytes") + 1]
+        self.assertEqual(self.cli.built[tx], built[-1], "exactly the verified bytes are signed")
+        self.assertEqual(self.cli.signed, [(ME, tx)])
         transaction = json.loads((release / "transaction.json").read_text())
         verified = transaction["verified_before_signing"]
         self.assertEqual((verified["kind"], verified["bytecode_digest"], verified["unsigned_digest"]),
                          ("publish", plan["revision"]["bytecode"]["digest"], transaction["digest"]))
-        # serialized-tx records nothing; the publisher records the verified effects.
+        # execute-signed-tx records nothing; the publisher records the verified effects.
         self.assertEqual(self.published(), dict(chain=TESTNET, package=oid(0x100), original=oid(0x100), version=1,
                                                 cap=oid(0xc0)))
         self.assertIn('toolchain-version = "1.81.1"', (self.package / "Published.toml").read_text())
@@ -405,6 +415,21 @@ class TestnetPlanTests(Base):
         self.assertEqual((verified["kind"], verified["bytecode_digest"]), ("upgrade", self.cli.digest()))
         self.assertEqual(self.published(), dict(chain=TESTNET, package=oid(0x102), original=oid(0x100), version=2,
                                                 cap=oid(0xc0)))
+
+    def test_signing_uses_the_client_configs_keystore_and_only_returns_the_signature(self):
+        config = self.tmp / "client.yaml"
+        config.write_text(f"keystore:\n  File: {self.tmp / 'sui.keystore'}\nenvs: []\n")
+        done = lambda stdout, code=0: subprocess.CompletedProcess([], code, stdout, "")
+        with unittest.mock.patch.object(publish.subprocess, "run", return_value=done('{"suiSignature": "AQID"}')) as run:
+            self.assertEqual(publish.Cli(config).sign(ME, "VFg="), "AQID")
+        self.assertEqual(run.call_args[0][0], ["sui", "keytool", "--keystore-path", str(self.tmp / "sui.keystore"), "sign",
+                                               "--address", ME, "--data", "VFg=", "--json"])
+        with unittest.mock.patch.object(publish.subprocess, "run", return_value=done("{}")), \
+                self.assertRaisesRegex(publish.PublishError, "no signature"):
+            publish.Cli(config).sign(ME, "VFg=")
+        config.write_text("keystore:\n  InMem: {}\n")
+        with self.assertRaisesRegex(publish.PublishError, "names no file keystore"):
+            publish.Cli(config).sign(ME, "VFg=")
 
     def assert_unsigned_refused(self, plan, pattern, *extra):
         self.assert_refused(plan, "refused the transaction before signing: .*" + pattern, *extra, network="testnet")
