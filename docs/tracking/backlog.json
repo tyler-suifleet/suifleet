@@ -3201,6 +3201,35 @@
         "Provide tested implementation in a PR for independent review; do not silently alter live customer pricing or spending allowances."
       ],
       "validation": "Offline pricing sensitivity and input validation regression tests, CLI examples and documentation consistency checks; no network mutation required."
+    },
+    {
+      "key": "SF-155",
+      "title": "Prepare a resumable real-network fleet cost measurement collector",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [
+        "SF-054",
+        "SF-130"
+      ],
+      "paths": [
+        "scripts",
+        "docs/business",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "Runnable preparation split from deferred SF-135/#267 Mainnet bill acceptance. Prepare a bounded workload manifest and read-only resumable collector so the final two-week pilot produces auditable actual costs rather than manual estimates.",
+      "evidence": "Current frozen SF054 quotes/scenario and fleet_costs.py reconcile supplied observations, but SF135 still requires an automated two-week fleet/transaction/storage/request accounting procedure before its Mainnet pilot can establish prices. This preparation does not require production publication or physical devices.",
+      "acceptance": [
+        "Define a workload/run manifest with network/chain, account/fleet identity, exact revisions, device count, reporting/upload/retention cadence, observation interval and source provenance using existing stable deployment manifest interfaces.",
+        "Collect/reconcile actual effects through supported gRPC/CLI or authenticated supplied evidence, with durable resume, digest deduplication, failed/unknown outcomes, device funding/internal transfers and separately reported refundable capital. Never treat budgets or Testnet-rescaled values as measured Mainnet expense.",
+        "Record WAL purchase/retention/renewal/reclaim costs and explicitly distinguish measured request counts/download observations from estimates or unavailable provider charges; required missing data must remain incomplete, not zero.",
+        "Provide offline positive/negative/restart/duplicate/network-mismatch regressions and a disposable isolated or existing dedicated Testnet-fixture smoke observation. Do not create a new costly fixture just for read-only collector validation.",
+        "Document the precise final SF135 two-week Mainnet procedure and integrate measured input output with existing accounting/subscription planning formats where supported. Keep SF135/#267 and SF087/#159 open; no Mainnet signing, submission, live billing or treasury/token purchase.",
+        "Commit only SF155 tracking entries from canonical catalog, open a linked implementation PR and hand off to independent review; final real-network costs remain unmeasured until acceptance actually runs."
+      ],
+      "validation": "Offline accounting/collector regressions, resumable read-only smoke evidence and documentation consistency. Public Mainnet reads are allowed; no Mainnet writes, production credentials, paid service purchases, physical programming or unsolicited new cloud servers."
     }
   ]
 }
