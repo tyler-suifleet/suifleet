@@ -59,6 +59,19 @@ class NotSubmitted(RuntimeError):
     """Verification refused a transaction before it was signed or submitted."""
 
 
+class DigestMismatch(RuntimeError):
+    """Something executed, but not as the verified transaction digest. Its
+    outcome says nothing about the verified transaction, which stays uncertain."""
+
+
+def bound(result, digest):
+    """The execution result, only if it is the verified transaction itself."""
+    executed = result.get('digest') if isinstance(result, dict) else None
+    if executed != digest:
+        raise DigestMismatch(f'executed transaction {executed} is not the verified transaction {digest}')
+    return result
+
+
 def run_version(tool, run=subprocess.run):
     result = run([str(tool), '--version'], capture_output=True, text=True, timeout=60)
     if result.returncode:
@@ -287,7 +300,7 @@ def ptb_submitter(client, ptb, *, sender, calls, run=subprocess.run, inspect=dec
         data = inspect(tx_bytes, run=run)
         verify_ptb_transaction(data, sender=sender, budget=budget, calls=calls)
         _persist(persist, tx_bytes, data, budget)
-        return client('serialized-tx', tx_bytes)
+        return bound(client('serialized-tx', tx_bytes), data['digest'])
     return submit
 
 
@@ -328,5 +341,5 @@ def package_submitter(client, build_tool, package_dir, common, *, sender, upgrad
         if record is not None:
             record.update(checked, digest=bytes(built['digest']).hex())
         _persist(persist, tx_bytes, data, budget)
-        return client('serialized-tx', tx_bytes)
+        return bound(client('serialized-tx', tx_bytes), data['digest'])
     return submit

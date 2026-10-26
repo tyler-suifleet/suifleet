@@ -617,7 +617,8 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            return client("serialized-tx", tx["tx_bytes"])  # Same digest: executes at most once.
+                            # Only an execution as the retained digest reconciles it.
+                            return toolchain.bound(client("serialized-tx", tx["tx_bytes"]), tx["digest"])
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
@@ -636,8 +637,10 @@ def run(args):
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
                         except Exception:
                             # Only a resubmission with failed execution effects is known.
+                            # A failure of any other digest proves nothing about the retained one.
                             last = ledger.evidence[-1] if ledger.evidence else {}
-                            if last.get("label") != retry or last.get("status") != "failure":
+                            if last.get("label") != retry or last.get("status") != "failure" \
+                                    or last.get("digest") != marker["tx"]["digest"]:
                                 save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
                                 raise
                             # It executed and failed, so it created nothing (for example

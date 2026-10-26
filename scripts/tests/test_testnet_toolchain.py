@@ -235,12 +235,13 @@ class VerifyBeforeSign(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True, check=True).stdout
             build = SimpleNamespace(returncode=0, stdout=json.dumps(dict(BUILT, digest=DIGEST)), stderr='')
             calls = []
+            executed = {'digest': tc.decode(tx_bytes)['digest'], 'effects': {}}
 
             def client(*command, json_output=True, check=True):
                 calls.append(command[0])
                 if command[0] == 'serialized-tx':
                     self.assertEqual(command[1], tx_bytes)
-                    return {'effects': {}}
+                    return executed
                 return SimpleNamespace(returncode=0, stdout=tx_bytes + '\n', stderr='')
 
             def run(command, **kwargs):
@@ -251,6 +252,11 @@ class VerifyBeforeSign(unittest.TestCase):
             submit(400_000_000)
             self.assertEqual(calls, ['test-publish', 'serialized-tx'])
             self.assertEqual(record['digest'], bytes(DIGEST).hex())
+            # An execution under any other digest is not the verified transaction.
+            verified, executed['digest'] = executed['digest'], 'BpaugV8b82Fz7NfVBaopt4AmFbzHnVJzrie5kBSg1jCN'
+            with self.assertRaisesRegex(tc.DigestMismatch, verified):
+                submit(400_000_000)
+            executed['digest'] = verified
             calls.clear()
             tampered = dict(BUILT, modules=MODULES[:2])
             build.stdout = json.dumps(tampered)

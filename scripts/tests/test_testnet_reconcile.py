@@ -263,7 +263,7 @@ class PersistBeforeSigning(unittest.TestCase):
             def client(*command, json_output=True, check=True):
                 order.append(command[0])
                 if command[0] == 'serialized-tx':
-                    return {'effects': {}}
+                    return {'digest': tc.decode(tx_bytes)['digest'], 'effects': {}}
                 return SimpleNamespace(returncode=0, stdout=tx_bytes + '\n', stderr='')
 
             def run(command, **kwargs):
@@ -293,7 +293,7 @@ class PersistBeforeSigning(unittest.TestCase):
         def client(*command, json_output=True, check=True):
             order.append(command[0] if command[0] != 'ptb' else ('ptb', '--serialize-unsigned-transaction' in command))
             if command[0] == 'serialized-tx':
-                return {'effects': {}}
+                return {'digest': tc.decode(tx_bytes)['digest'], 'effects': {}}
             return SimpleNamespace(returncode=0, stdout=tx_bytes + '\n', stderr='')
         persisted = []
         tc.ptb_submitter(client, ['--move-call', targets[0]], sender=SENDER, calls=targets,
@@ -538,6 +538,46 @@ class RunFlow(unittest.TestCase):
             evidence = json.loads((root / 'evidence.json').read_text())
             self.assertEqual(evidence['transactions'][0]['status'], 'unknown')
             self.assertEqual(evidence['allowance_used_mist'], 400_000_000)
+
+    def test_resubmission_executed_as_another_digest_keeps_the_original_uncertainty(self):
+        # serialized-tx may rebuild gas data. An outcome, failed or successful,
+        # under any digest but the retained one says nothing about the retained
+        # transaction: keep its marker and full reservation, publish nothing fresh.
+        retained, other = 'EzMmWDZKRSioFAVs2QAqrXm1mqXno1a4ejbA5jjE78eS', 'BpaugV8b82Fz7NfVBaopt4AmFbzHnVJzrie5kBSg1jCN'
+        gas = {'computationCost': '5010000', 'storageCost': '0', 'storageRebate': '0'}
+        failed = {'digest': other, 'effects': {'status': {'status': 'failure', 'error': 'InsufficientGas'}, 'gasUsed': gas}}
+        succeeded = {'digest': other, 'effects': {'status': {'status': 'success'}, 'gasUsed': gas}, 'objectChanges': [
+            {'type': 'published', 'packageId': PACKAGE},
+            {'type': 'created', 'objectType': '0x2::package::UpgradeCap', 'objectId': CAP}]}
+
+        def error(digest):
+            return lambda argv: SimpleNamespace(returncode=1, stdout='',
+                                                stderr=f"Error executing transaction '{digest}': InsufficientGas")
+        cases = {
+            'different failed digest': dict(serialized=error(other), tx_block=lambda argv: failed),
+            'different successful digest': dict(serialized=lambda argv: succeeded),
+            'mismatched read-back': dict(serialized=error(retained), tx_block=lambda argv: failed),
+        }
+        for name, cli in cases.items():
+            with self.subTest(name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = pending()
+                marker['tx'].update(digest=retained, sender=tc.normal(ADDRESS))
+                args, key, patches, commands = self.harness(root, self.state_with(marker), **cli)
+                with self.assertRaisesRegex(tc.DigestMismatch, f'{other} is not the verified transaction {retained}'):
+                    self.run_flow(args, patches, [
+                        patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=8)),
+                        patch.object(live.toolchain, 'decode', side_effect=decoded(digest=retained, sender=ADDRESS)),
+                        patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})])
+                saved = json.loads((root / 'state.json').read_text())['publications'][key]
+                self.assertEqual(saved['pending_operation']['tx']['digest'], retained)
+                self.assertNotIn('base_package', saved)
+                evidence = json.loads((root / 'evidence.json').read_text())
+                self.assertEqual(len(evidence['transactions']), 1)  # No fresh publication.
+                self.assertEqual((evidence['transactions'][0]['status'], evidence['allowance_used_mist']),
+                                 ('unknown', 400_000_000))
+                self.assertEqual(evidence.get('reconciliations', []), [])  # Nothing settled.
+                self.assertEqual(sum('serialized-tx' in c for c in commands), 1)
 
     def test_historical_marker_is_retained_with_its_observation(self):
         with tempfile.TemporaryDirectory() as temporary:
