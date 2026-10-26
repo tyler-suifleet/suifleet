@@ -351,7 +351,8 @@ DEVICE = tc.normal('0x' + 'd0' * 32)
 class RunFlow(unittest.TestCase):
     """Drive run() up to its first chain verification with an offline CLI."""
 
-    def harness(self, root, state, *, balance='2000000000', serialized=None, faucet=None, required=None, upgrade=False):
+    def harness(self, root, state, *, balance='2000000000', serialized=None, faucet=None, required=None, upgrade=False,
+                tx_block=None):
         tools = {'build': {'path': '/compiler', 'version': tc.BUILD['version']},
                  'network': {'path': '/network', 'version': tc.NETWORK['version'], 'sha256': 'pinned'}}
         buffer = io.BytesIO()
@@ -374,7 +375,12 @@ class RunFlow(unittest.TestCase):
             elif 'faucet' in argv:
                 return faucet(argv)
             elif 'serialized-tx' in argv:
-                output = json.dumps(serialized(argv))
+                output = serialized(argv)
+                if isinstance(output, SimpleNamespace):
+                    return output  # A raw CLI outcome, such as a failed execution.
+                output = json.dumps(output)
+            elif 'tx-block' in argv:
+                output = json.dumps(tx_block(argv))
             else:
                 self.assertIn('gas', argv)
                 output = json.dumps({'addressMistBalance': balance[0] if isinstance(balance, list) else balance,
@@ -466,6 +472,72 @@ class RunFlow(unittest.TestCase):
             evidence = json.loads((root / 'evidence.json').read_text())
             self.assertEqual(evidence['transactions'][0]['label'], 'publish base (retained bytes)')
             self.assertEqual(evidence['transactions'][0]['gas_mist'], 341_000_000)
+
+    def test_failed_retained_resubmission_is_read_back_and_one_fresh_publish_follows(self):
+        # Runs 40261665249 and 40266575477: bytes retained with the pre-SF-136
+        # 0.4 SUI budget were resubmitted and failed on chain with InsufficientGas.
+        # The CLI exits non-zero without effects; the failure must be read back by
+        # digest (charged at its actual cost, marker cleared) and the run must
+        # continue with one fresh publication at the current budget.
+        digest = 'EzMmWDZKRSioFAVs2QAqrXm1mqXno1a4ejbA5jjE78eS'
+        marker = pending()
+        marker['tx'].update(digest=digest, sender=tc.normal(ADDRESS))
+        failed = {'digest': digest, 'effects': {'status': {'status': 'failure', 'error': 'InsufficientGas'},
+                                                'gasUsed': {'computationCost': '5010000', 'storageCost': '0',
+                                                            'storageRebate': '0'}}}
+        sent, read, reservations = [], [], []
+
+        def submitter(*args, **kwargs):
+            def submit(budget):
+                reservations.append(budget)
+                raise tc.NotSubmitted('stop before signing the fresh publication')
+            return submit
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, key, patches, _ = self.harness(
+                root, self.state_with(marker),
+                serialized=lambda argv: (sent.append(argv[-2]), SimpleNamespace(
+                    returncode=1, stdout='', stderr=f"Error executing transaction '{digest}': InsufficientGas"))[1],
+                tx_block=lambda argv: (read.append(argv[-2]), failed)[1])
+            with self.assertRaisesRegex(tc.NotSubmitted, 'stop before signing the fresh publication'):
+                self.run_flow(args, patches, [
+                    patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=8)),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(digest=digest, sender=ADDRESS)),
+                    patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'}),
+                    patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
+            self.assertEqual(sent, ['BYTES'])  # The identical retained bytes, once.
+            self.assertEqual(read, [digest])
+            self.assertEqual(reservations, [live.PACKAGE_GAS])
+            saved = json.loads((root / 'state.json').read_text())['publications'][key]
+            self.assertNotIn('pending_operation', saved)
+            evidence = json.loads((root / 'evidence.json').read_text())
+            retained = evidence['transactions'][0]
+            self.assertEqual((retained['label'], retained['status'], retained['gas_mist']),
+                             ('publish base (retained bytes)', 'failure', 5_010_000))
+            self.assertEqual(evidence['reconciliations'][0]['outcome'], 'failed')
+            self.assertEqual(evidence['reconciliations'][0]['charged_by'], 'this run')
+            self.assertEqual(evidence['transactions'][1]['status'], 'not_submitted')
+            self.assertEqual(evidence['allowance_used_mist'], 5_010_000)
+
+    def test_unreadable_failed_resubmission_keeps_its_marker_and_full_reservation(self):
+        digest = 'EzMmWDZKRSioFAVs2QAqrXm1mqXno1a4ejbA5jjE78eS'
+        marker = pending()
+        marker['tx'].update(digest=digest, sender=tc.normal(ADDRESS))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, key, patches, _ = self.harness(
+                root, self.state_with(marker),
+                serialized=lambda argv: SimpleNamespace(returncode=1, stdout='', stderr='connection reset'))
+            with self.assertRaisesRegex(RuntimeError, 'connection reset'):
+                self.run_flow(args, patches, [
+                    patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=8)),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(digest=digest, sender=ADDRESS)),
+                    patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})])
+            saved = json.loads((root / 'state.json').read_text())['publications'][key]
+            self.assertEqual(saved['pending_operation']['tx']['digest'], digest)
+            evidence = json.loads((root / 'evidence.json').read_text())
+            self.assertEqual(evidence['transactions'][0]['status'], 'unknown')
+            self.assertEqual(evidence['allowance_used_mist'], 400_000_000)
 
     def test_historical_marker_is_retained_with_its_observation(self):
         with tempfile.TemporaryDirectory() as temporary:

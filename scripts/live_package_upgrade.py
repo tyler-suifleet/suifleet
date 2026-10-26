@@ -460,11 +460,27 @@ def run(args):
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
         if result.returncode and check and not (json_output and '"effects"' in result.stdout):
+            submitted = live_common.DIGEST.search(result.stderr + result.stdout)
+            if json_output and command[0] in ("serialized-tx", "ptb") and submitted:
+                # The CLI exits non-zero without effects when execution fails
+                # (runs 40261665249, 40266575477: InsufficientGas). Read the
+                # failure back by digest so it is charged and known, not unknown.
+                found = {}
+                wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
+                         f"transaction {submitted.group(1)} not readable", timeout=60)
+                return found
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output:
             return result
         out = result.stdout
         return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+
+    def executed(digest):
+        try:
+            found = client("tx-block", digest, check=False)
+        except ValueError:  # Not readable yet: no JSON output.
+            return {}
+        return found if isinstance(found, dict) and "effects" in found else {}
 
     def balance():
         gas = client("gas")
@@ -620,12 +636,16 @@ def run(args):
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
                         except Exception:
                             # Only a resubmission with failed execution effects is known.
-                            if ledger.evidence and ledger.evidence[-1].get("label") == retry \
-                                    and ledger.evidence[-1].get("status") == "failure":
-                                publication.pop("pending_operation")
-                            raise
-                        finally:
-                            save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
+                            last = ledger.evidence[-1] if ledger.evidence else {}
+                            if last.get("label") != retry or last.get("status") != "failure":
+                                save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
+                                raise
+                            # It executed and failed, so it created nothing (for example
+                            # bytes built with an older, insufficient budget). Like a
+                            # failure from an earlier run, it permits one fresh submission.
+                            outcome, value = "failed", {"digest": last.get("digest"), "gas_mist": last.get("gas_mist"),
+                                                        "effects": {"status": {"status": "failure"}}}
+                        save_state(state_path, state)
                         entry = {"label": label, "outcome": outcome, "legacy": bool(marker.get("legacy"))}
                         if outcome == "absent":
                             entry["reason"] = value
