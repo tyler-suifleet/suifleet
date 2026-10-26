@@ -202,7 +202,7 @@ console.log("PASS: the recommended deposit follows health, archives, retention, 
 // ── Saving: SF-130's fleet_settings::set, only with its type origins and a budget ──
 {
   const budget = { id: "0x" + "b1".repeat(32), capId: "0x" + "c1".repeat(32) };
-  assert.match(saving.settingsSaver(budget, withoutSettings).reason, /no on-chain fleet settings/);
+  assert.match(saving.settingsSaver(budget, withoutSettings).reason, /Saving settings is not available/);
   assert.equal(saving.settingsSaver(budget, withoutSettings).build, undefined);
   assert.match(saving.settingsSaver(undefined).reason, /create one on the Network budget page/);
   const chosen = settings.toSettings({ ...defaults, healthIntervalMs: 3_600_000 }, "testnet");

@@ -15,7 +15,7 @@ export interface SettingsSaver {
 
 export function settingsSaver(budget: Pick<BudgetView, "id" | "capId"> | undefined, manifest = MANIFEST): SettingsSaver {
   if (!settingsSupported(manifest)) {
-    return { reason: "This deployment's contracts have no on-chain fleet settings (SF-130); upgrade the contracts to save. Prices and the deposit below still follow your choices." };
+    return { reason: "Saving settings is not available in this fleet configuration. Ask your administrator to enable it. You can still explore choices and estimates without changing devices." };
   }
   if (!budget) return { reason: "Settings are stored on your fleet budget: create one on the Network budget page first." };
   return { build: (settings) => buildSetFleetSettingsTx(budget.id, budget.capId, settings) };

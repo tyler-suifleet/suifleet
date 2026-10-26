@@ -107,5 +107,5 @@ export function purchaseStatus(pending: PendingPurchase, balance: bigint, now: n
 export const FEE_NOTES = {
   onramp: "Card and on-ramp fees, exchange rates, KYC and the countries served are set by the provider and shown in its checkout before you pay. SuiFleet does not know or add them.",
   regions: "Availability depends on your country and payment method; the provider may decline or ask for identity verification.",
-  service: "SuiFleet adds no service fee: the deposit covers network costs only (an open business decision, see docs/FLEET_BUDGET.md).",
+  service: "This deposit has no service fee added by SuiFleet. It covers network costs only and does not purchase a subscription.",
 } as const;

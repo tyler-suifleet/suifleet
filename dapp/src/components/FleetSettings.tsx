@@ -19,8 +19,8 @@ import { MEASURED, formatToken, rescaled } from "@/lib/network-costs";
 
 const TITLES: Record<SettingKey, string> = {
   checkIntervalMs: "Update check",
-  rolloutCheckIntervalMs: "Rollout fast-check",
-  healthIntervalMs: "On-chain health",
+  rolloutCheckIntervalMs: "Checks during an update",
+  healthIntervalMs: "Health reports",
   archiveIntervalMs: "Log archives",
   archiveRetentionDays: "Log retention",
 };
@@ -123,7 +123,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     try { return { settings: toSettings({ ...values, [key]: value }, NETWORK) }; }
     catch (cause) {
       if (key !== "archiveRetentionDays") return { reason: (cause as Error).message };
-      return { reason: `Unavailable here: needs ${retentionEpochs(value, NETWORK)} Walrus epochs of ${epochDays(NETWORK)} day(s); the limit is ${SETTINGS_BOUNDS.archiveRetentionEpochs[1]}` };
+      return { reason: `Not available on this network. Choose a retention period of ${SETTINGS_BOUNDS.archiveRetentionEpochs[1] * epochDays(NETWORK)} days or less.` };
     }
   };
   const walCounted = !!config;
@@ -152,21 +152,25 @@ function SettingsForm({ table }: { table: PriceTable }) {
 
   const set = (key: Exclude<keyof Workload, "logUploads">, scale = 1) => (value: number) => setWorkload({ ...workload, [key]: Math.round(value * scale) });
   const fee = rescaled(quote);
+  const descriptions: Record<SettingKey, string> = {
+    checkIntervalMs: "How often devices look for new software and settings.",
+    rolloutCheckIntervalMs: "Check more frequently while a gradual update is in progress.",
+    healthIntervalMs: "How often devices send a verified health summary.",
+    archiveIntervalMs: "How often enabled log uploads are collected. This does not turn logging on.",
+    archiveRetentionDays: "How long uploaded device data is kept before it can expire.",
+  };
   return <div className="space-y-4 text-sm">
-    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-      <NumberField label="Devices" value={workload.devices} onChange={set("devices")} />
-      <NumberField label="Deployments per month" value={workload.deploymentsPerMonth} onChange={set("deploymentsPerMonth")} />
-      {workload.logUploads && <NumberField label="Log data per device per month (MiB)" step={0.1} value={workload.logBytesPerDeviceMonth / MIB} onChange={set("logBytesPerDeviceMonth", MIB)} />}
-      <NumberField label="Additional device data per device per month (MiB)" step={0.1} value={(workload.dataBytesPerDeviceMonth ?? 0) / MIB} onChange={set("dataBytesPerDeviceMonth", MIB)} />
-      <NumberField label="Releases per month" value={workload.releasesPerMonth} onChange={set("releasesPerMonth")} />
-      <NumberField label="Release artifact size (MiB)" step={0.1} value={workload.artifactBytes / MIB} onChange={set("artifactBytes", MIB)} />
-      <NumberField label="Months to prepay" value={months} onChange={setMonths} />
-    </div>
-    <label className="flex gap-1 items-center text-xs"><input type="checkbox" checked={workload.logUploads} onChange={(e) => setWorkload({ ...workload, logUploads: e.target.checked })} />
-      Estimate with device log uploads (off for new plans). This only sizes the estimate: the saved archive cadence and retention do not turn uploads on.</label>
-
-    {SETTING_KEYS.map((key) => <fieldset key={key} className="border rounded p-2">
-      <legend className="px-1 text-xs font-semibold">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads && !(workload.dataBytesPerDeviceMonth && workload.dataBytesPerDeviceMonth > 0) ? " (applies when device data uploads are on; no cost while off)" : ""}</legend>
+    {SETTING_KEYS.map((key) => <fieldset key={key} className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
+      <legend className="px-2 text-sm font-semibold text-slate-900">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads && !(workload.dataBytesPerDeviceMonth && workload.dataBytesPerDeviceMonth > 0) ? " (applies when device data uploads are on; no cost while off)" : ""}</legend>
+      <p className="text-sm text-slate-500">{descriptions[key]}</p>
+      <div className="grid gap-2 sm:grid-cols-3">{table.settings[key].map(o => {
+        const { settings, reason } = option(key, o.value); const selected = values[key] === o.value;
+        return <label key={o.value} className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${selected ? "border-blue-500 bg-blue-50 text-blue-950 ring-1 ring-blue-500" : "border-slate-200 bg-white"} ${!settings ? "opacity-60" : ""}`}>
+          <input id={`${key}-${o.value}`} type="radio" name={key} checked={selected} disabled={!settings} onChange={() => { setValues({ ...values, [key]: o.value }); setTouched(true); }} />
+          <span><span className="font-medium">{o.label}</span>{o.default && <span className="ml-2 text-xs text-slate-500">Recommended</span>}{reason && <span className="block text-xs">{reason}</span>}</span>
+        </label>;
+      })}</div>
+      <details className="text-xs text-slate-500"><summary>Compare estimated costs for these options</summary><div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead><tr className="text-left">
           <th className="p-1">Option</th><th className="p-1">Usage per device</th>
@@ -179,9 +183,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
           const network = settings && !result.error ? settingNetworkCost(key, settings, workload, quote) : undefined;
           const id = `${key}-${o.value}`;
           return <tr key={o.value} className="border-t" data-testid={id}>
-            <td className="p-1"><label htmlFor={id} className="flex gap-1 items-center">
-              <input id={id} type="radio" name={key} checked={values[key] === o.value} disabled={!settings} onChange={() => { setValues({ ...values, [key]: o.value }); setTouched(true); }} />
-              {o.label}{o.default ? " (default)" : ""}</label></td>
+            <td className="p-1"><span>{o.label}{o.default ? " (default)" : ""}</span></td>
             <td className="p-1">{network?.detail ?? reason}</td>
             <td className="p-1 text-right">{network ? usd(network.usdPerDevice) : "–"}</td>
             <td className="p-1 text-right">{network ? usd(network.usdPerFleet) : "–"}</td>
@@ -189,8 +191,22 @@ function SettingsForm({ table }: { table: PriceTable }) {
             <td className="p-1 text-right">{!o.usdPerDeviceMonth ? "included" : idle ? "not charged" : usd(o.usdPerDeviceMonth * workload.devices)}</td>
           </tr>;
         })}</tbody>
-      </table>
+      </table></div></details>
     </fieldset>)}
+    <details className="rounded-xl border border-slate-200 bg-slate-50 p-5" data-testid="cost-planning"><summary className="font-semibold text-slate-800">Plan expected usage and compare costs</summary>
+      <p className="my-3 text-sm text-slate-600">These are planning estimates, including proposed subscription rates. Changing these assumptions does not purchase a plan, change device counts or enable logging. Only the reporting and retention choices above are saved.</p>
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+      <NumberField label="Devices" value={workload.devices} onChange={set("devices")} />
+      <NumberField label="Deployments per month" value={workload.deploymentsPerMonth} onChange={set("deploymentsPerMonth")} />
+      {workload.logUploads && <NumberField label="Log data per device per month (MiB)" step={0.1} value={workload.logBytesPerDeviceMonth / MIB} onChange={set("logBytesPerDeviceMonth", MIB)} />}
+      <NumberField label="Additional device data per device per month (MiB)" step={0.1} value={(workload.dataBytesPerDeviceMonth ?? 0) / MIB} onChange={set("dataBytesPerDeviceMonth", MIB)} />
+      <NumberField label="Releases per month" value={workload.releasesPerMonth} onChange={set("releasesPerMonth")} />
+      <NumberField label="Release artifact size (MiB)" step={0.1} value={workload.artifactBytes / MIB} onChange={set("artifactBytes", MIB)} />
+      <NumberField label="Months to prepay" value={months} onChange={setMonths} />
+    </div>
+    <label className="flex gap-1 items-center text-xs"><input type="checkbox" checked={workload.logUploads} onChange={(e) => setWorkload({ ...workload, logUploads: e.target.checked })} />
+      Estimate with device log uploads (off for new plans). This only sizes the estimate: the saved archive cadence and retention do not turn uploads on.</label>
+
     <div className="flex gap-4 text-xs">
       <label className="flex gap-1 items-center"><input type="checkbox" checked={encrypted} onChange={(e) => setEncrypted(e.target.checked)} />
         {table.addOns.encryptedDelivery.label}: {usd(table.addOns.encryptedDelivery.usdPerDeviceMonth)} per device per month (chosen per release)</label>
@@ -212,13 +228,13 @@ function SettingsForm({ table }: { table: PriceTable }) {
         <p className="text-xs">Per fleet <strong>{usd(result.price.monthly)}</strong>; per device {usd(result.price.perDevice)}. Activation {usd(result.price.activationOneTime)} one-time.</p>
         <p className="text-xs">Device data: {usd(result.price.data.monthlyUsd)} per month ({usd(result.price.data.writeUsd)} writes + {usd(result.price.data.storageUsd)} storage), added after the plan minimum and annual discount. {result.price.data.allowance.toLocaleString("en-US")} bytes written per month included across this fleet, with {table.data.includedRetentionDays} days storage for that allowance.</p>
         <p className="text-xs">Proposed data rates: {usd(table.data.writeUsdPerGB)}/GB written and {usd(table.data.storageUsdPerGBMonth)}/GB-month stored (decimal GB). Steady-state storage at the selected retention; owner release uploads are excluded from this data add-on. Log and additional device-data volume both fund the recommended network deposit below.</p>
-        <p className="text-xs text-gray-600">From {table.source}.</p>
+        <p className="text-xs text-gray-600">Planning prices only. This page does not activate or charge a subscription.</p>
       </div>
     </div>}
 
     <p className="text-xs text-gray-600">Estimated costs can change. Your account approval app shows the actual network fee before you confirm.</p>
     <details className="text-xs text-gray-700 border rounded p-2" data-testid="quote"><summary>Technical cost assumptions and exchange rates</summary>
-      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: SF-127 isolated-localnet receipt and Testnet health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
+      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: controlled update-result and test-network health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
       <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${walrusError})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
       <p>USD: SUI ${quote.usd.SUI}, WAL ${quote.usd.WAL}, {quote.usdSource}, {quoteDate(quote.usdObservedAt)}.{" "}
         <button type="button" className="underline" disabled={usdLoading} onClick={() => void refreshUsd()}>Fetch live USD prices from CoinGecko</button>
@@ -234,6 +250,9 @@ function SettingsForm({ table }: { table: PriceTable }) {
         : <p>Short by {formatToken(shortfall.suiMist)} SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} WAL` : ""}. <a className="underline" href="/budget/">Deposit on the Network budget page</a>.</p>}
     </div>}
 
+    </details>
+    <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-5 space-y-3">
+      <h2 className="font-semibold">Review and save</h2><p className="text-sm text-slate-600">Save only the device reporting and retention settings above. They are stored on Sui with your fleet budget; devices apply them at their next check. Your wallet pays the network fee for this save. No deposit or subscription payment is made.</p>
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
@@ -253,5 +272,6 @@ function SettingsForm({ table }: { table: PriceTable }) {
       {message && <div><p role="status">Settings saved. Devices apply them at their next check.</p><details><summary>Confirmation details</summary><p className="break-all">{message}</p></details></div>}
       {error && <p role="alert">{error}</p>}
     </div>
+    </section>
   </div>;
 }
