@@ -3335,6 +3335,33 @@
         "Run frontend typecheck, production build and relevant browser/regression checks. Preview the implementation locally for user feedback, label unmerged preview accurately, and open a linked PR for independent review."
       ],
       "validation": "Frontend typecheck and production build, existing history regressions plus browser route/diagnostic/viewport verification; record screenshots and exact results. No contract/device deployment or testnet spend needed."
+    },
+    {
+      "key": "SF-158",
+      "title": "Make fleet administration, settings and funding understandable and polished",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp",
+        "scripts",
+        "docs/validation"
+      ],
+      "resources": [],
+      "description": "Follow user feedback after SF157: redesign confusing device-services, private-access, transfer, fleet-settings and budget screens with customer language, clear actions, progressive financial details and consistent visual hierarchy. No ticket IDs in customer output, including technical disclosures.",
+      "evidence": "2026-10-26 user reports ambiguous services purpose, unsupported private-access copy, Source proposes a fixed inventory and handover jargon, unclear save-versus-charge behavior and confusing funding/itemized prices. SF157 PR321 is merged.",
+      "acceptance": [
+        "Explain device monitoring features and missing reporting setup with a useful next step, without fabricating health or enabling unsupported contracts.",
+        "Explain private-access deployment limitations without referring to when the page was created; preserve confidentiality and revocation boundaries.",
+        "Replace legacy transfer jargon with current administrator, recipient, chosen resources and clear confirmation steps; retain partial-transfer/cancellation/expiry/security limits and advanced controls without inventing completed transfer discovery.",
+        "Present saved device operating settings separately from planning assumptions/prices. Explain settings storage, wallet network fee, when devices apply changes, and that saving does not deposit funds or purchase a subscription. Preserve underfunding confirmation and exact built transactions.",
+        "Make budget funding/balances the primary flow and itemized estimates/advanced controls optional. Explain account funds, device-activity budget, storage funds and separate subscription estimates without changing actual fee or token calculations.",
+        "Remove ticket references from all customer-rendered frontend output and record the rule in dapp/AGENTS.md; retain engineering attribution in repository docs only.",
+        "Verify typecheck/build and relevant real-browser fixtures, all-route desktop/mobile coverage and no hidden actionable risks; preview locally and obtain independent review."
+      ],
+      "validation": "Frontend typecheck/production build; onboarding, settings, access and administration browser tests as relevant; route/viewport and rendered-copy checks. No contract publication, customer payment, wallet transaction or device update."
     }
   ]
 }
