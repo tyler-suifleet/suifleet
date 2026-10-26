@@ -3,6 +3,7 @@ from datetime import datetime
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -335,8 +336,18 @@ class Repair(Fixture):
         for engine in [self.engine, *getattr(self, 'engines', [])]:
             for child in engine.children.values():
                 if child.poll() is None:
-                    child.kill()
-                child.wait(timeout=5)
+                    # The wrapper and CLI share a dedicated session. Killing only
+                    # the wrapper leaves that CLI racing TemporaryDirectory cleanup.
+                    members, foreign = d.Dispatcher.session_members(child.pid)
+                    self.assertFalse(foreign)
+                    os.killpg(child.pid, signal.SIGKILL)
+                    child.wait(timeout=5)
+                    deadline = time.monotonic()+5
+                    while any(d.Dispatcher.member_session(member) is not None for member in members):
+                        self.assertLess(time.monotonic(), deadline, 'test worker descendants did not stop')
+                        time.sleep(.01)
+                else:
+                    child.wait(timeout=5)
 
     def stopped_repair(self, reset=None, stopped=None):
         self.reset_at = time.time()+2*3600 if reset is None else reset
@@ -418,6 +429,23 @@ class Repair(Fixture):
         self.assertEqual(self.job_row()['status'], 'quota_wait')
         self.collect()
         self.assertEqual(self.job_row()['status'], 'running')
+
+    def test_cleanup_stops_resumed_cli_before_removing_its_directory(self):
+        now = time.time()
+        self.stopped_repair(reset=now-600, stopped=now-3600)
+        self.collect(); self.collect()
+        child = next(iter(self.engine.children.values()))
+        resumed = Path(str(self.marker)+'.resumed')
+        deadline = time.monotonic()+10
+        while not resumed.exists():
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        members, foreign = d.Dispatcher.session_members(child.pid)
+        self.assertFalse(foreign)
+        self.assertGreaterEqual(len(members), 2, 'exercise wrapper and real CLI child')
+        self.kill_processes()
+        self.assertTrue(all(d.Dispatcher.member_session(member) is None for member in members))
+        self.assertIsNotNone(child.returncode)
 
     def test_fences_lock_live_claim_process_and_changed_ownership(self):
         self.stopped_repair(); self.collect(); self.due()
