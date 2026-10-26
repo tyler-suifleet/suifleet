@@ -2,7 +2,7 @@
 
 Decision basis: 2026-10-16. This records Tyler's original commercial thesis, not a newly discovered positioning idea. Product implementation and hardware acceptance remain separate from business hypotheses.
 
-Updated 2026-10-25: the user selected a subscription floor based on a multiple of SUI-sensitive recurring cost. The [current planning policy](business/SUBSCRIPTION_PRICING.md) uses configurable 10× SUI-cost stress and an 80% infrastructure margin target under stress. The user requested the 10× exposure case; the margin target remains a planning assumption, and final tariffs and production margins remain unapproved and unmeasured until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267). The 2026-10-23 prices below are historical commercial candidates, subject to this floor.
+Updated 2026-10-25 with a [SUI cost sensitivity analysis and subscription policy](business/SUBSCRIPTION_PRICING.md): what happens to cost, margin and revenue as the USD cost of SUI operations moves between 0.25× and 20× of the quote basis, and the controls that keep fixed USD subscriptions safe (price floors of 50% margin at 3× and breakeven at 10×, a term hedge against token-price moves bought at invoice, and bounded renewal repricing). The 2026-10-23 prices below stand: the $0.08 tier clears the floors outright, while volume prices below about $0.07 per device need customer-funded SUI network costs, because the hedge cannot cover a gas-price rise. Final tariffs and margins remain estimates until [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267) measures a Mainnet bill.
 
 ## The opportunity
 
@@ -12,39 +12,60 @@ Do not begin with an arbitrary per-device SaaS subscription or use assumed engin
 
 A fleet with many devices and relatively infrequent releases is the initial economic hypothesis. Idle devices do not themselves require a periodic Sui transaction, although retained objects, active integrations and selected services can have costs. Receipts still scale with device activity: one shared artifact does not make 1,000 device reports one transaction.
 
-## Subscription pricing decision (2026-10-25)
+## SUI cost exposure and subscription policy (2026-10-25)
 
-For a fixed, bounded workload, separate monthly SUI-sensitive recurring cost `S`,
-WAL expense `W` and other recurring services `O`. Apply the configurable stress
-multiple to `S`, then price for the chosen margin under that stress:
+Subscriptions are fixed in USD for a bounded workload, and part of the cost to serve
+is paid in SUI. A move in the USD cost of SUI operations therefore changes
+SuiFleet's margin until the term renews, never the customer's invoice. Two things
+move that cost: the token price, and the validator-voted reference gas price, which
+fell from about 550 to 100 MIST in the last week of April 2026 (read from mainnet
+epochs 1050–1291). SUI's largest rise within any 365-day window of daily closes is
+9.9× (August 2024 to January 2025) and its largest fall is to 0.16× (July 2025 to
+July 2026), so the 10× case is a boundary an annual term must survive, not a tail.
 
-```text
-risk floor = (10 × S + W + O + fixed payment fee) / (1 − 0.80 − payment fee fraction)
-subscription = max(risk floor, monthly minimum, commercial price after discounts)
-```
+The [analysis and calculator](business/SUBSCRIPTION_PRICING.md) separate
+SUI-sensitive cost `S`, WAL cost `W`, USD services `O` and SUI-denominated working
+capital (deposits and gas float, which gain when the token rises), and apply three
+controls:
 
-The current planning inputs are 10× SUI-cost stress, 80% stressed infrastructure
-margin and provisional payment fees of 3% + $0.30 per invoice. Annual fixed fees
-are amortized over 12 months. Volume/annual discounts cannot undercut the floor.
-Refundable deposits and gas float remain separate working capital; unknown
-required provider costs must be quoted rather than counted as zero. The multiple
-covers total SUI-cost exposure, not a separate 10× token shock and 10× gas shock.
-WAL stress is independently configurable; its baseline multiplier is 1× under
-USD-targeted storage pricing.
+- **Floors.** A price must keep 50% infrastructure margin at 3× SUI cost and must
+  not lose money at 10×, measured without a hedge. Discounts, volume tiers and
+  partner prices cannot undercut a floor or the $49 minimum.
+- **Term hedge.** When a prepaid annual invoice is paid, SuiFleet would buy the SUI
+  the term's operations will consume at the current gas price: 8.3% of an annual
+  $0.08-tier invoice. That quantity of SUI then no longer depends on the token
+  price, but a validator gas-price rise still requires extra SUI bought at market,
+  so the hedge does not lower the floors. Monthly billing is never hedged.
+- **Renewal repricing.** If the SUI-cost basis at renewal is 3× or more above the
+  quote basis, the renewal is requoted with at least 30 days' notice. Prices never
+  change mid-term, and a fall in SUI never cuts them automatically.
 
-The [reproducible policy and calculator](business/SUBSCRIPTION_PRICING.md) show the
-formula, source requirements and sensitivity at 1×/2×/3×/5×/10× SUI cost, plus a
-20× boundary case. An explicitly
-synthetic $9/month cost split ($8 SUI-sensitive plus $1 other) yields a $478.24
-monthly floor with these assumptions, preserving about 80% infrastructure margin
-at 10× SUI cost. This is arithmetic, not a measured cost split or a final tariff.
-Customer prices remain fixed for purchased terms; a token move does not generate
-an automatic usage invoice. Reassess quotes and renewals against current costs.
+These controls are a proposed planning policy. No customer tariff, hedge purchase
+or contract term is approved by it; the notice terms need contract review first.
 
-The historical prices, AWS comparisons, profit and margin tables below were
-calculated without this new stress floor. They are not current customer quotes or
-margin promises. The dApp price table is still a historical commercial candidate;
-final reviewed tariffs must satisfy this policy before being published.
+Results for the typical profile at the proposed prices (cost basis 2026-10-23,
+SUI $0.987, reference gas price 100 MIST; margins are infrastructure margins after
+payment fees):
+
+| Fleet and term | Price | Cost to serve (SUI share) | Margin at 1× / 3× / 5× / 10× SUI cost | Unhedged breakeven | Floors bind? |
+|---|---:|---:|---|---:|---|
+| 1,000 devices, monthly | $80 ($0.08) | $9 (67%) | 85% / 70% / 55% / 18% | 12.4× (SUI ≈ $12.22) | No |
+| 10,000 devices, monthly | $800 ($0.08) | $139 (43%) | 80% / 65% / 50% / 12% | 11.6× (≈ $11.46) | No |
+| 100,000 devices, monthly, unhedged | $7,082.79 ($0.071) | $1,470 (41%) | 76% / 59% / 42% / 0% | 10.0× | Yes: the $5,300 list would break even at 7.1× and fall below 50% from 2.7× |
+| 100,000 devices, prepaid annual, hedged | $7,082.50 ($0.071) | $1,470 (41%) | 76% / 59% / 42% / 0% (gas-price move); 76% through any token move | 10.0× | Yes: the $4,770 discounted list keeps 66% through any token move but breaks even at a 6.3× gas-price rise |
+
+Consequences for the price list: the $0.08 tier is unchanged. Volume prices below
+about $0.07 per device are sold only to customers who fund their own network costs
+in SUI through the fleet budget ([SF-083](FLEET_BUDGET.md)); other volume fleets,
+monthly or prepaid annual, pay the floor. Even a
+renewal repriced to hold 50% margin at 10× SUI cost ($134.69 for 1,000 devices,
+$0.135 per device) stays 48% below Greengrass's $0.26 for the same workload;
+parity would need roughly 20× SUI cost. Pricing instead for a guaranteed 80% margin at
+10× would mean about $0.37 per device, above Greengrass, and was rejected.
+
+The tables below were calculated at 1× SUI cost; the sensitivity document gives the
+other multiples. The dApp price table remains a proposed tariff, and a reviewed
+tariff must clear the floors above before publication.
 
 ## Pricing and cost model (proposal, 2026-10-23)
 
@@ -273,7 +294,7 @@ Validation: [SF-135/#267](https://github.com/tyler-suifleet/suifleet/issues/267)
 
 ### Risks
 
-- **Token and fee exposure.** Use the [stressed subscription floor](business/SUBSCRIPTION_PRICING.md), not a fixed margin deduction extrapolated from the historical price table. SUI-sensitive recurring costs are stressed independently of WAL/USD-service expense. Walrus targets USD storage prices with periodic adjustments, not instantaneous repricing; test an independent WAL shock where needed. A shock beyond the selected assumptions can still compress margins. Refundable deposits/gas float also create capital exposure, separately from recurring expense.
+- **Token and fee exposure.** About two-thirds of the 1,000-device cost to serve is paid in SUI, and both the token price and the validator-voted reference gas price move: SUI rose 9.9× in the twelve months to January 2025 and fell to 0.16× in the twelve months to July 2026, and the reference gas price fell from about 550 to 100 MIST in April 2026. The [SUI cost sensitivity analysis](business/SUBSCRIPTION_PRICING.md) shows the $0.08 tier breaks even at about 12× SUI cost and holds 50% margin to about 5.7×, while the volume tier needs its floor or customer-funded SUI network costs; the term hedge covers token-price moves but not gas-price votes. Walrus prices storage in USD terms with periodic adjustment, so WAL is stressed separately. SUI-denominated deposits and gas float gain when the token rises and lose when it falls; they are capital, not revenue.
 - **No Mainnet measurement yet** (SF-135).
 - **The public endpoint is guidance-limited** and not intended for production; move paying fleets off it before relying on it.
 - **The weekly-archive figure** depends on deposit reclaim (SF-129) and on SF-121's archive work.
@@ -357,6 +378,8 @@ Compute/AI, database, storage, security and operations have different addressabl
 ## Manufacturer prospect research
 
 The [50-company discovery shortlist](business/prospects/README.md) supplies a sourced CSV, ranked readable report, explicit migration/safety caveats and prioritized discovery questions (SF-105). It is research only: fleet size, budget and buyer interest remain unknown, and no outreach or pilot has occurred.
+
+## Fleet data metering (SF-142)
 
 SF-142 implements the proposed data rates and allowance in the shared configurable
 price table and Settings planner, with separate network cost/deposit estimates.
