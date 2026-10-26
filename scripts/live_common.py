@@ -30,6 +30,10 @@ import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent  # noqa: F401 (re-exported to the suites)
 
+# Base publish budget. After SF-136 a fresh main base publish costs ~0.55 SUI;
+# 0.4 SUI failed InsufficientGas (runs 40238821132, 40261665249).
+PACKAGE_GAS = 700_000_000
+
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
 CLOCK = "@0x6"
@@ -261,17 +265,18 @@ class Live:
         execute = self.executor()
 
         def client(*command, json_output=True, check=True):
-            # The verified bytes are executed like any other mutation.
-            if command[0] == "serialized-tx":
+            # The verified, signed bytes are executed like any other mutation.
+            if command[0] == "execute-signed-tx":
                 return execute(*command)
             return self.client(*command, json_output=json_output, check=check)
         built = self.evidence.setdefault("verified_package_transactions", {})
+        sign = toolchain.keystore_signer(self.network_sui, self.wallet, self.operator)
         result = self.execute(label, toolchain.package_submitter(
-            client, self.build_sui, package_dir, common, sender=self.operator, upgrade=upgrade,
+            client, self.build_sui, package_dir, common, sender=self.operator, sign=sign, upgrade=upgrade,
             record=built.setdefault(label, {})),
             # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
             # existing allowance; effects settle actual cost, never replenishing it.
-            gas=self.ledger.remaining if upgrade is not None else 400_000_000)
+            gas=self.ledger.remaining if upgrade is not None else PACKAGE_GAS)
         if upgrade is None:
             toolchain.write_pubfile(pubfile, self.chain, package_dir, self.published(result),
                                     self.created(result, "::package::UpgradeCap")[0])
