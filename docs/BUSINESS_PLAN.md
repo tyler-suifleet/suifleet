@@ -31,12 +31,16 @@ controls:
 - **Floors.** A price must keep 50% infrastructure margin at 3× SUI cost and must
   not lose money at 10×, measured without a hedge. Discounts, volume tiers and
   partner prices cannot undercut a floor or the $49 minimum.
-- **Term hedge.** When an invoice is paid, SuiFleet buys the SUI the term's
-  operations will consume: 7.5% of an $0.08-tier invoice, 12.6% of a volume-tier
-  invoice. The paid-for operations then no longer depend on the token.
+- **Term hedge.** When a prepaid annual invoice is paid, SuiFleet would buy the SUI
+  the term's operations will consume: 7.5% of an $0.08-tier invoice, 12.6% of a
+  volume-tier invoice. The paid-for operations then no longer depend on the token.
+  Monthly billing is priced against the unhedged floors.
 - **Renewal repricing.** If the SUI-cost basis at renewal is 3× or more above the
   quote basis, the renewal is requoted with at least 30 days' notice. Prices never
   change mid-term, and a fall in SUI never cuts them automatically.
+
+These controls are a proposed planning policy. No customer tariff, hedge purchase
+or contract term is approved by it; the notice terms need contract review first.
 
 Results for the typical profile at the proposed prices (cost basis 2026-10-23,
 SUI $0.987, reference gas price 100 MIST; margins are infrastructure margins after

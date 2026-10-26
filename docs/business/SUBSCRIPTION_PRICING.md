@@ -1,6 +1,7 @@
 # Subscription pricing under SUI cost changes
 
-Decision recorded 2026-10-25. SuiFleet sells fixed USD subscriptions for a bounded
+Planning policy proposed 2026-10-25; not an approved customer tariff, treasury
+purchase or contract term. SuiFleet sells fixed USD subscriptions for a bounded
 workload (device capacity plus purchased check, health, log and data settings),
 with no automatic usage-overage invoices. Part of the cost of serving that
 workload is paid in SUI, so a move in the USD cost of SUI operations changes
@@ -15,11 +16,15 @@ The [planning policy](subscription-policy.json) holds the current controls:
 - **Floors.** A price must keep at least **50% infrastructure margin at 3× SUI cost**
   and must **not lose money at 10× SUI cost** (the user's requested boundary),
   measured without any hedge. A list price above both floors is unchanged by them.
-- **Term hedge.** When an invoice is paid, SuiFleet buys the SUI the term's
-  SUI-sensitive operations will consume (`term_sui_purchased_fraction` = 1). Floors
-  may be evaluated with that hedge in place (`--hedged`) when the term is prepaid.
-- **Renewal repricing trigger.** If the SUI-cost basis at renewal is at or above
-  **3×** the basis the quote used, the renewal is requoted with advance notice.
+- **Term hedge (proposed).** When an invoice is paid, SuiFleet would buy the SUI the
+  term's SUI-sensitive operations will consume (`term_sui_purchased_fraction` = 1).
+  Floors may be evaluated with that hedge in place (`--hedged`) only for prepaid
+  annual terms; the calculator refuses `--hedged` for monthly billing, because a
+  monthly price persists below the renewal trigger while the hedge covers one month.
+- **Renewal repricing trigger (proposed).** If the SUI-cost basis at renewal is at or
+  above **3×** the basis the quote used, the renewal is requoted with advance notice.
+  The trigger and notice period are provisional terms requiring contract review
+  before any customer is promised them.
 - Payment fees of 3% plus $0.30 per invoice are provisional inputs, not a quote.
 
 The 2026-10-23 [proposed price list](../BUSINESS_PLAN.md#proposed-price-list)
@@ -288,8 +293,13 @@ network costs in SUI (below). A month-to-month volume fleet pays the floor.
   uncertainty and directly scales every multiple. SF-135 measures it.
 - "Implied SUI price" assumes the reference gas price stays at 100 MIST. The
   multiple is on USD cost, so the same row also describes an RGP vote.
-- Within a monthly term the hedge covers the paid month; exposure is bounded by
-  the repricing notice period, not by the hedge.
+- Monthly billing is priced unhedged. A monthly hedge would cover only the paid
+  month while the price carries over below the trigger, so the unhedged floors are
+  the monthly protection and exposure is bounded by the repricing notice period.
+- The hedge is bought at the price on the day the invoice settles, not the quote
+  basis. A move between quote and payment is not hedged, and the purchased SUI
+  carries custody, accounting and opportunity-cost risk that this planner does not
+  model. No hedge purchase is approved by this document.
 - Payment fees, the 10% annual discount and the $49 minimum are the plan's
   provisional terms, not processor or legal quotes.
 - Labor, support, taxes and customer acquisition are excluded; the margins are
