@@ -10,7 +10,7 @@ export default function BudgetPage() {
   const account = useCurrentAccount();
   const [estimate, setEstimate] = useState<Estimate | undefined>();
   return <div className="max-w-4xl space-y-4">
-    <PageHeader title="Network budget" subtitle="Prepay your fleet's network costs; devices draw gas only within on-chain limits." />
+    <PageHeader title="Network budget" subtitle="Prepay device activity and storage costs. Each device can spend only within the limits you set." />
     <Section title="1. Estimate"><EstimatePanel onEstimate={setEstimate} /></Section>
     {!account && <p className="text-sm">Connect a wallet to fund and manage the budget.</p>}
     {account && <Section title="2. Fund your wallet (optional)">

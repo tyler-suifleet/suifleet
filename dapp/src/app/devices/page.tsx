@@ -529,7 +529,7 @@ function GroupsTab() {
 
 /** Health and archives are verified directly from the fleet's on-chain index. */
 function TelemetrySettings() {
-  return <p className="text-xs text-gray-500">{DATA_CONFIG ? "Health is verified directly from Sui." : "Configure the on-chain fleet to publish and read device health."} <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
+  return <p className="text-xs text-gray-500">{DATA_CONFIG ? "Health comes from verified device reports." : "Device health reporting is not set up for this fleet. Ask your administrator to finish the setup."} <Link href="/data" className="text-blue-700 underline">Read encrypted logs and diagnostics.</Link></p>;
 }
 
 function HealthDetails({ health }: { health?: DeviceHealth }) {
@@ -544,7 +544,7 @@ function HealthDetails({ health }: { health?: DeviceHealth }) {
       {health.lastSeenMs !== undefined && (
         <p className="text-gray-500">
           Last report {new Date(health.lastSeenMs).toLocaleString()} (taken {new Date(health.observedMs!).toLocaleString()} by the device clock),
-          daemon {health.daemonVersion}. Reports are signed by the device and verified against its on-chain identity.
+          client {health.daemonVersion}. Reports are checked against the registered device identity.
         </p>
       )}
       {health.services && (

@@ -15,6 +15,79 @@
   }
 }
 
+
+/* Common presentation for every route, including older operational forms.
+   Base-layer rules deliberately yield to a component's explicit utilities. */
+@layer base {
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.55;
+  }
+  :where(a, button, input, select, textarea, summary):focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 3px;
+  }
+  .fleet-content {
+    overflow-wrap: anywhere;
+  }
+  .fleet-content :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]), select, textarea) {
+    min-height: 2.5rem;
+    max-width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.5rem;
+    background-color: white;
+    color: #0f172a;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    transition: border-color 120ms, box-shadow 120ms;
+  }
+  .fleet-content :where(input, textarea)::placeholder { color: #64748b; }
+  .fleet-content :where(input, select, textarea):disabled { background-color: #f1f5f9; color: #64748b; }
+  .fleet-content :where(input[type="checkbox"], input[type="radio"]) { accent-color: #2563eb; }
+  .fleet-content :where(button) {
+    min-height: 2.5rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.5rem;
+    background-color: white;
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 120ms, border-color 120ms;
+  }
+  .fleet-content :where(button):hover:not(:disabled) { background-color: #f1f5f9; border-color: #94a3b8; }
+  .fleet-content :where(button):disabled { cursor: not-allowed; opacity: 0.55; }
+  .fleet-content :where(h2) { font-weight: 600; letter-spacing: -0.015em; }
+  .fleet-content :where(section, form, details).border {
+    border-radius: 0.75rem;
+    background-color: white;
+    border-color: #e2e8f0;
+  }
+  .fleet-content :where(summary) { padding-block: 0.25rem; font-weight: 500; cursor: pointer; }
+  .fleet-content :where(details[open] > summary) { margin-bottom: 0.75rem; }
+  .fleet-content :where(table) { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+  .fleet-content :where(th) {
+    background-color: #f8fafc;
+    color: #475569;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.025em;
+  }
+  .fleet-content :where(td) { padding: 0.875rem 1rem; vertical-align: top; border-bottom: 1px solid #f1f5f9; }
+  .fleet-content :where(tbody tr):hover { background-color: #f8fafc; }
+  .fleet-content :where(pre) { max-width: 100%; overflow-x: auto; font-size: 0.75rem; }
+  .fleet-content :where([role="alert"]) {
+    border: 1px solid #fecaca;
+    border-radius: 0.5rem;
+    background-color: #fef2f2;
+    color: #991b1b;
+    padding: 0.75rem 1rem;
+    font-size: 0.875rem;
+  }
+}
+
+/* Shared utility used by existing cards throughout the console. */
 @utility rounded {
-  border-radius: 0.25rem;
+  border-radius: 0.75rem;
 }

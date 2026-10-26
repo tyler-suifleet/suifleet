@@ -30,14 +30,14 @@ export function DataUsage() {
   const result = matchesFleet ? usage.data : undefined;
   return <section className="border rounded p-3 my-3 text-xs space-y-2">
     <h2 className="font-semibold">Fleet device-data usage</h2>
-    <p>Authoritative storage records, refreshed every minute. Streams group all data kinds by uploading device; owner artifacts and recipes appear separately. Bytes are decimal bytes.</p>
+    <p>Usage refreshes every minute. Device uploads are grouped by device; software releases and installation instructions are listed separately.</p>
     {(usage.error || schedule.error) && <p role="alert">Usage unavailable: {(usage.error ?? schedule.error)?.message}</p>}
-    {!result && !usage.error && <p>{(budget && storage && !matchesFleet ? 'The connected owner budget does not match the configured data fleet.' : reason) ?? (schedule.error ? 'Walrus schedule unavailable.' : 'Loading storage usage…')}</p>}
+    {!result && !usage.error && <p>{(budget && storage && !matchesFleet ? 'The connected owner budget does not match the configured data fleet.' : reason) ?? (schedule.error ? 'Storage availability information is unavailable.' : 'Loading storage usage…')}</p>}
     {result && !usage.error && <>
-      <p>Fleet lifetime encoded writes: {number(result.writtenEncodedBytes)} bytes; currently registered and unexpired: {number(result.storedBytes)} logical bytes; held records: {number(result.retainedBytes)} logical bytes, including expired blobs.</p>
-      <table className="w-full"><thead><tr className="text-left"><th>Stream (uploader)</th><th>Lifetime encoded bytes written</th><th>Unexpired logical bytes</th><th>Stored GB-month, month to date</th></tr></thead>
+      <p>Total uploaded bytes (including storage redundancy): {number(result.writtenEncodedBytes)} bytes; data within its registered storage period: {number(result.storedBytes)} bytes; retained records: {number(result.retainedBytes)} bytes, including expired uploads.</p>
+      <table className="w-full"><thead><tr className="text-left"><th>Uploaded by</th><th>Total uploaded bytes (includes redundancy)</th><th>Bytes within storage period</th><th>Storage used this month (GB-month)</th></tr></thead>
         <tbody>{result.streams.map(row => <tr key={row.device ?? 'owner'}><td className="break-all">{row.device ?? 'Owner releases (outside device allowance)'}</td><td>{number(row.writtenEncodedBytes)}</td><td>{number(row.storedBytes)}</td><td>{(Number(row.storedByteMs) / 1e9 / (365.25 / 12 * 86400000)).toFixed(6)}</td></tr>)}</tbody></table>
-      <p>Stored byte-time covers only records still held by this fleet, clipped to this UTC month and their Walrus expiry. Released blobs retain lifetime write counters but their removed records cannot establish historical byte-time. Expiry dates project the current epoch schedule. Registration does not establish Walrus certification or physical availability. These figures are usage evidence, not a billing invoice; encoded lifetime writes include Walrus redundancy and must not be priced as logical monthly writes.</p>
+      <details><summary>How storage usage is calculated</summary><p>Stored byte-time covers only records still held by this fleet, clipped to this UTC month and their Walrus expiry. Released blobs retain lifetime write counters but their removed records cannot establish historical byte-time. Expiry dates project the current epoch schedule. Registration does not establish Walrus certification or physical availability. These figures are usage evidence, not a billing invoice; encoded lifetime writes include Walrus redundancy and must not be priced as logical monthly writes.</p></details>
     </>}
     <a className="underline" href="/settings/">Plan expected data volume, included allowance, cost, price and prepaid deposit</a>
   </section>;
