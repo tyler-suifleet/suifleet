@@ -142,7 +142,11 @@ class LiveTransactionBudgetTests(unittest.TestCase):
         live.ledger = Budget(700_000_000, [])
         live.ledger.grant(used)
         live.assert_lock = Mock()
-        live.executor = Mock(return_value=Mock(return_value=effect(cost=25_000_000)))
+        live.executor = Mock()
+        # PTBs execute as exact signed bytes; record each submitted budget.
+        live.submitted = []
+        live.exact_ptb = lambda ptb, config=None: (
+            lambda budget: live.submitted.append((ptb, config, budget)) or effect(cost=25_000_000))
         return live
 
     def test_security_deployment_refuses_clipped_gas_before_submission(self):
@@ -151,14 +155,14 @@ class LiveTransactionBudgetTests(unittest.TestCase):
         live = self.live(668_755_111)
         with self.assertRaisesRegex(Spent, 'full gas budget'):
             live.transaction('deployment via head (after activation)', '--move-call', 'deployment')
-        live.executor.return_value.assert_not_called()
+        self.assertEqual(live.submitted, [])
         self.assertEqual(live.ledger.used, 668_755_111)
         self.assertEqual(live.ledger.evidence, [])
 
     def test_cached_security_fixture_submits_and_settles_full_budget(self):
         live = self.live(60_000_000)
         live.transaction('deployment via head (after activation)', '--move-call', 'deployment')
-        self.assertEqual(live.executor.return_value.call_args.args[-2:], ('--gas-budget', '200000000'))
+        self.assertEqual(live.submitted, [(['--move-call', 'deployment'], None, 200_000_000)])
         self.assertEqual(live.ledger.used, 85_000_000)
 
     def test_device_budget_cannot_be_clipped_or_charged_to_operator(self):
@@ -168,6 +172,6 @@ class LiveTransactionBudgetTests(unittest.TestCase):
         with self.assertRaises(Spent):
             live.transaction('device report', '--move-call', 'report', budget=10_000_000,
                              sender=('device-config', child))
-        live.executor.return_value.assert_not_called()
+        self.assertEqual(live.submitted, [])
         self.assertEqual(child.used, 31_000_000)
         self.assertEqual(live.ledger.used, 60_000_000)

@@ -429,30 +429,82 @@ module sui_edge::desired_state_tests {
     fun catalog_and_rollout_records_use_their_deletion_paths() {
         let mut scenario = ts::begin(ADMIN);
         let group = new_group(&mut scenario, ADMIN);
-        ts::next_tx(&mut scenario, ADMIN);
-        let clock = clock::create_for_testing(ts::ctx(&mut scenario));
+        let (rollout_id, bound) = rollout_and_catalog(&mut scenario, group);
+        assert!(retire(&mut scenario, ADMIN, rollout_id, vector[]), 0);
+        assert!(retire(&mut scenario, ADMIN, bound, vector[]), 1);
+        ts::end(scenario);
+    }
+
+    /// Move `record` to sharded receipts, then retire every (empty) root.
+    fun shard_and_drain(scenario: &mut ts::Scenario, record: ID, catalog: bool, drain: bool) {
+        ts::next_tx(scenario, ADMIN);
+        let mut d = ts::take_shared_by_id<DeploymentRecord>(scenario, record);
+        if (catalog) sui_edge::component_catalog::begin_sharded_receipts(&mut d, ts::ctx(scenario))
+        else deployment_manager::begin_sharded_receipts(&mut d, ts::ctx(scenario));
+        assert!(deployment_manager::schema_version(&d) != 3, 0);
+        ts::return_shared(d);
+        if (!drain) return;
+        ts::next_tx(scenario, ADMIN);
+        let mut d = ts::take_shared_by_id<DeploymentRecord>(scenario, record);
+        deployment_manager::begin_receipt_cleanup(&mut d, ts::ctx(scenario));
+        let roots = *deployment_manager::receipt_roots(&d);
+        roots.do!(|root| deployment_manager::retire_receipt_shard(&mut d,
+            ts::take_shared_by_id<deployment_manager::ReceiptShard>(scenario, root)));
+        ts::return_shared(d);
+    }
+
+    /// Two transaction-local records: a staged rollout and a catalog-bound one.
+    fun rollout_and_catalog(scenario: &mut ts::Scenario, group: ID): (ID, ID) {
+        ts::next_tx(scenario, ADMIN);
+        let clock = clock::create_for_testing(ts::ctx(scenario));
         let policy = deployment_manager::rollout_policy(1, 1, 1000, 100, 1, 1, 2000);
         let rollout = deployment_manager::new_rollout_verified(string::utf8(b"app"), string::utf8(b"1"),
             string::utf8(b"recipe"), string::utf8(b"hash"), string::utf8(DIGEST), vector[group],
-            vector[object::id_from_address(@0x1)], vector[0], policy, &clock, ts::ctx(&mut scenario));
+            vector[object::id_from_address(@0x1)], vector[0], policy, &clock, ts::ctx(scenario));
         let rollout_id = object::id(&rollout);
         deployment_manager::share_deployment(rollout);
-        sui_edge::component_catalog::create_catalog(ts::ctx(&mut scenario));
-        ts::next_tx(&mut scenario, ADMIN);
-        let mut catalog = ts::take_shared<sui_edge::component_catalog::ComponentCatalog>(&scenario);
+        sui_edge::component_catalog::create_catalog(ts::ctx(scenario));
+        ts::next_tx(scenario, ADMIN);
+        let mut catalog = ts::take_shared<sui_edge::component_catalog::ComponentCatalog>(scenario);
         sui_edge::component_catalog::publish_version(&mut catalog, string::utf8(b"app"), string::utf8(b"1.0.0"),
             vector[string::utf8(b"linux")], vector[string::utf8(b"x86_64")], vector[string::utf8(b"recipe")],
-            vector[string::utf8(DIGEST)], vector[string::utf8(DIGEST)], &clock, ts::ctx(&mut scenario));
+            vector[string::utf8(DIGEST)], vector[string::utf8(DIGEST)], &clock, ts::ctx(scenario));
         ts::return_shared(catalog);
-        ts::next_tx(&mut scenario, ADMIN);
-        let version = ts::take_immutable<sui_edge::component_catalog::ComponentVersion>(&scenario);
-        sui_edge::component_catalog::create_deployment(&version, vector[group], vector[], &clock, ts::ctx(&mut scenario));
+        ts::next_tx(scenario, ADMIN);
+        let version = ts::take_immutable<sui_edge::component_catalog::ComponentVersion>(scenario);
+        sui_edge::component_catalog::create_deployment(&version, vector[group], vector[], &clock, ts::ctx(scenario));
         ts::return_immutable(version);
-        let effects = ts::next_tx(&mut scenario, ADMIN);
+        let effects = ts::next_tx(scenario, ADMIN);
         let bound = *effects.shared().find_index!(|id| *id != rollout_id && *id != group).map!(|i| effects.shared()[i]).borrow();
         clock::destroy_for_testing(clock);
+        (rollout_id, bound)
+    }
+
+    // SF-127 sharding rewrites the inline schema; retire follows the
+    // directory's original schema once the receipt roots are retired.
+    #[test]
+    fun sharded_records_use_their_original_deletion_paths() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let (rollout_id, bound) = rollout_and_catalog(&mut scenario, group);
+        let plain = deploy(&mut scenario, ADMIN, b"firmware", b"1.0.0", vector[group]);
+        shard_and_drain(&mut scenario, rollout_id, false, true);
+        shard_and_drain(&mut scenario, bound, true, true);
+        shard_and_drain(&mut scenario, plain, false, true);
         assert!(retire(&mut scenario, ADMIN, rollout_id, vector[]), 0);
         assert!(retire(&mut scenario, ADMIN, bound, vector[]), 1);
+        assert!(retire(&mut scenario, ADMIN, plain, vector[]), 2);
+        ts::end(scenario);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 17, location = sui_edge::deployment_manager)]
+    fun sharded_record_with_live_roots_is_not_retired() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let (rollout_id, _) = rollout_and_catalog(&mut scenario, group);
+        shard_and_drain(&mut scenario, rollout_id, false, false);
+        retire(&mut scenario, ADMIN, rollout_id, vector[]);
         ts::end(scenario);
     }
 }

@@ -5,6 +5,8 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const { loader, appRequire } = require('./frontend_test_utils.cjs');
 const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../manifests/fixture.localnet.json')));
 manifest.chain_identifier = '4c78adac';
+// SF-127 sharded receipt types, as an upgraded manifest records them.
+for (const name of require('../interfaces/fleet-v1.json').optional_type_origins.receipt_shards) manifest.type_origins[name] = '0x' + '99'.padStart(64, '0');
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(manifest);
 const { normalizeSuiAddress: id, toBase58 } = appRequire('@mysten/sui/utils');
 const { bcs } = appRequire('@mysten/sui/bcs');
@@ -248,9 +250,16 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   const deployment = (n, extra) => ({ deploymentId: id('0xd0' + n), schemaVersion: '1', componentName: 'app', version: String(n), recipeBlobId: 'r', artifactSha256: 'a',
     targetGroups: [g1], targetDevices: [], creator: me, timestampMs: 1, statuses: { [device]: 1 }, receiptsVerified: true, resolvedDeviceIds: [device], control, ...extra });
   const managed = new Set([id('0xd02'), id('0xd03'), id('0xd04')]);
+  // SF-127 sharded receipt directories: 0xd09 still has live roots, 0xd0a finished cleanup.
+  const directory = (retiring, remaining) => ({ roots: Array.from({ length: 16 }, (_, i) => id(remaining ? '0x7' + i.toString(16) : '0x0')), original_schema: '3', migrated: '16', ready: !retiring, retiring, remaining: String(remaining) });
+  const directories = { [id('0xd09')]: directory(false, 16), [id('0xd0a')]: directory(true, 0) };
   const desiredState = { [g1]: { revision: '2', components: { contents: [{ key: 'app', value: id('0xd03') }] }, updated_at: '1' } };
   const reads = {
     async getDynamicField({ parentId, name }) {
+      if (name.type.endsWith('::deployment_manager::ReceiptShardKey')) {
+        if (!directories[id(parentId)]) throw missing();
+        return { dynamicField: { value: { type: `${manifest.type_origins['deployment_manager::ReceiptDirectory']}::deployment_manager::ReceiptDirectory`, bcs: protocol.deployment_manager_ReceiptDirectoryBcs.serialize(directories[id(parentId)]).toBytes() } } };
+      }
       if (name.type.endsWith('::deployment_manager::ManagedKey')) { if (!managed.has(id(parentId))) throw missing(); return { dynamicField: { value: { bcs: bcs.bool().serialize(true).toBytes() } } }; }
       if (!desiredState[parentId]) throw missing();
       return { dynamicField: { value: { type: `${manifest.type_origins['desired_state::DesiredState']}::desired_state::DesiredState`, bcs: protocol.desired_state_DesiredStateBcs.serialize(desiredState[parentId]).toBytes() } } };
@@ -266,13 +275,16 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
     deployment(6, { statuses: {}, control: { ...control, state: 2 } }),
     deployment(7, { statuses: {}, control: { ...control, expires_ms: '50' } }),
     deployment(8, { creator: id('0xbe') }),                           // someone else's
+    deployment(9),                                                    // sharded, live receipt roots
+    deployment('a'),                                                  // sharded, cleanup finished
   ];
   const planned = await reclaim.planDeploymentReclaim(reads, records, me, 100);
   assert.deepEqual(planned.map((r) => [r.deployment.version, r.eligible, r.reason]), [
     ['1', true, 'every target reported'], ['2', true, 'every target reported'],
     ['3', false, 'still desired by a group; publish a revision that supersedes it first'],
     ['4', false, 'a target group was deleted, so the on-chain check cannot run; delete it individually after review'],
-    ['5', false, 'still in progress'], ['6', true, 'cancelled'], ['7', true, 'expired']]);
+    ['5', false, 'still in progress'], ['6', true, 'cancelled'], ['7', true, 'expired'],
+    ['9', false, 'sharded receipts; finish receipt cleanup on the deployment first'], ['a', true, 'every target reported']]);
   assert.deepEqual(planned[0].groups, []);
   assert.deepEqual(planned[1].groups, [g1, g2]);
   const retire = reclaim.buildRetireDeploymentsTx(manifest.call_package_id, planned.slice(0, 2));

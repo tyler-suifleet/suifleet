@@ -29,23 +29,56 @@ def effects(status="success", cost=1_000_000, storage=0, rebate=0, error=None, d
         "computationCost": str(cost), "storageCost": str(storage), "storageRebate": str(rebate)}}}
 
 
-class Chain:
-    """Scripted `sui client` responses; records every command and config."""
+CHILD = "0x" + "11" * 32
+UNKNOWN = "Unkn111111111111111111111111111111111111111"
 
-    def __init__(self, *responses, tx_blocks=None):
+
+class Chain:
+    """Scripted `sui client` responses; records every command and config.
+
+    PTB mutations are built unsigned, decoded, signed and executed as exact
+    bytes (Live.exact_ptb): `calls` records the build command and each
+    scripted response answers one `execute-signed-tx` of those bytes."""
+
+    def __init__(self, *responses, tx_blocks=None, builds=()):
         self.responses, self.tx_blocks, self.calls = list(responses), tx_blocks or {}, []
+        self.builds, self.built, self.submissions = list(builds), {}, []
 
     def __call__(self, *command, json_output=True, check=True, config=None):
+        if command[0] == "execute-signed-tx" and command[command.index("--tx-bytes") + 1] in self.built:
+            self.submissions.append((command[command.index("--tx-bytes") + 1], config))
+            return self.responses.pop(0)
         self.calls.append((command, config))
         if command[0] == "tx-block":
             return self.tx_blocks.get(command[1], CompletedProcess([], 1, "", "not found"))
+        if "--serialize-unsigned-transaction" in command:
+            if self.builds:
+                return self.builds.pop(0)
+            tx_bytes = f"TX{len(self.built)}"
+            self.built[tx_bytes] = (int(command[command.index("--gas-budget") + 1]), config)
+            return CompletedProcess([], 0, tx_bytes + "\n", "")
         return self.responses.pop(0)
+
+    def decode(self, tx_bytes):
+        """The digest the next scripted response executes as."""
+        budget, config = self.built[tx_bytes]
+        upcoming = self.responses[0] if self.responses else None
+        if isinstance(upcoming, dict):
+            digest = upcoming["digest"]
+        else:
+            found = live_common.DIGEST.search(upcoming.stderr + upcoming.stdout) if upcoming is not None else None
+            digest = found.group(1) if found else UNKNOWN
+        return {"digest": digest, "gas_budget": str(budget), "sender": OPERATOR if config is None else CHILD}
 
 
 def live(chain, limit=100_000_000):
     run = Live("/nonexistent/client.yaml", "testnet", limit)
     run.client = chain
     run.operator, run.chain = OPERATOR, "4c78adac"  # Set by preflight.
+    if isinstance(chain, Chain):
+        run.decode = chain.decode
+        run.signer = lambda config, address: (lambda tx_bytes: f"sig:{address}:{tx_bytes}")
+    run.READ_BACK_SECONDS = 0
     return run
 
 
@@ -289,6 +322,98 @@ class ReadThrottleTests(unittest.TestCase):
                     self.assertIs(client(command, check=False, json_output=False), failure)
                 self.assertEqual(ran.call_count, 1)
                 sleep.assert_not_called()
+
+
+class ThrottledSubmissionTests(unittest.TestCase):
+    """CI run 40315547246: the public fullnode answered a mutating `ptb` with
+    HTTP 429 and no digest, an unknown outcome that failed the suite. PTBs are
+    now executed as exact signed bytes whose digest is known beforehand, so a
+    throttled submission is reconciled by that digest and only the same signed
+    bytes are ever resubmitted."""
+    throttle = CompletedProcess([], 1, "", "code: 'The service is currently unavailable', message: "
+                                "\"<title>429</title>429 Too Many Requests\"")
+    digest = "Thrt111111111111111111111111111111111111111"
+
+    def run_attack(self, chain):
+        run = live(chain)
+        with patch.object(live_common.time, "sleep") as sleep:
+            entry = run.attack("verified report after revocation", "--move-call", "x",
+                               module="device_cap", function="assert_signer", code=0, budget=10_000_000)
+        return run, entry, sleep
+
+    def test_throttled_submission_resubmits_the_same_signed_bytes(self):
+        aborted = effects("failure", cost=1_500_000, error=ABORT, digest=self.digest)
+        chain = Chain(self.throttle, aborted)
+        chain.decode = lambda tx_bytes, decode=chain.decode: {**decode(tx_bytes), "digest": self.digest}
+        run, entry, sleep = self.run_attack(chain)
+        self.assertEqual(entry["abort"], ("device_cap", "assert_signer", "0"))
+        self.assertEqual(len(chain.built), 1)  # Built and signed once.
+        self.assertEqual([tx for tx, _ in chain.submissions], ["TX0", "TX0"])
+        self.assertIn((("tx-block", self.digest), None), chain.calls)  # Reconciled by digest before resubmitting.
+        self.assertEqual(run.ledger.used, 1_500_000)
+        self.assertEqual(sleep.call_count, 1)
+
+    def test_throttled_submission_that_executed_is_never_resubmitted(self):
+        aborted = effects("failure", cost=1_500_000, error=ABORT, digest=self.digest)
+        chain = Chain(CompletedProcess([], 1, "", f"transaction '{self.digest}' " + self.throttle.stderr),
+                      tx_blocks={self.digest: aborted})
+        run, entry, _ = self.run_attack(chain)
+        self.assertEqual(len(chain.submissions), 1)
+        self.assertEqual((entry["digest"], entry["gas_mist"]), (self.digest, 1_500_000))
+
+    def test_persistent_throttling_keeps_the_reservation_at_the_bound(self):
+        chain = Chain(*[self.throttle] * Live.SUBMIT_ATTEMPTS)
+        run = live(chain)
+        with patch.object(live_common.time, "sleep"), self.assertRaisesRegex(RuntimeError, "same signed bytes"):
+            run.transaction("report", "--move-call", "x", budget=10_000_000)
+        self.assertEqual({tx for tx, _ in chain.submissions}, {"TX0"})
+        self.assertEqual(len(chain.submissions), Live.SUBMIT_ATTEMPTS)
+        self.assertEqual(run.ledger.used, 10_000_000)  # Unknown: the reservation stays charged.
+        self.assertEqual(run.evidence["transactions"][-1]["status"], "unknown")
+
+    def test_other_digest_is_not_this_transactions_outcome(self):
+        chain = Chain(self.throttle, effects(digest="Othr111111111111111111111111111111111111111"))
+        chain.decode = lambda tx_bytes, decode=chain.decode: {**decode(tx_bytes), "digest": self.digest}
+        run = live(chain)
+        with patch.object(live_common.time, "sleep"), self.assertRaises(sui_toolchain.DigestMismatch):
+            run.transaction("report", "--move-call", "x", budget=10_000_000)
+        self.assertEqual(run.ledger.used, 10_000_000)
+
+    def test_throttled_build_retries_before_signing_and_releases_when_refused(self):
+        chain = Chain(effects(cost=1_000_000), builds=[self.throttle, self.throttle])
+        run = live(chain)
+        with patch.object(live_common.time, "sleep"):
+            run.transaction("report", "--move-call", "x", budget=10_000_000)
+        self.assertEqual(len(chain.submissions), 1)
+        self.assertEqual(run.ledger.used, 1_000_000)
+        chain = Chain(builds=[self.throttle] * Live.SUBMIT_ATTEMPTS)
+        run = live(chain)
+        with patch.object(live_common.time, "sleep"), self.assertRaises(sui_toolchain.NotSubmitted):
+            run.transaction("report", "--move-call", "x", budget=10_000_000)
+        self.assertEqual((chain.submissions, run.ledger.used), ([], 0))
+        self.assertEqual(run.evidence["transactions"][-1]["status"], "not_submitted")
+
+    def test_unverified_bytes_are_never_signed(self):
+        for change in ({"gas_budget": "20000000"}, {"sender": CHILD}):
+            with self.subTest(change=change):
+                chain = Chain(effects())
+                chain.decode = lambda tx_bytes, decode=chain.decode, change=change: {**decode(tx_bytes), **change}
+                run = live(chain)
+                run.signer = Mock()
+                with self.assertRaises(sui_toolchain.NotSubmitted):
+                    run.transaction("report", "--move-call", "x", budget=10_000_000)
+                run.signer.assert_not_called()
+                self.assertEqual((chain.submissions, run.ledger.used), ([], 0))
+
+    def test_child_account_signs_with_its_own_config(self):
+        chain = Chain(effects(cost=1_000_000))
+        run = live(chain, limit=100_000_000)
+        signed = []
+        run.signer = lambda config, address: (lambda tx_bytes: signed.append((config, address)) or "sig")
+        run.transaction("device report", "--move-call", "x", budget=10_000_000,
+                        sender=run.child("/tmp/device.yaml", 40_000_000))
+        self.assertEqual(signed, [("/tmp/device.yaml", CHILD)])
+        self.assertEqual(chain.submissions, [("TX0", "/tmp/device.yaml")])
 
 
 class PackageReadThrottleTests(ReadThrottleTests):
@@ -661,7 +786,8 @@ class TeardownTests(unittest.TestCase):
 
     @staticmethod
     def calls(chain):
-        return [(" ".join(command), config) for command, config in chain.calls]
+        # Submissions only; an unanswered one is also read back by its known digest.
+        return [(" ".join(command), config) for command, config in chain.calls if command[0] != "tx-block"]
 
     def test_success_deletes_everything_and_sweeps_the_device(self):
         chain = Chain(*(effects(cost=1_000_000) for _ in range(4)))

@@ -67,8 +67,14 @@ check. That leaves the creator the same reach as the unchanged creator-only
 `delete_deployment`: the checked path protects the dApp and composed calls
 through the current package, not a creator deliberately using old entry points.
 
-The additive `deployment_manager::schema_version` getter selects the deletion
-path. The existing creator-only `delete_deployment` calls are unchanged. A
+`deployment_manager::receipt_schema` selects the deletion path. For a record
+with SF-127 sharded receipts it returns the schema kept in the receipt
+directory, because sharding sets the inline `schema_version` to 4. Such a
+record can be retired only after receipt cleanup has retired every receipt
+root. Until then `retire` aborts with `ECleanup` (17, `deployment_manager`),
+and the dApp lists the record as kept: "finish receipt cleanup on the
+deployment first". The existing creator-only `delete_deployment` calls are
+unchanged. A
 record whose target group was deleted cannot complete the on-chain check,
 because a deleted object cannot be read. The dApp lists such records as kept;
 the creator can still delete them individually after review.
