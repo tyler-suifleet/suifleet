@@ -899,3 +899,39 @@ Hosted checks for the pushed head are pending and will not be polled by this
 worker; fresh independent review and actual exact-head/current-base CI/testnet
 remain required. Physical/mainnet/provider/manual-wallet acceptance stays unrun
 in #32/#159. No public mutations, deployment, hardware or other workers ran.
+
+## 2026-10-26 console-base feedback reconciliation
+
+Integrated snapshot/fetched main `633bbb5f88d21acb3281fba20ad2dcef7d147b4f`
+in merge `1b11e282`. Resolved four conflicts: kept the incoming page header and
+plain-language messages/balance disclosure, retained stream retention and scoped
+archive reclaim controls, and retained archive-session fixture exports/import
+isolation. Existing fleet-selection/session invalidation remains intact.
+
+Fresh checks on the combined tree, all passed:
+
+- Network-none `suifleet-dev:sf035`: `cd dapp && pnpm typecheck && pnpm build`.
+- Host `node scripts/test_stream_retention.cjs`,
+  `test_stream_retention_panel.cjs`, `test_storage_reclaim.cjs`,
+  `test_storage_reclaim_panel.cjs`, and `test_data_browser.cjs`.
+- Host Chrome (`CHROME_EXECUTABLE=/opt/google/chrome/chrome`):
+  `test_data_session_browser.cjs`, `test_fleet_settings_browser.cjs`,
+  `test_data_browser_browser.cjs`, and `test_dapp_presentation_browser.cjs`.
+  Presentation covers 14 exported routes at desktop/mobile widths. Its initial
+  run overlapped the build and read the prior export (navigation assertion
+  failed); rerunning after the successful build passed.
+- `python3 -m unittest discover -s scripts/tests -p 'test_retention*.py'`:
+  15 passed; `test_tracking.py`: 10 passed.
+- Working-tree and staged `git diff --check`: passed.
+
+Move/Rust/OTA/localnet are unchanged by this reconciliation and were not rerun;
+earlier full-suite evidence above remains historical. No public-chain writes,
+service installation, hardware operations or production credentials were used.
+Read-only PR #279 query still reports OPEN, mergedAt null, head `bcaa99c5`:
+SF-129 verified merge remains a genuine integration dependency, not repaired by
+merging main here. The independent review reports no actionable source defect.
+Hosted checks for the pushed head remain pending/unpolled; the coordinator must
+obtain exact-head/current-base CI/testnet and fresh independent review. Physical,
+mainnet, provider and manual-wallet acceptance stays unrun in #32/#159, as does
+public SF-129 expiry/rebate evidence. Only the orchestrator may merge SF-129 and
+then reconcile its merged main into SF-141 before final integration.
