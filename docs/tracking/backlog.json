@@ -3289,6 +3289,30 @@
         "Commit only SF155 tracking entries from canonical catalog, open a linked implementation PR and hand off to independent review; final real-network costs remain unmeasured until acceptance actually runs."
       ],
       "validation": "Offline accounting/collector regressions, resumable read-only smoke evidence and documentation consistency. Public Mainnet reads are allowed; no Mainnet writes, production credentials, paid service purchases, physical programming or unsolicited new cloud servers."
+    },
+    {
+      "key": "SF-156",
+      "title": "Automatically resume acceptance work when its expiry fixture is ready",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "The remaining SF129 reclaim acceptance waits on real Walrus expiry, but a completed blocked review does not wake an owner when external readiness changes. Add a bounded read-only readiness watcher that dispatches the existing owner through the installed coordinator once eligible.",
+      "evidence": "2026-10-26: operator read-only planner observed Walrus epoch562, no eligible anchors; fixture expires563. User requests keeping the two remaining PRs moving without repeated prompts.",
+      "acceptance": [
+        "Periodically check fixture readiness with a read-only probe; never hold wallet/hardware resources or start an idle model before the actual epoch and eligible-anchor condition are satisfied.",
+        "On readiness, preserve existing ticket/branch/family and use the sole coordinator launch/reservation checks. Fail closed for changed ownership, active work, dirty trees or uncertain launch receipts; no direct ownership database edits.",
+        "Persist the one-shot dispatch/probe state across restarts, bound probe runtime and avoid duplicate comments, model jobs or wallet mutations. The watcher itself never signs, spends or marks acceptance complete.",
+        "Install the tested committed watcher and a local timer, record provenance, and retain independent review/CI/reclaim effects before merge. Keep actual testnet execution within the existing allowance/lease authorization.",
+        "Add offline readiness, duplicate/restart and invalid/unknown evidence regression tests, and document operation and limitations."
+      ],
+      "validation": "Offline watcher regressions, read-only live probe at epoch562, installed timer/service checks and source provenance. No paid unexpired prune or hardware/mainnet operation."
     }
   ]
 }
