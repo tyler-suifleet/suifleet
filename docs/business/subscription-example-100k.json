@@ -1,0 +1,37 @@
+{
+  "schema_version": 2,
+  "devices": 100000,
+  "profile": "typical",
+  "basis": {
+    "kind": "estimated",
+    "as_of": "2026-10-23",
+    "sui_usd": "0.987",
+    "reference_gas_price_mist": 100,
+    "sources": [
+      "docs/BUSINESS_PLAN.md#cost-to-serve-margin-and-greengrass-comparison-by-profile: typical profile, 100,000 devices, cost to serve $1,470-2,150, list revenue $5,300, Greengrass ~$25,200",
+      "docs/business/SUBSCRIPTION_PRICING.md#cost-split: per-device network costs scale linearly from the 1,000-device example; services $570 is one SuiFleet-run full node at the low end of the plan's $520-1,040 range",
+      "Reference prices 2026-10-23: SUI $0.987, WAL $0.0368 (CoinGecko); mainnet reference gas price 100 MIST",
+      "Testnet-rescaled estimates; SF-135/#267 replaces them with a measured Mainnet bill"
+    ]
+  },
+  "unquoted_costs": [],
+  "recurring_costs": {
+    "sui_sensitive_usd": "600.00",
+    "walrus_usd": "300.00",
+    "services_usd": "570.00"
+  },
+  "commercial": {
+    "list_monthly_usd": "5300",
+    "monthly_minimum_usd": "49",
+    "annual_discount_fraction": "0.10",
+    "comparison_monthly_usd": "25200",
+    "comparison_label": "AWS IoT Greengrass, typical profile, us-east-1 list prices 2026-10-23"
+  },
+  "working_capital": {
+    "sui_denominated": {
+      "refundable_storage_deposits_usd": "3000",
+      "device_gas_float_usd": "5922"
+    },
+    "usd_denominated": {}
+  }
+}
