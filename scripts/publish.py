@@ -22,6 +22,11 @@ process: the next run of this tool (or `--reconcile`) finishes the switch
 before anything else, and `make dapp-build` refuses to build until it has. If anything fails after the transaction executed, the
 transaction is kept in RECORDS/ENV/pending-*.json and `--recover FILE`
 finishes recording it without another transaction.
+
+A reviewed release plan (scripts/release_plan.py, docs/RELEASE_PLANNING.md)
+given with --plan must describe this exact transaction: network, chain,
+account, deployment, contract sources and gas budget. Testnet publication
+requires one; the plan is kept with the pending record and the release.
 """
 import argparse
 import json
@@ -36,6 +41,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deployment_manifest as dm
+import release_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 PINNED = {"35834a8a": "mainnet", "4c78adac": "testnet"}
@@ -179,9 +185,10 @@ def current_manifest(records, env):
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def install(manifest, records, env, template, frontend_env):
-    """Record the release, then switch RECORDS/ENV/current and .env.local to
-    it together (see activate). Rerunnable."""
+def install(manifest, records, env, template, frontend_env, plan=None, transaction=None):
+    """Record the release with its transaction summary and admitting plan,
+    then switch RECORDS/ENV/current and .env.local to it together (see
+    activate). Rerunnable."""
     name = f"v{manifest['package_version']}-{manifest['call_package_id'][2:14]}"
     release = records / env / "releases" / name
     if release.exists():
@@ -196,6 +203,9 @@ def install(manifest, records, env, template, frontend_env):
             raise PublishError(f"cannot generate client configs: {error}")
         finally:
             os.unlink(device.name)
+    for record, value in (("release-plan.json", plan), ("transaction.json", transaction)):
+        if value is not None and not (release / record).exists():
+            write_atomic(release / record, json.dumps(value, indent=2) + "\n")
     activate(records, env, name, frontend_env)
     return release
 
@@ -424,7 +434,24 @@ def finish(pending, args, read):
             time.sleep(2)
     if manifest["package_version"] != str(pending["version"]):
         raise PublishError(f"chain reports package version {manifest['package_version']}, expected {pending['version']}")
-    return install(manifest, args.records, pending["env"], args.device_template, args.frontend_env)
+    transaction = {"digest": pending["digest"], "effects": pending.get("effects")}
+    return install(manifest, args.records, pending["env"], args.device_template, args.frontend_env, pending.get("plan"),
+                   transaction)
+
+
+def admit_plan(args, step):
+    """The reviewed plan for this transaction, or None where none is required."""
+    if args.plan is None:
+        if step.network == "testnet" and not args.dry_run:
+            raise PublishError("testnet publication needs a reviewed release plan: run scripts/release_plan.py plan, "
+                               "review it, then pass --plan PLAN.json (docs/RELEASE_PLANNING.md)")
+        return None
+    try:
+        return release_plan.admit(json.loads(args.plan.read_text()), network=step.network, env=step.env,
+                                  chain=step.chain, address=step.address, published=step.published,
+                                  registry=step.registry, package=args.package, gas_budget=args.gas_budget)
+    except (release_plan.PlanError, ValueError, KeyError, TypeError) as error:
+        raise PublishError(f"release plan refused: {error}")
 
 
 def active_configuration(args, env):
@@ -465,7 +492,9 @@ def run(args, cli=None, read=dm.chain_facts):
     for url in mirrors:
         dm.endpoint(url)
     action = f"upgrade {step.published['package']} v{step.published['version']}" if step.published else "fresh publish"
-    print(f"{action} on {step.env} ({step.network}, chain {step.chain}) as {step.address}")
+    admitted = admit_plan(args, step)
+    print(f"{action} on {step.env} ({step.network}, chain {step.chain}) as {step.address}"
+          + (f" under plan {admitted['plan_digest']}" if admitted else ""))
     if args.dry_run:
         output = transaction(args, cli, step, dry_run=True)
         gas = output["effects"].get("gasUsed", {})
@@ -478,7 +507,8 @@ def run(args, cli=None, read=dm.chain_facts):
     pending_path = args.records / step.env / f"pending-{digest}.json"
     pending = dict(env=step.env, network=step.network, chain=step.chain, rpc=step.rpc, address=step.address,
                    digest=digest, package_path=str(args.package.resolve()), walrus=list(walrus),
-                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors)
+                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors, plan=admitted,
+                   effects={k: output["effects"].get(k) for k in ("status", "gasUsed")})
     write_atomic(pending_path, json.dumps(pending, indent=2) + "\n")
     configuration = active_configuration(args, step.env)
     try:
@@ -514,6 +544,7 @@ def parser():
     p.add_argument("--frontend-env", type=Path, default=ROOT / "dapp/.env.local",
                    help="frontend env file to update; pass '' to skip")
     p.add_argument("--client-config", type=Path, help="Sui client.yaml (default: the CLI's)")
+    p.add_argument("--plan", type=Path, help="reviewed release plan (scripts/release_plan.py); required on testnet")
     p.add_argument("--recover", type=Path, metavar="PENDING_JSON", help="finish recording an executed transaction")
     p.add_argument("--reconcile", action="store_true",
                    help="only finish an interrupted activation (RECORDS/ENV/activating.json); no transaction")
@@ -533,7 +564,8 @@ def main(argv=None):
         return 1
     if release:
         manifest = json.loads((release / "deployment.json").read_text())
-        print(f"Recorded {release}\n  package {manifest['call_package_id']} (v{manifest['package_version']})\n"
+        transaction = json.loads((release / "transaction.json").read_text()) if (release / "transaction.json").exists() else {}
+        print(f"Recorded {release}\n  transaction {transaction.get('digest', 'unknown')}\n  package {manifest['call_package_id']} (v{manifest['package_version']})\n"
               f"  UpgradeCap {manifest['upgrade_cap_id']}\n  registry {manifest['shared_objects']['registry']['id']}")
         if args.frontend_env:
             print(f"Updated {args.frontend_env}; rebuild the frontend. Device config template: {release / 'config.toml'}")

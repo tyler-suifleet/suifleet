@@ -285,10 +285,12 @@ check:
 	$(MAKE) dapp-build
 	git diff --check
 
-# Offline: publisher metadata parsing, verification and failure handling.
+# Offline: publisher metadata parsing, verification and failure handling, and
+# the SF-154 release planner with its publication admission gate.
 .PHONY: test-publish
 test-publish:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_publish.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_release_plan.py'
 
 # Signed releases (docs/RELEASES.md). These run on the host with Docker, not
 # in the dev container: the release builder is its own pinned image.
