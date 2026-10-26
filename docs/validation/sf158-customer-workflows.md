@@ -74,3 +74,38 @@ visually inspected. Local production export preview uses the existing public
 testnet configuration at http://localhost:3000. No real wallet/contract/device/
 production-provider operation was performed. Required independent review and CI
 are separate from these local results.
+
+## PR #323 feedback repair (2026-10-26)
+
+The share-reference card now has separate verified-proposal state. Every submitted
+operation clears it, and only a proposal event bound to the requested source,
+recipient and ordered resource list sets it. Reviewing another reference or
+confirming, transferring, finishing or cancelling cannot supply a share reference.
+The browser fixture now checks that the card disappears during and after recipient
+acceptance, and that a second proposal with an invalid event cannot reuse the first
+proposal's reference, without reloading between proposals.
+
+Repair checks (Docker mount at `/workspace`, network disabled):
+
+- `suifleet-dev:sf037`, working directory `/workspace/dapp`:
+  `node_modules/.bin/tsc --noEmit && node_modules/.bin/next build --webpack` passed;
+  16 static pages generated.
+- `suifleet-dev:sf010-chrome`, working directory `/workspace`:
+  `node scripts/test_administration_browser.cjs` passed both new regressions and
+  existing selection, pending, exact transaction, accept/batch/finish and invalid
+  event tests, with fixture chain and wallet responses only.
+- Same browser image: settings-cost and budget unit suites, settings and access
+  browser fixtures passed.
+- Same browser image: `node scripts/test_dapp_presentation_browser.cjs` passed
+  all 14 exported routes at desktop/mobile, with no external network or wallet.
+- Host `python3 -m unittest discover -s scripts/tests -p test_tracking.py -q`:
+  10 tests passed; `git diff --check` passed.
+
+An initial browser invocation incorrectly specified `/usr/bin/google-chrome`, which
+this image does not contain; rerunning with Playwright's bundled browser passed.
+An initial corepack invocation attempted registry discovery under disabled network;
+the installed compiler and Next.js binaries above passed without network access.
+The existing Tailwind module-type warning remains nonfatal. No chain, real wallet,
+provider, hardware or deployment actions were performed. Real-wallet/provider and
+physical/mainnet acceptance remain unrun in SF-031/#32 and SF-087/#159. Hosted CI
+and fresh independent review of the pushed repair remain coordinator merge gates.

@@ -42,6 +42,7 @@ function LegacyHandoverPage() {
   const [lookup, setLookup] = useState("");
   const [error, setError] = useState("");
   const [digest, setDigest] = useState("");
+  const [verifiedProposal, setVerifiedProposal] = useState("");
   const query = useQuery({ queryKey: ["handover", lookup], queryFn: () => readHandover(client, lookup), enabled: !!lookup });
   const h = query.data;
   const source = account?.address === h?.source;
@@ -49,6 +50,7 @@ function LegacyHandoverPage() {
   function submit(build: () => Transaction, proposedRecipient?: string) {
     if (submitting.current) return;
     submitting.current = true;
+    setVerifiedProposal("");
     setError("");
     try {
       mutation.mutate({ transaction: build() }, {
@@ -64,6 +66,7 @@ function LegacyHandoverPage() {
                 const proposal = fleet_handover_ProposedBcs.parse(event.bcs);
                 if (normalizeSuiAddress(proposal.source) !== normalizeSuiAddress(account!.address) || normalizeSuiAddress(proposal.recipient) !== normalizeSuiAddress(proposedRecipient)) continue;
                 if (proposal.objects.length !== expected.length || proposal.objects.some((object, i) => normalizeSuiAddress(object) !== normalizeSuiAddress(expected[i].objectId) || Number(proposal.kinds[i]) !== expected[i].kind)) continue;
+                setVerifiedProposal(proposal.handover_id);
                 setId(proposal.handover_id); setLookup(proposal.handover_id); return;
               } catch { /* Keep the confirmed receipt; never guess a transfer reference. */ }
             }
@@ -105,7 +108,7 @@ function LegacyHandoverPage() {
       <p className="text-sm text-slate-500">Creating this request does not transfer control. The recipient must accept first.</p>
       <button disabled={!transferSupported || !account || mutation.isPending || resourcesUnavailable || (!chosen.length && !additional.trim())} className="bg-blue-700 text-white rounded px-4 py-2 hover:bg-blue-800">Create transfer request</button>
       {digest && <details className="text-xs"><summary>Confirmation details</summary><p className="break-all">Confirmed transaction: {digest}</p></details>}
-      {lookup && digest && <div className="rounded-lg bg-blue-50 p-3 text-sm"><p className="font-medium">Share this transfer reference with the new administrator</p><p className="mt-1 break-all font-mono text-xs">{lookup}</p><p className="mt-2 text-slate-600">They can connect their account and enter it below to review the request.</p></div>}
+      {verifiedProposal && <div className="rounded-lg bg-blue-50 p-3 text-sm"><p className="font-medium">Share this transfer reference with the new administrator</p><p className="mt-1 break-all font-mono text-xs">{verifiedProposal}</p><p className="mt-2 text-slate-600">They can connect their account and enter it below to review the request.</p></div>}
     </form>
     <form className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-5" onSubmit={event => { event.preventDefault(); setLookup(id.trim()); }}>
       <input required aria-label="Transfer reference" className="border rounded p-2 flex-1" value={id} onChange={event => setId(event.target.value)} placeholder="Transfer reference" />
