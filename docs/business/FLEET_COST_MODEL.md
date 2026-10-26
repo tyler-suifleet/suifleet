@@ -330,3 +330,11 @@ repricing from 3×. Its examples use the business plan's typical-profile estimat
 not this historical, incomplete SF-054 scenario, and they do not establish a
 measured production bill. Supply missing costs before pricing; never use Testnet
 balances or assumed refunds as recurring revenue.
+
+## Resumable observation preparation (SF-155)
+
+Use the [collector and two-week procedure](FLEET_COST_COLLECTION.md) to preserve
+actual effects, WAL retention, request/provider observations, capital and balance
+reconciliation. Its export uses this accounting schema. Missing services,
+unresolved outcomes and interval coverage remain incomplete; final bill acceptance
+stays in SF-135/#267 and production acceptance in SF-087/#159.

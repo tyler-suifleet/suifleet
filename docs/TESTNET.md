@@ -361,3 +361,12 @@ refusals and verifies full deployment/cleanup reservations with a synthetic
 refusal. No new live success is claimed; current-head CI/testnet and independent
 review remain required. The existing encrypted fixture and historical uncertain
 reservations must be preserved; no blind replay or identical publication.
+
+## Read-only fleet cost collection (SF-155)
+
+The [resumable cost collector](business/FLEET_COST_COLLECTION.md) observes existing
+transaction digests using pinned SDK gRPC v2 and ingests authenticated, hash-pinned
+evidence into a durable local journal. The SF-082 fixture smoke creates no objects
+or transactions and needs no shared-wallet mutation lock. It never funds, signs,
+submits, uploads or purchases. Testnet costs remain Testnet observations; final
+Mainnet bill and production acceptance stay in SF-135/#267 and SF-087/#159.
