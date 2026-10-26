@@ -1,0 +1,312 @@
+{
+  "ticket": "SF-154",
+  "model": "claude-opus-5-5",
+  "statement": "Rehearsal and read-only planning evidence only. No production or mainnet transaction, signature, capability transfer or credential operation occurred; no testnet mutation was made.",
+  "localnet_rehearsal": {
+    "ticket": "SF-154",
+    "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
+    "chain": "b565b295",
+    "rpc": "http://127.0.0.1:9000",
+    "sui": "sui 1.81.1-e04cf9aa915c",
+    "plans": {
+      "plan-publish": {
+        "digest": "sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538",
+        "ready": true,
+        "action": "publish",
+        "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+        "findings": [],
+        "new_types": 114,
+        "removed_types": []
+      },
+      "plan-other-custody": {
+        "digest": "sha256:fd34211e200602400b6a4dd61a7626a6ee90c0e514e5f62b8e013289e2228767",
+        "ready": true,
+        "action": "publish",
+        "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+        "findings": [],
+        "new_types": 114,
+        "removed_types": []
+      },
+      "plan-over-budget": {
+        "digest": "sha256:db394b7f8382d5573e5b5e3d4411c31b8ae95b039e30c2b1b3cbb1086f5b1f70",
+        "ready": false,
+        "action": "publish",
+        "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+        "findings": [
+          "blocking:budget-exceeds-policy",
+          "blocking:spend-exceeds-policy"
+        ],
+        "new_types": 114,
+        "removed_types": []
+      },
+      "plan-upgrade": {
+        "digest": "sha256:30411e1dc1ef0bcce6bbda2716c303e0167094cc60f48f2cc8f114b7ed5c2865",
+        "ready": true,
+        "action": "upgrade",
+        "bytecode": "6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd",
+        "findings": [
+          "warning:migration-review"
+        ],
+        "new_types": [
+          "release_rehearsal::RehearsalMarker"
+        ],
+        "removed_types": []
+      },
+      "plan-dropped-type": {
+        "digest": "sha256:159e3c80612d31c0ed103d0f41b30b3ff08a3117b4254b0b6371b0eee8551263",
+        "ready": false,
+        "action": "upgrade",
+        "bytecode": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+        "findings": [
+          "blocking:type-removed"
+        ],
+        "new_types": [],
+        "removed_types": [
+          "release_rehearsal::RehearsalMarker"
+        ]
+      },
+      "plan-reupgrade": {
+        "digest": "sha256:b7c8214e5559365cf31ea11a7abf0e9e86948872e0a52e552367943bd902d7f9",
+        "ready": true,
+        "action": "upgrade",
+        "bytecode": "6f6dd680ed00436272a2b0185ef668d69abc3f88f1efc18f8ab69616aa7b18fd",
+        "findings": [
+          "warning:identical-bytecode"
+        ],
+        "new_types": [],
+        "removed_types": []
+      }
+    },
+    "transactions": {
+      "publish": {
+        "digest": "CG8n8WUwrQuircaWTkajKTcHbPpSf2E7VhY9dzVE75kG",
+        "status": "success",
+        "gas_used": {
+          "computationCost": "5020000",
+          "storageCost": "532699200",
+          "storageRebate": "4890600",
+          "nonRefundableStorageFee": "49400"
+        },
+        "net_gas_mist": 532828600,
+        "balance_change_mist": -532828600,
+        "plan": "sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538"
+      },
+      "upgrade": {
+        "digest": "BnV7ZZ4NCAqCSzr8hhU2q9ynBz1hUJNaZ8NVxVXyb9Z9",
+        "status": "success",
+        "gas_used": {
+          "computationCost": "6070000",
+          "storageCost": "532676400",
+          "storageRebate": "2595780",
+          "nonRefundableStorageFee": "26220"
+        },
+        "net_gas_mist": 536150620,
+        "balance_change_mist": -536150620,
+        "plan": "sha256:30411e1dc1ef0bcce6bbda2716c303e0167094cc60f48f2cc8f114b7ed5c2865"
+      }
+    },
+    "refusals": [
+      {
+        "case": "plan for another custody account",
+        "error": "error: release plan refused: plan is for ('localnet', 'sf-rehearse', 'b565b295', '0xabababababababababababababababababababababababababababababababab'), not ('localnet', 'sf-rehearse', 'b565b295', '0xed7d161efa85a0ade2dcfb9cd61e89120a133c51f7e1ebe151438422053b20de')"
+      },
+      {
+        "case": "plan exceeding the policy budget",
+        "error": "error: release plan refused: release plan is not ready (blocking: budget-exceeds-policy, spend-exceeds-policy)"
+      },
+      {
+        "case": "gas budget above the plan's",
+        "error": "error: release plan refused: gas budget 3000000000 exceeds the planned 2000000000"
+      },
+      {
+        "case": "replayed publish plan",
+        "error": "error: release plan refused: plan is a publish, but this run would upgrade; plan again"
+      },
+      {
+        "case": "plan whose sources dropped a published type",
+        "error": "error: release plan refused: release plan is not ready (blocking: type-removed)"
+      },
+      {
+        "case": "edited plan",
+        "error": "error: release plan refused: release plan digest does not match its contents; it was edited after planning"
+      }
+    ],
+    "checks": [
+      "fresh-publish plan ready (sha256:700ccdc9ffb416bf35b4d8af88f0f6dc018b0964802cccf70272acc1ec070538), bytecode b6eededde08cb498\u2026",
+      "custody, readiness and budget mismatches refused before any transaction; nothing written, no gas",
+      "published 0x52d6b2e76d5a7365283cb1926a70cb0eb2bf100eff5cb48769f91d5b5128cbf0 under the plan; transaction CG8n8WUwrQuircaWTkajKTcHbPpSf2E7VhY9dzVE75kG succeeded; both clients verify the generated configs",
+      "replayed publish plan refused once the deployment exists",
+      "upgrade to 0xe98d312cb4edf201bc21b64d32ce4d8b81df2fc4bf4c3ec3d9811b26a007fd80 (v2) under the plan; release_rehearsal::RehearsalMarker originates in v2, existing origins, registry and UpgradeCap kept; the v1 release is rejected as stale",
+      "dropped-type plan and edited plan refused; identical bytecode to the current release is flagged",
+      "old-package identity attacks from d3acb1e to the rehearsed head: 47/47 checks passed"
+    ],
+    "old_package_checks": "47/47 checks passed",
+    "records": {
+      "v1": "0x52d6b2e76d5a7365283cb1926a70cb0eb2bf100eff5cb48769f91d5b5128cbf0",
+      "v2": "0xe98d312cb4edf201bc21b64d32ce4d8b81df2fc4bf4c3ec3d9811b26a007fd80",
+      "upgrade_cap": "0x802a16bd5d9152cedd47ef77abec6d6d99f3ac7a35af272eeba7906f5b21f978",
+      "registry": "0x6f1ec1b252c4411c693afb50fd1bf343902c1ccff1cd188dcfb2a3fbfb1aa7d7"
+    },
+    "spent_mist": 1068979220,
+    "command": "make test-release-rehearsal-localnet REHEARSAL_ARGS='--evidence FILE' in suifleet-dev:sf037 --network none against a disposable `sui start --with-faucet --force-regenesis` localnet"
+  },
+  "read_only_public_plans": {
+    "testnet_fixture_upgrade": {
+      "note": "Upgrade plan of the agent wallet's cached package-upgrade fixture (fa83c390..01d697b6) to this head; planning only (adopted, unrecorded).",
+      "plan_digest": "sha256:f8370e1fc22b7ee26692b7449a9e5d8b7d385d76145068d348d694047773124b",
+      "created_at": 1792978866,
+      "network": "testnet",
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "action": "upgrade",
+      "ready": true,
+      "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
+      "contracts_source_digest": "sha256:b651df9f011078755693b936d67cfce1d1eeb3571bf3b55688051d5b58a8d5c1",
+      "bytecode": {
+        "digest": "b6eededde08cb498a0bc06d5e52f61edd61aefc9b57403ad094814664f75114d",
+        "compiler": "sui 1.81.1-e04cf9aa915c"
+      },
+      "cached_publication": null,
+      "custody": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "deployment": {
+        "call_package_id": "0x99ade6992eba96d6239da09b6cfda8bc1a01394360c9987773495716787dd09c",
+        "package_version": 2,
+        "upgrade_cap_id": "0x05749c80677d91cf94f1ab190f41a5b3887e812b36b9a6b687cff83ebabcc94f",
+        "upgrade_cap_owner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "registry_id": "0x4431790c6caea31662aeea878ef70ad4879187d6c5c6edcf2aac5b721a780629",
+        "registry_initial_shared_version": "1"
+      },
+      "on_chain_type_origins": 60,
+      "new_types": 54,
+      "removed_types": [],
+      "new_optional_groups": [
+        "fleet inbox",
+        "seal policy",
+        "fleet budget",
+        "fleet settings",
+        "customer",
+        "rollout health"
+      ],
+      "findings": [
+        "warning:migration-review",
+        "warning:adopt"
+      ],
+      "execution": {
+        "allowed": false,
+        "reason": "planning only: this checkout has no [published.testnet] record of the adopted package, so publish.py would not upgrade it"
+      },
+      "gas_budget_mist": 800000000
+    },
+    "testnet_cached_bytecode": {
+      "note": "Same fixture with the fixture's own verified head bytecode digest: detected as already published, so republishing is blocked.",
+      "plan_digest": "sha256:b074817f5f057579a9dc11f4f9748f48c88efd2394c78cfda1f945b26c3d4ffd",
+      "created_at": 1792978881,
+      "network": "testnet",
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "action": "upgrade",
+      "ready": false,
+      "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
+      "contracts_source_digest": "sha256:b651df9f011078755693b936d67cfce1d1eeb3571bf3b55688051d5b58a8d5c1",
+      "bytecode": {
+        "digest": "6e5abf07874eedbdd9b4e3430c77f9f857097e31fae84e0453213128b876d843",
+        "compiler": "sui 1.81.1-e04cf9aa915c"
+      },
+      "cached_publication": {
+        "fixture": "fa83c390c45dccab0051f8e9..01d697b6275d5b352e1439c8@1.81.1-e04cf9aa915c",
+        "role": "upgrade",
+        "package": "0x99ade6992eba96d6239da09b6cfda8bc1a01394360c9987773495716787dd09c",
+        "upgrade_cap": "0x05749c80677d91cf94f1ab190f41a5b3887e812b36b9a6b687cff83ebabcc94f",
+        "registry": "0x4431790c6caea31662aeea878ef70ad4879187d6c5c6edcf2aac5b721a780629"
+      },
+      "custody": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "deployment": {
+        "call_package_id": "0x99ade6992eba96d6239da09b6cfda8bc1a01394360c9987773495716787dd09c",
+        "package_version": 2,
+        "upgrade_cap_id": "0x05749c80677d91cf94f1ab190f41a5b3887e812b36b9a6b687cff83ebabcc94f",
+        "upgrade_cap_owner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "registry_id": "0x4431790c6caea31662aeea878ef70ad4879187d6c5c6edcf2aac5b721a780629",
+        "registry_initial_shared_version": "1"
+      },
+      "on_chain_type_origins": 60,
+      "new_types": 54,
+      "removed_types": [],
+      "new_optional_groups": [
+        "fleet inbox",
+        "seal policy",
+        "fleet budget",
+        "fleet settings",
+        "customer",
+        "rollout health"
+      ],
+      "findings": [
+        "warning:migration-review",
+        "warning:adopt",
+        "blocking:identical-bytecode"
+      ],
+      "execution": {
+        "allowed": false,
+        "reason": "planning only: this checkout has no [published.testnet] record of the adopted package, so publish.py would not upgrade it"
+      },
+      "gas_budget_mist": 800000000
+    },
+    "mainnet_unset_custody": {
+      "note": "Mainnet fresh-publish plan with no custody chosen: read-only; blocked by custody-unset and by missing mainnet pins in Move.lock.",
+      "plan_digest": "sha256:64c3e0f8a0c6e9a2d68cac6cee0f2621cc8a2f1917edacada7f109e511ec1b56",
+      "created_at": 1792978866,
+      "network": "mainnet",
+      "chain": "35834a8a",
+      "rpc": "https://fullnode.mainnet.sui.io:443",
+      "action": "publish",
+      "ready": false,
+      "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
+      "contracts_source_digest": "sha256:b651df9f011078755693b936d67cfce1d1eeb3571bf3b55688051d5b58a8d5c1",
+      "bytecode": null,
+      "cached_publication": null,
+      "custody": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "deployment": null,
+      "on_chain_type_origins": null,
+      "new_types": 114,
+      "removed_types": [],
+      "new_optional_groups": [],
+      "findings": [
+        "blocking:custody-unset",
+        "blocking:bytecode-build"
+      ],
+      "execution": {
+        "allowed": false,
+        "reason": "mainnet execution is outside this pipeline: publish.py refuses mainnet and actual production execution requires explicit user authorization under SF-087/#159"
+      },
+      "gas_budget_mist": 800000000
+    },
+    "mainnet_development_custody": {
+      "note": "Mainnet plan naming the testnet agent wallet as custody: blocked as forbidden development custody.",
+      "plan_digest": "sha256:71a827498be3550f981df7e835606b77da88caf3965d843ea98e9d8d3222874a",
+      "created_at": 1792978868,
+      "network": "mainnet",
+      "chain": "35834a8a",
+      "rpc": "https://fullnode.mainnet.sui.io:443",
+      "action": "publish",
+      "ready": false,
+      "revision": "195220e0ce945b98e882e961641d3f2c131e0e6d",
+      "contracts_source_digest": "sha256:b651df9f011078755693b936d67cfce1d1eeb3571bf3b55688051d5b58a8d5c1",
+      "bytecode": null,
+      "cached_publication": null,
+      "custody": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "deployment": null,
+      "on_chain_type_origins": null,
+      "new_types": 114,
+      "removed_types": [],
+      "new_optional_groups": [],
+      "findings": [
+        "blocking:custody-forbidden",
+        "blocking:bytecode-build"
+      ],
+      "execution": {
+        "allowed": false,
+        "reason": "mainnet execution is outside this pipeline: publish.py refuses mainnet and actual production execution requires explicit user authorization under SF-087/#159"
+      },
+      "gas_budget_mist": 800000000
+    }
+  }
+}
