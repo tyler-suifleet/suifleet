@@ -201,35 +201,29 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '850000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[1], '1500000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
                 self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
 
-    def test_fresh_post_sf136_pair_fits_the_package_budget_and_ceilings(self):
-        # Run 40238821132: publishing base b819cb2 (SF-136, 62,599 bytecode
-        # bytes) with the former fixed 0.4-SUI budget failed InsufficientGas.
-        # Run 40184514226 measured 349,109,200 MIST for 39,646 bytes, about
-        # 8,806 MIST/byte; the SF-129 head is 63,783 bytes and the
-        # upgrade-security base 6,608. Setup/deployment costs as measured.
+    def test_fresh_sf136_packages_fit_their_budgets(self):
+        # A fresh base publish of current main settled 532,828,600 MIST and its
+        # unchanged head upgrade 536,150,620 (SF-154 localnet rehearsal); the
+        # former 0.4-SUI base budget failed InsufficientGas (run 40261665249).
         from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
-        from live_package_upgrade import PACKAGE_GAS
-        rate = 349_109_200 // 39_646
-        base, head = 62_599 * rate, 63_783 * rate
-        self.assertLess(400_000_000, base)
-        self.assertGreaterEqual(PACKAGE_GAS - base, 100_000_000)
-        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
-        for cost in (base, 8_425_378, 1_243_578, head, 8_737_163, 1_988_000 + 30_000_000, 38_483_200):
-            ledger.grant(cost)
-        self.assertGreaterEqual(ledger.remaining, 150_000_000)
-        # Upgrade-security: small base, the same head upgrade, and its cached
-        # run's measured 104,743,694 MIST of objects/reports (run 40231623943).
-        security = Budget(dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security'], [])
-        for cost in (6_608 * rate, head, 104_743_694):
-            security.grant(cost)
-        self.assertGreaterEqual(security.remaining, 100_000_000)
+        from live_common import PACKAGE_GAS
+        base, head = 532_828_600, 536_150_620
+        self.assertGreater(PACKAGE_GAS, base)
+        security = dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security']
+        for ceiling, setup in ((PACKAGE_UPGRADE_CEILING, 60_000_000), (security, 40_000_000 + 30_000_000)):
+            ledger = Budget(ceiling, [])
+            ledger.grant(base)
+            ledger.grant(setup)  # Setup PTBs and device funding before the upgrade.
+            ledger.grant(head)
+            # Later operator PTBs still reserve their whole 0.2-SUI budget.
+            self.assertGreaterEqual(ledger.remaining, 200_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
@@ -578,6 +572,29 @@ class BytecodeFixtureTests(unittest.TestCase):
             self.assertEqual(live.checkpoint_setup(path,state,p,'publish base',lambda persist:{'id':'known'},ledger),{'id':'known'})
             self.assertNotIn('pending_operation',p)
             self.assertIn('pending_operation',json.loads(path.read_text())['publications']['pair'],'success is checkpointed only with its IDs by the caller')
+    def test_fresh_execution_under_another_digest_is_recorded_durably(self):
+        import tempfile, live_package_upgrade as live
+        from types import SimpleNamespace
+        for error in (live.toolchain.DigestMismatch('other', 'retained'), live.UnreadableExecution('other')):
+            with self.subTest(type(error).__name__), tempfile.TemporaryDirectory() as d:
+                path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+                ledger=SimpleNamespace(evidence=[{'label':'publish base','status':'unknown'}])
+                def executed_elsewhere(persist):
+                    persist({'digest':'retained','tx_bytes':'AAAA'})
+                    raise error
+                with self.assertRaises(type(error)):live.checkpoint_setup(path,state,p,'publish base',executed_elsewhere,ledger)
+                marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+                self.assertEqual((marker['tx']['digest'],marker['other_executions']),('retained',['other']))
+        # An unreadable outcome of the verified digest itself is ordinary uncertainty.
+        with tempfile.TemporaryDirectory() as d:
+            path=Path(d)/'private-state';p={};state={'publications':{'pair':p}}
+            def unreadable(persist):
+                persist({'digest':'retained','tx_bytes':'AAAA'})
+                raise live.UnreadableExecution('retained')
+            with self.assertRaises(live.UnreadableExecution):
+                live.checkpoint_setup(path,state,p,'publish base',unreadable,SimpleNamespace(evidence=[]))
+            marker=json.loads(path.read_text())['publications']['pair']['pending_operation']
+            self.assertNotIn('other_executions',marker)
     def test_malformed_private_state_does_not_trigger_a_fresh_publication(self):
         import tempfile, live_package_upgrade as live
         with tempfile.TemporaryDirectory() as d:
