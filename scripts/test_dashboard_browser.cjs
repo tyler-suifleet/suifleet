@@ -129,6 +129,15 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     assert.ok(hidden.includes("signature is not the device identity's"), hidden);
     await page.close();
 
+    // Disconnected operators retain read-only rollout controls and cannot write.
+    const disconnected = await browser.newPage();
+    await disconnected.goto(origin + "/rollouts");
+    await waitText(disconnected, "You can still view available rollout records.");
+    await disconnected.getByText("Create a gradual rollout", { exact: true }).click();
+    assert.equal(await disconnected.getByRole("button", { name: "Create without admitting devices", exact: true }).isDisabled(), true);
+    await disconnected.getByRole("combobox", { name: /^Rollout/ }).waitFor();
+    await disconnected.close();
+
     // Fleet rollout overview and the aborted rollout's stages and audit.
     page = await open("/rollouts");
     await page.waitForFunction(() => document.querySelector('[data-testid="rollout-overview"]')?.textContent.includes("Aborted"));
@@ -148,7 +157,7 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     page = await open("/rollouts#onchain");
     await page.getByRole("button", { name: "app 2.0.0" }).click();
     await page.getByLabel("Admission candidate IDs").fill(members[2]);
-    await page.getByRole("button", { name: "Verify on-chain health and advance" }).click();
+    await page.getByRole("button", { name: "Check device health and continue" }).click();
     await waitText(page, "Fixture wallet stopped before signing");
     const submitted = await page.evaluate(() => window.rolloutTransaction);
     assert.deepEqual(submitted.commands.map(c => c.MoveCall.function), ["advance_rollout_onchain"]);

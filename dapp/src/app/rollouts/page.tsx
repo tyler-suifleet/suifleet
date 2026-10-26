@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDeployments } from "@/hooks/useDeployments";
 import { buildRolloutTx, rolloutAnnouncements, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
-import { PageHeader, ConnectionRequired } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { bpsLabel, fetchRolloutDecisions, rolloutProgress, type RolloutProgress } from "@/lib/rollout-progress";
 import { utc } from "@/lib/device-services";
 import type { DeploymentEvent } from "@/lib/sui";
@@ -36,11 +36,11 @@ export default function RolloutsPage() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setPreparing(false); }
   }
-  if (!account) return <ConnectionRequired title="Staged rollouts" description="Release updates gradually with canary cohorts, concurrency limits and health gates." />;
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Send updates to a small group first, then expand once device health checks pass" />
     <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Advance to admit the first cohort. After devices report verified health following an update, advance again to evaluate the gate. Progress is saved if you close the browser. Return here to approve each next step.</p>
     <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p></section>
+    {!account && <p>Connect your wallet to create or control rollouts. You can still view available rollout records.</p>}
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
     <details className="border p-5"><summary>Create a gradual rollout</summary>
       <form className="grid gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void submit(async () => {

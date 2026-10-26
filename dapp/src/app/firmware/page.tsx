@@ -518,7 +518,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
   return (
     <div className="border border-gray-200 rounded p-3 text-xs space-y-1">
       <p className="font-medium text-gray-600">{label}</p>
-      <p className="text-gray-600">Storage has a limited lifetime. Renew it before expiry so devices can continue downloading.</p>
+      <p className="text-gray-600">Storage has a limited lifetime. The storage owner must renew it before expiry so devices can continue downloading.</p>
       <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}

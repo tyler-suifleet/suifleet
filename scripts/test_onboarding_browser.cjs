@@ -140,6 +140,10 @@ function audit() {
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1);
     const confirmed = await page.getByRole("status").filter({ hasText: "Device registered." }).innerText();
     assert.match(confirmed, /not online until its client/);
+    const confirmation = page.getByText("Confirmation details", { exact: true });
+    await confirmation.click();
+    await page.getByText("Confirmed transaction " + "1".repeat(32) + ".", { exact: false }).waitFor();
+    await confirmation.click();
     await page.getByRole("listitem").filter({ hasText: /^First Pi$/ }).waitFor();
     await progress.getByText("1 registered", { exact: true }).waitFor();
     await next.filter({ hasText: "Deploy a component" }).waitFor();
