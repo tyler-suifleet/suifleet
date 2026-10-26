@@ -4,10 +4,12 @@ the shared publication pipeline (scripts/release_plan.py, scripts/redeploy.sh)
 on the real contracts, Sui CLI and both clients.
 
   1. plan a fresh publish (pinned bytecode digest) and render it for review;
-  2. refuse a plan for another custody account and one that is not ready,
-     before any transaction (nothing written, no gas);
-  3. publish under the plan; record the transaction, effects and plan with the
-     release; daemon and frontend verify the generated configs;
+  2. refuse a plan for another custody account, one that is not ready and
+     one pinning bytecode the CLI does not build (checked in the unsigned
+     transaction), before any signature (nothing written, no gas);
+  3. publish under the plan, signing only the verified unsigned bytes; record
+     the transaction, effects, verification and plan with the release; daemon
+     and frontend verify the generated configs;
   4. refuse the replayed publish plan;
   5. plan a compatible upgrade adding a type, dry-run and execute it under the
      plan; the new type originates in the upgrade, existing origins, registry
@@ -178,7 +180,11 @@ def run(rpc_url, faucet_url, evidence_path, old_package_checks):
                 "digest": transaction["digest"], "status": "success", "gas_used": gas,
                 "net_gas_mist": int(gas["computationCost"]) + int(gas["storageCost"]) - int(gas["storageRebate"]),
                 "balance_change_mist": balance() - before,
-                "plan": json.loads((release / "release-plan.json").read_text())["plan_digest"]}
+                "plan": json.loads((release / "release-plan.json").read_text())["plan_digest"],
+                "verified_before_signing": transaction["verified_before_signing"]}
+            planned = json.loads((release / "release-plan.json").read_text())["revision"]["bytecode"]["digest"]
+            verified = transaction["verified_before_signing"]
+            assert (verified["bytecode_digest"], verified["unsigned_digest"]) == (planned, transaction["digest"]), verified
 
         # 1. Fresh-publish plan.
         fresh_path, fresh = plan("plan-publish")
@@ -194,7 +200,12 @@ def run(rpc_url, faucet_url, evidence_path, old_package_checks):
         assert not budget["ready"]
         refused("plan exceeding the policy budget", budget_path, "not ready .*budget-exceeds-policy")
         refused("gas budget above the plan's", fresh_path, "exceeds the planned", "--gas-budget", "3000000000")
-        passed("custody, readiness and budget mismatches refused before any transaction; nothing written, no gas")
+        wrong_path, wrong = plan("plan-other-bytecode", "--bytecode-digest", "00" * 32)
+        assert wrong["ready"]
+        for extra in ((), ("--dry-run",)):
+            refused("plan pinning bytecode the CLI does not build" + (" (dry run)" if extra else ""), wrong_path,
+                    "refused the transaction before signing: .*is not the planned 0{64}", *extra)
+        passed("custody, readiness, budget and bytecode mismatches refused before any signature; nothing written, no gas")
 
         # 3. Publish under the plan.
         funds = balance()
@@ -205,8 +216,8 @@ def run(rpc_url, faucet_url, evidence_path, old_package_checks):
         assert first["chain_identifier"] == chain and first["package_version"] == "1"
         executed("publish", first_release, funds)
         verified_by_both_clients(first_release)
-        passed(f"published {first['call_package_id']} under the plan; transaction {evidence['transactions']['publish']['digest']} "
-               "succeeded; both clients verify the generated configs")
+        passed(f"published {first['call_package_id']} under the plan; only the verified unsigned transaction "
+               f"{evidence['transactions']['publish']['digest']} was signed and succeeded; both clients verify the generated configs")
 
         # 4. Replay.
         refused("replayed publish plan", fresh_path, "plan is a publish, but this run would upgrade")

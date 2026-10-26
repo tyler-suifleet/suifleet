@@ -19,6 +19,8 @@ pins, for one network:
 A plan is ready only without blocking findings. scripts/publish.py --plan
 admits a transaction only for a ready, unexpired, untampered plan matching the
 live chain, account, deployment, sources and gas budget (required on testnet).
+When the plan pins bytecode, publish.py also verifies that the unsigned
+transaction carries exactly that package digest before signing it.
 Mainnet plans are planning only: the policy forbids their execution and
 publish.py keeps refusing mainnet; actual production execution is SF-087/#159.
 
@@ -50,7 +52,8 @@ SOURCE_GLOBS = ("Move.toml", "Move.lock", "sources/**/*.move")
 
 ABORT_BOUNDARIES = [
     {"phase": "before the transaction",
-     "boundary": "publish.py checks chain, account, UpgradeCap, records and this plan; any refusal changes nothing and spends no gas"},
+     "boundary": "publish.py checks chain, account, UpgradeCap, records and this plan, and verifies the planned bytecode "
+                 "digest in the unsigned transaction; any refusal changes nothing and spends no gas"},
     {"phase": "transaction executed with failed effects",
      "boundary": "gas is charged; package, records, Published.toml and client configs are unchanged"},
     {"phase": "transaction executed, recording failed",

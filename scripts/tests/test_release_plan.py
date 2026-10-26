@@ -1,6 +1,7 @@
 """Offline tests for scripts/release_plan.py and its admission gate in
 scripts/publish.py (SF-154): a fake Sui CLI and fake gRPC chain facts, as in
 test_publish.py. Nothing here touches a network, signs or spends gas."""
+import base64
 import contextlib
 import io
 import json
@@ -16,12 +17,83 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deployment_manifest as dm
 import publish
 import release_plan as rp
+import sui_toolchain as toolchain
 import test_publish
 from test_publish import CHAIN, ME, OTHER, Chain, Cli, oid, write_published
 
 ROOT = Path(__file__).resolve().parents[2]
 MAINNET, TESTNET = "35834a8a", "4c78adac"
 AGENT = "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+
+
+class PlannedCli(Cli):
+    """Also builds unsigned package transactions (their "bytes" encode the
+    decoded TransactionData) and executes them with serialized-tx, which,
+    like the real CLI, records nothing in Published.toml."""
+    MODULES, DEPENDENCIES = ["oRzrCwYAAAAB", "oRzrCwYAAAAC"], ["0x1", "0x2"]
+
+    def __init__(self, test, **options):
+        super().__init__(test, **options)
+        self.modules, self.dependencies, self.tamper, self.executed_digest = list(self.MODULES), list(self.DEPENDENCIES), None, None
+        self.built = {}
+
+    def version(self):
+        return "1.81.1"
+
+    def __call__(self, *args, check=True):
+        args = [str(a) for a in args]
+        out = lambda stdout: type("Result", (), {"stdout": stdout, "stderr": "", "returncode": 0})()
+        if "--serialize-unsigned-transaction" in args:
+            self.calls.append(args)
+            data = self.unsigned(args)
+            if self.tamper:
+                self.tamper(data)
+            tx = base64.b64encode(json.dumps(data).encode()).decode()
+            self.built[tx] = args
+            return out("Serialized unsigned transaction:\n" + tx + "\n")
+        if args[0] != "serialized-tx":
+            return super().__call__(*args, check=check)
+        self.calls.append(args)
+        data, built = json.loads(base64.b64decode(args[1])), self.built[args[1]]
+        replay = built[:built.index("--gas-budget")] + ["--json"] + (["--dry-run"] if "--dry-run" in args else [])
+        written, self.write_published = self.write_published, False
+        try:
+            result = super().__call__(*replay)
+        finally:
+            self.write_published = written
+            self.calls.pop()
+        output = json.loads(result.stdout)
+        if "--dry-run" not in args:
+            output["digest"] = self.executed_digest or data["digest"]
+        return out(json.dumps(output))
+
+    def unsigned(self, args):
+        pure = lambda value: {"kind": "Pure", "bytes": base64.b64encode(value).decode()}
+        if args[0] == "publish":
+            commands = [{"kind": "Publish", "modules": self.modules, "dependencies": self.dependencies},
+                        {"kind": "TransferObjects", "objects": [{"kind": "Result", "index": 0}],
+                         "address": {"kind": "Input", "index": 0}}]
+            inputs = [pure(bytes.fromhex(dm.object_id(self.address)[2:]))]
+        else:
+            cap = dm.object_id(args[args.index("--upgrade-capability") + 1])
+            digest = bytes.fromhex(toolchain.package_digest(self.modules, self.dependencies))
+            call = lambda function, arguments: {"kind": "MoveCall", "package": "0x2", "module": "package",
+                                                "function": function, "arguments": arguments}
+            commands = [call("authorize_upgrade", [{"kind": "Input", "index": i} for i in range(3)]),
+                        {"kind": "Upgrade", "modules": self.modules, "dependencies": self.dependencies,
+                         "package": self.test.chain.objects[cap]["upgrade_cap"]["package"],
+                         "ticket": {"kind": "Result", "index": 0}},
+                        call("commit_upgrade", [{"kind": "Input", "index": 0}, {"kind": "Result", "index": 1}])]
+            inputs = [{"kind": "ImmOrOwnedObject", "objectId": cap}, pure(b"\x00"), pure(bytes([32]) + digest)]
+        return {"sender": self.address, "gas_owner": self.address, "gas_budget": args[args.index("--gas-budget") + 1],
+                "commands": commands, "inputs": inputs, "digest": f"Unsigned{len(self.built) + 1}"}
+
+    def digest(self):
+        return toolchain.package_digest(self.modules, self.dependencies)
+
+
+def inspect(tx_bytes):
+    return json.loads(base64.b64decode(tx_bytes))
 
 
 def module_sources(types):
@@ -51,7 +123,7 @@ class Base(unittest.TestCase):
         self.env_file = self.tmp / ".env.local"
         self.env_file.write_text("NEXT_PUBLIC_WALRUS_EPOCHS=7\n")
         self.chain = Chain(self.chain_id)
-        self.cli = Cli(self, env=self.env)
+        self.cli = PlannedCli(self, env=self.env)
         self.now = self.publish_time = 1_800_000_000
         quiet = contextlib.redirect_stdout(io.StringIO())
         quiet.__enter__()
@@ -83,10 +155,12 @@ class Base(unittest.TestCase):
 
     def run_publish(self, plan=None, *extra, network="localnet"):
         with unittest.mock.patch.object(rp.time, "time", return_value=self.publish_time):
-            return publish.run(self.publish_args(plan, *extra, network=network), self.cli, self.chain)
+            return publish.run(self.publish_args(plan, *extra, network=network), self.cli, self.chain, inspect)
 
     def transactions(self):
-        return [c for c in self.cli.calls if c[0] in ("publish", "upgrade")]
+        """Signed or simulated transactions; building unsigned bytes is neither."""
+        return [c for c in self.cli.calls if c[0] == "serialized-tx"
+                or (c[0] in ("publish", "upgrade") and "--serialize-unsigned-transaction" not in c)]
 
     def assert_refused(self, plan, pattern, *extra, network="localnet"):
         before = self.transactions()
@@ -209,7 +283,7 @@ class LocalPlanTests(Base):
         self.assertIn("orphan", self.codes(self.plan()))
 
     def test_identical_bytecode_to_the_current_release_is_flagged(self):
-        digest = "ab" * 32
+        digest = self.cli.digest()
         self.run_publish(self.plan("--bytecode-digest", digest, "--compiler", "sui 1.81.1"))
         self.assertIn("identical-bytecode", self.codes(self.plan("--bytecode-digest", digest), "warning"))
         self.assertNotIn("identical-bytecode", self.codes(self.plan("--bytecode-digest", "cd" * 32), "warning"))
@@ -296,9 +370,100 @@ class TestnetPlanTests(Base):
         cached = self.plan("--bytecode-digest", digest, "--fixture-state", str(state), network="testnet")
         self.assertIn("identical-bytecode", self.codes(cached))
         self.assertEqual(cached["revision"]["cached_publication"]["package"], oid(0x51))
-        fresh = self.plan("--bytecode-digest", "11" * 32, "--fixture-state", str(state), network="testnet")
+        fresh = self.plan("--bytecode-digest", self.cli.digest(), "--fixture-state", str(state), network="testnet")
         self.assertTrue(fresh["ready"], fresh["findings"])
         self.run_publish(fresh, network="testnet")
+
+    def published(self):
+        return publish.publication(self.package, "testnet")
+
+    def test_planned_bytecode_is_verified_unsigned_and_only_those_bytes_are_signed(self):
+        plan = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        self.run_publish(plan, "--dry-run", network="testnet")
+        self.assertEqual([c[-2:] for c in self.transactions()], [["--dry-run", "--json"]])
+        self.assertIsNone(self.published(), "a dry run records nothing")
+        release = self.run_publish(plan, network="testnet")
+        built = [c for c in self.cli.calls if "--serialize-unsigned-transaction" in c]
+        signed = self.transactions()[-1]
+        self.assertEqual(built[-1][0], "publish")
+        self.assertEqual(signed[0], "serialized-tx")
+        self.assertEqual(self.cli.built[signed[1]], built[-1], "exactly the verified bytes are signed")
+        transaction = json.loads((release / "transaction.json").read_text())
+        verified = transaction["verified_before_signing"]
+        self.assertEqual((verified["kind"], verified["bytecode_digest"], verified["unsigned_digest"]),
+                         ("publish", plan["revision"]["bytecode"]["digest"], transaction["digest"]))
+        # serialized-tx records nothing; the publisher records the verified effects.
+        self.assertEqual(self.published(), dict(chain=TESTNET, package=oid(0x100), original=oid(0x100), version=1,
+                                                cap=oid(0xc0)))
+        self.assertIn('toolchain-version = "1.81.1"', (self.package / "Published.toml").read_text())
+
+        self.cli.modules = ["oRzrCwYAAAAD"]  # the upgrade's new bytecode
+        upgrade = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        self.assertTrue(upgrade["ready"], upgrade["findings"])
+        release = self.run_publish(upgrade, network="testnet")
+        verified = json.loads((release / "transaction.json").read_text())["verified_before_signing"]
+        self.assertEqual((verified["kind"], verified["bytecode_digest"]), ("upgrade", self.cli.digest()))
+        self.assertEqual(self.published(), dict(chain=TESTNET, package=oid(0x102), original=oid(0x100), version=2,
+                                                cap=oid(0xc0)))
+
+    def assert_unsigned_refused(self, plan, pattern, *extra):
+        self.assert_refused(plan, "refused the transaction before signing: .*" + pattern, *extra, network="testnet")
+        self.assertIsNone(self.published())
+        self.assertFalse(list(self.records.glob("testnet/releases/*")), "nothing is recorded")
+
+    def test_bytecode_other_than_the_plan_is_refused_before_signing(self):
+        # An erroneous operator-supplied digest: the reviewed plan does not describe these bytes.
+        wrong = self.plan("--bytecode-digest", "00" * 32, network="testnet")
+        self.assertTrue(wrong["ready"], wrong["findings"])
+        self.assert_unsigned_refused(wrong, "is not the planned 0{64}")
+        self.assert_unsigned_refused(wrong, "is not the planned", "--dry-run")
+        plan = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        # Another compiler (different modules) or build environment (other framework dependencies).
+        self.cli.modules = ["oRzrCwYAAAAE", *self.cli.MODULES[1:]]
+        self.assert_unsigned_refused(plan, "compiler, framework or build environment differs")
+        self.cli.modules, self.cli.dependencies = list(self.cli.MODULES), ["0x1", "0x2", "0xdee9"]
+        self.assert_unsigned_refused(plan, "is not the planned")
+
+    def test_unsigned_sender_budget_shape_and_upgrade_authority_are_verified(self):
+        plan = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        for tamper, pattern in ((lambda d: d.update(sender=OTHER), "sender or gas owner"),
+                                (lambda d: d.update(gas_owner=OTHER), "sender or gas owner"),
+                                (lambda d: d.update(gas_budget="1"), "gas budget differs"),
+                                (lambda d: d["commands"].append(d["commands"][1]), "unexpected publish commands"),
+                                (lambda d: d["inputs"].__setitem__(0, {"kind": "Pure", "bytes": base64.b64encode(
+                                    bytes.fromhex(OTHER[2:])).decode()}), "transfer only its UpgradeCap")):
+            self.cli.tamper = tamper
+            self.assert_unsigned_refused(plan, pattern)
+        self.cli.tamper = None
+        self.run_publish(plan, network="testnet")
+        self.cli.modules = ["oRzrCwYAAAAD"]
+        upgrade = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        stale = lambda d: d["inputs"].__setitem__(2, {"kind": "Pure", "bytes": base64.b64encode(bytes([32] + [0] * 32)).decode()})
+        for tamper, pattern in ((stale, "authorized digest differs"),
+                                (lambda d: d["inputs"].__setitem__(0, {"kind": "ImmOrOwnedObject", "objectId": oid(0xc1)}),
+                                 "different UpgradeCap"),
+                                (lambda d: d["commands"][1].update(package=oid(0x999)), "different package")):
+            self.cli.tamper = tamper
+            self.assert_refused(upgrade, "refused the transaction before signing: .*" + pattern, network="testnet")
+            self.assertEqual(self.published()["version"], 1)
+
+    def test_verified_execution_is_recorded_on_recovery_and_must_match_the_verified_bytes(self):
+        plan = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        with unittest.mock.patch.object(publish, "record_publication", side_effect=OSError("disk full")), \
+                self.assertRaisesRegex(publish.PublishError, "EXECUTED"):
+            self.run_publish(plan, network="testnet")
+        pending = next((self.records / "testnet").glob("pending-*.json"))
+        self.assertIsNone(self.published())
+        release = publish.run(self.publish_args(None, "--recover", str(pending), network="testnet"), self.cli, self.chain)
+        self.assertEqual(self.published()["package"], oid(0x100))
+        self.assertEqual(json.loads((release / "release-plan.json").read_text())["plan_digest"], plan["plan_digest"])
+
+        self.cli.modules = ["oRzrCwYAAAAD"]
+        upgrade = self.plan("--bytecode-digest", self.cli.digest(), network="testnet")
+        self.cli.executed_digest = "SomethingElse"
+        with self.assertRaisesRegex(publish.PublishError, "(?s)is not the verified Unsigned.*EXECUTED"):
+            self.run_publish(upgrade, network="testnet")
+        self.assertEqual(self.published()["version"], 1, "an unverified execution is never recorded")
 
     def test_adopted_fixture_upgrade_plan_reads_only(self):
         self.chain.package(oid(0x51), 2, oid(0x50))

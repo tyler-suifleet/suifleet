@@ -144,6 +144,18 @@ def compile_package(build_tool, package_dir, environment='testnet', run=subproce
     return {'modules': modules, 'dependencies': [normal(d) for d in dependencies], 'digest': list(digest)}
 
 
+def package_digest(modules, dependencies):
+    """Sui's package digest (MovePackage::compute_digest_for_modules_and_deps)
+    of base64 modules and dependency IDs: Blake2b-256 over the sorted module
+    hashes and dependency IDs. It equals `sui move build`'s `digest`."""
+    parts = [hashlib.blake2b(base64.b64decode(m), digest_size=32).digest() for m in modules]
+    parts += [bytes.fromhex(normal(d)[2:]) for d in dependencies]
+    digest = hashlib.blake2b(digest_size=32)
+    for part in sorted(parts):
+        digest.update(part)
+    return digest.hexdigest()
+
+
 def normal(address):
     value = str(address).lower().removeprefix('0x')
     if not re.fullmatch(r'[0-9a-f]{1,64}', value):
