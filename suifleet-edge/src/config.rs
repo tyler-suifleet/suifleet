@@ -439,6 +439,7 @@ impl DeploymentManifest {
             ("fleet inbox", crate::protocol::INBOX_TYPES),
             ("rollout health", crate::protocol::ROLLOUT_HEALTH_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
+            ("receipt shards", crate::protocol::SHARD_TYPES),
             ("customer", crate::protocol::CUSTOMER_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
@@ -484,6 +485,7 @@ impl DeploymentManifest {
             .chain(crate::protocol::INBOX_TYPES)
             .chain(crate::protocol::ROLLOUT_HEALTH_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
+            .chain(crate::protocol::SHARD_TYPES)
             .chain(crate::protocol::CUSTOMER_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }

@@ -2,6 +2,16 @@
 export const MOVE_ABI = {
   "component_catalog": {
     "functions": {
+      "begin_sharded_receipts": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "create_catalog": {
         "visibility": "Public",
         "entry": false,
@@ -236,6 +246,20 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "ShardedCatalogBindingKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "VersionPublished": {
         "abilities": [
           "Copy",
@@ -445,6 +469,18 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "begin_receipt_cleanup": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "begin_revision": {
         "visibility": "Public",
         "entry": false,
@@ -458,6 +494,18 @@ export const MOVE_ABI = {
         "returns": [
           "sui_edge::desired_state::RevisionPlan"
         ]
+      },
+      "begin_sharded_receipts": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "bind_device_metadata": {
         "visibility": "Public",
@@ -976,6 +1024,23 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "report_group_status_v4": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "&sui_edge::device_group::DeviceGroup",
+          "u8",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "report_status": {
         "visibility": "Public",
         "entry": false,
@@ -984,6 +1049,22 @@ export const MOVE_ABI = {
           "&sui_edge::customer::Customer",
           "&sui_edge::customer::Fleet",
           "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "u8",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "report_status_v4": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
           "&sui_edge::device_registry::DeviceRegistry",
           "&sui_edge::device_cap::DeviceCap",
           "u8",
@@ -1567,6 +1648,37 @@ export const MOVE_ABI = {
           "&std::string::String"
         ]
       },
+      "begin_receipt_cleanup": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "begin_sharded_receipts": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "cleanup_receipt_chunk": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
+          "u64"
+        ],
+        "returns": []
+      },
       "component_name": {
         "visibility": "Public",
         "entry": false,
@@ -1678,6 +1790,15 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "finish_receipt_migration": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": []
+      },
       "has_current_receipts": {
         "visibility": "Public",
         "entry": false,
@@ -1731,6 +1852,17 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "migrate_receipt_chunk": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
+          "u64"
+        ],
+        "returns": []
+      },
       "new_deployment_verified": {
         "visibility": "Public",
         "entry": false,
@@ -1771,12 +1903,85 @@ export const MOVE_ABI = {
           "sui_edge::deployment_manager::DeploymentRecord"
         ]
       },
+      "receipt_directory": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "&sui_edge::deployment_manager::ReceiptDirectory"
+        ]
+      },
+      "receipt_page_v3": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::deployment_manager::ReceiptShard",
+          "u64",
+          "u64"
+        ],
+        "returns": [
+          "vector<sui::object::ID>",
+          "vector<u8>",
+          "u64"
+        ]
+      },
+      "receipt_roots": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "&vector<sui::object::ID>"
+        ]
+      },
+      "receipt_schema": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
+      "receipt_shard_index": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "sui::object::ID"
+        ],
+        "returns": [
+          "u64"
+        ]
+      },
       "receipt_status": {
         "visibility": "Public",
         "entry": false,
         "type_parameters": [],
         "parameters": [
           "&sui_edge::deployment_manager::DeploymentRecord",
+          "sui::object::ID"
+        ],
+        "returns": [
+          "std::option::Option<u8>"
+        ]
+      },
+      "receipt_status_v3": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::deployment_manager::ReceiptShard",
           "sui::object::ID"
         ],
         "returns": [
@@ -1866,6 +2071,35 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "report_status_for_group_v3": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "&sui_edge::device_group::DeviceGroup",
+          "u8",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "report_status_v3": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui_edge::deployment_manager::ReceiptShard",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::device_cap::DeviceCap",
+          "u8",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "report_verified_status": {
         "visibility": "Public",
         "entry": false,
@@ -1890,6 +2124,16 @@ export const MOVE_ABI = {
           "&sui_edge::device_group::DeviceGroup",
           "u8",
           "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "retire_receipt_shard": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "sui_edge::deployment_manager::ReceiptShard"
         ],
         "returns": []
       },
@@ -2020,6 +2264,17 @@ export const MOVE_ABI = {
         "returns": [
           "&sui::vec_map::VecMap<sui::object::ID,u8>"
         ]
+      },
+      "sync_rollout_receipts": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&sui_edge::deployment_manager::ReceiptShard",
+          "vector<sui::object::ID>"
+        ],
+        "returns": []
       },
       "target_devices": {
         "visibility": "Public",
@@ -2283,6 +2538,125 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "ReceiptDirectory": {
+        "abilities": [
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "roots",
+            "vector<sui::object::ID>"
+          ],
+          [
+            "original_schema",
+            "u64"
+          ],
+          [
+            "migrated",
+            "u64"
+          ],
+          [
+            "ready",
+            "bool"
+          ],
+          [
+            "retiring",
+            "bool"
+          ],
+          [
+            "remaining",
+            "u64"
+          ]
+        ]
+      },
+      "ReceiptIndexKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "index",
+            "u64"
+          ]
+        ]
+      },
+      "ReceiptKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "device",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "ReceiptLayoutChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ]
+        ]
+      },
+      "ReceiptShard": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "deployment",
+            "sui::object::ID"
+          ],
+          [
+            "index",
+            "u64"
+          ],
+          [
+            "count",
+            "u64"
+          ],
+          [
+            "migration_cursor",
+            "u64"
+          ],
+          [
+            "migrated",
+            "bool"
+          ]
+        ]
+      },
+      "ReceiptShardKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "Receipts": {
         "abilities": [
           "Store"
@@ -2507,6 +2881,42 @@ export const MOVE_ABI = {
           [
             "offline_timeout_ms",
             "u64"
+          ]
+        ]
+      },
+      "ShardedReceipt": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "status",
+            "u8"
+          ],
+          [
+            "failed",
+            "bool"
+          ],
+          [
+            "reported_v3",
+            "bool"
+          ]
+        ]
+      },
+      "ShardedTargetGroupsKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
           ]
         ]
       },

@@ -243,3 +243,15 @@ active-identity, group-head admin and device-announcement target checks and
 weakening the member-index lookup (SF-125). The mutations must reach the targeted Move test and fail
 with `Test did not error as expected`; a compilation failure is not accepted.
 These are finite regression checks, not exhaustive authorization proofs.
+
+SF-127 adds sixteen independently shared receipt roots with device/deployment/root
+binding, current registry authority, bounded indexed fields, a migration barrier,
+sticky rollout failures and bounded retirement. Early packages lack a schema
+check on deletion: migration relocates group targets (and catalog bindings) away
+from keys those packages can remove. New APIs preserve legacy signatures/layouts;
+legacy v3 getters abort. See [the protocol and evidence](SHARDED_RECEIPTS.md).
+These additions have unit, actual-chain adversarial and client interoperability
+coverage; no formal proof of the entire new sharding/migration protocol is claimed.
+Existing conditional proof gates remain enabled, including the v2 authority guard
+under its explicit `LEGACY_RECEIPTS_VERSION` name and the typed schema-4 directory
+precondition for deployment handover.

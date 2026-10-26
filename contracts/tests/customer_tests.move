@@ -500,4 +500,111 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(f); s.end();
     }
 
+    // Populated managed v3 -> sharded v4, including barrier and cleanup.
+    fun managed_shard_case(attack: u8) {
+        use sui_edge::deployment_manager as dm;
+        use sui_edge::device_cap::DeviceCap;
+        let mut s = setup(); let fid = fleet(&mut s); allow_devices(&mut s, 1);
+        let did = register(&mut s, fid, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_deployment(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"), utf8(b"hash"),
+            utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), vector[], vector[did], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.next_tx(@0xD1);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let mut d = s.take_shared<dm::DeploymentRecord>();
+        customer::report_status(&c, &f, &mut d, &r, &cap, 1, s.ctx());
+        assert!(dm::receipts_version(&d) == 3 && dm::receipt_status(&d, did) == option::some(1));
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); ts::return_shared(d); ts::return_to_sender(&s, cap);
+        s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid); let mut d = s.take_shared<dm::DeploymentRecord>();
+        customer::begin_sharded_receipts(&c, &f, &mut d, s.ctx());
+        customer::begin_sharded_receipts(&c, &f, &mut d, s.ctx());
+        assert!(dm::receipts_version(&d) == 4);
+        let roots = *dm::receipt_roots(&d);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.next_tx(@0xD1);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid); let r = s.take_shared<DeviceRegistry>();
+        let cap = s.take_from_sender<DeviceCap>(); let mut d = s.take_shared<dm::DeploymentRecord>();
+        if (attack == 1) customer::report_status(&c, &f, &mut d, &r, &cap, 2, s.ctx());
+        let mut n = 0;
+        while (n < 16) {
+            let mut root = s.take_shared_by_id<dm::ReceiptShard>(roots[n]);
+            dm::migrate_receipt_chunk(&mut d, &mut root, 1);
+            dm::migrate_receipt_chunk(&mut d, &mut root, 1);
+            ts::return_shared(root); n = n + 1;
+        };
+        dm::finish_receipt_migration(&mut d);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); ts::return_shared(d); ts::return_to_sender(&s, cap);
+        s.next_tx(@0xD1);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid); let r = s.take_shared<DeviceRegistry>();
+        let cap = s.take_from_sender<DeviceCap>(); let mut d = s.take_shared<dm::DeploymentRecord>();
+        let mut root = s.take_shared_by_id<dm::ReceiptShard>(roots[dm::receipt_shard_index(did)]);
+        assert!(dm::receipt_status_v3(&d, &root, did) == option::some(1));
+        if (attack == 2) dm::report_status_v3(&d, &mut root, &r, &cap, 2, s.ctx());
+        customer::report_status_v4(&c, &f, &d, &mut root, &r, &cap, 2, s.ctx());
+        assert!(dm::receipt_status_v3(&d, &root, did) == option::some(2));
+        if (attack == 3) customer::report_status(&c, &f, &mut d, &r, &cap, 1, s.ctx());
+        ts::return_shared(root); ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); ts::return_shared(d); ts::return_to_sender(&s, cap);
+        s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid); let mut d = s.take_shared<dm::DeploymentRecord>();
+        customer::begin_receipt_cleanup(&c, &f, &mut d, s.ctx());
+        n = 0;
+        while (n < 16) {
+            let mut root = s.take_shared_by_id<dm::ReceiptShard>(roots[n]);
+            dm::cleanup_receipt_chunk(&d, &mut root, 1); dm::retire_receipt_shard(&mut d, root); n = n + 1;
+        };
+        customer::delete_deployment(&c, &mut f, d, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test]
+    fun populated_managed_shards_preserve_authority_and_cleanup() { managed_shard_case(0); }
+    #[test, expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun managed_v3_report_cannot_write_frozen_snapshot() { managed_shard_case(1); }
+    #[test, expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun unmanaged_shard_route_cannot_bypass_customer() { managed_shard_case(2); }
+    #[test, expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun managed_v3_report_cannot_write_finished_shards() { managed_shard_case(3); }
+
+    fun managed_extension_shard_cleanup(catalog: bool) {
+        use sui_edge::deployment_manager as dm;
+        use sui_edge::component_catalog::{Self as cc, ComponentCatalog, ComponentVersion};
+        let mut s = setup(); let fid = fleet(&mut s); allow_devices(&mut s, 1);
+        let did = register(&mut s, fid, @0xD1); s.next_tx(OWNER);
+        cc::create_catalog(s.ctx()); s.next_tx(OWNER);
+        let mut collection = s.take_shared<ComponentCatalog>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        cc::publish_version(&mut collection, utf8(b"app"), utf8(b"1.0.0"), vector[utf8(b"linux")],
+            vector[utf8(b"x86_64")], vector[utf8(b"blob")],
+            vector[utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")],
+            vector[utf8(b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(collection); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let mut d = if (catalog) {
+            let version = s.take_immutable<ComponentVersion>();
+            let d = customer::new_catalog_deployment(&c, &mut f, &version, vector[], vector[did], &clock, s.ctx());
+            ts::return_immutable(version); d
+        } else {
+            let policy = dm::rollout_policy(1, 1, 1, 0, 1, 1000, 1000);
+            customer::new_rollout(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"), utf8(b"hash"),
+                utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), vector[did], vector[0], policy, &clock, s.ctx())
+        };
+        sui::clock::destroy_for_testing(clock);
+        customer::begin_sharded_receipts(&c, &f, &mut d, s.ctx());
+        let roots = *dm::receipt_roots(&d);
+        assert!(dm::receipt_schema(&d) == if (catalog) 2 else 3);
+        dm::share_deployment(d); ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid); let mut d = s.take_shared<dm::DeploymentRecord>();
+        customer::begin_receipt_cleanup(&c, &f, &mut d, s.ctx());
+        let mut n = 0;
+        while (n < 16) { let root = s.take_shared_by_id<dm::ReceiptShard>(roots[n]); dm::retire_receipt_shard(&mut d, root); n = n + 1; };
+        customer::delete_deployment(&c, &mut f, d, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test]
+    fun managed_sharded_catalog_deletion_removes_relocated_binding() { managed_extension_shard_cleanup(true); }
+    #[test]
+    fun managed_sharded_rollout_deletion_removes_extensions() { managed_extension_shard_cleanup(false); }
+
 }

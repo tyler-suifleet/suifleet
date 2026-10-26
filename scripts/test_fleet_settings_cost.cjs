@@ -46,7 +46,7 @@ assert.equal(MAINNET_QUOTE.usdObservedAt, snapshot.token_market_quotes.WAL.last_
 const receipt = MEASURED.receipt;
 assert.equal(netMist(receipt, MEASURED.referenceGasPrice), receipt.computation + receipt.storage - receipt.rebate, "identity at the measured price");
 assert.equal(costs.MAINNET.receiptNetMist, receipt.computation / BigInt(10) + receipt.storage - receipt.rebate);
-assert.equal(costs.MAINNET.receiptNetMist, BigInt(351_568));
+assert.equal(costs.MAINNET.receiptNetMist, BigInt(5_283_232));
 assert.equal(netMist(MEASURED.draw, BigInt(2000)) - netMist(MEASURED.draw, BigInt(1000)), MEASURED.draw.computation, "only computation scales");
 assert.equal(costs.MAINNET.archiveNetMist, MEASURED.fleetData.archive.reduce((sum, e) => sum + e.computation / BigInt(10) + e.storage - e.rebate, BigInt(0)));
 assert.deepEqual(rescaled(MAINNET_QUOTE), costs.MAINNET);
@@ -157,9 +157,9 @@ const daily = line("healthIntervalMs", defaults), hourly = line("healthIntervalM
 near(daily.mistPerDevice, settings.MONTH_MS / DAY * Number(costs.MAINNET.recurringHealthNetMist), 1e-12, "daily health");
 near(hourly.usdPerDevice, 24 * daily.usdPerDevice, 1e-9, "hourly is 24 times daily");
 near(daily.usdPerFleet, daily.usdPerDevice * 1000, 1e-9, "per fleet");
-// Cross-check against the plan's rounded estimates (within 10%): health $0.003 daily, $0.072 hourly; a receipt about $0.00035.
+// Cross-check against the plan's rounded estimates (within 10%): health $0.003 daily, $0.072 hourly; a v3 receipt about $0.00514 (SF-127 localnet effects rescaled to Mainnet).
 near(daily.usdPerDevice, 0.003, 0.10, "daily health vs plan"); near(hourly.usdPerDevice, 0.072, 0.10, "hourly health vs plan");
-near(Number(costs.MAINNET.receiptNetMist) * usdPerMist, 0.00035, 0.05, "receipt vs plan");
+near(Number(costs.MAINNET.receiptNetMist) * usdPerMist, 0.00514, 0.01, "v3 receipt estimate");
 // Archives: daily costs more than weekly; longer retention costs more Walrus storage; no logs, no cost.
 const weekly = line("archiveIntervalMs", defaults), dailyArchives = line("archiveIntervalMs", { ...defaults, archiveIntervalMs: DAY });
 assert.ok(dailyArchives.usdPerDevice > weekly.usdPerDevice);
@@ -172,8 +172,12 @@ const fleet = settings.fleetNetworkCost(onMainnet, workload, MAINNET_QUOTE);
 const sum = fleet.lines.reduce((s, l) => s + l.usdPerDevice, 0) + fleet.base.receipts.usdPerDevice;
 near(fleet.usdPerDevice, sum, 1e-12, "lines add up");
 near(fleet.usdPerFleet, sum * 1000 + fleet.base.releasesUsdPerFleet, 1e-12, "fleet adds releases once");
-// Until deposit reclaim (SF-129) the archive line dominates and the default network cost exceeds the $0.08 first-tier base price.
-assert.ok(fleet.lines.find((l) => l.key === "archiveIntervalMs").usdPerDevice > 0.9 * fleet.usdPerDevice);
+// Until deposit reclaim (SF-129), archives remain the largest line, while v3
+// receipts now carry their own storage cost rather than an immediate cleanup rebate.
+near(fleet.base.receipts.usdPerDevice, workload.deploymentsPerMonth * Number(costs.MAINNET.receiptNetMist) * usdPerMist, 1e-12, "base includes v3 receipt storage");
+const archiveUsd = fleet.lines.find((l) => l.key === "archiveIntervalMs").usdPerDevice;
+assert.ok(archiveUsd > fleet.base.receipts.usdPerDevice);
+assert.ok(fleet.lines.every((l) => l.usdPerDevice <= archiveUsd));
 assert.ok(fleet.usdPerDevice > pricing.basePrice(table, 1).usd);
 console.log("PASS: each setting's network cost per device and per fleet, at Mainnet-rescaled gas and Walrus rates, matching the plan's estimates; kept apart from price");
 

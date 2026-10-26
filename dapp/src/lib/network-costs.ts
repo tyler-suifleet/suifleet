@@ -1,5 +1,6 @@
 // Up-front network-cost estimate for a fleet budget (SF-083), from the SF-054
-// measurements in docs/business/sf054. scripts/test_fleet_budget.cjs checks
+// measurements in docs/business/sf054 and SF-127 localnet receipt effects.
+// scripts/test_fleet_budget.cjs checks
 // these constants against those evidence files. Estimates, not quotes: the
 // wallet shows each transaction's actual cost before approval.
 //
@@ -14,12 +15,13 @@ export interface GasEffects { computation: bigint; storage: bigint; rebate: bigi
 const gas = (computation: number, storage: number, rebate: number): GasEffects =>
   ({ computation: BigInt(computation), storage: BigInt(storage), rebate: BigInt(rebate) });
 
-/** Measured inputs, with their SF-054 sources. */
+/** Measured inputs, with their recorded sources. */
 export const MEASURED = {
-  /** The Testnet reference gas price the effects below were paid at (MIST per computation unit). */
+  /** The reference gas price the effects below were paid at (MIST per computation unit). */
   referenceGasPrice: BigInt(1000),
-  /** Applied status receipt; historical Testnet effects. */
-  receipt: gas(1_000_000, 7_926_800, 7_675_232),
+  /** Highest measured single sharded v4 report at 1,000 targets (docs/validation/sf127-localnet.json).
+   * Later cleanup rebates belong to the cleanup sender, not the reporting device. */
+  receipt: gas(1_470_000, 9_515_200, 4_378_968),
   /** One fleet_budget::draw_gas, measured on testnet (docs/validation/sf083-testnet.json). */
   draw: gas(1_000_000, 6_391_600, 5_403_060),
   /** Observed Testnet SF-082 effects; fixture observations, not fleet-size gas ceilings or a production quote. */

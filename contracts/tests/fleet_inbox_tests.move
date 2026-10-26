@@ -164,6 +164,15 @@ module sui_edge::fleet_inbox_tests {
 
     #[test]
     fun operator_announces_to_device_and_group() {
+        announcements_with_receipts(false);
+    }
+
+    #[test]
+    fun sharded_deployments_keep_group_and_device_announcements() {
+        announcements_with_receipts(true);
+    }
+
+    fun announcements_with_receipts(sharded: bool) {
         let (mut s, group_id, device_id) = setup();
         add_member(&mut s, true);
         ts::next_tx(&mut s, OPERATOR);
@@ -175,13 +184,15 @@ module sui_edge::fleet_inbox_tests {
         clock.set_for_testing(1_000);
         assert!(inbox::inbox_groups(&device_inbox) == &vector[group_id], 0);
 
-        let first = record(b"app", vector[group_id], vector[device_id], &clock, &mut s);
+        let mut first = record(b"app", vector[group_id], vector[device_id], &clock, &mut s);
+        if (sharded) dm::begin_sharded_receipts(&mut first, ts::ctx(&mut s));
         inbox::announce_group(&mut group, &first, &clock, ts::ctx(&mut s));
         inbox::announce_device(&mut device_inbox, &registry, &cap, &first, &clock, ts::ctx(&mut s));
         // A later scheduled deployment of the same component replaces it and
         // arms the next start; an earlier one moves the start forward.
         let mut later = record(b"app", vector[group_id], vector[], &clock, &mut s);
         dm::set_control(&mut later, 0, 9_000, 0, 0, 0, 0, ts::ctx(&mut s));
+        if (sharded) dm::begin_sharded_receipts(&mut later, ts::ctx(&mut s));
         inbox::announce_group(&mut group, &later, &clock, ts::ctx(&mut s));
         let mut sooner = record(b"other", vector[group_id], vector[], &clock, &mut s);
         dm::set_control(&mut sooner, 0, 5_000, 0, 0, 0, 0, ts::ctx(&mut s));

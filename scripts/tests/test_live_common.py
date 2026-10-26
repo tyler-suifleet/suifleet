@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_common
+import live_package_upgrade
 import live_upgrade_security
 import live_wallet_gate
 import sui_toolchain
@@ -168,6 +169,7 @@ class PackageTransactionTests(unittest.TestCase):
             calls.append(dict(build_tool=build_tool, package_dir=package_dir, sender=sender, upgrade=upgrade))
 
             def submit(budget):
+                calls[-1]["budget"] = budget
                 if refuse:
                     raise sui_toolchain.NotSubmitted("bytecode differs")
                 record.update(kind="upgrade" if upgrade else "publish")
@@ -203,6 +205,31 @@ class PackageTransactionTests(unittest.TestCase):
         self.assertEqual(calls[0]["upgrade"], upgrade)
         pubfile.assert_not_called()
 
+    def test_security_upgrade_uses_package_sized_reservation_within_suite_ceiling(self):
+        # Run 40226492793: the pre-identity -> current upgrade failed with
+        # InsufficientGas at 400M despite 565,551,753 MIST left in the suite.
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=700_000_000)
+        run.ledger.used = 134_448_247
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)):
+            run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml",
+                        upgrade={"cap": "0xcap", "package": "0xold"})
+        self.assertEqual(calls[0]["budget"], run.ledger.limit - 134_448_247)
+        self.assertEqual(calls[0]["budget"], 565_551_753)
+        self.assertEqual(run.ledger.used, 219_448_247)
+        self.assertEqual(run.ledger.limit, 700_000_000)
+        self.assertEqual(len(chain.calls), 1)
+
+    def test_package_reservation_still_caps_at_remaining_allowance(self):
+        calls, chain = [], Chain(self.published())
+        run = live(chain, limit=700_000_000)
+        run.ledger.used = 300_000_000
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)):
+            run.publish("upgrade to head", "/tmp/package", "/tmp/pub.toml",
+                        upgrade={"cap": "0xcap", "package": "0xold"})
+        self.assertEqual(calls[0]["budget"], 400_000_000)
+        self.assertEqual(run.ledger.used, 385_000_000)
+
     def test_refused_package_transaction_is_never_submitted_or_charged(self):
         calls, chain = [], Chain()
         run = live(chain, limit=500_000_000)
@@ -228,6 +255,89 @@ class PackageTransactionTests(unittest.TestCase):
         with patch.object(live_common.subprocess, "run", return_value=CompletedProcess([], 0, "{}", "")) as ran:
             run.client("gas")
         self.assertEqual(ran.call_args.args[0][:2], ["/opt/sui-network/sui", "client"])
+
+
+class ReadThrottleTests(unittest.TestCase):
+    failure = CompletedProcess([], 1, "", 'service unavailable: <title>429</title>429 Too Many Requests')
+
+    def client(self):
+        return Live("/nonexistent/client.yaml", "testnet", 1).client
+
+    def test_throttled_reads_retry_then_return_real_response(self):
+        for command in ("object", "dynamic-field", "tx-block", "gas"):
+            with self.subTest(command=command):
+                client = self.client()
+                with patch.object(live_common.subprocess, "run", side_effect=[self.failure] * 4 + [CompletedProcess([], 0, '{"verified": true}', "")]) as ran, patch.object(live_common.time, "sleep") as sleep:
+                    self.assertEqual(client(command, "id"), {"verified": True})
+                self.assertEqual(ran.call_count, 5)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20, 40])
+                self.assertTrue(all(call == ran.call_args for call in ran.call_args_list))
+
+    def test_persistent_throttling_fails_at_bound(self):
+        client = self.client()
+        with patch.object(live_common.subprocess, "run", return_value=self.failure) as ran, patch.object(live_common.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "429"):
+                client("dynamic-field", "root")
+        self.assertEqual(ran.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
+
+    def test_mutations_and_other_errors_are_never_replayed(self):
+        for command, failure in (("ptb", self.failure), ("serialized-tx", self.failure), ("publish", self.failure), ("faucet", self.failure), ("unknown", self.failure), ("object", CompletedProcess([], 1, "", "not found"))):
+            with self.subTest(command=command, diagnostic=failure.stderr):
+                client = self.client()
+                with patch.object(live_common.subprocess, "run", return_value=failure) as ran, patch.object(live_common.time, "sleep") as sleep:
+                    self.assertIs(client(command, check=False, json_output=False), failure)
+                self.assertEqual(ran.call_count, 1)
+                sleep.assert_not_called()
+
+
+class PackageReadThrottleTests(ReadThrottleTests):
+    def client(self):
+        return lambda *args, **kwargs: live_package_upgrade.package_client(
+            "/pinned/sui", "/explicit/client.yaml", *args, **kwargs)
+
+
+class PackageClientWiringTests(unittest.TestCase):
+    def test_run_uses_shared_package_client_and_execution_reader(self):
+        # Stop at the first read: no chain, wallet or mutation is needed to
+        # verify that run's real adapter delegates to the retrying helper.
+        from types import SimpleNamespace
+        args = SimpleNamespace(network="testnet", evidence=None, max_spend_mist=1,
+                               wallet="/explicit/client.yaml", build_sui="/compiler",
+                               network_sui="/pinned/sui")
+        with patch.object(live_package_upgrade.os, "umask"), \
+                patch.object(live_package_upgrade.toolchain, "check_tools",
+                             return_value={"network": {"path": "/pinned/sui"}}), \
+                patch.object(live_package_upgrade, "package_client", side_effect=RuntimeError("stop at read")) as client:
+            with self.assertRaisesRegex(RuntimeError, "stop at read"):
+                live_package_upgrade.run(args)
+        self.assertEqual(client.call_args.args, ("/pinned/sui", Path(args.wallet), "envs"))
+        self.assertTrue(callable(client.call_args.kwargs["executed"]))
+
+    def test_failed_submission_reads_effects_without_replaying_mutation(self):
+        digest = "1" * 43
+        failure = CompletedProcess([], 1, "", f"transaction '{digest}' failed")
+        recovered = effects(status="failure", digest=digest)
+        executed = Mock(return_value=recovered)
+        for command in ("execute-signed-tx", "ptb"):
+            with self.subTest(command=command), \
+                    patch.object(live_common.subprocess, "run", return_value=failure) as ran, \
+                    patch.object(live_common.time, "sleep") as sleep:
+                self.assertEqual(live_package_upgrade.package_client(
+                    "/pinned/sui", "/explicit/client.yaml", command, executed=executed), recovered)
+                ran.assert_called_once()
+                sleep.assert_not_called()
+                executed.assert_called_with(digest)
+
+    def test_unreadable_failed_submission_preserves_unknown_execution(self):
+        digest = "1" * 43
+        failure = CompletedProcess([], 1, "", f"transaction '{digest}' failed")
+        with patch.object(live_common.subprocess, "run", return_value=failure) as ran, \
+                patch.object(live_package_upgrade, "wait_for", side_effect=AssertionError("not indexed")):
+            with self.assertRaises(live_package_upgrade.UnreadableExecution):
+                live_package_upgrade.package_client(
+                    "/pinned/sui", "/explicit/client.yaml", "ptb", executed=Mock(return_value={}))
+        ran.assert_called_once()
 
 
 class FleetPreflightFundingTests(unittest.TestCase):
@@ -305,11 +415,11 @@ class WalrusUploadTests(unittest.TestCase):
         blob, attempts = self.upload(*[server] * len(self.PUBLISHERS), self.STORED)
         self.assertEqual((blob, attempts), ("blob1", self.PUBLISHERS + self.PUBLISHERS[:1]))
 
-    def test_persistent_publisher_500_fails_without_acknowledging_storage(self):
+    def test_persistent_http_500_fails_closed_at_retry_bound(self):
         import urllib.error
-        # Exhaust every publisher and pass: no blob ID may be acknowledged.
         failure = urllib.error.HTTPError("u", 500, "Internal Server Error", {}, None)
-        error, attempts = self.upload(*[failure] * (live_common.WALRUS_PASSES * len(self.PUBLISHERS)))
+        count = live_common.WALRUS_PASSES * len(self.PUBLISHERS)
+        error, attempts = self.upload(*[failure] * count, self.STORED)
         self.assertIs(error, failure)
         self.assertEqual(attempts, self.PUBLISHERS * live_common.WALRUS_PASSES)
 
@@ -533,6 +643,9 @@ class TeardownTests(unittest.TestCase):
 
     def teardown(self, chain, made, held=(30_000_000, 0)):
         run = live(chain)
+        # These legacy cleanup fixtures have no sharded directory. Separate
+        # decoder/retirement cases below cover v3 storage and failure handling.
+        run.receipt_directory = lambda record: None
         run.operator = OPERATOR
         balances = list(held)
         run.balance = lambda address=None: balances.pop(0)
@@ -634,6 +747,42 @@ class DaemonStartupTests(unittest.TestCase):
         self.assertIs(process, self.process)
         process.kill.assert_not_called()
         process.wait.assert_not_called()
+
+
+class ShardedReceiptViewTests(unittest.TestCase):
+    def fixture(self):
+        run = Live('/nonexistent/client.yaml', 'localnet', 1)
+        roots = [hex(100 + i) for i in range(16)]
+        directory = dict(roots=roots, ready=True, retiring=False, migrated=16)
+        objects = {
+            'receipt': {'objType': '0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptsKey, X>', 'content': {'value': {'version':4, 'statuses':{'contents':[]}}}},
+            'directory': {'objType': '0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptShardKey, X>', 'content': {'value':directory}},
+            'entry': {'objType':'0x1::dynamic_field::Field<0x2::deployment_manager::ReceiptKey, X>', 'content': {'name': {'device':'0x10'}, 'value':{'status':1}}},
+        }
+        for index, root in enumerate(roots):
+            objects[root] = {'content': {'deployment':'0xd', 'index':index, 'count':int(index==0)}}
+        def client(command, parent):
+            if command == 'object': return objects[parent]
+            self.assertEqual(command, 'dynamic-field')
+            return {'dynamicFields': [{'fieldId':v} for v in (['receipt','directory'] if parent=='0xd' else ['entry'] if parent==roots[0] else [])]}
+        run.client = client
+        return run, objects, directory, roots
+
+    def test_reads_bound_v3_receipts_and_never_promotes_partial_migration(self):
+        run, _, directory, _ = self.fixture()
+        self.assertEqual(run.receipts('0xd'), {live_common.dm.object_id('0x10'):1})
+        directory['ready'] = False
+        self.assertEqual(run.receipts('0xd'), {})
+        directory['ready'] = True; directory['retiring'] = True
+        self.assertEqual(run.receipts('0xd'), {})
+
+    def test_foreign_root_and_truncated_cli_view_are_refused(self):
+        run, objects, _, roots = self.fixture()
+        objects[roots[0]]['content']['deployment'] = '0xee'
+        with self.assertRaises(AssertionError): run.receipts('0xd')
+        objects[roots[0]]['content']['deployment'] = '0xd'
+        objects[roots[0]]['content']['count'] = 2
+        with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
 if __name__ == "__main__":

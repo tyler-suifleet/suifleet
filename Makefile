@@ -166,6 +166,8 @@ check-interfaces:
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
 	$(RUN) node scripts/test_rollout.cjs
+	$(RUN) node scripts/test_receipt_shards.cjs
+	$(RUN) node scripts/test_browser_receipt_cleanup.cjs
 	$(RUN) node scripts/test_inbox.cjs
 
 generate-interfaces:
@@ -174,6 +176,21 @@ generate-interfaces:
 # Disposable localnet only; run inside a container with no public-network access.
 test-protocol-live:
 	$(RUN) python3 scripts/test_protocol_localnet.py
+
+# SF-127: 1000 receipts, real compatible upgrade and bounded storage/cleanup.
+.PHONY: test-receipt-shards-localnet
+test-receipt-shards-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --receipt-shards
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
+	$(RUN) python3 scripts/test_protocol_localnet.py --receipt-clients
+	$(RUN) python3 scripts/test_protocol_localnet.py --receipt-security
+
+.PHONY: test-managed-receipt-shards-localnet
+test-managed-receipt-shards-localnet:
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
+	$(RUN) cargo build --locked --manifest-path suifleet-indexer/Cargo.toml
+	$(RUN) python3 scripts/test_protocol_localnet.py --managed-receipt-shards
 
 .PHONY: test-handover-upgrade-localnet
 test-handover-upgrade-localnet:

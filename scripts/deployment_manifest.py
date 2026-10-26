@@ -20,7 +20,8 @@ INBOX_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_inbox"])
 ROLLOUT_HEALTH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_health"])
 CUSTOMER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["customer"])
 SETTINGS_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_settings"])
-OPTIONAL_GROUPS = {"fleet inbox": INBOX_TYPES, "catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "customer": CUSTOMER_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES}
+SHARD_TYPES = tuple(_PROTOCOL["optional_type_origins"]["receipt_shards"])
+OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES, "fleet inbox": INBOX_TYPES, "customer": CUSTOMER_TYPES, "receipt shards": SHARD_TYPES}
 
 def manifest_types(manifest):
     types = REQUIRED_TYPES
@@ -31,7 +32,7 @@ def manifest_types(manifest):
         types += tuple(present)
     return types + tuple(n for n in HANDOVER_TYPES if n in manifest["type_origins"])
 
-CLIENT_VERSIONS = {"dapp": "0.1.0", "edge": "0.2.1"}
+CLIENT_VERSIONS = {"dapp": "0.1.1", "edge": "0.2.2"}
 
 
 def object_id(value):
@@ -221,10 +222,10 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + INBOX_TYPES + SETTINGS_TYPES + CUSTOMER_TYPES + ROLLOUT_HEALTH_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
-        supported_clients={"dapp": {"min": "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.1", "max_exclusive": "0.3.0"}},
+        supported_clients={"dapp": {"min": "0.1.1" if all(n in table for n in SHARD_TYPES) else "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.2" if all(n in table for n in SHARD_TYPES) else "0.2.1", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
     if getattr(args, "aggregator_mirror", None):
         manifest["walrus"]["aggregator_urls"] = args.aggregator_mirror

@@ -59,5 +59,24 @@ const input = {component:'app',version:'1',recipe:'blob',artifactSha256:'a'.repe
   legacy.type_origins['deployment_manager::RolloutHealthKey'] = m.call_package_id;
   process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(legacy);
   assert.throws(()=>loader()('lib/rollout.ts'), /partial rollout health/);
+  const shardedManifest = structuredClone(m);
+  for (const name of require('../interfaces/fleet-v1.json').optional_type_origins.receipt_shards) shardedManifest.type_origins[name] = n('0x99');
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(shardedManifest);
+  const sr = loader()('lib/rollout.ts');
+  const roots = Array.from({length:16}, (_, i) => n('0x'+(256+i).toString(16)));
+  const directory = {roots, original_schema:'3', migrated:'16', ready:true, retiring:false, remaining:'16'};
+  const shardClient = {
+    getObject: async () => ({object:{...object,content:p.deployment_manager_DeploymentRecordBcs.serialize({...record,schema_version:'4'}).toBytes()}}),
+    getDynamicField: async ({name}) => name.type.endsWith('::RolloutKey') ? result : {dynamicField:{value:{
+      type:`${n('0x99')}::deployment_manager::ReceiptDirectory`, bcs:p.deployment_manager_ReceiptDirectoryBcs.serialize(directory).toBytes()}}}
+  };
+  assert.deepEqual(sr.buildRolloutTx(input).getData().commands.map(c=>c.MoveCall.function), ['rollout_policy','new_rollout_verified','begin_sharded_receipts','share_deployment']);
+  const synced = (await sr.buildAdvanceRolloutTx(shardClient,'0x42','0xad',['0x1'])).getData().commands;
+  assert.deepEqual(synced.map(c=>c.MoveCall.function), ['sync_rollout_receipts','sync_rollout_receipts','advance_rollout_onchain']);
+  for (const state of [{ready:false}, {retiring:true}]) {
+    Object.assign(directory,state);
+    await assert.rejects(sr.buildAdvanceRolloutTx(shardClient,'0x42','0xad'), /migration or retirement/);
+    Object.assign(directory,{ready:true,retiring:false});
+  }
   console.log('PASS: rollout encoders, policy bounds, mixed-origin BCS, serverless on-chain advance, creator/type binding and fail-closed reads');
 })().catch(e=>{console.error(e);process.exitCode=1;});

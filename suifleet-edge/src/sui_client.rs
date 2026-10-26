@@ -1544,7 +1544,7 @@ impl SuiClient {
             "{id} is not a DeploymentRecord"
         );
         let field = |name: &str| record.fields[name].as_str().unwrap_or_default().to_owned();
-        let groups = self.dynamic_field(id, "deployment_manager::TargetGroupsKey").await?;
+        let groups = self.dynamic_field(id, if self.has_receipt_shards(id).await? { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" }).await?;
         let devices = self.dynamic_field(id, "deployment_manager::TargetDevicesKey").await?;
         let event = DeploymentCreatedEvent {
             deployment_id: id.to_owned(),
@@ -1570,11 +1570,40 @@ impl SuiClient {
         }
     }
 
+    pub(crate) async fn has_receipt_shards(&self, deployment: &str) -> anyhow::Result<bool> {
+        if !self.manifest().type_origins.contains_key("deployment_manager::ReceiptShardKey") { return Ok(false); }
+        Ok(self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.is_some())
+    }
+
+    /// Ordinary/rollout records use schema 4 as the old-package deletion barrier.
+    /// Catalog records retain schema 2 so old handover remains forbidden. Payload schema and
+    /// rollout admission remain explicit in the introduction-origin directory.
+    pub async fn deployment_schema(&self, deployment: &str, fields: &Value) -> anyhow::Result<u64> {
+        let schema = number(&fields["schema_version"]).filter(|s| (1..=4).contains(s)).ok_or_else(|| anyhow::anyhow!("unsupported DeploymentRecord schema version"))?;
+        if schema != 4 && !self.has_receipt_shards(deployment).await? { return Ok(schema); }
+        anyhow::ensure!(protocol::SHARD_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "missing receipt shard type origins");
+        let receipts = self.dynamic_field(deployment, "deployment_manager::ReceiptsKey").await?
+            .ok_or_else(|| anyhow::anyhow!("missing v3 receipt authority"))?;
+        anyhow::ensure!(number(&receipts["version"]) == Some(4), "unsupported receipt authority version");
+        let directory = self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?
+            .ok_or_else(|| anyhow::anyhow!("missing receipt directory"))?;
+        anyhow::ensure!(directory["ready"] == true && directory["retiring"] == false && number(&directory["migrated"]) == Some(16), "receipt migration or retirement in progress");
+        number(&directory["original_schema"]).filter(|s| (1..=3).contains(s)).ok_or_else(|| anyhow::anyhow!("invalid original deployment schema"))
+    }
+
     /// Schema 3 requires a grant in the introduction-origin rollout field.
     /// Every call re-reads chain state, including after artifact downloads.
     pub async fn rollout_admission(&self, deployment: &str, device: &str) -> anyhow::Result<Option<&'static str>> {
         let record = self.object(deployment).await?;
-        if number(&record.fields["schema_version"]) != Some(3) { return Ok(None); }
+        let schema = match number(&record.fields["schema_version"]) {
+            Some(schema) if schema == 4 || self.has_receipt_shards(deployment).await? => match self.deployment_schema(deployment, &record.fields).await {
+                Ok(schema) => schema,
+                Err(_) => return Ok(Some("receipt authority unavailable; migration or retirement in progress")),
+            },
+            Some(schema) => schema,
+            None => return Ok(None), // payload resolution journals unsupported schemas
+        };
+        if schema != 3 { return Ok(None); }
         // Ownership or signer trust can change while artifacts are fetched.
         // Refresh both at the same final admission boundary as the grant.
         let identity = self.identity(device).await?;
@@ -1727,7 +1756,7 @@ impl SuiClient {
         let mut function = protocol::deployment_manager::REPORT_VERIFIED_STATUS;
         if !id_list(&direct).iter().any(|id| same_id(id, &device_id)) {
             let groups = self
-                .dynamic_field(deployment, "deployment_manager::TargetGroupsKey")
+                .dynamic_field(deployment, if self.has_receipt_shards(deployment).await? { "deployment_manager::ShardedTargetGroupsKey" } else { "deployment_manager::TargetGroupsKey" })
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("missing target groups"))?;
             let creator = record.fields["creator"].as_str().unwrap_or("").to_owned();
@@ -1742,6 +1771,24 @@ impl SuiClient {
             function = protocol::deployment_manager::REPORT_VERIFIED_STATUS_FOR_GROUP;
         }
         let mut args: Vec<Arg> = objects.into_iter().map(Arg::Object).collect();
+        let sharded = self.has_receipt_shards(deployment).await?;
+        if sharded {
+            self.deployment_schema(deployment, &record.fields).await?;
+            let directory = self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.unwrap();
+            let device = Address::from_str(&device_id)?;
+            let index = (device.inner()[31] % 16) as usize;
+            let roots = id_list(&directory["roots"]);
+            anyhow::ensure!(roots.len() == 16, "invalid receipt roots");
+            let root = self.object(&roots[index]).await?;
+            anyhow::ensure!(same_type(&root.object_type, &self.move_type("deployment_manager::ReceiptShard")) && matches!(root.owner, Owner::Shared { .. })
+                && root.fields["deployment"].as_str().is_some_and(|id| same_id(id, deployment))
+                && number(&root.fields["index"]) == Some(index as u64) && root.fields["migrated"] == true, "invalid receipt root binding");
+            args[0] = Arg::SharedRead(deployment.into());
+            args.insert(1, Arg::Object(roots[index].clone()));
+            function = if function == protocol::deployment_manager::REPORT_VERIFIED_STATUS {
+                protocol::deployment_manager::REPORT_STATUS_V3
+            } else { protocol::deployment_manager::REPORT_STATUS_FOR_GROUP_V3 };
+        }
         let mut module = protocol::deployment_manager::MODULE;
         if self
             .manifest()
@@ -1771,10 +1818,11 @@ impl SuiClient {
                     ],
                 );
                 module = "customer";
-                function = if function == protocol::deployment_manager::REPORT_VERIFIED_STATUS {
-                    "report_status"
-                } else {
-                    "report_group_status"
+                function = match (sharded, function == protocol::deployment_manager::REPORT_VERIFIED_STATUS || function == protocol::deployment_manager::REPORT_STATUS_V3) {
+                    (true, true) => "report_status_v4",
+                    (true, false) => "report_group_status_v4",
+                    (false, true) => "report_status",
+                    (false, false) => "report_group_status",
                 };
             }
         }
@@ -1793,7 +1841,7 @@ impl SuiClient {
         // A deleted historical record has no gate left to satisfy. A read
         // outage still propagates and retains the pending journal marker.
         let Some(record) = self.optional_object(deployment).await? else { return Ok(()); };
-        if record.fields["schema_version"].as_str() != Some("3") && record.fields["schema_version"].as_u64() != Some(3) { return Ok(()); }
+        if self.deployment_schema(deployment, &record.fields).await? != 3 { return Ok(()); }
         anyhow::ensure!(protocol::ROLLOUT_HEALTH_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)), "rollout health requires an upgraded package and regenerated manifest");
         // Simulation can lag effects until the receipt reaches a checkpoint.
         // This is a bounded read barrier, never another status submission.

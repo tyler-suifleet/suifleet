@@ -784,4 +784,239 @@ module sui_edge::deployment_manager_tests {
         ts::return_shared(record);
         ts::end(scenario);
     }
+    // SF-127 migration/report/cleanup invariants, with real active capabilities.
+    fun sharded_fixture(s: &mut ts::Scenario, seed: bool): ID {
+        setup_registry(s);
+        ts::next_tx(s, ADMIN);
+        let device = register_device_with_cap(s, b"sharded", DEVICE_ADDR);
+        ts::next_tx(s, ADMIN);
+        create_test_deployment(s, vector[], vector[device]);
+        if (seed) {
+            ts::next_tx(s, DEVICE_ADDR);
+            let mut d = ts::take_shared<DeploymentRecord>(s);
+            let cap = ts::take_from_sender<DeviceCap>(s);
+            report(s, &mut d, &cap, 1);
+            ts::return_to_sender(s, cap); ts::return_shared(d);
+        };
+        ts::next_tx(s, ADMIN);
+        let mut d = ts::take_shared<DeploymentRecord>(s);
+        deployment_manager::begin_sharded_receipts(&mut d, ts::ctx(s));
+        // Repeating begin neither allocates roots nor resets progress.
+        let roots = *deployment_manager::receipt_roots(&d);
+        deployment_manager::begin_sharded_receipts(&mut d, ts::ctx(s));
+        assert!(roots == *deployment_manager::receipt_roots(&d));
+        ts::return_shared(d);
+        ts::next_tx(s, ADMIN);
+        device
+    }
+    fun finish_shards(s: &mut ts::Scenario) {
+        let mut d = ts::take_shared<DeploymentRecord>(s);
+        let roots = *deployment_manager::receipt_roots(&d);
+        let mut i = 0;
+        while (i < 16) {
+            let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(s, roots[i]);
+            deployment_manager::migrate_receipt_chunk(&mut d, &mut root, 1);
+            deployment_manager::migrate_receipt_chunk(&mut d, &mut root, 1);
+            ts::return_shared(root); i = i + 1;
+        };
+        deployment_manager::finish_receipt_migration(&mut d);
+        deployment_manager::finish_receipt_migration(&mut d);
+        ts::return_shared(d); ts::next_tx(s, DEVICE_ADDR);
+    }
+    #[test]
+    fun sharded_migration_preserves_v2_reports_and_cleanup_drains_all_fields() {
+        let mut s = ts::begin(ADMIN);
+        let device = sharded_fixture(&mut s, true);
+        finish_shards(&mut s);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        let roots = *deployment_manager::receipt_roots(&d);
+        let index = deployment_manager::receipt_shard_index(device);
+        let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s, roots[index]);
+        assert!(deployment_manager::receipts_version(&d) == 4);
+        assert!(deployment_manager::receipt_status_v3(&d, &root, device) == option::some(1));
+        let (devices, statuses, next) = deployment_manager::receipt_page_v3(&d, &root, 0, 64);
+        assert!(devices == vector[device] && statuses == vector[1] && next == 1);
+        let registry = ts::take_shared<DeviceRegistry>(&s);
+        let cap = ts::take_from_sender<DeviceCap>(&s);
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 2, ts::ctx(&mut s));
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 1, ts::ctx(&mut s));
+        let (_, statuses, next) = deployment_manager::receipt_page_v3(&d, &root, 0, 64);
+        assert!(statuses == vector[1] && next == 1); // no duplicate index on retry
+        ts::return_shared(root); ts::return_shared(registry); ts::return_to_sender(&s, cap); ts::return_shared(d);
+        ts::next_tx(&mut s, ADMIN);
+        d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::begin_receipt_cleanup(&mut d, ts::ctx(&mut s));
+        let mut i = 0;
+        while (i < 16) {
+            let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s, roots[i]);
+            deployment_manager::cleanup_receipt_chunk(&d, &mut root, 1);
+            deployment_manager::cleanup_receipt_chunk(&d, &mut root, 1);
+            deployment_manager::retire_receipt_shard(&mut d, root); i = i + 1;
+        };
+        deployment_manager::delete_deployment(d, ts::ctx(&mut s)); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 15, location = sui_edge::deployment_manager)]
+    fun sharded_migration_cannot_finish_early() {
+        let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, true);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::finish_receipt_migration(&mut d); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun v2_mutation_is_rejected_after_shard_barrier() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, true);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::old_package_report_for_testing(&mut d, device, 2); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun legacy_single_receipt_getter_rejects_v3() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, false);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::receipt_status(&d, device); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 8, location = sui_edge::deployment_manager)]
+    fun legacy_global_receipt_getter_rejects_v3() {
+        let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::receipt_statuses(&d); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 14, location = sui_edge::deployment_manager)]
+    fun sharded_read_rejects_wrong_device_partition() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, false);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        let root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[(deployment_manager::receipt_shard_index(device) + 1) % 16]);
+        deployment_manager::receipt_status_v3(&d, &root, device); ts::return_shared(root); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 17, location = sui_edge::deployment_manager)]
+    fun sharded_deletion_requires_retirement() {
+        let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::delete_deployment(d, ts::ctx(&mut s)); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 16, location = sui_edge::deployment_manager)]
+    fun sharded_pages_have_a_hard_bound() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, false);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        let root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[deployment_manager::receipt_shard_index(device)]);
+        deployment_manager::receipt_page_v3(&d, &root, 0, 65); ts::return_shared(root); ts::return_shared(d); s.end();
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 2, location = sui_edge::device_cap)]
+    fun revoked_device_cannot_write_sharded_receipt() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, false);
+        let mut registry = ts::take_shared<DeviceRegistry>(&s);
+        let owner = owner_cap(&s, ADMIN, device);
+        device_registry::revoke_device(&mut registry, &owner);
+        ts::return_to_sender(&s, owner); ts::return_shared(registry);
+        ts::next_tx(&mut s, DEVICE_ADDR);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[deployment_manager::receipt_shard_index(device)]);
+        let registry = ts::take_shared<DeviceRegistry>(&s);
+        let cap = ts::take_from_sender<DeviceCap>(&s);
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 1, ts::ctx(&mut s));
+        ts::return_shared(root); ts::return_shared(d); ts::return_shared(registry); ts::return_to_sender(&s, cap); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 15, location = sui_edge::deployment_manager)]
+    fun report_cannot_cross_the_migration_barrier() {
+        let mut s = ts::begin(ADMIN); let device = sharded_fixture(&mut s, true);
+        ts::next_tx(&mut s, DEVICE_ADDR);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[deployment_manager::receipt_shard_index(device)]);
+        let registry = ts::take_shared<DeviceRegistry>(&s);
+        let cap = ts::take_from_sender<DeviceCap>(&s);
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 1, ts::ctx(&mut s));
+        ts::return_shared(root); ts::return_shared(d); ts::return_shared(registry); ts::return_to_sender(&s, cap); s.end();
+    }
+    #[test]
+    fun sharded_rollout_settlement_preserves_sticky_failure_without_report_hotspot() {
+        let mut s = ts::begin(ADMIN); setup_registry(&mut s);
+        ts::next_tx(&mut s, ADMIN);
+        let device = register_device_with_cap(&mut s, b"rollout-shard", DEVICE_ADDR);
+        ts::next_tx(&mut s, ADMIN);
+        let mut clock = clock::create_for_testing(ts::ctx(&mut s)); clock::set_for_testing(&mut clock, 1);
+        let policy = deployment_manager::rollout_policy(1, 1, 1000, 0, 1, 5000, 10000);
+        let mut d = deployment_manager::new_rollout_verified(string::utf8(b"app"), string::utf8(b"1"),
+            string::utf8(b"blob"), string::utf8(b"artifact"),
+            string::utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            vector[], vector[device], vector[0], policy, &clock, ts::ctx(&mut s));
+        deployment_manager::pre_rollout_report_for_testing(&mut d, device, 2);
+        deployment_manager::begin_sharded_receipts(&mut d, ts::ctx(&mut s));
+        deployment_manager::share_deployment(d); clock::destroy_for_testing(clock);
+        ts::next_tx(&mut s, DEVICE_ADDR);
+        finish_shards(&mut s);
+        ts::next_tx(&mut s, ADMIN);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        let mut clock = clock::create_for_testing(ts::ctx(&mut s)); clock::set_for_testing(&mut clock, 2);
+        // Permissionless settlement of a copied v2 receipt cannot finish a grant.
+        deployment_manager::advance_rollout(&mut d, vector[device], vector[], vector[], &clock, ts::ctx(&mut s));
+        clock::destroy_for_testing(clock);
+        ts::return_shared(d); ts::next_tx(&mut s, DEVICE_ADDR);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[deployment_manager::receipt_shard_index(device)]);
+        assert!(deployment_manager::receipt_status_v3(&d, &root, device) == option::some(2));
+        deployment_manager::sync_rollout_receipts(&mut d, &root, vector[device]);
+        assert!(deployment_manager::rollout_outcomes_for_testing(&d) == vector[0]);
+        let registry = ts::take_shared<DeviceRegistry>(&s); let cap = ts::take_from_sender<DeviceCap>(&s);
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 2, ts::ctx(&mut s));
+        deployment_manager::report_status_v3(&d, &mut root, &registry, &cap, 1, ts::ctx(&mut s));
+        assert!(deployment_manager::rollout_outcomes_for_testing(&d) == vector[0]);
+        deployment_manager::sync_rollout_receipts(&mut d, &root, vector[device]);
+        assert!(deployment_manager::rollout_outcomes_for_testing(&d) == vector[2]);
+        ts::return_shared(root); ts::return_shared(d); ts::return_shared(registry); ts::return_to_sender(&s, cap); s.end();
+    }
+
+    #[test]
+    fun group_report_uses_relocated_targets_and_the_bound_shared_root() {
+        let mut s = ts::begin(ADMIN); setup_registry(&mut s);
+        ts::next_tx(&mut s, ADMIN);
+        let device = register_device_with_cap(&mut s, b"group-shard", DEVICE_ADDR);
+        ts::next_tx(&mut s, ADMIN);
+        let group_id = create_group_with_device(&mut s, device);
+        ts::next_tx(&mut s, ADMIN);
+        create_test_deployment(&mut s, vector[group_id], vector[]);
+        ts::next_tx(&mut s, ADMIN);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::begin_sharded_receipts(&mut d, ts::ctx(&mut s));
+        assert!(*deployment_manager::target_groups(&d) == vector[group_id]);
+        ts::return_shared(d); ts::next_tx(&mut s, DEVICE_ADDR);
+        let d = ts::take_shared<DeploymentRecord>(&s);
+        let mut root = ts::take_shared_by_id<deployment_manager::ReceiptShard>(&s,
+            deployment_manager::receipt_roots(&d)[deployment_manager::receipt_shard_index(device)]);
+        let group = ts::take_shared<device_group::DeviceGroup>(&s);
+        let registry = ts::take_shared<DeviceRegistry>(&s); let cap = ts::take_from_sender<DeviceCap>(&s);
+        deployment_manager::report_status_for_group_v3(&d, &mut root, &registry, &cap, &group, 1, ts::ctx(&mut s));
+        assert!(deployment_manager::receipt_status_v3(&d, &root, device) == option::some(1));
+        ts::return_shared(root); ts::return_shared(d); ts::return_shared(registry); ts::return_shared(group); ts::return_to_sender(&s, cap); s.end();
+    }
+
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun future_receipt_authority_rejects_v3_cleanup() {
+        let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::set_receipts_version_for_testing(&mut d, 5);
+        deployment_manager::begin_receipt_cleanup(&mut d, ts::ctx(&mut s)); ts::return_shared(d); s.end();
+    }
+    #[test]
+    #[expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
+    fun future_receipt_authority_rejects_v3_migration_finish() {
+        let mut s = ts::begin(ADMIN); sharded_fixture(&mut s, false);
+        let mut d = ts::take_shared<DeploymentRecord>(&s);
+        deployment_manager::set_receipts_version_for_testing(&mut d, 5);
+        deployment_manager::finish_receipt_migration(&mut d); ts::return_shared(d); s.end();
+    }
+
 }

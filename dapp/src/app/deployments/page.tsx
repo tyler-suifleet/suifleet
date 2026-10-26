@@ -11,9 +11,9 @@ import { DeploymentReclaimPanel } from "@/components/StorageReclaim";
 import type { DeviceObject, DeviceGroup } from "@/lib/sui";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
-import { buildDeleteDeploymentTx } from "@/lib/sui";
+import { buildDeleteDeploymentStepTx } from "@/lib/sui";
 import { STATUS_LABELS, STATUS_COLORS } from "@/lib/constants";
 import { PageHeader } from "@/components/ui";
 import Link from "next/link";
@@ -24,6 +24,7 @@ export default function DeploymentsPage() {
   const devices = useDevices(), groups = useGroups();
   const [view, setView] = useState<"devices" | "deployments">("devices");
   const account = useCurrentAccount();
+  const client = useCurrentClient();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
 
   return (
@@ -80,21 +81,21 @@ export default function DeploymentsPage() {
                   d={d}
                   devices={devices.data ?? []}
                   groups={groups.data ?? []}
-                  canDelete={account?.address === d.creator}
+                  canDelete={fleet ? fleet.administrator && fleet.id === d.creator : account?.address === d.creator}
                   isPending={isPending}
                   onControl={(control) => signAndExecute(
                     { transaction: buildDeploymentControlTx(d.deploymentId, control, fleet) },
                     { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
                   )}
-                  onDelete={() => {
+                  onDelete={async () => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
-                    signAndExecute(
-                      { transaction: buildDeleteDeploymentTx(d.deploymentId, d.schemaVersion, fleet) },
+                    try { signAndExecute(
+                      { transaction: await buildDeleteDeploymentStepTx(client, d.deploymentId, d.schemaVersion, fleet) },
                       {
                         onSuccess: () => setTimeout(() => refetch(), 3000),
                         onError: (err) => alert(`Failed: ${err.message}`),
                       }
-                    );
+                    ); } catch (error) { alert(`Failed: ${error instanceof Error ? error.message : String(error)}`); }
                   }}
                 />
               ))}
@@ -158,7 +159,7 @@ function DeploymentRow({
               onClick={onDelete}
               className="text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
             >
-              Delete
+              {d.receiptCleanup ? "Continue deletion" : "Delete"}
             </button>
           )}
         </td>

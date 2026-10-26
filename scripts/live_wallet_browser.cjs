@@ -50,6 +50,7 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     if (smoke) {
       assert.deepEqual(errors, []);
       assert.deepEqual(externalRequests, []);
+      assert.equal(await page.evaluate(() => typeof window.live.deleteDeploymentStep), "function");
       assert.equal(await page.evaluate(() => typeof process), "undefined");
       console.log("PASS: live wallet bundle boots offline with no Node process global or external requests");
       return;
@@ -138,7 +139,11 @@ const component = (version, run) => `#!/bin/sh\n# suifleet live browser acceptan
     pass("an account without the manifest's chain is refused before signing");
 
     // Cleanup (storage rebates) and sweep the test key back to the funder.
-    await submit("delete deployment", "buildDeleteDeploymentTx", deployment.deploymentId);
+    await require("./browser/receipt-cleanup-loop.cjs").cleanupDeployment(deployment, undefined, async (record, fleet) => {
+      const result = await live(([d, f]) => window.live.deleteDeploymentStep(d, f), [record, fleet]);
+      if (!result.done) evidence.transactions.push({ label: "delete deployment step", digest: result.digest, status: "success" });
+      return result;
+    });
     await submit("remove device from group", "buildRemoveDeviceFromGroupTx", group.objectId, device.objectId);
     await submit("delete group", "buildDeleteGroupTx", group.objectId);
     await submit("deregister device", "buildDeregisterDeviceTx", { objectId: device.objectId, ownerCapId: device.ownerCapId });
