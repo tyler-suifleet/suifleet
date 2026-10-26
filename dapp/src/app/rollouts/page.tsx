@@ -8,7 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDeployments } from "@/hooks/useDeployments";
 import { buildRolloutTx, rolloutAnnouncements, readRollout, buildAdvanceRolloutTx, buildRolloutControlTx, type Rollout, type RolloutInput } from "@/lib/rollout";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { bpsLabel, fetchRolloutDecisions, rolloutProgress, type RolloutProgress } from "@/lib/rollout-progress";
 import { utc } from "@/lib/device-services";
 import type { DeploymentEvent } from "@/lib/sui";
@@ -36,21 +36,22 @@ export default function RolloutsPage() {
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setPreparing(false); }
   }
+  if (!account) return <ConnectionRequired title="Staged rollouts" description="Release updates gradually with canary cohorts, concurrency limits and health gates." />;
   return <div className="max-w-4xl space-y-4">
     <PageHeader title="Staged rollouts" subtitle="Canary cohorts, bounded admission and audited health gates" />
-    <p>Advance to admit the first cohort. After devices publish their signed post-apply health on chain, advance again to evaluate the gate. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
-    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p>
+    <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Advance to admit the first cohort. After devices publish their signed post-apply health on chain, advance again to evaluate the gate. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
+    <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p></section>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
-    <details className="border p-4"><summary>Create rollout from an authenticated recipe</summary>
-      <form className="space-y-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
+    <details className="border p-5"><summary>Create rollout from an authenticated recipe</summary>
+      <form className="grid gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
         const parsed = cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean));
         return buildRolloutTx({ ...input, cohorts: parsed }, fleet ? undefined : await rolloutAnnouncements(client, account!.address, parsed.flat()), fleet);
       }); }}>
-        <p>Use a recipe and its exact digests from the firmware upload. One cohort per line, with device IDs separated by spaces. Cohorts are an immutable snapshot of direct targets; adding group members never expands it.</p>
-        {(["component", "version", "recipe", "artifactSha256", "recipeSha256"] as const).map(key => <label className="block" key={key}>{key}<input required className="border ml-2 p-1" value={input[key]} onChange={e => setInput({ ...input, [key]: e.target.value })} /></label>)}
-        <label className="block">Cohorts<textarea required className="border block w-full" value={cohorts} onChange={e => setCohorts(e.target.value)} /></label>
-        {([ ["concurrency", "Concurrent outstanding grants"], ["rateCount", "Grants per rolling window"], ["rateWindowMs", "Rate window (ms)"], ["bakeMs", "Bake period (ms)"], ["minimumSamples", "Minimum samples per cohort"], ["failureBps", "Abort failure threshold (basis points, 100 = 1%)"], ["offlineTimeoutMs", "Stall timeout before pause (ms)"] ] as const).map(([key,label]) => <label className="block" key={key}>{label}<input required type="number" min={key === "bakeMs" ? 0 : 1} className="border ml-2 p-1" value={input[key]} onChange={e => setInput({ ...input, [key]: Number(e.target.value) })} /></label>)}
-        <button disabled={pending || !account}>Create without admitting devices</button>
+        <p className="sm:col-span-2 text-sm text-slate-600">Use a recipe and its exact digests from the firmware upload. One cohort per line, with device IDs separated by spaces. Cohorts are an immutable snapshot of direct targets; adding group members never expands it.</p>
+        {(["component", "version", "recipe", "artifactSha256", "recipeSha256"] as const).map(key => <label className="block" key={key}>{key}<input required className="border block w-full mt-1 p-2" value={input[key]} onChange={e => setInput({ ...input, [key]: e.target.value })} /></label>)}
+        <label className="block sm:col-span-2">Cohorts<textarea required className="border block w-full mt-1 min-h-24" value={cohorts} onChange={e => setCohorts(e.target.value)} /></label>
+        {([ ["concurrency", "Concurrent outstanding grants"], ["rateCount", "Grants per rolling window"], ["rateWindowMs", "Rate window (ms)"], ["bakeMs", "Bake period (ms)"], ["minimumSamples", "Minimum samples per cohort"], ["failureBps", "Abort failure threshold (basis points, 100 = 1%)"], ["offlineTimeoutMs", "Stall timeout before pause (ms)"] ] as const).map(([key,label]) => <label className="block" key={key}>{label}<input required type="number" min={key === "bakeMs" ? 0 : 1} className="border block w-full mt-1 p-2" value={input[key]} onChange={e => setInput({ ...input, [key]: Number(e.target.value) })} /></label>)}
+        <button className="justify-self-start bg-blue-700 text-white hover:bg-blue-800" disabled={pending || !account}>Create without admitting devices</button>
       </form>
     </details>
     <RolloutOverview deployments={deployments.filter(d => d.schemaVersion === "3")} select={setSelected} />

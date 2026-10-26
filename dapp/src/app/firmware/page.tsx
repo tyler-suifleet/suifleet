@@ -23,7 +23,7 @@ import { fetchVersion, buildCatalogDeploymentTx, type ComponentVersion } from "@
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { assertComponentRecipe } from "@/lib/recipe-schema";
 import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { ConfigurationFields } from "@/components/ConfigurationFields";
 import Link from "next/link";
 
@@ -198,7 +198,7 @@ export default function FirmwarePage() {
     setter(next);
   }
 
-  if (!account) return <p className="text-sm text-gray-500">Connect your wallet to deploy a component.</p>;
+  if (!account) return <ConnectionRequired title="Deploy component" description="Choose software, select your devices and review an update before deploying." />;
 
   if (step === "done" && txDigest) {
     return (

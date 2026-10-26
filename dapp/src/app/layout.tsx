@@ -31,6 +31,11 @@ const NAV = [
   { href: "/settings",    label: "Fleet settings" },
   { href: "/budget",      label: "Network budget" },
 ];
+const NAV_GROUPS = [
+  { label: "Workspace", routes: ["/", "/get-started"] },
+  { label: "Fleet operations", routes: ["/devices", "/services", "/deployments", "/rollouts", "/components", "/firmware", "/data"] },
+  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/settings", "/budget"] },
+];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -39,12 +44,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <title>SuiFleet</title>
         <meta name="description" content="Decentralized edge fleet management on Sui" />
       </head>
-      <body className="min-h-screen bg-[#f0f2f5] text-gray-900 flex flex-col">
+      <body className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
+        <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:shadow-lg">Skip to content</a>
         <QueryClientProvider client={queryClient}>
           <DAppKitProvider dAppKit={dAppKit}>
             <FleetSelectionProvider>
               {/* Top bar */}
-              <div className="bg-[#0b1628] text-white h-11 flex items-center px-5 gap-3 shrink-0 z-20 border-b border-white/5">
+              <div className="bg-white text-slate-900 min-h-16 flex items-center px-4 md:px-6 gap-3 shrink-0 z-20 border-b border-slate-200">
                 <div className="flex items-center gap-2">
                   <div className="w-6 h-6 rounded bg-[#4DA2FF] flex items-center justify-center shrink-0">
                     <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
@@ -57,9 +63,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   </div>
                   <span className="font-semibold text-sm tracking-tight">SuiFleet</span>
                 </div>
-                <span className="hidden sm:inline text-white/20 text-xs">|</span>
-                <span className="hidden sm:inline text-white/40 text-xs">Edge Fleet Management</span>
-                <div className="ml-auto">
+                <span className="hidden sm:inline text-slate-300 text-xs">|</span>
+                <span className="hidden sm:inline text-slate-500 text-xs">Edge Fleet Management</span>
+                <span className="ml-auto hidden sm:inline-flex rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium capitalize text-slate-600">{NETWORK}</span>
+                <div className="ml-auto sm:ml-0 shrink-0">
                   <ConnectButton />
                 </div>
               </div>
@@ -67,10 +74,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <MobileNav />
               <div className="flex flex-1 overflow-hidden">
                 <Sidebar />
-                <main className="flex-1 min-w-0 overflow-auto p-4 md:p-8">
-                  <FleetSwitcher />
-                  <FleetScope>{children}</FleetScope>
-                  <HistoryStatus />
+                <main id="main-content" className="fleet-content flex-1 min-w-0 p-4 md:p-8 lg:px-10">
+                  <div className="mx-auto w-full max-w-7xl">
+                    <FleetSwitcher />
+                    <FleetScope>{children}</FleetScope>
+                    <HistoryStatus />
+                  </div>
                 </main>
               </div>
             </FleetSelectionProvider>
@@ -106,34 +115,25 @@ function MobileNav() {
 function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="hidden md:flex w-52 bg-[#0b1628] shrink-0 flex-col z-10 border-r border-white/5">
-      <div className="px-3 pt-5 pb-3">
-        <p className="text-[10px] font-semibold text-white/30 uppercase tracking-widest px-1">Manage</p>
-      </div>
-      <nav className="flex-1 space-y-0.5 px-2">
-        {NAV.map(({ href, label }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              className={`flex items-center px-3 py-2 text-sm rounded transition-colors ${
-                active
-                  ? "bg-[#4DA2FF]/15 text-[#4DA2FF] font-medium"
-                  : "text-white/50 hover:bg-white/5 hover:text-white/80"
-              }`}
-            >
-              {label}
-            </Link>
-          );
-        })}
+    <aside className="hidden md:flex w-60 bg-[#0b1628] shrink-0 flex-col border-r border-slate-800">
+      <nav aria-label="Main" className="flex-1 space-y-6 px-3 py-6">
+        {NAV_GROUPS.map(group => <div key={group.label}>
+          <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
+          <ul className="space-y-1">{group.routes.map(href => {
+            const item = NAV.find(item => item.href === href)!;
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            return <li key={href}><Link href={href} aria-current={active ? "page" : undefined}
+              className={`flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${active
+                ? "bg-blue-500/15 text-blue-200 font-semibold ring-1 ring-blue-400/20"
+                : "text-slate-300 hover:bg-white/5 hover:text-white"}`}>
+              <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? "bg-blue-400" : "bg-slate-600"}`} />{item.label}
+            </Link></li>;
+          })}</ul>
+        </div>)}
       </nav>
-      <div className="px-4 py-4 border-t border-white/5">
-        <p className="text-[10px] text-white/25">
-          Network: <span className="text-white/40">{NETWORK}</span>
-        </p>
+      <div className="border-t border-white/10 px-6 py-5 text-xs text-slate-400">
+        Edge fleet management <span className="mt-1 block capitalize">{NETWORK} workspace</span>
       </div>
     </aside>
   );
 }
-

@@ -24,11 +24,11 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 max-w-5xl">
-      <PageHeader title="Dashboard" />
-      <Link href="/get-started" className="block text-sm text-blue-700 underline">New here? Sign in and register your first device</Link>
+      <PageHeader title="Dashboard" subtitle="Your fleet at a glance. Track device health, recent updates and active incidents." />
+      <Link href="/get-started" className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800 hover:bg-blue-100">New here? Sign in and register your first device</Link>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         <StatCard label="Devices (healthy)" value={dl ? "—" : reported ? `${devices.length} (${healthy})` : devices.length} href="/devices" />
         <StatCard label="Device groups" value={gl ? "—" : groups.length} href="/devices" />
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
@@ -159,9 +159,9 @@ export default function DashboardPage() {
 
 function StatCard({ label, value, href }: { label: string; value: number | string; href: string }) {
   return (
-    <Link href={href} className="bg-white border border-gray-200 rounded p-4 hover:border-[#4DA2FF] transition-colors block">
+    <Link href={href} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:border-blue-300 hover:shadow-md transition-all block">
       <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
-      <p className="text-3xl font-light mt-1 text-gray-800">{value}</p>
+      <p className="text-3xl font-semibold tracking-tight mt-3 text-slate-900">{value}</p>
     </Link>
   );
 }
@@ -186,10 +186,10 @@ function TableSkeleton({ cols, rows }: { cols: number; rows: number }) {
 
 function Empty({ msg, cta }: { msg: string; cta?: { label: string; href: string } }) {
   return (
-    <div className="text-center py-8 text-sm text-gray-400">
+    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-4 py-10 text-center text-sm text-slate-500">
       <p>{msg}</p>
       {cta && (
-        <Link href={cta.href} className="mt-2 inline-block text-[#4DA2FF] hover:underline text-xs">
+        <Link href={cta.href} className="mt-2 inline-block font-medium text-blue-700 hover:underline text-sm">
           {cta.label}
         </Link>
       )}

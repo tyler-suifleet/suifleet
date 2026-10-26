@@ -5,10 +5,10 @@ import type { DeviceHealth, FleetStatus } from "@/lib/telemetry";
 
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <div className="mb-2">
-      <h1 className="text-xl font-semibold text-gray-900">{title}</h1>
-      {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
-    </div>
+    <header className="mb-6 space-y-2">
+      <h1 className="text-2xl md:text-3xl font-semibold tracking-tight text-slate-900">{title}</h1>
+      {subtitle && <p className="max-w-3xl text-sm leading-relaxed text-slate-600">{subtitle}</p>}
+    </header>
   );
 }
 
@@ -22,16 +22,16 @@ export function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-white border border-gray-200 rounded">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
-        <h2 className="text-sm font-semibold">{title}</h2>
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-slate-100">
+        <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
         {action && (
-          <Link href={action.href} className="text-xs text-[#4DA2FF] hover:underline">
+          <Link href={action.href} className="text-sm font-medium text-blue-700 hover:underline">
             {action.label}
           </Link>
         )}
       </div>
-      <div className="px-4 py-3">{children}</div>
+      <div className="px-5 py-5 overflow-x-auto">{children}</div>
     </div>
   );
 }
@@ -59,4 +59,19 @@ export function HealthBadge({ health }: { health?: DeviceHealth }) {
       {health ? STATUS_STYLE[health.status].label : "Health not reported"}
     </span>
   );
+}
+
+/** Consistent disconnected states retain the page context and a clear next step. */
+export function ConnectionRequired({ title, description }: { title: string; description: string }) {
+  return <div className="max-w-5xl space-y-6">
+    <PageHeader title={title} subtitle={description} />
+    <section className="rounded-xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div aria-hidden="true" className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M15 10h5v5h-5z"/></svg>
+      </div>
+      <h2 className="font-semibold text-slate-900">Connect your account to continue</h2>
+      <p role="status" className="mt-2 max-w-lg text-sm leading-relaxed text-slate-600">Use the wallet control in the top bar to connect the account that manages your fleet.</p>
+      <Link href="/get-started" className="mt-5 inline-flex text-sm font-medium text-blue-700 hover:underline">New to SuiFleet? Set up your first device →</Link>
+    </section>
+  </div>;
 }
