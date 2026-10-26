@@ -1,3 +1,4 @@
+import type { NamedFleet } from "./customer-fleets";
 import { calls, deployment_manager_ControlBcs } from "./fleet-protocol";
 import { requireManifest, moveType } from "./deployment-manifest";
 import { PACKAGE_ID } from "./constants";
@@ -30,9 +31,13 @@ export function validateControl(c: DeploymentControl) {
   if ((BigInt(c.window_start_ms) !== BigInt(0) || BigInt(c.window_end_ms) !== BigInt(0)) && BigInt(c.window_end_ms) <= BigInt(c.window_start_ms)) throw new Error("Maintenance window end must follow start");
   if (BigInt(c.notice_ms) > BigInt(604800000)) throw new Error("Notice must be at most seven days");
 }
-export function buildDeploymentControlTx(id: string, c: DeploymentControl): Transaction {
+export function buildDeploymentControlTx(id: string, c: DeploymentControl, fleet?: NamedFleet): Transaction {
   requireManifest(); validateControl(c);
   const tx = new Transaction();
+  if (fleet) {
+    tx.moveCall({ target: `${PACKAGE_ID}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(id), tx.pure.u8(c.state), tx.pure.u64(c.not_before_ms), tx.pure.u64(c.expires_ms), tx.pure.u64(c.window_start_ms), tx.pure.u64(c.window_end_ms), tx.pure.u64(c.notice_ms)] });
+    return tx;
+  }
   calls.deployment_manager_set_control(tx, PACKAGE_ID, id, c.state, c.not_before_ms,
     c.expires_ms, c.window_start_ms, c.window_end_ms, c.notice_ms);
   return tx;

@@ -21,8 +21,8 @@ PIN = json.loads((ROOT / "contracts/security-specs/toolchain.json").read_text())
 # Mutations affect only a disposable copy of the actual release implementation.
 MUTATIONS = {
     "return-omit-custody": ("device_registry", "return_device", "dof::add(&mut registry.id, CustodyKey { device_id }, device);", "transfer::public_freeze_object(device);"),
-    "enrollment-claim": ("enrollment", "enroll", "policy.claims.remove(claim);", "let _ = policy.claims.borrow(claim);"),
-    "enrollment-quota": ("enrollment", "enroll", "policy.remaining = policy.remaining - 1;", ""),
+    "enrollment-claim": ("enrollment", "enroll_internal", "policy.claims.remove(claim);", "let _ = policy.claims.borrow(claim);"),
+    "enrollment-quota": ("enrollment", "enroll_internal", "policy.remaining = policy.remaining - 1;", ""),
     "init-untyped-identity": ("device_registry", "security_actual_init", "        transfer::share_object(registry);", "        let mut registry = registry;\n        let device_id = object::id(&registry);\n        df::add(&mut registry.id, IdentityKey { device_id }, false);\n        transfer::share_object(registry);"),
     "binding-legacy-status": ("deployment_manager", "make_deployment", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());", "df::add(&mut record.id, ReceiptsKey {},      new_receipts());\n        df::add(&mut record.id, StatusesKey {}, vec_map::empty<ID, u8>());"),
     "close-authority": ("enrollment", "close", "assert_operator(policy, ctx);", ""),
@@ -40,7 +40,9 @@ MUTATIONS = {
     "binding-recipe": ("deployment_manager", "new_deployment_verified", "df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);", ""),
     "recipe-length": ("deployment_manager", "assert_recipe_hash", "assert!(bytes.length() == 64, EInvalidRecipeHash);", ""),
     "cap-authority": ("device_cap", "assert_signer", "assert!(ctx.sender() == *signer, EWrongSigner);", ""),
-    "receipts-future": ("deployment_manager", "receipts_mut", "assert!(receipts.version <= RECEIPTS_VERSION, EPackageOutdated);", ""),
+    "receipts-future": ("deployment_manager", "receipts_mut", "assert!(receipts.version <= target_version, EPackageOutdated);", ""),
+    "receipts-customer-version": ("deployment_manager", "receipts_mut", "if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else RECEIPTS_VERSION", "RECEIPTS_VERSION"),
+    "receipts-no-upgrade": ("deployment_manager", "receipts_mut", "receipts.version = target_version;", ""),
     "receipts-clear": ("deployment_manager", "receipts_mut", "receipts.statuses = vec_map::empty();", ""),
     "role-authority": ("roles", "revoke", "assert!(ctx.sender() == operator, ENotOperator);", ""),
     "role-remove": ("roles", "revoke", "let _: address = df::remove(device_registry::uid_mut(registry), key);", "let _: address = *df::borrow(device_registry::uid(registry), key);"),

@@ -19,12 +19,35 @@ pub struct Config {
     pub account_id: String,
     #[serde(default)]
     pub archives: Option<crate::fleet_archive::Config>,
+    #[serde(default)]
+    pub managed: Option<ManagedFleet>,
+}
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ManagedFleet {
+    pub customer_id: String,
+    pub fleet_id: String,
 }
 impl Config {
     pub fn validate(&self) -> anyhow::Result<()> {
-        for id in [&self.package_id, &self.type_origin, &self.fleet_id, &self.budget_id,
-            &self.storage_id, &self.writer_id, &self.account_id] { Address::from_str(id)?; }
-        if let Some(archives) = &self.archives { archives.validate()?; }
+        for id in [
+            &self.package_id,
+            &self.type_origin,
+            &self.fleet_id,
+            &self.budget_id,
+            &self.storage_id,
+            &self.writer_id,
+            &self.account_id,
+        ] {
+            Address::from_str(id)?;
+        }
+        if let Some(managed) = &self.managed {
+            Address::from_str(&managed.customer_id)?;
+            Address::from_str(&managed.fleet_id)?;
+        }
+        if let Some(archives) = &self.archives {
+            archives.validate()?;
+        }
         Ok(())
     }
 }
@@ -44,6 +67,24 @@ pub struct Writer {
 }
 impl Config {
     pub async fn read(&self, sui: &SuiClient, device_id: &str) -> anyhow::Result<(Fleet, Writer)> {
+        if let Some(managed) = &self.managed {
+            let operator = sui.operator(device_id).await?;
+            anyhow::ensure!(
+                crate::sui_client::same_id(&operator, &managed.fleet_id),
+                "managed operator mismatch"
+            );
+            let fleet = sui.object(&managed.fleet_id).await?;
+            anyhow::ensure!(
+                crate::sui_client::same_id(
+                    fleet.fields["customer_id"].as_str().unwrap_or(""),
+                    &managed.customer_id
+                ) && crate::sui_client::same_id(
+                    fleet.fields["budget_id"].as_str().unwrap_or(""),
+                    &self.budget_id
+                ),
+                "managed fleet data binding mismatch"
+            );
+        }
         let (kind, owner, bytes) = sui.move_object(&self.fleet_id).await?;
         anyhow::ensure!(same_type(&kind, &format!("{}::fleet_data::FleetData", self.type_origin))
             && matches!(owner, Owner::Shared { .. }), "unexpected fleet-data type/ownership");

@@ -179,6 +179,12 @@ class DriftCheckTest(unittest.TestCase):
         self.assertEqual(self.run_check(source, suffix=".rs", modules=modules), ([], 1))
         self.assert_drift(source.replace('"fleet_data"', '"fleet_datx"'), "is not a function", suffix=".rs", modules=modules)
 
+    def test_daemon_literal_module_assignment(self):
+        modules = {"customer": {"structs": {}, "functions": {"report_status": function()}}}
+        source = 'call.module = "customer".parse().unwrap(); call.function = "report_status".parse().unwrap();'
+        self.assertEqual(self.run_check(source, suffix=".rs", modules=modules), ([], 1))
+        self.assert_drift(source.replace('"customer"', '"custmer"'), "is not a function", suffix=".rs", modules=modules)
+
     def test_daemon_public_and_private_entry_functions_pass(self):
         for visibility, entry in (("Public", False), ("Private", True)):
             with self.subTest(visibility=visibility, entry=entry):

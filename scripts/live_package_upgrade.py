@@ -532,7 +532,9 @@ def run(args):
         return ledger.execute(client, label, command, **kwargs)
 
     def transaction(label, *ptb, budget=None, funding=0):
-        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding)
+        # Fresh publication can consume most of the run ceiling. Never submit
+        # an ordinary PTB with its configured gas budget silently reduced.
+        return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
 
     def created(result, suffix):
         return [c["objectId"] for c in result["objectChanges"] if c["type"] == "created" and c["objectType"].endswith(suffix)]
@@ -713,7 +715,7 @@ def run(args):
                         target = {"cap": upgrade_cap, "package": old}
                         upgraded = step("upgrade to head", lambda persist: mutate("upgrade to head", toolchain.package_submitter(
                             client, tools["build"]["path"], package_dir, common, sender=operator,
-                            upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=PACKAGE_GAS),
+                            upgrade=target, record=built.setdefault("upgrade", {}), persist=persist), gas=ledger.remaining),
                             lambda data, tx: toolchain.verify_package_transaction(data, head_built, sender=operator,
                                                                                   budget=tx["gas_budget"], upgrade=target),
                             legacy=lambda marker: reconciler.legacy_publication(

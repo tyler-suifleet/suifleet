@@ -34,15 +34,19 @@ class Budget:
         self.faucet_attempts += 1
         return request()  # A credit cannot change used/remaining, even on failure.
 
-    def execute(self, client, label, command, *, gas=200_000_000, funding=0, expect='success'):
+    def execute(self, client, label, command, *, gas=200_000_000, funding=0, expect='success', require_full=False):
         """Reserve gas plus funding, execute, then settle to the effects' net
-        cost. `expect='failure'` is for calls that must abort on chain."""
+        cost. `expect='failure'` is for calls that must abort on chain.
+        `require_full` rejects insufficient allowance before invoking the client;
+        it does not increase the ceiling or release any unknown reservation."""
         if gas <= 0 or funding < 0 or expect not in ('success', 'failure'):
             raise ValueError('invalid gas/funding reservation')
         # Refuse a useless tiny budget before even invoking publish/upgrade.
         available = self.remaining - funding
         if available < 2_000_000:
             raise Spent(f'insufficient remaining allowance before {label}')
+        if require_full and available < gas:
+            raise Spent(f'insufficient remaining allowance for full gas budget before {label}')
         reserved = min(gas, available)
         self.used += reserved + funding
         entry = dict(label=label, gas_budget_mist=reserved, funding_mist=funding, status='unknown')

@@ -16,8 +16,12 @@ const wallet = {
     return result(execution === "success");
   },
 };
+// Compile the real TSX provider too; loading the hook below uses a hook fixture.
+assert.equal(typeof loader()("hooks/useFleetSelection.tsx").FleetSelectionProvider, "function");
 const hook = loader({
-  "@tanstack/react-query": { useMutation: (options) => options },
+  "react": { useRef: (current) => ({ current }) },
+  "./useFleetSelection": { useFleetSelection: () => ({ supported: false }) },
+  "@tanstack/react-query": { useMutation: (options) => options, useQueryClient: () => ({ invalidateQueries: async () => {} }) },
   "@mysten/dapp-kit-react": { useCurrentClient: () => client, useDAppKit: () => wallet },
 })("hooks/useFleetTransaction.ts");
 (async () => {

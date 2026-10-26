@@ -5,6 +5,8 @@ import { DAppKitProvider } from "@mysten/dapp-kit-react";
 import dynamic from "next/dynamic";
 import { dAppKit } from "@/lib/dapp-kit";
 import { usePathname } from "next/navigation";
+import { FleetSelectionProvider, FleetScope } from "@/hooks/useFleetSelection";
+import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import Link from "next/link";
@@ -26,7 +28,7 @@ const NAV = [
   { href: "/components", label: "Components" },
   { href: "/firmware",    label: "Deploy component" },
   { href: "/access",      label: "Access policies" },
-  { href: "/handover",    label: "Fleet handover" },
+  { href: "/handover",    label: "Administration" },
   { href: "/settings",    label: "Fleet settings" },
   { href: "/budget",      label: "Network budget" },
 ];
@@ -41,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-[#f0f2f5] text-gray-900 flex flex-col">
         <QueryClientProvider client={queryClient}>
           <DAppKitProvider dAppKit={dAppKit}>
+            <FleetSelectionProvider>
               {/* Top bar */}
               <div className="bg-[#0b1628] text-white h-11 flex items-center px-5 gap-3 shrink-0 z-20 border-b border-white/5">
                 <div className="flex items-center gap-2">
@@ -66,10 +69,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <div className="flex flex-1 overflow-hidden">
                 <Sidebar />
                 <main className="flex-1 min-w-0 overflow-auto p-4 md:p-8">
+                  <FleetSwitcher />
                   <HistoryNotice />
-                  {children}
+                  <FleetScope>{children}</FleetScope>
                 </main>
               </div>
+            </FleetSelectionProvider>
             </DAppKitProvider>
         </QueryClientProvider>
       </body>
