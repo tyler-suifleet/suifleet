@@ -132,6 +132,22 @@ def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, re
     return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
 
 
+def executed_facts(rpc, digest, attempts=10, delay=3, chain=None):
+    """Executed facts for a just-submitted digest once the fullnode indexes it,
+    or None (the outcome then stays unknown and fully charged)."""
+    chain = chain or reconciler.Chain(rpc)
+    for attempt in range(attempts):
+        try:
+            facts = chain.transaction(digest)
+        except reconciler.Uncertain:
+            facts = None
+        if facts:
+            return facts
+        if attempt + 1 < attempts:
+            time.sleep(delay)
+    return None
+
+
 def gas_pools(gas):
     """(address balance, coin total). Gas selection draws one pool, never their sum."""
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
@@ -457,10 +473,25 @@ def run(args):
     network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
+        exact = command[0] == "serialized-tx"
+        if exact:
+            command = toolchain.exact_execution(network_sui, wallet, command[1])
         full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
         if json_output:
             full.append("--json")
         result = subprocess.run(full, text=True, capture_output=True, timeout=600)
+        if exact and result.returncode and '"effects"' not in result.stdout:
+            # Read the digest derived from the signed bytes, never one parsed
+            # from a CLI diagnostic. A submission by this run consumes this
+            # run's allowance even when its effects arrive through gRPC.
+            digest = toolchain.decode(command[command.index("--tx-bytes") + 1])["digest"]
+            facts = executed_facts(rpc_url, digest)
+            if facts:
+                if facts["digest"] != digest:
+                    raise reconciler.Uncertain("submission lookup returned a different transaction digest")
+                _, recovered = reconciler.settle(facts, operator)
+                recovered.pop("reconciled")
+                return recovered
         if result.returncode and check and not (json_output and '"effects"' in result.stdout):
             raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
         if not json_output:
@@ -603,7 +634,7 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            return reconciler.submit_retained(client, tx, facts_reader, operator)  # Same digest, at most once.
+                            return client("serialized-tx", tx["tx_bytes"])  # Signs and submits these exact bytes.
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
@@ -621,11 +652,13 @@ def run(args):
                                 marker, chain=facts_reader, operator=operator, inspect=toolchain.decode, verify=verify,
                                 resubmit=resubmit(retry), now=time.time(), legacy=legacy)
                         except Exception:
-                            # Only a resubmission with failed execution effects is known.
-                            if ledger.evidence and ledger.evidence[-1].get("label") == retry \
-                                    and ledger.evidence[-1].get("status") == "failure":
-                                publication.pop("pending_operation")
-                            raise
+                            # Only a resubmission with failed execution effects is known:
+                            # it created nothing, exactly like a reconciled failure.
+                            failed = ledger.evidence[-1] if ledger.evidence else {}
+                            if failed.get("label") != retry or failed.get("status") != "failure":
+                                raise
+                            outcome, value = "failed", {"digest": failed.get("digest"), "gas_mist": failed.get("gas_mist"),
+                                                        "effects": {"status": {"status": "failure"}}}
                         finally:
                             save_state(state_path, state)  # Keeps observation progress, never drops uncertainty.
                         entry = {"label": label, "outcome": outcome, "legacy": bool(marker.get("legacy"))}
@@ -921,7 +954,10 @@ if __name__ == "__main__":
     # publish 0.349 + head upgrade 0.356, run 40184514226) before setup,
     # device funding, deployments and cleanup. After SF-136 a fresh pair is
     # ~0.55 + ~0.56 SUI of packages, about 1.2 SUI in total (run 40238821132).
-    parser.add_argument("--max-spend-mist", type=int, default=1_400_000_000)
+    # SF-127 run 40246935467 settled 1.221 SUI of current-main packages and setup
+    # before its base deployment; the full 0.2-SUI deployment and cleanup
+    # reservations must still fit.
+    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")

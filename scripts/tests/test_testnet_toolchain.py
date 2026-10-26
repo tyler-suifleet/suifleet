@@ -226,6 +226,34 @@ class VerifyBeforeSign(unittest.TestCase):
                     tc.verify_package_transaction(transaction(**spec), BUILT, sender=SENDER, budget=400_000_000,
                                                   upgrade=expected)
 
+    def test_exact_execution_signs_the_verified_bytes_only(self):
+        # `sui client serialized-tx` re-derived a fresh ValidDuring nonce, so
+        # the retained digest never executed (runs 40238821132/40243584986).
+        with tempfile.TemporaryDirectory() as root:
+            wallet = Path(root) / 'client.yaml'
+            wallet.write_text(f"keystore:\n  File: {root}/sui.keystore\nenvs: []\nactive_address: '{SENDER}'\n")
+            calls = []
+
+            def signer(raw=None, address=SENDER, code=0):
+                def run(command, **kwargs):
+                    calls.append(command)
+                    data = command[command.index('--data') + 1]
+                    return SimpleNamespace(returncode=code, stderr='refused', stdout=json.dumps(
+                        {'suiAddress': address, 'rawTxData': raw or data, 'suiSignature': 'SIG'}))
+                return run
+            self.assertEqual(tc.exact_execution('/n/sui', wallet, 'BYTES', run=signer()),
+                             ['execute-signed-tx', '--tx-bytes', 'BYTES', '--signatures', 'SIG'])
+            self.assertEqual(calls[0][:4], ['/n/sui', 'keytool', '--keystore-path', f'{root}/sui.keystore'])
+            self.assertEqual(calls[0][calls[0].index('--address') + 1], tc.normal(SENDER))
+            for run, message in ((signer(raw='OTHER'), 'exact verified bytes'),
+                                 (signer(address='0x' + '0f' * 32), 'exact verified bytes'),
+                                 (signer(code=1), 'could not be signed')):
+                with self.assertRaisesRegex(tc.NotSubmitted, message):
+                    tc.exact_execution('/n/sui', wallet, 'BYTES', run=run)
+            wallet.write_text("keystore:\n  File: relative.keystore\nactive_address: '" + SENDER + "'\n")
+            with self.assertRaisesRegex(tc.NotSubmitted, 'absolute'):
+                tc.exact_execution('/n/sui', wallet, 'BYTES', run=signer())
+
     def test_submitter_signs_only_verified_bytes(self):
         with tempfile.TemporaryDirectory() as root:
             package = Path(root)

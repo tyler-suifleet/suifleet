@@ -268,6 +268,42 @@ def _serialized(client, command, budget):
     return tx_bytes
 
 
+def wallet_signer(wallet):
+    """(file keystore, active address) named by an explicit client.yaml."""
+    text = Path(wallet).read_text()
+    paths = re.findall(r'^\s+File:\s*(\S.*?)\s*$', text, re.MULTILINE)
+    addresses = re.findall(r'''^active_address:\s*["']?(0x[0-9a-fA-F]+)["']?\s*$''', text, re.MULTILINE)
+    if len(paths) != 1 or len(addresses) != 1:
+        raise NotSubmitted('wallet must name one file keystore and one active address')
+    keystore = paths[0].strip('"\'')
+    if not Path(keystore).is_absolute():
+        raise NotSubmitted('wallet keystore path must be absolute')
+    return keystore, normal(addresses[0])
+
+
+def exact_execution(network_sui, wallet, tx_bytes, run=None):
+    """`sui client` arguments that execute exactly `tx_bytes`.
+
+    `sui client serialized-tx` re-derives a ValidDuring expiration with a fresh
+    nonce for address-balance gas (1.82.1), so the transaction that executes is
+    not the verified, persisted one and its digest can never be reconciled.
+    A signature over the exact bytes pins the digest instead."""
+    keystore, address = wallet_signer(wallet)
+    signed = (run or subprocess.run)([str(network_sui), 'keytool', '--keystore-path', keystore, 'sign',
+                  '--address', address, '--data', tx_bytes, '--json'],
+                 capture_output=True, text=True, timeout=120)
+    if signed.returncode:
+        raise NotSubmitted(f'transaction could not be signed:\n{signed.stderr[-500:]}')
+    try:
+        out = json.loads(signed.stdout[signed.stdout.index('{'):])
+        signature, raw, signer = out['suiSignature'], out['rawTxData'], normal(out['suiAddress'])
+    except (ValueError, KeyError, TypeError) as error:
+        raise NotSubmitted(f'unreadable signing output: {error}') from error
+    if raw != tx_bytes or signer != address:
+        raise NotSubmitted('signer did not sign the exact verified bytes with the wallet account')
+    return ['execute-signed-tx', '--tx-bytes', tx_bytes, '--signatures', signature]
+
+
 def ptb_submitter(client, ptb, *, sender, calls, run=subprocess.run, inspect=decode, persist=None):
     """Callable for Budget.execute: build, verify and persist a setup PTB, then submit."""
     def submit(budget):

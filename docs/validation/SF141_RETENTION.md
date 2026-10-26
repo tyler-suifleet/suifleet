@@ -554,3 +554,44 @@ fresh independent review and the SF-129 merge dependency remain required.
 Physical/mainnet/provider/manual-wallet acceptance remains deferred and unrun in
 [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+### PR #307 predecessor submission integration (2026-10-25)
+
+Integrated the current SF-129 PR #279 head
+`7b04f38eba94dd0ed977164d3b4a0e29c6d1b507`, including its signed-byte
+execution path and full deployment/cleanup gas reservations. Current main and
+the review snapshot base are both
+`b819cb2010ac4890e4d2d3bb5dad62b9df9b6a8d`; main was fetched and merged
+(already contained). SF-129 remains OPEN and a strict merge prerequisite.
+This source pin replaces earlier pins for continued dependent development;
+it does not establish SF-129 merge or public expiry-window rebate acceptance.
+
+Removed the duplicate `submit_retained` recovery layer. All retained submissions
+now use `exact_execution` (sign exact persisted bytes, then execute-signed-tx),
+so CLI nonce regeneration cannot change their digest. The single effects recovery
+path derives the lookup digest from signed bytes, checks returned digest and
+verified sender/gas owner, and drops `reconciled` for an execution submitted by
+this run. Known failed effects clear only the failed pending operation, charge
+actual net gas, and permit a fresh bounded publication. Missing/unavailable,
+foreign or mismatched facts preserve the pending bytes and full reservation.
+Recovery does not submit another transaction. The inherited bounded gRPC
+indexing retry remains in `executed_facts`.
+
+Adapted the old exception-based regression to the predecessor's known-failure
+flow: the durable fresh intent remains after a failed retained publication.
+Added full offline run-flow tests for successful recovery/this-run attribution
+and absent/unavailable/foreign sender/foreign payer/wrong-digest negatives.
+
+Fresh verification on the integrated repair:
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  138 tests, OK (one existing skip), 3.708 seconds.
+- `git diff --check` and `git diff --cached --check`: passed.
+- No Move/Rust/frontend/OTA/localnet suites rerun for this Python-harness-only
+  delta; earlier receipts remain historical evidence.
+- No public network writes, funding, deployment or hardware operations ran.
+
+Hosted exact-head/current-base ordinary/security CI, automatic public-Testnet
+acceptance and fresh independent review remain pending after push and are not
+watched or waived. The coordinator alone merges, after verifying SF-129 merged.
+Physical/mainnet/production-provider/manual-wallet acceptance stays deferred and
+unrun in #32/#159. This repair handoff is not approval.
