@@ -723,3 +723,50 @@ merged form, enforce exact-head/current-base CI and automatic testnet, and obtai
 fresh independent review. Hosted CI is pending and was not polled. No live writes
 or hardware operations ran. Public expiry-window rebate and deferred physical,
 mainnet, provider and manual-wallet evidence remain unclaimed (#32/#159).
+
+## 2026-10-26 receipt-sharding base integration
+
+The review of `2668b49a` reported no actionable code defects. Merged snapshot
+and fetched current main `8ab0aefa96223d974775f08d0a6314ea27b411c1`
+without conflicts, incorporating receipt sharding and its client/runtime APIs.
+The merge commit is `d4f090f487635f27714732a0ebbf0b51351d62b7`.
+
+Fresh verification used the pinned `suifleet-dev:sf035` image, network disabled,
+with disposable SF141 caches and read-only Git metadata for the local chain:
+
+- `make INSIDE_DEV_CONTAINER=1 test-contracts check-interfaces`: passed all
+  three Move packages, compiled ABI comparison (1077 references, no drift),
+  generated interfaces (14 modules) and protocol/catalog/control/rollout/
+  receipt-shard/browser-cleanup/inbox regressions.
+- `CARGO_NET_OFFLINE=true make INSIDE_DEV_CONTAINER=1 edge-test`: passed
+  default 462 tests and PKCS11 464 tests, four existing ignored tests per variant.
+- `cd dapp && pnpm typecheck && pnpm build`: passed.
+- `SF141_RETENTION=1 SF129_RECEIPT=/tmp/pr307-current-localnet.json python3
+  scripts/test_reclaim_localnet.py`: passed real existing-object upgrade and
+  per-stream purchase/expiry/reclaim. Temporary chain keys remained disposable.
+- Host `node scripts/test_stream_retention.cjs`,
+  `test_stream_retention_panel.cjs`, `test_storage_reclaim.cjs` and
+  `test_storage_reclaim_panel.cjs`: passed.
+- Host `python3 -m unittest discover -s scripts/tests -p PATTERN`:
+  `test_testnet*.py` 145 OK (one skip), `test_live*.py` 66 OK,
+  `test_release*.py` 27 OK. These are offline mocked-network tests.
+
+The initial host Rust invocation could not select a default toolchain; the
+successful Rust checks above used the pinned image instead. No test failure
+was ignored or replaced. No public-wallet writes, faucet, deployment or physical
+operation ran.
+
+Read-only PR metadata still reports SF-129 / PR #279 OPEN at
+`3b0bcb5b663dac61f81497d8e6d9f2de6d185551`, no merge commit. Its verified
+merge and reconciliation remain required before SF-141 integration. Hosted
+CI and automatic testnet for the pushed head remain pending, unpolled; fresh
+independent review remains required. The coordinator alone merges. Public
+expiry-window rebate and deferred physical/mainnet/provider/manual-wallet
+acceptance remain unrun in #32/#159. This handoff is not approval.
+
+- `CARGO_NET_OFFLINE=true make INSIDE_DEV_CONTAINER=1 test-ota`: the complete
+  rebuilt-debug-daemon suite passed, including supervisor/configuration/daemon
+  handoff, desired state/inbox/handover, controls/telemetry/logs/console,
+  rollout/cadence/budget/settings/recovery and all five fleet-data variants,
+  ending with compact-history + quilt + stream-retention. This is simulator
+  evidence, not physical boot/recovery or public-provider acceptance.
