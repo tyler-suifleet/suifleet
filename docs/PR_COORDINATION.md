@@ -895,3 +895,62 @@ it. Raising the ceiling preserves existing attempt counts, exponential backoff,
 identical-run deduplication, ownership and all review/merge gates. It does not
 increase any testnet spending allowance or automatically replay uncertain
 transactions. A fully successful CI snapshot ends the failure episode as before.
+
+
+### Expired-fixture acceptance readiness (SF-156)
+
+`acceptance_watch.py` is a standalone one-shot operator helper for the existing
+SF-129/PR279 Testnet fixture. Its user timer checks every 15 minutes while WSL is
+running. It reads the existing owner and the read-only `reclaim_plan.cjs` output;
+epoch 563 alone is insufficient: the intended device/writer must have an eligible
+expired anchor. Before that condition, no model worker, wallet lock or transaction
+is started. Node probes time out after 60 seconds.
+
+Once ready, it posts a uniquely marked readiness observation and requests a fix
+through the installed coordinator's normal transactional per-PR reservation and
+ownership/clean-tree/head checks. The existing Claude claim and branch are kept.
+It does not run another coordinator scan or merger. Existing active/reserved or
+uncertain jobs prevent a second dispatch; normal coordinator collection handles
+its persisted worker/launch receipts. The owner must independently verify chain,
+account, authority, bytecode/origins and expiry before the bounded effects-checked
+reclaim run. Readiness is not successful acceptance or approval.
+
+The private `~/.local/state/pr-coordinator/sf129-expiry-watch.json` journal records
+waiting/dispatch state without claim tokens. A dispatched reservation is one-shot
+across timer/service restarts. Supplied reclaim evidence stops further dispatch,
+but still needs independent review. An interrupted launch with no matching durable
+reservation, or a failed/uncertain reservation, reports `operator_required` and
+never replays automatically. Inspect the exact claim/process/job evidence before
+any explicit recovery; do not delete the journal just to force another worker.
+Probe failures fail closed and are retried on the next timer invocation. Errors
+record their type, without exception argv that might contain a claim token.
+
+Install **tested committed source** under the user's maintenance authorization:
+
+```bash
+python3 -m unittest discover -s tools/pr-coordinator/tests -p test_acceptance_watch.py -v
+# Run before enabling execution: only a read-only readiness probe.
+python3 tools/pr-coordinator/acceptance_watch.py \
+  --config ~/.config/pr-coordinator/config.json \
+  --state ~/.local/state/pr-coordinator \
+  --runtime ~/.local/lib/pr-coordinator/current
+install -m 0700 tools/pr-coordinator/acceptance_watch.py ~/.local/lib/pr-coordinator/acceptance_watch.py
+install -m 0644 tools/pr-coordinator/acceptance-watch.service tools/pr-coordinator/acceptance-watch.timer ~/.config/systemd/user/
+# Preserve a working Node/tool PATH; the system Node may be too old for the SDK.
+python3 -c 'import os,shutil; print("PATH="+os.path.dirname(shutil.which("node"))+":"+os.path.expanduser("~/.local/bin")+":"+os.path.expanduser("~/.cargo/bin")+":"+os.defpath)' > ~/.config/pr-coordinator/acceptance-watch.env
+systemctl --user daemon-reload
+systemctl --user enable --now acceptance-watch.timer
+systemctl --user start acceptance-watch.service
+systemctl --user status acceptance-watch.timer
+journalctl --user -u acceptance-watch.service -n 10 --no-pager
+cat ~/.local/state/pr-coordinator/sf129-expiry-watch.json
+```
+
+The service uses `KillMode=process`, preserving any properly launched worker when
+the one-shot helper exits. Its main execution timeout is four minutes; an uncertain
+launch remains journaled rather than retried blindly. Disabling the timer stops
+future probes, not a worker already running. This fixture-specific helper does not
+provision production keys, authorize Mainnet/hardware work, change CI allowances,
+mark tickets Done, reset repair budgets or relax independent merge gates. The
+standalone helper is installed separately from the coordinator generation; record
+its exact commit/hash in the local installation receipt when updating it.
