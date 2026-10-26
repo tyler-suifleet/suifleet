@@ -80,7 +80,7 @@ DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
-PACKAGE_GAS = 400_000_000  # Publish/upgrade budget: the largest single gas reservation.
+PACKAGE_GAS = live_common.PACKAGE_GAS  # Base publish budget: the largest fixed gas reservation.
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",

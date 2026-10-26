@@ -201,12 +201,29 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[1], '700000000', 'evidence/upgrade-security.json'),
+            for command, ceiling, evidence in ((calls[1], '1500000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
                 self.assertEqual(command[command.index('--state') + 1], state)
                 self.assertEqual(command[command.index('--evidence') + 1], evidence)
                 self.assertNotIn('--faucet-tool', command)  # One faucet request per run, package gate only.
+
+    def test_fresh_sf136_packages_fit_their_budgets(self):
+        # A fresh base publish of current main settled 532,828,600 MIST and its
+        # unchanged head upgrade 536,150,620 (SF-154 localnet rehearsal); the
+        # former 0.4-SUI base budget failed InsufficientGas (run 40261665249).
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
+        from live_common import PACKAGE_GAS
+        base, head = 532_828_600, 536_150_620
+        self.assertGreater(PACKAGE_GAS, base)
+        security = dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security']
+        for ceiling, setup in ((PACKAGE_UPGRADE_CEILING, 60_000_000), (security, 40_000_000 + 30_000_000)):
+            ledger = Budget(ceiling, [])
+            ledger.grant(base)
+            ledger.grant(setup)  # Setup PTBs and device funding before the upgrade.
+            ledger.grant(head)
+            # Later operator PTBs still reserve their whole 0.2-SUI budget.
+            self.assertGreaterEqual(ledger.remaining, 200_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
