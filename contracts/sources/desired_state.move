@@ -202,14 +202,17 @@ module sui_edge::desired_state {
 
     /// Delete the record and return its storage rebate once every target group
     /// is confirmed. Catalog bindings are removed by their defining module
-    /// first; devices already refuse deleted records.
+    /// first; devices already refuse deleted records. A sharded record aborts
+    /// until its receipt cleanup has retired every root.
     public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &mut TxContext) {
         let Retirement { deployment_id, managed, pending } = retirement;
         assert!(object::id(&deployment) == deployment_id, EWrongRecord);
         assert!(pending.is_empty(), EUnconfirmed);
         // Assigned to a plan after `begin_retirement`: its groups were never checked.
         assert!(managed || !deployment_manager::is_managed(&deployment), ERetiring);
-        let schema = deployment_manager::schema_version(&deployment);
+        // Sharded records (SF-127) keep their deletion path in the receipt
+        // directory; their receipt roots must be retired first.
+        let schema = deployment_manager::receipt_schema(&deployment);
         if (schema == 2) component_catalog::delete_deployment(deployment, ctx)
         else if (schema == 3) deployment_manager::delete_rollout(deployment, ctx)
         else deployment_manager::delete_deployment(deployment, ctx);
