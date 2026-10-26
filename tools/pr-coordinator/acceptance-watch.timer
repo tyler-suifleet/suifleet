@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll SuiFleet acceptance expiry without an idle model worker
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+AccuracySec=30s
+Unit=acceptance-watch.service
+
+[Install]
+WantedBy=timers.target

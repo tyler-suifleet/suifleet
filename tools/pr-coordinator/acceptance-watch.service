@@ -1,0 +1,10 @@
+[Unit]
+Description=Check SuiFleet expired-fixture readiness and dispatch its existing owner
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/pr-coordinator/acceptance-watch.env
+ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/acceptance_watch.py --config %h/.config/pr-coordinator/config.json --state %h/.local/state/pr-coordinator --runtime %h/.local/lib/pr-coordinator/current --execute
+TimeoutStartSec=240
+KillMode=process
+UMask=0077
