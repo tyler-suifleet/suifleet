@@ -201,7 +201,7 @@ Cost components per device per month:
 
 - On-chain health: $0.003 daily, $0.072 hourly.
 - Log archives: $0.004 weekly, $0.032 daily for 100 MB a month. Both require deposit reclaim; the weekly figure is about $0.10 before [SF-129/#264](https://github.com/tyler-suifleet/suifleet/issues/264).
-- Deployment receipts: about $0.00035 each (four a month: $0.0014).
+- Deployment receipts: about $0.00524 each (four a month: $0.021), using SF-127 v3 isolated-localnet effects rescaled to Mainnet reference gas price 100 MIST at $1/SUI. Later cleanup rebates accrue to the cleanup sender, not the reporting device.
 - RPC:
   - $0 at 1,000 devices, on the public endpoint or Chainstack's free tier.
   - $49–199 a month on a paid plan at 10,000 devices.

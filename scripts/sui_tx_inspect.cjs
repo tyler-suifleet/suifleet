@@ -20,7 +20,8 @@ function input(value) {
   if (value.$kind === 'Object') {
     const kind = value.Object.$kind;
     const object = value.Object[kind];
-    return { kind, objectId: object.objectId };
+    return { kind, objectId: object.objectId,
+      ...(kind === 'ImmOrOwnedObject' ? { version: String(object.version) } : {}) };
   }
   return { kind: value.$kind };
 }

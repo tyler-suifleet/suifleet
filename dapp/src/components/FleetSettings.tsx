@@ -217,7 +217,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     </div>}
 
     <div className="text-xs text-gray-700 border rounded p-2" data-testid="quote">
-      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: Testnet measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
+      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: SF-127 isolated-localnet receipt and Testnet health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
       <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${walrusError})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
       <p>USD: SUI ${quote.usd.SUI}, WAL ${quote.usd.WAL}, {quote.usdSource}, {quoteDate(quote.usdObservedAt)}.{" "}
         <button type="button" className="underline" disabled={usdLoading} onClick={() => void refreshUsd()}>Fetch live USD prices from CoinGecko</button>

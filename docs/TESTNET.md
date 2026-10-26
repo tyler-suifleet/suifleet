@@ -336,6 +336,32 @@ The same follow-up also repairs [run 38692509474](https://github.com/tyler-suifl
 
 The first SF-045 machine test at head `532ffd4a588f` on base `38beecd423ff` passed all application and independent receipt-writing effects checks. Its low-balance retry exercised automatic one-attempt faucet replenishment (return code 0, balance after credit 1,491,061,660 MIST), then spent 138,470,100 MIST net within a 187,399,364 MIST conservative allowance. Contract trees were identical, so this run deliberately skipped upgrade and tested a fresh current package. That is genuine machine evidence, not successful full Actions execution, and a later repaired head must obtain its own exact-head receipt/status before integration.
 
+SF-127 current-main integration consumes PR279 shared harness corrections at
+`50df059cb127ff2c19dcda29c0f901c15e9b7b09`: package publish reservation 0.7 SUI,
+package-run ceiling 1.4 SUI, upgrade-security 0.85 SUI, wallet 0.15 SUI; selected
+sequence preflight requires 2.4 SUI. These supersede the smaller historical
+figures above. Reservations settle against actual effects; failed/unknown charges,
+non-replenishing allowances, chain/authority checks and single-shot submission
+are unchanged. No live result is implied by the budget projection regressions.
+
+**SF-127 full-reservation repair (run 40246935467).** The effects artifact records
+536,721,200 MIST for base publication (`nugr1oBVkWNSDbnq7C6cLQcTdZBCJeLoRA6TvLoB2MG`)
+and 583,442,163 MIST for the compatible upgrade (`HsGi515cuVWZPKJH48PdGWBAYaDkmKV2X25UkFDmrMQ2`).
+Eight successful transactions plus device funding consumed 1,221,160,708 MIST.
+The 178,839,292 MIST remainder under the 1.4-SUI ceiling could not reserve the
+required 200,000,000 MIST for either the base deployment or bounded abort
+cleanup; both were refused before submission. This was allowance exhaustion,
+not a faucet or wallet-balance failure. The package gate now has a strict
+1.6-SUI allowance (CLI default and CI); upgrade-security remains 0.85 SUI and
+wallet 0.15 SUI, for a 2.6-SUI selected-suite preflight, plus any retained
+quarantine reservation. This supersedes the 1.4/2.4 figures immediately above.
+An offline regression replays the exact settled charges, reproduces both old
+refusals and verifies full deployment/cleanup reservations with a synthetic
+50M deployment cost, retained unknown cleanup charge and strict overspend
+refusal. No new live success is claimed; current-head CI/testnet and independent
+review remain required. The existing encrypted fixture and historical uncertain
+reservations must be preserved; no blind replay or identical publication.
+
 ## Read-only fleet cost collection (SF-155)
 
 The [resumable cost collector](business/FLEET_COST_COLLECTION.md) observes existing

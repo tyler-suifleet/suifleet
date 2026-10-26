@@ -77,6 +77,22 @@ const load = loader(), sui = load('lib/sui.ts'), inbox = load('lib/fleet-inbox.t
   assert.deepEqual(fns(rollout.buildRolloutTx(input, { groups: [], devices: [{ deviceId: '0xde', ownerCapId: '0xc1', exists: true }] })),
     ['deployment_manager::rollout_policy', 'deployment_manager::new_rollout_verified', 'fleet_inbox::announce_device', 'deployment_manager::share_deployment']);
 
+  // Both optional origin groups coexist: initialize receipt roots before
+  // announcing the same record, then share it only after all mutations.
+  const combined = structuredClone(m);
+  for (const name of protocol.optional_type_origins.receipt_shards) combined.type_origins[name] = n('0x127');
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(combined);
+  const combinedLoad = loader();
+  const sharded = combinedLoad('lib/sui.ts').buildCreateDeploymentTx('app', '1', 'blob', DIGEST, DIGEST,
+    ['0x10'], ['0xde'], false, { groups: ['0x10'], devices: [] });
+  assert.deepEqual(fns(sharded), ['deployment_manager::new_deployment_verified',
+    'deployment_manager::begin_sharded_receipts', 'fleet_inbox::announce_group', 'deployment_manager::share_deployment']);
+  const shardedRollout = combinedLoad('lib/rollout.ts').buildRolloutTx(input,
+    { groups: [], devices: [{ deviceId: '0xde', ownerCapId: '0xc1', exists: true }] });
+  assert.deepEqual(fns(shardedRollout), ['deployment_manager::rollout_policy', 'deployment_manager::new_rollout_verified',
+    'deployment_manager::begin_sharded_receipts', 'fleet_inbox::announce_device', 'deployment_manager::share_deployment']);
+  process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(m);
+
   // Inbox existence: missing is absent, a wrong type fails closed.
   const inboxType = `${ORIGIN}::fleet_inbox::DeviceInbox`;
   const found = await inbox.existingInboxes({ getObjects: async ({ objectIds }) => ({ objects: objectIds.map((id, i) =>

@@ -384,9 +384,16 @@ registration, now shows these steps:
 The page still checks the network and account, and explains that wallet gas
 and the fleet budget differ.
 
-**Estimate** (`lib/network-costs.ts`). It uses the SF-054 measurements:
-- the applied-receipt net gas (1,251,568 MIST);
-- Walrus Mainnet rates (57,321 FROST per MiB-epoch, 104,135 FROST per MiB
+**Estimate** (`lib/network-costs.ts`). It combines recorded measurements:
+
+- the highest measured single v3 receipt at 1,000 targets in
+  [SF-127 localnet evidence](validation/sf127-localnet.json): 1,070,000 MIST
+  computation + 9,515,200 storage - 4,378,968 rebate = 6,206,232 MIST
+  at reference gas price 1,000. At the recorded Mainnet price of 100,
+  computation alone scales, giving 5,243,232 MIST (about $0.00514).
+  This replaces the historical v2 receipt estimate. Later bounded cleanup
+  rebates accrue to the cleanup sender and are not credited to device gas;
+- the SF-054 Walrus Mainnet rates (57,321 FROST per MiB-epoch, 104,135 FROST per MiB
   written);
 - the on-chain RS2 encoded length, which reproduces SF-054's exact sizes;
 - the recorded spot quotes.

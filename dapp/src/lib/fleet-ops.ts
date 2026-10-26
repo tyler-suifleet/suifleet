@@ -10,8 +10,9 @@ import { readIdentities } from './telemetry';
 import { announcementsFor, existingInboxes, inboxId, inboxSupported, withInbox } from './fleet-inbox';
 
 export interface Operation {
-  command: 'add-devices' | 'remove-devices' | 'create-deployment';
+  command: 'add-devices' | 'remove-devices' | 'create-deployment' | 'migrate-receipts' | 'cleanup-receipts';
   sender: string;
+  deployment?: string;
   fleetId?: string;
   devices?: string[];
   group?: string;
@@ -85,6 +86,13 @@ export async function buildOperation(client: SuiGrpcClient, request: Operation):
   const fleet = request.fleetId ? fleets.find(f => f.id === id(request.fleetId!)) : undefined;
   if (request.fleetId && !fleet?.administrator) throw Error("Fleet administrator authority is missing");
   const [devices, groups] = await Promise.all([fleet ? fetchFleetDevices(client, fleet.devices) : fetchDevices(client, sender), fetchGroups(client, fleet?.id ?? sender)]);
+  if (request.command === 'migrate-receipts' || request.command === 'cleanup-receipts') {
+    if (!request.deployment) throw Error('deployment required');
+    const { deployment_manager_DeploymentRecordBcs } = await import('./fleet-protocol');
+    const object = (await client.getObject({ objectId: id(request.deployment), include: { content: true } })).object;
+    if (id(deployment_manager_DeploymentRecordBcs.parse(object.content).creator) !== (fleet?.id ?? sender)) throw Error('Sender is not deployment creator');
+    return (await import('./receipt-shards')).buildReceiptMaintenanceTx(client, id(request.deployment), request.command === 'migrate-receipts' ? 'migrate' : 'cleanup', fleet);
+  }
   const identities = await readIdentities(client, devices.map(d => d.objectId));
   const active = new Set(devices.filter((_, index) => identities[index] && !identities[index]!.revoked).map(device => id(device.objectId)));
   const requested = [...(request.devices ?? []), ...(request.targetDevices ?? [])].map(value => id(value));

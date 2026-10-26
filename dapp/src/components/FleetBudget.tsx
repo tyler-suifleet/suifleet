@@ -87,7 +87,7 @@ export function EstimatePanel({ onEstimate }: { onEstimate?: (estimate: Estimate
         <tr><td className="p-1">Indicative value ({quote.usdSource}, {quoteDate(quote.usdObservedAt)})</td><td className="p-1 text-right">≈ ${result.estimate.usd.total.toFixed(2)}</td></tr>
       </tbody>
     </table>}
-    <p className="text-xs text-gray-600">From SF-054 Testnet measurements rescaled to {quote.referenceGasPrice.toString()} MIST gas ({quote.gasSource}, {quoteDate(quote.gasObservedAt)}): a status receipt costs about {sui(rescaled(quote).receiptNetMist)} net. Walrus {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} FROST per MiB written ({quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}). An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p>
+    <p className="text-xs text-gray-600">From SF-054 Testnet and SF-127 isolated-localnet measurements rescaled to {quote.referenceGasPrice.toString()} MIST gas ({quote.gasSource}, {quoteDate(quote.gasObservedAt)}): a status receipt costs about {sui(rescaled(quote).receiptNetMist)} net. Walrus {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} FROST per MiB written ({quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}). An estimate, not a quote: the wallet shows each transaction&apos;s actual cost. {storage.reason ?? ""}</p>
   </div>;
 }
 

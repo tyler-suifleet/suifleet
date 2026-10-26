@@ -248,11 +248,21 @@ def run(binary):
                     # Persist an outcome before funding fails, without delivering it.
                     sim.allow_reports = False
                     sim.add("0x202")
-                    ota.wait_for(lambda: "0x202" in state().get("deployments", {}), "deployment not applied", process)
+                    # Journal admission precedes command completion. Wait for
+                    # the durable terminal outcome before stopping the daemon;
+                    # an admitted apply alone becomes indeterminate on restart.
+                    ota.wait_for(lambda: state().get("deployments", {}).get("0x202", {}).get("status") == 1,
+                                 "deployment not applied", process)
+                    # Change the artificial account/gas snapshot while stopped.
+                    # Keep the no-refused-draw check independent of concurrent
+                    # fixture changes between a top-up read and simulation.
+                    stop(process)
+                    process = None
                     # Allowance used up, too little gas to report: queue and explain.
                     sim.account["drawn_in_period"] = sim.account["limits"]["period_allowance"]
                     sim.gas = REPORT_COST - 1
                     sim.add("0x203")
+                    process = start()
                     ota.wait_for(lambda: "used up" in (funding().get("blocked") or ""), "exhaustion not recorded", process)
                     time.sleep(2.5)
                     assert reported("0x202") is False and sim.draws == [DRAW], (state()["deployments"]["0x202"], sim.draws)

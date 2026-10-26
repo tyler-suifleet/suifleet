@@ -80,6 +80,11 @@ introduction package; the dApp verifies that origin before reading a handover.
 Existing DeviceGroup/DeploymentRecord/DeviceOwnerCap origins and layouts remain
 unchanged. See [fleet authority migration](FLEET_HANDOVER.md).
 
+SF-127 adds optional `receipt_shards` introduction origins and schema 4's receipt
+barrier, with the original payload schema stored in the directory. Legacy v2
+receipt signatures/layouts remain compatible; v3 uses separate immutable-deployment
+report calls and bounded shard-aware getters. See [sharded receipts](SHARDED_RECEIPTS.md)
+for migration, early-package deletion protection, rollout settlement and cleanup.
 The additive SF-125 `fleet_inbox` module (device inboxes and group heads) and the
 `device_group` member index (`MemberKey`, `IndexKey`, `GroupIndex`, `GroupIndexed`)
 are in the same reviewed ABI, with an all-or-none optional origin group

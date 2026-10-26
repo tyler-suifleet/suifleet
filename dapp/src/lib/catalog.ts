@@ -24,6 +24,7 @@ export function buildCatalogDeploymentTx(version:string,groups:string[],devices:
   if (fleet) {
     const [record] = tx.moveCall({ target: `${catalogPackage()}::customer::new_catalog_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(version), tx.pure.vector("id", groups), tx.pure.vector("id", devices), tx.object("0x6")] });
     if (initiallyPaused) tx.moveCall({ target: `${catalogPackage()}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
+    if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) tx.moveCall({ target: `${catalogPackage()}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record] });
     calls.deployment_manager_share_deployment(tx, catalogPackage(), record);
     return tx;
   }

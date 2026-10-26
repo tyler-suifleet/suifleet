@@ -1,0 +1,85 @@
+{
+  "result": "PASS",
+  "network": "isolated network-none localnet",
+  "base": "14b351b9389c058117297343ced34f262db6f3c3",
+  "old": "0x3f1634570b0c705e08387976546f68c07294a31d6cf45166d6f5c80fc1cb915a",
+  "head": "0x2306d01c0371f88ec152b3144ff373ef6c2ddc33b3f29f7627becfcffb79b477",
+  "digests": {
+    "publish pre-identity package": "5zAMK8R8iUYeq4RTwQEjMFDCb5nWQZzazkT4fK3mMDLz",
+    "create on old package": "AzHd3TMEeBr5qtJiziGuLvCcQCMbgeLeGiSsZSQ9eJDJ",
+    "compatible pre-identity upgrade": "HjeE68qMzgLs3nm98YCc9WhiHSd9dMr7NCnaWR3zZaZ",
+    "protect oldest deletion path": "5gBdfnXR6275KQreJ6SA7mancKCreGXKsXicGzuuDXpx",
+    "bounded legacy cleanup 4": "DdRCcNkvCdE7r758XACUWdz2ff9YpLtQ8n8gXouCzYxv",
+    "bounded legacy cleanup 5": "DKhydZHMXxcNo7ypDA1WqjLTNHcr97i3tD259EamXBtk",
+    "bounded legacy cleanup 6": "FKnKMw2KNLo4FhXRQEvhoQq6eQndXyhe2Nacm4r1Mdhc",
+    "bounded legacy cleanup 7": "Eyo1n1sn2zzy3LiDEJ67oG91jKsYkuSj5CfhMdjvjMKp",
+    "bounded legacy cleanup 8": "CpTJ7cok2YnCrtemtEj84nopyakpunmkbA93kSBjwejR",
+    "bounded legacy cleanup 9": "BY7K6kfRSkPtyWHUSZdSNxFyxV8A37m1kvwADKsX3KTi",
+    "activate probe device": "4SGk72uwVGTtKfMESS9tgNxuSCGhdMTDoDF4tWzyucjd",
+    "new sharded failure probe": "EsXC6wdSM6MJb4nkbzGB5KUvVKCSf6iuFtezvyxhSfUq",
+    "create catalog client probe": "A8GRr25E5moAk94sy2YijqwPQHbgkrsEUfXk19abAdjA",
+    "publish catalog client probe": "HUJTc5u6fZWM9FQ6VuSrfDLq6hN7fMEbTUme8KSS8uAR",
+    "create paused catalog client probe": "9NqwcCTMUmDwbMiipVx6GAgATPeY9tiyWdMtd2fx7UNn",
+    "shard catalog client probe": "4EW6NjhBPHJPkZF6KWb1YrdfiynjqoBiayYCrnrLh9dv",
+    "unpause catalog client probe": "Pebo2ckDUnZA4h3wziKYXYEjwyw3pWRW4WaMtsqW7B4",
+    "create sharded rollout health probe": "Bxm1miyng11HfE46ukpdx7mvuzuec9YXtv19m8sfUbW2",
+    "admit sharded rollout health probe": "96NdEnrdFrtTM3GVtAF1KqWc6wHy6ovb1xpsGtnDdJK5",
+    "settle sharded rollout receipt before health retry": "A233a6uASdo3kW1u5BtVuL5QtEqJ31C1kC9P9zAVbgCy",
+    "independently verified device rollout health": "A4JkZciYCnMHYiPvzW9zGNRWphJrVWuxi42P7CVguMS6",
+    "bounded rollout probe cleanup 21": "Cc59NTJUFidhwjPm19saSb1AELwq14Wvk3gsa4APNDfP",
+    "bounded rollout probe cleanup 22": "22HEYr6vaHWZMJNKLxFqcY78ZF1WusUcfudVoeaJh8Hj",
+    "bounded rollout probe cleanup 23": "1KFYgbRFFfnLqQcZ6Uu3rmtSfeDvbVnTpQNQxX9Cn7i",
+    "bounded rollout probe cleanup 24": "2wWwExUTbE1pKEiMtQwh8dmTMNmJdmbb4BwQSLr2cMLr",
+    "bounded rollout probe cleanup 25": "4G2dfLocTswWKGeVuiPZm64MMPTz9pZoGoPpCYU6yU7e",
+    "bounded rollout probe cleanup 26": "4NkoW8TaDcJE1rTqVUJxinT8VvZGbVJiagsmGHoK2xPB",
+    "bounded rollout probe cleanup 27": "Es7QYfF7jcnZhB4e8SKMvEzjqZdhQavpcp3TbCErCEDZ",
+    "bounded catalog probe cleanup 28": "CmYCCthEWRPB2qeZVh1VruHUpgzQZTpqKHmwFzc95y3D",
+    "bounded catalog probe cleanup 29": "EYQ1ZZmULj7r2bq2XpWw9CYdoSJvLBYsk6aFbXENbPMf",
+    "bounded catalog probe cleanup 30": "8MaTiqpUPqzFQujEBihdAvF1RMFuFQRvGVsz3k5adLTh",
+    "bounded catalog probe cleanup 31": "7dvxmKmFdRxcwnLFx5TFjmW7s6QM2DwuSnWvBUjMDiGN",
+    "bounded catalog probe cleanup 32": "GzWWLegBDD2BAPd8Z1EPz6kSxNMjekumpwucYopURBbS",
+    "bounded catalog probe cleanup 33": "38yFGjEU41p1Ti68vHNJbYa6iZC1N66nz3XBTEujTVXG",
+    "bounded catalog probe cleanup 34": "9cGhFJtzxxzrKvtz5WrEhrpWgSiefRboPLw5J7SPFyhe",
+    "bounded probe cleanup 35": "E56gyLW8aCxeoEzAGJhkCpQ9VfRbUb8Nc7YeqYXA9M8t",
+    "bounded probe cleanup 36": "JAMTLZsQ2PZJMeAAtbaRgriCuSQNU4amBmABLgMQjL5L",
+    "bounded probe cleanup 37": "CnZw8kFd1dp2PGMALbmowPpY9t5cgbL6ByK7a9B5NZf7",
+    "bounded probe cleanup 38": "21zYXD6is7Ub8VGjbtjdmHtWeR4fepdAP78TG6Nm4Y6o",
+    "bounded probe cleanup 39": "XiDDXW1sNchib9dFUH2RTEh7ua7V62g1i9wHffiek9i",
+    "bounded probe cleanup 40": "DRRCneoTpSUzCSDfQYmsa3A8Q8ARbT9cUskaRwshqdoe",
+    "bounded probe cleanup 41": "4v6ptmKsZHt9v9HqH1ibByzQ3VNVraKnzBPcqmLeMtxb"
+  },
+  "failures": {
+    "old no-schema-check delete blocked": {
+      "digest": "Dqr2vSvk1MscnXjgCtnGHu8YkwevbAxetsn4gsn2UhJe",
+      "status": "MoveAbort in 1st command, abort code: 1, in '0x0000000000000000000000000000000000000000000000000000000000000002::dynamic_field::remove_child_object' (instruction 0)"
+    }
+  },
+  "daemon": "actual daemon built with Rust 1.94.0; missing-recipe Failed receipt through immutable-deployment v3 signing/transport/effects path for ordinary and schema-2 catalog records",
+  "indexer": "actual production index command independently materialized ordinary and schema-2 catalog v3 Failed receipts and the relocated catalog binding",
+  "rollout_probe": {
+    "deployment": "0x3eca18fa4d28006341bbb2d64338df8c8208fa6337c2a4b786b1297dd1e996d7",
+    "health": {
+      "devices": [
+        "0xb7c2a563d4654c0fdde277589c1b7a02628e13eb605c32e7f3c96d90d1728321"
+      ],
+      "healthy": [
+        false
+      ],
+      "at_ms": [
+        "1792984031189"
+      ],
+      "signers": [
+        "0xf505984963d6173911802c1c82c68635bc0e2458079ea0d83fd361893093e99e"
+      ]
+    }
+  },
+  "catalog_probe": {
+    "deployment": "0x304d568326cccf876cbceb0f20f4d1e468772061547af926e13c2d01d128c2e7",
+    "version": "0x7e946763708a2c02f2dfd5a635a12f71c63a615f1d4f406ebcd2f2af9138eb61",
+    "error": "blob missing-recipe: transfer failed after 1 attempts: error sending request for url (http://127.0.0.1:9/v1/blobs/missing-recipe): client error (Connect): tcp connect error: Connection refused (os error 111)"
+  },
+  "limits": [
+    "No successful artifact installation in this probe; existing OTA simulator covers successful apply",
+    "No public-network, hardware, mainnet or manual wallet acceptance"
+  ]
+}
