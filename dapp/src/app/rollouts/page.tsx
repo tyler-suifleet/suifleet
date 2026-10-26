@@ -38,11 +38,11 @@ export default function RolloutsPage() {
   }
   if (!account) return <ConnectionRequired title="Staged rollouts" description="Release updates gradually with canary cohorts, concurrency limits and health gates." />;
   return <div className="max-w-4xl space-y-4">
-    <PageHeader title="Staged rollouts" subtitle="Canary cohorts, bounded admission and audited health gates" />
-    <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Advance to admit the first cohort. After devices publish their signed post-apply health on chain, advance again to evaluate the gate. Coordinator state survives browser restarts. No background service submits coordinator transactions.</p>
+    <PageHeader title="Staged rollouts" subtitle="Send updates to a small group first, then expand once device health checks pass" />
+    <section className="rounded-xl border border-slate-200 bg-white p-5 space-y-3 text-sm text-slate-600"><h2 className="text-slate-900">How staged rollouts work</h2><p>Advance to admit the first cohort. After devices report verified health following an update, advance again to evaluate the gate. Progress is saved if you close the browser. Return here to approve each next step.</p>
     <p>Offline admitted devices retain capacity. Pausing or aborting stops new applies; an already admitted apply may finish. Each device supplies one health sample after its deployment outcome. Freshness is relative to its grant, independent of the daily health cadence.</p></section>
     {error && <p role="alert">{error}</p>}{readError && <p role="alert">{readError.message}</p>}
-    <details className="border p-5"><summary>Create rollout from an authenticated recipe</summary>
+    <details className="border p-5"><summary>Create a gradual rollout</summary>
       <form className="grid gap-4 sm:grid-cols-2" onSubmit={e => { e.preventDefault(); void submit(async () => {
         const parsed = cohorts.trim().split(/\n/).map(line => line.split(/[\s,]+/).filter(Boolean));
         return buildRolloutTx({ ...input, cohorts: parsed }, fleet ? undefined : await rolloutAnnouncements(client, account!.address, parsed.flat()), fleet);
@@ -61,7 +61,7 @@ export default function RolloutsPage() {
       <RolloutDetail id={selected} rollout={rollout} />
       <label className="block">Admission candidate IDs<input className="border ml-2" value={candidates} onChange={e => setCandidates(e.target.value)} /></label>
       <p>Choose reachable members to admit. Leave blank to evaluate health without new grants. Omitted offline members remain eligible for audited skips; admitted members retain capacity until they report.</p>
-      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean), fleet ? { fleet, config: dataConfig } : undefined))}>Verify on-chain health and advance</button>
+      <button disabled={pending || !account || rollout.state !== 0} onClick={() => void submit(() => buildAdvanceRolloutTx(client, selected, account!.address, candidates.split(/[\s,]+/).filter(Boolean), fleet ? { fleet, config: dataConfig } : undefined))}>Check device health and continue</button>
       <label className="block">Audit reason<input className="border ml-2" value={reason} onChange={e => setReason(e.target.value)} /></label>
       <label className="block">Skip never-admitted offline IDs (optional)<input className="border ml-2" value={skip} onChange={e => setSkip(e.target.value)} /></label>
       {[ [0,"Resume / apply skips"], [1,"Pause"], [2,"Abort permanently"] ].map(([state,label]) => <button className="mr-4" key={state} disabled={pending || !account || rollout.state >= 2} onClick={() => void submit(() => buildRolloutControlTx(selected, Number(state), skip.split(/[\s,]+/).filter(Boolean), reason, fleet))}>{label}</button>)}

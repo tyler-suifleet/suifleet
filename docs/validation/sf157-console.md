@@ -51,3 +51,26 @@ programming, Mainnet operation or production-provider acceptance was performed.
 Disconnected route coverage plus populated fixture checks do not establish every
 authenticated page state. Existing missing on-chain health configuration remains
 unavailable, rather than showing a fabricated healthy device.
+
+## Plain-language refinement (2026-10-26)
+
+User requested language understandable without blockchain/Sui knowledge. Setup
+now explains the wallet as the account approval app, uses funds/network fees
+instead of gas, and keeps registration confirmation references in details. Device,
+access and deployment copy explains verified reports, permissions, encrypted
+software and outcomes. Fee assumptions, exact storage periods and formulas remain
+in technical disclosures; SUI/WAL payment units, deposit shortages, missing health,
+privacy limitations and destructive key-replacement consequences remain explicit.
+No dates are invented from expiry counters. `dapp/AGENTS.md` records this standard
+for subsequent work.
+
+Additional actual checks: `node scripts/test_onboarding.cjs`,
+`CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_onboarding_browser.cjs`
+and `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_fleet_settings_browser.cjs`
+passed. Onboarding covers connection, approval/rejection, duplicate submission,
+expiry, unavailable reads and narrow layouts. Settings covers actual constructed
+transactions, cost calculations, explicit underfunding confirmation, saved
+settings, fleet switching and rejected approval. Tests retain their behavioral
+assertions with the new wording and explicitly open the technical quote disclosure.
+Frontend typecheck, production build and all-route presentation browser checks
+were rerun successfully. All browser wallets/networks are disposable fixtures.

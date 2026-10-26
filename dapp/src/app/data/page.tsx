@@ -41,7 +41,7 @@ export default function FleetDataPage() {
   // Discard the session with every plaintext derived from it, including a
   // search query that may hold copied log text. A pending read decrypted
   // under the discarded session no longer matches session.current.
-  function expire(){session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setMessage('Seal session expired; decrypted records were discarded.');}
+  function expire(){session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setMessage('Your secure viewing session expired. Open the archive again to continue.');}
   useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
   useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
   // The access record and the signed session belong to one account.
@@ -152,15 +152,15 @@ export default function FleetDataPage() {
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device data, download verified bytes and manage scoped sharing in your browser" /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
-    {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment.</p> : <>
+    {!DATA_CONFIG ? <p>Device data reporting is not set up for this fleet. Ask your administrator to finish the setup.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}
       <button className="border rounded p-2 ml-3" disabled={!device || isPending || (role!=='owner' && role!=='support')} onClick={()=>void diagnostics()}>Request diagnostics</button>
-      {!SEAL_SETTINGS && <p>Configure this deployment’s Seal providers to read archives.</p>}
-      <p data-testid="archive-role">{role==='owner'?'This account holds the fleet budget owner capability and may decrypt archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
+      {!SEAL_SETTINGS && <p>An administrator needs to set up the encryption service before you can open private archives.</p>}
+      <p data-testid="archive-role">{role==='owner'?'This account manages the fleet budget and can open its private archives.':role==='support'?'This account is a granted support account and may decrypt archives.':role==='none'?'This account is not authorized to decrypt fleet archives. Log search and diagnostic bundles are unavailable.':'Checking archive read permission…'}</p>
       {message && <p role="status">{message}</p>}
       {entries.length>0 && (role==='owner' || role==='support') && <button className="border rounded p-2" disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(entries[0].index,entries[0].anchor.kind)}>Open current shadow documents</button>}
-      <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Originally purchased through Walrus epoch {anchor.end_epoch}; live retention is checked on open</span></li>)}</ul>
+      <ul>{entries.map(({index,anchor})=><li key={index} className="border-b p-3"><button disabled={busy || !SEAL_SETTINGS} onClick={()=>void open(index,anchor.kind)} className="underline text-blue-700">{['Logs','Diagnostics','Crash'][anchor.kind]} · {new Date(Number(anchor.at_ms)).toLocaleString()}</button><span className="ml-3 text-sm">Availability is checked when you open this archive</span></li>)}</ul>
       {DATA_CONFIG?.compactHistoryOrigin && <p className="text-sm">Older archive links appear as you open their newer archive. History reads verify at most 64 links from the current root; expired or missing predecessors are unavailable.</p>}
       {archive && opened!==undefined && <ShadowDocuments view={shadowDocumentsView(archive,opened,anchorCount)} index={opened} />}
       {archive && <ArchiveView archive={archive} index={opened} query={query} setQuery={setQuery} close={close} />}

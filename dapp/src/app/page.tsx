@@ -58,7 +58,7 @@ export default function DashboardPage() {
           </ul>
         )}
         <p className="mt-2 text-xs text-gray-400">
-          Derived in your browser from verified on-chain health and receipts. A failed deployment stays an incident until the device reports that component running from a later applied deployment.
+          Based on verified device reports and update results. A failed update stays an active incident until the device confirms that a newer update is running.
           {!depl && failedResults > 0 && (
             <> Deployment history keeps {failedResults} failed device result{failedResults === 1 ? "" : "s"}: <Link href="/deployments" className="hover:underline">view deployments</Link>.</>
           )}

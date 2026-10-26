@@ -46,7 +46,7 @@ export default function DeviceServicesPage() {
   const selectedDevice = selection.supported && !selection.fleet?.devices.includes(device) ? "" : device;
   const name = (device: string) => owned.find((d) => id(d.objectId) === id(device))?.name ?? device;
   return <div className="max-w-5xl space-y-4">
-    <PageHeader title="Device services" subtitle="Shadows, streams, messaging, bridge and alerts from each device's signed, chain-anchored report" />
+    <PageHeader title="Device services" subtitle="View device configuration, data streams, messaging and alerts from verified device reports" />
     {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment; device service views need the verified Sui path.</p>
       : !account ? <p>Connect a wallet to read this fleet.</p> : <>
       <label>Device <select className="border rounded p-2" value={selectedDevice} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?${new URLSearchParams({ device: e.target.value })}` : "?"); }}>
@@ -91,7 +91,7 @@ function Services({ view, device }: { view: ServicesView; device: string }) {
   const off = <p className="text-sm text-gray-500">Not enabled on this device.</p>;
   const more = (omitted: number) => omitted > 0 && <p className="text-xs text-gray-500">{omitted} more not listed (snapshot size limit).</p>;
   return <>
-    <p className="text-xs text-gray-500">Signed report observed {utc(view.observedMs)}, anchored on chain {utc(view.receivedMs)}.</p>
+    <p className="text-xs text-gray-500">Signed report observed {utc(view.observedMs)}, recorded {utc(view.receivedMs)}.</p>
     <Section title="Shadows">
       {shadows.state === "disabled" ? off : <div className="space-y-2 text-sm" data-testid="shadows">
         <p>{shadows.shadows} shadows; {shadows.notificationsRefused} delta notifications refused ({shadows.notificationsRefusedRecent} since the previous report).</p>

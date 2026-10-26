@@ -211,9 +211,9 @@ export default function FirmwarePage() {
             </svg>
           </div>
           <p className="font-semibold text-gray-800">Deployment created</p>
-          <p className="text-xs font-mono text-gray-400">{txDigest}</p>
+          <details className="text-xs text-gray-500"><summary>Confirmation details</summary><p className="break-all font-mono">{txDigest}</p></details>
           <div className="text-left space-y-2">
-            {artifact && <p className="text-xs text-gray-600">{artifact.confidential ? "Confidential: artifact and recipe were Seal-encrypted before upload." : "Public: artifact and recipe are readable by anyone."}</p>}
+            {artifact && <p className="text-xs text-gray-600">{artifact.confidential ? "Private: software and installation instructions were encrypted before upload." : "Public: anyone can download this software and its installation instructions."}</p>}
             {artifact && <StorageSummary label="Artifact storage" storage={artifact.storage} />}
             {recipeStorage && <StorageSummary label="Recipe storage" storage={recipeStorage} />}
           </div>
@@ -518,6 +518,8 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
   return (
     <div className="border border-gray-200 rounded p-3 text-xs space-y-1">
       <p className="font-medium text-gray-600">{label}</p>
+      <p className="text-gray-600">Storage has a limited lifetime. Renew it before expiry so devices can continue downloading.</p>
+      <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
         Stored until Walrus epoch {storage.endEpoch ?? "unknown"} · renewable by{" "}
         {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
@@ -528,6 +530,7 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
           Renew before it expires: <code className="font-mono text-gray-700">{renew}</code>
         </p>
       )}
+      </details>
       {warnings.map((warning) => (
         <p key={warning} className="text-amber-700 bg-amber-50 rounded px-2 py-1">{warning}</p>
       ))}
