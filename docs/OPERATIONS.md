@@ -372,6 +372,8 @@ A group can carry a **desired state**: a revisioned map from component name to t
 7. Stage daemon rollout, verify enrolled identity/cap binding and preserve each device's journal. Do not force firmware replay by deleting state. Run a real end-to-end update/report and negative-path acceptance test before expanding the rollout.
 8. Record artifacts, versions, IDs, migrations, results and recovery instructions in the release issue. Keep private credentials out of all artifacts.
 
+Steps 1–5 are planned and admitted by [the release planner](RELEASE_PLANNING.md) (SF-154): `scripts/release_plan.py` writes a reviewable, read-only plan of chain, custody, manifest/type origins, compatibility/migration, client generation, rollout, cost limits and abort boundaries; `scripts/redeploy.sh --plan` refuses any transaction the plan does not describe. Mainnet plans are planning only.
+
 The current development command is:
 
 ```bash
