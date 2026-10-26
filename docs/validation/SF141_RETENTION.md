@@ -770,3 +770,50 @@ acceptance remain unrun in #32/#159. This handoff is not approval.
   rollout/cadence/budget/settings/recovery and all five fleet-data variants,
   ending with compact-history + quilt + stream-retention. This is simulator
   evidence, not physical boot/recovery or public-provider acceptance.
+
+## 2026-10-26 funding-only CI recovery — run 40310094389
+
+The failed exact-head run at `5904a4710ddf632915dcd162b7223586079519d1`
+(base `8ab0aefa96223d974775f08d0a6314ea27b411c1`) submitted no
+transactions and consumed zero allowance. Its public artifact records one
+successful 1-SUI faucet credit, leaving 2,826,511,937 MIST below the
+3,650,000,000-MIST preflight requirement: selected suite ceilings total
+3,250,000,000 MIST plus the preserved 400,000,000-MIST historical hold.
+No code defect or new uncertain transaction was identified.
+
+A separate bounded funding-only recovery acquired `network:suifleet-testnet`,
+coordinated in SF-010/#11 and asserted the lock before the faucet operation.
+The checksum-pinned transaction CLI (SHA-256
+`de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`)
+verified chain `4c78adac` and read the dedicated CI address's gas pools.
+A disposable public-only client configuration with an empty keystore was used;
+no CI signing credential was accessed. The balance was still exactly the failed
+run's final balance, so one faucet request was made, with no retry.
+
+Faucet transaction `5mYvY4Cb2yUrN6jdTqjas6yRVWUy7pw6JRUHQSDPRZnk`
+was independently read through `sui client tx-block --json`: effects success,
+checkpoint 399398346, and balance change +1,000,000,000 MIST to
+`0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`.
+The faucet paid its own 1,000,000-MIST computation fee; no dedicated-wallet
+transaction or gas spend occurred. A fresh `gas --json` read shows
+3,744,773,212 MIST in address balance plus 81,738,725 MIST in a coin, totaling
+3,826,511,937 MIST, 176,511,937 above the existing requirement. The global
+lock was promptly released. No allowance, quarantine marker, encrypted fixture,
+spend ceiling, test or retry policy was changed. No fixture transaction was
+replayed. This balance snapshot does not guarantee funds remain unused later.
+
+Fresh local checks:
+- `git merge origin/main`: already up to date at `8ab0aefa`.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`: 145
+  tests OK, one existing skip (7.170 seconds).
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`: 66 tests
+  OK (0.039 seconds).
+- Product code is unchanged; Move/Rust/frontend/OTA/localnet suites were not
+  rerun for this funding-only recovery.
+
+SF-129 PR #279 is still OPEN with no merge commit; verified integration of
+its merged form remains required before SF-141 merges. The coordinator must
+obtain actual exact-head/current-base CI and automatic testnet results and fresh
+independent review. Hosted checks were not watched or polled. No approval is
+claimed. Physical/mainnet/provider/manual-wallet acceptance remains unrun in
+#32/#159. No deployment, hardware programming or production credentials were used.
