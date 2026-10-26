@@ -520,3 +520,37 @@ Hosted exact-head/current-base CI and automatic public-testnet checks remain for
 the coordinator after push; no hosted CI was watched or polled. Fresh independent
 review and SF-129's integration gate remain required; this is a repair handoff,
 not approval or permission to merge.
+
+
+### PR #307 retained-publication CI repair (2026-10-25)
+
+Run [40247168337](https://github.com/tyler-suifleet/suifleet/actions/runs/40247168337)
+resubmitted a retained 400,000,000-MIST base publication. New publications already
+reserve 700,000,000 MIST; retained bytes cannot have their budget changed.
+The pinned CLI returned `InsufficientGas` without JSON effects, leaving the
+reservation and pending marker unknown. A read-only gRPC lookup of
+`FTPAMqyDsrDMTj9VwxBSbJyezM4B8STk4H5uvYR56d6E` confirmed failed effects at
+epoch 1264/checkpoint 399232091, sender and gas owner the dedicated CI wallet
+`0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`,
+5,010,000 MIST net gas, and no created objects. No machine-session mutation ran.
+
+Retained-byte submission now performs one exact-digest effects lookup after a
+CLI error. Verified sender/gas-owner effects settle the ledger and allow the
+existing setup path to clear a confirmed failed marker. Missing/unavailable or
+foreign/mismatched effects preserve uncertainty and the full reservation.
+There is no new submission retry, spend-ceiling increase, or marker deletion
+based only on the CLI error. A subsequent run can reconcile the historical
+failed transaction before building a fresh publication with the existing budget.
+
+Fresh scoped checks: `python3 -m unittest discover -s scripts/tests -p
+ 'test_testnet*.py'`: 136 tests passed, one existing skip; `git diff --check`: passed.
+The offline regression drives `run()` through retained-byte CLI failure and
+independent failed-effects lookup, checking persisted marker removal, no adopted
+package, failed digest evidence and allowance accounting. Negative cases retain
+unknown reservations. Current base `b819cb2010ac4890e4d2d3bb5dad62b9df9b6a8d`
+is already an ancestor; no merge commit is necessary. Application/Move/Rust suites
+were not rerun for this harness-only delta. Hosted CI remains pending after push;
+fresh independent review and the SF-129 merge dependency remain required.
+Physical/mainnet/provider/manual-wallet acceptance remains deferred and unrun in
+[#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
