@@ -11,6 +11,7 @@ import { normalizeStructTag, normalizeSuiAddress as id } from "@mysten/sui/utils
 import { calls } from "./fleet-protocol";
 import { moveType } from "./deployment-manifest";
 import { readDesiredState } from "./desired-state";
+import { readReceiptDirectory } from "./receipt-shards";
 import { AnchorBcs, readDeviceData, type FleetDataConfig } from "./fleet-data";
 import { RecordBcs } from "./retention";
 import type { DeploymentEvent } from "./sui";
@@ -281,6 +282,13 @@ export async function planDeploymentReclaim(client: Pick<SuiGrpcClient, "getDyna
   for (const d of deployments.filter((d) => id(d.creator) === id(account))) {
     const finished = finishedReason(d, nowMs);
     if (!finished) { out.push({ deployment: d, groups: [], reason: "still in progress", eligible: false }); continue; }
+    // SF-127 sharded receipts: the record is deletable only after receipt
+    // cleanup has retired every root; `retire` aborts before that.
+    const directory = await readReceiptDirectory(client, d.deploymentId);
+    if (directory && !(directory.retiring && directory.remaining === "0")) {
+      out.push({ deployment: d, groups: [], reason: "sharded receipts; finish receipt cleanup on the deployment first", eligible: false });
+      continue;
+    }
     const managed = await isManaged(client, d.deploymentId);
     const groups = managed ? [...new Set(d.targetGroups.map((g) => id(g)))] : [];
     let blocked: string | undefined;
