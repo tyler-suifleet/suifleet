@@ -159,9 +159,11 @@ def stage(src, dst):
 
 
 def publish(path, pubfile, upgrade_cap=None):
+    # Localnet only. The budget is a ceiling, not the cost: the current
+    # contracts no longer publish within the former 0.5 SUI.
     args = ["test-upgrade", path, "--upgrade-capability", upgrade_cap] if upgrade_cap else ["test-publish", path]
     proc = sui(*args, "--build-env", "testnet", "--pubfile-path", pubfile,
-               "--gas-budget", "500000000", "--json", "--silence-warnings")
+               "--gas-budget", "2000000000", "--json", "--silence-warnings")
     out = proc.stdout
     tx = json.loads(out[out.index("{"):])
     if tx["effects"]["status"]["status"] != "success":
