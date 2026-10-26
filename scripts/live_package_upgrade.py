@@ -475,6 +475,9 @@ def run(args):
     def client(*command, json_output=True, check=True):
         exact = command[0] == "serialized-tx"
         if exact:
+            # Decode before signing/submitting: NotSubmitted is safe only before
+            # a transaction can reach the network. Never decode again afterwards.
+            digest = toolchain.decode(command[1])["digest"]
             command = toolchain.exact_execution(network_sui, wallet, command[1])
         full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
         if json_output:
@@ -484,7 +487,6 @@ def run(args):
             # Read the digest derived from the signed bytes, never one parsed
             # from a CLI diagnostic. A submission by this run consumes this
             # run's allowance even when its effects arrive through gRPC.
-            digest = toolchain.decode(command[command.index("--tx-bytes") + 1])["digest"]
             facts = executed_facts(rpc_url, digest)
             if facts:
                 if facts["digest"] != digest:

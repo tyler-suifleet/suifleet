@@ -572,6 +572,56 @@ class RunFlow(unittest.TestCase):
                 self.assertEqual(evidence['allowance_used_mist'], 400_000_000)
                 self.assertEqual(evidence['reconciliations'], [])
 
+    def test_decoder_is_never_called_after_retained_or_fresh_submission(self):
+        # A node/decoder failure after send used to become NotSubmitted, releasing
+        # the reservation and (for fresh setup) removing the durable intent.
+        for retained in (True, False):
+            with self.subTest(retained=retained), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                marker = pending()
+                marker['tx']['sender'] = tc.normal(ADDRESS)
+                sent = []
+
+                def submit(argv):
+                    sent.append(signed_bytes(argv))
+                    return SimpleNamespace(stdout='', returncode=1, stderr='lost response')
+
+                def inspect(*args, **kwargs):
+                    if sent:
+                        raise tc.NotSubmitted('decoder unavailable after submission')
+                    return decoded(sender=ADDRESS)(*args, **kwargs)
+
+                def fresh(client, *args, persist, **kwargs):
+                    def execute(budget):
+                        persist(marker['tx'])
+                        return client('serialized-tx', marker['tx']['tx_bytes'])
+                    return execute
+
+                state = self.state_with(marker)
+                if not retained:
+                    original = state
+                    def state(key, digest, tools):
+                        result = original(key, digest, tools)
+                        result['publications'][key].pop('pending_operation')
+                        return result
+                args, key, patches, _ = self.harness(root, state, serialized=submit)
+                extra = [patch.object(live.reconciler, 'Chain', return_value=FakeChain(epoch=8)),
+                         patch.object(live, 'executed_facts', return_value=None),
+                         patch.object(live.toolchain, 'decode', side_effect=inspect),
+                         patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})]
+                if not retained:
+                    extra.append(patch.object(live.toolchain, 'package_submitter', side_effect=fresh))
+                with self.assertRaises(RuntimeError) as caught:
+                    self.run_flow(args, patches, extra)
+                self.assertNotIsInstance(caught.exception, tc.NotSubmitted)
+                self.assertEqual(sent, ['BYTES'])
+                saved = json.loads((root / 'state.json').read_text())['publications'][key]
+                self.assertEqual(saved['pending_operation']['tx'], marker['tx'])
+                evidence = json.loads((root / 'evidence.json').read_text())
+                self.assertEqual(evidence['transactions'][0]['status'], 'unknown')
+                self.assertEqual(evidence['allowance_used_mist'],
+                                 400_000_000 if retained else live.PACKAGE_GAS)
+
     def test_historical_marker_is_retained_with_its_observation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

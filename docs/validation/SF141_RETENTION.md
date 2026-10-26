@@ -595,3 +595,30 @@ acceptance and fresh independent review remain pending after push and are not
 watched or waived. The coordinator alone merges, after verifying SF-129 merged.
 Physical/mainnet/production-provider/manual-wallet acceptance stays deferred and
 unrun in #32/#159. This repair handoff is not approval.
+
+## Post-submission decoder feedback repair (2026-10-25)
+
+Moved digest decoding ahead of exact signing/submission in the live upgrade
+client. Effects recovery uses that precomputed digest, so a subsequent node
+failure cannot be misclassified as a pre-submission refusal. Unknown outcomes
+retain their reservation and pending operation for reconciliation.
+
+Added an offline full-run regression for retained replay and fresh
+`checkpoint_setup` publication. The decoder refuses calls after the simulated
+submission; a lost CLI response and missing effects must keep the exact pending
+bytes and full budget (400M retained / 700M fresh), with status `unknown`.
+
+Fresh checks for this Python-only feedback delta:
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  139 tests, OK (one existing skip), 3.795 seconds.
+- `python3 -m unittest discover -s scripts/tests -p 'test_live*.py'`:
+  53 tests, OK, 0.030 seconds.
+- `git merge origin/main`: already up to date at b819cb2010ac4890e4d2d3bb5dad62b9df9b6a8d.
+- No Move/Rust/frontend/OTA/localnet rerun for this scoped harness repair.
+- No public-network mutations, hardware or deployments performed.
+
+PR #279 / SF-129 remains OPEN at 7b04f38eba94dd0ed977164d3b4a0e29c6d1b507;
+its verified merge is still required before SF-141 integration. Hosted CI and
+automatic testnet on the pushed repair remain pending, unpolled; fresh independent
+review is required. Deferred external #32/#159 evidence remains unrun. This
+feedback repair does not approve or authorize merging the PR.
