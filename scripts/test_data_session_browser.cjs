@@ -10,7 +10,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
 const page_ = path.resolve(__dirname, "../dapp/src/app/data/page.tsx"), fakes = path.resolve(__dirname, "browser/data-session-fakes.js");
 const faked = new Set(["@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/hooks/useFleetDataConfig", "@/hooks/useFleetSelection", "@/lib/fleet-data",
-  "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
+  "@/components/DataUsage", "@/components/FleetDataBrowser", "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
 const fakeDependencies = { name: "data-session-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => args.importer === page_ && faked.has(args.path) ? { path: fakes } : undefined);
 } };
@@ -49,6 +49,8 @@ const fakeDependencies = { name: "data-session-fakes", setup(b) {
 
     await waitText("granted support account");
     await openButton.waitFor();
+    await page.getByText("Storage details", { exact: true }).click();
+    await waitText("Originally purchased through storage period (Walrus epoch) 100");
 
     // A read completed within its session renders, including an out-of-range timestamp shown raw.
     await openButton.click();
@@ -60,7 +62,7 @@ const fakeDependencies = { name: "data-session-fakes", setup(b) {
     // Expiry discards the plaintext and the search query that may hold copied log text.
     await expireKey(0);
     await tick();
-    await waitText("Seal session expired; decrypted records were discarded.");
+    await waitText("Your secure viewing session expired. Open the archive again to continue.");
     assert.ok(!(await body()).includes("SECRET-LOG"), "expired plaintext and query discarded");
 
     // A read still pending when its session expires never publishes, and later ticks do not resurrect it.
@@ -68,7 +70,7 @@ const fakeDependencies = { name: "data-session-fakes", setup(b) {
     await page.waitForFunction(() => window.__control.reads.length === 2);
     await expireKey(1);
     await tick();
-    await waitText("Seal session expired");
+    await waitText("Your secure viewing session expired");
     await resolveRead(1);
     await settle();
     for (let i = 0; i < 3; i++) await tick();
@@ -81,7 +83,7 @@ const fakeDependencies = { name: "data-session-fakes", setup(b) {
     assert.equal(await page.evaluate(() => window.__control.keys.length), 3, "each expired session is replaced by a newly signed one");
     await expireKey(2);
     await resolveRead(2);
-    await waitText("Seal session expired");
+    await waitText("Your secure viewing session expired");
     await settle();
     assert.ok(!(await body()).includes("SECRET-LOG-LINE"), "a read finishing after expiry must not render plaintext");
 

@@ -46,3 +46,7 @@ export const SEAL_SETTINGS = {};
 export const WALRUS_AGGREGATOR = "";
 export const walrus = () => ({});
 export const TESTNET_WALRUS_PACKAGE_CONFIG = {};
+
+// These separately tested panels are outside the archive-session lifecycle fixture.
+export const DataUsage = () => null;
+export const FleetDataBrowser = () => null;
