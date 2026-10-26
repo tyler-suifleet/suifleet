@@ -97,6 +97,44 @@ def decoded(digest='D1', sender=OPERATOR, max_epoch='8', payment=(), budget='400
                              'expiration': {'kind': 'ValidDuring', 'min_epoch': None, 'max_epoch': max_epoch}}
 
 
+class RetainedSubmission(unittest.TestCase):
+    def test_cli_insufficient_gas_settles_actual_cost_without_releasing_unknowns(self):
+        from testnet_budget import Budget
+        evidence = []
+        ledger = Budget(1_400_000_000, evidence)
+        client = Mock(side_effect=RuntimeError('InsufficientGas'))
+        failure = facts(success=False, created=[])
+        failure['gas_used'] = {'computationCost': '5010000', 'storageCost': '0', 'storageRebate': '0'}
+        chain = FakeChain(transactions={'D1': failure})
+        with self.assertRaisesRegex(RuntimeError, 'execution effects'):
+            ledger.execute(client, 'publish base (retained bytes)',
+                           lambda budget: rc.submit_retained(client, pending()['tx'], chain, OPERATOR),
+                           gas=400_000_000)
+        self.assertEqual(ledger.used, rc.net_gas(failure))
+        self.assertEqual(evidence[0]['status'], 'failure')
+        self.assertEqual(evidence[0]['digest'], 'D1')
+        client.assert_called_once_with('serialized-tx', 'BYTES')
+        self.assertEqual(chain.reads, [('transaction', 'D1')])
+
+    def test_absent_unavailable_foreign_or_wrong_digest_keeps_full_reservation(self):
+        from testnet_budget import Budget
+        foreign = facts(sender=OTHER)
+        wrong = facts(digest='OTHER')
+        for value in (None, RuntimeError('unavailable'), foreign, wrong):
+            with self.subTest(value=value):
+                ledger = Budget(1_400_000_000, [])
+                chain = Mock()
+                chain.transaction = Mock(side_effect=value) if isinstance(value, Exception) else Mock(return_value=value)
+                client = Mock(side_effect=RuntimeError('InsufficientGas'))
+                with self.assertRaises(RuntimeError):
+                    ledger.execute(client, 'publish base',
+                                   lambda budget: rc.submit_retained(client, pending()['tx'], chain, OPERATOR),
+                                   gas=400_000_000)
+                self.assertEqual(ledger.used, 400_000_000)
+                self.assertEqual(ledger.evidence[0]['status'], 'unknown')
+                client.assert_called_once()
+
+
 class Reconcile(unittest.TestCase):
     def decide(self, marker, chain, *, inspect=None, verify=None, resubmit=None, now=2000.0, legacy=None):
         resubmit = resubmit or Mock(side_effect=AssertionError('must not resubmit'))
@@ -440,6 +478,33 @@ class RunFlow(unittest.TestCase):
             evidence = json.loads((root / 'evidence.json').read_text())
             self.assertEqual(evidence['reconciliations'][0]['outcome'], 'executed')
             self.assertEqual(evidence['allowance_used_mist'], 0)  # Charged by the run that submitted it.
+
+    def test_restart_cli_failure_reconciles_effects_and_clears_only_known_marker(self):
+        marker = pending()
+        marker['tx']['sender'] = tc.normal(ADDRESS)
+        failure = facts(sender=tc.normal(ADDRESS), success=False, created=[])
+        failure['error'] = 'InsufficientGas'
+        failure['gas_used'] = {'computationCost': '400000000', 'storageCost': '0', 'storageRebate': '0'}
+        chain = FakeChain(epoch=8)
+        chain.transaction = Mock(side_effect=[None, failure])
+        def cli_error(argv):
+            raise RuntimeError('Error executing transaction D1: InsufficientGas')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, key, patches, _ = self.harness(root, self.state_with(marker), serialized=cli_error)
+            with self.assertRaisesRegex(RuntimeError, 'execution effects'):
+                self.run_flow(args, patches, [
+                    patch.object(live.reconciler, 'Chain', return_value=chain),
+                    patch.object(live.toolchain, 'decode', side_effect=decoded(sender=ADDRESS)),
+                    patch.object(live.toolchain, 'verify_package_transaction', return_value={'kind': 'publish'})])
+            saved = json.loads((root / 'state.json').read_text())['publications'][key]
+            self.assertNotIn('pending_operation', saved)
+            self.assertNotIn('base_package', saved)
+            evidence = json.loads((root / 'evidence.json').read_text())
+            self.assertEqual(evidence['allowance_used_mist'], 400_000_000)
+            self.assertEqual(evidence['transactions'][0]['status'], 'failure')
+            self.assertEqual(evidence['transactions'][0]['digest'], 'D1')
+            self.assertEqual(chain.transaction.call_count, 2)
 
     def test_restart_resubmits_identical_retained_bytes_through_the_ledger(self):
         marker = pending()

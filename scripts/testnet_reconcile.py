@@ -111,6 +111,27 @@ def settle(facts, operator):
     return ('executed' if facts['success'] else 'failed'), cli_result(facts)
 
 
+def submit_retained(client, tx, chain, operator):
+    """Submit once; a CLI error alone cannot establish execution failure.
+
+    Some CLI releases omit JSON effects on InsufficientGas. Read this exact
+    digest once so the caller's ledger can settle a confirmed execution. Missing
+    or unavailable facts keep the reservation and pending marker unchanged.
+    """
+    try:
+        return client('serialized-tx', tx['tx_bytes'])
+    except RuntimeError:
+        facts = chain.transaction(tx['digest'])
+        if facts is None:
+            raise
+        if facts['digest'] != tx['digest']:
+            raise Uncertain('submission lookup returned a different transaction digest')
+        _, result = settle(facts, toolchain.normal(operator))
+        # This execution belongs to this run's submission, not an earlier read.
+        result.pop('reconciled')
+        return result
+
+
 def dead(tx, chain):
     """Why the retained transaction can never execute, or None."""
     expiry = (tx.get('expiration') or {}).get('max_epoch')

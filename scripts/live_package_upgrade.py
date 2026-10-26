@@ -603,7 +603,7 @@ def run(args):
                         def identical(budget):
                             if budget != tx["gas_budget"]:
                                 raise toolchain.NotSubmitted("allowance cannot reserve the retained transaction budget")
-                            return client("serialized-tx", tx["tx_bytes"])  # Same digest: executes at most once.
+                            return reconciler.submit_retained(client, tx, facts_reader, operator)  # Same digest, at most once.
                         return mutate(label, identical, gas=tx["gas_budget"])
                     return send
 
