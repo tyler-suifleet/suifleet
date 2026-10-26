@@ -8,6 +8,10 @@ const update=(id,version,status,time)=>({deploymentId:id,componentName:'test-app
 const updates=[update('0x11','1.0.1',2,1000),update('0x12','1.0.2',1,2000),{...update('0x13','1.0.2',1,3000),targetDevices:['0xdb'],resolvedDeviceIds:['0xdb'],statuses:{'0xdb':1}}];
 const query=data=>({data,isLoading:false,error:null,refetch:async()=>{}});
 export const useCurrentAccount=()=>({address:'0xa'});
+// Read-only fixture: queries are provided below; any unmocked chain call is an error.
+const client=new Proxy({}, {get:(_target,key)=>{throw Error(`Unexpected chain access in history fixture: ${String(key)}`);}});
+export const useCurrentClient=()=>client;
+export const useCurrentNetwork=()=> 'localnet';
 export const useDevices=()=>query(devices);
 export const useGroups=()=>query(groups);
 export const useDeployments=()=>query(updates);

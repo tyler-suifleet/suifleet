@@ -6,6 +6,10 @@ let listeners = new Set();
 window.updateAccess = changes => { window.accessFixture = { ...window.accessFixture, ...changes }; listeners.forEach(l => l()); };
 function useFixture() { return useSyncExternalStore(cb => { listeners.add(cb); return () => listeners.delete(cb); }, () => window.accessFixture); }
 export function useCurrentAccount() { return useFixture().connected ? { address: id(10) } : null; }
+// This page fixture supplies reads explicitly; an unexpected chain call must fail.
+const client = new Proxy({}, { get: (_target, key) => { throw Error(`Unexpected chain access in access fixture: ${String(key)}`); } });
+export const useCurrentClient = () => client;
+export const useCurrentNetwork = () => 'testnet';
 export const POLICIES_ENABLED = ACCESS_ENABLED;
 export function useAccessPolicies() {
   const f = useFixture();

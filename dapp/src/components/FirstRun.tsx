@@ -78,7 +78,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its daemon starts and reports in.` });
       await Promise.all([cache.invalidateQueries({ queryKey: ["devices"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] })]);
     } catch (cause) {
-      setError({ address, text: `${cause instanceof Error ? cause.message : "Wallet request failed"}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejected requests create no registration; an executed failure may charge gas.` });
+      setError({ address, text: `${cause instanceof Error ? cause.message : "Wallet request failed"}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
     } finally {
       inFlight.current = false;
       setPhase(null);
@@ -88,7 +88,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   return <div className="max-w-4xl space-y-6 text-sm text-gray-900">
     <header className="space-y-1">
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
-      <p className="text-gray-700">Sign in, add gas, register a device and deploy your first update.</p>
+      <p className="text-gray-700">Connect your account, add funds for network fees, register a device and send your first update.</p>
     </header>
 
     <nav aria-label="Onboarding progress">
@@ -110,6 +110,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         <p className="text-gray-700">{config.enabled ? "Use Google sign-in or Slush" : "Use Slush"} in the wallet menu—no extension needed. Existing extension wallets also work.</p>
         {!config.enabled && <p role="status" className="text-gray-700">{config.reason}</p>}
       </>}
+      <p className="text-gray-700">Your wallet is the account app that approves changes and payments. SuiFleet asks for approval before submitting an action.</p>
       <div>{connect}</div>
       <div className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">
         <p className="font-semibold">You hold this fleet’s keys</p>
@@ -121,22 +122,22 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       </div>
       <Disclosure summary="About account custody and sessions">
         <p>A Google zkLogin address is controlled by your Google account and Enoki’s app-specific salt service. Losing that account can mean losing your fleet and funds. Enoki availability is also required to sign in and generate proofs.</p>
-        <p>Sessions expire at the current Sui epoch boundary; sign in again when prompted.</p>
+        <p>Your sign-in session expires periodically. Sign in again when prompted.</p>
         <p>For a business fleet, use stronger custody such as a hardware-backed extension wallet or multisig before making large deposits. Move ownership with the recipient-confirmed fleet handover (under Advanced below) while you still have account access.</p>
       </Disclosure>
     </StepCard>
 
-    <StepCard id="funding" index={2} title="Add gas" state={steps[1].state}>
+    <StepCard id="funding" index={2} title="Add funds" state={steps[1].state}>
       {!account ? <p className="text-gray-700">Sign in to check your balance on <strong>{NETWORK}</strong>.</p> : <>
         {state.isPending && <p role="status">Checking deployment and account balance…</p>}
         {state.error && <p role="alert" className="text-red-800">{state.error.message}</p>}
         {state.isSuccess && <div className="flex flex-wrap items-baseline gap-x-3">
-          <span className="text-2xl font-semibold" aria-label={`Gas balance ${displaySui(state.data)}`}>{displaySui(state.data)}</span>
-          <span className="text-gray-700">available for gas on {NETWORK}</span>
+          <span className="text-2xl font-semibold" aria-label={`Network fee balance ${displaySui(state.data)}`}>{displaySui(state.data)}</span>
+          <span className="text-gray-700">available for network fees on {NETWORK}</span>
         </div>}
         {state.isSuccess && (BigInt(state.data) === BigInt(0)
           ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI on <strong>{NETWORK}</strong> to <span className="break-all font-mono">{account.address}</span>.</p>
-          : <p className="text-gray-700">Registration needs gas; your wallet shows the actual cost before you approve. Gas is not a fleet budget.</p>)}
+          : <p className="text-gray-700">Adding a device costs a small network fee. Your approval app shows the amount before you confirm. This account balance is separate from your fleet budget.</p>)}
         <div className="flex flex-wrap items-center gap-3">
           <button type="button" disabled={state.isFetching} onClick={() => { void state.refetch(); void devices.refetch(); }} className={SECONDARY}>Refresh account and inventory</button>
           {state.isFetching && !state.isPending && <span className="text-gray-600">Refreshing…</span>}
@@ -146,7 +147,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         </Disclosure>
         {budgetSupported() && <div className="space-y-3 rounded-md border border-gray-200 p-4">
           <h3 className="font-semibold">Prepay network costs</h3>
-          <p className="text-gray-700">Your wallet&apos;s gas above pays for your own transactions. The fleet budget is separate: you deposit network costs up front, each device gets a small float at registration and tops up only through the contract, within limits you set.</p>
+          <p className="text-gray-700">Your account balance pays for actions you approve. The fleet budget is separate: prepay device network costs and set spending limits. Each device receives a small starting balance and can refill only within those limits.</p>
           <EstimatePanel onEstimate={setEstimate} />
           <h4 className="font-semibold">Fund by card (optional)</h4>
           <CardFunding asset="SUI" amount={estimate ? formatToken(estimate.suiDepositMist) : "1"} />
@@ -165,8 +166,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     </StepCard>
 
     <StepCard id="register" index={3} title="Register your first device" state={steps[2].state}>
-      {!account ? <p className="text-gray-700">Sign in and add gas first.</p> : <>
-        <p className="text-gray-700">Start the SuiFleet daemon on the device and copy the public address it prints. Registration records the device and its access on chain; it does not install software or show that the device is online.</p>
+      {!account ? <p className="text-gray-700">Connect your account and add funds first.</p> : <>
+        <p className="text-gray-700">Start the SuiFleet client on the device and copy the device address it displays. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
         {devices.error && <p role="alert" className="text-red-800">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
         {devices.isLoading && <p role="status">Loading inventory…</p>}
         {devices.isSuccess && (devices.data.length === 0
@@ -207,11 +208,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending}>{mutation.isPending ? "Registering…" : "Register device"}</button>
-            {!ready && state.isSuccess && <p className="text-gray-600">Registration unlocks once this address has gas.</p>}
+            {!ready && state.isSuccess && <p className="text-gray-600">Add funds to this account to enable registration.</p>}
           </div>
         </form>
         <div aria-live="polite">{phase && <p className="text-blue-900">{PHASE[phase]}</p>}</div>
-        {message?.address === account.address && <p role="status" className="break-all rounded-md border border-green-300 bg-green-50 px-4 py-3 text-green-950">{message.text}</p>}
+        {message?.address === account.address && <div className="rounded-md border border-green-300 bg-green-50 px-4 py-3 text-green-950"><p role="status">Device registered. It is not online until its client starts and sends a report.</p><details><summary>Confirmation details</summary><p className="break-all">{message.text}</p></details></div>}
         {error?.address === account.address && <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-red-950">{error.text}</p>}
       </>}
     </StepCard>
@@ -238,8 +239,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
 function nextAction(step: OnboardingStep, google: boolean) {
   switch (step.id) {
     case "account": return google ? "Sign in with Google, Slush or a wallet extension." : "Connect Slush or a wallet extension.";
-    case "funding": return step.state === "blocked" ? "Resolve the balance check below, then refresh." : step.status === "Not funded" ? "Send SUI to your address to pay for gas." : "Checking your balance…";
-    case "register": return step.state === "blocked" ? "Inventory is unavailable; refresh before registering." : "Register the device running the SuiFleet daemon.";
+    case "funding": return step.state === "blocked" ? "Resolve the balance check below, then refresh." : step.status === "Not funded" ? "Add SUI to this account to cover network fees." : "Checking your balance…";
+    case "register": return step.state === "blocked" ? "Inventory is unavailable; refresh before registering." : "Register the device running the SuiFleet client.";
     case "update": return "Deploy a component to your registered device.";
   }
 }

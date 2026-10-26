@@ -76,7 +76,7 @@ function audit() {
     await next.filter({ hasText: manifest.network === "testnet" ? "Sign in with Google" : "Connect Slush" }).waitFor();
     assert.equal(await progress.locator('[aria-current="step"]').count(), 1);
     assert.match(await progress.locator('[aria-current="step"]').innerText(), /Sign in/);
-    await page.getByText("Sign in and add gas first.", { exact: true }).waitFor();
+    await page.getByText("Connect your account and add funds first.", { exact: true }).waitFor();
     assert.equal(await page.getByText("Advanced: move fleet ownership").count(), 0);
     await page.getByText("You hold this fleet’s keys", { exact: true }).waitFor();
     await layout("disconnected");
@@ -89,9 +89,9 @@ function audit() {
     await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
     await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
     await page.getByText("Fund this address before registering.", { exact: false }).waitFor();
-    await page.getByLabel("Gas balance 0 SUI", { exact: true }).waitFor();
+    await page.getByLabel("Network fee balance 0 SUI", { exact: true }).waitFor();
     await progress.getByText("Not funded", { exact: true }).waitFor();
-    await next.filter({ hasText: "Send SUI to your address" }).waitFor();
+    await next.filter({ hasText: "Add SUI to this account" }).waitFor();
     assert.equal(await register.isDisabled(), true);
     await page.getByText("SuiFleet Acceptance Wallet", { exact: true }).waitFor();
     await page.getByText(`Network: ${manifest.network}`, { exact: true }).waitFor();
@@ -115,8 +115,8 @@ function audit() {
 
     await page.evaluate(() => window.acceptance.fund());
     await page.getByRole("button", { name: "Refresh account and inventory" }).click();
-    await page.getByLabel("Gas balance 1 SUI", { exact: true }).waitFor();
-    await progress.getByText("Gas available", { exact: true }).waitFor();
+    await page.getByLabel("Network fee balance 1 SUI", { exact: true }).waitFor();
+    await progress.getByText("Funds available", { exact: true }).waitFor();
     await page.getByText("1 SUI (1,000,000,000 MIST)", { exact: true }).waitFor();
     await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Register device" && !b.disabled));
     // The signing account and network stay visible next to the action.
@@ -136,10 +136,14 @@ function audit() {
     await page.getByText("Approve the registration in your wallet…", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Registering…", exact: true }).click({ force: true }).catch(() => {});
     await page.evaluate(() => window.acceptance.release());
-    await page.getByRole("status").filter({ hasText: "Confirmed transaction" }).waitFor();
+    await page.getByRole("status").filter({ hasText: "Device registered." }).waitFor();
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1);
-    const confirmed = await page.getByRole("status").filter({ hasText: "Confirmed transaction" }).innerText();
-    assert.match(confirmed, /not online until its daemon/);
+    const confirmed = await page.getByRole("status").filter({ hasText: "Device registered." }).innerText();
+    assert.match(confirmed, /not online until its client/);
+    const confirmation = page.getByText("Confirmation details", { exact: true });
+    await confirmation.click();
+    await page.getByText("Confirmed transaction " + "1".repeat(32) + ".", { exact: false }).waitFor();
+    await confirmation.click();
     await page.getByRole("listitem").filter({ hasText: /^First Pi$/ }).waitFor();
     await progress.getByText("1 registered", { exact: true }).waitFor();
     await next.filter({ hasText: "Deploy a component" }).waitFor();

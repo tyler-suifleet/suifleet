@@ -74,9 +74,9 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await card.getByLabel("Account address", { exact: true }).fill("0x" + "ab".repeat(32));
     await card.getByRole("button", { name: "Grant decryption" }).click();
     await card.getByRole("button", { name: "Revoke device Granted sensor" }).click();
-    page.once("dialog", d => d.dismiss()); await card.getByRole("button", { name: "Rotate key epoch" }).click();
+    page.once("dialog", d => d.dismiss()); await card.getByRole("button", { name: "Replace encryption key" }).click();
     assert.equal(await page.evaluate(() => window.accessCalls.length), 5);
-    page.once("dialog", d => d.accept()); await card.getByRole("button", { name: "Rotate key epoch" }).click();
+    page.once("dialog", d => d.accept()); await card.getByRole("button", { name: "Replace encryption key" }).click();
     const calls = await page.evaluate(() => window.accessCalls.map(tx => tx.commands[0].MoveCall.function));
     assert.deepEqual(calls, ["grant_device", "grant_device", "grant_group", "grant_account", "revoke_device", "rotate_key_epoch"]);
     await card.getByLabel("Recipient type").selectOption("device");
@@ -85,7 +85,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await update({ recipients: "empty" }); await card.getByText("No activated devices available.", { exact: false }).waitFor();
     await card.getByLabel("Recipient type").selectOption("group"); await card.getByText("No administered groups available.", { exact: false }).waitFor();
     await update({ recipients: "ready", pending: true });
-    assert.equal(await card.getByRole("button", { name: "Rotate key epoch" }).isDisabled(), true);
+    assert.equal(await card.getByRole("button", { name: "Replace encryption key" }).isDisabled(), true);
     await update({ pending: false });
     for (const width of [375, 1280]) {
       await page.setViewportSize({ width, height: 900 });

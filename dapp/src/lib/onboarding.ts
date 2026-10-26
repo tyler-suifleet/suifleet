@@ -55,15 +55,15 @@ export function onboardingProgress(connected: boolean, balance: Loaded<string>, 
   const registered = devices.status === "success" && devices.value > 0;
   const at = (state: StepState, status: string) => ({ state, status });
   const account: OnboardingStep = { id: "account", title: "Sign in", ...(connected ? at("done", "Connected") : at("current", "Not connected")) };
-  const funding: OnboardingStep = { id: "funding", title: "Add gas", ...(!connected ? at("upcoming", "Waiting for sign-in")
+  const funding: OnboardingStep = { id: "funding", title: "Add funds", ...(!connected ? at("upcoming", "Waiting for sign-in")
     : balance.status === "pending" ? at("current", "Checking balance…")
     : balance.status === "error" ? at("blocked", "Balance unavailable")
-    : funded ? at("done", "Gas available") : at("current", "Not funded")) };
+    : funded ? at("done", "Funds available") : at("current", "Not funded")) };
   const register: OnboardingStep = { id: "register", title: "Register a device", ...(!connected ? at("upcoming", "Waiting for sign-in")
     : devices.status === "error" ? at("blocked", "Inventory unavailable")
     : devices.status === "pending" ? at(funded ? "current" : "upcoming", "Checking inventory…")
     : registered ? at("done", `${devices.value} registered`)
-    : funded ? at("current", "No devices yet") : at("upcoming", "Needs gas first")) };
+    : funded ? at("current", "No devices yet") : at("upcoming", "Needs funds first")) };
   const update: OnboardingStep = { id: "update", title: "Deploy a first update", ...(registered
     ? at("current", "Ready to deploy") : at("upcoming", "Needs a registered device")) };
   return [account, funding, register, update];
