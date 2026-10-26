@@ -40,26 +40,30 @@ export function StreamRetentionPanel() {
       await execute({ transaction: setStreamRetentionTx(DATA_CONFIG, cap, kind, epochs) });
       const policies = await readStreamPolicies(client, DATA_CONFIG);
       if (current === generation.current) { setValues(policies); setMessage('Retention confirmed for new writes. Existing expiries are unchanged.'); }
-    } catch { if (current === generation.current) setMessage('Retention change refused or unavailable. Re-read chain state before retrying.'); }
+    } catch { if (current === generation.current) setMessage('Retention change refused or unavailable. Reload the settings before retrying.'); }
   }
   async function extend() {
     if (!DATA_CONFIG || !cap || !storage) return;
     const current = generation.current;
     try {
       await execute({transaction:extendStreamArchiveTx(DATA_CONFIG,storage,cap,blob,extension)});
-      if (current === generation.current) setMessage('Archive extension confirmed. Its live storage record controls expiry.');
-    } catch { if (current === generation.current) setMessage('Archive extension refused or unavailable. Expired bytes and pending renewal policies cannot be extended here.'); }
+      if (current === generation.current) setMessage('Archive extension confirmed. The storage network determines the updated expiry.');
+    } catch { if (current === generation.current) setMessage('Archive extension refused or unavailable. Expired data and archives awaiting renewal cannot be extended here.'); }
   }
   return <section className="border rounded p-4 space-y-3"><h2 className="font-semibold">Per-stream retention</h2>
-    {!DATA_CONFIG?.streamRetentionOrigin ? <p>This deployment needs the stream retention upgrade and verified type origin.</p> : <>
-      <ul>{ARCHIVE_STREAMS.map((name, i) => <li key={name}>{name}: {loaded ? values[i] === undefined ? 'legacy pool policy; not configured' : `${values[i]} Walrus epochs` : 'unavailable'}</li>)}</ul>
-      <label>Stream <select value={kind} onChange={e => { const next = Number(e.target.value); setKind(next); setEpochs(values[next] ?? 3); }}>{ARCHIVE_STREAMS.map((name, i) => <option key={name} value={i}>{name}</option>)}</select></label>
-      <label> Retention in Walrus epochs <input type="number" min={1} max={53} step={1} value={epochs} onChange={e => setEpochs(Number(e.target.value))} /></label>
-      <button className="border rounded p-2" disabled={!loaded || !cap || isPending} onClick={() => void save()}>Save stream retention</button>
-      <div><label>Existing archive blob object ID <input value={blob} onChange={e => setBlob(e.target.value)} /></label>
-        <label> Additional epochs <input type="number" min={1} max={53} step={1} value={extension} onChange={e => setExtension(Number(e.target.value))} /></label>
-        <button className="border rounded p-2" disabled={!cap || !storage || isPending} onClick={() => void extend()}>Extend archive before expiry</button></div>
-      <p>New device writes buy the full period, within their WAL and upload quotas. Dates depend on the network’s Walrus epoch schedule. Choose 1–53 epochs; keep an existing archive longer with a wallet-approved extension before expiry, within the live Walrus horizon. Expired bytes cannot be restored by extending a reference. Recover expired deposits in Network budget after reviewing the reclaim preview. The cost estimate uses the fleet-wide pool setting; per-stream purchases also need enough WAL in the device’s existing allowance.</p>
+    {!DATA_CONFIG?.streamRetentionOrigin ? <p>Retention settings are unavailable until this fleet’s software is upgraded and verified.</p> : <>
+      <ul>{ARCHIVE_STREAMS.map((name, i) => <li key={name}>{name}: {loaded ? values[i] === undefined ? 'using the shared storage setting' : 'custom storage period configured (see technical settings)' : 'unavailable'}</li>)}</ul>
+      <p>Choose how long to keep each stream’s new data. Changing a setting does not extend existing archives. Exact durations depend on the storage network’s schedule; calendar expiry dates are unavailable here.</p>
+      <details><summary>Technical storage settings</summary>
+        <p>Storage periods use Walrus epochs, the storage network’s time units. Choose 1–53 epochs. Current settings: {ARCHIVE_STREAMS.map((name, i) => `${name}: ${loaded ? values[i] === undefined ? 'shared setting' : `${values[i]} epochs` : 'unavailable'}`).join('; ')}.</p>
+        <label>Stream <select value={kind} onChange={e => { const next = Number(e.target.value); setKind(next); setEpochs(values[next] ?? 3); }}>{ARCHIVE_STREAMS.map((name, i) => <option key={name} value={i}>{name}</option>)}</select></label>
+        <label> Storage period (Walrus epochs) <input type="number" min={1} max={53} step={1} value={epochs} onChange={e => setEpochs(Number(e.target.value))} /></label>
+        <button className="border rounded p-2" disabled={!loaded || !cap || isPending} onClick={() => void save()}>Save stream retention</button>
+        <div><label>Archive storage object ID <input value={blob} onChange={e => setBlob(e.target.value)} /></label>
+          <label> Additional storage (Walrus epochs) <input type="number" min={1} max={53} step={1} value={extension} onChange={e => setExtension(Number(e.target.value))} /></label>
+          <button className="border rounded p-2" disabled={!cap || !storage || isPending} onClick={() => void extend()}>Extend archive before expiry</button></div>
+      </details>
+      <p>Your wallet, the app that approves account actions, must approve changes and extensions. New device writes pay for the full storage period using WAL, the asset used to buy storage, within the device’s spending and upload limits. The cost estimate uses the shared storage setting; custom periods also require enough WAL in the device’s existing allowance. Extensions must be approved before expiry and stay within the storage network’s maximum future period. Expired data cannot be restored by extending an archive. Recover eligible expired storage deposits in Network budget after reviewing the reclaim preview.</p>
     </>}{message && <p role="status">{message}</p>}
   </section>;
 }

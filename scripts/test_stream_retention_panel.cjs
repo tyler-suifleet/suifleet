@@ -34,7 +34,8 @@ const text=t=>typeof t==='string'||typeof t==='number'?String(t):Array.isArray(t
 const button=t=>nodes(t).find(n=>n.type==='button');
 const flush=()=>new Promise(r=>setImmediate(r));
 (async()=>{
- render();await flush();let tree=render();assert.equal(button(tree).props.disabled,false);assert.match(text(tree),/Logs: 3 Walrus epochs/);
+ render();await flush();let tree=render();assert.equal(button(tree).props.disabled,false);assert.match(text(tree),/Logs: 3 epochs/);
+ const technical=nodes(tree).find(n=>n.type==='details');assert(technical,'technical controls require disclosure');assert.match(text(technical),/Archive storage object ID/);assert.match(text(tree),/WAL, the asset used to buy storage/);assert.match(text(tree),/Expired data cannot be restored/);
  nodes(tree).find(n=>n.type==='input').props.onChange({target:{value:'54'}});tree=render();await button(tree).props.onClick();await flush();assert.equal(signed.length,0,'invalid horizon never reaches wallet');
  nodes(tree).find(n=>n.type==='input').props.onChange({target:{value:'26'}});tree=render();button(tree).props.onClick();await flush();assert.equal(signed.length,1);
  const tx=signed[0].getData();assert.equal(tx.commands[0].MoveCall.function,'set_stream_retention');
