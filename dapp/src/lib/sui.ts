@@ -1,3 +1,4 @@
+import { readShardedReceipts, readReceiptDirectory, buildReceiptMaintenanceTx } from "./receipt-shards";
 import type { NamedFleet } from "./customer-fleets";
 import { batchFields } from './batch-fields';
 import { incrementalEvents as allEvents } from "./event-history";
@@ -77,6 +78,7 @@ export interface DeploymentEvent {
    * statuses or accept reports from revoked keys, so none are shown.
    */
   receiptsVerified: boolean;
+  receiptCleanup?: boolean;
   resolvedDeviceIds: string[];
 }
 
@@ -89,7 +91,7 @@ export interface DeploymentReceipts {
  * Receipts authority version of the contracts this client targets. Lower
  * versions are written by older packages, which accept reports from revoked,
  * rotated-out or deregistered keys; the current package discards them on
- * migration. Higher versions lock older packages out and stay trusted.
+ * migration. Version 3 requires the bound shared roots; unknown versions fail closed.
  */
 export const RECEIPTS_AUTHORITY_VERSION = BigInt(2);
 
@@ -97,7 +99,7 @@ export const RECEIPTS_AUTHORITY_VERSION = BigInt(2);
  * Read authoritative status receipts. Legacy `StatusesKey` entries are never
  * used: any address can write them through the original package.
  */
-export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField">, deploymentId: string): Promise<DeploymentReceipts> {
+export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject" | "getObjects">, deploymentId: string): Promise<DeploymentReceipts> {
   let field;
   try {
     field = await client.getDynamicField({ parentId: deploymentId,
@@ -114,7 +116,16 @@ export async function readReceipts(client: Pick<SuiGrpcClient, "getDynamicField"
   // Additive upgrades can bump it while retaining the same BCS layout.
   if (BigInt(receipts.version) === BigInt(0)) throw new Error("Invalid Receipts authority version");
   if (receipts.statuses.contents.some((entry) => entry.value !== 1 && entry.value !== 2)) throw new Error("Unsupported Receipts status");
-  if (BigInt(receipts.version) < RECEIPTS_AUTHORITY_VERSION) return { verified: false, statuses: {} };
+  if (receipts.version === "4") return readShardedReceipts(client, deploymentId);
+  if (BigInt(receipts.version) > BigInt(4)) throw new Error("Unsupported receipts authority version");
+  let managed = false;
+  if (requireManifest().type_origins['deployment_manager::CustomerFleetKey']) {
+    try {
+      await client.getDynamicField({ parentId: deploymentId, name: { type: moveType('deployment_manager::CustomerFleetKey'), bcs: new Uint8Array([0]) } });
+      managed = true;
+    } catch (error) { if (!(error instanceof ObjectError && error.reason === 'notFound')) throw error; }
+  }
+  if (BigInt(receipts.version) !== (managed ? BigInt(3) : RECEIPTS_AUTHORITY_VERSION)) return { verified: false, statuses: {} };
   return { verified: true, statuses: Object.fromEntries(receipts.statuses.contents.map((entry) => [entry.key, entry.value])) };
 }
 
@@ -257,18 +268,27 @@ export function buildCreateDeploymentTx(
       tx.pure.string(componentName), tx.pure.string(version), tx.pure.string(recipeBlobId), tx.pure.string(artifactSha256), tx.pure.string(recipeSha256),
       tx.pure.vector("id", targetGroupIds), tx.pure.vector("id", targetDeviceIds), tx.object("0x6")] });
     if (initiallyPaused) tx.moveCall({ target: `${PACKAGE_ID}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
+    if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) tx.moveCall({ target: `${PACKAGE_ID}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record] });
     calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
     return tx;
   }
-  if (initiallyPaused || announcements) {
+  if (initiallyPaused || announcements || requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) {
     const [record] = calls.deployment_manager_new_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
     if (initiallyPaused) calls.deployment_manager_set_control(tx, PACKAGE_ID, record, 1, 0, 0, 0, 0, 0);
+    if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) calls.deployment_manager_begin_sharded_receipts(tx, PACKAGE_ID, record);
     if (announcements) announce(tx, record, announcements);
     calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   } else {
     calls.deployment_manager_create_deployment_verified(tx, PACKAGE_ID, componentName, version, recipeBlobId, artifactSha256, recipeSha256, targetGroupIds, targetDeviceIds, "0x6");
   }
   return tx;
+}
+
+/** One bounded deletion step. Sharded deployments first stop admission and
+ * reports, drain fields, retire roots, then consume the deployment. */
+export async function buildDeleteDeploymentStepTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, deployment: string, schema = "1", fleet?: NamedFleet): Promise<Transaction> {
+  const directory = await readReceiptDirectory(client, deployment);
+  return directory ? buildReceiptMaintenanceTx(client, deployment, "cleanup", fleet) : buildDeleteDeploymentTx(deployment, schema, fleet);
 }
 
 export function buildDeleteDeploymentTx(deploymentObjectId: string, schemaVersion = "1", fleet?: NamedFleet): Transaction {
@@ -383,11 +403,13 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
     const record = live.get(event.deployment_id);
     return record && (!owner || record.creator === owner);
   });
+  const directories = new Map(await Promise.all(liveEvents.map(async event =>
+    [event.deployment_id, await readReceiptDirectory(client, event.deployment_id)] as const)));
   // Persisted events discover IDs only. Targets must be re-read from objects:
   // browser storage is neither a current target list nor an authority source.
   const targetValues = await batchFields(client, liveEvents.flatMap(event =>
     (["TargetGroupsKey", "TargetDevicesKey"] as const).map(name => ({ parent: event.deployment_id,
-      keyType: moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
+      keyType: name === "TargetGroupsKey" && !!directories.get(event.deployment_id) ? moveType("deployment_manager::ShardedTargetGroupsKey") : moveType(`deployment_manager::${name}`), key: bcs.bool().serialize(false).toBytes(),
       valueType: "vector<0x2::object::ID>" }))));
   const currentEvents = liveEvents.map((event, index) => {
     const groups = targetValues[index * 2], devices = targetValues[index * 2 + 1];
@@ -408,7 +430,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
       return group && group.admin === record.creator ? [...group.device_ids, ...indexed.get(id) ?? []] : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
-    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, schemaVersion: record.schema_version, componentName: record.component_name, version: record.version,
+    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, receiptCleanup: directories.get(event.deployment_id)?.retiring, schemaVersion: directories.get(event.deployment_id)?.original_schema ?? record.schema_version, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
       targetGroups: event.target_groups, targetDevices: event.target_devices,
       creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,

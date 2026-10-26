@@ -41,7 +41,7 @@ MUTATIONS = {
     "recipe-length": ("deployment_manager", "assert_recipe_hash", "assert!(bytes.length() == 64, EInvalidRecipeHash);", ""),
     "cap-authority": ("device_cap", "assert_signer", "assert!(ctx.sender() == *signer, EWrongSigner);", ""),
     "receipts-future": ("deployment_manager", "receipts_mut", "assert!(receipts.version <= target_version, EPackageOutdated);", ""),
-    "receipts-customer-version": ("deployment_manager", "receipts_mut", "if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else RECEIPTS_VERSION", "RECEIPTS_VERSION"),
+    "receipts-customer-version": ("deployment_manager", "receipts_mut", "if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else LEGACY_RECEIPTS_VERSION", "LEGACY_RECEIPTS_VERSION"),
     "receipts-no-upgrade": ("deployment_manager", "receipts_mut", "receipts.version = target_version;", ""),
     "receipts-clear": ("deployment_manager", "receipts_mut", "receipts.statuses = vec_map::empty();", ""),
     "role-authority": ("roles", "revoke", "assert!(ctx.sender() == operator, ENotOperator);", ""),

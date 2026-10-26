@@ -111,18 +111,21 @@ def settle(facts, operator):
     return ('executed' if facts['success'] else 'failed'), cli_result(facts)
 
 
-def dead(tx, chain):
+def dead(tx, chain, inputs=()):
     """Why the retained transaction can never execute, or None."""
     expiry = (tx.get('expiration') or {}).get('max_epoch')
     epoch = chain.epoch()
     if expiry is not None and epoch > int(expiry):
         return f'expired: current epoch {epoch} is past its last valid epoch {expiry}'
     coins = [p for p in tx.get('gas_payment') or [] if str(p['version']) != '0']  # 0: address-balance reservation
-    current = chain.versions([p['objectId'] for p in coins])
-    for payment in coins:
+    # Owned inputs (notably UpgradeCap) can move even with address-balance gas.
+    # These references come directly from the verified bytes, never cached metadata.
+    owned = [p for p in inputs if p.get('kind') == 'ImmOrOwnedObject']
+    current = chain.versions([p['objectId'] for p in coins + owned])
+    for payment in coins + owned:
         version = current.get(toolchain.normal(payment['objectId']))
         if version is None or int(version) > int(payment['version']):
-            return f'gas coin {payment["objectId"]} moved past version {payment["version"]}'
+            return f'input object {payment["objectId"]} moved past version {payment["version"]}'
     return None
 
 
@@ -172,7 +175,7 @@ def reconcile(pending, *, chain, operator, inspect, verify, resubmit, now, legac
     facts = chain.transaction(tx['digest'])
     if facts:
         return settle(facts, operator)
-    reason = dead(tx, chain)
+    reason = dead(tx, chain, data.get('inputs') or [])
     if reason:
         if now - float(pending.get('created') or 0) > RETENTION_SECONDS:
             raise Uncertain('pending transaction is older than the automatic history window; explicit reconciliation required')

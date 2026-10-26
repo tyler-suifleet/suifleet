@@ -464,6 +464,16 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                     wait_for(lambda: state().get("deployments", {}).get("0x200", {}).get("reported"),
                              "rejected recipe did not report", process)
                     assert state()["deployments"]["0x200"]["status"] == 2 and count() == 0
+                    # The unknown schema also leaves post-receipt health queued.
+                    # Restore a readable ordinary record and wait for that real
+                    # retry to settle before measuring idle receipt reads. A
+                    # pending health retry legitimately performs authority reads
+                    # and otherwise overlaps the next queued-receipt scenario.
+                    wait_for(lambda: state()["deployments"]["0x200"].get("rollout_health_slow_retry", False),
+                             "unknown schema did not retain health retry", process)
+                    sim.schema_fields["0x200"] = {"schema_version": "1"}
+                    wait_for(lambda: not state()["deployments"]["0x200"].get("rollout_health_pending", True),
+                             "post-receipt health did not settle", process, timeout=12)
                     batches = sim.reads["BatchGetObjects"]
                     wait_for(lambda: sim.reads["BatchGetObjects"] >= batches + 2,
                              "rejection did not settle", process)
@@ -519,7 +529,7 @@ def run(binary, firmware_helper=False, daemon_user=None, platform_installer=Fals
                 sim.add("0x103", creator="0xbad")
                 # Unsupported records must fail individually, with no downloads,
                 # and must not poison discovery of the valid group deployment.
-                for id, version in (("0x10b", "4"), ("0x10c", None), ("0x10d", "invalid")):
+                for id, version in (("0x10b", "5"), ("0x10c", None), ("0x10d", "invalid")):
                     sim.schema_fields[id] = {"schema_version": version}
                     sim.add(id)
                 sim.add("0x104", groups=[GROUP], direct=False)

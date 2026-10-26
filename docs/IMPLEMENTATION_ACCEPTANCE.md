@@ -155,6 +155,13 @@ No paid provider purchase, production credentials, mainnet or physical programmi
 is authorized. A missing final-test account must not idle unrelated implementation
 workers. A genuine unresolved software/API defect still blocks its own work.
 
+SF-127 retains source/security, local/simulator, isolated-chain upgrade and
+old-package gates, normal automatic testnet CI and fresh independent review.
+Physical, actual-mainnet and final production-provider/manual-wallet checks stay
+unrun in SF-031/#32 and SF-087/#159 under the standing implementation split.
+The [sharded receipt evidence](SHARDED_RECEIPTS.md) distinguishes actual 1,000-target
+measurements from the functional 120,000-receipt storage target and pending CI.
+
 SF-139 opaque device data retains authenticated intake, bounded durable chunking,
 raw-byte/signature/ciphertext integrity, quota/restart/failure cases, scoped Seal
 and old-package bypass tests, isolated-chain upgrades, applicable automatic

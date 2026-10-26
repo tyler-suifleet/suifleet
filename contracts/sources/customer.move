@@ -558,7 +558,7 @@ module sui_edge::customer {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let (found, index) = fleet.deployments.index_of(&object::id(&record)); assert!(found, EBinding);
         fleet.deployments.swap_remove(index);
-        if (deployment_manager::schema_version(&record) == 2) component_catalog::remove_for_customer(&mut record, object::id(fleet).to_address());
+        if (deployment_manager::receipt_schema(&record) == 2) component_catalog::remove_for_customer(&mut record, object::id(fleet).to_address());
         deployment_manager::delete_for_customer(record, object::id(fleet).to_address());
     }
     public fun report_status(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
@@ -570,6 +570,31 @@ module sui_edge::customer {
         assert_reporter(customer, fleet, record, registry, cap, ctx); assert_group(fleet, group);
         assert!(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
         deployment_manager::record_customer_status(record, object::id(fleet), cap, status, ctx);
+    }
+    /// Managed shard operations keep customer/fleet membership checks at every report.
+    public fun begin_sharded_receipts(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        let authority = object::id(fleet).to_address();
+        if (deployment_manager::receipt_schema(record) == 2) component_catalog::begin_customer_receipts(record, authority, ctx)
+        else deployment_manager::begin_sharded_receipts_as(record, authority, ctx);
+    }
+    public fun begin_receipt_cleanup(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::begin_receipt_cleanup_as(record, object::id(fleet).to_address());
+    }
+    public fun report_status_v4(customer: &Customer, fleet: &Fleet, record: &DeploymentRecord,
+        shard: &mut sui_edge::deployment_manager::ReceiptShard, registry: &DeviceRegistry, cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
+        assert_reporter(customer, fleet, record, registry, cap, ctx);
+        assert!(deployment_manager::target_devices(record).contains(&device_cap::device_id(cap)), EBinding);
+        deployment_manager::record_customer_status_v4(record, shard, object::id(fleet), cap, status, ctx);
+    }
+    public fun report_group_status_v4(customer: &Customer, fleet: &Fleet, record: &DeploymentRecord,
+        shard: &mut sui_edge::deployment_manager::ReceiptShard, registry: &DeviceRegistry, cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &mut TxContext) {
+        assert_reporter(customer, fleet, record, registry, cap, ctx); assert_group(fleet, group);
+        assert!(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
+        deployment_manager::record_customer_status_v4(record, shard, object::id(fleet), cap, status, ctx);
     }
     fun assert_reporter(customer: &Customer, fleet: &Fleet, record: &DeploymentRecord, registry: &DeviceRegistry, cap: &DeviceCap, ctx: &mut TxContext) {
         assert_fleet(customer, fleet);

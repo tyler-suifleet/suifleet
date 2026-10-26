@@ -28,19 +28,27 @@ module sui_edge::rollout_health_tests {
     fun progress(d: &DeploymentRecord, expected: u8) {
         let (state, _) = dm::rollout_progress(d); assert!(state == expected, 0);
     }
-    fun sample(healthy: bool, revoke: bool) {
+    fun sample(healthy: bool, revoke: bool, sharded: bool) {
         let mut s = ts::begin(ADMIN);
         let mut c = clock::create_for_testing(ts::ctx(&mut s)); clock::set_for_testing(&mut c, 1);
         let id = setup(&mut s, &c);
         ts::next_tx(&mut s, ADMIN);
         let mut d = ts::take_shared<DeploymentRecord>(&s);
         let r = ts::take_shared<DeviceRegistry>(&s);
+        if (sharded) { dm::begin_sharded_receipts(&mut d, ts::ctx(&mut s)); };
         dm::advance_rollout_onchain(&mut d, &r, vector[id], &c, ts::ctx(&mut s));
         ts::return_shared(r); ts::return_shared(d);
         ts::next_tx(&mut s, DEVICE);
         let mut d = ts::take_shared<DeploymentRecord>(&s);
         let r = ts::take_shared<DeviceRegistry>(&s); let cap = ts::take_from_sender<DeviceCap>(&s);
-        dm::report_verified_status(&mut d, &r, &cap, 1, ts::ctx(&mut s));
+        if (sharded) {
+            let roots = dm::receipt_roots(&d);
+            let mut shard = ts::take_shared_by_id<dm::ReceiptShard>(&s, roots[dm::receipt_shard_index(id)]);
+            dm::report_status_v3(&d, &mut shard, &r, &cap, 1, ts::ctx(&mut s));
+            assert!(dm::rollout_outcomes_for_testing(&d)[0] == 0);
+            dm::sync_rollout_receipts(&mut d, &shard, vector[id]);
+            ts::return_shared(shard);
+        } else { dm::report_verified_status(&mut d, &r, &cap, 1, ts::ctx(&mut s)); };
         ts::return_to_sender(&s, cap); ts::return_shared(r); ts::return_shared(d);
         ts::next_tx(&mut s, ADMIN);
         let mut d = ts::take_shared<DeploymentRecord>(&s); let r = ts::take_shared<DeviceRegistry>(&s);
@@ -69,6 +77,15 @@ module sui_edge::rollout_health_tests {
         clock::set_for_testing(&mut c, 360101);
         if (healthy && !revoke) { dm::advance_rollout_onchain(&mut d, &r, vector[], &c, ts::ctx(&mut s)); };
         progress(&d, if (!healthy) 2 else if (revoke) 1 else 3);
+        if (sharded) {
+            dm::begin_receipt_cleanup(&mut d, ts::ctx(&mut s));
+            let roots = *dm::receipt_roots(&d); let mut i = 0;
+            while (i < roots.length()) {
+                let mut shard = ts::take_shared_by_id<dm::ReceiptShard>(&s, roots[i]);
+                dm::cleanup_receipt_chunk(&d, &mut shard, 64);
+                dm::retire_receipt_shard(&mut d, shard); i = i + 1;
+            };
+        };
         dm::delete_rollout(d, ts::ctx(&mut s)); ts::return_shared(r);
         clock::destroy_for_testing(c); ts::end(s);
     }
@@ -89,7 +106,10 @@ module sui_edge::rollout_health_tests {
     fun ungranted_health_rejected() { missing_outcome(false); }
     #[test, expected_failure(abort_code=3, location=sui_edge::deployment_manager)]
     fun health_before_outcome_rejected() { missing_outcome(true); }
-    #[test] fun health_after_grant_is_valid_beyond_wall_clock_window() { sample(true, false); }
-    #[test] fun degraded_sample_cannot_be_replaced_by_healthy_retry() { sample(false, false); }
-    #[test] fun revoked_identity_cannot_supply_healthy_gate() { sample(true, true); }
+    #[test] fun health_after_grant_is_valid_beyond_wall_clock_window() { sample(true, false, false); }
+    #[test] fun degraded_sample_cannot_be_replaced_by_healthy_retry() { sample(false, false, false); }
+    #[test] fun revoked_identity_cannot_supply_healthy_gate() { sample(true, true, false); }
+    #[test] fun sharded_health_completes_after_receipt_settlement() { sample(true, false, true); }
+    #[test] fun sharded_degraded_health_aborts() { sample(false, false, true); }
+    #[test] fun sharded_revoked_identity_cannot_supply_gate() { sample(true, true, true); }
 }

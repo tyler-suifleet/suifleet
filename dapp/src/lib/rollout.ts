@@ -1,3 +1,4 @@
+import { readReceiptDirectory, receiptShardIndex } from "./receipt-shards";
 import type { NamedFleet } from "./customer-fleets";
 import type { FleetDataConfig } from "./fleet-data";
 import { bcs } from "@mysten/sui/bcs";
@@ -49,11 +50,13 @@ export function buildRolloutTx(input: RolloutInput, announcements?: Announcement
     const [record] = tx.moveCall({ target: `${PACKAGE_ID}::customer::new_rollout`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id),
       tx.pure.string(input.component), tx.pure.string(input.version), tx.pure.string(input.recipe), tx.pure.string(input.artifactSha256), tx.pure.string(input.recipeSha256),
       tx.pure.vector("id", input.cohorts.flat()), tx.pure.vector("u64", input.cohorts.flatMap((cohort, i) => cohort.map(() => i))), policy, tx.object("0x6")] });
+    if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) tx.moveCall({ target: `${PACKAGE_ID}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record] });
     calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record); return tx;
   }
   const [record] = calls.deployment_manager_new_rollout_verified(tx, PACKAGE_ID, input.component, input.version,
     input.recipe, input.artifactSha256, input.recipeSha256, [], input.cohorts.flat(),
     input.cohorts.flatMap((cohort, i) => cohort.map(() => i)), policy, "0x6");
+  if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) calls.deployment_manager_begin_sharded_receipts(tx, PACKAGE_ID, record);
   if (announcements) announce(tx, record, announcements);
   calls.deployment_manager_share_deployment(tx, PACKAGE_ID, record);
   return tx;
@@ -64,11 +67,11 @@ export async function readRollout(client: Pick<SuiGrpcClient, "getDynamicField">
   if (normalizeStructTag(dynamicField.value.type) !== normalizeStructTag(moveType("deployment_manager::Rollout"))) throw new Error("Unexpected rollout policy type");
   return deployment_manager_RolloutBcs.parse(dynamicField.value.bcs);
 }
-export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject">, id: string, owner: string) {
+export async function readRolloutTarget(client: Pick<SuiGrpcClient, "getObject" | "getDynamicField">, id: string, owner: string) {
   const { object } = await client.getObject({ objectId: id, include: { content: true } });
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("deployment_manager::DeploymentRecord"))) throw new Error("Unexpected rollout deployment type");
   const record = deployment_manager_DeploymentRecordBcs.parse(object.content);
-  if (record.schema_version !== "3" || normalizeSuiAddress(record.id) !== normalizeSuiAddress(id) ||
+  if ((record.schema_version !== "3" && !(record.schema_version === "4" && (await readReceiptDirectory(client, id))?.original_schema === "3")) || normalizeSuiAddress(record.id) !== normalizeSuiAddress(id) ||
     normalizeSuiAddress(record.creator) !== normalizeSuiAddress(owner)) throw new Error("Rollout deployment identity or creator mismatch");
   return { componentName: record.component_name, version: record.version };
 }
@@ -79,6 +82,7 @@ export async function buildAdvanceRolloutTx(client: Pick<SuiGrpcClient, "getDyna
   const selected = candidates.map(id => normalizeSuiAddress(id));
   if (new Set(selected).size !== selected.length || selected.some(id => !r.members.includes(id))) throw new Error("Admission candidates must be distinct rollout members");
   const tx = new Transaction();
+  await appendRolloutReceiptSync(client, tx, id, r.members);
   if (scope) tx.moveCall({ target: `${PACKAGE_ID}::customer::advance_rollout_onchain`, arguments: [tx.object(scope.fleet.customerId), tx.object(scope.fleet.id), tx.object(id), tx.object(manifest.shared_objects.registry.id), tx.pure.vector("id", selected), tx.object("0x6")] });
   else calls.deployment_manager_advance_rollout_onchain(tx, PACKAGE_ID, id,
     manifest.shared_objects.registry.id, selected, "0x6");
@@ -92,4 +96,17 @@ export function buildRolloutControlTx(id: string, state: number, skip: string[],
   if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::control_rollout`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(id), tx.pure.u8(state), tx.pure.vector("id", skip), tx.pure.string(reason), tx.object("0x6")] });
   else calls.deployment_manager_control_rollout(tx, PACKAGE_ID, id, state, skip, reason, "0x6");
   return tx;
+}
+
+/** Chain settlement is separate from device reporting, so roots can report
+ * concurrently without taking the rollout coordinator object mutably. */
+export async function appendRolloutReceiptSync(client: Pick<SuiGrpcClient, "getDynamicField">, tx: Transaction, id: string, members: string[]) {
+  const directory = await readReceiptDirectory(client, id);
+  if (directory) {
+    if (!directory.ready || directory.retiring) throw Error("Receipt migration or retirement in progress");
+    directory.roots.forEach((root, index) => {
+      const devices = members.filter(device => receiptShardIndex(device) === index);
+      for (let start = 0; start < devices.length; start += 64) calls.deployment_manager_sync_rollout_receipts(tx, PACKAGE_ID, id, root, devices.slice(start, start + 64));
+    });
+  }
 }

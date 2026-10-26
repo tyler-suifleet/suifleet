@@ -463,6 +463,31 @@ def transaction_gas_budget(value):
     return value
 
 
+def package_client(network_sui, wallet, *command, json_output=True, check=True, executed=None):
+    full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
+    if json_output:
+        full.append("--json")
+    result = live_common.run_client_command(full, command)
+    if result.returncode and check and not (json_output and '"effects"' in result.stdout):
+        submitted = live_common.DIGEST.search(result.stderr + result.stdout)
+        if executed is not None and json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
+            # The CLI exits non-zero without effects when execution fails
+            # (runs 40261665249, 40266575477: InsufficientGas). Read the
+            # failure back by digest so it is charged and known, not unknown.
+            found = {}
+            try:
+                wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
+                         f"transaction {submitted.group(1)} not readable", timeout=60)
+            except AssertionError as error:
+                raise UnreadableExecution(submitted.group(1)) from error
+            return found
+        raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
+    if not json_output:
+        return result
+    out = result.stdout
+    return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+
+
 def run(args):
     ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
     os.umask(0o077)
@@ -477,28 +502,8 @@ def run(args):
     network_sui = tools["network"]["path"]
 
     def client(*command, json_output=True, check=True):
-        full = [network_sui, "client", "--client.config", str(wallet), *map(str, command)]
-        if json_output:
-            full.append("--json")
-        result = subprocess.run(full, text=True, capture_output=True, timeout=600)
-        if result.returncode and check and not (json_output and '"effects"' in result.stdout):
-            submitted = live_common.DIGEST.search(result.stderr + result.stdout)
-            if json_output and command[0] in ("execute-signed-tx", "ptb") and submitted:
-                # The CLI exits non-zero without effects when execution fails
-                # (runs 40261665249, 40266575477: InsufficientGas). Read the
-                # failure back by digest so it is charged and known, not unknown.
-                found = {}
-                try:
-                    wait_for(lambda: found.update(executed(submitted.group(1))) or bool(found),
-                             f"transaction {submitted.group(1)} not readable", timeout=60)
-                except AssertionError as error:
-                    raise UnreadableExecution(submitted.group(1)) from error
-                return found
-            raise RuntimeError(f"sui client {command[0]} failed:\n{result.stderr[-3000:]}\n{result.stdout[-3000:]}")
-        if not json_output:
-            return result
-        out = result.stdout
-        return json.loads(out[min(i for i in (out.find("{"), out.find("[")) if i >= 0):])
+        return package_client(network_sui, wallet, *command, json_output=json_output,
+                              check=check, executed=executed)
 
     def executed(digest):
         try:
@@ -986,10 +991,9 @@ if __name__ == "__main__":
     parser.add_argument("--wallet", required=True, help="client.yaml of the funded wallet to spend from")
     parser.add_argument("--network", default="testnet", choices=["testnet", "localnet"])
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
-    # A fresh base->head fixture with SF-125 inboxes costs about 0.78 SUI before
-    # the deployments (base publish 0.342 + head upgrade 0.376, run 40092917058),
-    # about 0.85 SUI in total.
-    parser.add_argument("--max-spend-mist", type=int, default=1_000_000_000)
+    # SF-127 current-main package storage cost 1.120 SUI (run 40246935467);
+    # setup, device funding and full deployment/cleanup reservations also fit.
+    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")

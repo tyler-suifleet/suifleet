@@ -14,7 +14,15 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
  let daemon;
  async function stopDaemon(){if(daemon && daemon.exitCode===null){const stopped=new Promise(resolve=>daemon.once("exit",resolve));daemon.kill("SIGTERM");await stopped;}daemon=undefined;}
  try {
-  const base=execFileSync("git",["merge-base","HEAD","origin/main"],{encoding:"utf8"}).trim();
+  // Reviewed pre-customer main with indexed-group support. The feature's
+  // introduction-commit parent predates that separately merged API.
+  const base="fdf3dd33c451f32e155a0bc768850087da8374ad";
+  const managedShards=process.env.SF127_MANAGED_SHARDS === "1";
+  const managedTree=path.join(tmp,"managed");
+  if (managedShards) {
+    await fs.mkdir(managedTree);
+    execFileSync("tar",["-x","-C",managedTree],{input:execFileSync("git",["archive","origin/main","contracts"],{maxBuffer:20*1024*1024})});
+  }
   const oldTree=path.join(tmp,"base"); await fs.mkdir(oldTree);
   execFileSync("tar",["-x","-C",oldTree],{input:execFileSync("git",["archive",base,"contracts"],{maxBuffer:20*1024*1024})});
   assert.ok(!(await fs.readdir(path.join(oldTree,"contracts/sources"))).includes("customer.move"),"base must precede customer introduction");
@@ -30,13 +38,17 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   for(const signer of [...Array(12).fill(owner),delegate,device]) { for(let retry=0;;retry++) { try { await requestSuiFromFaucetV2({host:faucet,recipient:signer.toSuiAddress()}); break; } catch(error) { if(retry===9) throw error; await new Promise(resolve=>setTimeout(resolve,500)); } } }
   const digests={},failures={};
   async function execute(label,tx,signer=owner){
-   tx.setGasBudget(label === "upgrade head" ? 2_000_000_000 : 400_000_000);
+   tx.setGasBudget(label.startsWith("upgrade") ? 2_000_000_000 : 400_000_000);
    let r;try{r=await client.signAndExecuteTransaction({transaction:tx,signer,include:{effects:true,events:true,objectTypes:true}});}catch(e){throw Error(`${label}: ${e.message}`);}
    assert.ok(r.Transaction?.status.success,`${label}: ${JSON.stringify(r.FailedTransaction?.status)}`);
    await client.waitForTransaction({digest:r.Transaction.digest});digests[label]=r.Transaction.digest;console.log(`PASS localnet: ${label}`);return r.Transaction;
   }
   const created=(r,suffix)=>{const id=Object.keys(r.objectTypes).find(id=>r.objectTypes[id].endsWith(suffix));assert.ok(id,`missing ${suffix}`);return id;};
   const expectedErrors = {
+   "managed old call during freeze": [5, "deployment_manager::receipts_mut"],
+   "managed old call after finish": [5, "deployment_manager::receipts_mut"],
+   "managed shard foreign fleet": [1, "customer::assert_reporter"],
+   "managed shard after reassignment": [1, "customer::assert_reporter"],
    "retired pending account cannot release capacity twice": [1, "customer::retire_pending_device"],
    "pending migration cannot lend cap": [1, "customer::borrow_budget_cap"],
    "old group mutation after adoption": [0, "device_group::remove_device"],
@@ -95,8 +107,8 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   tx=new Transaction();tx.moveCall({target:`${old}::fleet_budget::enroll_device`,arguments:[tx.object(budget),tx.object(cap),tx.object(registry),tx.object(staleOwnerCap),tx.pure.u64(0),tx.pure.u64(1000000),tx.object("0x6")]});
   const staleAccount=created(await execute("legacy stale enrollment",tx),"::fleet_budget::GasAccount");
   tx=new Transaction();tx.moveCall({target:`${old}::device_registry::deregister_activated_device`,arguments:[tx.object(registry),tx.object(staleOwnerCap)]});await execute("legacy deregistration leaves account",tx);
-  const built=compile(path.join(root,"contracts"));tx=new Transaction();const [ticket]=tx.moveCall({target:"0x2::package::authorize_upgrade",arguments:[tx.object(upgradeCap),tx.pure.u8(0),tx.pure.vector("u8",built.digest)]});const receipt=tx.upgrade({modules:built.modules,dependencies:built.dependencies,package:old,ticket});tx.moveCall({target:"0x2::package::commit_upgrade",arguments:[tx.object(upgradeCap),receipt]});
-  const upgraded=await execute("upgrade head",tx), head=upgraded.effects.changedObjects.find(o=>o.outputState==="PackageWrite").objectId;
+  const built=compile(path.join(managedShards ? managedTree : root,"contracts"));tx=new Transaction();const [ticket]=tx.moveCall({target:"0x2::package::authorize_upgrade",arguments:[tx.object(upgradeCap),tx.pure.u8(0),tx.pure.vector("u8",built.digest)]});const receipt=tx.upgrade({modules:built.modules,dependencies:built.dependencies,package:old,ticket});tx.moveCall({target:"0x2::package::commit_upgrade",arguments:[tx.object(upgradeCap),receipt]});
+  const upgraded=await execute("upgrade head",tx); let head=upgraded.effects.changedObjects.find(o=>o.outputState==="PackageWrite").objectId;
   const pkg=bcs.Object.parse((await client.getObject({objectId:head,include:{objectBcs:true}})).object.objectBcs).data.Package;
   const origins=Object.fromEntries(pkg.typeOriginTable.map(o=>[`${o.moduleName}::${o.datatypeName}`,o.package]));
   assert.equal(origins["device_registry::Device"],old);assert.equal(origins["customer::Customer"],head);assert.equal(origins["fleet_budget::FleetBudget"],old);
@@ -126,7 +138,7 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   manifest.chain_identifier=toHex(fromBase58((await client.ledgerService.getServiceInfo({})).response.chainId).slice(0,4));
   manifest.shared_objects.registry={id:registry,initial_shared_version:(await client.getObject({objectId:registry})).object.owner.Shared.initialSharedVersion};
   process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(manifest);
-  const read=loader()("lib/customer-fleets.ts");const discovered=await read.fetchCustomerFleets(client,owner.toSuiAddress());assert.equal(discovered.length,3);assert.equal(discovered.find(f=>f.id===fleet).activeDevices,1n);assert.deepEqual(await read.fetchCustomerFleets(client,delegate.toSuiAddress()),[]);
+  let read=loader()("lib/customer-fleets.ts");const discovered=await read.fetchCustomerFleets(client,owner.toSuiAddress());assert.equal(discovered.length,3);assert.equal(discovered.find(f=>f.id===fleet).activeDevices,1n);assert.deepEqual(await read.fetchCustomerFleets(client,delegate.toSuiAddress()),[]);
   // Exercise the real daemon custody resolver, not a browser-only authority model.
   const manifestPath=path.join(tmp,"manifest.json");await fs.writeFile(manifestPath,JSON.stringify(manifest));const key=path.join(tmp,"device.key");await fs.writeFile(key,Buffer.from(decodeSuiPrivateKey(device.getSecretKey()).secretKey).toString("hex"),{mode:0o600});
   const cfg=path.join(tmp,"config.toml");await fs.writeFile(cfg,`[sui]\nmanifest_path=${JSON.stringify(manifestPath)}\n[device]\nkeypair_path=${JSON.stringify(key)}\ndevice_object_id="${deviceId}"\ndevice_cap_id="${deviceCap}"\n[apply]\ncommand="/bin/false"\ntimeout_seconds=5\n[runtime]\nstate_dir=${JSON.stringify(path.join(tmp,"state"))}\n`);
@@ -153,6 +165,55 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   }
   assert.ok(reported,"real daemon did not submit its managed Failed receipt");await stopDaemon();
   console.log("PASS localnet: real daemon signed and submitted a managed receipt with checked chain state");
+  let shardRoot;
+  if (managedShards) {
+    const managedPackage=head, next=compile(path.join(root,"contracts"));
+    tx=new Transaction();
+    const [authorization]=tx.moveCall({target:"0x2::package::authorize_upgrade",arguments:[tx.object(upgradeCap),tx.pure.u8(0),tx.pure.vector("u8",next.digest)]});
+    const upgradedReceipt=tx.upgrade({modules:next.modules,dependencies:next.dependencies,package:managedPackage,ticket:authorization});
+    tx.moveCall({target:"0x2::package::commit_upgrade",arguments:[tx.object(upgradeCap),upgradedReceipt]});
+    const upgradedShards=await execute("upgrade populated managed package to shards",tx);
+    head=upgradedShards.effects.changedObjects.find(o=>o.outputState==="PackageWrite").objectId;
+    const nextPkg=bcs.Object.parse((await client.getObject({objectId:head,include:{objectBcs:true}})).object.objectBcs).data.Package;
+    const nextOrigins=Object.fromEntries(nextPkg.typeOriginTable.map(o=>[`${o.moduleName}::${o.datatypeName}`,o.package]));
+    for (const [name,origin] of Object.entries(origins)) assert.equal(nextOrigins[name],origin,`changed prior type origin: ${name}`);
+    assert.equal(nextOrigins['deployment_manager::ReceiptShardKey'],head);
+    manifest.call_package_id=head;manifest.package_version=String(nextPkg.version);manifest.type_origins=nextOrigins;
+    process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(manifest);
+    read=loader()("lib/customer-fleets.ts");
+    await fs.writeFile(manifestPath,JSON.stringify(manifest));
+    await execute("managed shard migration begin",call("begin_sharded_receipts",t=>[t.object(customer),t.object(fleet),t.object(deployment)]));
+    const oldReport=()=>{const t=new Transaction();t.moveCall({target:`${managedPackage}::customer::report_status`,arguments:[t.object(customer),t.object(fleet),t.object(deployment),t.object(registry),t.object(deviceCap),t.pure.u8(1)]});return t;};
+    await reject("managed old call during freeze",oldReport(),device);
+    const shardLoad=loader(), shardApi=shardLoad("lib/receipt-shards.ts"), app=shardLoad("lib/sui.ts");
+    assert.equal((await app.readReceipts(client,deployment)).verified,false);
+    await execute("managed shard bounded migration",await shardApi.buildReceiptMaintenanceTx(client,deployment,'migrate',discovered.find(f=>f.id===fleet)));
+    await execute("managed shard migration finish",await shardApi.buildReceiptMaintenanceTx(client,deployment,'migrate',discovered.find(f=>f.id===fleet)));
+    assert.equal((await app.readReceipts(client,deployment)).statuses[deviceId],2);
+    await reject("managed old call after finish",oldReport(),device);
+    const directory=await shardApi.readReceiptDirectory(client,deployment);shardRoot=directory.roots[shardApi.receiptShardIndex(deviceId)];
+    const report=(selected,status)=>call("report_status_v4",t=>[t.object(customer),t.object(selected),t.object(deployment),t.object(shardRoot),t.object(registry),t.object(deviceCap),t.pure.u8(status)]);
+    await reject("managed shard foreign fleet",report(second,1),device);
+    await execute("managed immutable shard report",report(fleet,1),device);
+    assert.equal((await app.readReceipts(client,deployment)).statuses[deviceId],1);
+    // A fresh durable state forces the real daemon through the managed shard
+    // signer/transport path, independently read back through the frontend.
+    await fs.rm(path.join(tmp,"state"),{recursive:true,force:true});
+    const shardLog=await fs.open(path.join(tmp,"shard-daemon.log"),"w",0o600);
+    daemon=spawn("suifleet-edge/target/debug/suifleet",[],{env:{...env,EDGE_CONFIG:cfg,RUST_LOG:"suifleet=info"},stdio:["ignore",shardLog.fd,shardLog.fd]});await shardLog.close();
+    let shardReported=false;
+    for(let attempt=0;attempt<90;attempt++) {
+      if((await app.readReceipts(client,deployment)).statuses[deviceId]===2){shardReported=true;break;}
+      if(daemon.exitCode!==null)throw Error("managed shard daemon exited; private temporary log withheld");
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }
+    assert.ok(shardReported,"real daemon did not submit managed sharded receipt");await stopDaemon();
+    const db=path.join(tmp,'managed-indexer.db');
+    execFileSync(path.join(root,'suifleet-indexer/target/debug/suifleet-indexer'),['index','--manifest',manifestPath,'--db',db],{encoding:'utf8',timeout:120000,stdio:['ignore','pipe','pipe']});
+    const indexed=JSON.parse(execFileSync('python3',['-c','import sqlite3,json,sys; print(json.dumps(sqlite3.connect(sys.argv[1]).execute("SELECT device_id,status FROM receipts WHERE deployment_id=?",(sys.argv[2],)).fetchall()))',db,deployment],{encoding:'utf8'}));
+    assert.deepEqual(indexed,[[deviceId,2]],'independent production indexer missed managed shard receipt');
+    console.log("PASS localnet: preserved managed type origins, frozen snapshot, old-package attacks and real daemon sharded receipt");
+  }
   tx=new Transaction();
   const [rolloutPolicy]=tx.moveCall({target:`${head}::deployment_manager::rollout_policy`,arguments:[tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(1),tx.pure.u64(100),tx.pure.u64(1),tx.pure.u64(10000),tx.pure.u64(200000000)]});
   const [rolloutRecord]=tx.moveCall({target:`${head}::customer::new_rollout`,arguments:[tx.object(customer),tx.object(fleet),tx.pure.string("app"),tx.pure.string("1"),tx.pure.string("blob"),tx.pure.string("a".repeat(64)),tx.pure.string("b".repeat(64)),tx.pure.vector("id",[deviceId]),tx.pure.vector("u64",[0]),rolloutPolicy,tx.object("0x6")]});
@@ -170,6 +231,15 @@ const root=path.resolve(__dirname,".."), rpc="http://127.0.0.1:9000", faucet="ht
   const secondView=discovered.find(f=>f.id===second);
   await execute("explicit atomic reassignment",call("reassign_device",t=>[t.object(customer),t.object(fleet),t.object(second),t.object(budget),t.object(secondView.budgetId),t.object(accountId),t.object(registry),t.pure.id(deviceId),t.object("0x6")]));
   await reject("reassigned device cannot report source receipt",call("report_status",t=>[t.object(customer),t.object(fleet),t.object(deployment),t.object(registry),t.object(deviceCap),t.pure.u8(1)]),device);
+  if (managedShards) {
+    await reject("managed shard after reassignment",call("report_status_v4",t=>[t.object(customer),t.object(fleet),t.object(deployment),t.object(shardRoot),t.object(registry),t.object(deviceCap),t.pure.u8(1)]),device);
+    const shardApi=loader()("lib/receipt-shards.ts");
+    for(let step=0;step<12;step++) {
+      await execute(`managed bounded cleanup ${step}`,await shardApi.buildReceiptMaintenanceTx(client,deployment,'cleanup',discovered.find(f=>f.id===fleet)));
+      if (!(await shardApi.readReceiptDirectory(client,deployment).catch(()=>undefined))) break;
+    }
+    assert.ok((await client.getObjects({objectIds:[deployment,shardRoot]})).objects.every(o=>o instanceof Error),"managed cleanup orphaned objects");
+  }
   const after=await read.fetchCustomerFleets(client,owner.toSuiAddress());assert.equal(after.find(f=>f.id===second).activeDevices,1n);assert.ok(after.find(f=>f.id===second).devices.includes(deviceId));assert.ok(!after.find(f=>f.id===fleet).devices.includes(deviceId));
   const operatorAfter=execFileSync("suifleet-edge/target/debug/suifleet",["--check-operator",cfg],{encoding:"utf8",stdio:["ignore","pipe","pipe"]});assert.ok(operatorAfter.includes(second));
   const budgetUi=load("lib/fleet-budget.ts");
