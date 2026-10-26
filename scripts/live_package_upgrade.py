@@ -543,6 +543,8 @@ def run(args):
         pools = gas_pools(client("gas"))
         start_balance, shortfall = sum(pools), funding_shortfall(pools, required)
         evidence['faucet'] = {'attempts': 1, 'cli_returncode': funded.returncode,
+                              'balance_before_mist': evidence['funding']['address_mist'] + evidence['funding']['coin_mist'],
+                              'balance_change_mist': start_balance - (evidence['funding']['address_mist'] + evidence['funding']['coin_mist']),
                               'balance_after_mist': start_balance, 'success': shortfall is None}
     if shortfall:
         evidence.update(success=False, allowance_used_mist=ledger.used, max_spend_mist=ledger.limit)

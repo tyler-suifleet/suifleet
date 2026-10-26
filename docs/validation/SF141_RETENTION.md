@@ -622,3 +622,32 @@ its verified merge is still required before SF-141 integration. Hosted CI and
 automatic testnet on the pushed repair remain pending, unpolled; fresh independent
 review is required. Deferred external #32/#159 evidence remains unrun. This
 feedback repair does not approve or authorize merging the PR.
+
+### Funding repair diagnosis — run 40253439621
+
+The exact failed run's public `package-upgrade.json` artifact proves chain
+`4c78adac`, protocol 139, a successful single faucet invocation (return code 0),
+and no submitted transactions. Initial gas pools totaled 1,815,945,830 MIST;
+the request credited 1,000,000,000 MIST, leaving 2,815,945,830 MIST. The required
+3,000,000,000 MIST includes the unchanged 2.6 SUI selected-suite ceilings and
+the 0.4 SUI unresolved historical quarantine hold. This is insufficient credit,
+not a failed faucet or a newly uncertain submission. The old marker and hold
+must remain until independently reconciled. No additional faucet request was
+made by this worker, and no encrypted state was decrypted or modified.
+
+The harness now records public before/after balance delta, without CLI output,
+so subsequent funding repairs can distinguish successful partial funding.
+An offline regression reproduces the exact balances and verifies one request,
+zero mutations, zero allowance consumed and unchanged ceiling despite credit.
+`python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`: 140 tests
+OK, one existing skip. `test_live*.py`: 53 tests OK. `git diff --check`: clean.
+Product source is unchanged; application suites were not rerun for this delta.
+
+Funding recovery itself remains unverified: the next protected execution must
+re-read balance and apply the existing single-request rule if needed. Absent
+intervening spending, one additional ordinary run's 1 SUI credit would cover
+this recorded shortfall; this is arithmetic, not a claimed live result. No
+retry loop, higher allowance, removed reservation or fabricated success was
+introduced. Hosted CI was not watched or polled. Independent review, current
+CI/testnet and verified SF-129 merge remain gates. Physical/mainnet/provider/
+manual-wallet checks remain unrun in #32/#159. The coordinator owns next dispatch.
