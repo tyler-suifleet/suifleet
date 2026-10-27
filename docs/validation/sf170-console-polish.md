@@ -37,6 +37,24 @@ In `suifleet-dev:sf037` (Node/TypeScript) and `suifleet-dev:sf010-chrome`
   the debug daemon (`real daemon --enroll`): passed, including policy-select and
   UI group creation (shown at once, one group on chain).
 
+### Review fix: duplicate registration on Devices
+
+Codex review of `58a27c16` found that "Register by address" on Devices was
+disabled only while signing, so a confirmed registration not yet indexed could
+be submitted again (the contract does not reject a second device for one
+address). The button and the form's submit are now disabled while a creation is
+pending, and a submission whose address matches an unlisted registration
+(including one past the polling timeout) is refused.
+
+- `node scripts/test_devices_pending_browser.cjs` (new, `suifleet-dev:sf010-chrome`):
+  passed. Lagged indexing: the pending row shows, Register by address is disabled
+  and a forced click neither opens the form nor signs; listing the device
+  re-enables it. Fails on `58a27c16` with "pending registration blocks reopening
+  Register by address".
+- `test_device_history_browser.cjs`, `test_onboarding_browser.cjs`: passed.
+- `tsc --noEmit`, `next build`, `test_pending_rows.cjs`, `test_onboarding.cjs`,
+  `test_fleet_ops.cjs`, `test_telemetry.cjs` (`suifleet-dev:sf037`): passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
