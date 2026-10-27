@@ -40,6 +40,23 @@ const hook = loader({
   signingError = undefined; execution = "failure"; await assert.rejects(mutate({ transaction: {} }), /Move abort/);
   execution = "success"; confirmation = "failure"; await assert.rejects(mutate({ transaction: {} }), /Move abort/);
   confirmation = "success";
+  // SF-160: retain successful wallet evidence before node confirmation and
+  // distinguish definite refusal from an ambiguous transport interruption.
+  let digest, refused = false;
+  const callbacks = { onSubmitted: value => { digest = value; }, onDefiniteFailure: () => { refused = true; } };
+  confirmation = "failure";
+  await assert.rejects(mutate({ transaction: {}, ...callbacks }), /Move abort/);
+  assert.equal(digest, "test-digest"); assert.equal(refused, false);
+  confirmation = "success"; digest = undefined;
+  signingError = "Connection lost after submission";
+  await assert.rejects(mutate({ transaction: {}, ...callbacks }), /Connection lost/);
+  assert.equal(digest, undefined); assert.equal(refused, false);
+  signingError = "User rejected the request";
+  await assert.rejects(mutate({ transaction: {}, ...callbacks }), /User rejected/);
+  assert.equal(refused, true); refused = false; signingError = undefined;
+  execution = "failure";
+  await assert.rejects(mutate({ transaction: {}, ...callbacks }), /Move abort/);
+  assert.equal(refused, true); assert.equal(digest, undefined); execution = "success";
   const oldService = service.getServiceInfo;
   service.getServiceInfo = async () => { account = { ...goodAccount }; return oldService(); };
   assert.equal((await mutate({ transaction: {} })).digest, "test-digest", "same account rebuilt by wallet is valid");
