@@ -94,3 +94,13 @@ check. Older packages remain callable and keep their single-device behavior.
   builder against pre-upgrade customer objects, on-chain refusals (architecture,
   unregistered ID, bound, duplicate), a base-package call after the upgrade, bulk
   removal and deregistration of a formerly grouped device.
+- `scripts/live_group_batch.py` (dedicated agent wallet, `network:suifleet-testnet`
+  lock): an ephemeral publication of the contracts, four fleet devices, an
+  on-chain architecture refusal, one batch adding all four (3 `x86_64` +
+  1 `aarch64`, each pinned to its architecture), one batch removal and cleanup.
+  Public-testnet run at `435f73ba`: `docs/validation/sf171-testnet.json`
+  (7 transactions, 0.0449 SUI net, reusing publication
+  `5pSxFqT1…pvGG`). The first attempt
+  (`docs/validation/sf171-testnet-attempt1.json`) published the package
+  (0.603 SUI) and stopped when device registration exceeded its 0.08 SUI gas
+  budget; registration of four devices costs about 0.107 SUI gross.
