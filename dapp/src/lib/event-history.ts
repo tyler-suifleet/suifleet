@@ -20,6 +20,18 @@ function warn(key: string, message: string) {
   snapshot = [...new Set(warnings.values())].join(' ');
   listeners.forEach(listener => listener());
 }
+/** One replaceable entry per rollout; repeated refreshes never stack warnings. */
+export function reportDecisionHistory(key: string, missing: boolean, pruned: boolean) {
+  const name = `decision:${key}`;
+  if (missing) warn(name, pruned
+    ? 'Decision history pruned by this connection. Stored decisions remain readable; exact legacy revision gaps appear in the rollout audit.'
+    : 'Decision history incomplete. Exact revisions without a stored or recovered decision appear in the rollout audit.');
+  else {
+    warnings.delete(name);
+    snapshot = [...new Set(warnings.values())].join(' ');
+    listeners.forEach(listener => listener());
+  }
+}
 function storage() { try { return typeof window === 'undefined' ? undefined : window.localStorage; } catch { return undefined; } }
 const PREFIX = 'suifleet-history-v1:';
 const STREAM_LIMIT = 256 * 1024;
@@ -114,7 +126,7 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
   }
   // Initial public-node discovery is explicitly partial. Do not label it complete.
   const next: Scan = saved ? { ...saved, events: saved.events.map(event => ({ ...event, bcs: compactDiscovery(type, event.bcs) })) } : { version: 2, checkpoint: lowest.toString(), partial: invalid || lowest > BigInt(0), events: [] };
-  if (next.partial) warn(key, `History unavailable before checkpoint ${lowest}; event-based discovery may omit older or evicted objects. Use an archival endpoint for complete history.`);
+  if (next.partial) warn(key, `History unavailable before checkpoint ${lowest}; History pruned by this connection; event-based discovery may omit older or evicted objects. Use an archival endpoint for complete history.`);
   const known = new Set(next.events.map(event => `${event.transactionDigest}:${event.eventIndex}`));
   for (let pages = 0; ; pages++) {
     if (pages >= 200) {
@@ -162,7 +174,7 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
       next.cursor = undefined;
       next.checkpoint = lowest.toString();
       next.partial = true;
-      warn(key, `History unavailable before checkpoint ${lowest}; retention advanced during discovery. Known objects are preserved; use an archival endpoint for complete history.`);
+      warn(key, `History unavailable before checkpoint ${lowest}; History pruned by this connection; retention advanced during discovery. Known objects are preserved; use an archival endpoint for complete history.`);
       continue;
     }
     if (reason === undefined || reason === 0) throw Error('History stream ended without a successful terminal frame');

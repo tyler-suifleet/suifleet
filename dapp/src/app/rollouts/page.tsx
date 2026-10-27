@@ -1,4 +1,5 @@
 "use client";
+import { DecisionAudit } from "@/components/DecisionAudit";
 
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
@@ -112,9 +113,7 @@ function RolloutDetail({ id, rollout }: { id: string; rollout: Rollout }) {
       <tbody>{p.stages.map(s => <tr key={s.cohort}><td>{s.cohort + 1}</td><td>{STAGE[s.status]}</td><td>{s.members}</td><td>{s.granted}</td><td>{s.inflight}</td><td>{s.applied}</td><td>{s.failed}</td><td>{s.skipped}</td><td>{s.waiting}</td></tr>)}</tbody></table>
     <details><summary>Members</summary><ul>{p.members.map(m => <li className="font-mono text-xs" key={m.device}>Cohort {m.cohort + 1} · {m.device} · {{ waiting: "Waiting", granted: "Granted; awaiting receipt", applied: "Applied", failed: "Failed", skipped: "Skipped" }[m.status]}{m.grantedAtMs !== null ? ` · granted ${utc(m.grantedAtMs)}` : ""}</li>)}</ul></details>
     <details><summary>Decision audit</summary>
-      {error ? <p role="status">Decision history unavailable: {error.message}</p> : !history ? <p>Loading…</p> : <>
-        <ul>{history.decisions.map(d => <li key={d.revision.toString()} className="text-xs">#{d.revision.toString()} · {utc(d.atMs)} · {d.state} · cohort {(d.cohort + BigInt(1)).toString()} · {d.reason}{d.admitted.length ? ` · granted ${d.admitted.length}` : ""}</li>)}</ul>
-        {!history.complete && <p className="text-xs">Older decisions were not read.</p>}</>}
+      {error ? <p role="status">Decision history unavailable: {error.message}</p> : !history ? <p>Loading…</p> : <DecisionAudit history={history} revision={revision!} />}
     </details>
   </div>;
 }

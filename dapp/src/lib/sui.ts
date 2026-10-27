@@ -1,3 +1,4 @@
+import { decisionCleanupStep } from "./decision-cleanup";
 import { readShardedReceipts, readReceiptDirectory, buildReceiptMaintenanceTx } from "./receipt-shards";
 import type { NamedFleet } from "./customer-fleets";
 import { batchFields } from './batch-fields';
@@ -288,6 +289,10 @@ export function buildCreateDeploymentTx(
  * reports, drain fields, retire roots, then consume the deployment. */
 export async function buildDeleteDeploymentStepTx(client: Pick<SuiGrpcClient, "getDynamicField" | "getObject">, deployment: string, schema = "1", fleet?: NamedFleet): Promise<Transaction> {
   const directory = await readReceiptDirectory(client, deployment);
+  if (schema === "3" || directory?.original_schema === "3") {
+    const audit = await decisionCleanupStep(client, deployment, fleet);
+    if (audit) return audit;
+  }
   return directory ? buildReceiptMaintenanceTx(client, deployment, "cleanup", fleet) : buildDeleteDeploymentTx(deployment, schema, fleet);
 }
 
