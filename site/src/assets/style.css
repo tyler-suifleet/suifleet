@@ -1,4 +1,4 @@
-/* SuiFleet identity. Font and artwork are served locally; no remote resources. */
+/* Concept 09: open sky, blue water and a fleet moving together. All assets are local. */
 @font-face {
   font-family:Inter;
   src:url('/assets/inter-variable.woff2') format('woff2');
@@ -8,14 +8,14 @@
 }
 
 :root {
-  --ink:#10252e;
-  --muted:#607073;
-  --line:#dce3df;
-  --soft:#f4f6f2;
-  --brand:#176145;
-  --brand-dark:#10252e;
-  --brand-soft:#e5f2eb;
-  --accent:#43b994;
+  --ink:#15304c;
+  --muted:#536b82;
+  --line:#dce9f5;
+  --soft:#f4f9fe;
+  --brand:#1768b2;
+  --brand-dark:#15304c;
+  --brand-soft:#eaf5ff;
+  --accent:#4da2ff;
   --warn:#85551b;
   --warn-soft:#fff7e9;
   font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -43,7 +43,7 @@ a:hover {
 }
 
 a:focus-visible,summary:focus-visible {
-  outline:3px solid #248365;
+  outline:3px solid #1768b2;
   outline-offset:5px;
   border-radius:3px
 }
@@ -58,7 +58,7 @@ p {
 }
 
 h1,h2,h3 {
-  font-weight:620;
+  font-weight:540;
   letter-spacing:-.055em;
   line-height:1.13;
   text-wrap:balance
@@ -109,7 +109,7 @@ code {
 
 .site-header {
   background:#fff;
-  border-bottom:1px solid #edf0ed
+  border-bottom:1px solid #e8f1f9
 }
 
 .header-row {
@@ -124,7 +124,7 @@ code {
   align-items:center;
   gap:9px;
   text-decoration:none;
-  color:#2779c9;
+  color:#1768b2;
   font-size:27px;
   font-weight:500;
   letter-spacing:-1.3px;
@@ -158,7 +158,7 @@ code {
   text-decoration:none;
   font-size:13px;
   font-weight:500;
-  color:#4f6061;
+  color:#4d6680;
   white-space:nowrap
 }
 
@@ -173,7 +173,7 @@ code {
   gap:27px;
   min-height:48px;
   padding:12px 22px;
-  border-radius:7px;
+  border-radius:999px;
   border:1px solid var(--line);
   font-size:13px;
   font-weight:580;
@@ -186,26 +186,26 @@ code {
 
 .button:hover {
   background:var(--soft);
-  border-color:#a5b8b0;
+  border-color:#9bbfdf;
   color:var(--ink)
 }
 
 .button.primary {
-  background:var(--ink);
+  background:var(--brand);
   color:#fff;
-  border-color:var(--ink)
+  border-color:var(--brand)
 }
 
 .button.primary:hover {
-  background:#23424b;
-  border-color:#23424b;
+  background:#10558f;
+  border-color:#10558f;
   color:#fff
 }
 
 .button.light {
-  background:#d5f1e4;
-  border-color:#d5f1e4;
-  color:#122b24
+  background:#e1f1ff;
+  border-color:#e1f1ff;
+  color:#15304c
 }
 
 .header-cta {
@@ -268,7 +268,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   font-size:9px;
   font-weight:650;
   letter-spacing:1.35px;
-  color:#44645a;
+  color:#356991;
   text-decoration:none
 }
 
@@ -279,13 +279,13 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .hero h1 {
   font-size:clamp(3.5rem,5.75vw,5.2rem);
   line-height:1.045;
-  letter-spacing:-.075em;
+  letter-spacing:-.06em;
   margin:23px 0 24px;
-  font-weight:620
+  font-weight:540
 }
 
 .hero h1>span {
-  color:#71877d
+  color:#287dcc
 }
 
 .hero-description {
@@ -299,17 +299,17 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 
 .hero-footnote {
   font-size:10px;
-  color:#627168;
+  color:#536b82;
   margin:18px 0 0
 }
 
 .fleet-visual {
   margin:18px 0 0;
   min-width:0;
-  border:1px solid #d8e2dc;
-  border-radius:13px;
+  border:1px solid #d9e9f7;
+  border-radius:20px;
   background:#fff;
-  box-shadow:0 22px 65px -30px #17372a46,0 0 0 11px #f1f5f0;
+  box-shadow:0 22px 65px -30px #226aa126,0 0 0 11px #f0f7ff;
   position:relative
 }
 
@@ -318,9 +318,9 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   justify-content:space-between;
   padding:14px 20px;
-  border-bottom:1px solid #e6ece7;
-  background:#f9fbf8;
-  border-radius:13px 13px 0 0
+  border-bottom:1px solid #e4eef8;
+  background:#f8fbff;
+  border-radius:20px 20px 0 0
 }
 
 .visual-brand {
@@ -328,7 +328,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   gap:8px;
   font-size:11px;
-  font-weight:620
+  font-weight:540
 }
 
 .visual-brand img {
@@ -340,7 +340,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   font-size:8px;
   font-weight:600;
   letter-spacing:1.2px;
-  color:#627168
+  color:#536b82
 }
 
 .visual-body {
@@ -357,7 +357,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .visual-eyebrow {
   font-size:7px;
   letter-spacing:1.1px;
-  color:#627168;
+  color:#536b82;
   font-weight:650
 }
 
@@ -374,8 +374,8 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   gap:5px;
   font-size:8px;
   white-space:nowrap;
-  color:#327455;
-  background:#ecf7ef;
+  color:#1768b2;
+  background:#eaf5ff;
   padding:3px 7px;
   border-radius:4px
 }
@@ -385,8 +385,8 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   gap:11px;
   padding:14px;
-  background:#f6f8f5;
-  border:1px solid #e9eee7;
+  background:#f5faff;
+  border:1px solid #e5eff8;
   border-radius:6px
 }
 
@@ -395,7 +395,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   place-items:center;
   width:35px;
   height:35px;
-  border:1px solid #d8e3da;
+  border:1px solid #dce9f5;
   border-radius:6px;
   font-size:21px;
   background:#fff
@@ -410,14 +410,14 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .release-summary div>span {
   display:block;
   font-size:8px;
-  color:#76857b;
+  color:#5b7289;
   margin-top:2px
 }
 
 .verified-label {
   margin-left:auto;
   font-size:8px;
-  color:#4a7962
+  color:#1768b2
 }
 
 .rollout-stages {
@@ -433,7 +433,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   min-width:55px;
   gap:8px;
-  color:#8e9d94;
+  color:#627c95;
   font-size:8px
 }
 
@@ -442,7 +442,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   place-items:center;
   width:24px;
   height:24px;
-  border:1px solid #dbe4dd;
+  border:1px solid #dce9f5;
   border-radius:50%;
   font-size:9px;
   background:#fff
@@ -453,39 +453,39 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 }
 
 .stage.complete,.stage.current {
-  color:#274e3c
+  color:#234e73
 }
 
 .stage.complete>span {
-  background:#d8ede0;
-  border-color:#d8ede0;
-  color:#33795a;
+  background:#e1f1ff;
+  border-color:#e1f1ff;
+  color:#1768b2;
   font-size:13px
 }
 
 .stage.current>span {
-  background:#173b2b;
-  border-color:#173b2b;
+  background:#1768b2;
+  border-color:#1768b2;
   color:#fff;
-  box-shadow:0 0 0 4px #edf5ee
+  box-shadow:0 0 0 4px #eaf5ff
 }
 
 .stage-line {
   height:1px;
   flex:1;
   margin-top:12px;
-  background:#e2e9e1
+  background:#e0edf9
 }
 
 .stage-line.complete {
-  background:#91c4a1
+  background:#73b8f4
 }
 
 .device-list>div {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  border-bottom:1px solid #edf1eb;
+  border-bottom:1px solid #e8f1f9;
   padding:12px 0;
   font-size:9px
 }
@@ -496,7 +496,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 
 .device-list .device-list-heading {
   font-size:7px;
-  color:#627168;
+  color:#536b82;
   padding:0 0 8px
 }
 
@@ -509,14 +509,14 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .device-symbol {
   width:11px;
   height:13px;
-  border:1px solid #99ab9e;
+  border:1px solid #7f9db8;
   border-radius:2px;
-  background:linear-gradient(to bottom,transparent 62%,#d8e2d8 62%,#d8e2d8 72%,transparent 72%)
+  background:linear-gradient(to bottom,transparent 62%,#d4e5f4 62%,#d4e5f4 72%,transparent 72%)
 }
 
 .applied {
-  color:#3c7a58;
-  background:#edf7ee;
+  color:#1768b2;
+  background:#eaf5ff;
   padding:2px 6px;
   border-radius:4px;
   font-size:7px
@@ -546,13 +546,13 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   justify-content:center;
   gap:6px;
-  border-top:1px solid #e9eee6;
+  border-top:1px solid #e5eff8;
   font-size:7px;
-  color:#627168
+  color:#536b82
 }
 
 .shield-symbol {
-  color:#6e9981
+  color:#3979ab
 }
 
 .fleet-visual figcaption {
@@ -560,7 +560,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   bottom:-37px;
   width:100%;
   text-align:center;
-  color:#627168;
+  color:#536b82;
   font-size:8px;
   letter-spacing:.05px
 }
@@ -580,7 +580,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   letter-spacing:1px;
   font-weight:600;
   line-height:1.7;
-  color:#627168;
+  color:#536b82;
   min-width:190px
 }
 
@@ -599,7 +599,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   font-size:14px;
   font-weight:550;
   letter-spacing:-.4px;
-  color:#69796f
+  color:#536b82
 }
 
 .workflow-section {
@@ -613,7 +613,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   letter-spacing:1.7px;
   font-weight:650;
   margin-bottom:19px;
-  color:#577d68
+  color:#356991
 }
 
 .section-heading {
@@ -639,20 +639,22 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .workflow-grid {
   display:grid;
   grid-template-columns:repeat(3,1fr);
-  gap:54px;
+  gap:22px;
   margin-top:53px
 }
 
 .workflow-grid article {
-  border-top:1px solid var(--line);
-  padding-top:17px
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:25px;
+  background:linear-gradient(145deg,#f7fbff,#fff)
 }
 
 .feature-number {
   font-size:8px;
   letter-spacing:1.2px;
   font-weight:550;
-  color:#627168
+  color:#536b82
 }
 
 .feature-glyph {
@@ -662,22 +664,22 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   display:grid;
   place-items:center;
   font-size:28px;
-  border:1px solid #dae5dc;
+  border:1px solid #d6e9fa;
   border-radius:12px;
-  background:#f0f5ee;
-  color:#3c7251
+  background:#edf7ff;
+  color:#1768b2
 }
 
 .rollout-glyph {
-  background:#edf3f5;
-  color:#537881;
-  border-color:#dce7e9
+  background:#edf7ff;
+  color:#1768b2;
+  border-color:#d6e9fa
 }
 
 .results-glyph {
-  background:#f5f3ea;
-  color:#93814d;
-  border-color:#e8e4d7
+  background:#edf7ff;
+  color:#1768b2;
+  border-color:#d6e9fa
 }
 
 .workflow-grid h3 {
@@ -701,7 +703,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 }
 
 .platform-band {
-  background:#f4f6f1
+  background:#f0f8ff url('/assets/fleet-wave.svg') center bottom / 100% 160px no-repeat
 }
 
 .platform-section {
@@ -731,14 +733,14 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   padding:20px 21px;
   margin-bottom:12px;
-  border:1px solid #dbe3d8;
-  border-radius:7px;
-  background:#ffffffa6
+  border:1px solid #d9e9f7;
+  border-radius:14px;
+  background:#ffffffd9
 }
 
 .layer-index {
   font-size:9px;
-  color:#8b9b8a;
+  color:#627c95;
   font-weight:500
 }
 
@@ -752,13 +754,13 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .platform-layer div>span {
   display:block;
   font-size:9px;
-  color:#859181;
+  color:#536b82;
   margin-top:4px
 }
 
 .platform-layer.highlighted {
-  background:#e1efdf;
-  border-color:#c5dcc0
+  background:#dfF0ff;
+  border-color:#b8dbfa
 }
 
 .platform-layer img {
@@ -777,14 +779,14 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .platform-tags>span {
   font-size:8px;
   padding:4px 9px;
-  border:1px solid #dae2d5;
+  border:1px solid #cfe3f5;
   border-radius:4px;
-  color:#6f806a
+  color:#536b82
 }
 
 .trust-band {
-  background:#10272f;
-  color:#f8faf7
+  background:#103b64;
+  color:#f5faff
 }
 
 .trust-section {
@@ -797,7 +799,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 }
 
 .trust-section .eyebrow {
-  color:#8dc1a8
+  color:#a7d5ff
 }
 
 .trust-section h2 {
@@ -806,7 +808,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 }
 
 .trust-section>div>p {
-  color:#b2c1be;
+  color:#d3e5f5;
   font-size:14px;
   max-width:365px;
   line-height:1.95;
@@ -822,7 +824,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   display:flex;
   gap:24px;
   padding:23px 0;
-  border-bottom:1px solid #2b4148
+  border-bottom:1px solid #38618a
 }
 
 .trust-points article:first-child {
@@ -836,7 +838,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 
 .trust-points article>span {
   font-size:9px;
-  color:#75a087;
+  color:#a7d5ff;
   min-width:20px;
   padding-top:3px
 }
@@ -850,7 +852,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 
 .trust-points p {
   font-size:13px;
-  color:#a8bab7;
+  color:#c8ddf0;
   line-height:1.9;
   margin:0;
   max-width:305px
@@ -879,13 +881,13 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 
 .closing-section .preview-note {
   font-size:9px;
-  color:#627168;
+  color:#536b82;
   margin-top:25px
 }
 
 .site-footer {
   border-top:1px solid var(--line);
-  background:#f9faf7
+  background:#f7fbff
 }
 
 .footer-top {
@@ -899,7 +901,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .footer-top>div>p {
   font-size:12px;
   line-height:1.8;
-  color:#627168;
+  color:#536b82;
   margin:16px 0 0
 }
 
@@ -917,13 +919,13 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 .footer-label {
   font-size:9px;
   font-weight:650;
-  color:#344c40;
+  color:#244c70;
   margin-bottom:10px
 }
 
 .footer-links a {
   font-size:12px;
-  color:#627168;
+  color:#536b82;
   text-decoration:none
 }
 
@@ -936,11 +938,11 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
   align-items:center;
   justify-content:space-between;
   gap:20px;
-  border-top:1px solid #e6eae3;
+  border-top:1px solid #dce9f5;
   padding-top:18px;
   padding-bottom:18px;
   font-size:8px;
-  color:#627168
+  color:#536b82
 }
 
 .footer-bottom p {
@@ -951,7 +953,7 @@ main>section,main>.page,.band>section,.platform-band>section,.trust-band>section
 }
 
 .footer-bottom a {
-  color:#6f8275;
+  color:#536b82;
   text-decoration:none
 }
 
@@ -985,7 +987,7 @@ main>.page {
 
 .page p,.page li {
   font-size:14px;
-  color:#54666a
+  color:#536b82
 }
 
 .page a {
@@ -1005,7 +1007,7 @@ main>.page {
 .card {
   padding:26px;
   border:1px solid var(--line);
-  border-radius:9px;
+  border-radius:16px;
   background:#fff
 }
 
@@ -1019,9 +1021,9 @@ main>.page {
 
 .note {
   padding:20px 23px;
-  background:#f4f6ed;
-  border:1px solid #dfe6d4;
-  border-radius:7px;
+  background:#edf7ff;
+  border:1px solid #cfe3f5;
+  border-radius:14px;
   margin:30px 0
 }
 
@@ -1033,8 +1035,8 @@ main>.page {
 .badge {
   display:inline-block;
   font-size:10px;
-  color:#476c54;
-  background:#ecf4e9;
+  color:#1768b2;
+  background:#eaf5ff;
   padding:5px 12px;
   border-radius:30px
 }
@@ -1241,7 +1243,7 @@ td.num,th.num {
     margin:15px 0 0;
     overflow:auto;
     scrollbar-width:none;
-    border-top:1px solid #eff2ec
+    border-top:1px solid #e8f1f9
   }
 
   .site-header nav ul {
@@ -1476,7 +1478,7 @@ td.num,th.num {
   }
 
   .fleet-visual {
-    box-shadow:0 20px 55px -30px #17372a46,0 0 0 7px #f1f5f0
+    box-shadow:0 20px 55px -30px #226aa126,0 0 0 7px #f0f7ff
   }
 
   .visual-topbar {

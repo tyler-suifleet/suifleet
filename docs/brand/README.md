@@ -1,6 +1,6 @@
 # SuiFleet visual identity
 
-The user selected concept 09 on 2026-10-27: three sky-blue sailboats moving together on one wave. The site uses this fleet direction with a blue wordmark in locally served Inter. The surrounding site retains its restrained white / pale-green / navy palette. The initial website application is tracked in SF-180. Product copy describes the testnet preview; the example rollout on the homepage is explicitly illustrative.
+The user selected concept 09 on 2026-10-27: three sky-blue sailboats moving together on one wave. The site uses this fleet direction with a blue wordmark in locally served Inter. The whole site follows the same direction: white and pale-sky surfaces, ocean-blue headings, blue actions, softer rounded cards and a locally served wave illustration. The shared stylesheet applies this identity to every public page. The initial website application is tracked in SF-180. Product copy describes the testnet preview; the example rollout on the homepage is explicitly illustrative.
 
 ## Assets
 
@@ -8,9 +8,10 @@ The user selected concept 09 on 2026-10-27: three sky-blue sailboats moving toge
 - `site/src/assets/suifleet-mark.png`: transparent symbol-only derivative produced with built-in image editing from concept 09; no raster postprocessing.
 - `site/src/assets/logo.svg`: manually authored vector interpretation of the selected three-sail/shared-wave motif, used for crisp navigation and small-size rendering.
 - `site/src/assets/favicon.svg`: the same vector motif for browser tabs.
+- `site/src/assets/fleet-wave.svg`: manually authored decorative waves echoing the shared wave in concept 09; no runtime scripts or external resources.
 - The wordmark is accessible live text. The vector interpretation is not an exact pixel trace of the generated reference.
 
-Symbol color: sky blue `#4da2ff`. Live wordmark: deeper blue `#2779c9` for readability. Avoid stretching, shadows or extra outlines.
+Symbol color: sky blue `#4da2ff`. Live wordmark and actions: deeper blue `#1768b2` for readable contrast on white. Heading ink: `#15304c`; body copy: `#536b82`; surface: `#f4f9fe`. The security section uses deep ocean blue `#103b64` with pale-blue text. Amber remains reserved for update/warning meaning. Avoid stretching, shadows or extra outlines.
 
 ## Font provenance
 
