@@ -60,6 +60,21 @@ import subprocess
 DEFAULT_BASE = "f43d531^1"  # main immediately before SF-008 (#50): receipts, no identities.
 
 
+def desired_state(live, group):
+    """Read the fixture's desired state through the supported CLI transport.
+
+    Refuse absent/ambiguous fields rather than treating a partial read as
+    successful acceptance. Public fullnodes do not serve legacy JSON-RPC.
+    """
+    states = []
+    for field in live.client("dynamic-field", group)["dynamicFields"]:
+        value = live.object(field["fieldId"])
+        if "::desired_state::DesiredKey," in str(value.get("objType", "")).replace(" ", ""):
+            states.append(plain(value["content"])["value"])
+    assert len(states) == 1, f"expected one DesiredKey field for {group}, found {len(states)}"
+    return states[0]
+
+
 DEVICE_FUNDING = 40_000_000  # The legacy device's own report/attack gas, charged up front.
 CLEANUP_GAS = 20_000_000  # Deletions are cheap; an unknown outcome must not starve the remaining cleanup.
 
@@ -285,11 +300,7 @@ def run(args):
                     "--move-call", f"{new}::deployment_manager::share_deployment", "record")
                 record = live.created(result, "::deployment_manager::DeploymentRecord")[0]
                 made["catalog_records"].append(record)
-                field = dm.rpc(live.rpc_url, "suix_getDynamicFieldObject", [group, {
-                    "type": f'{manifest["type_origins"]["desired_state::DesiredKey"]}::desired_state::DesiredKey',
-                    "value": {"dummy_field": False}}])
-                content = field["data"]["content"]
-                desired = plain(content.get("fields", content))["value"]
+                desired = desired_state(live, group)
                 assert int(desired["revision"]) == len(made["catalog_records"])
                 assert desired["components"]["contents"] == [{"key": json.loads(name), "value": record}], desired
             with (root / "daemon-legacy.log").open("a") as log:
