@@ -175,3 +175,36 @@ The existing nonfatal Tailwind module-type warning remains. No live operations o
 migrations were performed. External wallet/provider/physical/mainnet acceptance
 remains unrun in #32 and #159. Hosted CI/automatic testnet and fresh independent
 review remain coordinator gates; this integration is not approval.
+
+## Paid-retention base integration (2026-10-26)
+
+Integrated snapshot/current main `9aba0c224b29f2233d7c0e3e43c7cbed3de0173a`
+in merge `3e5582ca`. The settings-page conflict is resolved by retaining the
+customer explanation of saving versus payment and adding upstream's
+`StreamRetentionPanel`. Prior verified-proposal and customer guidance repairs
+remain intact. The latest independent review reported no source defects;
+this update addresses subsequent base movement, not a new claimed code defect.
+
+Fresh checks on this integration, using Docker with `--network none` and the
+checkout mounted at `/workspace`:
+
+- `suifleet-dev:sf037`, `/workspace/dapp`: `node_modules/.bin/tsc --noEmit`
+  and `node_modules/.bin/next build --webpack` passed (16 static pages).
+- `suifleet-dev:sf010-chrome`, `/workspace`, `node scripts/NAME.cjs` passed for
+  `test_greengrass_compat` (83 recipes, 47 managed cases),
+  `test_fleet_settings_cost`, `test_fleet_budget`, `test_administration_browser`,
+  `test_fleet_settings_browser`, `test_access_browser`, `test_storage_reclaim`,
+  `test_storage_reclaim_panel`, `test_stream_retention`,
+  `test_stream_retention_panel` and `test_data_session_browser`.
+- Same image: `node scripts/test_dapp_presentation_browser.cjs` passed all
+  14 routes at desktop/mobile and four populated import guidance cases.
+- Host: `python3 -m unittest discover -s scripts/tests -p test_tracking.py -q`
+  passed 10 tests; `git diff --check origin/main..HEAD` passed.
+
+The nonfatal pre-existing Tailwind module-type warning remains. No new backend
+behavior, migration, chain/wallet/provider operation or hardware operation was
+introduced by the conflict resolution. Upstream backend acceptance is recorded
+in its own merged evidence; this worker did not rerun backend/live suites.
+Hosted CI/current-base automatic testnet and fresh independent review remain
+pending for the new pushed head; this worker does not poll hosted CI. Deferred
+real-wallet/provider/physical/mainnet acceptance remains unrun in #32 and #159.
