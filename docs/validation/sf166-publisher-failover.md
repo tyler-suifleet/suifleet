@@ -119,3 +119,42 @@ publisher retains override retry behavior; overrides are per-tab. No migration.
 Hosted exact-head/current-base CI and automatic testnet remain pending coordinator
 verification, followed by independent review. They were not polled by this worker.
 Deferred external acceptance stays in SF-031/#32 and SF-087/#159, explicitly unrun.
+
+## Funding repair and current-base integration — 2026-10-27
+
+The latest independent review reported no actionable source defects. The failed
+hosted run `40555193600` had stopped at its funding guard before transactions;
+its historical 400,000,000 MIST uncertainty reservation remains untouched.
+Merged current main `85331590985644a113eb6750782121169ef03a4b` without conflicts,
+including the upstream Greengrass compatibility changes. No additional source
+repair was indicated by the review or funding diagnosis.
+
+Read-only verification during this repair on 2026-10-27, using the dedicated agent
+`client.yaml` explicitly through a writable temporary config in the dev container,
+confirmed chain `4c78adac` with checksum-pinned transaction CLI
+`1.82.1-987123842623` (binary SHA-256
+`de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`).
+The dedicated CI recipient
+`0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`
+had 4,164,192,457 MIST total: 4,085,833,567 address balance and 78,358,890
+coin balance. This exceeds the failed run's 3,650,000,000 MIST requirement.
+No faucet request, signing, transaction, fixture change or allowance/reservation
+change was needed. The global network lock was acquired and released promptly.
+The temporary config reported no active address; this check used the explicit CI
+recipient for its read, and made no claim of signing authority or key access.
+
+Verification after integrating the base:
+
+- `PYTHONPATH=scripts/tests python3 -m unittest scripts/tests/test_testnet.py scripts/tests/test_testnet_reconcile.py`: 86 tests OK (offline fixtures).
+- `node scripts/test_walrus_publishers.cjs`: PASS.
+- `node scripts/test_greengrass_compat.cjs`: PASS; 90 AWS fixtures, 19 frontend-validated translations and 47 managed-dependency fixtures.
+- `docker run --rm --network none -v "$PWD:/workspace" -w /workspace -e INSIDE_DEV_CONTAINER=1 -e pnpm_config_verify_deps_before_run=false suifleet-dev:latest make dapp-typecheck dapp-build`: exit 0, including frontend/browser regressions, TypeScript and all 16 production static pages; one existing environment-dependent skip.
+- `git diff --check`: passed.
+
+Hosted CI and automatic testnet for the new pushed head remain pending; this
+worker did not watch or poll hosted checks. The coordinator must obtain genuine
+exact-head/current-base success and a fresh independent review before merging.
+Funding sufficiency is a point-in-time observation, not a testnet success or a
+promise that concurrent authorized runs cannot consume funds later. Deferred
+physical/mainnet/provider/manual-wallet checks remain unrun in #32 and #159.
+No contract/ABI migration is needed.
