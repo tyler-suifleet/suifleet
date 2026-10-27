@@ -371,3 +371,60 @@ evidence into a durable local journal. The SF-082 fixture smoke creates no objec
 or transactions and needs no shared-wallet mutation lock. It never funds, signs,
 submits, uploads or purchases. Testnet costs remain Testnet observations; final
 Mainnet bill and production acceptance stay in SF-135/#267 and SF-087/#159.
+
+## SF-173 hosted evaluation fleet
+
+The evaluation profile is `profiles/seal-testnet`, chain `4c78adac`, owned by the
+dedicated agent wallet above. The reproducible setup is:
+
+```bash
+# Run with the pinned dev-image tools, wallet mounted at its absolute path,
+# and its keystore path available exactly as recorded in client.yaml.
+make evaluation-fleet SUIFLEET_WALLET=/path/to/agent/client.yaml DRY_RUN=1
+# Acquire network:suifleet-testnet with ticket lock, export the returned token
+# locally as SUIFLEET_TESTNET_LOCK_TOKEN, then assert before mutations.
+make evaluation-fleet SUIFLEET_WALLET=/path/to/agent/client.yaml
+make verify-evaluation-fleet
+# Release the resource immediately after writes.
+```
+
+The initial defaults deposit 0.1 SUI into the fleet budget and swap 0.02 SUI
+for WAL through the pinned Testnet exchange into fleet storage. These transfers
+are charged to the same strict 1.2-SUI run ceiling as transaction fees; they are
+funding, not gas consumption. The faucet may be called once when needed and
+never increases the allowance. An interrupted continuation must deduct the
+prior receipt's allowance usage from its ceiling and use `--no-fund`; do not
+reset the allowance or request another faucet credit during recovery.
+
+`evaluation-fleet.json` records observed SUI MIST and WAL FROST balances (both
+have nine decimal places), the observation time, setup parameters and effects
+references. Balances change as devices draw gas or buy storage. Inspect Budget
+and Data before an evaluation; replenish explicitly under the same wallet lock:
+
+```bash
+make evaluation-fleet SUIFLEET_WALLET=/path/to/agent/client.yaml \
+  EVALUATION_ARGS='--no-fund --top-up-id evaluation-20261027 --top-up-sui 100000000 --top-up-wal-sui 20000000'
+```
+
+Reuse the same top-up ID on retries; choose a new ID only for an intentional
+new transfer. Never replace an unknown outcome with a new ID. WAL is a Testnet token, acquired through the pinned
+exchange; no Mainnet, paid provider or production credentials are used. Health
+cadence configuration enables reporting; a device must separately enroll and
+run its producer before any actual health report exists. Physical acceptance
+remains in #32; final production/provider/manual-wallet acceptance stays #159.
+
+2026-10-27 setup evidence: [effects and funding](validation/sf173-testnet.json),
+[console readers](validation/sf173-console.json). The compatible core upgrade
+`8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv` cost 593,883,363 MIST.
+Nine successful setup transactions consumed **844,091,608 MIST in gas** and
+transferred **120,000,000 MIST of funding**, for **964,091,608 MIST allowance
+usage** of the original 1.2-billion ceiling. One faucet credited 1 SUI before
+setup; a continuation used only the remaining 606,116,637-MIST allowance and
+requested no faucet. Two storage build attempts were refused before signing;
+no failed or unknown execution was replayed. A cached dry run then submitted
+zero transactions and spent zero. At setup completion the budget held **0.1
+SUI**, fleet storage **0.02 WAL**, and the operator **0.751997907 SUI**. Storage
+pool capacity remains zero until an explicit purchase; WAL funding alone is
+not a purchased storage pool or proof of a successful upload. No device is
+enrolled in FleetData yet, so health cadence is configured but no health report
+is claimed. Hosted publication and browser acceptance must be recorded separately.

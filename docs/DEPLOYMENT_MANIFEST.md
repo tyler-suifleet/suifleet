@@ -118,3 +118,48 @@ root, receipt/index keys and relocated group/catalog keys retain their own
 introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
+
+## Hosted Testnet evaluation fleet (SF-173)
+
+`profiles/seal-testnet` is a separate, explicitly selected disposable fleet.
+`scripts/live_evaluation_fleet.py` upgrades its recorded core package under the
+existing UpgradeCap, preserves the registry, publishes dependent storage/data
+packages, creates and funds the budget/storage, saves settings and configures
+health cadence. It generates that profile's manifest and frontend environment
+alongside `fleet-storage.json`, `fleet-data.json` and `evaluation-fleet.json`.
+Storage/data have their own packages and type origins; do not put their types
+under the core package's origin. The public evaluation record binds all object
+IDs, package IDs, configuration, funding observations and transaction digests.
+
+The command checkpoints each step beside the dedicated wallet in
+`sf173-state.json`, before submission and after successful effects. Completed
+steps are re-read from chain; unknown steps stop rather than publish again.
+A verified pre-sign refusal can retry. Keep the private checkpoint and run
+receipts when recovering; never clear an unknown transaction just to retry.
+The [Testnet procedure](TESTNET.md#sf-173-hosted-evaluation-fleet) describes the
+lock, allowance, funding and read-only console verification. This path does not
+activate `deployments/testnet/current` or rewrite the default frontend config.
+
+Build the hosted export with every public binding (the historical `seal.json`
+also contains audit metadata, so use generated `seal-settings.json` here):
+
+```bash
+python3 scripts/build_walrus_site.py \
+  --manifest profiles/seal-testnet/deployment.json \
+  --fleet-storage profiles/seal-testnet/fleet-storage.json \
+  --fleet-data profiles/seal-testnet/fleet-data.json \
+  --seal-settings profiles/seal-testnet/seal-settings.json \
+  --builder /path/to/pinned/site-builder --receipt /private/runtime/build.json
+```
+
+The 2026-10-27 export build passed (132 resources), but was **not published**.
+The existing hosted Site `0xb1891eab584649b8b19c08fa16fda71351b973bfafef3ab1209874bbd79c7ab4`
+is owned by publisher `0x9f1b6c9c0f3c6c38b071508e269a62897d90950aec72363279795833ec191e39`,
+not the dedicated agent/CI wallets authorized by this task. Updating that Site
+requires explicit authorization to use its preserved publisher wallet and
+remaining non-replenishing allowance. Do not create another publisher, reset its
+journal, claim the old hosted export uses the new profile, or treat a successful
+local build as hosted acceptance. Preserve the existing publisher and original
+Site receipts; the original profile `publication.json` and `verification.json`
+are historical core-v1 evidence, superseded for current configuration by the
+SF-173 profile record and console receipt.

@@ -1,0 +1,20 @@
+{
+  "model": "gpt-6.1-sol",
+  "published": false,
+  "resources": 132,
+  "receipt_sha256": "6d6835da13026c6a03c5418f57e1aed86c79e6095a934069d217610733a3efc1",
+  "builder": {
+    "archive_sha256": "0495bc5f94095459094f36c5eb73ecbb87fcda55bb4308445edc1bc2538876f4",
+    "archive_url": "https://github.com/MystenLabs/walrus-sites/releases/download/mainnet-v2.12.2/site-builder-mainnet-v2.12.2-ubuntu-x86_64.tgz",
+    "binary_sha256": "c9d9e59c49de2c95b913820b0cbd1d6b1a19f2b1ec5de7e2a3291e6bc2619d50",
+    "platform": "ubuntu-x86_64",
+    "release": "mainnet-v2.12.2",
+    "schema": 1,
+    "version_output": "site-builder 2.12.2-7c5dfaf4ed2a"
+  },
+  "manifest_sha256": null,
+  "fleet_data_sha256": "b841b3150040f6643f10999fe3beb78bc29889353ca1d442a19f89e3f5d3614a",
+  "fleet_storage_sha256": "d363c5b91605d4d3bf2524efebbee00c361e62d69650ee32a94d69c15aef3f5c",
+  "seal_settings_sha256": "6d18bbc4f76b5a851c88f5dc7672b2b64432afecbfeb7fa020e9be73c957a29e",
+  "result": "Production static export passed; 16 pages generated. Hosted publication awaits existing publisher-wallet authorization."
+}
