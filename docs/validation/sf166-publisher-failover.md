@@ -96,3 +96,26 @@ The earlier real secondary-publisher receipt above remains historical evidence,
 not a new exact-head run. Hosted CI/automatic testnet and fresh independent review
 remain coordinator gates after push. External acceptance remains deferred in
 SF-031/#32 and SF-087/#159; no migration is required.
+
+## Current-base refresh after second review — 2026-10-27
+
+The second independent review found no actionable source defects and confirmed
+all six previous findings resolved. Its outstanding gates were hosted CI/testnet
+and a fresh evidence review. Merged current main
+`af805cc1736dd12849fa396d047a3ad29f99c5e0` without conflicts; upstream changes
+were limited to backlog/publication tracking records. No additional source change
+was needed.
+
+Re-ran the exact network-disabled container command above with
+`make dapp-typecheck dapp-build`: exit 0, including TypeScript, frontend/browser
+regressions and all 16 production static pages; one existing environment-dependent
+skip. Host `node scripts/test_walrus_publishers.cjs` and `git diff --check` also
+passed. No new live publication or on-chain verification was run; the earlier
+secondary-publisher receipt remains historical evidence.
+
+Known nonblocking review limitations remain: a hanging first aggregator may consume
+the caller deadline before mirrors are tried; an override duplicating a configured
+publisher retains override retry behavior; overrides are per-tab. No migration.
+Hosted exact-head/current-base CI and automatic testnet remain pending coordinator
+verification, followed by independent review. They were not polled by this worker.
+Deferred external acceptance stays in SF-031/#32 and SF-087/#159, explicitly unrun.
