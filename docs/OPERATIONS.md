@@ -407,29 +407,27 @@ The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PAC
 
 ## Public website and domains (SF-172)
 
-The landing site at `suifleet.io` is built from `site/` with the standard library
-only, checked offline in CI (links, no-script/no-tracker policy, CSP, digests and
-guide screencasts) and published by uploading the exact reviewed build. The
-console is served at `app.suifleet.io` from the static export above and documentation
-at `docs.suifleet.io`. [site/README.md](../site/README.md) records the hosting and
-DNS plan (conventional static hosting for the apex and docs; the console's Walrus
-Site remains its verifiable copy) and the release checklist.
+The proposed landing site is built from `site/` with standard-library Python.
+`make test-site site-check` runs offline build, link, metadata, privacy and
+checksum checks; CI also compares two independent builds for reproducibility.
+The written guide includes an offline console screenshot, not testnet execution
+proof. Videos (SF-175), hosting/DNS/TLS/publication (SF-176), documentation
+(SF-177) and generated pricing (SF-178) remain separately tracked.
 
-Add these steps to every release that changes the console or what the site says:
+[site/README.md](../site/README.md) documents conventional static hosting for
+`suifleet.io`, `app.suifleet.io` and `docs.suifleet.io`, with the existing Walrus
+Site console distribution kept separate. These are planned origins, not a claim
+that this work configured DNS or launched a service.
 
-1. Rebuild `app.suifleet.io` from the release's verified manifest, as above.
-2. If a guide step's console labels changed, re-record its screencast on Testnet
-   with `site/guide/record_guide.py` ([checklist](../site/guide/RECORDING.md)) and
-   update `site/guide/steps.json` in the same change.
-3. Update `site/src/pages/pricing.html` together with any approved price change in
-   [the business plan](BUSINESS_PLAN.md), and the status notes on the home and
-   security pages together with launches.
-4. `make test-site site-check`, review every page and video, then publish only
-   with the user's explicit authorization for that release and verify the served
-   bytes with `site/verify_served.py`. Record the result in the release issue.
-
-No domain has been configured or published by this repository. Publication to
-any live domain requires the user's explicit go-ahead and is recorded separately.
+For a release, rebuild the console with its verified manifest, update the written
+guide and screenshot when labels change, and update proposed pricing/status
+claims with their canonical sources. Run the site checks, review every page at
+mobile/desktop widths, follow external links and verify contact delivery. After
+SF-175, review each recording too. Obtain explicit user authorization before any
+live-domain publication, upload only the reviewed artifact and verify its bytes
+and response headers using `site/verify_served.py`. Record authorization, revision,
+artifact checksums and deployment results in the release issue; retain the prior
+artifact for rollback. No live domain was configured or published by SF-172.
 
 ## Execution privileges
 
