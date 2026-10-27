@@ -57,6 +57,21 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "new_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
       "publish_version": {
         "visibility": "Public",
         "entry": false,

@@ -566,6 +566,39 @@ module sui_edge::customer_tests {
     #[test, expected_failure(abort_code = 5, location = sui_edge::deployment_manager)]
     fun managed_v3_report_cannot_write_finished_shards() { managed_shard_case(3); }
 
+    #[test]
+    fun managed_catalog_desired_revision() {
+        use sui_edge::deployment_manager;
+        use sui_edge::component_catalog::{Self as cc, ComponentCatalog, ComponentVersion};
+        use sui_edge::desired_state;
+        use sui_edge::device_group::DeviceGroup;
+        let mut s = setup(); let fid = fleet(&mut s); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_group(&c, &mut f, utf8(b"Library group"), utf8(b""), &clock, s.ctx());
+        cc::create_catalog(s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        let mut catalog = s.take_shared<ComponentCatalog>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        cc::publish_version(&mut catalog, utf8(b"app"), utf8(b"1.0.0"),
+            vector[utf8(b"linux"), utf8(b"linux")], vector[utf8(b"arm"), utf8(b"x86_64")],
+            vector[utf8(b"arm-recipe"), utf8(b"x86-recipe")],
+            vector[utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")], vector[utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(catalog); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut group = s.take_shared<DeviceGroup>(); let value = s.take_immutable<ComponentVersion>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let mut record = customer::new_catalog_deployment(&c, &mut f, &value, vector[object::id(&group)], vector[], &clock, s.ctx());
+        customer::begin_sharded_receipts(&c, &f, &mut record, s.ctx());
+        let mut plan = customer::begin_revision(&c, &f, &group, s.ctx());
+        desired_state::set_component(&mut plan, &mut record);
+        customer::commit_revision(&c, &f, plan, &mut group, &clock, s.ctx());
+        assert!(*desired_state::components(&group).get(&utf8(b"app")) == object::id(&record));
+        assert!(deployment_manager::is_managed(&record));
+        deployment_manager::share_deployment(record); sui::clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(group); ts::return_immutable(value); s.end();
+    }
+
     fun managed_extension_shard_cleanup(catalog: bool) {
         use sui_edge::deployment_manager as dm;
         use sui_edge::component_catalog::{Self as cc, ComponentCatalog, ComponentVersion};
