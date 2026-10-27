@@ -71,7 +71,7 @@ const {SuiGrpcClient}=appRequire('@mysten/sui/grpc'),{Transaction}=appRequire('@
    if(current && current.certified_epoch==null){const registered=Object.entries(state.intents).find(([label,i])=>label.startsWith(`blob/${hash}/`) && Transaction.from(i.bytes).getData().commands.some(c=>c.$kind==='MoveCall' && c.MoveCall.function==='register_blob'))?.[1];assert(registered?.status==='success');blob.step={step:'registered',blobId:blob.result.blobId,blobObjectId:blob.result.blobObject.id,txDigest:registered.digest};delete blob.result;await save();}}
   if(!blob.result){blob.result=await storage.writeBlob({blob:packed.bytes,epochs:3,deletable:false,signer,resume:blob.step,onStep:async step=>{blob.step=step;await save();}});await save();}
   blob.result.blobObject=await freshBlob(blob.result.blobObject.id);await save();
-  P.reusableBlob(blob.result.blobObject,Number((await storage.systemState()).epoch));
+  P.reusableBlob(blob.result.blobObject,Number((await storage.stakingState()).epoch));
   const planned=structuredClone(state.bindings);const {rebind:changed,removed}=P.resourcePlan(packed.resources,planned);
   const tx=new Transaction();let siteArg;
   if(!state.siteId){const [m]=tx.moveCall({target:`${P.pin.packageId}::metadata::new_metadata`,arguments:Array.from({length:5},()=>tx.pure.option('string',null))});[siteArg]=tx.moveCall({target:`${P.pin.packageId}::site::new_site`,arguments:[tx.pure.string('SuiFleet'),m]});}
