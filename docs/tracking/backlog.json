@@ -3916,6 +3916,144 @@
         "User receives a working draft preview of the redesigned site. SF172 remains a merge prerequisite. No mainnet publishing, credentials, DNS changes or real spending authorized by this visual task."
       ],
       "validation": "Run site build, site unit/negative/reproducibility/link checks and desktop/mobile rendered review with screenshots. Preserve meaningful existing checks and report exact commands; itemized small commits authored/committed by Tyler Bush."
+    },
+    {
+      "key": "SF-181",
+      "title": "Collect subscriptions through a prepaid on-chain account in USDC or SUI",
+      "priority": "P2",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-185"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "interfaces",
+        "docs/BUSINESS_PLAN.md",
+        "docs/business/SUBSCRIPTION_PRICING.md",
+        "docs/DEPLOYMENT_MANIFEST.md",
+        "scripts/subscription_pricing.py"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Crypto path: the customer prepays a fixed-USD plan in USDC (primary) or SUI into an on-chain subscription account, following the prepaid FleetBudget pattern (SF-083). The contract releases each elapsed period's fee to SuiFleet's treasury and extends the customer's entitlement, so nobody signs every month and no billing server exists. Today customer.move keeps paid entitlement (device_limit, allowance, period via set_entitlement) behind registry authority and says there is no billing backend, and BUSINESS_PLAN.md lists payment method and collection as undecided. Mysten's Payment Kit (experimental) offers sui:pay payment URIs and duplicate-proof on-chain payment records for any coin, but no recurring billing; evaluate it for the deposit step.",
+      "evidence": "contracts/sources/customer.move set_entitlement; docs/BUSINESS_PLAN.md platform subscription decision (2026-10-23) and SUI-sensitivity policy; docs/FLEET_BUDGET.md prepaid pattern; https://sdk.mystenlabs.com/payment-kit; conversation of 2026-10-27 recorded on #353.",
+      "acceptance": [
+        "An additive Move module holds one subscription account per customer bound to its Customer and registry. It covers deposit in accepted coins (USDC required, SUI optional), plan tier and per-period price fixed in coin units for the paid term, and a collect call that releases at most one period's fee per elapsed period to the treasury address fixed at creation, extending the Customer entitlement through the existing authority path. Events cover deposit, collection, plan change and refund.",
+        "Nobody, including SuiFleet's admin capability, can take more than the fees due. Cancellation returns the unearned balance to the customer under a refund rule recorded in BUSINESS_PLAN.md. Price changes apply only at renewal with the notice the SUI-sensitivity policy requires, and the annual prepay discount is supported.",
+        "Accepted coin types and the treasury address (SF-185) are recorded in the deployment manifest with their type origins, and clients read the payee only from the manifest. Payment Kit is evaluated for deposits and payment links: the decision and any pinned package IDs are recorded.",
+        "Move tests cover double collection, early collection, wrong coin, insufficient balance, cancellation, plan change, upgrade from the current package and old-package entry points. A testnet run with testnet USDC records digests and gas within the standing spend limits.",
+        "BUSINESS_PLAN.md records the 2026-10-27 payment decision (crypto plus card) and replaces 'payment method undecided'."
+      ],
+      "validation": "make test-contracts, interface generation/checks, Move security check, public-testnet effects for deposit/collect/cancel."
+    },
+    {
+      "key": "SF-182",
+      "title": "Let customers choose a plan, prepay and track their subscription in the console",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-181"
+      ],
+      "paths": [
+        "dapp/src",
+        "docs/OPERATIONS.md",
+        "docs/FRONTEND_CLIENT.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Customers need a plan and billing page: choose a device-capacity tier, see the price in USD and in USDC/SUI for the term, prepay in one wallet transaction or from another wallet through a payment link or QR code, and see paid-until, balance, upcoming collections and receipts. The payee is the manifest-pinned treasury; suifleet.sui may only label it.",
+      "evidence": "SF-181 contract; pricing tiers in BUSINESS_PLAN.md and the console fleet-settings estimator (SF-131); SF-178 pricing data; the 2026-10-27 discussion that payments must never be routed through a mutable SuiNS lookup.",
+      "acceptance": [
+        "A Plans and billing page lists tiers from the canonical pricing data, explains what the subscription includes versus network costs paid into the fleet budget, and quotes the term price in USD and in the selected coin with the conversion source and time.",
+        "Prepay works from the connected wallet in one transaction and from another wallet through a payment URI and QR code. Each path verifies the on-chain result before showing success.",
+        "Subscription status shows plan, paid-until, balance, next collection and history with digests. Receipts download as PDF or CSV with the customer's company details for accounting.",
+        "The payee is shown as the manifest treasury address. The suifleet.sui label appears only when that address's default SuiNS name reverse-resolves to suifleet.sui, and payment never depends on a SuiNS lookup.",
+        "Low-balance and renewal warnings appear in the console ahead of expiry. Connect, sign, reject, network-mismatch and insufficient-funds flows are tested."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet prepay walkthrough with recorded digests, wallet acceptance under SF-031 policy."
+    },
+    {
+      "key": "SF-183",
+      "title": "Pay for subscriptions by card through a hosted USDC on-ramp",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-182"
+      ],
+      "paths": [
+        "dapp/src/lib/onramp.ts",
+        "dapp/src/components",
+        "docs/OPERATIONS.md",
+        "docs/BUSINESS_PLAN.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Card path one: the card buys USDC on Sui into the customer's own wallet through a provider's hosted checkout, and the console then completes the same on-chain prepay as SF-182, so card payments also fund the prepaid account. The console already opens OnRamp.money's hosted checkout for SUI/WAL budget funding (dapp/src/lib/onramp.ts, SF-083). That path is disabled without a public app ID, and Coinbase was excluded because it needs a server-minted session. Sui's docs list USDC-on-Sui on-ramps from Banxa, Coinbase, OnRamp.money and Meld. OnRamp.money is operated by OMO LLC (Saint Vincent and the Grenadines) with an Indian affiliate registered with FIU-IND; its licensing for US/EU customers is unverified.",
+      "evidence": "dapp/src/lib/onramp.ts; https://docs.sui.io/onchain-finance/asset-custody/fiat-on-ramps; user question 2026-10-27 on OnRamp.money's legitimacy.",
+      "acceptance": [
+        "Provider due diligence is recorded for at least OnRamp.money and Banxa: operating entity, licensing in the target markets (US, EU), KYC inside the hosted flow, fees, regions, USDC-on-Sui support and the absence of secret keys or servers. The user selects the provider(s) and completes any partner signup; agents do neither.",
+        "Checkout offers Pay by card. It opens the chosen provider's hosted checkout pre-filled with the wallet, USDC on Sui and an amount covering the quote plus gas, detects the arrival on chain, then continues to the prepay transaction. Abandoned, partial and late purchases are handled without losing funds.",
+        "onramp.ts supports USDC and the chosen provider(s) through public build configuration only. No secret, webhook or server is added.",
+        "On testnet, where providers do not operate, a clearly labeled test mode simulates the purchase with a testnet USDC transfer so the full flow can be exercised."
+      ],
+      "validation": "Unit tests for URL construction and arrival detection; testnet walkthrough in test mode; real-card acceptance deferred to the user under the SF-031/#32 real-wallet policy."
+    },
+    {
+      "key": "SF-184",
+      "title": "Accept invoiced card or bank payments and record them on chain from Administration",
+      "priority": "P2",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-181"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md",
+        "docs/BUSINESS_PLAN.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Card path two, for companies that need a normal invoice: SuiFleet bills through a hosted invoice service such as Stripe Invoicing or Payment Links (Stripe hosts the payment page, so SuiFleet runs no server). After payment, SuiFleet's administrator records it on chain from the console's Administration page, which extends the customer's entitlement exactly as an on-chain prepayment would. The business plan budgets card fees at about 3% plus USD 0.30 per invoice.",
+      "evidence": "customer.move set_entitlement (registry authority only); BUSINESS_PLAN.md card-fee assumption; 2026-10-27 user decision.",
+      "acceptance": [
+        "Administration can record an off-chain payment for a customer: invoice reference, amount, currency and period. It extends paid-until through the registry authority and emits an event carrying the invoice reference and no personal data. It rejects overlapping or duplicate invoice references.",
+        "The customer's billing page shows invoice-paid periods next to on-chain prepayments, with one paid-until date.",
+        "A runbook covers invoice-provider account setup (user action), invoice template contents, reconciliation, refunds and voids. No provider secret is stored in the repository, the app or CI.",
+        "Move and console tests plus a testnet run record the admin transaction effects."
+      ],
+      "validation": "Move tests, frontend tests, testnet admin-recording run with digests."
+    },
+    {
+      "key": "SF-185",
+      "title": "Define the SuiFleet treasury multisig and pin it as the payment address",
+      "priority": "P2",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "docs/OPERATIONS.md",
+        "docs/DEPLOYMENT_MANIFEST.md",
+        "deployments",
+        "scripts",
+        "dapp/src/lib/deployment-manifest.ts"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: SuiFleet collects subscriptions by crypto and by card, with no SuiFleet server (SF-137). Subscription revenue must land in a company treasury, not a personal wallet. Use a Sui multisig address backed by hardware keys, and pin its address in each network's deployment manifest so clients never take the payee from a mutable source. The user registered suifleet.sui on 2026-10-27 (it expires 2030-10-26 and currently targets the personal wallet). Pointing it at the treasury and setting the treasury's default name are later user-only mainnet actions.",
+      "evidence": "#353 comments of 2026-10-27 (suifleet.sui registration, payment-address guidance); docs/DEPLOYMENT_MANIFEST.md.",
+      "acceptance": [
+        "A runbook explains creating the treasury multisig (threshold, hardware keys, key holders, recovery and rotation), verifying its address, and the later user-only steps: point suifleet.sui at it and set its default name. Agents never hold treasury keys or perform mainnet actions.",
+        "The deployment manifest schema gains a treasury payee field with validation. Clients read the payee only from the manifest and show a mismatch error instead of paying when it is absent or malformed.",
+        "Testnet uses a disposable testnet multisig with the same shape so SF-181 to SF-184 can be exercised end to end, and its address is recorded."
+      ],
+      "validation": "Manifest schema tests; testnet multisig creation and one signed spend with recorded digests; runbook review by the user."
     }
   ]
 }
