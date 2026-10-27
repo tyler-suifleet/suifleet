@@ -210,3 +210,26 @@ export function membershipOutcome(plan: MembershipPlan, results: BatchResult[]):
   });
   return outcome;
 }
+
+export interface RunSummary {
+  /** Every planned transaction was sent and confirmed successful. */
+  complete: boolean;
+  /** Transactions confirmed successful. */
+  confirmed: number;
+  /** The transaction that stopped the run while it is still failed or unconfirmed. */
+  failure?: BatchResult;
+  /** Planned transactions that were never sent. */
+  unsent: number;
+}
+
+/**
+ * Whether a run finished. A run stops at its first failed or unconfirmed
+ * transaction; reconciling that one to success does not send the rest, so
+ * success requires a confirmed result for every planned transaction.
+ */
+export function runSummary(plan: MembershipPlan, results: BatchResult[]): RunSummary {
+  const confirmed = results.filter((r) => r.status === "succeeded").length;
+  const unsent = plan.transactions.length - results.length;
+  return { complete: unsent === 0 && confirmed === plan.transactions.length, confirmed, unsent,
+    failure: results.find((r) => r.status !== "succeeded") };
+}

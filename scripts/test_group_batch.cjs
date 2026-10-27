@@ -128,5 +128,100 @@ assert.deepEqual(counts4(batch.membershipOutcome(three, rejected)), [100, 100, 0
   assert.deepEqual(await batch.reconcileResults([...rejected, ...late], never), [...rejected, ...late]);
   const removalOutcome = batch.membershipOutcome(removal, [{ index: 0, status: 'ambiguous', error: 'timeout' }]);
   assert.deepEqual(removalOutcome.unknown.map(c => c.deviceId), [devices[0].objectId]);
+
+  // Run summary: success needs every planned transaction confirmed, not just
+  // every attempted one.
+  const lateFirst = [{ index: 0, status: 'succeeded', digest: 'late', error: 'timeout' }];
+  assert.deepEqual(batch.runSummary(three, lateFirst), { complete: false, confirmed: 1, unsent: 2, failure: undefined });
+  assert.equal(batch.runSummary(three, [0, 1, 2].map(index => ({ index, status: 'succeeded' }))).complete, true);
+  assert.equal(batch.runSummary(three, rejected).failure, rejected[1]);
+
+  // Component: the real dialog, driven through review, apply, settle and Check
+  // again with a stateful hook runtime; wallet and node calls are injected.
+  await dialogRegressions(many, site, fleet);
   console.log('PASS: bulk group selection, review plan, batch limits, architecture mismatches, transaction shape and partial-failure outcomes');
 })().catch(err => { console.error(err); process.exit(1); });
+
+/**
+ * Render BulkGroupMembership with a minimal hook runtime (state persists by
+ * call order) and return its text, buttons and inputs. `wallet(i, hooks)` plays
+ * transaction i; `node.lookup(digest)` answers digest effects lookups.
+ */
+async function dialogRegressions(many, site, fleet) {
+  let slots = [], cursor = 0;
+  const react = {
+    useState(initial) {
+      const i = cursor++;
+      if (!(i in slots)) slots[i] = { value: initial };
+      const slot = slots[i];
+      return [slot.value, (next) => { slot.value = typeof next === 'function' ? next(slot.value) : next; }];
+    },
+    useMemo: (fn) => (cursor++, fn()),
+  };
+  const env = {};
+  const component = loader({
+    react,
+    '@mysten/dapp-kit-react': { useCurrentClient: () => ({ async getTransaction({ digest }) { return env.lookup(digest); } }) },
+    '@/hooks/useFleetTransaction': { useFleetTransaction: () => ({ async mutateAsync(options) { return env.wallet(env.calls++, options); } }) },
+  })('components/BulkGroupMembership.tsx');
+  const flush = () => new Promise(resolve => setImmediate(resolve));
+  function render(props) {
+    cursor = 0;
+    const buttons = {}, inputs = [], text = [];
+    (function walk(node) {
+      if (node == null || typeof node === 'boolean') return;
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (typeof node !== 'object') return void text.push(String(node));
+      if (typeof node.type === 'function') return walk(node.type(node.props));
+      if (node.type === 'button') buttons[[node.props.children].flat().join('')] = node.props;
+      if (node.type === 'input') inputs.push(node.props);
+      walk(node.props?.children);
+    })(component.BulkGroupMembership(props));
+    return { buttons, inputs, text: text.join('') };
+  }
+  const props = { devices: many, groups: [site], selected: many.map(d => d.objectId), fleet, reloadGroups: async () => {}, onClose() {} };
+  const found = (status) => ({ Transaction: { status: { success: status === 'succeeded' } } });
+  async function run(wallet, lookup) {
+    slots = []; Object.assign(env, { calls: 0, wallet, lookup });
+    render(props).inputs.find(i => i.type === 'checkbox' && !i.checked).onChange({ target: { checked: true } });
+    const approve = render(props).buttons['Approve 3 transaction(s)'];
+    assert.ok(approve, 'review plans three transactions');
+    approve.onClick();
+    for (let i = 0; i < 20; i++) await flush();
+    return render(props);
+  }
+  const confirm = (digest) => ({ onProgress, onSubmitted }) => { onProgress('wallet'); onProgress('confirming'); onSubmitted(digest); return { digest }; };
+  const timeout = (digest) => ({ onProgress, onSubmitted }) => { onProgress('wallet'); onProgress('confirming'); onSubmitted(digest); throw Error('confirmation timeout'); };
+
+  // Every transaction confirmed: complete.
+  const all = await run((i, o) => confirm(`D${i}`)(o), async () => { throw Error('lookup must not be called'); });
+  assert.match(all.text, /All 3 transaction\(s\) succeeded\./);
+  assert.doesNotMatch(all.text, /Nothing is retried/);
+
+  // Regression: the first batch times out, then settles as succeeded at once.
+  // Two batches were never sent, so this is not a full success.
+  const first = await run((i, o) => (i === 0 ? timeout('D0') : confirm(`D${i}`))(o), async () => found('succeeded'));
+  assert.equal(env.calls, 1, 'the run stops at the unconfirmed transaction');
+  assert.doesNotMatch(first.text, /All 3 transaction/);
+  assert.match(first.text, /1 of 3 transaction\(s\) succeeded; transaction 1 was confirmed late \(confirmation timeout\)\. The remaining 2 transaction\(s\) were not sent\./);
+  assert.match(first.text, /Not attempted \(150\)/);
+  assert.match(first.text, /Review again to plan only the remaining changes\./);
+
+  // Regression: the middle batch times out and is not found yet; Check again
+  // then finds its successful effects. The last batch is still unsent.
+  let effects;
+  const middle = await run((i, o) => (i === 1 ? timeout('D1') : confirm(`D${i}`))(o), async () => effects);
+  assert.equal(env.calls, 2);
+  assert.match(middle.text, /Transaction 2 of 3 was not confirmed: confirmation timeout\. Later transactions were not sent\./);
+  assert.match(middle.text, /Unknown \(100\)/);
+  assert.match(middle.text, /Resolve the unknown transaction first/);
+  effects = found('succeeded');
+  middle.buttons['Check again'].onClick();
+  for (let i = 0; i < 20; i++) await flush();
+  const rechecked = render(props);
+  assert.doesNotMatch(rechecked.text, /All 3 transaction/);
+  assert.match(rechecked.text, /2 of 3 transaction\(s\) succeeded; transaction 2 was confirmed late \(confirmation timeout\)\. The remaining 1 transaction\(s\) were not sent\./);
+  assert.match(rechecked.text, /Not attempted \(50\)/);
+  assert.doesNotMatch(rechecked.text, /Unknown \(/);
+  assert.match(rechecked.text, /Review again to plan only the remaining changes\./);
+}

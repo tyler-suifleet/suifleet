@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { existingInboxes, inboxSupported } from "@/lib/fleet-inbox";
-import { buildMembershipTx, failureStatus, groupBatchSupported, membershipOutcome, planMembership, reconcileResults, MAX_FLEET_CHANGES, MAX_WALLET_CHANGES,
+import { buildMembershipTx, failureStatus, groupBatchSupported, membershipOutcome, planMembership, reconcileResults, runSummary, MAX_FLEET_CHANGES, MAX_WALLET_CHANGES,
   type BatchResult, type DigestLookup, type MembershipAction, type MembershipChange, type MembershipOutcome, type MembershipPlan } from "@/lib/group-batch";
 import type { NamedFleet } from "@/lib/customer-fleets";
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
@@ -161,16 +161,20 @@ function ChangeList({ title, changes, name, groupName }: { title: string; change
   );
 }
 
-function Outcome({ plan, results, outcome, name, groupName, checking, onRecheck, onClose }: { plan: MembershipPlan; results: BatchResult[]; outcome: MembershipOutcome;
+export function Outcome({ plan, results, outcome, name, groupName, checking, onRecheck, onClose }: { plan: MembershipPlan; results: BatchResult[]; outcome: MembershipOutcome;
   name: (id: string) => string; groupName: (id: string) => string; checking: boolean; onRecheck: () => void; onClose: () => void }) {
-  const failure = results.find((r) => r.status !== "succeeded");
+  const { complete, confirmed, failure, unsent } = runSummary(plan, results);
   const pending = results.filter((r) => r.status === "ambiguous");
   const verb = plan.action === "add" ? "Added" : "Removed";
+  const total = plan.transactions.length;
+  // A stopping transaction confirmed late (on settling or Check again) still left the rest unsent.
+  const stopped = results.find((r) => r.error);
   return (
     <section aria-label="Result" className="text-sm space-y-2">
-      <p role={failure ? "alert" : "status"} className={failure ? "text-red-700" : "text-green-700"}>
-        {failure ? `Transaction ${failure.index + 1} of ${plan.transactions.length} ${failure.status === "failed" ? "failed" : "was not confirmed"}: ${failure.error}. Later transactions were not sent.`
-          : `All ${plan.transactions.length} transaction(s) succeeded.`}
+      <p role={complete ? "status" : "alert"} className={complete ? "text-green-700" : failure ? "text-red-700" : "text-amber-800"}>
+        {complete ? `All ${total} transaction(s) succeeded.`
+          : failure ? `Transaction ${failure.index + 1} of ${total} ${failure.status === "failed" ? "failed" : "was not confirmed"}: ${failure.error}. Later transactions were not sent.`
+          : `${confirmed} of ${total} transaction(s) succeeded${stopped ? `; transaction ${stopped.index + 1} was confirmed late (${stopped.error})` : ""}. The remaining ${unsent} transaction(s) were not sent.`}
       </p>
       {outcome.changed.length > 0 && <ChangeList title={verb} changes={outcome.changed} name={name} groupName={groupName} />}
       {outcome.unchanged.length > 0 && <div><p className="font-medium">Not changed ({outcome.unchanged.length})</p><ChangeList title="Unchanged" changes={outcome.unchanged} name={name} groupName={groupName} /></div>}
@@ -183,7 +187,7 @@ function Outcome({ plan, results, outcome, name, groupName, checking, onRecheck,
       </div>}
       {outcome.notAttempted.length > 0 && <div><p className="font-medium">Not attempted ({outcome.notAttempted.length})</p><ChangeList title="Not sent" changes={outcome.notAttempted} name={name} groupName={groupName} /></div>}
       <ul className="text-xs font-mono text-gray-500">{results.filter((r) => r.digest).map((r) => <li key={r.index}>Transaction {r.index + 1}: {r.digest}{r.status === "ambiguous" ? " (unconfirmed)" : r.status === "failed" ? " (failed)" : ""}</li>)}</ul>
-      {failure && <p className="text-xs text-gray-500">Nothing is retried automatically. {pending.length ? "Resolve the unknown transaction first: reviewing again before it settles could submit the same changes twice." : "Review again to plan only the remaining changes."}</p>}
+      {!complete && <p className="text-xs text-gray-500">Nothing is retried automatically. {pending.length ? "Resolve the unknown transaction first: reviewing again before it settles could submit the same changes twice." : "Review again to plan only the remaining changes."}</p>}
       <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">Close</button>
     </section>
   );

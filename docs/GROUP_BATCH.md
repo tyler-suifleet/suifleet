@@ -48,6 +48,11 @@ group:
   stays unknown: check the wallet's activity before planning again;
 - **not attempted**: in later transactions, which were never sent.
 
+The run reports success only when every planned transaction was sent and
+confirmed. If the transaction that stopped the run is later confirmed
+successful, the run is still incomplete. The dialog then reports how many
+transactions succeeded and how many were never sent.
+
 Nothing is retried automatically. Once nothing is unknown, reviewing again
 plans only the remaining changes, because devices already in the requested
 state are skipped.
