@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useFleetStorage, useFleetBlobStore } from './useFleetStorage';
 import { fetchFleetSettings } from '@/lib/fleet-settings';
 import { WALRUS_EPOCHS, NETWORK } from '@/lib/constants';
-import { DAY, periodEpochs, expiryTime, storageSchedule, releaseWalrus, buildExtendFleetReleaseTx } from '@/lib/release-storage';
+import { DAY, periodEpochs, expiryTime, storageSchedule, releaseWalrus, buildExtendFleetReleaseTx, requireFleetUploadPeriod } from '@/lib/release-storage';
 import { uploadBlob, type BlobStore } from '@/lib/walrus';
 import { useFleetTransaction } from './useFleetTransaction';
 
@@ -33,12 +33,13 @@ export function useReleasePeriod(sizes: number[]) {
   const fleetStore: BlobStore = async (body, progress) => {
     if (!s || error || !epochs || !fleet.target || !prepaid.store) throw Error('Fleet storage or storage period unavailable');
     // A prepaid pool can have a longer period than requested; it cannot shorten a blob.
-    const blob = await prepaid.store(body, progress);
     const current = await storageSchedule(client);
     const targetEnd = current.epoch + periodEpochs(days, current);
+    requireFleetUploadPeriod(!!prepaid.retention, prepaid.storage?.endEpoch, targetEnd);
+    const blob = await prepaid.store(body, progress);
     if (blob.endEpoch === undefined) throw Error('Fleet registration omitted storage expiry');
     if (blob.endEpoch < targetEnd) {
-      await execute.mutateAsync({ transaction: buildExtendFleetReleaseTx(fleet.target, blob.blobObjectId!, targetEnd - blob.endEpoch) });
+      await execute.mutateAsync({ transaction: await buildExtendFleetReleaseTx(client, fleet.target, blob.blobObjectId!, targetEnd - blob.endEpoch) });
       blob.endEpoch = targetEnd;
     }
     return blob;

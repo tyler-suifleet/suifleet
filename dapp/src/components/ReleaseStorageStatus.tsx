@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFleetStorage } from '@/hooks/useFleetStorage';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { NETWORK } from '@/lib/constants';
-import { DAY, storageSchedule, releaseWalrus, releaseObjects, periodEpochs, expiryTime, expiryWarning, buildExtendFleetReleaseTx, buildExtendWalletReleaseTx } from '@/lib/release-storage';
+import { DAY, storageSchedule, releaseWalrus, releaseObjects, periodEpochs, expiryTime, expiryWarning, requireDirectExtension, buildExtendFleetReleaseTx, buildExtendWalletReleaseTx } from '@/lib/release-storage';
 import { useDeploymentStorage } from '@/hooks/useDeploymentStorage';
 import { deploymentRecipeDigest } from '@/lib/release-recipe';
 import { ConfidentialRecipeStorage } from './ConfidentialRecipeStorage';
@@ -35,11 +35,12 @@ export function ReleaseStorageStatus({ blobId, blobObjectId: _hint }: { blobId: 
     try {
       // Refresh authority and expiry before building: stale display data never authorizes payment.
       const fresh = (await releaseObjects(client, account!.address, fleet.target)).find(o => o.id === object.id && o.blobId === blobId);
+      requireDirectExtension(fresh?.retained);
       const s = await storageSchedule(client);
       const extra = periodEpochs(days, s);
       if (!fresh || fresh.endEpoch <= s.epoch) throw Error('Blob expired or ownership changed; restore verified bytes or reconnect its owner');
       if (fresh.endEpoch + extra > s.epoch + s.maxEpochs) throw Error('Extension exceeds the network storage horizon; choose fewer days');
-      const tx = fresh.fleet ? buildExtendFleetReleaseTx(fleet.target!, fresh.id, extra) : await buildExtendWalletReleaseTx(client, fresh.id, extra);
+      const tx = fresh.fleet ? await buildExtendFleetReleaseTx(client, fleet.target!, fresh.id, extra) : await buildExtendWalletReleaseTx(client, fresh.id, extra);
       const result = await execute.mutateAsync({ transaction: tx });
       setMessage(`Storage extension confirmed: ${result.digest}`);
       await Promise.all([cache.invalidateQueries({ queryKey: ['release-objects'] }), cache.invalidateQueries({ queryKey: ['release-expiry'] })]);
@@ -49,7 +50,8 @@ export function ReleaseStorageStatus({ blobId, blobObjectId: _hint }: { blobId: 
     <p>Storage expiry: {endMs === undefined ? status.isLoading ? 'checking…' : 'unknown' : `${new Date(endMs).toISOString().slice(0, 10)} (epoch ${end}) · projected from current epoch duration`}</p>
     {warning && <p className="text-amber-700" role="status">{warning}</p>}
     {(status.error || owned.error || schedule.error) && <p>Storage details unavailable: {String(status.error ?? owned.error ?? schedule.error)}</p>}
-    {object && <div><label>Extend storage by days <input className="border w-20 p-1" type="number" min="1" value={days} disabled={busy} onChange={e => setDays(Number(e.target.value))} /></label><p>{quote.data !== undefined ? `Estimated ${formatToken(quote.data)} WAL from ${object.fleet ? 'fleet funds' : 'your wallet'}, plus SUI gas` : 'Loading extension price…'}{schedule.data && end !== undefined && epochs > 0 ? ` · new projected expiry ${new Date(expiryTime(end + epochs, schedule.data)).toISOString().slice(0, 10)}` : ''}</p><button className="rounded border px-2 py-1" disabled={busy || !epochs || quote.data === undefined || !endMs || endMs <= Date.now()} onClick={extend}>{busy ? 'Extending…' : 'Extend storage'}</button></div>}
+    {object?.retained && <p role="status">Scheduled retention is attached. Manage its renewal target on the Network budget page; direct extension is disabled to preserve prepaid storage.</p>}
+    {object && !object.retained && <div><label>Extend storage by days <input className="border w-20 p-1" type="number" min="1" value={days} disabled={busy} onChange={e => setDays(Number(e.target.value))} /></label><p>{quote.data !== undefined ? `Estimated ${formatToken(quote.data)} WAL from ${object.fleet ? 'fleet funds' : 'your wallet'}, plus SUI gas` : 'Loading extension price…'}{schedule.data && end !== undefined && epochs > 0 ? ` · new projected expiry ${new Date(expiryTime(end + epochs, schedule.data)).toISOString().slice(0, 10)}` : ''}</p><button className="rounded border px-2 py-1" disabled={busy || !epochs || quote.data === undefined || !endMs || endMs <= Date.now()} onClick={extend}>{busy ? 'Extending…' : 'Extend storage'}</button></div>}
     {!object && !owned.isLoading && <p>Connect the storage owner or select its fleet to extend this blob.</p>}
     {message && <p role="status">{message}</p>}
   </div>;

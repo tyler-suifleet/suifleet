@@ -110,3 +110,49 @@ actual Mainnet acceptance remain unrun in [SF-031/#32](https://github.com/tyler-
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159), under the
 user-authorized implementation split. This work provisions no production
 credentials and authorizes no physical programming or Mainnet writes.
+
+## PR #356 feedback repair (2026-10-27)
+
+The independent review found that direct `extend_blob` could move a retained
+blob's end past the start of its prepaid renewal resource. The repair preserves
+that boundary: Library/Deployments flag attached renewal policies, hide direct
+extension and direct the operator to the Network budget renewal controls. The
+fresh pre-signing read rejects those policies too. Every fleet release extension
+PTB now reads `renewal` and consumes it with `option::destroy_none` before the
+extension, so a concurrently attached policy aborts atomically before payment.
+The Renewal introduction origin is resolved from the current package; failure
+stops signing. No contract source, ABI or layout changed.
+
+Retained publish/import/Deploy uploads whose chosen period exceeds the pool end
+are refused before registration, with guidance to refill the pool or choose
+wallet-paid storage. The pool read can become stale; the atomic renewal guard
+still prevents stranding capacity if an unexpected post-upload extension is
+needed. Such a failed upload may leave a certified finite-lived blob, but does
+not register the version or change its prepaid renewal boundary.
+
+Feedback verification:
+
+- `node scripts/test_release_storage.cjs`: PASS, including guarded transaction
+  ordering, introduction origin, missing-origin refusal, cross-page renewal
+  discovery, retained direct-extension refusal and upload-period preflight.
+- Pinned container `sui move test --path contracts/fleet_storage`: **76/76 PASS**,
+  including the same guard aborting for an actual prepaid renewal and allowing
+  an unretained blob extension to epoch 6. Host Move cache mounted into the
+  disposable container; networking disabled.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_components_browser.cjs`:
+  PASS; real browser, fixture chain/wallet/storage.
+
+The snapshot base af805cc1736dd12849fa396d047a3ad29f99c5e0 was integrated
+before the repair. No new public-network transaction was submitted for feedback;
+the original publish/extension receipts above remain historical evidence for
+this ticket. Current-head automatic testnet/ordinary/security CI and a fresh
+independent review remain coordinator gates. Deferred manual wallet/provider,
+physical and mainnet checks remain unrun in #32 and #159.
+
+- Pinned `make dapp-typecheck`: PASS (full offline frontend prerequisites).
+- Pinned `make dapp-build`: PASS, all static pages exported; existing Tailwind
+  module-type warning only.
+- The trailing Move command in that combined container invocation failed fetching
+  dependencies with networking disabled because its Move cache was not mounted.
+  The separate cache-mounted Move run above completed 76/76 tests successfully.
+- `git diff --check`: PASS.

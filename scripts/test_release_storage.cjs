@@ -14,11 +14,21 @@ assert.match(expiryWarning(17 * DAY, 10 * DAY), /within 7 days/);
 assert.equal(expiryWarning(18 * DAY, 10 * DAY), undefined);
 assert.match(expiryWarning(undefined), /unknown/);
 const target = { config: { packageId: '0xa', walrus: { system: '0xb' } }, storageId: '0xc', budgetId: '0xd', capId: '0xe' };
-const tx = buildExtendFleetReleaseTx(target, '0xf', 3).getData();
-assert.match(tx.commands[0].MoveCall.function, /extend_blob/);
-assert.equal(tx.commands[0].MoveCall.arguments.length, 6);
-assert.throws(() => buildExtendFleetReleaseTx(target, '0xf', 0));
 (async () => {
+  const api = { movePackageService: { getDatatype: async () => ({ response: { datatype: { definingId: '0x99' } } }) } };
+  const tx = (await buildExtendFleetReleaseTx(api, target, '0xf', 3)).getData();
+  assert.deepEqual(tx.commands.map(c => c.MoveCall.function), ['renewal', 'destroy_none', 'extend_blob']);
+  assert.equal(tx.commands[1].MoveCall.typeArguments[0], '0x99::fleet_storage::Renewal');
+  assert.equal(tx.commands[2].MoveCall.arguments.length, 6);
+  await assert.rejects(buildExtendFleetReleaseTx(api, target, '0xf', 0));
+  await assert.rejects(buildExtendFleetReleaseTx({ movePackageService: { getDatatype: async () => ({ response: {} }) } }, target, '0xf', 1), /origin unavailable/);
+  const { requireDirectExtension, requireFleetUploadPeriod } = load('lib/release-storage.ts');
+  assert.throws(() => requireDirectExtension(true), /scheduled retention/);
+  requireDirectExtension(false);
+  assert.throws(() => requireFleetUploadPeriod(true, 12, 15), /Refill/);
+  assert.throws(() => requireFleetUploadPeriod(true, undefined, 15), /Refill/);
+  requireFleetUploadPeriod(true, 15, 15);
+  requireFleetUploadPeriod(false, 12, 15);
   // The actual publisher transport must carry the chosen period, including retries.
   const constants = { NETWORK: 'testnet', WALRUS_PUBLISHER: 'https://publisher.walrus-testnet.walrus.space', WALRUS_EPOCHS: 5 };
   const walrus = loader({ './constants': constants })('lib/walrus.ts');
@@ -63,6 +73,14 @@ assert.throws(() => buildExtendFleetReleaseTx(target, '0xf', 0));
   const objects = await load('lib/release-storage.ts').releaseObjects({ ...adapter, listOwnedObjects: async () => ({ objects: [{ objectId: '0xf' }], hasNextPage: false }) }, '0x1');
   assert.equal(objects[0].blobId, appRequire('@mysten/walrus').blobIdFromInt(42n));
   assert.equal(objects[0].endEpoch, 15);
+  // Renewal can occur on a later dynamic-field page than its blob record.
+  const { RecordBcs, RenewalBcs } = load('lib/retention.ts');
+  const fleetClient = { ...adapter, listOwnedObjects: async () => ({ objects: [], hasNextPage: false }),
+    listDynamicFields: async ({ cursor }) => cursor ? { dynamicFields: [{ name: { type: '0x99::fleet_storage::RenewalKey', bcs: bcs.Address.serialize('0xf').toBytes() }, value: { type: '0x99::fleet_storage::Renewal', bcs: RenewalBcs.serialize({ target: 20, max_fee: '10', last_success_epoch: null }).toBytes() } }], hasNextPage: false } : {
+      dynamicFields: [{ name: { type: '0xa::fleet_storage::RecordKey', bcs: bcs.Address.serialize('0xf').toBytes() }, value: { type: '0xa::fleet_storage::BlobRecord', bcs: RecordBcs.serialize({ device_id: null, blob_id: '42', size: '100', encoded_size: '2000000', end_epoch: 15, uploaded_at_ms: '0' }).toBytes() } }], hasNextPage: true, cursor: 'next' } };
+  const retainedObjects = await load('lib/release-storage.ts').releaseObjects(fleetClient, '0x1', target);
+  assert.equal(retainedObjects[0].retained, true);
+  assert.throws(() => requireDirectExtension(retainedObjects[0].retained), /scheduled retention/);
   const protocol = load('lib/fleet-protocol.ts');
   for (const sharded of [false, true]) {
     let bindingType;
