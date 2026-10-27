@@ -91,14 +91,14 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
   const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
   const differences=result?.informational??[];
   return <div className="space-y-3 border p-4"><h2>Import AWS Greengrass recipe</h2>
-    <p>Imports the supported parts of a Greengrass V2 software definition. AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance.</p>
+    <p>Imports the supported parts of a Greengrass V2 software definition. AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance. Lifecycle steps and artifact keys may use any letter case, as in AWS (Install/Run/Shutdown or install/run/shutdown, URI or Uri). One check lists every finding; bind the listed artifacts and check again.</p>
     <label className="block">Recipe (JSON or YAML)<textarea rows={10} className="w-full font-mono" value={text} onChange={e=>{setText(e.target.value);setResult(null);}}/></label>
     {uris.map(uri=><label key={uri} className="block">Artifact for <code>{uri}</code> <input type="file" onChange={e=>{const f=e.target.files?.[0];setFiles(({[uri]:_,...rest})=>f?{...rest,[uri]:f}:rest);setResult(null);}}/></label>)}
     <button disabled={busy||!text.trim()} onClick={check}>Check translation</button>
     {result&&<div role="status" className="space-y-2">
       <p>{result.outcome==='translate'?`Translates to ${result.manifests!.length} native manifest(s)`:'Rejected'}{result.omitted_manifests?.length?`; manifests ${result.omitted_manifests.join(', ')} omitted (platform not translated: Windows, macOS or 32-bit x86)`:''}</p>
       <ul>{result.reasons.map(r=><li key={r}><code>{r}</code>: {guidance(r)}</li>)}</ul>
-      {result.manifests?.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipe.schemaVersion}</p>)}
+      {result.manifests?.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipe.schemaVersion} · lifecycle {Object.keys(m.recipe.lifecycle).join(', ')}</p>)}
       {result.managed_dependencies&&<ul>{Object.entries(result.managed_dependencies).map(([d,c])=><li key={d}><code>{d}</code>: {c.outcome}{c.reason?` (${c.reason})`:''}</li>)}</ul>}
       {result.ipc_acl&&<div><p>Equivalent operator IPC ACL for a ported component (recipes never grant it):</p><pre>{ipcAclToml(name,result.ipc_acl)}</pre>{result.ipc_acl.unmapped.length>0&&<p>No native equivalent: {result.ipc_acl.unmapped.join(', ')}</p>}</div>}
       {differences.length>0&&<div><p>Reported differences from AWS behaviour:</p><ul>{differences.map(d=><li key={d}><code>{d}</code>: {guidance(d)}</li>)}</ul>
