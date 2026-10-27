@@ -40,7 +40,7 @@ import time
 import deployment_manifest as dm
 import sui_toolchain as toolchain
 from live_common import Live, ROOT, CLOCK, WALRUS_TESTNET, plain, stage
-from live_fleet_budget import record_publication, publish_storage, net_gas, EXCHANGE_PACKAGE, EXCHANGE
+from live_fleet_budget import record_publication, net_gas, EXCHANGE_PACKAGE, EXCHANGE
 from live_fleet_data import source_key
 
 PROFILE = ROOT / "profiles/seal-testnet"
@@ -73,9 +73,20 @@ class Reconcile(RuntimeError):
     """A step may have executed; read its effects before doing anything else."""
 
 
+class EvaluationLive(Live):
+    def client(self, *command, **options):
+        deployment = getattr(self, "deployment", None)
+        if deployment and command[0] == "execute-signed-tx":
+            tx = command[command.index("--tx-bytes") + 1]
+            deployment.record_submission(self.decode(tx)["digest"])
+        return super().client(*command, **options)
+
+
 class Deployment:
     def __init__(self, live, args):
         self.live, self.args = live, args
+        live.deployment = self
+        self.active_step = None
         self.profile = args.profile.resolve()
         self.base = dm.validate(json.loads((self.profile / "deployment.json").read_text()))
         self.seal = json.loads((self.profile / "seal.json").read_text())
@@ -97,21 +108,39 @@ class Deployment:
     def save(self):
         if self.args.dry_run:
             return
-        self.state_path.write_text(json.dumps(self.state, indent=2) + "\n")
-        os.chmod(self.state_path, 0o600)
+        # Persist intent before signing; a torn checkpoint must never turn an
+        # uncertain publication into an apparently missing step on restart.
+        with tempfile.NamedTemporaryFile(mode="w", dir=self.state_path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            try:
+                json.dump(self.state, output, indent=2)
+                output.write("\n")
+                output.flush()
+                os.fsync(output.fileno())
+                os.replace(temporary, self.state_path)
+                fd = os.open(self.state_path.parent, os.O_DIRECTORY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            finally:
+                temporary.unlink(missing_ok=True)
 
     def step(self, name, run, extract, verify):
         """Run `run` at most once for `name`; reuse a completed, re-verified step."""
         steps, pending = self.fleet["steps"], self.fleet["pending"]
         if name in steps:
             verify(steps[name])
-            self.live.check(f"reused {name}; re-verified on chain, nothing spent")
+            self.live.check(f"reused checkpoint {name}; no mutation")
             return steps[name]
         if name in pending:
             digest = self.args.adopt.get(name)
             if not digest:
                 raise Reconcile(f"step {name} may have executed (pending since {pending[name]['started']}); find its "
                                 f"transaction in the run evidence or wallet history and rerun with --adopt {name}=DIGEST")
+            if digest != pending[name].get("digest"):
+                raise Reconcile("adoption must match the exact transaction checkpointed before submission; "
+                                "a legacy intent without a digest requires operator reconciliation")
             result = self.live.executed(digest)
             if not result or result["effects"]["status"]["status"] != "success":
                 raise Reconcile(f"{digest} is not a successful executed transaction for {name}")
@@ -123,13 +152,33 @@ class Deployment:
         else:
             pending[name] = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
             self.save()
-            result = run()
+            self.active_step = name
+            try:
+                result = run()
+            except toolchain.NotSubmitted:
+                # This exception is reserved for verified pre-sign refusals.
+                # Unknown submissions keep their intent and cannot be replayed.
+                pending.pop(name)
+                self.save()
+                raise
+            finally:
+                self.active_step = None
         done = dict(extract(result), digest=result["digest"], net_gas_mist=net_gas(result))
         steps[name] = done
         pending.pop(name, None)
         self.save()
         verify(done)
         return done
+
+    def record_submission(self, digest):
+        if self.active_step is None:
+            # Top-ups deliberately are new transfers, outside cached setup.
+            raise Reconcile("uncached mutation refused; use an explicit checkpointed top-up step")
+        pending = self.fleet["pending"][self.active_step]
+        if pending.get("digest") not in (None, digest):
+            raise Reconcile("cannot replace a checkpointed transaction with different bytes")
+        pending["digest"] = digest
+        self.save()
 
     # ── Free on-chain checks of reused steps ─────────────────────────────────
 
@@ -203,7 +252,29 @@ class Deployment:
         storage_dir, data_dir = tree / "fleet_storage", tree / "fleet_data"
 
         def publication(directory, label):
-            return (lambda: publish_storage(live, directory, label=label),
+            def publish():
+                execute = live.executor()
+                def client(*command, **options):
+                    if command[0] == "execute-signed-tx":
+                        return execute(*command)
+                    return live.client(*command, **options)
+                def submit(gas):
+                    # Walrus dependencies use Git sources; the CLI's alternate
+                    # pubfile mode only accepts local dependency sources.
+                    try:
+                        built = toolchain.compile_package(live.build_sui, directory)
+                        pinned = (directory / "Move.lock").read_bytes()
+                        tx = toolchain._serialized(client, ["publish", directory, "--silence-warnings"], gas)
+                        if (directory / "Move.lock").read_bytes() != pinned:
+                            raise toolchain.NotSubmitted("transaction compiler changed Move.lock")
+                        decoded = live.decode(tx)
+                        checked = toolchain.verify_package_transaction(decoded, built, sender=live.operator, budget=gas)
+                    except (RuntimeError, ValueError, KeyError) as error:
+                        raise toolchain.NotSubmitted(str(error)) from error
+                    live.evidence.setdefault("verified_package_transactions", {})[label] = checked
+                    return toolchain.execute_exact(client, live.signer(None, live.operator), tx, decoded["digest"])
+                return live.execute(label, submit, gas=300_000_000, require_full=True)
+            return (publish,
                     lambda r: {"package": dm.object_id(live.published(r)), "cap": live.created(r, "::package::UpgradeCap")[0]},
                     lambda step: self.package_cap(step["package"], step["cap"]))
         storage = self.step(f"fleet_storage:{source_key(ROOT / 'contracts/fleet_storage', core['package'])}",
@@ -268,11 +339,13 @@ class Deployment:
     def top_up(self, objects, storage_package):
         live, budget = self.live, {"budget": objects["budget"], "cap": objects["budget_cap"]}
         if self.args.top_up_sui:
-            live.transaction("top up the evaluation fleet budget", "--split-coins", "gas", f"[{self.args.top_up_sui}u64]", "--assign", "coin",
+            self.step(f"top-up-sui:{self.args.top_up_id}:{self.args.top_up_sui}", lambda: live.transaction("top up the evaluation fleet budget", "--split-coins", "gas", f"[{self.args.top_up_sui}u64]", "--assign", "coin",
                              "--move-call", f"{self.fleet['steps'][self.core_name]['package']}::fleet_budget::deposit", f"@{objects['budget']}",
-                             f"@{objects['budget_cap']}", "coin", budget=15_000_000, funding=self.args.top_up_sui)
+                             f"@{objects['budget_cap']}", "coin", budget=15_000_000, funding=self.args.top_up_sui), lambda r: {}, lambda s: None)
         if self.args.top_up_wal_sui:
-            self.swap(storage_package, objects["storage"], budget, self.args.top_up_wal_sui, "top up the evaluation fleet's WAL")
+            self.step(f"top-up-wal:{self.args.top_up_id}:{self.args.top_up_wal_sui}",
+                      lambda: self.swap(storage_package, objects["storage"], budget, self.args.top_up_wal_sui, "top up the evaluation fleet's WAL"),
+                      lambda r: {}, lambda s: None)
 
     # ── Profile ──────────────────────────────────────────────────────────────
 
@@ -297,6 +370,7 @@ class Deployment:
         pretty("deployment.json", manifest)
         pretty("fleet-storage.json", fleet_storage)
         pretty("fleet-data.json", fleet_data)
+        pretty("seal-settings.json", {key: self.seal[key] for key in ("keyServers", "threshold")})
         (self.profile / "frontend.env").write_text(
             "# Separate disposable Seal TESTNET evaluation fleet. Explicit selection only. No credentials.\n"
             "# Generated by scripts/live_evaluation_fleet.py from this profile's JSON files (SF-173).\n"
@@ -346,16 +420,21 @@ def main(argv=None):
     p.add_argument("--swap-mist", type=int, default=SWAP, help="SUI swapped to WAL for the initial storage funding")
     p.add_argument("--top-up-sui", type=int, default=0, metavar="MIST", help="deposit this much SUI into the existing fleet budget")
     p.add_argument("--top-up-wal-sui", type=int, default=0, metavar="MIST", help="swap this much SUI to WAL into the existing fleet storage")
+    p.add_argument("--top-up-id", help="unique checkpoint label for this intentional top-up; reuse on retries")
     p.add_argument("--adopt", action="append", default=[], metavar="STEP=DIGEST", help="reconcile a pending step from its executed transaction")
     p.add_argument("--dry-run", action="store_true", help="read and verify only; build but never sign the upgrade")
     p.add_argument("--no-fund", action="store_true", help="never request the faucet")
     p.add_argument("--evidence", type=Path)
     args = p.parse_args(argv)
     args.adopt = dict(item.split("=", 1) for item in args.adopt)
+    if (args.top_up_sui or args.top_up_wal_sui) and not args.top_up_id:
+        p.error("top-ups require --top-up-id; reuse the same ID when resuming")
+    if min(args.deposit_mist, args.swap_mist, args.top_up_sui, args.top_up_wal_sui) < 0:
+        p.error("funding amounts cannot be negative")
     if not args.dry_run and not os.environ.get("SUIFLEET_TESTNET_LOCK_TOKEN"):
         raise SystemExit("mutations need the network:suifleet-testnet lock token in SUIFLEET_TESTNET_LOCK_TOKEN")
     os.umask(0o077)
-    live = Live(args.wallet, "testnet", 1 if args.dry_run else args.max_spend_mist)
+    live = EvaluationLive(args.wallet, "testnet", 1 if args.dry_run else args.max_spend_mist)
     live.preflight(auto_fund=not (args.dry_run or args.no_fund))
     try:
         Deployment(live, args).run()

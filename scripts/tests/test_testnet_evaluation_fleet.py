@@ -99,6 +99,8 @@ class EvaluationFleetSteps(unittest.TestCase):
         d, _ = self.deployment()
         with self.assertRaises(RuntimeError):
             d.step("core:k", lambda: (_ for _ in ()).throw(RuntimeError("timeout")), lambda r: {}, lambda s: None)
+        d.fleet["pending"]["core:k"]["digest"] = "GOOD"
+        d.save()
         live = FakeLive(self.wallet, executed={"GOOD": effects("GOOD"), "BAD": effects("BAD", "failure")})
         failed, _ = self.deployment(live, adopt={"core:k": "BAD"})
         with self.assertRaises(fleet.Reconcile):
@@ -114,6 +116,45 @@ class EvaluationFleetSteps(unittest.TestCase):
         self.assertIsNone(d.step("budget:x", lambda: self.fail("dry run must not execute"), lambda r: {}, lambda s: None))
         self.assertEqual(live.evidence["planned"], ["budget:x"])
         self.assertFalse((self.wallet.parent / fleet.STATE).exists())
+
+    def test_pre_sign_refusal_can_retry_without_adopting_an_unrelated_transaction(self):
+        d, _ = self.deployment()
+        def refused():
+            raise fleet.toolchain.NotSubmitted("compiler refused before signing")
+        with self.assertRaises(fleet.toolchain.NotSubmitted):
+            d.step("storage:x", refused, lambda r: {}, lambda s: None)
+        self.assertEqual(next(iter(self.state().values()))["pending"], {})
+        again, _ = self.deployment()
+        done = again.step("storage:x", lambda: effects("D3"), lambda r: {}, lambda s: None)
+        self.assertEqual(done["digest"], "D3")
+
+    def test_submission_identity_is_durable_and_cannot_be_replaced(self):
+        d, _ = self.deployment()
+        def lost():
+            d.record_submission("EXPECTED")
+            with self.assertRaises(fleet.Reconcile):
+                d.record_submission("UNRELATED")
+            raise RuntimeError("connection lost after submission")
+        with self.assertRaises(RuntimeError):
+            d.step("core:k", lost, lambda r: {}, lambda s: None)
+        pending = next(iter(self.state().values()))["pending"]["core:k"]
+        self.assertEqual(pending["digest"], "EXPECTED")
+        self.assertIsNone(d.active_step)
+        again, _ = self.deployment(FakeLive(self.wallet, executed={"UNRELATED": effects("UNRELATED")}),
+                                  adopt={"core:k": "UNRELATED"})
+        with self.assertRaises(fleet.Reconcile):
+            again.step("core:k", lambda: self.fail("never replay"), lambda r: {}, lambda s: None)
+
+    def test_failed_checkpoint_replace_preserves_previous_intent(self):
+        d, _ = self.deployment()
+        with self.assertRaises(RuntimeError):
+            d.step("core:k", lambda: (_ for _ in ()).throw(RuntimeError("unknown")), lambda r: {}, lambda s: None)
+        before = (self.wallet.parent / fleet.STATE).read_bytes()
+        d.fleet["pending"].clear()
+        with patch.object(fleet.os, "replace", side_effect=OSError("disk failure")):
+            with self.assertRaises(OSError):
+                d.save()
+        self.assertEqual((self.wallet.parent / fleet.STATE).read_bytes(), before)
 
     def test_public_record_restores_cache_only_for_the_same_fleet(self):
         step = {"package": "0xp", "version": "2", "digest": "D"}
@@ -136,7 +177,7 @@ class EvaluationFleetSteps(unittest.TestCase):
         self.assertTrue(fleet.core_key("1.81.1-a").endswith("@1.81.1-a"))
 
     def test_mutations_refuse_before_any_wallet_access_without_the_lock(self):
-        with patch.dict(os.environ, {}, clear=False), patch.object(fleet, "Live") as wallet:
+        with patch.dict(os.environ, {}, clear=False), patch.object(fleet, "EvaluationLive") as wallet:
             os.environ.pop("SUIFLEET_TESTNET_LOCK_TOKEN", None)
             with self.assertRaises(SystemExit):
                 fleet.main(["--wallet", str(self.wallet)])
