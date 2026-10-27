@@ -21,7 +21,7 @@ export function useFleetTransaction() {
   const client = useCurrentClient();
   const wallet = useDAppKit();
   return useMutation({
-    mutationFn: async ({ transaction, onProgress, support }: { transaction: Transaction; onProgress?: (phase: TransactionPhase) => void; support?: { config: FleetDataConfig; deviceId: string } }) => {
+    mutationFn: async ({ transaction, onProgress, onSubmitted, onDefiniteFailure, support }: { transaction: Transaction; onProgress?: (phase: TransactionPhase) => void; onSubmitted?: (digest: string) => void; onDefiniteFailure?: () => void; support?: { config: FleetDataConfig; deviceId: string } }) => {
       const captured = selection;
       onProgress?.("validating");
       const manifest = requireManifest();
@@ -59,12 +59,20 @@ export function useFleetTransaction() {
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network changed; retry the transaction");
       if (captured.supported && (latest.current.identity !== captured.identity || (captured.fleet && localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id))) throw Error("Fleet selection changed; retry the transaction");
       onProgress?.("wallet");
-      const result = await wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
+      const result = await wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network }).catch((error: unknown) => {
+        // A transport error can hide an executed transaction. Only explicit
+        // wallet rejection permits the caller to retry automatically.
+        const rejected = error as { code?: number; name?: string; message?: string } | null;
+        if (rejected?.code === 4001 || rejected?.name === "UserRejectedRequestError" || rejected?.message === "User rejected the request") onDefiniteFailure?.();
+        throw error;
+      });
       if (result.FailedTransaction || !result.Transaction.status.success) {
+        onDefiniteFailure?.();
         throw new Error(result.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
       }
       // Confirm against the verified fleet node, independently of wallet effects.
       onProgress?.("confirming");
+      onSubmitted?.(result.Transaction.digest);
       const confirmed = await client.waitForTransaction({ digest: result.Transaction.digest, include: { effects: true, events: true } });
       if (confirmed.FailedTransaction || !confirmed.Transaction.status.success) {
         throw new Error(confirmed.FailedTransaction?.status.error?.message ?? "Transaction execution was not successful");
