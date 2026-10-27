@@ -248,7 +248,8 @@ class Deployment:
 
     def packages(self, tree, core):
         live = self.live
-        record_publication(tree, live.chain, self.base["call_package_id"], self.cap, published_at=core["package"], version=int(core["version"]))
+        original = self.base["type_origins"]["device_registry::DeviceRegistry"]
+        record_publication(tree, live.chain, original, self.cap, published_at=core["package"], version=int(core["version"]))
         storage_dir, data_dir = tree / "fleet_storage", tree / "fleet_data"
 
         def publication(directory, label):
