@@ -162,12 +162,34 @@ const commands = (tx) => tx.getData().commands;
   const withdrawn = { ...stale, policy: { open: true, version: "12" } };
   assert.equal(e.entryStatuses(restored, withdrawn)[0].status, "withdrawn");
   assert.match(e.entryStatuses(restored, withdrawn)[0].detail, /previously observed/);
+  const laggingEvents = { ...withdrawn, policy: { ...withdrawn.policy, enrolled: 1n } };
+  assert.equal(e.entryStatuses(restored, laggingEvents)[0].status, "confirming", "consumed claims must wait for the event index");
+  assert.deepEqual(e.plan(restored, e.entryStatuses(restored, laggingEvents), laggingEvents), []);
+  assert.match(e.entryStatuses(restored, laggingEvents)[0].detail, /confirmed-registration-digest/);
+  assert.equal(e.entryStatuses(restored, { ...laggingEvents, policy: { ...laggingEvents.policy, open: false } })[0].status, "confirming", "closure does not prove an unindexed enrollment was withdrawn");
+
   assert.match(e.entryStatuses(submitted, { ...stale, policy: { open: false } })[0].detail, /policy is closed/);
   const interrupted = { ...submitted, entries: [entry(5, { submitted: true })] };
   assert.equal(e.entryStatuses(interrupted, stale)[0].status, "confirming");
   assert.match(e.entryStatuses(interrupted, stale)[0].detail, /outcome unknown/);
   assert.deepEqual(e.plan(interrupted, e.entryStatuses(interrupted, stale), stale), []);
   assert.equal(e.entryStatuses(interrupted, visible)[0].status, "awaiting-device");
+
+  // Recovery is explicit, and never permits resetting digest/observation evidence.
+  const recovered = e.recoverInterruptedRegistrations(e.parseJob(JSON.stringify(interrupted), { operator, policyId }), stale);
+  assert.equal(e.entryStatuses(recovered, stale)[0].status, "unregistered");
+  assert.equal(e.plan(recovered, e.entryStatuses(recovered, stale), stale)[0].kind, "claims");
+  assert.equal(e.entryStatuses(interrupted, stale)[0].status, "confirming", "recovery must not mutate the saved job before operator confirmation");
+  for (const protectedJob of [submitted, restored]) {
+    const unchanged = e.recoverInterruptedRegistrations(protectedJob, stale);
+    assert.equal(unchanged.entries[0], protectedJob.entries[0]);
+    assert.deepEqual(e.plan(unchanged, e.entryStatuses(unchanged, stale), stale), []);
+  }
+  assert.equal(e.recoverInterruptedRegistrations(interrupted, laggingEvents), interrupted, "an incomplete event index also blocks manual reset");
+  assert.equal(e.recoverInterruptedRegistrations(interrupted, visible).entries[0], interrupted.entries[0], "freshly visible registration cannot be reset");
+  const page = fs.readFileSync(path.resolve(__dirname, "../dapp/src/app/enrollment/page.tsx"), "utf8");
+  assert.match(page, /onClick=\{recoverInterrupted\}>Reset interrupted submissions/);
+  assert.match(page, /if \(!confirm\(`Reset[\s\S]*TWICE[\s\S]*return;\n\s+jobRef.current = recovered/);
 
   // ── Plans: chunked, idempotent top-ups, bounded commands ─────────────────
   const many = { ...e.newJob(operator, policyId), entries: Array.from({ length: 600 }, (_, i) => entry(100 + i)) };

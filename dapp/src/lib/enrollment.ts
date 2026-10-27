@@ -485,6 +485,16 @@ export async function snapshot(client: SuiGrpcClient, job: EnrollmentJob, fleet?
   return { policy, registered, enrollments, devices, groups, balances: await balances(client, pending.filter((c) => registered.has(c))) };
 }
 
+/** Only an operator-confirmed reset may retry an unproven submission. */
+export function recoverInterruptedRegistrations(job: EnrollmentJob, chain: ChainSnapshot): EnrollmentJob {
+  if (chain.policy.enrolled > BigInt(chain.enrollments.size)) return job;
+  const recoverable = new Set(entryStatuses(job, chain)
+    .filter(v => v.status === "confirming" && !v.entry.registrationDigest && !v.entry.observedRegistered)
+    .map(v => v.entry.claim));
+  return { ...job, entries: job.entries.map(entry => recoverable.has(entry.claim)
+    ? { ...entry, submitted: undefined, error: undefined } : entry) };
+}
+
 /** Remember positive observations only; a missing field is never proof of registration. */
 export function observeRegistrations(job: EnrollmentJob, chain: ChainSnapshot): EnrollmentJob {
   let changed = false;
@@ -516,6 +526,11 @@ export function entryStatuses(job: EnrollmentJob, chain: ChainSnapshot): EntryVi
       }
       if (entry.revoked) return { entry, status: "revoked" };
       if (entry.submitted || entry.observedRegistered || entry.registrationDigest) {
+        // Enrollment consumes the claim before its event necessarily reaches
+        // the index. Do not offer to fund it again while events are incomplete.
+        if (chain.policy.enrolled > BigInt(chain.enrollments.size)) return {
+          entry, status: "confirming", detail: `${entry.registrationDigest ? `registration ${entry.registrationDigest}: ` : ""}waiting for enrollment events to catch up with the policy; do not submit again`,
+        };
         if (chain.policy.open === false) return { entry, status: "withdrawn", detail: "the policy is closed and the claim is absent" };
         if (entry.observedRegistered && entry.observedPolicyVersion && chain.policy.version && BigInt(chain.policy.version) > BigInt(entry.observedPolicyVersion)) {
           return { entry, status: "withdrawn", detail: "previously observed in the policy; absent after a later policy mutation (withdrawn elsewhere)" };
@@ -523,7 +538,7 @@ export function entryStatuses(job: EnrollmentJob, chain: ChainSnapshot): EntryVi
         return { entry, status: "confirming", detail: entry.registrationDigest
           ? `registration ${entry.registrationDigest}: waiting for the claim to appear in policy reads; do not submit again`
           : entry.observedRegistered ? "waiting for a policy read newer than the last observed registration"
-          : "submission interrupted; outcome unknown. Refresh to reconcile before taking further action" };
+          : "submission interrupted; outcome unknown. Refresh and check wallet history. If it never executed, use Reset interrupted submissions; retrying can pay twice" };
       }
       return { entry, status: "unregistered" };
     }

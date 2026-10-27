@@ -14,7 +14,7 @@ import { requireManifest } from "@/lib/deployment-manifest";
 import {
   BROWSER_CREDENTIAL_LIMIT, LIMITS, buildClosePolicyTx, buildCreatePolicyTx, buildRevokeClaimsTx, buildSetLimitsTx, buildTransferTx,
   checkReservations, chunk, createdPolicy, credentialArchive, entryStatuses, fetchPolicies, generateCredentials, loadJob, newJob,
-  observeRegistrations, parseJob, parseRoster, plan, policyAccepting, saveJob, snapshot, storedReservations,
+  observeRegistrations, recoverInterruptedRegistrations, parseJob, parseRoster, plan, policyAccepting, saveJob, snapshot, storedReservations,
   type EnrollmentJob, type EntryStatus, type EntryView, type PolicyState, type ReservationCheck,
 } from "@/lib/enrollment";
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
@@ -221,6 +221,20 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     if (!reserved.size || !confirm(`Remove ${reserved.size} reservations that were never used? Their names and serials become available again.`)) return;
     setJob({ ...job, entries: job.entries.filter((e) => !reserved.has(e.claim)) });
   }
+  async function recoverInterrupted() {
+    setProgress({ step: 1, total: 1, label: "Checking interrupted submissions" });
+    try {
+      // Refresh before offering recovery; never reset a now-visible claim.
+      const fresh = await chain.refetch();
+      if (!fresh.data || fresh.isError) return onError("Refresh failed; cannot reset interrupted submissions");
+      const current = jobRef.current;
+      const recovered = recoverInterruptedRegistrations(current, fresh.data);
+      const count = recovered.entries.filter((entry, i) => entry !== current.entries[i]).length;
+      if (!count) return onError("No unproven interrupted submissions remain. Confirmed registrations cannot be reset here.");
+      if (!confirm(`Reset ${count} interrupted submissions to reservations? Check your wallet history first and confirm they never executed. No digest was saved, so success cannot be ruled out. Running pending transactions again may pay registration funding TWICE. This does not revoke any on-chain claim.`)) return;
+      jobRef.current = recovered; setJob(recovered);
+    } finally { setProgress(null); }
+  }
   function reRegisterWithdrawn() {
     const withdrawn = new Set(views.filter((v) => v.status === "withdrawn").map((v) => v.entry.claim));
     if (!withdrawn.size || !confirm(`Re-register ${withdrawn.size} withdrawn claims? Only do this if their credentials were not leaked.`)) return;
@@ -268,6 +282,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
           {progress && <button className={button} onClick={() => { stop.current = true; }}>Stop after this transaction</button>}
           <button className={button} disabled={!!progress} onClick={() => chain.refetch()}>Refresh</button>
           <button className={button} disabled={!!progress} onClick={revokeUnused}>Revoke unused claims</button>
+          <button className={button} disabled={!!progress || !views.some(v => v.status === "confirming" && !v.entry.registrationDigest && !v.entry.observedRegistered)} onClick={recoverInterrupted}>Reset interrupted submissions</button>
           <button className={button} disabled={!!progress || !counts.withdrawn} onClick={reRegisterWithdrawn}>Re-register withdrawn claims</button>
           <button className={button} disabled={!!progress} onClick={forgetReserved}>Remove unused reservations</button>
           <button className={button} onClick={() => download(`suifleet-enrollment-job-${policy.id.slice(2, 10)}.json`, JSON.stringify(job, null, 2), "application/json")}>Export job</button>
