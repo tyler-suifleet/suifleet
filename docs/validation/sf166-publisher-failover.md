@@ -7,7 +7,8 @@ Owner: Codex, running model `gpt-6.1-sol`, session
 The browser accepts ordered manifest publisher/aggregator lists, preserving legacy
 single URLs. Publisher 5xx/network/timeout errors try unchanged protected bytes at
 the next publisher; cancellation, rejected requests and malformed successes stop.
-Uploads record their serving publisher. Read probes and archive readers fail over
+Operator-added session overrides also fall through on rejected or malformed
+responses and can be listed/removed in Settings. Uploads record their serving publisher. Read probes and archive readers fail over
 across configured aggregators, recording the serving endpoint without weakening
 archive authentication. Session overrides are validated, stored in tab session
 storage, and available from Settings without a rebuild. Fleet-paid storage is
@@ -64,3 +65,34 @@ an invoice to the operator. The stored test blob expires at Walrus epoch 564
 (distinct from the Sui epoch). No final production-provider, real-wallet, physical
 Pi or mainnet acceptance was run; those remain SF-031/#32 and SF-087/#159 under
 the authorized implementation/acceptance split. No migration is required.
+
+## PR #343 feedback repair — 2026-10-27
+
+Addressed all six independent review findings. Unavailable selected fleet storage
+stays checked with its reason and permits an explicit opt-out. Component publishing
+and Greengrass import share the same automatic fleet-paid selection. Session
+publishers are listed/removable, and failed session overrides cannot strand the
+manifest route after a reload. Caller-provided read deadlines cover body reads
+without a shorter imposed deadline; cancellation retains its abort reason. Browser
+reads retain the legacy aggregator after ordered mirrors, whose HTTPS/CORS needs
+are documented. Publisher failures show a plain failure category (HTTP status for
+rejected requests) once, with escaped raw diagnostics under Technical details.
+
+Verification on the repaired source:
+
+- `docker run --rm --network none -v "$PWD:/workspace" -w /workspace -e INSIDE_DEV_CONTAINER=1 -e pnpm_config_verify_deps_before_run=false suifleet-dev:latest make dapp-typecheck`: exit 0, including offline testnet/manifest/frontend/browser regressions and TypeScript; one existing environment-dependent test skipped.
+- Same container/options with `make dapp-build`: exit 0; production compilation, TypeScript and all 16 static pages generated.
+- Host `node scripts/test_walrus_publishers.cjs`: exit 0, including persisted bad override fallback/removal, configured-but-unavailable selection/opt-out, caller signal preservation, final-endpoint abort and legacy read fallback.
+- Host `node scripts/test_upload_progress.cjs`, `node scripts/test_fleet_bulk.cjs`, `node scripts/test_fleet_recovery.cjs`, `node scripts/test_greengrass_compat.cjs`: all exit 0. The last checks 83 AWS fixtures and 47 managed-dependency fixtures.
+- `git diff --check`: exit 0.
+
+An initial extra command named nonexistent `scripts/test_greengrass_recipe.cjs`
+and failed with MODULE_NOT_FOUND; the actual compatibility test above passed.
+`git fetch origin main` followed by `git merge --no-edit origin/main` reported
+already up to date, and ancestry was verified against base
+`88c7079c386667f1dc83ca8f4b9dcedbcc06cb8e`.
+No new live transactions, hardware operations or deployments were performed.
+The earlier real secondary-publisher receipt above remains historical evidence,
+not a new exact-head run. Hosted CI/automatic testnet and fresh independent review
+remain coordinator gates after push. External acceptance remains deferred in
+SF-031/#32 and SF-087/#159; no migration is required.
