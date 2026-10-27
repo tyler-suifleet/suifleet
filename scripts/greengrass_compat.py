@@ -51,11 +51,16 @@ TOP_KEYS = {
     "ComponentPublisher", "ComponentConfiguration", "ComponentDependencies",
     "ComponentType", "ComponentSource", "Manifests", "Lifecycle",
 }
-STEP_KEYS = {"Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback"}
+# AWS matches lifecycle step names, step keys and artifact keys
+# case-insensitively (Install/install, URI/Uri); these are the canonical spellings.
+STEP_KEYS = ("Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback")
 # Native SF-014 lifecycle commands that keep their meaning.
 MAPPED_STEPS = ("install", "run", "shutdown")
 # No native equivalent on the merged base.
-UNSUPPORTED_STEPS = {"bootstrap", "startup", "recover", "uninstall"}
+UNSUPPORTED_STEPS = ("bootstrap", "startup", "recover", "uninstall")
+LIFECYCLE_KEYS = MAPPED_STEPS + UNSUPPORTED_STEPS + ("Setenv",)
+ARTIFACT_KEYS = ("Uri", "Unarchive", "Permission", "Digest", "Algorithm")
+PERMISSION_KEYS = ("Read", "Execute")
 OS_MAP = {"linux": "linux", "*": "*"}
 OMITTED_OS = {"windows", "darwin"}
 ARCH_MAP = {"amd64": "x86_64", "aarch64": "aarch64", "arm": "arm", "*": "*"}
@@ -72,6 +77,23 @@ CONFIG_VALUES, CONFIG_DEPTH = 4096, 32
 PUBLISH, SUBSCRIBE = "aws.greengrass#PublishToTopic", "aws.greengrass#SubscribeToTopic"
 # Reasons decided while parsing JSON/YAML text, before translation.
 PARSE_REASONS = {"invalid-recipe", "invalid-yaml", "duplicate-key", "multiple-documents", "yaml-ambiguous-scalar", "yaml-non-json-value"}
+
+
+def _fold(value: dict, names, reasons: set):
+    """Match keys case-insensitively, as AWS does: (canonical values in document order, unknown keys).
+
+    Keys that differ only in case are rejected, never resolved by picking one.
+    """
+    known, unknown = {}, []
+    for key, item in value.items():
+        canonical = next((n for n in names if n.lower() == key.lower()), None)
+        if canonical is None:
+            unknown.append(key)
+        elif canonical in known:
+            reasons.add("case-duplicate-key")
+        else:
+            known[canonical] = item
+    return known, unknown
 
 
 def _script(step_name: str, script: str, basename: str, reasons: set) -> str:
@@ -115,7 +137,8 @@ def _step(step_name: str, step, basename: str, reasons: set):
     if isinstance(step, str):
         script = step
     elif isinstance(step, dict):
-        if set(step) - STEP_KEYS or "Skipif" in step or "BootstrapOnRollback" in step:
+        step, unknown = _fold(step, STEP_KEYS, reasons)
+        if unknown or "Skipif" in step or "BootstrapOnRollback" in step:
             reasons.add("unsupported-step-key")
         if "RequiresPrivilege" in step and step["RequiresPrivilege"] is not False:
             reasons.add("privileged-step")
@@ -162,16 +185,20 @@ def _artifact(manifest: dict, bindings: dict, reasons: set):
     if not isinstance(artifacts, list) or len(artifacts) != 1:
         reasons.add("artifact-count")
         return None, None
-    artifact = artifacts[0]
-    if not isinstance(artifact, dict) or set(artifact) - {"Uri", "Unarchive", "Permission", "Digest", "Algorithm"}:
+    if not isinstance(artifacts[0], dict):
         reasons.add("unsupported-artifact-key")
         return None, None
+    # An unknown key is reported with every other finding for this artifact.
+    artifact, unknown = _fold(artifacts[0], ARTIFACT_KEYS, reasons)
+    if unknown:
+        reasons.add("unsupported-artifact-key")
     uri = artifact.get("Uri")
     basename = uri.rstrip("/").rsplit("/", 1)[-1] if isinstance(uri, str) else None
     if artifact.get("Unarchive", "NONE") != "NONE":
         reasons.add("unsupported-unarchive")
-    permission = artifact.get("Permission", {})
-    if not isinstance(permission, dict) or set(permission) - {"Read", "Execute"} or permission.get("Read", "OWNER") != "OWNER" or permission.get("Execute", "NONE") != "NONE":
+    declared = artifact.get("Permission", {})
+    permission, other = _fold(declared, PERMISSION_KEYS, reasons) if isinstance(declared, dict) else ({}, [""])
+    if other or permission.get("Read", "OWNER") != "OWNER" or permission.get("Execute", "NONE") != "NONE":
         reasons.add("unsupported-artifact-permission")
     binding = bindings.get(uri) if isinstance(uri, str) else None
     if binding is None:
@@ -317,24 +344,30 @@ def translate_recipe(recipe, bindings: dict, catalog: dict) -> dict:
     if not isinstance(raw, list) or not raw:
         reasons.add("no-manifests")
         raw = []
+    # Every manifest is checked in full, so one check reports every finding.
     for index, manifest in enumerate(raw):
-        if not isinstance(manifest, dict) or set(manifest) - {"Name", "Platform", "Lifecycle", "Selections", "Artifacts"}:
+        if not isinstance(manifest, dict):
             reasons.add("unsupported-manifest-key"); continue
+        if set(manifest) - {"Name", "Platform", "Lifecycle", "Selections", "Artifacts"}:
+            reasons.add("unsupported-manifest-key")
         if "Selections" in manifest:
             reasons.add("global-lifecycle-selections")
         platform = _platform(manifest.get("Platform"), reasons)
         if platform == "omit":
             omitted.append(index); continue
-        if platform is None:
-            continue
-        if platform in seen:
-            reasons.add("duplicate-platform"); continue
-        seen.add(platform)
+        distinct = platform is not None and platform not in seen
+        if platform is not None and not distinct:
+            reasons.add("duplicate-platform")
+        if distinct:
+            seen.add(platform)
         binding, basename = _artifact(manifest, bindings, reasons)
-        lifecycle = manifest.get("Lifecycle", {})
+        declared = manifest.get("Lifecycle", {})
         commands = {}
-        if not isinstance(lifecycle, dict):
-            reasons.add("invalid-step"); lifecycle = {}
+        if not isinstance(declared, dict):
+            reasons.add("invalid-step"); declared = {}
+        lifecycle, unknown_steps = _fold(declared, LIFECYCLE_KEYS, reasons)
+        if unknown_steps:
+            reasons.add("unknown-lifecycle-step")
         for step_name, step in lifecycle.items():
             if step_name == "Setenv":
                 reasons.add("step-timeout-or-env")
@@ -342,11 +375,9 @@ def translate_recipe(recipe, bindings: dict, catalog: dict) -> dict:
                 command = _step(step_name, step, basename, reasons)
                 if command is not None:
                     commands[step_name] = command
-            elif step_name in UNSUPPORTED_STEPS:
+            else:
                 _step(step_name, step, basename, reasons)
                 reasons.add("unsupported-lifecycle-step")
-            else:
-                reasons.add("unknown-lifecycle-step")
         if "shutdown" in commands and "run" not in commands:
             reasons.add("shutdown-without-run")
         # Without install or run the daemon hands the artifact to the platform updater.
@@ -355,7 +386,7 @@ def translate_recipe(recipe, bindings: dict, catalog: dict) -> dict:
         for step_name in MAPPED_STEPS:
             if step_name in commands:
                 note(f"Lifecycle.{step_name}")
-        if binding is None:
+        if binding is None or not distinct:
             continue
         native = {
             "schemaVersion": "1.2" if defaults else "1.1" if dependencies else "1.0",
