@@ -1,0 +1,32 @@
+{
+  "purpose": "PR #345 funding-only repair; not an enrollment or automatic testnet acceptance rerun",
+  "failed_run": "https://github.com/tyler-suifleet/suifleet/actions/runs/40551885729",
+  "tested_head": "657121d613f27ff97e581c103ca4fd5f0981e994",
+  "base": "af805cc1736dd12849fa396d047a3ad29f99c5e0",
+  "chain": "4c78adac",
+  "recipient": "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac",
+  "network_cli_version": "sui 1.82.1-987123842623",
+  "network_cli_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+  "diagnosis": "One 1-SUI faucet credit in the failed run left the wallet below the combined suite allowance plus the preserved historical hold. No test transactions started; allowance used was zero.",
+  "required_balance_mist": 3650000000,
+  "held_mist": 400000000,
+  "repair_faucet_attempts": 1,
+  "before": {
+    "address_mist": 2781540505,
+    "coin_mist": 78358890,
+    "total_mist": 2859899395
+  },
+  "after": {
+    "address_mist": 3781540505,
+    "coin_mist": 78358890,
+    "total_mist": 3859899395
+  },
+  "digest": "5e5xMBh5b7MpLgtrWqbwoJgfo6utayKc27pNWKV446WQ",
+  "checkpoint": "399866861",
+  "effects_status": "success",
+  "recipient_credit_mist": 1000000000,
+  "faucet_sender_net_gas_mist": 1000000,
+  "dedicated_wallet_spend_mist": 0,
+  "lock": "network:suifleet-testnet acquired/asserted for faucet mutation, released promptly",
+  "limitations": "Public empty-keystore config; no signing credentials loaded. No package/object writes or uncertain-transaction replay. Allowances and historical reservations unchanged. Balance can change before serialized CI runs. Hosted exact-head/current-base CI and independent review still required. External acceptance remains in #32/#159, unrun."
+}
