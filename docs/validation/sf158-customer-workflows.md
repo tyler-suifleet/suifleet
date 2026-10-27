@@ -140,3 +140,38 @@ included in this branch (`git merge --no-edit origin/main`: already up to date).
 No migration or chain/wallet/provider/hardware operations were performed. Deferred
 external acceptance remains unrun in #32 and #159. Hosted CI and fresh independent
 review remain required on the pushed head; this worker does not poll hosted CI.
+
+## Current-base integration (2026-10-26)
+
+The latest independent source review found no remaining actionable defects; its
+blocker was pending hosted CI/testnet evidence. Integrated snapshot/current main
+`1124ef17bb6383c6e171841c5bab35a010e7873c` with a merge commit, preserving both
+resolved feedback regressions. The automatic FleetBudget merge retains upstream
+archive reclaim controls alongside the customer funding layout. No new functional
+repair was necessary.
+
+Fresh post-integration checks, using the same Docker mounts/images above and
+`--network none`:
+
+- `node_modules/.bin/tsc --noEmit` and `node_modules/.bin/next build --webpack`:
+  passed, 16 static pages generated.
+- `node scripts/test_greengrass_compat.cjs`: passed, 83 recipes, 47 managed cases.
+- `node scripts/test_fleet_settings_cost.cjs` and `node scripts/test_fleet_budget.cjs`:
+  passed.
+- `node scripts/test_administration_browser.cjs`,
+  `node scripts/test_fleet_settings_browser.cjs` and
+  `node scripts/test_access_browser.cjs`: passed, including both prior feedback
+  regressions and the underfunded-save confirmation.
+- `node scripts/test_storage_reclaim.cjs` and
+  `node scripts/test_storage_reclaim_panel.cjs`: passed upstream reclaim plan,
+  signed-preview and account/network/fleet-switch regressions.
+- `node scripts/test_dapp_presentation_browser.cjs`: passed all 14 routes at
+  desktop/mobile widths and four populated Greengrass rejection guidance cases,
+  with no external network or wallet.
+- Host `python3 -m unittest discover -s scripts/tests -p test_tracking.py -q`:
+  10 passed. `git diff --check origin/main..HEAD`: passed.
+
+The existing nonfatal Tailwind module-type warning remains. No live operations or
+migrations were performed. External wallet/provider/physical/mainnet acceptance
+remains unrun in #32 and #159. Hosted CI/automatic testnet and fresh independent
+review remain coordinator gates; this integration is not approval.
