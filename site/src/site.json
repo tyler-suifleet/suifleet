@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "SuiFleet",
+  "origin": "https://suifleet.io",
+  "app_url": "https://app.suifleet.io/",
+  "docs_url": "https://docs.suifleet.io/",
+  "repo_url": "https://github.com/tyler-suifleet/suifleet",
+  "repo_branch": "main",
+  "issues_url": "https://github.com/tyler-suifleet/suifleet/issues",
+  "contact_email": "hello@suifleet.io",
+  "external_hosts": [
+    "app.suifleet.io",
+    "docs.suifleet.io",
+    "github.com",
+    "docs.sui.io",
+    "docs.wal.app",
+    "seal-docs.wal.app"
+  ],
+  "nav": [
+    {"label": "How it works", "path": "/how-it-works/"},
+    {"label": "Guide", "path": "/guide/"},
+    {"label": "Pricing", "path": "/pricing/"},
+    {"label": "Docs", "path": "/docs/"},
+    {"label": "Security", "path": "/security/"},
+    {"label": "Contact", "path": "/contact/"}
+  ],
+  "pages": [
+    {"source": "index.html", "path": "/", "title": "SuiFleet: verifiable OTA updates and fleet management", "description": "Deploy software to Linux device fleets with signed release authority, encrypted delivery and tamper-evident update records. No application servers."},
+    {"source": "how-it-works.html", "path": "/how-it-works/", "title": "How it works", "description": "How SuiFleet registers devices, delivers authenticated releases and records device reports without an application server."},
+    {"source": "guide.html", "path": "/guide/", "title": "Guide", "description": "Step-by-step walkthrough of the SuiFleet console with short screencasts: sign in, fund, register, enroll, publish, deploy and roll out."},
+    {"source": "pricing.html", "path": "/pricing/", "title": "Pricing", "description": "Proposed per-device pricing for the SuiFleet platform and managed plans, with network fees included."},
+    {"source": "docs.html", "path": "/docs/", "title": "Documentation", "description": "Where to find SuiFleet documentation: operator guides, device client, security model and reference."},
+    {"source": "security.html", "path": "/security/", "title": "Security and custody", "description": "Who holds which keys in SuiFleet, what the chain records prove and what remains your platform's responsibility."},
+    {"source": "contact.html", "path": "/contact/", "title": "Contact", "description": "Contact SuiFleet about pilots, design partnerships, security reports and support."},
+    {"source": "privacy.html", "path": "/privacy/", "title": "Privacy", "description": "This site sets no cookies and runs no scripts or analytics. What the console and public networks can see."},
+    {"source": "404.html", "path": "/404.html", "title": "Page not found", "description": "The page you asked for does not exist."}
+  ]
+}

@@ -1,0 +1,43 @@
+<div class="page">
+<h1>Security and custody</h1>
+<p class="lead">Who holds which key, what the records prove, and what stays your responsibility. The full model is in the <a href="{{repo:docs/ACCESS_AND_ENCRYPTION.md}}">access and encryption reference</a>.</p>
+
+<h2>Who holds which key</h2>
+<table>
+<thead><tr><th>Key</th><th>Held by</th><th>Used for</th></tr></thead>
+<tbody>
+<tr><td>Your account key</td><td>You: in your wallet (Slush, an extension wallet) or, with Google sign-in, an ephemeral browser key with a zero-knowledge proof issued through Mysten Labs' Enoki service.</td><td>Registering devices, publishing versions, deploying, funding and changing permissions. Every action is a transaction you approve.</td></tr>
+<tr><td>Device key</td><td>Each device. It is generated on the device at first boot, stored with owner-only permissions (with key isolation, readable only by a separate signer service), and never leaves the device. PKCS#11 tokens are supported as an alternative.</td><td>Signing the device's reports, health and log archives, and decrypting releases addressed to it.</td></tr>
+<tr><td>Enrollment claim keys</td><td>You, in the downloaded credentials file, until each device uses its claim once.</td><td>Letting a device prove it is the one you reserved during batch enrollment.</td></tr>
+<tr><td>Decryption key shares</td><td>Independent Seal key servers, each holding a share; a threshold of them must agree.</td><td>Releasing a decryption key only to identities the on-chain access policy allows.</td></tr>
+</tbody>
+</table>
+<p>SuiFleet never holds your account key or any device key, and the console never asks for a recovery phrase. SuiFleet holds the capability to upgrade its own smart-contract packages; upgrades keep existing interfaces compatible and are planned, checked against the chain and reviewed before they are signed.</p>
+
+<h2>What the records prove</h2>
+<ul>
+<li><strong>Release authority.</strong> Only accounts holding the right on-chain capability or delegation can publish or deploy. Delegated decryption rights never grant publishing or deployment rights.</li>
+<li><strong>Integrity.</strong> Devices verify each recipe and artifact against the digests recorded on chain before running anything, and reject versions they do not support.</li>
+<li><strong>Device reports.</strong> A result or health report is signed by the device's own key and checked against its current registration. It proves which device identity reported, not that the hardware booted correctly or is uncompromised; software keys are not hardware attestation.</li>
+<li><strong>History.</strong> Deployments, rollout decisions and reports are permanent public records. Neither you nor SuiFleet can rewrite them.</li>
+</ul>
+
+<h2>Your responsibilities</h2>
+<ul>
+<li>Your platform updater (SWUpdate, RAUC or your own scripts) owns OS installation, partitions, reboots, boot confirmation and firmware rollback. SuiFleet runs the commands you configure and records what they report.</li>
+<li>Protect the browser you sign in from: a compromised browser or extension can ask you to approve harmful transactions. Read what you approve, and disconnect on shared machines.</li>
+<li>Keep enrollment credential files out of source control and delete them once devices have enrolled.</li>
+<li>Remember that on-chain names, group memberships and targets are public. Use confidential delivery for anything proprietary.</li>
+</ul>
+
+<h2>Revocation</h2>
+<p>You can revoke a device or its capability, remove it from groups, close enrollment policies and revoke unused claims. Revocation stops future authority; it cannot recall a release a device has already decrypted.</p>
+
+<h2 id="status">Current status</h2>
+<ul>
+<li>SuiFleet runs on Sui testnet as a public preview. Mainnet service has not launched.</li>
+<li>Production Seal key-provider selection, real-hardware signers (TPM or secure element) and physical-device acceptance are still being validated.</li>
+<li>Contract security checks run on every change (<a href="{{repo:docs/MOVE_SECURITY.md}}">Move security gates</a>, <a href="{{repo:docs/SECURITY_CI.md}}">CI security scanning</a>). No independent third-party audit has been published yet.</li>
+</ul>
+<p>Found a problem? See <a href="/contact/">how to report it</a>.</p>
+</div>
