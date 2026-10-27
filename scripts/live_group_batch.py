@@ -71,7 +71,7 @@ def run(args):
         for index, arch in enumerate(archs):
             register += ['--move-call', call('register_device'), f'@{customer}', f'@{fleet}', f'@{budget}', f'@{registry}',
                          f'"sf171-{index}"', f'@0x{secrets.token_hex(32)}', f'"{arch}"', '@0x6']
-        r = live.transaction('register four fleet devices', *register, budget=80_000_000)
+        r = live.transaction('register four fleet devices', *register, budget=200_000_000)
         devices = live.created(r, '::device_registry::Device')
         accounts = live.created(r, '::fleet_budget::GasAccount')
         assert len(devices) == 4 and len(accounts) == 4
