@@ -109,3 +109,34 @@ The existing Tailwind module-type warning remains nonfatal. No chain, real walle
 provider, hardware or deployment actions were performed. Real-wallet/provider and
 physical/mainnet acceptance remain unrun in SF-031/#32 and SF-087/#159. Hosted CI
 and fresh independent review of the pushed repair remain coordinator merge gates.
+
+## Greengrass guidance feedback repair (2026-10-26)
+
+Customer-facing overrides now explain the unsupported Lambda runtime, native IPC
+migration and operator ACL, AWS-managed dependency replacement, and privileged
+platform installer boundary without repository paths or planning references. The
+shared translator guidance and CLI output remain unchanged. The presentation
+browser fixture mounts the actual import component and submits four golden recipe
+fixtures, checking the populated rejection results at both 1440px and 390px.
+Only storage availability is stubbed; translation and guidance rendering are real,
+and uploads/signing are disabled.
+
+Current repair verification (Docker `/workspace` mount, `--network none`):
+
+- `suifleet-dev:sf037`, `/workspace/dapp`: `node_modules/.bin/tsc --noEmit`
+  and `node_modules/.bin/next build --webpack` passed; 16 static pages generated.
+- `suifleet-dev:sf010-chrome`, `/workspace`: presentation browser suite passed
+  all 14 routes and four populated import cases at desktop/mobile widths.
+- Same image: `test_greengrass_compat.cjs` passed 83 recipe fixtures and 47
+  managed-dependency fixtures; settings-cost and budget suites passed.
+- Same image: administration, settings and access browser suites passed.
+- Host tracking unit suite: 10 passed; `git diff --check` passed.
+
+The first new browser assertion assumed all dependency reason codes used the
+field-specific form; the fixture returned the generic code. The assertion now
+accepts either valid code and the rerun passed. The existing nonfatal Tailwind
+module-type warning remains. Current main `633bbb5f` was fetched and is already
+included in this branch (`git merge --no-edit origin/main`: already up to date).
+No migration or chain/wallet/provider/hardware operations were performed. Deferred
+external acceptance remains unrun in #32 and #159. Hosted CI and fresh independent
+review remain required on the pushed head; this worker does not poll hosted CI.

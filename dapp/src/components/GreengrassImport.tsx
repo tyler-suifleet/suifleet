@@ -17,7 +17,18 @@ import { buildPublishVersionTx } from '@/lib/catalog';
 import type { Transaction } from '@mysten/sui/transactions';
 
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
-const guidance=(code:string)=>GUIDANCE[code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code];
+// CLI migration guidance retains repository references; the customer UI explains
+// the same limits and next steps without internal engineering provenance.
+const CUSTOMER_GUIDANCE: Record<string,string> = {
+  'unsupported-component-type': 'Only aws.greengrass.generic components translate. Repackage Lambda functions or plugins as a generic component with a run command; the Lambda runtime is not supported.',
+  'ipc-access-control': 'accessControl authorizes the AWS IPC protocol, which SuiFleet does not implement. Port the component to the native IPC SDK, run it as a separately provisioned Unix user and have the operator add the suggested [ipc.components.<name>] ACL. Recipes never grant IPC privileges.',
+  'aws-managed-dependency': 'This AWS-managed component has no translatable native equivalent yet. Review the dependency results below, provide a native replacement and depend on that component instead.',
+  'privileged-step': 'RequiresPrivilege other than false has no native equivalent: components run as the device client user. Move privileged work into a platform installer configured by your administrator.',
+};
+const guidance=(code:string)=>{
+  const key=code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code;
+  return CUSTOMER_GUIDANCE[key]??GUIDANCE[key];
+};
 
 export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
   const inFlight=useRef(false),active=useRef(true);
