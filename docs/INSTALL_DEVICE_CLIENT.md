@@ -5,13 +5,18 @@ holds the device's own key, watches the network for deployments aimed at it and
 reports results. The console links here from Get started, Devices and
 Enrollment (SF-169).
 
-A device needs four things:
+A device needs five things:
 
 1. The `suifleet` binary and its service files.
 2. A device key, generated on the device. The client prints its public address.
 3. The network manifest `deployment.json` for the fleet's network.
-4. A configuration file, `/etc/suifleet/config.toml`, written after the device
-   is registered or enrolled.
+4. On Linux, the signing service's configuration, `/etc/suifleet/signer.toml`.
+   The signing service holds the device key; the daemon cannot start without it.
+5. The daemon's configuration, `/etc/suifleet/config.toml`.
+
+Items 4 and 5 are written after the device is registered or enrolled, and
+installed in that order: `deployment.json`, then `signer.toml`, then
+`config.toml` last.
 
 ## Get the client
 
@@ -52,8 +57,11 @@ package-only builds.
 
 At first boot `suifleet-provision.service` generates the key, without
 networking, and prints the address (see
-[Find the device address](#find-the-device-address)). The daemon
-`suifleet.service` stays stopped until `/etc/suifleet/config.toml` exists.
+[Find the device address](#find-the-device-address)). The image includes
+`/etc/suifleet/signer.toml.example` and `/etc/suifleet/config.toml.example` as
+templates. The signing service stays stopped until `/etc/suifleet/signer.toml`
+exists, and the daemon `suifleet.service` until `/etc/suifleet/config.toml`
+exists.
 
 ## macOS package
 
@@ -94,9 +102,16 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now suifleet-provision.service suifleet-enrollment.path suifleet-signer.socket
 ```
 
-Use the recipe's examples as templates: `$F/config.toml.example` and
-`$F/signer.toml.example`. They keep the key in the separate signing service
-([KEY_ISOLATION.md](KEY_ISOLATION.md)). The privileged firmware path is
+Copy the recipe's templates beside the real files, as the image does:
+
+```sh
+sudo install -m 0640 -g suifleet-signer "$F/signer.toml.example" /etc/suifleet/signer.toml.example
+sudo install -m 0640 -g suifleet "$F/config.toml.example" /etc/suifleet/config.toml.example
+```
+
+They keep the key in the separate signing service
+([KEY_ISOLATION.md](KEY_ISOLATION.md)); write `signer.toml` and then
+`config.toml` from them as described below. The privileged firmware path is
 optional; see [OPERATIONS.md](OPERATIONS.md#execution-privileges) before
 enabling `suifleet-firmware.path`.
 
@@ -139,13 +154,44 @@ or a superseded release. Get it from your fleet's operator or publisher:
 Install it first, as `/etc/suifleet/deployment.json`, root-owned. On Linux use
 group `suifleet`, mode 0640.
 
+## Signing service configuration (signer.toml)
+
+On Linux the device key belongs to the signing service
+(`suifleet-signer.service`), not to the daemon, so components the daemon runs
+cannot read it ([KEY_ISOLATION.md](KEY_ISOLATION.md)). The daemon asks this
+service for the device address when it starts, so install
+`/etc/suifleet/signer.toml` **before** `config.toml`. Its appearance also
+hands the key file to the service's user. A minimal file:
+
+```toml
+# /etc/suifleet/signer.toml
+manifest_path = "deployment.json"
+device_cap_id = "0x<DEVICE_CAP_ID>"
+keypair_path = "/etc/suifleet/device.key"
+caller_unit = "suifleet.service"
+```
+
+Use the same `manifest_path` and DeviceCap ID as `config.toml`. Write it from
+`/etc/suifleet/signer.toml.example`, which also lists the optional Seal, fleet
+budget and PKCS#11 settings, and install it root-owned, group
+`suifleet-signer`, mode 0640:
+
+```sh
+sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer.toml
+```
+
+macOS has no signing service: the daemon reads the key itself (see
+[MACOS_RUNTIME.md](MACOS_RUNTIME.md)), so skip this step there.
+
 ## Configuration file
 
 `/etc/suifleet/config.toml` names the manifest, the device's on-chain IDs and
-how updates are applied. Install it **last**: on Linux, its appearance starts
-the daemon. A minimal Linux configuration with the signing service:
+how updates are applied. Install it **last**, after `deployment.json` and
+`signer.toml`: on Linux, its appearance starts the daemon. A minimal Linux
+configuration with the signing service:
 
 ```toml
+# /etc/suifleet/config.toml
 [sui]
 manifest_path = "deployment.json"
 
@@ -165,6 +211,16 @@ allow_recipe_commands = false
 [runtime]
 state_dir = "/var/lib/suifleet"
 ```
+
+Install it root-owned, group `suifleet`, mode 0640:
+
+```sh
+sudo install -m 0640 -o root -g suifleet config.toml /etc/suifleet/config.toml
+```
+
+On macOS, replace the `[device.signer]` table with
+`keypair_path = "/etc/suifleet/device.key"` under `[device]`, and install both
+files root-owned, mode 0644.
 
 The Device and DeviceCap IDs come from registration or enrollment. Every
 option is documented in
@@ -188,7 +244,8 @@ sudo suifleet --enroll /path/to/enroll.toml
 ```
 
 It prints JSON with `device_address`, `device_object_id` and `device_cap_id`.
-Write those IDs into `config.toml`, then install it. Details, claim funding and
+Write the DeviceCap ID into `signer.toml` and both IDs into `config.toml`, then
+install them in that order. Details, claim funding and
 security are in [ENROLLMENT.md](ENROLLMENT.md#claim-enrollment-and-bulk-onboarding).
 
 ## Register by address
@@ -202,7 +259,8 @@ Without Enrollment, register one device at a time:
    Registration sends the DeviceCap to the device address, so read its ID from
    the registration transaction's created objects in a Sui explorer, or list
    the objects that address owns (`sui client objects DEVICE_ADDRESS`). Put
-   both IDs into `config.toml`, then install it.
+   the DeviceCap ID into `signer.toml` and both IDs into `config.toml`, then
+   install them in that order.
 4. Give the device a little SUI for status reports, or enroll it in the fleet
    budget during registration.
 

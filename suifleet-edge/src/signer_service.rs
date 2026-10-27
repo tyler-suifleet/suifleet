@@ -1716,6 +1716,61 @@ mod tests {
         let refused = signer.sign_personal_message(b"anything").unwrap_err();
         assert!(format!("{refused:#}").contains("not a telemetry snapshot"), "{refused:#}");
     }
+
+    /// SF-169: the install guide's Linux files, in its order, start the
+    /// daemon with the service signer under the shipped units.
+    #[test]
+    fn install_guide_configuration_sequence_loads() {
+        let guide = include_str!("../../docs/INSTALL_DEVICE_CLIENT.md");
+        let files = "../meta-suifleet/recipes-edge/suifleet/files/";
+        let signer_unit = include_str!("../meta-suifleet/recipes-edge/suifleet/files/suifleet-signer.service");
+        let socket_unit = include_str!("../meta-suifleet/recipes-edge/suifleet/files/suifleet-signer.socket");
+        let daemon_unit = include_str!("../meta-suifleet/recipes-edge/suifleet/files/suifleet.service");
+        assert!(signer_unit.contains("ConditionPathExists=/etc/suifleet/signer.toml"), "{files}suifleet-signer.service");
+        assert!(daemon_unit.contains("ConditionPathExists=/etc/suifleet/config.toml"), "{files}suifleet.service");
+        let block = |name: &str| {
+            let marker = format!("```toml\n# /etc/suifleet/{name}\n");
+            let start = guide.find(&marker).unwrap_or_else(|| panic!("the guide shows no {name}")) + marker.len();
+            let body = &guide[start..];
+            body[..body.find("```").unwrap()].to_owned()
+        };
+        // deployment.json first, signer.toml (root:suifleet-signer 0640) next, config.toml last.
+        let at = |text: &str| guide.find(text).unwrap_or_else(|| panic!("the guide does not show {text}"));
+        let order = [
+            at("Install it first, as `/etc/suifleet/deployment.json`"),
+            at("sudo install -m 0640 -o root -g suifleet-signer signer.toml /etc/suifleet/signer.toml"),
+            at("sudo install -m 0640 -o root -g suifleet config.toml /etc/suifleet/config.toml"),
+        ];
+        assert!(order.is_sorted(), "{order:?}");
+        assert!(include_str!("../meta-suifleet/recipes-edge/suifleet/files/signer.toml.example").contains("root:suifleet-signer 0640"));
+
+        let (object, cap) = ("0x10", "0x11");
+        let fill = |text: String| text.replace("0x<DEVICE_OBJECT_ID>", object).replace("0x<DEVICE_CAP_ID>", cap);
+        let dir = std::env::temp_dir().join(format!("suifleet-guide-sequence-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (signer_path, config_path) = (dir.join("signer.toml"), dir.join("config.toml"));
+        std::fs::write(dir.join("deployment.json"), include_str!("../../manifests/fixture.localnet.json")).unwrap();
+        assert_eq!(key_holder(&config_path).unwrap(), DAEMON_USER);
+
+        // signer.toml alone hands the key to the signing service before the daemon starts.
+        std::fs::write(&signer_path, fill(block("signer.toml"))).unwrap();
+        assert_eq!(key_holder(&config_path).unwrap(), SIGNER_USER);
+        let (service, policy) = ServiceConfig::load(&signer_path).unwrap();
+        assert_eq!(policy.cap, Address::from_str(cap).unwrap());
+        assert_eq!(service.caller_unit.as_deref(), Some("suifleet.service"));
+        assert_eq!(service.keypair_path, Path::new("/etc/suifleet/device.key"));
+
+        std::fs::write(&config_path, fill(block("config.toml"))).unwrap();
+        let config = crate::config::Config::load(&config_path).unwrap();
+        let signer = config.device.signer.as_ref().expect("the guide's config.toml uses the signing service");
+        assert_eq!(signer.kind, "service");
+        assert!(socket_unit.contains(&format!("ListenStream={}\n", signer.socket.display())), "{}", signer.socket.display());
+        assert_eq!((config.device.device_object_id.as_str(), config.device.device_cap_id.as_str()), (object, cap));
+        assert_eq!(config.sui.manifest_path, service.manifest_path);
+        assert_eq!(key_holder(&config_path).unwrap(), SIGNER_USER);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
 
 #[cfg(test)]
