@@ -122,7 +122,7 @@ export default function FirmwarePage() {
     // entire recipe upload; mutation.isPending starts too late for that.
     if (deploymentInFlight.current || step !== "deploy" || (selectedGroups.size === 0 && selectedDevices.size === 0)) return;
     if (!catalogVersion && (!artifact || !protection)) return;
-    if (!catalogVersion && desired && selectedDevices.size > 0) {
+    if (desired && selectedDevices.size > 0) {
       alert("Desired state targets groups only. Clear the individual devices, or untick desired state for a one-shot deployment.");
       return;
     }
@@ -134,7 +134,7 @@ export default function FirmwarePage() {
     try {
       let transaction;
       if (catalogVersion) {
-        transaction = buildCatalogDeploymentTx(catalogVersion.objectId, [...selectedGroups], [...selectedDevices], initiallyPaused, selectedFleet);
+        transaction = buildCatalogDeploymentTx(catalogVersion.objectId, [...selectedGroups], [...selectedDevices], initiallyPaused, selectedFleet, desiredTargets);
       } else {
         const recipe = buildRecipe(artifact!);
         setDeployPhase("uploading");
@@ -410,13 +410,10 @@ export default function FirmwarePage() {
             )}
           </div>
 
-          {catalogVersion ? (
-            <p className="text-xs text-gray-500">Catalog versions deploy one-shot; desired state does not select them yet.</p>
-          ) : (
           <label className="flex items-start gap-3 text-sm">
             <input type="checkbox" checked={desired} onChange={() => setDesired(!desired)} className="rounded mt-0.5" disabled={step !== "deploy"} />
             <span>
-              <span className="font-medium">Make this the groups&apos; desired version of {componentName || "this component"}</span>
+              <span className="font-medium">Make this the groups&apos; desired version of {catalogVersion?.name || componentName || "this component"}</span>
               <span className="block text-xs text-gray-500">
                 Devices converge on the latest desired version: offline devices skip superseded ones, devices added
                 to a group later receive it, and removed devices stop following it. Untick for a one-shot deployment
@@ -429,7 +426,6 @@ export default function FirmwarePage() {
               )}
             </span>
           </label>
-          )}
 
           {/* Individual devices */}
           <div>

@@ -15,3 +15,22 @@ const ordered=['1.0.0-alpha','1.0.0-alpha.1','1.0.0-alpha.beta','1.0.0-beta','1.
 assert.deepEqual([...ordered].reverse().sort(compareVersions),ordered);
 assert.ok(compareVersions('1.0.0+aaa','1.0.0+bbb')<0);
 console.log(`PASS: ${cases.length} independent catalog selection vectors and SemVer discovery ordering`);
+
+const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'../manifests/fixture.localnet.json')));
+for (const name of loader()('lib/protocol-version.ts').CATALOG_TYPES) manifest.type_origins[name]=manifest.call_package_id;
+process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(manifest);
+const catalog=loader()('lib/catalog.ts');
+for (const fleet of [undefined, {customerId:'0x51',id:'0x52'}]) {
+ const groups=['0x61','0x62'];
+ const tx=catalog.buildCatalogDeploymentTx('0x41',groups,[],true,fleet,true).getData();
+ const functions=tx.commands.map(c=>c.MoveCall.function);
+ assert.equal(functions.filter(n=>n==='set_component').length,2);
+ assert.equal(functions.filter(n=>n==='commit'||n==='commit_revision').length,2);
+ assert.equal(functions.at(-1),'share_deployment');
+ assert.ok(functions.includes('set_control'));
+ assert.ok(functions.includes(fleet?'new_catalog_deployment':'new_deployment'));
+}
+assert.throws(()=>catalog.buildCatalogDeploymentTx('0x41',[],[],false,undefined,true),/groups only/);
+assert.throws(()=>catalog.buildCatalogDeploymentTx('0x41',['0x61'],['0x71'],false,undefined,true),/groups only/);
+assert.equal(catalog.buildCatalogDeploymentTx('0x41',['0x61'],['0x71']).getData().commands[0].MoveCall.function,'create_deployment');
+console.log('PASS: catalog desired PTBs, both authority paths, atomic multi-group revisions, paused admission and one-shot fallback');
