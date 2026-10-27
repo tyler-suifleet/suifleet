@@ -1,0 +1,25 @@
+{
+  "chain": "4c78adac",
+  "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+  "fleet": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40",
+  "device": "0x913cdd67e83b79f79e709b676be331bbe93720de693d5bc667005954315c5898",
+  "name": "lab-gateway-01",
+  "health": {
+    "status": "unreported",
+    "codes": [
+      "not-in-data-fleet"
+    ],
+    "reasons": [
+      "This device is not in the configured data fleet."
+    ],
+    "components": []
+  },
+  "checks": [
+    "verified deployment and registry",
+    "actual activated device",
+    "verified FleetData bindings",
+    "absent DeviceData index",
+    "rendered header and detail in Chrome"
+  ],
+  "writes": 0
+}

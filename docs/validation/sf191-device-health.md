@@ -1,0 +1,54 @@
+# SF-191 device health messaging
+
+Codex, actual running model `gpt-6.1-sol`, 2026-10-27. Session
+`dispatch-29de26393dc443efac8fe8ae45699e75`; branch
+`work/suifleet/sf-191-b89bf553` in its assigned worktree. No dependencies.
+
+SF-170/PR350 was checked first: its open head removes the environment variable
+name but still combines a missing DeviceData index with a zero report sequence.
+SF-191 therefore remains a distinct fix. The health reader now distinguishes
+missing configuration, absent data-fleet membership and an enrolled device with
+no report. The header uses the same selected-fleet configuration hook as health.
+Existing identity, revocation, chain/binding and report-verification gates remain.
+The detail/header components were extracted without changing the report display.
+
+Passed commands (host Node v24.21.0, pnpm 11.0.8, locked dependencies):
+
+- `cd dapp && corepack pnpm@11.0.8 install --frozen-lockfile`
+- `cd dapp && corepack pnpm@11.0.8 typecheck`
+- `cd dapp && corepack pnpm@11.0.8 build`: all 16 static pages generated.
+- `node scripts/test_fleet_data.cjs`: real signed/BCS reader regressions plus
+  rendered detail/header assertions for all three states and selected-fleet
+  locator scoping (unmatched, matched and legacy selection).
+- `node scripts/test_dashboard_requests.cjs`: 1,000-device batching regression;
+  62 health calls, missing index versus zero-report assertions, unchanged request
+  budget (708 combined calls, peak 86 starts per 30 seconds).
+- `node scripts/test_telemetry.cjs`: signatures, identity, tampering, status,
+  pagination, missing configuration and failed/stalled refresh regressions.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`:
+  actual Devices/dashboard/services/archive/rollout browser fixture passed.
+- `git diff --check`
+
+Read-only Testnet repro used the public deployment and fleet-data JSON locators
+from PR363 (`e297e16bf755a14932930dbdc9ac24b757baaef6`), fetched with `gh api
+repos/tyler-suifleet/suifleet/contents/profiles/seal-testnet/FILE?ref=refs/pull/363/head
+--jq .content` and base64-decoded to temporary files. No upstream code was imported.
+
+```bash
+CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/verify_device_health.cjs \
+  /tmp/sf191-manifest.json /tmp/sf191-data.json \
+  0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965
+```
+
+Passed: actual chain `4c78adac`, verified package/registry and FleetData bindings,
+activated `lab-gateway-01`, missing DeviceData index, then actual detail/header
+components rendered and checked in Chrome. See [public IDs/results](sf191-testnet-health.json).
+This is live read-only chain plus rendered-component acceptance, not an interactive
+hosted-site or extension-wallet session. No wallet was opened and no transaction
+was submitted (zero gas). No hosted export was deployed.
+
+Hosted exact-head/current-base CI and independent review are pending at handoff;
+no approval is claimed. Physical/Mainnet and production-provider/manual real-wallet
+acceptance remains unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+No contract/schema migration is required. Rebuild the frontend to deliver this fix.
