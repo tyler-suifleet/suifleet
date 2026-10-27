@@ -79,4 +79,5 @@ td.num, th.num { text-align: right; white-space: nowrap; }
   .site-header nav ul { gap: .5rem 1rem; }
   .hero h1 { font-size: 2rem; }
   .guide-index { columns: 1; }
+  th, td { overflow-wrap: anywhere; }
 }
