@@ -93,14 +93,17 @@ test-ota:
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
 	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
+	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt --stream-retention
 
 .PHONY: test-opaque
 test-opaque:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_opaque_sdk.py
 ifdef INSIDE_DEV_CONTAINER
 	python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --stream-retention
 else
 	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
+	docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 -v "$(CURDIR):/workspace" -w /workspace "$${SUIFLEET_DEV_IMAGE:-$$(docker compose images -q dev)}" python3 scripts/test_opaque_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --stream-retention
 endif
 
 # Fleet service configuration, root only in a disposable network-none container
@@ -396,6 +399,8 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	$(RUN) node scripts/test_storage_reclaim.cjs
 	$(RUN) node scripts/test_storage_reclaim_panel.cjs
+	$(RUN) node scripts/test_stream_retention.cjs
+	$(RUN) node scripts/test_stream_retention_panel.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_fleet_reclaim.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
 	$(RUN) node scripts/test_pilot_load.cjs
@@ -732,7 +737,10 @@ test-fleet-data-upgrade-localnet:
 
 # SF-129 reclaim lifecycle on a disposable network-none chain: base objects,
 # in-place core/data upgrades, expiry, prune/burn/retire and measured rebates.
-.PHONY: test-reclaim-localnet
+.PHONY: test-reclaim-localnet test-stream-retention-localnet
+test-stream-retention-localnet:
+	$(RUN) env SF141_RETENTION=1 python3 scripts/test_reclaim_localnet.py
+
 test-reclaim-localnet:
 	$(RUN) python3 scripts/test_reclaim_localnet.py
 

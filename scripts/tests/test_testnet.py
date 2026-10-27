@@ -353,6 +353,111 @@ class TrustTests(unittest.TestCase):
             # Later operator PTBs still reserve their whole 0.2-SUI budget.
             self.assertGreaterEqual(ledger.remaining, 200_000_000)
 
+    def test_fresh_sf129_package_costs_leave_room_for_deployments(self):
+        # Actual settled costs/funding from run 40184514226: base publish,
+        # register, group, head upgrade, activation, device top-up (gas +
+        # funding) and the three-deployment batch. Under the former 0.8-SUI
+        # ceiling only 5,827,318 MIST remained for the base-package deployment,
+        # which failed with InsufficientGas.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING
+        observed = [349_109_200, 8_425_378, 1_243_578, 356_186_163, 8_737_163,
+                    1_988_000 + 30_000_000, 38_483_200]
+        self.assertEqual(800_000_000 - sum(observed), 5_827_318)
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        for cost in observed:
+            ledger.grant(cost)
+        # Room for the base deployment, cleanup and report-gas variance; the
+        # ceiling stays strict and non-replenishing.
+        self.assertGreaterEqual(ledger.remaining, 150_000_000)
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+
+    def test_fresh_post_sf136_pair_fits_the_package_budget_and_ceilings(self):
+        # Run 40238821132: publishing base b819cb2 (SF-136, 62,599 bytecode
+        # bytes) with the former fixed 0.4-SUI budget failed InsufficientGas.
+        # Run 40184514226 measured 349,109,200 MIST for 39,646 bytes, about
+        # 8,806 MIST/byte; the SF-129 head is 63,783 bytes and the
+        # upgrade-security base 6,608. Setup/deployment costs as measured.
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, SUITES
+        from live_package_upgrade import PACKAGE_GAS
+        rate = 349_109_200 // 39_646
+        base, head = 62_599 * rate, 63_783 * rate
+        self.assertLess(400_000_000, base)
+        self.assertGreaterEqual(PACKAGE_GAS - base, 100_000_000)
+        setup = (base, 8_425_378, 1_243_578, head, 8_737_163, 1_988_000 + 30_000_000, 38_483_200)
+        self.assertEqual(sum(setup), 1_201_670_829)
+        # The former 1.4-SUI allowance cannot reserve the full 0.2-SUI base
+        # deployment PTB, so the runner refuses it before invoking the client.
+        old, refused = Budget(1_400_000_000, []), Mock()
+        old.grant(sum(setup))
+        with self.assertRaises(Spent):
+            old.execute(refused, 'create 1 deployment via base', ['ptb'], gas=200_000_000, require_full=True)
+        refused.assert_not_called()
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        ledger.grant(sum(setup))
+
+        def effects(status, computation):
+            return lambda *args: dict(digest='offline', effects=dict(status=dict(status=status),
+                                      gasUsed=dict(computationCost=str(computation), storageCost='0',
+                                                   storageRebate='0')))
+        # Full reservations, in the runner's order: the base deployment (a
+        # synthetic 50M exceeding the measured batch), a retained replay that
+        # fails on chain (charged like run 40238821132's 5.01M InsufficientGas)
+        # and an abort cleanup whose outcome is unknown (whole 0.2 SUI kept).
+        ledger.execute(effects('success', 50_000_000), 'create 1 deployment via base', ['ptb'],
+                       gas=200_000_000, require_full=True)
+        with self.assertRaises(RuntimeError):
+            ledger.execute(effects('failure', 5_010_000), 'retained replay', ['ptb'],
+                           gas=200_000_000, require_full=True)
+        with self.assertRaises(TimeoutError):
+            ledger.execute(Mock(side_effect=TimeoutError()), 'abort cleanup', ['ptb'],
+                           gas=200_000_000, require_full=True)
+        self.assertEqual(ledger.used, sum(setup) + 50_000_000 + 5_010_000 + 200_000_000)
+        self.assertEqual([e['status'] for e in ledger.evidence], ['success', 'failure', 'unknown'])
+        self.assertGreaterEqual(ledger.remaining, 100_000_000)
+        # Strict and non-replenishing: nothing beyond the ceiling is granted.
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+        # Upgrade-security: small base, the same head upgrade, and its cached
+        # run's measured 104,743,694 MIST of objects/reports (run 40231623943).
+        security = Budget(dict((name, ceiling) for name, _, ceiling in SUITES)['upgrade-security'], [])
+        for cost in (6_608 * rate, head, 104_743_694):
+            security.grant(cost)
+        self.assertGreaterEqual(security.remaining, 100_000_000)
+
+    def test_sf127_current_main_reserves_full_base_ptb_and_cleanup(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, required_balance, SUITES
+        # Settled effects plus device funding from run 40246935467. The
+        # refused base PTB and abort cleanup have no submitted transaction.
+        observed = (536_721_200, 8_425_378, 1_243_578, 583_442_163,
+                    8_737_163, 31_000_099, 9_588_562, 42_002_565)
+        self.assertEqual(sum(observed), 1_221_160_708)
+        old = Budget(1_400_000_000, [])
+        old.grant(sum(observed))
+        refused = Mock()
+        for label in ('base deployment', 'bounded abort cleanup'):
+            with self.assertRaises(Spent):
+                old.execute(refused, label, ['ptb'], gas=200_000_000, require_full=True)
+        refused.assert_not_called()
+        self.assertEqual(old.evidence, [])
+        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        ledger.grant(sum(observed))
+        # Synthetic 50M cost for the remaining single deployment exceeds the
+        # measured three-deployment batch. Cleanup still reserves its full
+        # 200M even if its eventual rebate would make the net cost zero.
+        def effects(*args):
+            return dict(digest='offline', effects=dict(status=dict(status='success'),
+                        gasUsed=dict(computationCost='50000000', storageCost='0', storageRebate='0')))
+        ledger.execute(effects, 'base deployment', ['ptb'], gas=200_000_000, require_full=True)
+        with self.assertRaises(TimeoutError):
+            ledger.execute(Mock(side_effect=TimeoutError()), 'cleanup unknown', ['ptb'],
+                           gas=200_000_000, require_full=True)
+        self.assertEqual(ledger.used, sum(observed) + 250_000_000)
+        self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
+        with self.assertRaises(Spent):
+            ledger.grant(ledger.remaining + 1)
+        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
         for codes, relevant, expected in (({}, False, (0, 1)), ({'live_package_upgrade.py': 3}, True, (3, 1)),

@@ -200,8 +200,8 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   // Large plans are split into 64-entry calls and capped per transaction.
   const many = { epoch: 10, anchors: Array.from({ length: 300 }, (_, index) => ({ ...plan.anchors[0], index })), loose: [loose], scanned: 300, truncated: false };
   const split = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, many);
-  assert.deepEqual([split.anchors, split.loose], [256, 0]);
-  assert.deepEqual(calls(split.tx), Array(4).fill('fleet_data::prune_expired_anchors'));
+  assert.deepEqual([split.anchors, split.loose], [85, 1]);
+  assert.deepEqual(calls(split.tx), [...Array(2).fill('fleet_data::prune_expired_anchors'), 'fleet_data::burn_expired_blobs']);
   assert.throws(() => reclaim.buildArchiveReclaimTx(config, id('0xca'), system, { ...plan, anchors: [], loose: [] }), /Nothing to reclaim/);
 
   // SF-139 opaque items are deleted with their anchor, so they weigh its batch.
@@ -217,7 +217,9 @@ const calls = (tx) => tx.getData().commands.map((c) => c.MoveCall && `${c.MoveCa
   assert.ok(chain.reads.includes('item:1:15') && chain.reads.includes('item:1:16') === false && chain.reads.every((r) => !String(r).startsWith('item:4')),
     'probes stop at the item bound and skip unexpired anchors');
   const heavy = { epoch: 10, anchors: Array.from({ length: 40 }, (_, index) => ({ ...itemPlan.anchors[0], index })), loose: [loose], scanned: 40, truncated: false };
-  assert.deepEqual(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, heavy).anchors, 15, '15 anchors × 17 deletions stay within the bound');
+  assert.deepEqual(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, heavy).anchors, 13, '13 anchors × 19 deletions include reuse markers and compact heads');
+  const filled = reclaim.buildArchiveReclaimTx(config, id('0xca'), system, { ...heavy, loose: Array.from({ length: 20 }, (_, i) => b(100 + i)) });
+  assert.deepEqual([filled.anchors, filled.loose], [13, 9], 'loose blobs fill only the remaining weighted budget');
   const mixed = { ...heavy, anchors: [{ ...itemPlan.anchors[1], index: 1 }, { ...itemPlan.anchors[0], index: 0 }] };
   assert.deepEqual(Object.values(reclaim.buildArchiveReclaimTx(config, id('0xca'), system, mixed)).slice(1), [2, 1], 'remaining weight still burns loose blobs');
   // A package without the SF-139 types has no item origin and no item probes.

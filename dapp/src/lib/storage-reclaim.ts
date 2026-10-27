@@ -225,7 +225,8 @@ export function buildArchiveReclaimTx(config: FleetDataConfig, budgetCapId: stri
   // per-transaction bound; an oversized first anchor still goes alone.
   let anchors = 0, weight = 0;
   for (const c of plan.anchors) {
-    const cost = 1 + c.items;
+    // Anchor, blob reuse marker and at most one compact-head field.
+    const cost = 3 + c.items;
     if (anchors > 0 && weight + cost > RECLAIM_TRANSACTION_LIMIT) break;
     byWriter.set(c.writerId, [...(byWriter.get(c.writerId) ?? []), c.index]);
     anchors++; weight += cost;

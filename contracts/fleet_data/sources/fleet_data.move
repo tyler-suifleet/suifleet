@@ -98,6 +98,59 @@ module fleet_data::fleet_data {
         fleet_id: ID, blob_object_ids: vector<ID>, epoch: u32,
     }
 
+    /// Archive stream identities are stable: 0 logs, 1 diagnostics, 2 crash.
+    /// Additive dynamic fields preserve existing FleetData and Anchor layouts.
+    public struct StreamRetentionKey has copy, drop, store { kind: u8 }
+    public struct StreamRetention has copy, drop, store { epochs: u32 }
+    public struct StreamRetentionChanged has copy, drop {
+        fleet_id: ID, kind: u8, epochs: u32,
+    }
+    public fun set_stream_retention(fleet: &mut FleetData, budget: &FleetBudget,
+        cap: &BudgetOwnerCap, kind: u8, epochs: u32) {
+        owner(fleet, budget, cap);
+        assert!(kind <= 2 && epochs > 0 && epochs <= 53, EBounds);
+        let key = StreamRetentionKey { kind };
+        if (df::exists(&fleet.id, key)) {
+            let _: StreamRetention = df::remove(&mut fleet.id, key);
+        };
+        df::add(&mut fleet.id, key, StreamRetention { epochs });
+        event::emit(StreamRetentionChanged { fleet_id: object::id(fleet), kind, epochs });
+    }
+    /// None leaves legacy pool-backed admission unchanged until owner opt-in.
+    public fun stream_retention(fleet: &FleetData, kind: u8): Option<u32> {
+        assert!(kind <= 2, EBounds);
+        let key = StreamRetentionKey { kind };
+        if (df::exists(&fleet.id, key)) option::some(df::borrow<StreamRetentionKey, StreamRetention>(&fleet.id, key).epochs)
+        else option::none()
+    }
+    /// One atomic write-time purchase using the live stream policy and existing
+    /// device authorization/quota checks. No pool refill or renewal worker.
+    public fun register_stream_blob(fleet: &FleetData, writer: &DeviceData,
+        budget: &FleetBudget, account: &GasAccount, registry: &DeviceRegistry,
+        cap: &DeviceCap, storage: &mut FleetStorage, system: &mut System,
+        kind: u8, blob_id: u256, root_hash: u256, size: u64,
+        clock: &Clock, ctx: &mut TxContext): ID {
+        device(fleet, writer, budget, account, registry, cap, ctx);
+        assert!(object::id(storage) == fleet.storage_id, EBinding);
+        let epochs = stream_retention(fleet, kind).destroy_some();
+        fleet_storage::register_blob_for_epochs(storage, budget, account, registry,
+            cap, system, blob_id, root_hash, size, 1, epochs, clock, ctx)
+    }
+
+    /// Managed counterpart; customer allowance and finite WAL purchase commit together.
+    public fun register_managed_stream_blob(customer: &mut Customer, managed_fleet: &Fleet,
+        fleet: &FleetData, writer: &DeviceData, budget: &FleetBudget,
+        account: &GasAccount, registry: &DeviceRegistry, cap: &DeviceCap,
+        storage: &mut FleetStorage, system: &mut System, kind: u8,
+        blob_id: u256, root_hash: u256, size: u64, clock: &Clock, ctx: &mut TxContext): ID {
+        device(fleet, writer, budget, account, registry, cap, ctx);
+        assert!(object::id(storage) == fleet.storage_id, EBinding);
+        let epochs = stream_retention(fleet, kind).destroy_some();
+        fleet_storage::register_managed_blob_for_epochs(customer, managed_fleet,
+            storage, budget, account, registry, cap, system, blob_id, root_hash,
+            size, 1, epochs, clock, ctx)
+    }
+
     public fun create(budget: &FleetBudget, cap: &BudgetOwnerCap,
         storage: &FleetStorage, chain_identifier: String, ctx: &mut TxContext) {
         fleet_budget::assert_owner(budget, cap);
@@ -304,6 +357,13 @@ module fleet_data::fleet_data {
             // the actual prior chain head, including across signer rotation.
             assert!(expected_previous == previous_hash, ESequence);
             df::add(&mut writer.id, key, CompactHead { first_index, index, anchor, previous_hash });
+            // Opted-in finite streams keep a temporary expiry index as well as
+            // the authenticated compact root. SF-129 can reclaim every expired
+            // blob without reading private ciphertext or guessing loose custody.
+            if (stream_retention(fleet, kind).is_some()) {
+                df::add(&mut writer.id, AnchorKey { index }, anchor);
+                df::add(&mut writer.id, blob_object_id, true);
+            };
         } else {
             df::add(&mut writer.id, AnchorKey { index }, anchor);
             df::add(&mut writer.id, blob_object_id, true);
@@ -361,6 +421,11 @@ module fleet_data::fleet_data {
             while (item < MAX_ANCHOR_ITEMS && df::exists(&writer.id, ItemKey { batch: anchor.seq, item })) {
                 let _: DataItem = df::remove(&mut writer.id, ItemKey { batch: anchor.seq, item });
                 item = item + 1;
+            };
+            let compact_key = CompactHeadKey { reserved: false };
+            if (df::exists(&writer.id, compact_key)
+                && df::borrow<CompactHeadKey, CompactHead>(&writer.id, compact_key).index == *index) {
+                let _: CompactHead = df::remove(&mut writer.id, compact_key);
             };
         });
         event::emit(AnchorsPruned { fleet_id: object::id(fleet), device_id: writer.device_id,

@@ -12,7 +12,7 @@ import test_budget_ota as budget
 sys.path.insert(0,str(Path('sdk/python').resolve()))
 from suifleet_ipc import Client,IpcError
 
-def run(binary,shim_binary):
+def run(binary,shim_binary,stream_retention=False):
     assert os.geteuid()==0,'run disposable root container for IPC admin fixture'
     ota.SHIM=shim_binary;sim=fleet.Simulator();process=None
     class Handler(BaseHTTPRequestHandler):
@@ -56,7 +56,7 @@ def run(binary,shim_binary):
                 f'[fleet_data]\npackage_id="{fleet.PACKAGE}"\ntype_origin="{fleet.PACKAGE}"\nfleet_id="{fleet.FLEET}"\nbudget_id="{budget.BUDGET}"\nstorage_id="{fleet.STORAGE}"\nwriter_id="{fleet.WRITER}"\naccount_id="{budget.ACCOUNT}"\n'
                 f'[logs]\ninterval_seconds=10\nmax_lines_per_interval=128\nbuffer_max=16\n[fleet_data.archives]\nstorage_package="0xf6"\nstorage_type_origin="0xf6"\nsystem_id="0xf4"\nwalrus_package="0xf7"\nkey_server_package="0xf5"\n'
                 'key_servers = '+json.dumps([{'object_id':s['object_id'],'weight':1} for s in vectors['servers']]).replace(': ',' = ')+'\n'
-                f'threshold=2\nquilt=true\nopaque=true\nwalrus_streams=["durable"]\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n'
+                f'threshold=2\nquilt=true\nopaque=true\nstream_retention={str(stream_retention).lower()}\nwalrus_streams=["durable"]\nnode={json.dumps(sys.executable)}\ncodec={json.dumps(str(codec))}\ncodec_sha256="{hashlib.sha256(codec.read_bytes()).hexdigest()}"\n'
                 '[streams]\n[[streams.definitions]]\nname="durable"\nmax_size=1048576\nstrategy_on_full="RejectNewData"\npersistence="File"\ndiscard_exported=true\nwalrus_export=true\n')
             with (root/'daemon.log').open('w') as log:
                 def start():return subprocess.Popen([str(binary)],env={**os.environ,'EDGE_CONFIG':str(config)},stdout=log,stderr=log)
@@ -97,10 +97,15 @@ def run(binary,shim_binary):
                 assert sum(durable_batches.values())==6,durable_batches
                 assert max(durable_batches.values())>1,'multiple stream messages must share a batch'
                 assert any(not any(p['identifier'].startswith('data-') for p in json.loads((sim.upload_dir/(a['blob_object_id']+'-items.json')).read_text())) for a in sim.anchors),'routine logs get a batch between opaque batches'
+                if stream_retention:
+                    assert len(sim.stream_writes)==len(sim.registered), 'every purchased opaque/log batch uses stream retention'
+                    assert set(sim.stream_writes)=={0},sim.stream_writes
+                else:
+                    assert not sim.stream_writes, 'legacy registration remains unchanged'
                 assert not sim.errors,sim.errors
                 print('PASS opaque real IPC chunk intake, durable storage/certification outage, restart exact ciphertext/purchase reuse, verified index retirement, independent SDK binary/text retrieval')
     finally:
         if process and process.poll() is None:process.terminate();process.wait(timeout=10)
         shim.terminate();shim.wait(timeout=10);server.shutdown();server.server_close()
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);a=p.parse_args();run(a.binary.resolve(),a.shim.resolve())
+    p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--shim',type=Path,required=True);p.add_argument('--stream-retention',action='store_true');a=p.parse_args();run(a.binary.resolve(),a.shim.resolve(),a.stream_retention)

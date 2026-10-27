@@ -1,4 +1,114 @@
-# Protected prepaid retention (SF-092)
+# Per-stream finite retention (SF-141)
+
+New archive deployments can buy their complete retention at write time, without a
+renewal service. The supported archive streams are logs (`kind = 0`), diagnostics
+(`1`) and crash reports (`2`); their encrypted payloads can include shadow and
+Quilt items. This setting applies to these chain-anchored archives, not an
+unrelated customer exporter or the local IPC stream spool.
+
+The owner sets `fleet_data::set_stream_retention` with its `BudgetOwnerCap`, one
+period per stream, from 1 through 53 **Walrus** epochs. Three, thirteen and
+twenty-six epochs approximate six weeks, six months and one year only on a
+14-day epoch schedule; Testnet epochs have a different schedule. The actual
+Walrus protocol horizon is checked again by the purchase. Data and Settings show
+and edit the same on-chain records, using a separately configured, verified
+`StreamRetentionKey`/`StreamRetention` introduction origin.
+
+`register_stream_blob` reads the live policy in the purchase transaction. Its
+`fleet_storage::register_blob_for_epochs` call buys fresh capacity ending at
+`current Walrus epoch + period`, then registers the non-deletable blob. It leaves
+the shared pool untouched. Capacity and write charges share the device's existing
+`write_fees_per_period` WAL allowance and discretionary balance; byte, upload,
+identity, account, pause and reserve-coverage checks still apply. Historical
+`total_write_fees`/`UploadRegistered.write_fee` names include this capacity charge
+on the stream path. Insufficient WAL or quota aborts atomically. A configured
+legacy protected-archive target beyond the selected period also aborts, rather
+than silently creating executor work; align that owner target before activation. Once the old absolute floor has
+elapsed, fully-paid rolling purchases continue without an executor or renewed
+absolute target; legacy pool admissions keep their old future-target check.
+Policy edits affect future purchases, not previously bought expiries.
+
+For a longer lifetime, the owner can use **Extend archive before expiry** in
+Data or Settings. This invokes `extend_stream_blob`, pays from the fleet's WAL
+and updates the actual blob and record together. The chain refuses expired or
+owner-uploaded blobs, invalid/live-protocol horizons and attached legacy renewal
+policies. Handle an existing prepaid policy before using this path. Repeated
+wallet-approved extensions can keep data beyond one purchase horizon; they are
+not scheduled, and no stopped browser or missing owner guarantees renewal.
+There is no SuiFleet-hosted service, automatic debit or promise of indefinite
+retention. The fleet-wide cost estimator still models its pool retention;
+per-stream purchases need their own sufficient device WAL allowance.
+
+## Expiry and custody
+
+The Data live index omits expired/released archives using their **current** held
+record, so a later owner extension overrides the original anchor expiry. A read
+failure is unavailable, never an empty successful scan. Expiry makes bytes
+unavailable automatically; recovering deposits requires an owner wallet
+transaction in Network budget, using SF-129's preview-bound reclaim flow.
+Select the stream, scan, dry run and sign. The chain rechecks exclusive expiry;
+stale, duplicate and early calls abort atomically. Batches remain at most 64 per
+call and 256 removals per transaction. Rescanning after success selects nothing
+already removed. WAL spent on storage is not refunded; executed effects report
+Sui storage rebates after gas.
+
+Configured compact streams also retain temporary `AnchorKey`/reuse entries so
+SF-129 can reclaim their individual expired blobs without decrypting private
+history or guessing ownership of loose uploads. Pruning the current compact
+index also removes its expired root; sequence/count values are never reset.
+A subsequent compact chain can start at the next unused index. Earlier compact
+uploads without this expiry index remain explicit legacy custody decisions.
+
+The per-stream reclaim consumer **never selects unanchored blobs**. An upload
+may be the only durable ciphertext of a device's pending raw batch. Expiry does
+not authorize deleting raw data, acknowledging an exporter or resetting a signed
+transaction. The daemon pins its registration API in `pending.json`, preserves
+ciphertext and signed intent across uncertain effects/restart, and removes local
+spool records only after re-reading the matching authoritative anchor and hash.
+An owner pruning an expired root before an offline device reconciles can leave
+that device pending; retain the raw spool and perform explicit recovery rather
+than inventing an acknowledgment. Existing local spool quotas/backpressure remain.
+
+## Compatible rollout and verification
+
+1. Merge SF-129/#264 before final integration of this dependent implementation.
+   Development used reviewed source `76c186993e0a8ddf065360db5003028c3156cf04`.
+2. Compatibly upgrade `fleet_storage` and `fleet_data`. Existing layouts and
+   origins stay unchanged, including `AnchorKey`, `Anchor`, `FleetData` and
+   `DeviceData`. Explicitly run the owner `migrate` for v1/v2 FleetStorage;
+   existing v3 objects need no object rewrite. Record the new stream policy types/events' introduction package;
+   do not substitute the current call package for older types.
+3. Set `streamRetentionOrigin` in `NEXT_PUBLIC_FLEET_DATA` to that verified
+   introduction package and update both packages' call IDs. Set the owner's
+   desired policies. Old clients/packages remain callable and keep their legacy
+   pool behavior; roll out supported clients rather than claiming an old package
+   is disabled or that an upgrade changes device configuration automatically.
+4. Set `[fleet_data.archives] stream_retention = true` in both daemon and isolated
+   signer configuration. An absent policy fails closed. Existing pending batches
+   retain their original API; a policy edit never regenerates their ciphertext.
+   Validate configured budgets/quotas, then activate devices in stages.
+
+Meaningful checks: `make test-contracts`, `make test-retention`, `make test-ota`,
+`make test-stream-retention-localnet`, frontend typecheck/build and Move security
+checks. The lifecycle runs in a disposable network-none container, upgrades
+existing objects from the exact SF-129 source, checks origins and bytes, buys and
+certifies distinct lifetimes, tests a compact expiry index and a browser extension,
+refuses early prune and compares preview rebates with real effects. Its receipt is
+[the isolated-chain evidence](validation/sf141-localnet.json).
+
+Normal CI/security, automatic public-Testnet checks and independent review remain
+gates. This receipt does **not** establish the SF-129 public epoch-563 prune/rebate,
+resolve SF-146 fixture uncertainty or change a spending ceiling. No public write
+was made by this local test. Physical, Mainnet, production-provider and manual
+real-wallet acceptance remain unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## Legacy protected prepaid retention (SF-092 / SF-128)
+
+The following records the existing legacy finite-target APIs and executor,
+for migration and compatibility. New per-stream archives use the write-time
+path above and need no renewal executor for their purchased period.
+
 
 SuiFleet hosts no retention scheduler. Browser actions and prepaid on-chain
 policies are the product path. Worker examples below are optional customer-run

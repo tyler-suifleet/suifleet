@@ -18,10 +18,9 @@ CONTEXT = 'testnet/package-upgrade'
 # class: anything but exact-head/base success blocks.
 FAILURE_CLASSES = ('source', 'infrastructure', 'funding', 'uncertain')
 SHA = re.compile(r'^[0-9a-f]{40}$')
-# Shared runner anonymous quota can reset several minutes away (605s in CI).
-# Bound recovery to 15 minutes inside the keyless preflight job's 20-minute
-# timeout; a later reset still fails closed without waiting past the deadline.
+# Privileged reads retain the reviewed 900-second budget; keyless probes allow one hourly reset.
 PUBLIC_RETRY_BUDGET = 900
+PROBE_RETRY_BUDGET = 3700
 PUBLIC_MAX_ATTEMPTS = 6
 TRANSIENT_STATUS = (500, 502, 503, 504)
 RATE_HEADERS = ('retry-after', 'x-ratelimit-limit', 'x-ratelimit-remaining',
@@ -300,7 +299,9 @@ if __name__ == '__main__':
     elif args.probe_environment:
         if args.status or args.recheck:
             parser.error('probe cannot publish status or authorize a run')
-        print(json.dumps(verify_environment(repo), sort_keys=True))
+        print(json.dumps(verify_environment(
+            repo, read_public=lambda path: public_api(path, budget=PROBE_RETRY_BUDGET)),
+            sort_keys=True))
     elif args.status:
         failure = failure_class(os.environ.get('ACCEPTANCE_OUTCOME', ''),
                                 dependencies=os.environ.get('DEPENDENCIES_OUTCOME', '')) if args.status == 'failure' else None

@@ -97,7 +97,7 @@ the creator can still delete them individually after review.
   rescan, *Continue scan* or account change discards it, and a slow dry run of
   an earlier plan is dropped, so signing never submits a plan that was not
   simulated.
-- **Batching.** At most 64 entries per call and 256 removals per transaction. Each anchor counts as one removal plus its SF-139 item indexes, so anchors with full item batches go about 15 per transaction. The planner counts items from a complete listing, and reads them exactly when the scan was bounded or resumed.
+- **Batching.** At most 64 entries per call and 256 removals per transaction. Each anchor reserves three removals for its anchor, reuse marker and possible compact head, plus its SF-139 item indexes, so full 16-item batches go 13 per transaction. The planner counts items from a complete listing, and reads them exactly when the scan was bounded or resumed.
   Larger histories are reclaimed in successive transactions.
 - **Scanning.** The planner lists only the index entries that still exist, so
   pruned history costs no reads and never blocks later archives. Each device
@@ -280,3 +280,13 @@ checks these rules offline against the committed receipt.
   schedule.
 - The retention worker does not run reclaim, and reclaim does not renew
   anything.
+
+
+## SF-141 per-stream consumer
+
+When `streamRetentionOrigin` is configured, the archive panel selects only the
+chosen archive stream's indexed expired anchors. Unanchored uploads remain held
+for device recovery. New compact stream writes also keep a temporary expiry index;
+pruning its current index removes the expired compact root after the same
+exclusive-expiry check. Older compact roots without this index remain legacy
+custody. See [per-stream retention](RETENTION_RENEWAL.md) for activation and limits.
