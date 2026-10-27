@@ -17,6 +17,9 @@ export const useCurrentAccount = () => {
   return current ? { address: current } : null;
 };
 export const useCurrentClient = () => client;
+// Present for hooks bundled through other imports (fleet storage/selection); unused by these pages.
+export const useCurrentNetwork = () => "localnet";
+export const useDAppKit = () => ({});
 export const useAccessPolicies = () => ({ data: [] });
 export const useDevices = () => ({ data: [{ objectId: "0x123", name: "Acceptance device", arch: "x86_64" }] });
 export const useGroups = () => ({ data: [] });
