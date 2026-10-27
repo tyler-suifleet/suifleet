@@ -533,7 +533,7 @@ def finish(pending, args, read):
     resolve = SimpleNamespace(rpc=pending["rpc"], chain_identifier=pending["chain"], package=pending["package"],
                               upgrade_cap=pending["cap"], registry=pending["registry"], network=pending["network"],
                               publisher=pending["walrus"][0], aggregator=pending["walrus"][1],
-                              aggregator_mirror=pending.get("aggregator_urls", []))
+                              aggregator_mirror=pending.get("aggregator_urls", []), publisher_mirror=pending.get("publisher_mirrors", []), publisher_urls=pending.get("publisher_urls"))
     for attempt in range(10):
         try:
             manifest = dm.resolve(resolve, read)
@@ -604,6 +604,14 @@ def run(args, cli=None, read=dm.chain_facts, inspect=toolchain.decode):
         mirrors = (step.previous or {}).get("walrus", {}).get("aggregator_urls", [])
     for url in mirrors:
         dm.endpoint(url)
+    publisher_mirrors = getattr(args, "publisher_mirror", None)
+    if publisher_mirrors is None:
+        publisher_mirrors = [url for url in (step.previous or {}).get("walrus", {}).get("publisher_urls", []) if url != walrus[0]]
+    publisher_urls = [walrus[0], *publisher_mirrors]
+    if args.publisher is None and getattr(args, "publisher_mirror", None) is None:
+        publisher_urls = (step.previous or {}).get("walrus", {}).get("publisher_urls", publisher_urls)
+    for url in publisher_urls:
+        dm.endpoint(url)
     action = f"upgrade {step.published['package']} v{step.published['version']}" if step.published else "fresh publish"
     admitted = admit_plan(args, step)
     print(f"{action} on {step.env} ({step.network}, chain {step.chain}) as {step.address}"
@@ -627,7 +635,7 @@ def run(args, cli=None, read=dm.chain_facts, inspect=toolchain.decode):
     pending_path = args.records / step.env / f"pending-{digest}.json"
     pending = dict(env=step.env, network=step.network, chain=step.chain, rpc=step.rpc, address=step.address,
                    digest=digest, package_path=str(args.package.resolve()), walrus=list(walrus),
-                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors, plan=admitted,
+                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors, publisher_mirrors=publisher_mirrors, publisher_urls=publisher_urls if len(publisher_urls) > 1 or "publisher_urls" in (step.previous or {}).get("walrus", {}) else None, plan=admitted,
                    effects={k: output["effects"].get(k) for k in ("status", "gasUsed")}, verified=verified)
     if verified:
         pending.update(original=step.published["original"] if step.published else None,
@@ -658,6 +666,7 @@ def parser():
     p.add_argument("--expect-address", help="account that must be active (required unless --recover)")
     p.add_argument("--network", choices=("devnet", "localnet"), help="label for a chain that is neither testnet nor mainnet")
     p.add_argument("--dry-run", action="store_true", help="simulate the transaction; write nothing")
+    p.add_argument("--publisher-mirror", action="append", help="additional publisher in failover order; default preserves previous release")
     p.add_argument("--publisher", help="Walrus publisher URL (default: previous release, or testnet's public one)")
     p.add_argument("--aggregator-mirror", action="append", help="ordered device mirrors; repeat for each URL (default: preserve previous release)")
     p.add_argument("--aggregator", help="Walrus aggregator URL (default: previous release, or testnet's public one)")

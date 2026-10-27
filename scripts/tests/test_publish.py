@@ -208,11 +208,23 @@ class PublishTests(unittest.TestCase):
 
     def test_ordered_mirrors_survive_upgrade(self):
         mirrors = ["https://one.example", "https://two.example"]
-        self.run_publish("--aggregator-mirror", mirrors[0], "--aggregator-mirror", mirrors[1])
+        self.run_publish("--aggregator-mirror", mirrors[0], "--aggregator-mirror", mirrors[1], "--publisher-mirror", "https://secondary.example")
         self.assertEqual(self.manifest()["walrus"]["aggregator_urls"], mirrors)
+        self.assertEqual(self.manifest()["walrus"]["publisher_urls"], ["http://127.0.0.1:31415", "https://secondary.example"])
         args = self.args(); args.publisher = args.aggregator = None
         publish.run(args, self.cli, self.chain)
         self.assertEqual(self.manifest()["walrus"]["aggregator_urls"], mirrors)
+        self.assertEqual(self.manifest()["walrus"]["publisher_urls"], ["http://127.0.0.1:31415", "https://secondary.example"])
+
+    def test_explicit_publisher_order_survives_upgrade(self):
+        self.run_publish()
+        manifest = self.manifest()
+        # The list can intentionally differ from the legacy older-client URL.
+        manifest["walrus"]["publisher_urls"] = ["https://secondary.example"]
+        (self.records / "dev/current/deployment.json").write_text(json.dumps(manifest))
+        args = self.args(); args.publisher = args.aggregator = None
+        publish.run(args, self.cli, self.chain)
+        self.assertEqual(self.manifest()["walrus"]["publisher_urls"], ["https://secondary.example"])
 
     def test_dry_run_writes_nothing(self):
         before = self.snapshot()

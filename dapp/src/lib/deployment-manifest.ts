@@ -29,7 +29,7 @@ export interface DeploymentManifest {
   type_origins: Record<string, string>;
   shared_objects: { registry: { id: string; initial_shared_version: string } };
   supported_clients: Record<string, { min: string; max_exclusive: string }>;
-  walrus: { publisher_url: string; aggregator_url: string };
+  walrus: { publisher_url: string; aggregator_url: string; publisher_urls?: string[]; aggregator_urls?: string[] };
 }
 function fail(message: string): never { throw new Error(`Deployment manifest: ${message}`); }
 export function normalizeId(value: string): string {
@@ -64,6 +64,12 @@ export function parseManifest(raw: string): DeploymentManifest {
   const current = version(clientPackage.version);
   if (compare(version(range.min), current) > 0 || compare(current, version(range.max_exclusive)) >= 0) fail("unsupported dapp client version");
   endpoint(m.rpc_url); endpoint(m.walrus.publisher_url); endpoint(m.walrus.aggregator_url);
+  for (const list of [m.walrus.publisher_urls, m.walrus.aggregator_urls]) {
+    if (list !== undefined) {
+      if (!Array.isArray(list) || !list.length) fail("endpoint list must be nonempty");
+      for (const url of list) endpoint(url);
+    }
+  }
   return m;
 }
 // Absence permits an unconfigured static build, but never a query or transaction.

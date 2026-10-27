@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { addSessionPublisher } from "@/lib/walrus";
 import { NETWORK } from "@/lib/constants";
 import { useDevices } from "@/hooks/useDevices";
 import { useCostQuote } from "@/hooks/useCostQuote";
@@ -43,8 +44,7 @@ function NumberField({ label, value, onChange, step }: { label: string; value: n
 /** The fleet's cost settings with each option's network cost and SuiFleet price, and the deposit they need. */
 export function FleetSettingsPanel() {
   const { table, error } = loadPriceTable();
-  if (!table) return <p role="alert" className="text-sm">Prices unavailable: {error}</p>;
-  return <SettingsForm table={table} />;
+  return <><StorageEndpoints />{!table ? <p role="alert" className="text-sm">Prices unavailable: {error}</p> : <SettingsForm table={table} />}</>;
 }
 
 /** Price-table option values for saved settings, when every saved value is one of the table's options. */
@@ -274,4 +274,15 @@ function SettingsForm({ table }: { table: PriceTable }) {
     </div>
     </section>
   </div>;
+}
+
+function StorageEndpoints() {
+  const [url, setUrl] = useState("");
+  const [message, setMessage] = useState("");
+  return <section className="border rounded p-4 space-y-2"><h2>Storage endpoints</h2>
+    <p>Publishers receive the bytes you upload. Only add a service you trust. This override lasts for this tab session; fleet-paid storage keeps its own route.</p>
+    <label>Publisher URL<input type="url" className="border p-2 block w-full" value={url} onChange={e => setUrl(e.target.value)} /></label>
+    <button type="button" onClick={() => { try { setMessage(`Added ${addSessionPublisher(url)} for this session; it will be tried first.`); setUrl(""); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } }}>Add publisher for session</button>
+    {message && <p role="status">{message}</p>}
+  </section>;
 }
