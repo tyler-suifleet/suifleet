@@ -118,3 +118,9 @@ root, receipt/index keys and relocated group/catalog keys retain their own
 introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
+
+The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
+tells clients the package has the bounded batch membership entry points. Like
+`fleet_handover`, it is a single-type group recorded with its own introduction
+origin; manifests without it keep the single-device calls. See
+[bulk group membership](GROUP_BATCH.md).
