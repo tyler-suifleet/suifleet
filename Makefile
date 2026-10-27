@@ -411,6 +411,7 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_relay.cjs
 	$(RUN) node scripts/test_walrus_node_writes.cjs
 	$(RUN) node scripts/test_walrus_site_protocol.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_walrus_site.py'
 	$(RUN) node scripts/test_enrollment_frontend.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
 
