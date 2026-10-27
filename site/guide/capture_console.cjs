@@ -6,14 +6,22 @@ const { chromium } = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || '../../da
 (async () => {
   const root = path.resolve(process.argv[2] || 'dapp/out');
   const server = http.createServer(async (req, res) => {
+    let handle;
     try {
       let file = path.resolve(root, '.' + new URL(req.url, 'http://localhost').pathname);
       if (!file.startsWith(root + path.sep)) throw new Error('outside root');
-      if ((await fs.stat(file)).isDirectory()) file = path.join(file, 'index.html');
+      handle = await fs.open(file, 'r');
+      if ((await handle.stat()).isDirectory()) {
+        await handle.close();
+        handle = undefined;
+        file = path.join(file, 'index.html');
+        handle = await fs.open(file, 'r');
+      }
       const mime = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.woff2':'font/woff2'};
       res.setHeader('Content-Type', mime[path.extname(file)] || 'application/octet-stream');
-      res.end(await fs.readFile(file));
+      res.end(await handle.readFile());
     } catch { res.statusCode = 404; res.end(); }
+    finally { if (handle) await handle.close(); }
   });
   let browser;
   try {

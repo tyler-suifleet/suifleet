@@ -8,13 +8,21 @@ const {chromium} = require(process.env.SUIFLEET_PLAYWRIGHT_MODULE || '../../dapp
   const config = JSON.parse(await fs.readFile(path.join(__dirname,'../src/site.json')));
   await fs.mkdir(shots,{recursive:true});
   const server = http.createServer(async (req,res) => {
+    let handle;
     try {
       let file = path.resolve(root, '.' + new URL(req.url,'http://localhost').pathname);
       if (file !== root && !file.startsWith(root + path.sep)) throw new Error('outside root');
-      if ((await fs.stat(file)).isDirectory()) file = path.join(file,'index.html');
+      handle = await fs.open(file, 'r');
+      if ((await handle.stat()).isDirectory()) {
+        await handle.close();
+        handle = undefined;
+        file = path.join(file, 'index.html');
+        handle = await fs.open(file, 'r');
+      }
       res.setHeader('Content-Type', {'.html':'text/html','.css':'text/css','.png':'image/png','.svg':'image/svg+xml'}[path.extname(file)] || 'application/octet-stream');
-      res.end(await fs.readFile(file));
+      res.end(await handle.readFile());
     } catch { res.statusCode=404;res.end(); }
+    finally { if (handle) await handle.close(); }
   });
   let browser;
   try {
