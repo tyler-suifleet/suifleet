@@ -24,6 +24,24 @@ CI_HANDOFF = ('Do NOT wait for, watch or poll hosted CI (no sleep/watch loops, m
 FAMILIES = {'Codex', 'Claude'}
 
 
+def shared_github_snapshot(args, env, invoke):
+    """Use the ticket engine's host-wide cache when its installed version supports it.
+
+    The legacy engine remains usable during staged upgrades. No PR decision reads
+    are cached; the shared module's allowlist is discovery-only.
+    """
+    import importlib.util
+    import shutil
+    launcher = shutil.which('ticket')
+    module_path = Path(launcher).resolve().with_name('ticket_snapshot.py') if launcher else None
+    if not module_path or not module_path.is_file():
+        return invoke()
+    spec = importlib.util.spec_from_file_location('ticket_shared_snapshot', module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.shared_run(args, None, env, invoke)
+
+
 def network_authorization(project):
     grant = project.get('testnet_authorization')
     if not grant:
@@ -697,7 +715,7 @@ class Coordinator:
         token = run(['gh', 'auth', 'token', '--hostname', 'github.com', '--user', account]).strip()
         env = {**os.environ, 'GH_TOKEN': token}
         try:
-            return run(['gh', *args], cwd=project['root'], env=env)
+            return shared_github_snapshot(args, env, lambda: run(['gh', *args], cwd=project['root'], env=env))
         except subprocess.CalledProcessError as error:
             if rate_limit_error(error):
                 match = re.search(r'retry-after:\s*(\d+)', (error.stderr or '').lower())
