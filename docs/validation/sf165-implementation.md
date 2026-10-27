@@ -250,3 +250,29 @@ No migration. Hosted exact-head/current-base CI and automatic Testnet are pendin
 not watched or polled; fresh independent review remains required. This is a base
 integration handoff, not approval. Physical/mainnet/manual-wallet/production-provider
 acceptance remains explicitly unrun in #32/#159.
+
+## Tracking-base feedback integration (2026-10-27)
+
+Merged snapshot/current main `4d3adbee0fd77072827aeed358794990e31d370a`
+without conflicts. The sole upstream change is the SF-176 hosting specification
+in the seed backlog; no functional SF-165 patch or new source finding is involved.
+The supplied review has no unresolved threads or actionable source findings.
+
+Checks on the integrated branch:
+
+- The pinned network-none container command above running
+  `make dapp-typecheck && make dapp-build`: PASS, including offline prerequisites,
+  TypeScript and all 16 static pages. Existing Tailwind module-type warning only.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_tunneling_process_scan.py`: 2 PASS; same with
+  `test_live_release_storage.py`: 3 PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS with chain/wallet/storage fixtures.
+- `git diff --check` and snapshot/current-base ancestry: PASS.
+
+No new Move, daemon/systemd or public-network run; prior receipts remain historical.
+No migration. Hosted CI and automatic Testnet are pending on the pushed head and
+were not watched or polled. Fresh independent review and exact-head/current-base
+checks remain required before coordinator integration. Deferred physical/mainnet,
+manual real-wallet and production-provider acceptance remains unrun in #32/#159.
