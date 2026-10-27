@@ -94,6 +94,15 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
 
+    def test_optional_rollout_audit_origin_group(self):
+        m = fixture()
+        for name in dm.AUDIT_TYPES:
+            m['type_origins'][name] = dm.object_id('0xa164')
+        self.assertTrue(all(name in dm.manifest_types(m) for name in dm.AUDIT_TYPES))
+        del m['type_origins'][dm.AUDIT_TYPES[-1]]
+        with self.assertRaisesRegex(ValueError, 'partial rollout audit'):
+            dm.manifest_types(m)
+
     def test_optional_rollout_health_origin_group(self):
         manifest = fixture()
         manifest["type_origins"][dm.ROLLOUT_HEALTH_TYPES[0]] = dm.object_id("0x4")

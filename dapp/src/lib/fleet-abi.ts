@@ -536,6 +536,19 @@ export const MOVE_ABI = {
           "sui_edge::customer::BudgetLoan"
         ]
       },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "commit_revision": {
         "visibility": "Public",
         "entry": false,
@@ -1679,6 +1692,17 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "component_name": {
         "visibility": "Public",
         "entry": false,
@@ -2363,6 +2387,72 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "DecisionCleanupKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DecisionKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "DecisionRecord": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
           ]
         ]
       },
