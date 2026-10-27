@@ -3364,6 +3364,33 @@
         "Verify typecheck/build and relevant real-browser fixtures, all-route desktop/mobile coverage and no hidden actionable risks; preview locally and obtain independent review."
       ],
       "validation": "Frontend typecheck/production build; onboarding, settings, access and administration browser tests as relevant; route/viewport and rendered-copy checks. No contract publication, customer payment, wallet transaction or device update."
+    },
+    {
+      "key": "SF-159",
+      "title": "Refresh unchanged site resources when old Walrus storage expires",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "scripts/live_walrus_site.py",
+        "scripts/live_walrus_site.cjs",
+        "scripts/walrus_site_protocol.cjs",
+        "scripts/tests",
+        "docs/validation"
+      ],
+      "resources": [],
+      "description": "Testnet frontend update successfully wrote changed resources but reused unchanged resource bindings into expired old blobs. Rebind the complete export to its newly certified packed blob, and provide a fenced recovery for a successful update whose readback failed.",
+      "evidence": "2026-10-26 user-authorized mobile preview publication: existing site b1891eab\u2026 on testnet; update/6 executed successfully, but readback of unchanged AgTSbe\u2026 failed not certified after expiry. Original pending plan and all effects are retained. HTTPS static preview already available separately.",
+      "acceptance": [
+        "Fresh publication/update binds every exported resource to the newly certified packed blob even if its content hash matches an earlier resource. Verify exact resource metadata, ranges, hashes, headers and routes against live reads.",
+        "Recover only explicitly from an old pending plan whose exact recorded site transactions have independently verified successful effects and no unknown publisher intents. Preserve old plan/error/transaction evidence, use a new operation label and never delete or replay ambiguous intents.",
+        "Preserve exact publisher identity/site ID, chain/ABI/manifest checks, serialized wallet lease, strict non-replenishing spending accounting and no extra identical blob purchase.",
+        "Add offline expiry/recovery failure-path tests; complete the current bounded testnet site readback and record public digests, actual costs and limitations.",
+        "No Mainnet, new production credentials, customer wallet signing, device update or claim of permanent public testnet portal."
+      ],
+      "validation": "Offline site protocol/wrapper tests and exact-source script checks, effects-checked current testnet update/recovery and full resource readback. Record separate temporary HTTPS preview validation."
     }
   ]
 }
