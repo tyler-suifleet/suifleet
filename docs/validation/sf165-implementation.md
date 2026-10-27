@@ -188,3 +188,38 @@ remain historical evidence, not a new run. No new public-network mutation was
 performed. Hosted CI and automatic Testnet must run for the pushed head/current
 base; they were not polled and this handoff is not approval. Fresh independent
 review remains required. Deferred external acceptance remains unrun in #32/#159.
+
+## CI process-scan repair (2026-10-27)
+
+Failed run [40569575446](https://github.com/tyler-suifleet/suifleet/actions/runs/40569575446/job/122419887297)
+reached the actual tunnel/systemd crash-cleanup check, then raised
+`FileNotFoundError` reading `/proc/1031/comm`: the process exited between
+`exists()` and `read_text()`. The scan now catches only missing/exited-process
+errors around the read. Live matching processes remain visible and unexpected
+errors still fail. No runtime daemon code or cleanup assertion changed.
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_tunneling_process_scan.py`: 2 tests PASS. The deterministic exit-during-read
+  fixture reproduces the original scanner's `FileNotFoundError`; it checks both
+  ENOENT/ESRCH, a surviving proxy, and permission-error propagation. Wired into
+  the existing CI tunnel step and `make test-tunneling`.
+- `python3 scripts/test_tunneling.py --binary
+  /home/tyler/dev/codex/src/suifleet-worktrees/work-suifleet-sf-063-c57b23ee/suifleet-edge/target/debug/suifleet
+  --package /tmp/pr193-tunnel.tar.gz --evidence /tmp/sf165-tunnel-repair.json`:
+  all 9 actual proxy/systemd checks PASS in disposable network-none container,
+  including SIGKILL descendant cleanup, TLS negatives and credential revocation.
+  Uses the existing SF-063 binary, SHA-256
+  `67d19a95474daf542ec4f652ae7664ffccab5d9880f82a3e379d60d7a84ca2cc`,
+  and pinned proxy source `8a71618acf536923e882387e8d9eca9dbc7fdbe2`;
+  this is harness verification, not a rebuild of the current daemon.
+  Two earlier attempts with the old canonical-checkout cached binary failed
+  before MQTT subscription because that binary has no tunnel-mode CLI support.
+- Pinned network-none container command documented above, running
+  `make dapp-typecheck && make dapp-build`: PASS (16 static pages).
+- `node scripts/test_release_storage.cjs`: PASS.
+- `git diff --check`: PASS. `git merge origin/main --no-edit`: already up to
+  date; base `85331590985644a113eb6750782121169ef03a4b` is included.
+
+No new public-network transactions or Move changes. Hosted exact-head/current-base
+CI, automatic testnet and fresh independent review remain mandatory and pending;
+this repair is not approval. Deferred external checks remain unrun in #32/#159.

@@ -44,6 +44,21 @@ def wait_for(fn, label, timeout=15):
     raise AssertionError("timed out: " + label)
 
 
+def proxy_pids(proc=Path("/proc")):
+    pids = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            name = (entry / "comm").read_text().strip()
+        except (FileNotFoundError, ProcessLookupError):
+            # A process may exit after enumeration or while comm is read.
+            continue
+        if name == "suifleet-localp":
+            pids.append(int(entry.name))
+    return pids
+
+
 def exact(sock, n):
     out = b""
     while len(out) < n:
@@ -263,10 +278,6 @@ def inside():
 
     def closed(c):
         wait_for(lambda: c["closed"], "proxy cleanup")
-
-    def proxy_pids():
-        return [int(p.name) for p in Path("/proc").iterdir() if p.name.isdigit() and
-                (p / "comm").exists() and (p / "comm").read_text().strip() == "suifleet-localp"]
 
     start()
     for label, patch in (("bad-target", {"services": ["SHELL"]}), ("source", {"clientMode": "source"}),

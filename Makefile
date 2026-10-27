@@ -718,6 +718,7 @@ package-tunneling:
 	python3 scripts/package_tunneling.py --output "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}"
 
 test-tunneling:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_process_scan.py
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(MAKE) package-tunneling
 	python3 scripts/test_tunneling.py --package "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}" $(TUNNEL_EVIDENCE)
