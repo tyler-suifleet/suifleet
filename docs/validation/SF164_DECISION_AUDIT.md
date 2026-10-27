@@ -121,3 +121,62 @@ or relabeled as a pass. This repair performed no public-chain writes. Hosted
 ordinary/security CI and automatic public-testnet acceptance at the repaired
 head remain pending for the coordinator, followed by a fresh independent review.
 Deferred final acceptance remains #32 and #159 as described above.
+
+
+## 2026-10-27: retained post-pruning fixture repair
+
+The original public-CI acceptance run failed honestly: its admitted decision was
+about 5.5 million checkpoints newer than the fullnode retention floor. A five
+minute wait could not demonstrate pruning, and the original `finally` deleted
+the rollout, so every retry reset its age. The earlier two orchestration tests
+above described that old lifecycle; the repair below supersedes it.
+
+The package-upgrade runner now stores one audit fixture inside its existing
+private, authenticated, bytecode-pair/compiler-keyed cache. Its chain, operator,
+call package, complete per-type origins, registry and device must match before
+reuse. Creation/admission digests and the verified original admission checkpoint
+are saved atomically. Each mutation first persists its verified unsigned bytes
+and digest, signs only those bytes under the existing strict ledger and a full
+20M MIST budget, and reconciles that digest after interruption. Unknown outcomes
+are retained without an automatic replay. Outstanding audit gas reservations
+are also held back during the next run's funding preflight.
+
+A timeout now retains the exact record and checkpoint. The reader checks the
+current record's type/creator, component/version, rollout revision and membership
+on each reuse, forbids event-history reads, and still requires the actual node
+retention floor to pass the original decision checkpoint before it accepts a
+complete current-state audit. Fresh runs check the floor once rather than
+sleeping five minutes. Only that explicit floor-pending result has an
+`infrastructure` scheduling hint; it remains unsuccessful, never passed or
+silently skipped. Other source/reader failures remain failures.
+
+After genuine proof, normal runs retain the small aged record for repeated free
+reads. An operator may append `--retire-rollout-audit` to the normal explicitly
+configured package-upgrade invocation to reclaim it after proof. Cleanup has the
+same durable exact-digest reconciliation. An explicitly retired fixture is not
+automatically recreated: do not retire one while its acceptance is still needed.
+There is at most one retained rollout per cached bytecode fixture; this repair
+does not publish or upgrade package code.
+
+Fresh repair checks:
+
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_rollout_audit_acceptance.py -q`: 18 tests passed, including restart without
+  additional transactions, changed provenance/current creator, wrong origin or
+  failed effects, missing checkpoint, fake floor/incomplete audit, unknown
+  mutation/cleanup, pre-sign persistence and conservative gas reservation.
+- Equivalent discovery for `test_testnet_reconcile.py`: 43 tests passed.
+- Equivalent discovery for `test_testnet_fixture_cache.py`: 21 tests passed.
+- `node scripts/test_rollout_audit.cjs`: passed, including real BCS decoding of
+  retained record creator, revision and membership refusals, audit pagination,
+  forbidden event fallback and the actual-floor timeout boundary.
+- `node --check scripts/read_rollout_audit_live.cjs`, Python AST parsing for the
+  changed Python files, and `git diff --check`: passed.
+
+These are fresh offline repair checks, not fresh Move/build or public-chain
+acceptance. No wallet was loaded, no faucet/transaction was submitted, and no
+hardware or production action was taken during this repair. The previous failed
+CI record was deleted by its old cleanup and cannot be resurrected. Automatic
+protected Testnet CI must create the new retained fixture once, preserve it
+across retries, and obtain actual post-pruning proof after the real floor
+advances. Independent source review and exact-head CI remain required; this
+repair does not establish that temporal evidence already passed.
