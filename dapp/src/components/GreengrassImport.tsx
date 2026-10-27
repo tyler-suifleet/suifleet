@@ -13,7 +13,8 @@ import type { AccessPolicy } from '@/lib/access-policy';
 import { DeliveryFields } from '@/components/DeliveryFields';
 import { FleetStorageChoice } from '@/components/FleetStorageChoice';
 import { useFleetBlobStore } from '@/hooks/useFleetStorage';
-import { buildPublishVersionTx } from '@/lib/catalog';
+import { buildPublishVersionTx, type ComponentVersion } from '@/lib/catalog';
+import { assertVersionAvailable } from '@/lib/component-library';
 import type { Transaction } from '@mysten/sui/transactions';
 
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
@@ -30,7 +31,7 @@ const guidance=(code:string)=>{
   return CUSTOMER_GUIDANCE[key]??GUIDANCE[key];
 };
 
-export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
+export function GreengrassImport({catalog,versions,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;versions:ComponentVersion[];owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
   const inFlight=useRef(false),active=useRef(true);
   useEffect(()=>{active.current=true;return ()=>{active.current=false;};},[]);
   const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
@@ -59,6 +60,8 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       // Reject an unusable native recipe before any artifact upload.
       for(const m of preview.manifests) assertComponentRecipe(m.recipe);
       if(!catalog) throw new Error('Choose a catalog');
+      // The same release identity may already be published from any of the account's catalogs.
+      assertVersionAvailable(versions,catalog,preview.manifests[0].recipe.componentName,preview.manifests[0].recipe.componentVersion);
       // One release identity for every artifact and recipe; no plaintext fallback.
       const protection=protect(delivery);
       // Fleet-paid storage is never silently replaced by the publisher.
