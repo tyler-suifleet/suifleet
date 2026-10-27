@@ -9,6 +9,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from unittest import mock
 
 SITE = Path(__file__).resolve().parents[1]
@@ -25,6 +26,15 @@ def rewrite_sums(out):
 
 
 class SiteTest(unittest.TestCase):
+    def test_sitemap_and_robots_use_canonical_origin(self):
+        build.build(self.out)
+        tree = ET.fromstring((self.out / "sitemap.xml").read_text())
+        actual = {v.text for v in tree.findall("{*}url/{*}loc")}
+        config = json.loads((SITE / "src/site.json").read_text())
+        expected = {config["origin"] + v["path"] for v in config["pages"] if v["path"] != "/404.html"}
+        self.assertEqual(actual, expected)
+        self.assertIn("Sitemap: https://suifleet.io/sitemap.xml", (self.out / "robots.txt").read_text())
+
     def setUp(self):
         self.temp = Path(tempfile.mkdtemp(prefix="sf172-site-"))
         self.addCleanup(shutil.rmtree, self.temp)

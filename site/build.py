@@ -24,6 +24,7 @@ from pathlib import Path
 import re
 import shutil
 import sys
+from xml.sax.saxutils import escape
 
 SITE = Path(__file__).resolve().parent
 ROOT = SITE.parent
@@ -154,6 +155,12 @@ def build(out):
                     shutil.copyfile(MEDIA / "guide" / video[key], out / "media" / "guide" / video[key])
     for name in ("_headers", "robots.txt"):
         shutil.copyfile(SRC / name, out / name)
+    urls = "".join(f"<url><loc>{escape(config['origin'] + page['path'])}</loc></url>"
+                   for page in config["pages"] if page["path"] != "/404.html")
+    (out / "sitemap.xml").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' + urls + '</urlset>\n',
+        encoding="utf-8")
     files = sorted(p for p in out.rglob("*") if p.is_file())
     sums = "".join(f"{sha256(p)}  {p.relative_to(out).as_posix()}\n" for p in files)
     (out / "SHA256SUMS").write_text(sums, encoding="utf-8", newline="\n")
