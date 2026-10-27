@@ -993,3 +993,23 @@ unclassified. No elapsed-time heuristic or log-text scraping grants repair.
 Existing per-check attempt budgets, ownership, live-worker fences, exact-head/base
 CI and independent review still apply. Installation is only through the reviewed
 merged-runtime path; this change does not restart services from a worktree.
+
+### Shared discovery snapshots
+
+The coordinator uses the installed atomic-ticketing engine's `ticket_snapshot.py`
+provider when available. Install atomic-ticketing 0.3.2 or later before deploying
+this coordinator change. The provider is resolved from the `ticket` command's
+versioned installation; cache data is shared with dispatcher-triggered CLI
+refreshes in `${XDG_STATE_HOME:-~/.local/state}/github-snapshots-v1`.
+
+Only discovery lists are cached, with an absolute 60-second lifetime and
+credential/host isolation. Writes invalidate snapshots, and concurrent readers
+coalesce. PR details, review feedback, checks, ownership verification and branch
+tips remain live: the cache never supplies merge approval. Quota observations are
+shared for 60 seconds; discovery reserves 250 GraphQL points and 100 REST
+requests for fresh decisions and writes. Server rate limits establish a shared
+cooldown rather than a retry loop per worker. Expired/error snapshots are not
+served as fallback. Existing exact-head/base and review gates remain in force.
+
+An older ticket engine keeps the previous live transport until upgraded. Updating
+source on main does not bypass the existing runtime activation/validation policy.
