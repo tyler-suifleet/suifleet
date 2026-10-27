@@ -7,7 +7,9 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from live_fleet_budget import record_publication
-from live_fleet_reclaim import check_origins, fixture_step
+import hashlib
+import subprocess
+from live_fleet_reclaim import check_origins, contracts_at, fixture_step
 
 # The committed SF-129 receipt: SF-082 base, then the first reclaim upgrade.
 RECEIPT = json.loads((Path(__file__).resolve().parents[2] / 'docs/validation/sf129-testnet.json').read_text())
@@ -84,6 +86,19 @@ class OriginTests(unittest.TestCase):
         head = {name: origin for name, origin in V2_ORIGINS.items() if name != 'fleet_data::ExpiredBlobsBurned'}
         with self.assertRaisesRegex(AssertionError, 'ExpiredBlobsBurned is missing'):
             check_origins(V2, BASE, head, BASE_ORIGINS, self.introduced)
+
+
+class SourceRevisionTests(unittest.TestCase):
+    def test_revision_tree_is_the_source_the_version_2_receipt_verified(self):
+        # The version-2 upgrade was built from this revision; its fleet_data source hash is in the receipt.
+        root = Path(__file__).resolve().parents[2]
+        if subprocess.run(['git', '-C', str(root), 'cat-file', '-e', RECEIPT['head'] + '^{commit}'], capture_output=True).returncode:
+            self.skipTest('receipt revision absent from this (shallow) checkout')
+        with tempfile.TemporaryDirectory() as directory:
+            contracts = contracts_at(RECEIPT['head'], directory)
+            source = (contracts / 'fleet_data/sources/fleet_data.move').read_bytes()
+            self.assertEqual(hashlib.sha256(source).hexdigest(), RECEIPT['source_sha256'])
+            self.assertTrue((contracts / 'fleet_storage/Move.toml').is_file() and (contracts / 'Move.toml').is_file())
 
 
 if __name__ == '__main__':

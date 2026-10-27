@@ -75,9 +75,9 @@ export function useReclaim(deps: readonly unknown[], build: () => Transaction) {
 }
 
 function PreviewLine({ preview }: { preview: ReclaimPreview }) {
-  if (!preview.ok) return <p role="alert">Dry run refused: {preview.error}. Nothing was signed; refresh the plan.</p>;
-  return <p role="status">Dry run: {formatReclaim(preview.netMist)} recoverable after this transaction&apos;s own fees (rebate {formatReclaim(preview.rebateMist)},
-    computation {formatReclaim(preview.computationMist)}, new storage {formatReclaim(preview.storageCostMist)}). The wallet shows the final amount; WAL already paid to Walrus is not refunded.</p>;
+  if (!preview.ok) return <p role="alert">Dry run refused: {preview.error}. Nothing was signed; find the items again before retrying.</p>;
+  return <div role="status"><p>Dry run: {formatReclaim(preview.netMist)} recoverable after this transaction&apos;s own network fee. This is an estimate; your wallet shows the final amount before you approve. WAL already paid for storage is not refunded.</p>
+    <details><summary>Fee breakdown</summary><p>Storage deposit returned {formatReclaim(preview.rebateMist)}, computation fee {formatReclaim(preview.computationMist)}, new storage {formatReclaim(preview.storageCostMist)}.</p></details></div>;
 }
 
 /** Expired archive anchors and blobs of this fleet's devices. */
@@ -106,11 +106,13 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
   const count = plan ? plan.anchors.length + plan.loose.length : 0;
   return <fieldset className="border rounded p-2 space-y-2" disabled={scanning || reclaim.pending}>
     <legend className="px-1 font-semibold">Reclaim expired archives</legend>
-    <p>Deletes the chain index entry of each archive whose Walrus storage has ended, releases its blob from fleet storage and burns it, returning those storage deposits. Archives whose storage was renewed are kept. Expired archives are no longer readable from Walrus; export anything you must keep before it expires.</p>
+    <p>Deletes device archives whose paid storage period has ended and returns the SUI deposit held for each one. Archives whose storage was renewed are kept. Expired archives can no longer be downloaded, so export anything you must keep before its storage ends. Deletion cannot be undone.</p>
+    <details><summary>Technical details</summary><p>Removes each expired archive&apos;s fleet_data index entry and reuse marker, releases its Walrus blob from fleet storage and burns it. An archive is expired only when its current Walrus end epoch, including renewals, is at or before the current epoch; the contract checks this again when the transaction runs.</p></details>
     {DATA_CONFIG.streamRetentionOrigin && <label>Archive stream <select value={stream} onChange={e => { setStream(Number(e.target.value)); setPlan(undefined); }}>{ARCHIVE_STREAMS.map((name, i) => <option key={name} value={i}>{name}</option>)}</select> Unanchored uploads are kept for device recovery.</label>}
     <button type="button" disabled={epoch === undefined} onClick={() => void scan()}>Find expired archives</button>
     {scanError && <p role="alert">Archive scan failed: {scanError}</p>}
-    {plan && <p role="status">Walrus epoch {plan.epoch}: {plan.anchors.length} expired indexed archive(s) and {plan.loose.length} unindexed expired device blob(s) of {plan.scanned} live index entries.{plan.truncated ? " More history exists past the scan bound; reclaim these, then continue the scan." : ""}</p>}
+    {plan && <p role="status">Found {count} expired archive(s) to delete.{plan.truncated ? " Older history was not checked yet; reclaim these, then continue the scan." : ""}</p>}
+    {plan && <details><summary>Scan details</summary><p>Walrus epoch {plan.epoch}: {plan.anchors.length} expired indexed archive(s) and {plan.loose.length} unindexed expired device blob(s) of {plan.scanned} live index entries.</p></details>}
     {plan?.truncated && <button type="button" onClick={() => void scan(plan.resume)}>Continue scan</button>}
     {plan && count > 0 && <div className="flex gap-2">
       <button type="button" onClick={() => void reclaim.dryRun()}>Dry run</button>
@@ -137,7 +139,8 @@ export function DeploymentReclaimPanel({ deployments }: { deployments: Deploymen
   const eligible = plan?.filter((r) => r.eligible) ?? [], kept = plan?.filter((r) => !r.eligible && r.reason !== "still in progress") ?? [];
   return <fieldset className="border rounded p-2 space-y-2 text-xs" disabled={scanning || reclaim.pending}>
     <legend className="px-1 font-semibold">Reclaim finished deployment records</legend>
-    <p>Deletes your records that are cancelled, expired or reported by every target, after the chain confirms no target group&apos;s desired state still uses them. Catalog bindings are removed first. Devices ignore deleted records; their update history stays in chain events.</p>
+    <p>Deletes your finished update records (cancelled, expired, or reported by every target device) and returns the SUI deposit held for each one. A record is kept while any device group is still set to use it. Devices ignore deleted records, and their update history stays available. Deletion cannot be undone.</p>
+    <details><summary>Technical details</summary><p>Deletes DeploymentRecord objects after the transaction confirms that no target group&apos;s desired state references them. Catalog bindings are removed first; rollouts use delete_rollout. Update history remains in chain events.</p></details>
     <button type="button" onClick={() => void scan()}>Find finished records</button>
     {scanError && <p role="alert">Scan failed: {scanError}</p>}
     {plan && <p role="status">{eligible.length} reclaimable record(s){eligible.length > 64 ? "; the first 64 are reclaimed per transaction" : ""}; {kept.length} finished record(s) kept.</p>}

@@ -225,23 +225,49 @@ The run used a 150,000,000 MIST non-replenishing allowance and spent
 in an earlier preflight of this run, which then stopped before any write. It
 was the only faucet request, and it does not replenish the allowance.
 
-**Not yet run on Testnet:** the two SF-082 archives' storage ends at Walrus
-epoch 563, and the run happened at epoch 559. No Testnet archive was expired,
-so no successful Testnet prune or rebate is claimed. A read-only planner check
-on 2026-10-23 (`scripts/reclaim_plan.cjs`) found Walrus epoch 560 and no
-expired archive; repeats on 2026-10-24 at 04:10 and 05:23 UTC found the same. Once the Walrus epoch
-reaches 563, rerun the same script with `--reclaim` while holding
-`network:suifleet-testnet`, and record the executed rebate.
+### Expired-archive reclaim on Testnet
 
-The UpgradeCap decides what the rerun does, not the source-keyed cache. If
+Evidence: [sf129-testnet-reclaim.json](validation/sf129-testnet-reclaim.json).
+On 2026-10-26 the Walrus epoch reached 563, when both SF-082 archives' storage
+ended. A read-only planner run found the two archives (indices 0 and 1) and
+nothing else.
+
+| Step | Digest | Net MIST |
+|---|---|---:|
+| Prune of both expired archives, releasing and burning their blobs | `3rNCChJAxBnsTbVQS3ykxswbqEMy4B43A7T66617VSRU` | 31,750,638 returned |
+
+The effects show success. The transaction deleted 12 objects, including both
+blobs (`0x25d6…e4df`, `0xf2e0…aa09`) and the archives' dynamic fields. It emitted
+`AnchorsPruned` and one `BlobReleased` per blob. Gas was 1,000,000 computation
+and 20,862,000 storage, against a 53,612,638 storage rebate. The planner then
+found no remaining candidates. Before the prune, the run checked the same
+chain, account, caps and type origins as the upgrade run.
+
+The prune used version 2 (`0xfe96…385c`), the package this PR deployed above.
+The run built that version's source revision, `176ff469`
+(`--source-revision`), and checked it byte for byte against the on-chain
+modules. It did not republish. The current source cannot be deployed to this
+fixture without a core upgrade. Since SF-136, current `fleet_data` imports
+core's `customer` module, which the SF-082 core package lacks. A
+working-tree upgrade attempt therefore failed linkage verification on chain:
+`Am9mKL8X6xSFd85De1ANn111be6F3iZbrnafBFjQfK89`, 1,000,163 MIST, recorded in
+[sf129-testnet-linkage-failure.json](validation/sf129-testnet-linkage-failure.json).
+Upgrading the shared SF-082 core fixture costs about 0.55 SUI (see
+[TESTNET.md](TESTNET.md)), so this run did not do it. Later prune changes
+are covered by the Move tests and `make test-reclaim-localnet`, not by this
+Testnet run: deleting SF-139 opaque item indexes and managed-customer access.
+
+Both runs together spent 1,000,163 MIST and returned 31,750,638 MIST. No
+faucet request was made. `network:suifleet-testnet` was held only during
+each run.
+
+The UpgradeCap, not the source-keyed cache, decides what a run does. If
 the cap's latest version already carries this source's bytecode, the run
-reuses it. Otherwise it upgrades compatibly from that latest version. This
-happens, for example, after the SF-121 merge changed `fleet_data` following
-the version-2 upgrade above. Base types must keep the base origin. Every
-later type, including the two reclaim events, must keep the origin of the
-version that introduced it. Only types new in this upgrade may originate in
-it. `scripts/tests/test_live_fleet_reclaim.py` checks these rules offline
-against the committed receipt.
+reuses it. Otherwise it upgrades compatibly from that latest version. Base
+types must keep the base origin. Every later type, including the two reclaim
+events, must keep the origin of the version that introduced it. Only types
+new in this upgrade may originate in it. `scripts/tests/test_live_fleet_reclaim.py`
+checks these rules offline against the committed receipt.
 
 ## Limits
 
