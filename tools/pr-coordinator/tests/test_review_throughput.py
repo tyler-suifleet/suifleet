@@ -109,7 +109,10 @@ class SharedReads(unittest.TestCase):
         return c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(d))
 
     def test_rate_limit_defers_other_prs_and_survives_restart_without_account_switch(self):
-        with tempfile.TemporaryDirectory() as d:
+        # This tests the coordinator's local backoff; isolate the installed
+        # provider so fake credentials never reach a real quota endpoint.
+        with tempfile.TemporaryDirectory() as d, patch.object(
+                c, 'shared_github_snapshot', side_effect=lambda args, env, invoke: invoke()):
             engine=self.engine(d)
             project={'id':'p','github_account':'expected','root':d,'repository':'owner/repo'}
             error=subprocess.CalledProcessError(1,['gh'],stderr='HTTP 429 Retry-After: 120')

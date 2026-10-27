@@ -90,3 +90,33 @@ class ScanIsolation(unittest.TestCase):
             with patch.object(engine,'gh',side_effect=[json.dumps([[source]]),'[[]]']),patch.object(c,'run') as run:
                 engine.discover_merged(project,[{'branch':'work/1','status':'done'}])
                 run.assert_not_called()
+
+class SharedSnapshotBridge(unittest.TestCase):
+    def test_loads_shared_provider_from_resolved_ticket_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);engine=root/'engine';engine.mkdir()
+            launcher=engine/'atomic_ticketing.py';launcher.write_text('')
+            (root/'ticket').symlink_to(launcher)
+            (engine/'ticket_snapshot.py').write_text(
+                'def shared_run(args,payload,env,invoke):\n'
+                ' assert payload is None\n'
+                ' assert env["GH_TOKEN"] == "private-test-token"\n'
+                ' return "shared:" + invoke()\n')
+            with patch('shutil.which',return_value=str(root/'ticket')):
+                self.assertEqual(c.shared_github_snapshot(['api','repos/a/b/issues?state=all'],
+                    {'GH_TOKEN':'private-test-token'},lambda:'snapshot'),'shared:snapshot')
+
+    def test_old_engine_upgrade_path_preserves_live_reads(self):
+        with tempfile.TemporaryDirectory() as directory:
+            launcher=Path(directory)/'ticket';launcher.write_text('')
+            with patch('shutil.which',return_value=str(launcher)):
+                self.assertEqual(c.shared_github_snapshot(['pr','view','1'],{},lambda:'fresh'),'fresh')
+
+    def test_provider_failure_cannot_fall_back_to_an_uncontrolled_request(self):
+        with tempfile.TemporaryDirectory() as directory:
+            launcher=Path(directory)/'ticket';launcher.write_text('')
+            launcher.with_name('ticket_snapshot.py').write_text(
+                'def shared_run(*args):\n raise RuntimeError("shared cooldown")\n')
+            with patch('shutil.which',return_value=str(launcher)):
+                with self.assertRaisesRegex(RuntimeError,'shared cooldown'):
+                    c.shared_github_snapshot(['api','repos/a/b/issues?state=all'],{},lambda:self.fail('bypassed provider'))
