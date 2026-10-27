@@ -56,7 +56,7 @@ make dapp-build
 # Requires the build above: the browser regression uses its actual CSS.
 CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_components_browser.cjs
 CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_wallet_browser.cjs
-CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_upload_browser.cjs
+make test-deploy-component-browser  # also in make ci; covers same-file re-selection (SF-194)
 node scripts/test_component_catalog.cjs
 ```
 
