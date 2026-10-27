@@ -191,6 +191,8 @@ def check_videos(out, require):
         errors.append("guide video console_commit must identify a full Git commit")
     seen = set()
     for video in manifest.get("videos", []):
+        if not re.fullmatch(r"[0-9a-f]{40}", video.get("console_commit", manifest.get("console_commit", ""))):
+            errors.append(f"guide video {video['step']} has an invalid console commit")
         if video["step"] not in steps:
             errors.append(f"video for unknown guide step {video['step']}")
         if video["step"] in seen:

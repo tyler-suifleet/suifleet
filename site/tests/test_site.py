@@ -123,7 +123,7 @@ class SiteTest(unittest.TestCase):
         video = b"\x1aE\xdf\xa3 not really webm"
         (media / "guide" / "sign-in.webm").write_bytes(video)
         manifest = {"schema_version": 1, "network": "testnet", "chain": "4c78adac", "console_commit": "0" * 40,
-                    "recorded": "2026-10-27", "videos": [{"step": "sign-in", "file": "sign-in.webm",
+                    "recorded": "2026-10-27", "videos": [{"step": "sign-in", "file": "sign-in.webm", "console_commit": "1" * 40,
                                                           "file_sha256": hashlib.sha256(video).hexdigest(),
                                                           "width": 1280, "height": 800, "caption": "Signing in."}]}
         (media / "guide" / "videos.json").write_text(json.dumps(manifest))
@@ -134,6 +134,7 @@ class SiteTest(unittest.TestCase):
             self.assertEqual(self.errors(), [])
             guide = (self.out / "guide" / "index.html").read_text()
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
+            self.assertIn('<code>111111111111</code>', guide)
             missing = self.errors(require_videos=True)
             self.assertEqual(len(missing), 10, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")

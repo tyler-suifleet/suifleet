@@ -85,7 +85,7 @@ def render_guide(config):
                        f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
                        f'Your browser cannot play this WebM screencast. <a href="/media/guide/{video["file"]}">Download it</a>.</video>'
                        f'<figcaption>{html.escape(video["caption"])} Recorded on Sui {html.escape(manifest["network"])} '
-                       f'from console build <code>{html.escape(manifest["console_commit"][:12])}</code> on {html.escape(manifest["recorded"])}.</figcaption></figure>')
+                       f'from console build <code>{html.escape(video.get("console_commit", manifest["console_commit"])[:12])}</code> on {html.escape(manifest["recorded"])}.</figcaption></figure>')
         else:
             out.append('<p class="pending-video">Screencast not yet recorded for this step.</p>')
         out.append('<details class="transcript"><summary>Transcript and instructions</summary>')
