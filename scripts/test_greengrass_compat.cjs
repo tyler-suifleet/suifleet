@@ -68,6 +68,15 @@ const proto = translator.translateGreengrassText(cases.find(c => c.id === "json-
   "s3://example-bucket/hello/1.0.0/hello.tar": { artifactBlobId: "blob_hello", artifactSha256: "ab".repeat(32) } });
 assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(proto.manifests[0].recipe)).componentDependencies), ["__proto__"]);
 
+// SF-167: the import panel offers a file input for every artifact URI in any
+// letter case, so an AWS-cased recipe needs at most one binding round.
+const awsCased = cases.find(c => c.id === "aws-cased-yaml-translates");
+assert.deepEqual(translator.artifactUris(awsCased.recipe), ["s3://example-bucket/hello/1.0.0/hello-arm.tar", "s3://example-bucket/hello/1.0.0/hello.tar"]);
+assert.deepEqual(translator.artifactUris(cases.find(c => c.id === "aws-cased-json-translates").recipe), ["s3://example-bucket/hello/1.0.0/hello.tar"]);
+const everything = cases.find(c => c.id === "every-finding-in-one-check");
+const bound = translator.translateGreengrassRecipe(everything.recipe, Object.fromEntries(translator.artifactUris(everything.recipe).map(uri => [uri, awsCased.bindings[uri]])));
+assert.deepEqual(bound.reasons, ["configuration-variable", "unsupported-lifecycle-step"], "binding every listed URI resolves unbound-artifact in one round");
+
 assert.ok(translated >= 10 && texts >= 10);
 console.log(`PASS: translator executed ${cases.length} AWS recipe fixtures (${texts} JSON/YAML texts); ${translated} translations accepted by the frontend validator; guidance for ${codes.size} codes`);
 console.log(`PASS: translator classified ${managed.length} SF-038 managed-dependency fixtures`);
