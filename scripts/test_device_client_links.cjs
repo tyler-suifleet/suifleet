@@ -101,7 +101,10 @@ const render = (manifest, variant) => {
   return renderToStaticMarkup(createElement(DeviceClientHelp, { variant }));
 };
 const manifest = read('manifests/fixture.localnet.json');
-const decode = (html) => html.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+// One pass, so a decoded "&" never starts another entity.
+const ENTITIES = { '&amp;': '&', '&quot;': '"', '&#x27;': "'", '&lt;': '<', '&gt;': '>' };
+const decode = (html) => html.replace(/&(?:amp|quot|#x27|lt|gt);/g, (entity) => ENTITIES[entity]);
+assert.equal(decode('&amp;lt;&lt;'), '&lt;<');
 for (const variant of ['address', 'enroll']) {
   const html = decode(render(manifest, variant));
   const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
