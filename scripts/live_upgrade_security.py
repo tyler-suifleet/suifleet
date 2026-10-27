@@ -94,7 +94,7 @@ def run(args):
     state_path = Path(args.state) if args.state else live.wallet.parent / "live-state.json"
     walrus = Walrus(args.walrus)
     daemon, passed, failure = None, False, None
-    made = {"base_records": [], "head_records": []}
+    made = {"base_records": [], "head_records": [], "catalog_records": []}
     with tempfile.TemporaryDirectory(prefix="suifleet-live-security-") as temporary:
         root = Path(temporary)
         try:
@@ -262,6 +262,45 @@ def run(args):
             assert live.receipts(d2) == {dm.object_id(device): 1}
             assert history(components) == ["2.0.0"], "migration retry replayed the updater"
             live.check("populated v2 receipt preserved; old-package write rejected; real daemon durable retry reports v3 with new provenance and no updater replay")
+            # SF-168: automatic testnet acceptance of multi-platform catalog
+            # records committed as successive group desired-state revisions.
+            catalog = live.created(transaction("create desired catalog", "--move-call",
+                f"{new}::component_catalog::create_catalog"), "::component_catalog::ComponentCatalog")[0]
+            stop_daemon(daemon)
+            daemon = None
+            for version in ("3.0.0", "4.0.0"):
+                name, _, blob, artifact_hash, recipe_hash = deployment_args(walrus, version, run_id)
+                # Only the second manifest matches this x86_64 daemon.
+                result = transaction("publish desired catalog version", "--move-call",
+                    f"{new}::component_catalog::publish_version", f"@{catalog}", name, json.dumps(version),
+                    'vector["linux","linux"]', 'vector["aarch64","x86_64"]',
+                    f'vector["never-download",{blob}]', f'vector["{"a" * 64}",{recipe_hash}]',
+                    f'vector["{"b" * 64}",{artifact_hash}]', CLOCK)
+                version_id = live.created(result, "::component_catalog::ComponentVersion")[0]
+                result = transaction("commit catalog desired revision", "--move-call",
+                    f"{new}::component_catalog::new_deployment", f"@{version_id}", ids([group]), "vector[]", CLOCK,
+                    "--assign", "record", "--move-call", f"{new}::desired_state::begin", f"@{group}", "--assign", "plan",
+                    "--move-call", f"{new}::desired_state::set_component", "plan", "record",
+                    "--move-call", f"{new}::desired_state::commit", "plan", f"@{group}", CLOCK,
+                    "--move-call", f"{new}::deployment_manager::share_deployment", "record")
+                record = live.created(result, "::deployment_manager::DeploymentRecord")[0]
+                made["catalog_records"].append(record)
+                field = dm.rpc(live.rpc_url, "suix_getDynamicFieldObject", [group, {
+                    "type": f'{manifest["type_origins"]["desired_state::DesiredKey"]}::desired_state::DesiredKey',
+                    "value": {"dummy_field": False}}])
+                content = field["data"]["content"]
+                desired = plain(content.get("fields", content))["value"]
+                assert int(desired["revision"]) == len(made["catalog_records"])
+                assert desired["components"]["contents"] == [{"key": json.loads(name), "value": record}], desired
+            with (root / "daemon-legacy.log").open("a") as log:
+                daemon = subprocess.Popen([str(DAEMON)], env={**os.environ, "EDGE_CONFIG": str(root / "release-legacy" / "config.toml")}, stdout=log, stderr=log)
+            wait_for(lambda: live.receipts(record) == {dm.object_id(device): 1},
+                     "daemon did not converge on the latest catalog desired version", daemon)
+            assert live.receipts(made["catalog_records"][0]) == {}, "superseded catalog version executed"
+            assert history(components) == ["2.0.0", "4.0.0"], "catalog supersession/selection applied unexpected bytes"
+            live.evidence["catalog_desired"] = {"records": made["catalog_records"], "latest": record,
+                "receipt": {dm.object_id(device): 1}, "versions_applied": history(components)}
+            live.check("real daemon converged on latest multi-platform catalog desired version; superseded version skipped; effects, platform selection and on-chain receipt verified")
             transaction("revoke the device (head)", "--move-call", f"{new}::device_registry::revoke_device", f"@{registry}", f"@{owner_cap}")
             attack("verified report after revocation", "--move-call", f"{new}::deployment_manager::report_verified_status",
                    f"@{d2}", f"@{registry}", f"@{cap}", "2u8", module="device_cap", function="assert_active", code=2)
@@ -311,6 +350,22 @@ def teardown(live, made):
                 while int(plain(live.object(root)["content"])["count"]) > 0:
                     live.transaction("drain receipt chunk", "--move-call", f"{package}::deployment_manager::cleanup_receipt_chunk", f"@{record}", f"@{root}", "64", budget=CLEANUP_GAS)
                 live.transaction("retire receipt root", "--move-call", f"{package}::deployment_manager::retire_receipt_shard", f"@{record}", f"@{root}", budget=CLEANUP_GAS)
+    if made.get("catalog_records"):
+        def clean_catalog_desired():
+            group = made["group"]
+            # Clear the current component, then prove neither record is desired.
+            # Use the component identity recorded on the immutable deployment.
+            content = live.object(made["catalog_records"][-1])["content"]
+            name = plain(content.get("fields", content))["component_name"]
+            ptb = ["--move-call", f"{package}::desired_state::begin", f"@{group}", "--assign", "plan",
+                "--move-call", f"{package}::desired_state::remove_component", "plan", json.dumps(name),
+                "--move-call", f"{package}::desired_state::commit", "plan", f"@{group}", CLOCK]
+            for index, record in enumerate(made["catalog_records"]):
+                ptb += ["--move-call", f"{package}::desired_state::begin_retirement", f"@{record}", "--assign", f"proof{index}",
+                    "--move-call", f"{package}::desired_state::confirm_not_desired", f"proof{index}", f"@{group}",
+                    "--move-call", f"{package}::desired_state::retire", f"proof{index}", f"@{record}"]
+            live.transaction("retire catalog desired records", *ptb, budget=CLEANUP_GAS)
+        steps.append(("retire catalog desired records", clean_catalog_desired))
     steps.append(("clean sharded receipts", clean_shards))
     if made["head_records"]:
         steps.append(("delete head deployments", lambda: live.transaction("delete head deployments", *(
