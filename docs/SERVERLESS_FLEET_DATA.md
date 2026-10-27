@@ -602,7 +602,20 @@ through the new package. Managed fleets use the customer-admin wrapper. The dApp
 bounded deletion planner handles both ordinary and sharded rollouts and preserves
 customer authority. The final `delete_rollout` removes at most the remaining 64
 entries; larger logs require preparation calls. Direct callers must use the same
-sequence. Old-package deletion cannot be retroactively changed by an upgrade.
+sequence. The cursor counts every revision, including legacy and old-package gaps
+without a stored record. A rollout at revision R therefore requires
+`max(0, ceil(R / 64) - 1)` preparation calls before its final deletion, even if
+all its revisions predate this upgrade. Direct CLI/automation calls to
+`delete_rollout` or `customer::delete_deployment` abort with `ERolloutState` (13)
+until enough preparation calls have completed. Old-package deletion cannot be
+retroactively changed by an upgrade.
+
+Each decision-producing tick creates another persistent dynamic field and pays
+its storage deposit. Entry size is bounded (256 reason bytes and 512 admitted
+IDs), but total history grows with the number of decisions; there is no automatic
+retention limit. Budget gas/storage and wallet-signed cleanup transactions for
+frequently ticked rollouts. Explicit deletion removes the fields and receives the
+chain's applicable storage rebate; it also permanently removes their audit.
 
 Validation commands: `make test-contracts`, `node scripts/test_rollout_audit.cjs`,
 `node scripts/test_dashboard_views.cjs`, `make dapp-typecheck`, `make dapp-build`,

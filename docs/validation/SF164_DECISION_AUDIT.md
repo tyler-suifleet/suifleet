@@ -81,3 +81,43 @@ rollout deletion intentionally deletes the audit in bounded chunks.
 Manual real-wallet/physical acceptance remains [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32),
 and final production/mainnet/provider acceptance remains [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 Those checks are unrun and are not waived or claimed complete.
+
+## PR #349 feedback repair (2026-10-27)
+
+The new direct `clear_decision_audit` API now takes `&mut TxContext`, matching
+customer cleanup and the pinned compiler's ESL06010 rule. The reviewed ABI and
+generated TypeScript ABI were recaptured/regenerated; the lint baseline is
+unchanged. Three additional Move tests verify fleet-address cleanup authority,
+foreign-fleet rejection (`EBinding`) and revoked-admin rejection. Operator docs
+now explicitly describe storage growth and cleanup through legacy revision gaps.
+
+Repair checks in `suifleet-dev:sf037` (user UID/GID, `HOME=/home/dev`, worktree
+mounted, host Move cache mounted at `/home/dev/.move`):
+
+- `python3 scripts/generate_interfaces.py --capture && make generate-interfaces`:
+  passed; only context mutability changed in both ABI files.
+- `make test-contracts`: core 297/297 and storage 74/74 passed. Fleet-data was
+  independently rerun with `sui move test --path contracts/fleet_data --build-env
+  testnet`: 60/60 passed.
+- `python3 scripts/check_move_security.py`: passed in full, including pinned
+  strict linters, unchanged unsuppressed baselines, package tests and actual
+  authority-bypass mutation counterexamples. No diagnostic was added to the baseline.
+- `make check-interfaces`: passed; 1098 references, zero drift; generated ABI,
+  negative fixtures and all listed client suites passed.
+- `node scripts/test_rollout_audit.cjs && node scripts/test_browser_receipt_cleanup.cjs`:
+  passed.
+- `cd dapp && pnpm typecheck && pnpm build`: passed.
+- Fresh compatible upgrade: the equivalent runner above, in a `--network none`
+  container with this worktree at its absolute path and common Git directory
+  mounted read-only, passed after the signature repair. Existing rollout,
+  old-package gaps, pruned-event reads, complete fresh history and deletion all
+  passed. All eight effects-checked digests are recorded in
+  [repair upgrade evidence](sf164-feedback-upgrade.json).
+
+The protected public-testnet floor-advancement check deliberately fails if the
+fullnode's retention floor does not advance within 300 seconds. That endpoint
+availability/timing risk remains observable in automatic CI; it is not skipped
+or relabeled as a pass. This repair performed no public-chain writes. Hosted
+ordinary/security CI and automatic public-testnet acceptance at the repaired
+head remain pending for the coordinator, followed by a fresh independent review.
+Deferred final acceptance remains #32 and #159 as described above.
