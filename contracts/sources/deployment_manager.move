@@ -1275,7 +1275,7 @@ module sui_edge::deployment_manager {
 
     /// Explicit deletion preparation, at most 64 revisions per call. Starting
     /// cleanup freezes further decisions through this package version.
-    public fun clear_decision_audit(d: &mut DeploymentRecord, limit: u64, ctx: &TxContext) {
+    public fun clear_decision_audit(d: &mut DeploymentRecord, limit: u64, ctx: &mut TxContext) {
         clear_decision_audit_as(d, limit, ctx.sender());
     }
     public(package) fun clear_decision_audit_as(d: &mut DeploymentRecord, limit: u64, authority: address) {

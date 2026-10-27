@@ -1699,7 +1699,7 @@ export const MOVE_ABI = {
         "parameters": [
           "&mut sui_edge::deployment_manager::DeploymentRecord",
           "u64",
-          "&sui::tx_context::TxContext"
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },

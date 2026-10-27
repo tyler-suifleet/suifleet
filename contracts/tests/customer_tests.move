@@ -607,4 +607,40 @@ module sui_edge::customer_tests {
     #[test]
     fun managed_sharded_rollout_deletion_removes_extensions() { managed_extension_shard_cleanup(false); }
 
+    fun managed_audit_cleanup(foreign: bool, revoked: bool) {
+        use sui_edge::deployment_manager as dm;
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 1);
+        let device = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let policy = dm::rollout_policy(1, 1, 1, 100, 1, 10000, 2000);
+        let record = customer::new_rollout(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"),
+            utf8(b"hash"), utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            vector[device], vector[0], policy, &clock, s.ctx());
+        dm::share_deployment(record);
+        ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        if (revoked) {
+            let mut c = s.take_shared<Customer>();
+            customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx());
+            ts::return_shared(c); s.next_tx(OWNER);
+        };
+        let c = s.take_shared<Customer>();
+        let mut f = s.take_shared_by_id<Fleet>(if (foreign) b else a);
+        let mut record = s.take_shared<dm::DeploymentRecord>();
+        assert!(dm::has_decision_for_testing(&record, 1));
+        customer::clear_decision_audit(&c, &f, &mut record, 64, s.ctx());
+        assert!(!dm::has_decision_for_testing(&record, 1));
+        customer::delete_deployment(&c, &mut f, record, s.ctx());
+        ts::return_shared(c); ts::return_shared(f);
+        sui::clock::destroy_for_testing(clock); s.end();
+    }
+    #[test]
+    fun managed_audit_cleanup_uses_fleet_authority() { managed_audit_cleanup(false, false); }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun managed_audit_cleanup_rejects_foreign_fleet() { managed_audit_cleanup(true, false); }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_audit_cleanup_rejects_revoked_wallet() { managed_audit_cleanup(false, true); }
+
 }

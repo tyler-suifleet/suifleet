@@ -165,8 +165,8 @@ module sui_edge::rollout_tests {
     fun foreign_sender_cannot_clear_audit() {
         let mut s = ts::begin(ADMIN); let c = clock::create_for_testing(ts::ctx(&mut s));
         let mut d = setup(&mut s, &c, 4, 1, 1, 10000);
-        let foreign = sui::tx_context::dummy();
-        dm::clear_decision_audit(&mut d, 1, &foreign);
+        let mut foreign = sui::tx_context::dummy();
+        dm::clear_decision_audit(&mut d, 1, &mut foreign);
         dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
     }
 }
