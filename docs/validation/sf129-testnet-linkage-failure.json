@@ -1,0 +1,66 @@
+{
+  "started": "2026-10-26T23:04:28Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "compatible fleet_data upgrade from version 2",
+      "gas_budget_mist": 120000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "Am9mKL8X6xSFd85De1ANn111be6F3iZbrnafBFjQfK89",
+      "gas_mist": 1000163,
+      "allowance_used_mist": 1000163
+    }
+  ],
+  "checks": [
+    "Testnet chain/account, data UpgradeCap and fleet budget owner cap verified"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf129-bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/tmp/sf129-bin/sui-network",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1265,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 920229719,
+  "max_spend_mist": 150000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "e864bfb531919218d6d64e2258eb65a626c405c0",
+  "verified_package_transactions": {
+    "upgrade fleet_data": {
+      "kind": "upgrade",
+      "modules": 1,
+      "policy": "00"
+    }
+  },
+  "end_balance_mist": 919229556,
+  "spent_mist": 1000163,
+  "allowance_used_mist": 1000163,
+  "finished": "2026-10-26T23:04:41Z"
+}

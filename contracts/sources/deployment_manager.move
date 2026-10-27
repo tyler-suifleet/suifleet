@@ -487,6 +487,8 @@ module sui_edge::deployment_manager {
         receipts.version = 3;
         df::add(&mut deployment.id, CustomerFleetKey {}, fleet_id);
     }
+    /// 1 plain, 2 catalog-bound, 3 staged rollout, 4 sharded receipts. Use
+    /// `receipt_schema` to select the deletion path.
     public fun schema_version(deployment: &DeploymentRecord): u64 { deployment.schema_version }
 
     fun new_receipts(): Receipts {

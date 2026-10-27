@@ -1,0 +1,798 @@
+{
+  "schema": 1,
+  "mode": "isolated-network-none-localnet",
+  "result": "PASS",
+  "revision": "2a15608575baade0de8ce0f5a238383ac0ccbd55",
+  "base": "e19970e045c42aad2452d5a67294fe1b770133f9",
+  "chain": "2a4e44e9",
+  "referenceGasPrice": "1000",
+  "packages": {
+    "coreBase": "0x06d3fdf77acd158f09815ec1355be329ec4af086efa7ee3574b2c4ee428d9e06",
+    "coreHead": "0x27ce90bed3179e914670be36b50f75f644b4a3c2f24391ae72b8ad2fc9f7a0fd",
+    "dataBase": "0x303758b3ab193dbee9e528f89915961a4f87de7b424a1c84646d0a8d11ef0baf",
+    "dataHead": "0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10",
+    "storage": "0xdcee2c1492c7dd18020fb194a1886175748be1bde8ded7d1151f2bda95b2fbd4",
+    "walrus": "0xd459dee9e58e9aa5cafaa001921c3ee348ab588cd142fa98388e980c098d7c34"
+  },
+  "typeOrigins": {
+    "fleet_data::FleetData": "0x303758b3ab193dbee9e528f89915961a4f87de7b424a1c84646d0a8d11ef0baf",
+    "fleet_data::AnchorsPruned": "0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10",
+    "fleet_data::ExpiredBlobsBurned": "0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10",
+    "desired_state::Retirement": "0x27ce90bed3179e914670be36b50f75f644b4a3c2f24391ae72b8ad2fc9f7a0fd",
+    "deployment_manager::DeploymentRecord": "0x06d3fdf77acd158f09815ec1355be329ec4af086efa7ee3574b2c4ee428d9e06"
+  },
+  "measuredMist": {
+    "perWeeklyArchive": {
+      "storagePurchaseShare": "136755",
+      "register": "7349146",
+      "certify": "1030957",
+      "anchor": "6388898",
+      "writeTotal": "14905756",
+      "lockedStorageDeposit": "13413972",
+      "reclaimReturnedSingle": "12556305",
+      "lifecycleNetPerBlob": "2512665",
+      "lifecycleComputationPerBlob": "3200000",
+      "lifecycleBlobs": "10",
+      "reclaimReturnedPerArchiveBatched": "13413972",
+      "batchedArchives": "7",
+      "reclaimReturnedPerUnanchoredBlob": "7729733",
+      "netAfterReclaimBatched": "1491784",
+      "netAfterReclaimSingle": "2349451"
+    },
+    "defaultRetention": {
+      "storageEpochs": 3,
+      "mainnet": {
+        "epochDays": 14,
+        "retentionDays": 42,
+        "liveArchivesPerDevice": 6,
+        "lockedDepositPerDeviceMist": "80483832",
+        "lockedDepositAfterOneYearWithoutReclaimMist": "697526544"
+      },
+      "testnet": {
+        "epochDays": 1,
+        "retentionDays": 3,
+        "liveArchivesPerDevice": 1,
+        "lockedDepositPerDeviceMist": "13413972",
+        "lockedDepositAfterOneYearWithoutReclaimMist": "697526544"
+      }
+    },
+    "deploymentRecords": {
+      "retiredRecords": 2,
+      "returnedNet": "27808156"
+    }
+  },
+  "previews": {
+    "single": "12556305",
+    "batch": "93897810",
+    "loose": "15459467",
+    "retire": "27808156",
+    "matchedExecutedEffects": true
+  },
+  "refusals": [
+    {
+      "label": "prune before expiry",
+      "digest": "HCswN6EunHvXuVfpHZTefstdudWqeprzzi3uwB9pFCX4",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 8, in '0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10::fleet_data::burn_expired' (instruction 16)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "8",
+            "location": {
+              "package": "0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10",
+              "module": "fleet_data",
+              "function": 17,
+              "instruction": 16,
+              "functionName": "burn_expired"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "7394800",
+        "storageRebate": "7394061",
+        "nonRefundableStorageFee": "739"
+      }
+    },
+    {
+      "label": "burn before expiry",
+      "digest": "9eLUcSGrdrTu6Vg2dAaAeBqPEsnu72A2iwZA1rJJM2eh",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 8, in '0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10::fleet_data::burn_expired' (instruction 16)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "8",
+            "location": {
+              "package": "0x6742328a4eef8706c34c4d30dae676cc967c584d6f030b32639ee95318cdeb10",
+              "module": "fleet_data",
+              "function": 17,
+              "instruction": 16,
+              "functionName": "burn_expired"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4864000",
+        "storageRebate": "4863514",
+        "nonRefundableStorageFee": "486"
+      }
+    },
+    {
+      "label": "device cannot use the owner cap",
+      "refused": "Error checking transaction input objects: Transaction was not signed by the correct sender: Object 0x655cd6e0cd6ae7986e99df164982de6a6f25c438612ab87b1d6a43de98846134 is owned by account address 0x994c"
+    },
+    {
+      "label": "burned blob cannot be re-anchored",
+      "digest": "754ZvUAvGAUUiMNVh85gvwGCdGp32DTn6AUtqN1GgsRK",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 262145, in '0x0000000000000000000000000000000000000000000000000000000000000001::option::destroy_some' (instruction 5)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "262145",
+            "location": {
+              "package": "0x0000000000000000000000000000000000000000000000000000000000000001",
+              "module": "option",
+              "function": 14,
+              "instruction": 5,
+              "functionName": "destroy_some"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5099600",
+        "storageRebate": "5099090",
+        "nonRefundableStorageFee": "510"
+      }
+    },
+    {
+      "label": "still-desired record refused",
+      "digest": "A9fSsbJSze3AzA7AVDUFMy2MkgQQVhrfGpseiB3C936S",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 2nd command, abort code: 7, in '0x27ce90bed3179e914670be36b50f75f644b4a3c2f24391ae72b8ad2fc9f7a0fd::desired_state::confirm_not_desired' (instruction 38)",
+          "command": 1,
+          "MoveAbort": {
+            "abortCode": "7",
+            "location": {
+              "package": "0x27ce90bed3179e914670be36b50f75f644b4a3c2f24391ae72b8ad2fc9f7a0fd",
+              "module": "desired_state",
+              "function": 5,
+              "instruction": 38,
+              "functionName": "confirm_not_desired"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5274400",
+        "storageRebate": "5273873",
+        "nonRefundableStorageFee": "527"
+      }
+    }
+  ],
+  "transactions": [
+    {
+      "label": "publish base core",
+      "digest": "E4944HyVkxGXT2gpehFmy19W4cedHCeQZ2p1XWUbRNiu",
+      "gas": {
+        "computationCost": "2990000",
+        "storageCost": "325226800",
+        "storageRebate": "4939506",
+        "nonRefundableStorageFee": "494"
+      }
+    },
+    {
+      "label": "publish WAL",
+      "digest": "5HETiwCoALudoyUSQyHGfwGaJPZ9aXwve4wsrLmkLBt3",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "24289600",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "publish Walrus",
+      "digest": "7Y9QELf7MPZigFTiSN2LPrHGWn8dC1D22QQ5eBdbThgg",
+      "gas": {
+        "computationCost": "6680000",
+        "storageCost": "678824400",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "initialize isolated Walrus system",
+      "digest": "4FWqz5ohVD6spwoiR88NkJEdmnoAPX5VMXnuqQVoBsqz",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "24791200",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "publish storage",
+      "digest": "9AWdjUP1dUbvNa85XtXSkSMpYQuKUnUZT4a8mMHzTuYe",
+      "gas": {
+        "computationCost": "1090000",
+        "storageCost": "121296000",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "publish base data",
+      "digest": "GhzzvV1Au5swQPXWFiEKq52k8pH3Q9kF6vp5fff3qspy",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "52630000",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "create budget",
+      "digest": "2Q7DW7vY9PXg92D1EPyb1js6go9NjY75w5g6kjYN4Gv7",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5335200",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "create fleet storage",
+      "digest": "E1d5uhDwWnDuYsR9Nytpn9RaeCbYhR71nLxPtX87gXkd",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4864000",
+        "storageRebate": "2621738",
+        "nonRefundableStorageFee": "262"
+      }
+    },
+    {
+      "label": "buy archive storage",
+      "digest": "DpnJoqwVboK82PiVETWfH6N7ZqfkZB7qe9ZMvPw5tQzj",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "27876800",
+        "storageRebate": "27509249",
+        "nonRefundableStorageFee": "2751"
+      }
+    },
+    {
+      "label": "create fleet data",
+      "digest": "DVLaZqznyTFyJCSc53kgX7PuMYzwvfLKCUiZ8vBrEDxw",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5130000",
+        "storageRebate": "2621738",
+        "nonRefundableStorageFee": "262"
+      }
+    },
+    {
+      "label": "enroll device 0",
+      "digest": "4z1CRJXHMbTqjPBxKs8rq94bMx9PDNbC4QH654PEvabu",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "26752000",
+        "storageRebate": "7112889",
+        "nonRefundableStorageFee": "711"
+      }
+    },
+    {
+      "label": "enroll writer 0",
+      "digest": "DSLSRHSWaaZEmXNQDvEwZrRhx28FvyJ6Eoins4ek4jjp",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10108000",
+        "storageRebate": "5129487",
+        "nonRefundableStorageFee": "513"
+      }
+    },
+    {
+      "label": "enroll device 1",
+      "digest": "92xTrQhdJozeXKFAKceaxvqTZ7KQtFGye1BkhptoSB8D",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "26752000",
+        "storageRebate": "7112889",
+        "nonRefundableStorageFee": "711"
+      }
+    },
+    {
+      "label": "enroll writer 1",
+      "digest": "CVUnPyq5iHXqo34N72qrLaXbQySXXYQUtudtVaAJgdqg",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10108000",
+        "storageRebate": "5129487",
+        "nonRefundableStorageFee": "513"
+      }
+    },
+    {
+      "label": "enroll device 2",
+      "digest": "HThBjo9Jo9eAjJP5hMWQUUxv82GAYa5crupeFjZKfE9P",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "26752000",
+        "storageRebate": "7112889",
+        "nonRefundableStorageFee": "711"
+      }
+    },
+    {
+      "label": "enroll writer 2",
+      "digest": "2HX1H4QQ4ViLCi921dcB9tv5oDP6Yta3TLQr7uoiTPRV",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10108000",
+        "storageRebate": "5129487",
+        "nonRefundableStorageFee": "513"
+      }
+    },
+    {
+      "label": "enroll device 3",
+      "digest": "AcUibtPP5EcK26vK1E6dTNZYNBX9VkaaheWnC5uetxqE",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "26752000",
+        "storageRebate": "7112889",
+        "nonRefundableStorageFee": "711"
+      }
+    },
+    {
+      "label": "enroll writer 3",
+      "digest": "BBn6B4LfZ1tken13fTygq2CqkbhnGRvbGKDhN1nKheeo",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10108000",
+        "storageRebate": "5129487",
+        "nonRefundableStorageFee": "513"
+      }
+    },
+    {
+      "label": "device 0 archive 1: register",
+      "digest": "JDf2rtXftH46bW7QzZp2uiiFyw7Z2mncp2umT5bMGpLf",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "31453254",
+        "nonRefundableStorageFee": "3146"
+      }
+    },
+    {
+      "label": "device 0 archive 1: certify",
+      "digest": "HLK1KaAdH4g5Paa2TGgwLCCmRiMyopjZmvyU8SN6MCvt",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 0 archive 1: anchor",
+      "digest": "8LhtAQWECE7aeNiatsTSw4fs2cf6zvPKXonZMtcZYExn",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10366400",
+        "storageRebate": "4977502",
+        "nonRefundableStorageFee": "498"
+      }
+    },
+    {
+      "label": "device 0 archive 2: register",
+      "digest": "DgmMuuku7677xiLDnSxVC3NH7L8hL6FAg6XZZu2nPzx2",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 0 archive 2: certify",
+      "digest": "5YPteN4bwNXUs8ZkE7DbYBXYs84WtkAreZwczcgVXvDu",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 0 archive 2: anchor",
+      "digest": "3eXjdBiD48d5L9p44RUb1rXPhbo3t71kKksFiBLWhiuC",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10427200",
+        "storageRebate": "5038296",
+        "nonRefundableStorageFee": "504"
+      }
+    },
+    {
+      "label": "device 1 archive 1: register",
+      "digest": "HaZZVpHmtTR1bvdgtM59LaGTnuYRXvmvUWKFPmUU55WX",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "31453254",
+        "nonRefundableStorageFee": "3146"
+      }
+    },
+    {
+      "label": "device 1 archive 1: certify",
+      "digest": "6sPThKHnp7u2r57CXHNA7hodwE3ygtuxcJj8paofcSbQ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 1 archive 1: anchor",
+      "digest": "3DkmoP2vzhPBPiTzLVf6C13E7tiSd2N8LKSqrctE4eBv",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10366400",
+        "storageRebate": "4977502",
+        "nonRefundableStorageFee": "498"
+      }
+    },
+    {
+      "label": "device 1 archive 2: register",
+      "digest": "FBab26EaewpvLsxvkcLo3PKLbkWebQWjvDZTVYMjzwVc",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 1 archive 2: certify",
+      "digest": "CKB7nyJAmkMP1zmwBgqryeCi5Cay329GbQsLnEHdopn1",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 1 archive 2: anchor",
+      "digest": "DngKT5BwMHzmPMU1aG1JwfhGCdckKsp81XB86UoBSZiv",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10427200",
+        "storageRebate": "5038296",
+        "nonRefundableStorageFee": "504"
+      }
+    },
+    {
+      "label": "device 2 archive 1: register",
+      "digest": "9oVr5DsaTVHGLVxs2ghf49wJFiepygfGSd8L6H2nEGA6",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "31453254",
+        "nonRefundableStorageFee": "3146"
+      }
+    },
+    {
+      "label": "device 2 archive 1: certify",
+      "digest": "4ytQAB51owzy8fKz6diV9AMdPtraAFHPmn7YwBc7Biem",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 2 archive 1: anchor",
+      "digest": "8MkoantuQuztWrh8Sk3jRJGiZU7EEkXDEU8F1NXncdwT",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10366400",
+        "storageRebate": "4977502",
+        "nonRefundableStorageFee": "498"
+      }
+    },
+    {
+      "label": "device 2 archive 2: register",
+      "digest": "81n2kZZSay9Q3rxf8tLx7EoG7vPeWDMzEY7df4XXhvef",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 2 archive 2: certify",
+      "digest": "J6CZ4CrDMfG3ZhL3DM2FQ2uckuagCaEVbjyqf7afzCkU",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 2 archive 2: anchor",
+      "digest": "BUMTf7k5pGZfEmihsHJBtrWyagQNLrGpQQxnCBdPmYHH",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10427200",
+        "storageRebate": "5038296",
+        "nonRefundableStorageFee": "504"
+      }
+    },
+    {
+      "label": "device 3 archive 1: register",
+      "digest": "J6hWMEJMZUqLk12pyXPRtLAppDgxdMq3LUqwYqRSBZhn",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "31453254",
+        "nonRefundableStorageFee": "3146"
+      }
+    },
+    {
+      "label": "device 3 archive 1: certify",
+      "digest": "6VZ3EPQwEPwGT7GsvM2fbvxSPfdwxbbHCnmHfKVHuaFS",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 3 archive 1: anchor",
+      "digest": "63TzGAgzRCVxG6KgfMmAn5XHZGCJmRamSmwaLs5W5ydd",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10366400",
+        "storageRebate": "4977502",
+        "nonRefundableStorageFee": "498"
+      }
+    },
+    {
+      "label": "device 3 archive 2: register",
+      "digest": "ExBwqVgqLXfjewNRMPabgktTJCvorg2UNhc69GKAZ8Z3",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 3 archive 2: certify",
+      "digest": "Ek8D8TLESkoBdrRdoJ5Ke3FFgua6ictyujBtCZbXYGn1",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "device 3 archive 2: anchor",
+      "digest": "2XJqT24dU3TzBzmiFUxfDJ3fTzyGVrNqoHsUn4QNVeuJ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "10427200",
+        "storageRebate": "5038296",
+        "nonRefundableStorageFee": "504"
+      }
+    },
+    {
+      "label": "device 0 unanchored upload: register",
+      "digest": "5hw2pQ1tDRqtCE6FbJCn215CzysdhH4KuVUqQK66KjiQ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37802400",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 0 unanchored upload: certify",
+      "digest": "8VXjqvnXsrLD6SB5buiuRSQamUJ6wGaNU923o1xcfTLR",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5601200",
+        "storageRebate": "5570243",
+        "nonRefundableStorageFee": "557"
+      }
+    },
+    {
+      "label": "create group",
+      "digest": "FVaj3gURJaZRwUarVrTFiScZsdULwtpLdUHnKSRG9hBJ",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "2796800",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "create deployment 1.0.0",
+      "digest": "2kV8CUdyE7osxUNGkPNq2sXrEtWJZBEJoK7e2TTcosPT",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13231600",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "desire 0x511a7c0af30ee9460e1b0af40e3c356232930fa3dd3e3735414a4a4959c302c8",
+      "digest": "EhsZhbVCBZ9WnRFMjdx7ENE4UD3S2PQpG46WWE7bvTTs",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "9766000",
+        "storageRebate": "5273873",
+        "nonRefundableStorageFee": "527"
+      }
+    },
+    {
+      "label": "create deployment 1.1.0",
+      "digest": "8WWu2eX62wiAZSA3zW1WZ51P76ZiHEqU37d12pBpeW3Q",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13231600",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "desire 0x95f5f9b76c696198b5f929ed8835fb2b6f31104c809b454af7071bf3f50bf8f4",
+      "digest": "5r6goSJBrGm3zf5AknXUpTwygSFxtMZcQT9vmvMM1E8y",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "9766000",
+        "storageRebate": "7926007",
+        "nonRefundableStorageFee": "793"
+      }
+    },
+    {
+      "label": "create deployment 0.9.0",
+      "digest": "BdZEmqYM1pzQzN2AEtyxzzek4n4LxwV4mThm3EAM2gkA",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "13231600",
+        "storageRebate": "987901",
+        "nonRefundableStorageFee": "99"
+      }
+    },
+    {
+      "label": "cancel deployment records",
+      "digest": "AMiJwqJhhuGCaKk733bhubHkQsgXFAkYsjmZ2hk4LWTF",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "16400800",
+        "storageRebate": "8419958",
+        "nonRefundableStorageFee": "842"
+      }
+    },
+    {
+      "label": "upgrade core",
+      "digest": "FKV1VnpMNr1LFFwTKPDPAiCCPvLZp88LNyhY17XHaVgY",
+      "gas": {
+        "computationCost": "3080000",
+        "storageCost": "333837600",
+        "storageRebate": "2621738",
+        "nonRefundableStorageFee": "262"
+      }
+    },
+    {
+      "label": "upgrade data",
+      "digest": "9MCdgPKm6nw2Y7KEtrUukFXv7Qrmn6WqD5d5ygWbdLvk",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "63346000",
+        "storageRebate": "2621738",
+        "nonRefundableStorageFee": "262"
+      }
+    },
+    {
+      "label": "device 1 post-upgrade upload: register",
+      "digest": "GQWUpMinhv1R6WoJpYq3YN5zpm7yUCuiKrD5Lmsmr32A",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "37437600",
+        "storageRebate": "29599040",
+        "nonRefundableStorageFee": "2960"
+      }
+    },
+    {
+      "label": "device 1 post-upgrade upload: certify",
+      "digest": "CVJPioqwCfZ4Ti7aT3G17X5vfkMeCHoAa1HeX8ytNL63",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5236400",
+        "storageRebate": "5205479",
+        "nonRefundableStorageFee": "521"
+      }
+    },
+    {
+      "label": "advance Walrus fixture to epoch 3",
+      "digest": "GMpC2CSyk9W8MLvfg3gofEPRrzL7jDrbFrTFFAmnFJt1",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "22328800",
+        "storageRebate": "22326567",
+        "nonRefundableStorageFee": "2233"
+      }
+    },
+    {
+      "label": "reclaim one expired archive",
+      "digest": "J2q66mdKU4oWkPgikr9Fp29TVuqtAQGEmBnR9KptxfBH",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "7394800",
+        "storageRebate": "20951105",
+        "nonRefundableStorageFee": "2095"
+      }
+    },
+    {
+      "label": "reclaim remaining expired archives",
+      "digest": "6693Dy1j9gDcMFjf6wLmDm38t9PEJtM5qxSbZZgZ9mHN",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "14987200",
+        "storageRebate": "109885010",
+        "nonRefundableStorageFee": "10990"
+      }
+    },
+    {
+      "label": "burn unanchored expired blobs",
+      "digest": "2Hn1Vv3EwJSj1HqRL2aD2YAnfwk7sLMESGmtp54C3wh3",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "4864000",
+        "storageRebate": "21323467",
+        "nonRefundableStorageFee": "2133"
+      }
+    },
+    {
+      "label": "retire finished deployment records",
+      "digest": "BozLxxD5u52HibNHEyvbLFB87EiU3uhKFp4NnMprfv15",
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "5631600",
+        "storageRebate": "34439756",
+        "nonRefundableStorageFee": "3444"
+      }
+    }
+  ],
+  "limits": [
+    "Isolated chain: storage and computation follow the pinned 1.82.1 protocol; it is not a public-network price.",
+    "Walrus System is a one-member fixture whose epoch is set directly; certification uses a real BLS certificate for that committee.",
+    "WAL storage/write fees are consumed by Walrus and are not refunded; only Sui object deposits are reclaimed.",
+    "Mainnet live-archive counts assume 14-day Walrus epochs and weekly uploads at three purchased epochs.",
+    "Per-transaction nets include rewrites of shared objects; reclaim returns exceed the write transactions' own net deposits. Use the lifecycle and returned-deposit figures."
+  ]
+}

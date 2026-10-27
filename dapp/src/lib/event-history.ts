@@ -99,6 +99,7 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
   const { response: info } = await client.ledgerService.getServiceInfo({});
   if (info.lowestAvailableCheckpoint === undefined) throw Error('History unavailable: endpoint does not report its retained checkpoint range');
   let lowest = info.lowestAvailableCheckpoint;
+  let reported = lowest;
   let pruningRetries = 0;
   let cache = memory.get(client);
   if (!cache) memory.set(client, cache = new Map());
@@ -150,11 +151,14 @@ async function scan(client: SuiGrpcClient, key: string, type: string, sender?: s
       }
     } catch (error) {
       // Retention may advance after GetServiceInfo or invalidate a saved cursor
-      // inside the same checkpoint. Retry reads once, keeping every known ID.
-      if (!(error instanceof Error) || !/requested data below earliest available/i.test(error.message) || pruningRetries++ >= 1) throw error;
+      // inside the same checkpoint. Transaction pruning can also run ahead of
+      // the reported checkpoint floor, leaving that checkpoint partly pruned:
+      // then skip past it. Bounded retries keep every known ID.
+      if (!(error instanceof Error) || !/requested data below earliest available/i.test(error.message) || pruningRetries++ >= 3) throw error;
       const { response: refreshed } = await client.ledgerService.getServiceInfo({});
-      if (refreshed.lowestAvailableCheckpoint === undefined || refreshed.lowestAvailableCheckpoint < lowest) throw error;
-      lowest = refreshed.lowestAvailableCheckpoint;
+      if (refreshed.lowestAvailableCheckpoint === undefined || refreshed.lowestAvailableCheckpoint < reported) throw error;
+      reported = refreshed.lowestAvailableCheckpoint;
+      lowest = reported > lowest ? reported : lowest + BigInt(1);
       next.cursor = undefined;
       next.checkpoint = lowest.toString();
       next.partial = true;

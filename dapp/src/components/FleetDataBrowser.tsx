@@ -9,7 +9,7 @@ import { useGroups } from '@/hooks/useGroups';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { listFleetDeviceIds, readFleetData } from '@/lib/fleet-data';
 import { listDataItems, readDataItem, DataItemBcs, scopedDecryptor, fetchDataItem, assembleDataItems, setReadGrant } from '@/lib/opaque-data';
-import { readAnchors } from '@/lib/fleet-bulk';
+import { readAnchorAt } from '@/lib/fleet-bulk';
 import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
 import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { fetchCustomerFleets } from '@/lib/customer-fleets';
@@ -62,7 +62,8 @@ export function FleetDataBrowser(){
         for(const entry of page.items){
           const start=Number(entry.value.anchor_index);
           if(!Number.isSafeInteger(start))throw Error('Data anchor exceeds browser limits');
-          const [anchor]=await readAnchors(client,DATA_CONFIG,device,start,1);
+          // Exact slot: a pruned (SF-129) index must not resolve to a later neighbour.
+          const anchor=await readAnchorAt(client,DATA_CONFIG,device,start);
           if(!anchor||anchor.seq!==entry.batch)throw Error('Data timestamp/anchor unavailable');
           rows.push({device,batch:entry.batch,item:entry.item,atMs:anchor.at_ms,value:entry.value});
         }

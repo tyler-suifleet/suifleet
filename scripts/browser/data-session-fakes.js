@@ -35,7 +35,7 @@ export { parseCompactHead } from "@/lib/fleet-bulk";
 export const readFleetData = async () => ({ support: [operator] });
 export const readDeviceData = async () => ({ id: "0xe1", anchor_count: "1" });
 export const listFleetDeviceIds = async () => ({ devices: [device], cursor: null, hasNextPage: false });
-export const readAnchors = async () => [{ kind: 0, at_ms: "1", end_epoch: 100 }];
+export const readAnchorEntries = async () => ({ entries: [{ index: 0, anchor: { kind: 0, at_ms: "1", end_epoch: 100 } }], next: 1 });
 export const fetchBudgets = async () => [];
 export const archiveDecryptor = async () => () => {};
 // Each archive read waits until the test resolves it.

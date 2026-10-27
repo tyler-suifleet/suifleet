@@ -13,7 +13,7 @@ import { Transaction } from '@mysten/sui/transactions';
 import { useDevices } from '@/hooks/useDevices';
 import { useFleetTransaction } from '@/hooks/useFleetTransaction';
 import { readDeviceData, readFleetData, listFleetDeviceIds } from '@/lib/fleet-data';
-import { archiveDecryptor, fetchVerifiedArchive, readAnchors, parseCompactHead, type Anchor, type Archive } from '@/lib/fleet-bulk';
+import { archiveDecryptor, fetchVerifiedArchive, readAnchorEntries, parseCompactHead, type Anchor, type Archive } from '@/lib/fleet-bulk';
 import { fetchBudgets } from '@/lib/fleet-budget';
 import { requireManifest, verifyDeployment } from '@/lib/deployment-manifest';
 import { SEAL_SETTINGS } from '@/lib/seal';
@@ -87,8 +87,8 @@ export default function FleetDataPage() {
       const writer=await readDeviceData(client,DATA_CONFIG,device);
       const count=Number(writer?.anchor_count ?? 0);
       if(!Number.isSafeInteger(count)) throw Error('Archive index exceeds browser limits');
-      const start=Math.max(0,count-32),anchors=await readAnchors(client,DATA_CONFIG,device,start,32);
-      if(current===generation.current){setEntries(anchors.map((anchor,i)=>({index:anchor.index ?? start+i,anchor})).reverse());setAnchorCount(count);}
+      const start=Math.max(0,count-32),{entries:page}=await readAnchorEntries(client,DATA_CONFIG,device,start,32);
+      if(current===generation.current){setEntries(page.reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
   useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps

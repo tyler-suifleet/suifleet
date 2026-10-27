@@ -152,7 +152,7 @@ Do not add it a second time to device report gas.
 | Deployment/target objects and all reports | Historical exact effects; extrapolation explicitly Testnet and one device target |
 | Walrus artifact **and recipe** reserve/register/certify | Four current Testnet effects and WAL deltas; Mainnet gross WAL rates independently checked; Mainnet gas/deposits unquoted |
 | Renewal | Base scenario has none. Add exact extension epochs, remaining capacity, WAL/subsidy quote, owner authority and extension SUI effects for longer retention |
-| Cleanup/rebates | Historical deployment deletion measured; current blob deposits remain held. No assumed WAL refund or speculative future SUI rebate |
+| Cleanup/rebates | Historical deployment deletion measured. SF-129 measured expired-archive and finished-record reclaim on an isolated chain ([storage reclaim](../STORAGE_RECLAIM.md)); a successful Testnet archive reclaim awaits expiry. No assumed WAL refund |
 | Failed execution/retries | Zero in this observed upload run. Failed effects still charge gas; count each attempt and retain its digest/status |
 | Unknown execution | Never report zero or retry blindly. Reserve full gas budget plus unresolved WAL/payment exposure until effects reconcile; keep the bill incomplete |
 | Seal key servers | Production independent providers, authentication, fees, per-session/key quotas, persistence and recovery unselected/unquoted; no production committee support inferred from test servers |
