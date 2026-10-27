@@ -60,7 +60,7 @@ class SiteTest(unittest.TestCase):
         self.assertIn(">Launch app<", home)
         guide = (self.out / "guide" / "index.html").read_text()
         steps = json.loads((SITE / "guide" / "steps.json").read_text())["steps"]
-        self.assertEqual(len(steps), 7)
+        self.assertEqual(len(steps), 9)
         for step in steps:
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
@@ -135,7 +135,7 @@ class SiteTest(unittest.TestCase):
             guide = (self.out / "guide" / "index.html").read_text()
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
             missing = self.errors(require_videos=True)
-            self.assertEqual(len(missing), 6, missing)
+            self.assertEqual(len(missing), 10, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")
             rewrite_sums(self.out)
             self.assertTrue(any("does not match its recorded digest" in e for e in self.errors()))
