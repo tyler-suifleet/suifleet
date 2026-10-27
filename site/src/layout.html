@@ -3,39 +3,68 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>{{page_title}}</title>
 <meta name="description" content="{{description}}">
 {{canonical}}<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/assets/inter-variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <div class="wrap header-row">
-<a class="brand" href="/"><img src="/assets/logo.svg" alt="" width="28" height="28"> SuiFleet</a>
+<a class="brand" href="/" aria-label="SuiFleet home">
+<img src="/assets/logo.svg" alt="" width="38" height="38">
+<span>SuiFleet<span class="brand-period">.</span>
+</span>
+</a>
 <nav aria-label="Main">
-<ul>
-{{nav}}
-</ul>
+<ul>{{nav}}</ul>
 </nav>
-<a class="button primary" href="{{app_url}}">Launch app</a>
+<a class="button primary header-cta" href="{{app_url}}">Launch app</a>
 </div>
 </header>
-<main id="main">
-{{content}}
-</main>
+<main id="main">{{content}}</main>
 <footer class="site-footer">
-<div class="wrap footer-row">
-<p>SuiFleet is in public testnet preview. Mainnet service has not launched; see <a href="/security/#status">current status</a>.</p>
-<ul>
-<li><a href="/docs/">Documentation</a></li>
-<li><a href="/security/">Security</a></li>
-<li><a href="/privacy/">Privacy</a></li>
-<li><a href="/contact/">Contact</a></li>
-<li><a href="{{repo_url}}">Source (MIT)</a></li>
-</ul>
+<div class="wrap footer-top">
+<div>
+<a class="brand" href="/">
+<img src="/assets/logo.svg" alt="" width="38" height="38">
+<span>SuiFleet<span class="brand-period">.</span>
+</span>
+</a>
+<p>Good software belongs<br>on every device.</p>
+</div>
+<div class="footer-links">
+<div>
+<span class="footer-label">Product</span>
+<a href="/how-it-works/">How it works</a>
+<a href="/pricing/">Pricing</a>
+<a href="{{app_url}}">Open console</a>
+</div>
+<div>
+<span class="footer-label">Resources</span>
+<a href="/guide/">Get started</a>
+<a href="/docs/">Documentation</a>
+<a href="{{repo_url}}">Source code</a>
+</div>
+<div>
+<span class="footer-label">SuiFleet</span>
+<a href="/security/">Security</a>
+<a href="/contact/">Contact</a>
+<a href="/privacy/">Privacy</a>
+</div>
+</div>
+</div>
+<div class="wrap footer-bottom">
+<span>© 2026 SuiFleet</span>
+<p>
+<span class="status-dot">
+</span>Public testnet preview · <a href="/security/#status">Current status</a>
+</p>
+<a href="/assets/suifleet-mark.png" download="SuiFleet-logo.png">Download logo ↗</a>
 </div>
 </footer>
 </body>
