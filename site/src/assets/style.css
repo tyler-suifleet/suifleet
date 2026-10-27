@@ -124,16 +124,16 @@ code {
   align-items:center;
   gap:9px;
   text-decoration:none;
-  color:var(--ink);
+  color:#2779c9;
   font-size:27px;
-  font-weight:640;
+  font-weight:500;
   letter-spacing:-1.3px;
   white-space:nowrap
 }
 
 .brand img {
   flex:none;
-  width:38px;
+  width:62px;
   height:38px
 }
 
@@ -1412,7 +1412,7 @@ td.num,th.num {
   }
 
   .brand img {
-    width:32px;
+    width:52px;
     height:32px
   }
 
