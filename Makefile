@@ -368,7 +368,7 @@ site-build:
 	python3 site/build.py --out site/dist
 
 site-check: site-build
-	python3 site/check.py site/dist --require-videos
+	python3 site/check.py site/dist
 
 test-site:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s site/tests -v

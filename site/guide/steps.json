@@ -7,16 +7,23 @@
       "title": "Sign in",
       "console_route": "get-started/",
       "console_label": "Get started",
-      "summary": "Open the console and connect an account. You can use the Slush web wallet with no extension, an installed Sui wallet extension, or Google sign-in where the build enables it. Nothing is signed in this step.",
-      "before": ["A Sui wallet, or a Google account if Google sign-in is offered."],
-      "actions": [
-        "Open the console and choose Get started in the sidebar.",
-        "In the Sign in or connect card, click Connect and pick Slush, your extension wallet or Google.",
-        "Approve the connection in the wallet. The card shows your account name, short address and the network (Testnet in the preview).",
-        "If fleets are enabled, use the Fleet selector in the top bar to choose a fleet, or click Create default fleet."
+      "summary": "Open the console and connect an account. You can use the Slush web wallet with no extension, an installed Sui wallet extension, or Google sign-in where the build enables it. The first time, you create your fleet; that is the only transaction in this step.",
+      "before": [
+        "A Sui wallet, or a Google account if Google sign-in is offered."
       ],
-      "result": "The console shows your connected address and the next onboarding step.",
-      "docs": [{"label": "Wallet onboarding", "path": "docs/WALLET_ONBOARDING.md"}]
+      "actions": [
+        "Open the console and click Connect Wallet at the top right.",
+        "Pick Slush, your extension wallet or Google, and approve the connection.",
+        "The first time, click Create default fleet in the Fleet bar and approve the transaction. Pages stay hidden behind \"Select or create a fleet to continue\" until a fleet is selected.",
+        "Choose Get started in the sidebar: it shows your account, short address, the network (Testnet in the preview) and the next onboarding step."
+      ],
+      "result": "The console shows your connected address, your selected fleet and the next onboarding step.",
+      "docs": [
+        {
+          "label": "Wallet onboarding",
+          "path": "docs/WALLET_ONBOARDING.md"
+        }
+      ]
     },
     {
       "id": "fund",
@@ -24,7 +31,9 @@
       "console_route": "budget/",
       "console_label": "Network budget",
       "summary": "Network fees for device reports and storage are paid from a fleet budget you control, so devices never need a wallet of their own topped up by hand. Deposits and withdrawals are your transactions; spending limits cap what each device may use.",
-      "before": ["SUI in the connected account. On testnet, request it from the Sui faucet; the console shows the address to fund."],
+      "before": [
+        "SUI in the connected account. On testnet, request it from the Sui faucet; the console shows the address to fund."
+      ],
       "actions": [
         "Choose Network budget in the sidebar.",
         "Enter an Initial deposit (SUI) and click Create budget and deposit, then approve the transaction.",
@@ -32,7 +41,12 @@
         "Optionally create fleet storage under Storage funding to prepay Walrus storage for uploads and log archives."
       ],
       "result": "A Confirmed message with the transaction digest, and the new balance under Keep devices reporting.",
-      "docs": [{"label": "Fleet budget", "path": "docs/FLEET_BUDGET.md"}]
+      "docs": [
+        {
+          "label": "Fleet budget",
+          "path": "docs/FLEET_BUDGET.md"
+        }
+      ]
     },
     {
       "id": "register-device",
@@ -40,7 +54,9 @@
       "console_route": "devices/",
       "console_label": "Devices",
       "summary": "Each device creates its own signing key on first boot; the key never leaves the device. You register the device's public address, which creates its on-chain record and a capability bound to that address.",
-      "before": ["The device's address, printed by suifleet --derive-address /etc/suifleet/device.key on the device."],
+      "before": [
+        "The device's address, printed by suifleet --derive-address /etc/suifleet/device.key on the device."
+      ],
       "actions": [
         "Choose Devices in the sidebar and click Register by address.",
         "Enter a Device name, paste the Device SUI address and pick the Architecture.",
@@ -48,7 +64,16 @@
         "The device appears in the list. It shows as not yet reporting until its client starts and sends a signed report."
       ],
       "result": "A new device row with its name, architecture and address.",
-      "docs": [{"label": "Device client setup", "path": "README.md"}, {"label": "Identity lifecycle", "path": "docs/OPERATIONS.md"}]
+      "docs": [
+        {
+          "label": "Device client setup",
+          "path": "README.md"
+        },
+        {
+          "label": "Identity lifecycle",
+          "path": "docs/OPERATIONS.md"
+        }
+      ]
     },
     {
       "id": "enroll-batch",
@@ -56,7 +81,9 @@
       "console_route": "enrollment/",
       "console_label": "Enrollment",
       "summary": "For manufacturing, reserve names and serial numbers instead of typing addresses. Each device gets a single-use claim credential and enrolls itself on first boot; no device address is needed in advance.",
-      "before": ["A roster (CSV of names and serial numbers), or a single device to pair."],
+      "before": [
+        "A roster (CSV of names and serial numbers), or a single device to pair."
+      ],
       "actions": [
         "Choose Enrollment in the sidebar. Under 1. Enrollment batch policy, set a Quota and Valid for days, then click Create policy.",
         "Under 2. Reserve names and serial numbers, paste a roster CSV (or use Pair one device), optionally pick a Default group, and click Check.",
@@ -64,7 +91,12 @@
         "Under 3. Register claims, click Run pending transactions and approve each transaction. Devices then enroll themselves with suifleet --enroll."
       ],
       "result": "Entries move from Reserved to Waiting for device, and to Enrolled when each device claims its record.",
-      "docs": [{"label": "Enrollment", "path": "docs/ENROLLMENT.md"}]
+      "docs": [
+        {
+          "label": "Enrollment",
+          "path": "docs/ENROLLMENT.md"
+        }
+      ]
     },
     {
       "id": "publish-version",
@@ -72,7 +104,10 @@
       "console_route": "components/",
       "console_label": "Components",
       "summary": "A version is a named component with one artifact per platform and a recipe describing how to install and run it. The browser encrypts both before uploading them to Walrus and records their digests on chain.",
-      "before": ["The artifact file for each platform.", "An access policy (Access policies page) naming who may decrypt it, for confidential delivery."],
+      "before": [
+        "The artifact file for each platform.",
+        "An access policy (Access policies page) naming who may decrypt it, for confidential delivery."
+      ],
       "actions": [
         "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
@@ -81,7 +116,16 @@
         "Click Review version, then Upload and publish version, and approve the transaction."
       ],
       "result": "Version published, with the confirmed transaction digest. The version appears in the component library.",
-      "docs": [{"label": "Component catalog", "path": "docs/COMPONENT_CATALOG.md"}, {"label": "Confidential delivery", "path": "docs/CONFIDENTIAL_DELIVERY.md"}]
+      "docs": [
+        {
+          "label": "Component catalog",
+          "path": "docs/COMPONENT_CATALOG.md"
+        },
+        {
+          "label": "Confidential delivery",
+          "path": "docs/CONFIDENTIAL_DELIVERY.md"
+        }
+      ]
     },
     {
       "id": "deploy-group",
@@ -89,16 +133,28 @@
       "console_route": "firmware/",
       "console_label": "Deploy component",
       "summary": "Groups let one deployment reach many devices, and membership is checked by each device at apply time. A deployment records the version, the targets and the wallet that authorized it.",
-      "before": ["A published version.", "Registered or enrolled devices."],
+      "before": [
+        "A published version.",
+        "Registered or enrolled devices."
+      ],
       "actions": [
         "On Devices, open the Device groups tab, click Create group and give it a Group name.",
         "Click Manage on the group and Add the devices that should receive the release.",
         "In the component library click Deploy this version, or choose Deploy component in the sidebar.",
-        "Under Select targets tick the group, keep Make this the groups' desired version selected, and click Deploy to 1 target.",
+        "Under Select targets & review tick the group (or individual devices) and click Deploy to 1 target. A catalog version deploys once; to make it a group's desired version, use the ad-hoc Deploy component flow.",
         "Approve the transaction, then open View deployments to follow each device's signed result."
       ],
       "result": "Deployment created. Each device in the group reports success or failure under Deployments.",
-      "docs": [{"label": "Desired state", "path": "docs/OPERATIONS.md"}, {"label": "Deployment admission controls", "path": "docs/DEPLOYMENT_SERVICES.md"}]
+      "docs": [
+        {
+          "label": "Desired state",
+          "path": "docs/OPERATIONS.md"
+        },
+        {
+          "label": "Deployment admission controls",
+          "path": "docs/DEPLOYMENT_SERVICES.md"
+        }
+      ]
     },
     {
       "id": "staged-rollout",
@@ -106,7 +162,10 @@
       "console_route": "rollouts/",
       "console_label": "Rollouts",
       "summary": "A staged rollout releases to cohorts in order. Devices are admitted a few at a time; each cohort must report signed, healthy results for its bake period before the next one starts, and the rollout stops itself if failures pass your threshold.",
-      "before": ["A published version (its recipe blob and the artifact and recipe SHA-256 digests).", "The device IDs for each cohort."],
+      "before": [
+        "A published version (its recipe blob and the artifact and recipe SHA-256 digests).",
+        "The device IDs for each cohort."
+      ],
       "actions": [
         "Choose Rollouts in the sidebar and open Create a gradual rollout.",
         "Fill in the component, version, recipe and digests, and list the Cohorts, one line per cohort.",
@@ -115,7 +174,12 @@
         "Use Pause, Resume or Abort permanently at any time; each action records your Audit reason on chain."
       ],
       "result": "The rollout status line shows the active cohort and decision number, and advances only on healthy signed reports.",
-      "docs": [{"label": "Staged rollouts", "path": "docs/STAGED_ROLLOUTS.md"}]
+      "docs": [
+        {
+          "label": "Staged rollouts",
+          "path": "docs/STAGED_ROLLOUTS.md"
+        }
+      ]
     }
   ]
 }
