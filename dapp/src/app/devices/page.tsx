@@ -22,6 +22,7 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
 import { PageHeader, HealthBadge } from "@/components/ui";
+import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import type { DeviceRef } from "@/lib/sui";
 
 type Tab = "devices" | "groups";
@@ -216,6 +217,7 @@ function DevicesTab() {
               Advanced. To add devices without copying addresses, use <Link href="/enrollment" className="text-[#4DA2FF] hover:underline">Enrollment</Link>:
               reserve names and serials, and each device enrolls with its own key.
             </p>
+            <DeviceClientHelp variant="address" />
             <FormField label="Device name" name="name" placeholder="rpi-001" required />
             <FormField label="Device SUI address" name="deviceAddress" placeholder="0x…" required />
             <div>
