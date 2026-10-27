@@ -37,14 +37,20 @@ another architecture.
 Each transaction is atomic. After a run the dialog reports, per device and
 group:
 
-- **changed**: in a transaction whose effects were confirmed, or in the
-  failed transaction but shown as changed when membership was re-read;
-- **not changed**: in the failed transaction and not changed on re-read;
-- **unknown**: in the failed transaction, but membership could not be re-read;
+- **changed**: in a transaction whose successful effects were confirmed;
+- **not changed**: in a transaction that definitely failed: refused before the
+  wallet was asked, rejected in the wallet, or executed with failed effects;
+- **unknown**: in a transaction that was, or may have been, submitted without
+  confirmed effects (a wallet transport error or confirmation timeout). It may
+  still execute. When its digest is known the dialog looks up its effects, and
+  **Check again** repeats that; it becomes changed or not changed only from
+  those effects. A membership re-read never decides it. Without a digest it
+  stays unknown: check the wallet's activity before planning again;
 - **not attempted**: in later transactions, which were never sent.
 
-Nothing is retried automatically. Reviewing again plans only the remaining
-changes, because devices already in the requested state are skipped.
+Nothing is retried automatically. Once nothing is unknown, reviewing again
+plans only the remaining changes, because devices already in the requested
+state are skipped.
 
 ## Limits
 

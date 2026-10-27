@@ -7,15 +7,15 @@ import { useMemo, useState } from "react";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { existingInboxes, inboxSupported } from "@/lib/fleet-inbox";
-import { buildMembershipTx, groupBatchSupported, membershipOutcome, planMembership, MAX_FLEET_CHANGES, MAX_WALLET_CHANGES,
-  type BatchResult, type MembershipAction, type MembershipChange, type MembershipOutcome, type MembershipPlan } from "@/lib/group-batch";
+import { buildMembershipTx, failureStatus, groupBatchSupported, membershipOutcome, planMembership, reconcileResults, MAX_FLEET_CHANGES, MAX_WALLET_CHANGES,
+  type BatchResult, type DigestLookup, type MembershipAction, type MembershipChange, type MembershipOutcome, type MembershipPlan } from "@/lib/group-batch";
 import type { NamedFleet } from "@/lib/customer-fleets";
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
 
 export function BulkGroupMembership({ devices, groups, selected, fleet, reloadGroups, onClose }: {
   devices: DeviceObject[]; groups: DeviceGroup[]; selected: string[]; fleet?: NamedFleet;
-  /** Fresh membership, or undefined when it cannot be read. */
-  reloadGroups: () => Promise<DeviceGroup[] | undefined>;
+  /** Refresh membership after a run. */
+  reloadGroups: () => Promise<unknown>;
   onClose: () => void;
 }) {
   const client = useCurrentClient();
@@ -25,6 +25,7 @@ export function BulkGroupMembership({ devices, groups, selected, fleet, reloadGr
   const [includeMismatched, setIncludeMismatched] = useState(false);
   const [running, setRunning] = useState<{ plan: MembershipPlan; results: BatchResult[]; current?: number } | null>(null);
   const [outcome, setOutcome] = useState<MembershipOutcome | null>(null);
+  const [checking, setChecking] = useState(false);
   const plan = useMemo(() => {
     try { return planMembership(action, selected, groupIds, devices, groups, { managed: !!fleet, includeMismatched }); }
     catch (err) { return err instanceof Error ? err : Error(String(err)); }
@@ -32,26 +33,48 @@ export function BulkGroupMembership({ devices, groups, selected, fleet, reloadGr
   const name = (deviceId: string) => devices.find((d) => d.objectId === deviceId)?.name ?? `${deviceId.slice(0, 12)}…`;
   const groupName = (groupId: string) => groups.find((g) => g.objectId === groupId)?.name ?? `${groupId.slice(0, 12)}…`;
 
+  // Effects of a submitted digest from the verified fleet node; a lookup
+  // error (not found yet, node unavailable) leaves the result ambiguous.
+  const lookup: DigestLookup = async (digest) => {
+    const result = await client.getTransaction({ digest, include: { effects: true } });
+    return result.Transaction?.status.success ? "succeeded" : "failed";
+  };
+
+  async function settle(frozen: MembershipPlan, results: BatchResult[]) {
+    const reconciled = await reconcileResults(results, lookup);
+    await reloadGroups().catch(() => undefined);
+    setRunning({ plan: frozen, results: reconciled });
+    setOutcome(membershipOutcome(frozen, reconciled));
+  }
+
   async function apply(frozen: MembershipPlan) {
     const results: BatchResult[] = [];
     setRunning({ plan: frozen, results });
-    let failed = false;
     for (const [index, changes] of frozen.transactions.entries()) {
       setRunning({ plan: frozen, results: [...results], current: index });
+      let reachedWallet = false, definiteFailure = false, submitted: string | undefined;
       try {
         // Inbox existence is read per transaction: an earlier one may have created it.
         const inboxes = !fleet && inboxSupported() ? await existingInboxes(client, [...new Set(changes.map((c) => c.deviceId))]) : undefined;
-        const { digest } = await mutateAsync({ transaction: buildMembershipTx(frozen.action, changes, devices, fleet, inboxes) });
-        results.push({ index, digest });
+        const { digest } = await mutateAsync({ transaction: buildMembershipTx(frozen.action, changes, devices, fleet, inboxes),
+          onProgress: (phase) => { if (phase !== "validating") reachedWallet = true; },
+          onSubmitted: (digest) => { submitted = digest; },
+          onDefiniteFailure: () => { definiteFailure = true; } });
+        results.push({ index, status: "succeeded", digest });
       } catch (err) {
-        results.push({ index, error: err instanceof Error ? err.message : String(err) });
-        failed = true;
+        // A transport error or confirmation timeout may hide a transaction
+        // that still executes: keep it ambiguous, with its digest if known.
+        results.push({ index, status: failureStatus(reachedWallet, definiteFailure), digest: submitted, error: err instanceof Error ? err.message : String(err) });
         break;
       }
     }
-    const after = await reloadGroups().catch(() => undefined);
-    setRunning({ plan: frozen, results: [...results] });
-    setOutcome(membershipOutcome(frozen, results, failed ? after : undefined));
+    await settle(frozen, results);
+  }
+
+  async function recheck() {
+    if (!running || checking) return;
+    setChecking(true);
+    try { await settle(running.plan, running.results); } finally { setChecking(false); }
   }
 
   const busy = running !== null && outcome === null;
@@ -99,7 +122,7 @@ export function BulkGroupMembership({ devices, groups, selected, fleet, reloadGr
         {running && !outcome && (
           <p className="text-sm" role="status">Transaction {(running.current ?? running.plan.transactions.length - 1) + 1} of {running.plan.transactions.length}: approve it in your wallet…</p>
         )}
-        {running && outcome && <Outcome plan={running.plan} results={running.results} outcome={outcome} name={name} groupName={groupName} onClose={onClose} />}
+        {running && outcome && <Outcome plan={running.plan} results={running.results} outcome={outcome} name={name} groupName={groupName} checking={checking} onRecheck={() => void recheck()} onClose={onClose} />}
       </div>
     </div>
   );
@@ -138,22 +161,29 @@ function ChangeList({ title, changes, name, groupName }: { title: string; change
   );
 }
 
-function Outcome({ plan, results, outcome, name, groupName, onClose }: { plan: MembershipPlan; results: BatchResult[]; outcome: MembershipOutcome;
-  name: (id: string) => string; groupName: (id: string) => string; onClose: () => void }) {
-  const failure = results.find((r) => r.error);
+function Outcome({ plan, results, outcome, name, groupName, checking, onRecheck, onClose }: { plan: MembershipPlan; results: BatchResult[]; outcome: MembershipOutcome;
+  name: (id: string) => string; groupName: (id: string) => string; checking: boolean; onRecheck: () => void; onClose: () => void }) {
+  const failure = results.find((r) => r.status !== "succeeded");
+  const pending = results.filter((r) => r.status === "ambiguous");
   const verb = plan.action === "add" ? "Added" : "Removed";
   return (
     <section aria-label="Result" className="text-sm space-y-2">
       <p role={failure ? "alert" : "status"} className={failure ? "text-red-700" : "text-green-700"}>
-        {failure ? `Transaction ${failure.index + 1} of ${plan.transactions.length} failed: ${failure.error}. Later transactions were not sent.`
+        {failure ? `Transaction ${failure.index + 1} of ${plan.transactions.length} ${failure.status === "failed" ? "failed" : "was not confirmed"}: ${failure.error}. Later transactions were not sent.`
           : `All ${plan.transactions.length} transaction(s) succeeded.`}
       </p>
       {outcome.changed.length > 0 && <ChangeList title={verb} changes={outcome.changed} name={name} groupName={groupName} />}
       {outcome.unchanged.length > 0 && <div><p className="font-medium">Not changed ({outcome.unchanged.length})</p><ChangeList title="Unchanged" changes={outcome.unchanged} name={name} groupName={groupName} /></div>}
-      {outcome.unknown.length > 0 && <div className="text-amber-800"><p className="font-medium">Unknown ({outcome.unknown.length}): membership could not be re-read. Refresh before trying again.</p><ChangeList title="Unknown" changes={outcome.unknown} name={name} groupName={groupName} /></div>}
+      {outcome.unknown.length > 0 && <div className="text-amber-800">
+        <p className="font-medium">Unknown ({outcome.unknown.length}): the transaction may still execute. {pending.some((r) => r.digest)
+          ? "Check its digest again before reviewing these changes."
+          : "The wallet returned no digest; check its activity before reviewing these changes."}</p>
+        <ChangeList title="Unknown" changes={outcome.unknown} name={name} groupName={groupName} />
+        {pending.some((r) => r.digest) && <button disabled={checking} onClick={onRecheck} className="mt-1 px-3 py-1 text-xs bg-amber-100 rounded hover:bg-amber-200 disabled:opacity-50">{checking ? "Checking…" : "Check again"}</button>}
+      </div>}
       {outcome.notAttempted.length > 0 && <div><p className="font-medium">Not attempted ({outcome.notAttempted.length})</p><ChangeList title="Not sent" changes={outcome.notAttempted} name={name} groupName={groupName} /></div>}
-      <ul className="text-xs font-mono text-gray-500">{results.filter((r) => r.digest).map((r) => <li key={r.index}>Transaction {r.index + 1}: {r.digest}</li>)}</ul>
-      {failure && <p className="text-xs text-gray-500">Nothing is retried automatically. Review again to plan only the remaining changes.</p>}
+      <ul className="text-xs font-mono text-gray-500">{results.filter((r) => r.digest).map((r) => <li key={r.index}>Transaction {r.index + 1}: {r.digest}{r.status === "ambiguous" ? " (unconfirmed)" : r.status === "failed" ? " (failed)" : ""}</li>)}</ul>
+      {failure && <p className="text-xs text-gray-500">Nothing is retried automatically. {pending.length ? "Resolve the unknown transaction first: reviewing again before it settles could submit the same changes twice." : "Review again to plan only the remaining changes."}</p>}
       <button onClick={onClose} className="px-4 py-2 text-sm bg-gray-100 rounded hover:bg-gray-200">Close</button>
     </section>
   );

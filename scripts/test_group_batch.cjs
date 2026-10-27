@@ -82,20 +82,51 @@ const legacy = batch.buildMembershipTx('add', [{ groupId: site.objectId, deviceI
   [{ ...devices[0], ownerCapId: id('0xca') }], undefined, undefined, false);
 assert.deepEqual(fns(legacy), ['device_registry::borrow_device', 'device_group::add_device', 'device_registry::return_device']);
 
-// Partial failure: successful transactions applied everything; the failed one is
-// classified from re-read membership; later ones were never sent.
+// Partial failure: transactions are atomic. Successful ones applied everything,
+// definite failures nothing; later ones were never sent. A membership snapshot
+// never decides an ambiguous submission.
 const three = batch.planMembership('add', many.slice(0, 250).map(d => d.objectId), [site.objectId], many, [site], { managed: true });
-const ok = batch.membershipOutcome(three, [0, 1, 2].map(index => ({ index, digest: `D${index}` })));
+const ok = batch.membershipOutcome(three, [0, 1, 2].map(index => ({ index, status: 'succeeded', digest: `D${index}` })));
 assert.equal(ok.changed.length, 250);
-const failedAt1 = [{ index: 0, digest: 'D0' }, { index: 1, error: 'rejected' }];
-const reread = [{ ...site, deviceIds: [...three.transactions[0], three.transactions[1][0]].map(c => c.deviceId) }];
-const partial = batch.membershipOutcome(three, failedAt1, reread);
-assert.equal(partial.changed.length, 101);
-assert.equal(partial.unchanged.length, 99);
-assert.equal(partial.notAttempted.length, 50);
-assert.equal(partial.unknown.length, 0);
-const unread = batch.membershipOutcome(three, failedAt1, undefined);
-assert.deepEqual([unread.changed.length, unread.unknown.length, unread.notAttempted.length], [100, 100, 50]);
-const removalOutcome = batch.membershipOutcome(removal, [{ index: 0, error: 'timeout' }], [{ ...canary, deviceIds: [] }]);
-assert.deepEqual(removalOutcome.changed.map(c => c.deviceId), [devices[0].objectId]);
-console.log('PASS: bulk group selection, review plan, batch limits, architecture mismatches, transaction shape and partial-failure outcomes');
+const counts4 = o => [o.changed.length, o.unchanged.length, o.unknown.length, o.notAttempted.length];
+
+// Submission status: refusal before the wallet, wallet rejection or failed
+// effects are definite; a wallet transport error or confirmation timeout is not.
+assert.equal(batch.failureStatus(false, false), 'failed', 'refused before signing');
+assert.equal(batch.failureStatus(true, true), 'failed', 'wallet rejection or failed effects');
+assert.equal(batch.failureStatus(true, false), 'ambiguous', 'transport error or confirmation timeout');
+
+// Definite wallet rejection: nothing applied.
+const rejected = [{ index: 0, status: 'succeeded', digest: 'D0' }, { index: 1, status: 'failed', error: 'User rejected the request' }];
+assert.deepEqual(counts4(batch.membershipOutcome(three, rejected)), [100, 100, 0, 50]);
+
+(async () => {
+  const never = async () => { throw Error('lookup must not be called'); };
+  // Transport error without a digest: unknown, and no digest to reconcile.
+  const transport = [{ index: 0, status: 'succeeded', digest: 'D0' }, { index: 1, status: 'ambiguous', error: 'wallet disconnected' }];
+  const noDigest = await batch.reconcileResults(transport, never);
+  assert.deepEqual(counts4(batch.membershipOutcome(three, noDigest)), [100, 0, 100, 50]);
+
+  // Confirmation timeout with a digest: unknown while the digest is not found
+  // (or the node errors), then changed once its effects show late success.
+  const one = batch.planMembership('add', [devices[1].objectId], [site.objectId], devices, [site], { managed: true });
+  const timeout = [{ index: 0, status: 'ambiguous', digest: 'submitted-digest', error: 'confirmation timeout' }];
+  assert.deepEqual(counts4(batch.membershipOutcome(one, timeout)), [0, 0, 1, 0], 'regression: was reported unchanged');
+  const pending = await batch.reconcileResults(timeout, async () => undefined);
+  assert.deepEqual(counts4(batch.membershipOutcome(one, pending)), [0, 0, 1, 0]);
+  const unreachable = await batch.reconcileResults(timeout, async () => { throw Error('node unavailable'); });
+  assert.deepEqual(counts4(batch.membershipOutcome(one, unreachable)), [0, 0, 1, 0]);
+  const late = await batch.reconcileResults(pending, async digest => digest === 'submitted-digest' ? 'succeeded' : undefined);
+  assert.deepEqual(late[0], { ...timeout[0], status: 'succeeded' }, 'digest and error are kept for the report');
+  assert.deepEqual(batch.membershipOutcome(one, late).changed.map(c => c.deviceId), [devices[1].objectId]);
+
+  // Failed effects found for the digest: definitely unchanged.
+  const failedEffects = await batch.reconcileResults(timeout, async () => 'failed');
+  assert.deepEqual(counts4(batch.membershipOutcome(one, failedEffects)), [0, 1, 0, 0]);
+
+  // Settled results are not looked up again.
+  assert.deepEqual(await batch.reconcileResults([...rejected, ...late], never), [...rejected, ...late]);
+  const removalOutcome = batch.membershipOutcome(removal, [{ index: 0, status: 'ambiguous', error: 'timeout' }]);
+  assert.deepEqual(removalOutcome.unknown.map(c => c.deviceId), [devices[0].objectId]);
+  console.log('PASS: bulk group selection, review plan, batch limits, architecture mismatches, transaction shape and partial-failure outcomes');
+})().catch(err => { console.error(err); process.exit(1); });

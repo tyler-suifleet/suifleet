@@ -263,7 +263,7 @@ function DevicesTab() {
 
       {bulk && groups.data && (
         <BulkGroupMembership devices={devices} groups={groups.data} selected={selectedIds} fleet={fleet}
-          reloadGroups={async () => { const r = await groups.refetch(); return r.isError ? undefined : r.data; }}
+          reloadGroups={() => groups.refetch()}
           onClose={() => { setBulk(false); void groups.refetch(); }} />
       )}
 

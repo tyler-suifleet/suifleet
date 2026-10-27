@@ -148,35 +148,65 @@ export function buildMembershipTx(action: MembershipAction, changes: MembershipC
   return tx;
 }
 
-export interface BatchResult { index: number; digest?: string; error?: string }
+/**
+ * How a transaction ended. `failed` is definite: refused before signing,
+ * rejected by the wallet, or executed with failed effects, so (being atomic)
+ * it applied nothing. `ambiguous`: it was, or may have been, submitted, but
+ * no effects were confirmed (wallet transport error, confirmation timeout).
+ */
+export type BatchStatus = "succeeded" | "failed" | "ambiguous";
+export interface BatchResult { index: number; status: BatchStatus; digest?: string; error?: string }
+
+/**
+ * The status of a transaction whose submission threw. Only a refusal before
+ * the wallet was asked, or a definite failure reported by the wallet or
+ * effects, proves nothing was applied.
+ */
+export function failureStatus(reachedWallet: boolean, definiteFailure: boolean): BatchStatus {
+  return !reachedWallet || definiteFailure ? "failed" : "ambiguous";
+}
+
+/** Effects of a known digest: undefined while it is not found or cannot be read. */
+export type DigestLookup = (digest: string) => Promise<"succeeded" | "failed" | undefined>;
+
+/**
+ * Resolve ambiguous results whose digest is known from that digest's
+ * execution effects. Without a digest, or until the effects are found, they
+ * stay ambiguous; a membership snapshot cannot show that a pending
+ * transaction will not execute.
+ */
+export async function reconcileResults(results: BatchResult[], lookup: DigestLookup): Promise<BatchResult[]> {
+  return Promise.all(results.map(async (result) => {
+    if (result.status !== "ambiguous" || !result.digest) return result;
+    const status = await lookup(result.digest).catch(() => undefined);
+    return status ? { ...result, status } : result;
+  }));
+}
+
 export interface MembershipOutcome {
-  /** Confirmed by transaction effects, or by re-reading membership after a failure. */
+  /** Applied: the transaction's effects were confirmed successful. */
   changed: MembershipChange[];
-  /** In the failed transaction and not visible as changed when membership was re-read. */
+  /** In a transaction that definitely failed (atomic, so nothing applied). */
   unchanged: MembershipChange[];
-  /** In the failed transaction, but membership could not be re-read. */
+  /** In a transaction that may still execute or whose effects were not confirmed. */
   unknown: MembershipChange[];
   /** In transactions after the failure; never submitted. */
   notAttempted: MembershipChange[];
 }
 
 /**
- * Classify every planned change after a run. Successful transactions applied
- * all their changes (they are atomic). For a failed one, `after` (membership
- * re-read once the run stopped) decides; later transactions were not sent.
+ * Classify every planned change after a run from transaction outcomes only.
+ * Transactions are atomic: a successful one applied all its changes, a failed
+ * one none. Later transactions were not sent.
  */
-export function membershipOutcome(plan: MembershipPlan, results: BatchResult[], after?: DeviceGroup[]): MembershipOutcome {
+export function membershipOutcome(plan: MembershipPlan, results: BatchResult[]): MembershipOutcome {
   const outcome: MembershipOutcome = { changed: [], unchanged: [], unknown: [], notAttempted: [] };
   plan.transactions.forEach((changes, index) => {
     const result = results.find((r) => r.index === index);
-    if (!result) { outcome.notAttempted.push(...changes); return; }
-    if (result.digest && !result.error) { outcome.changed.push(...changes); return; }
-    if (!after) { outcome.unknown.push(...changes); return; }
-    for (const change of changes) {
-      const group = after.find((g) => g.objectId === change.groupId);
-      if (!group) { outcome.unknown.push(change); continue; }
-      (group.deviceIds.includes(change.deviceId) === (plan.action === "add") ? outcome.changed : outcome.unchanged).push(change);
-    }
+    if (!result) outcome.notAttempted.push(...changes);
+    else if (result.status === "succeeded") outcome.changed.push(...changes);
+    else if (result.status === "failed") outcome.unchanged.push(...changes);
+    else outcome.unknown.push(...changes);
   });
   return outcome;
 }
