@@ -369,16 +369,33 @@ before selecting another release. Never replace a pending publisher identity.
 
 For an update, retain the previous exported bytes, resource/routing digest
 receipt, deployment manifest, site object ID and wallet/chain identity; build and
-verify the new bundle, then update that exact site and verify every changed
-resource through its Sui map and Walrus readback before changing any domain.
+verify the new bundle, then update that exact site. Every exported resource,
+including unchanged content, is rebound to the new certified packed blob. Verify
+every resource through its Sui map and Walrus readback before changing any domain.
 Rollback means redeploying the retained previous bundle to the same owned site;
 it costs new transactions/storage and requires the same authorization/preflight.
 Use `--resume-evidence PREVIOUS_RECEIPT --operation update` with the new export and
 receipt; use `--operation rollback` with the retained previous export/receipt.
 Preserve the owned Site, publisher identity and private runtime journal. Additional
 allowance requires an explicit `--add-funding-mist N` and verified transfer effects;
-rebates do not increase it. Each new blob buys three Testnet epochs: extend or
-republish before expiry.
+rebates do not increase it. Each new blob buys three Testnet epochs. The wrapper
+refuses expired cached blobs; it does not implement renewal or a forced purchase
+of an identical packed hash. Reusing an expired retained export therefore requires
+a separately reviewed, bounded renewal/publication procedure before rollback.
+
+If a Site transaction succeeded but readback failed, use the explicit
+`--resume-evidence PREVIOUS_RECEIPT --operation refresh` with the same export,
+build receipt and private runtime journal. Refresh requires every publisher intent
+to be successful and independently verifies the exact pending Site transaction
+digests and successful effects. The pending and requested files, RPC endpoint,
+owner, journal and signing-key path must match; per-operation export/directory
+overrides and marker substitutions are refused. Reconcile unknown or failed
+intents first; do not delete them or change publisher identity. The wrapper
+archives the original pending plan and error verbatim without overwriting evidence,
+then uses a distinct refresh operation label to rebind the complete release. It
+reuses the certified, unexpired packed blob without buying identical storage.
+See [the recovery evidence](validation/sf159-site-refresh.md) for the bounded
+Testnet rehearsal and its limitations.
 
 The Testnet rehearsal published, updated and rolled back Site
 `0xb1891eab584649b8b19c08fa16fda71351b973bfafef3ab1209874bbd79c7ab4`,
