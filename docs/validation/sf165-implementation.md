@@ -156,3 +156,35 @@ physical and mainnet checks remain unrun in #32 and #159.
   dependencies with networking disabled because its Move cache was not mounted.
   The separate cache-mounted Move run above completed 76/76 tests successfully.
 - `git diff --check`: PASS.
+
+## Current-base feedback handoff (2026-10-27)
+
+The next review reported no new actionable source defect and confirmed the
+prepaid-renewal fix. Its remaining blockers were hosted CI and automatic Testnet.
+The supplied snapshot additionally showed ordinary CI `check` cancelled and
+base movement. Merged snapshot/current main
+`85331590985644a113eb6750782121169ef03a4b` into this branch as `d70ea42c`.
+The Greengrass importer merge was clean; its storage-period controls remain.
+No additional functional change was necessary.
+
+Verification after integration:
+
+- Pinned, network-disabled `make dapp-typecheck && make dapp-build` using the
+  container/mount command above: PASS; all 16 static pages exported. Existing
+  Tailwind module-type warning remains.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `node scripts/test_greengrass_compat.cjs`: PASS (90 recipe fixtures and 47
+  managed-dependency fixtures).
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_greengrass_compat.py`: 40 tests PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_live_release_storage.py`: 3 tests PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS (fixture chain/wallet/storage).
+- `git diff --check`: PASS.
+
+No Move sources/tests changed in this handoff; the earlier 76/76 Move results
+remain historical evidence, not a new run. No new public-network mutation was
+performed. Hosted CI and automatic Testnet must run for the pushed head/current
+base; they were not polled and this handoff is not approval. Fresh independent
+review remains required. Deferred external acceptance remains unrun in #32/#159.
