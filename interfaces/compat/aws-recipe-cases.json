@@ -4053,5 +4053,454 @@
     "empty-step"
    ]
   }
+ },
+ {
+  "id": "aws-cased-yaml-translates",
+  "format": "yaml",
+  "note": "SF-167: lifecycle step names, step keys and artifact keys are matched case-insensitively as AWS does; the AWS-documented Install/Run/Shutdown, URI and Script spellings translate to canonical lowercase native lifecycle commands.",
+  "recipe_text": "---\n# Cased as in the AWS developer guide: Install/Run/Shutdown, URI, Script, RequiresPrivilege\nRecipeFormatVersion: '2020-01-25'\nComponentName: com.example.Hello\nComponentVersion: '1.0.0'\nComponentDescription: My first AWS IoT Greengrass component.\nComponentPublisher: Amazon\nComponentConfiguration:\n  DefaultConfiguration:\n    Message: world\nManifests:\n  - Platform:\n      os: linux\n      architecture: aarch64\n    Lifecycle:\n      Install:\n        Script: tar -xf {artifacts:path}/hello-arm.tar\n        RequiresPrivilege: false\n      Run: python3 -u {artifacts:path}/hello-arm.tar\n      Shutdown: echo stopping\n    Artifacts:\n      - URI: s3://example-bucket/hello/1.0.0/hello-arm.tar\n  - Platform:\n      os: linux\n      architecture: amd64\n    Lifecycle:\n      Run: python3 -u {artifacts:path}/hello.tar\n    Artifacts:\n      - URI: s3://example-bucket/hello/1.0.0/hello.tar\n        Permission:\n          Read: OWNER\n",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentDescription": "My first AWS IoT Greengrass component.",
+   "ComponentPublisher": "Amazon",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "Message": "world"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "Install": {
+       "Script": "tar -xf {artifacts:path}/hello-arm.tar",
+       "RequiresPrivilege": false
+      },
+      "Run": "python3 -u {artifacts:path}/hello-arm.tar",
+      "Shutdown": "echo stopping"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello-arm.tar"
+      }
+     ]
+    },
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "amd64"
+     },
+     "Lifecycle": {
+      "Run": "python3 -u {artifacts:path}/hello.tar"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Permission": {
+        "Read": "OWNER"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "aarch64",
+     "recipe": {
+      "schemaVersion": "1.2",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello_arm",
+      "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+      "lifecycle": {
+       "install": "tar -xf {artifact}",
+       "run": "python3 -u {artifact}",
+       "shutdown": "echo stopping"
+      },
+      "configuration": {
+       "defaults": {
+        "Message": "world"
+       }
+      },
+      "description": "My first AWS IoT Greengrass component."
+     }
+    },
+    {
+     "os": "linux",
+     "arch": "x86_64",
+     "recipe": {
+      "schemaVersion": "1.2",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "run": "python3 -u {artifact}"
+      },
+      "configuration": {
+       "defaults": {
+        "Message": "world"
+       }
+      },
+      "description": "My first AWS IoT Greengrass component."
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "ComponentConfiguration.DefaultConfiguration",
+    "Lifecycle.install",
+    "Lifecycle.run",
+    "Lifecycle.shutdown"
+   ]
+  }
+ },
+ {
+  "id": "aws-cased-json-translates",
+  "note": "SF-167: mixed-case step names and artifact keys (INSTALL, uri, ALGORITHM, digest) match their canonical keys.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "INSTALL": {
+       "script": "echo installed",
+       "requiresprivilege": false
+      }
+     },
+     "Artifacts": [
+      {
+       "uri": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "ALGORITHM": "SHA-256",
+       "digest": "q6urq6urq6urq6urq6urq6urq6urq6urq6urq6urq6s="
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "translate",
+   "reasons": [],
+   "manifests": [
+    {
+     "os": "linux",
+     "arch": "*",
+     "recipe": {
+      "schemaVersion": "1.0",
+      "componentName": "com.example.Hello",
+      "componentVersion": "1.0.0",
+      "artifactBlobId": "blob_hello",
+      "artifactSha256": "abababababababababababababababababababababababababababababababab",
+      "lifecycle": {
+       "install": "echo installed"
+      },
+      "configuration": {}
+     }
+    }
+   ],
+   "omitted_manifests": [],
+   "informational": [
+    "ComponentPublisher",
+    "Lifecycle.install"
+   ]
+  }
+ },
+ {
+  "id": "lifecycle-case-duplicate-rejected",
+  "note": "SF-167: two lifecycle steps differing only in case are the same AWS step; which one wins is never guessed.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "Install": "echo one",
+      "install": "echo two"
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "case-duplicate-key"
+   ]
+  }
+ },
+ {
+  "id": "artifact-case-duplicate-rejected",
+  "note": "SF-167: URI and Uri in one artifact are the same AWS key; the artifact is never bound to a guessed one.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo run"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello.tar",
+       "Uri": "s3://example-bucket/hello/1.0.0/hello-arm.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "case-duplicate-key"
+   ]
+  }
+ },
+ {
+  "id": "step-key-case-duplicate-rejected",
+  "note": "SF-167: Script and script in one step are the same AWS key.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": {
+       "Script": "echo one",
+       "script": "echo two"
+      }
+     },
+     "Artifacts": [
+      {
+       "Uri": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "case-duplicate-key"
+   ]
+  }
+ },
+ {
+  "id": "every-finding-in-one-check",
+  "note": "SF-167: the evaluated two-manifest AWS-cased recipe reports configuration interpolation, unbound s3:// artifacts and unsupported steps together in one check, not one layer per check.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "ComponentConfiguration": {
+    "DefaultConfiguration": {
+     "Message": "world"
+    }
+   },
+   "Manifests": [
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "aarch64"
+     },
+     "Lifecycle": {
+      "Install": "tar -xf {artifacts:path}/hello-arm.tar",
+      "Run": "python3 -u {artifacts:path}/hello-arm.tar --message {configuration:/Message}",
+      "Recover": "echo recover"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello-arm.tar"
+      }
+     ]
+    },
+    {
+     "Platform": {
+      "os": "linux",
+      "architecture": "amd64"
+     },
+     "Lifecycle": {
+      "Run": "python3 -u {artifacts:path}/hello.tar --message {configuration:/Message}"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {},
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "configuration-variable",
+    "unbound-artifact",
+    "unsupported-lifecycle-step"
+   ]
+  }
+ },
+ {
+  "id": "manifest-findings-reported-together",
+  "note": "SF-167: an unknown manifest key, unknown artifact key, unknown platform value and duplicate platform no longer hide the other findings for the same manifest.",
+  "recipe": {
+   "RecipeFormatVersion": "2020-01-25",
+   "ComponentName": "com.example.Hello",
+   "ComponentVersion": "1.0.0",
+   "ComponentPublisher": "Example",
+   "Manifests": [
+    {
+     "Name": "a",
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo {iot:thingName}"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ],
+     "Extra": 1
+    },
+    {
+     "Platform": {
+      "os": "linux"
+     },
+     "Lifecycle": {
+      "run": "echo {kernel:rootPath}",
+      "Bootstrap": "echo b"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello.tar"
+      }
+     ]
+    },
+    {
+     "Platform": {
+      "os": "freebsd"
+     },
+     "Lifecycle": {
+      "Run": "echo $SVCUID"
+     },
+     "Artifacts": [
+      {
+       "URI": "s3://example-bucket/hello/1.0.0/hello-arm.tar",
+       "Extra": 1
+      }
+     ]
+    }
+   ]
+  },
+  "bindings": {
+   "s3://example-bucket/hello/1.0.0/hello.tar": {
+    "artifactBlobId": "blob_hello",
+    "artifactSha256": "abababababababababababababababababababababababababababababababab"
+   },
+   "s3://example-bucket/hello/1.0.0/hello-arm.tar": {
+    "artifactBlobId": "blob_hello_arm",
+    "artifactSha256": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+   }
+  },
+  "expected": {
+   "outcome": "reject",
+   "reasons": [
+    "aws-environment-variable",
+    "aws-runtime-variable",
+    "duplicate-platform",
+    "unsupported-artifact-key",
+    "unsupported-lifecycle-step",
+    "unsupported-manifest-key",
+    "unsupported-platform-value"
+   ]
+  }
  }
 ]
