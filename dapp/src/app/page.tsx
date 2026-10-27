@@ -3,11 +3,12 @@
 import { useDevices } from "@/hooks/useDevices";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useGroups } from "@/hooks/useGroups";
-import { useFleetHealth } from "@/hooks/useFleetHealth";
+import { useFleetHealth, useNow } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import { historicalFailures } from "@/lib/alerts";
 import { deviceHref } from "@/lib/device-services";
 import Link from "next/link";
+import { deviceHealthTile, deploymentTile } from "@/lib/dashboard-stats";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
 
 export default function DashboardPage() {
@@ -15,10 +16,9 @@ export default function DashboardPage() {
   const { data: deployments = [], isLoading: depl } = useDeployments();
   const { data: groups = [], isLoading: gl } = useGroups();
   const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
-  const healthy = Object.values(health).filter((h) => h.status === "healthy").length;
-  const reported = Object.values(health).some((h) => h.status !== "unavailable");
-
-  const pending = deployments.filter((d) => d.resolvedDeviceIds.some((id) => (d.statuses[id] ?? 0) === 0));
+  const healthTile = deviceHealthTile(devices.map(d => d.objectId), health);
+  const now = useNow(5_000);
+  const admissionTile = deploymentTile(deployments, now);
   const alerts = useFleetAlerts();
   const failedResults = historicalFailures(deployments);
 
@@ -29,10 +29,10 @@ export default function DashboardPage() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-        <StatCard label="Devices (healthy)" value={dl ? "—" : reported ? `${devices.length} (${healthy})` : devices.length} href="/devices" />
+        <StatCard label={healthTile.label} value={dl ? "—" : healthTile.value} hint={dl ? undefined : healthTile.hint} href="/devices" />
         <StatCard label="Device groups" value={gl ? "—" : groups.length} href="/devices" />
         <StatCard label="Deployments" value={depl ? "—" : deployments.length} href="/deployments" />
-        <StatCard label="Active deployments" value={depl ? "—" : pending.length} href="/deployments" />
+        <StatCard label="Active deployments" value={depl ? "—" : admissionTile.active} hint={depl ? undefined : admissionTile.hint} href="/deployments" />
       </div>
 
       {/* Active incidents (SF-020): derived in this browser from verified telemetry and receipts.
@@ -157,11 +157,12 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ label, value, href }: { label: string; value: number | string; href: string }) {
+function StatCard({ label, value, href, hint }: { label: string; value: number | string; href: string; hint?: string }) {
   return (
     <Link href={href} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:border-blue-300 hover:shadow-md transition-all block">
       <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
       <p className="text-3xl font-semibold tracking-tight mt-3 text-slate-900">{value}</p>
+      {hint && <p className="mt-2 text-xs text-gray-500">{hint}</p>}
     </Link>
   );
 }
