@@ -23,6 +23,30 @@ from live_fleet_budget import EXCHANGE_PACKAGE, EXCHANGE, net_gas
 FUNDING = 700_000_000
 
 
+def refresh_effects(saved, request, state, executed):
+    """Fence a readback-failed plan before giving its recovery a new intent label."""
+    for key in ('files', 'rpc', 'owner', 'journal', 'key'):
+        if saved.get(key) != request.get(key):
+            raise ValueError('refresh cannot change the pending export or publisher boundary')
+    if any(intent.get('status') != 'success' for intent in state['intents'].values()):
+        raise ValueError('reconcile unknown/failed publisher intents before refresh')
+    operations = saved.get('operations')
+    if not operations or not request.get('operations') or operations == request['operations']:
+        raise ValueError('refresh requires a distinct explicit operation')
+    verified = []
+    for operation in operations:
+        if operation.get('files', saved['files']) != request['files'] or operation.get('directory', saved.get('directory')) != request.get('directory') or 'marker' in operation:
+            raise ValueError('refresh cannot substitute a different pending operation export')
+        intent = state['intents'].get('site/' + operation['name'])
+        if not intent or intent.get('status') != 'success':
+            raise ValueError('the pending Site transaction is not confirmed successful')
+        result = executed(intent['digest'])
+        if not result or result.get('digest') != intent['digest'] or result.get('effects', {}).get('status', {}).get('status') != 'success':
+            raise ValueError('pending Site effects could not be independently verified')
+        verified.append(intent['digest'])
+    return verified
+
+
 def run(args):
     if not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
         raise RuntimeError('serialized wallet resource required')
@@ -131,7 +155,21 @@ def run(args):
             saved = json.loads(plan.read_text())
             if saved.get('files') != request['files']:
                 raise ValueError('reconcile the pending publication before selecting another release')
-            request = saved
+            if args.operation == 'refresh' and saved.get('operations') != request.get('operations'):
+                verified = refresh_effects(saved, request, state, lambda digest: live.executed(digest, config=wallet))
+                # Archive the original intent and error verbatim; never mark its readback successful.
+                archive = root / ('reconciled-plan-' + hashlib.sha256(plan.read_bytes()).hexdigest() + '.json')
+                if archive.exists():
+                    raise ValueError('refresh archive already exists; inspect recovery before retrying')
+                error = Path(str(plan) + '.error')
+                if error.exists():
+                    error.rename(Path(str(archive) + '.error'))
+                plan.rename(archive)
+                plan.write_text(json.dumps(request))
+                live.evidence['reconciled_site_intents'] = verified
+                live.evidence['archived_pending_plan'] = archive.name
+            else:
+                request = saved
         else:
             plan.write_text(json.dumps(request))
         live.assert_lock()
@@ -168,6 +206,6 @@ if __name__ == '__main__':
     parser.add_argument('--max-spend-mist', type=int, default=800_000_000)
     parser.add_argument('--evidence', required=True)
     parser.add_argument('--resume-evidence', type=Path)
-    parser.add_argument('--operation', choices=['publish', 'update', 'rollback', 'rehearse'], default='rehearse')
+    parser.add_argument('--operation', choices=['publish', 'update', 'rollback', 'refresh', 'rehearse'], default='rehearse')
     parser.add_argument('--add-funding-mist', type=int, default=0)
     run(parser.parse_args())

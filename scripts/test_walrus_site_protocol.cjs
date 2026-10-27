@@ -28,6 +28,16 @@ const P=require('./walrus_site_protocol.cjs');
   assert.deepEqual(P.settle(80,20,{computationCost:'2',storageCost:'3',storageRebate:'50'}),{used:60,cost:0},'refund never replenishes the earlier spend');
   assert.deepEqual(P.settle(80,20,{computationCost:'7',storageCost:'5',storageRebate:'2'}),{used:70,cost:10});
   assert.throws(()=>P.settle(80,20,{}));assert.throws(()=>P.settle(80,20,{computationCost:'21',storageCost:'0',storageRebate:'0'}));
+  const expiredBindings={'/index.html':{sha256:digest,blobId:'expired-old-blob'},'/removed.js':{sha256:'gone'}};
+  const refresh=P.resourcePlan(packed.resources,expiredBindings);
+  assert.deepEqual(refresh.rebind.map(r=>r.path),['/index.html'],'unchanged bytes must rebind to fresh release storage');
+  assert.deepEqual(refresh.removed,['/removed.js']);
+  assert.equal(expiredBindings['/index.html'].blobId,'expired-old-blob','planning preserves original journal evidence');
+  assert.throws(()=>P.resourcePlan([...packed.resources,...packed.resources],expiredBindings),/duplicate/);
+  P.reusableBlob({certified_epoch:0,storage:{end_epoch:'564'}},563);
+  assert.throws(()=>P.reusableBlob({certified_epoch:562,storage:{end_epoch:'563'}},563),/expired/);
+  assert.throws(()=>P.reusableBlob({certified_epoch:null,storage:{end_epoch:'564'}},563),/certification/);
+  console.log('PASS: unchanged resource expiry refresh, removal, duplicate refusal, preserved evidence and certified/unexpired blob preflight');
   console.log('Site pack ranges/SHA256 byte order, tampering/path/symlink refusal and complete pinned API/layout drift checks pass');
  }finally{await fs.rm(root,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1});

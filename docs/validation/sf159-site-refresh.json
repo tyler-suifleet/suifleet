@@ -1,0 +1,96 @@
+{
+  "network": "testnet",
+  "chain": "4c78adac",
+  "frontend_commit": "5a782d05",
+  "publisher_code_commit": "e94439cc34ddfa99e946dfe86df2df350be4701f",
+  "site_id": "0xb1891eab584649b8b19c08fa16fda71351b973bfafef3ab1209874bbd79c7ab4",
+  "site_owner": "0x9f1b6c9c0f3c6c38b071508e269a62897d90950aec72363279795833ec191e39",
+  "finished": "2026-10-27T04:16:22Z",
+  "resources": 129,
+  "routes": 31,
+  "full_readback": true,
+  "publisher_limit_mist": 1000000000,
+  "publisher_lifetime_used_mist": 533165472,
+  "current_publication_net_gas_mist": 48059841,
+  "transactions": [
+    {
+      "digest": "D5QufAW1rAZKigiZA1qiBU1FdV7PMqhqDWjWnx3nNNhK",
+      "status": "success",
+      "net_gas_mist": 1999474,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "115732800",
+        "storageRebate": "114733326",
+        "nonRefundableStorageFee": "11474"
+      },
+      "label": "blob/e9388b9a87c2373d5fbb1fe21ba5a8526680f14d157d9b9eecb9ef38aac119c1/system::reserve_space,coin::destroy_zero,system::register_blob,coin::destroy_zero"
+    },
+    {
+      "digest": "Hmo3jU86f3xcHapR77wz19PXi4zPaGFXRHpaBwoHP5du",
+      "status": "success",
+      "net_gas_mist": 1030696,
+      "gas": {
+        "computationCost": "1000000",
+        "storageCost": "2994400",
+        "storageRebate": "2963704",
+        "nonRefundableStorageFee": "296"
+      },
+      "label": "blob/e9388b9a87c2373d5fbb1fe21ba5a8526680f14d157d9b9eecb9ef38aac119c1/system::certify_blob"
+    },
+    {
+      "digest": "AMN5kfN7oHnmr5HGw6Snb81yRvKWNaJd5uRXPVvhUgXX",
+      "status": "success",
+      "net_gas_mist": 35855822,
+      "gas": {
+        "computationCost": "10500000",
+        "storageCost": "427538000",
+        "storageRebate": "402182178",
+        "nonRefundableStorageFee": "40222"
+      },
+      "label": "site/update/6/807727db0a6ca5ead84a4ee05240e34e77026392cc2beb15eb539c48106134d6"
+    },
+    {
+      "digest": "EYfoSXp2GxKAFVe86dmahu7NZtsLkdgGJL3Qsz5zQuy",
+      "status": "success",
+      "net_gas_mist": 9173849,
+      "gas": {
+        "computationCost": "9170000",
+        "storageCost": "38494000",
+        "storageRebate": "38490151",
+        "nonRefundableStorageFee": "3849"
+      },
+      "label": "site/refresh/6/807727db0a6ca5ead84a4ee05240e34e77026392cc2beb15eb539c48106134d6"
+    }
+  ],
+  "latest_phase": "refresh/6/807727db0a6ca5ead84a4ee05240e34e77026392cc2beb15eb539c48106134d6",
+  "archive_preserved": true,
+  "preview_url": "https://hazardous-archived-minolta-mails.trycloudflare.com",
+  "preview_kind": "temporary HTTPS static export mirror; WSL must remain running",
+  "mobile_browser_check": {
+    "width": 390,
+    "secure_context": true,
+    "slush_option": true,
+    "page_errors": 0,
+    "page_overflow": false,
+    "real_mobile_wallet_signing": false
+  },
+  "archives": [
+    {
+      "name": "reconciled-plan-7ff99472a96b6fd61858fb4c116900c8d5da273dcffd7f01e175a0a331a9f786.json",
+      "sha256": "7ff99472a96b6fd61858fb4c116900c8d5da273dcffd7f01e175a0a331a9f786",
+      "error_preserved": true
+    }
+  ],
+  "pending_plan_remaining": false,
+  "blob_id": "ANUcnLlQKppSvZuRG8ebRRN01Lissy4yqo_7VlUqfTo",
+  "storage_end_epoch": 566,
+  "certified_epoch": 563,
+  "funding_transfer": {
+    "digest": "6GWWNdKyB4QPNVxV1bpBUCuRgYbjQ4DzKPQb5ELANnmL",
+    "funding_mist": 300000000,
+    "gas_mist": 1988000,
+    "status": "success"
+  },
+  "known_sui_gas_total_mist": 50047841,
+  "wal_cost_note": "Storage fees paid from existing publisher WAL; not extracted in this receipt. Funding transfer is retained publisher capital, not a network fee."
+}
