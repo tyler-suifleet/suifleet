@@ -42,7 +42,7 @@ const docPath = (url) => {
 const urls = [guideUrl(), ...Object.keys(GUIDE_SECTIONS).map((section) => guideUrl(section))];
 for (const url of urls) assert.equal(docPath(url), `docs/${GUIDE_FILE}`);
 for (const platform of PLATFORMS) assert.ok(Object.hasOwn(GUIDE_SECTIONS, platform.section));
-for (const section of ['yocto', 'macos', 'linux', 'address', 'manifest', 'config', 'enroll']) assert.ok(Object.hasOwn(GUIDE_SECTIONS, section), section);
+for (const section of ['yocto', 'macos', 'linux', 'address', 'manifest', 'signer', 'config', 'enroll']) assert.ok(Object.hasOwn(GUIDE_SECTIONS, section), section);
 console.log(`PASS: ${urls.length} console guide links resolve to repository docs and headings`);
 
 // 2. The guide's own relative links and anchors resolve.
@@ -114,6 +114,7 @@ for (const variant of ['address', 'enroll']) {
   assert.ok(html.includes('Install the device client'));
   assert.ok(html.includes('Download deployment.json'));
   assert.match(html, /rel="noopener noreferrer"/);
+  assert.ok(hrefs.includes(guideUrl('signer')) && html.includes('/etc/suifleet/signer.toml'), `${variant}: no signer.toml step`);
   if (variant === 'address') {
     for (const command of [COMMANDS.readAddress, COMMANDS.provisionLog, COMMANDS.deriveAddress, COMMANDS.checkConfig]) assert.ok(html.includes(command), command);
     assert.ok(html.includes(ADDRESS_LINE) && html.includes('64 hexadecimal') && html.includes('not your wallet address'));

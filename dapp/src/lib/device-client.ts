@@ -13,6 +13,7 @@ export const GUIDE_SECTIONS = {
   linux: "generic-linux",
   address: "find-the-device-address",
   manifest: "network-manifest-deploymentjson",
+  signer: "signing-service-configuration-signertoml",
   config: "configuration-file",
   enroll: "first-boot-enrollment",
   register: "register-by-address",

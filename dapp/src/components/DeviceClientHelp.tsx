@@ -48,15 +48,16 @@ export function DeviceClientHelp({ variant }: { variant: "address" | "enroll" })
       </p>
       <Commands lines={[COMMANDS.readAddress, COMMANDS.provisionLog, COMMANDS.deriveAddress]} />
       <p>
-        After registering, put the Device and DeviceCap IDs in <code>/etc/suifleet/config.toml</code> beside <code>deployment.json</code>,
-        then check it with <code>{COMMANDS.checkConfig}</code> (<GuideLink section="register">steps</GuideLink>).
+        After registering, install <code>deployment.json</code>, then the DeviceCap ID in <code>/etc/suifleet/signer.toml</code> (<GuideLink section="signer">signing service</GuideLink>, Linux),
+        then both IDs in <code>/etc/suifleet/config.toml</code> last, and check it with <code>{COMMANDS.checkConfig}</code> (<GuideLink section="register">steps</GuideLink>).
       </p>
     </> : <>
       <p>After first boot, the device enrolls itself with its credential media (no address to copy):</p>
       <Commands lines={[COMMANDS.enroll]} />
       <p>
-        It prints the new <code>device_object_id</code> and <code>device_cap_id</code>; write them into <code>/etc/suifleet/config.toml</code> to
-        start the client (<GuideLink section="enroll">first-boot enrollment</GuideLink>, <GuideLink section="config">configuration file</GuideLink>).
+        It prints the new <code>device_object_id</code> and <code>device_cap_id</code>. On Linux, write the cap ID into <code>/etc/suifleet/signer.toml</code> first,
+        then both into <code>/etc/suifleet/config.toml</code> to start the client (<GuideLink section="enroll">first-boot enrollment</GuideLink>,{" "}
+        <GuideLink section="signer">signing service</GuideLink>, <GuideLink section="config">configuration file</GuideLink>).
       </p>
     </>}
     <ManifestDownload />
