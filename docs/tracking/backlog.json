@@ -1075,7 +1075,7 @@
       "key": "SF-044",
       "title": "Configurable concurrent implementation workers per model family",
       "priority": "P1",
-      "area": "infrastructure",
+      "area": "infra",
       "phase": "baseline",
       "kind": "type:infrastructure",
       "depends_on": [],
@@ -3391,6 +3391,392 @@
         "No Mainnet, new production credentials, customer wallet signing, device update or claim of permanent public testnet portal."
       ],
       "validation": "Offline site protocol/wrapper tests and exact-source script checks, effects-checked current testnet update/recovery and full resource readback. Record separate temporary HTTPS preview validation."
+    },
+    {
+      "key": "SF-160",
+      "title": "Show freshly registered enrollment claims as registered, not withdrawn",
+      "priority": "P0",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/enrollment.ts",
+        "dapp/src/app/enrollment/page.tsx",
+        "dapp/scripts"
+      ],
+      "resources": [],
+      "description": "After 'Run pending transaction' registered two claims (0.02 SUI forwarded to each claim address, 0.0462 SUI net), the roster immediately showed both as 'Claim withdrawn \u2014 no longer in the policy: revoked elsewhere, or its registration did not complete' and offered 'Re-register withdrawn claims'. The chain had the claims: the policy row later reads '2 unused claims'. entryStatuses marks any submitted entry 'withdrawn' whenever registeredClaims does not find its dynamic field, so a read served before the registering transaction's effects are visible (or by a lagging replica) turns a paid registration into a failure message that invites a second payment. For a factory line this is the worst class of bug: money left the wallet, the UI says it failed, and the obvious next click spends it again.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Policy 0x34d94d20\u2026c569, registration digest GuDYmrm1\u2026 succeeded (Step 34 of the evaluation journal attached to SF-170). On 0ca16547 the policy select shows '2 unused claims' on a fresh read while the status derivation (entryStatuses/registeredClaims in dapp/src/lib/enrollment.ts) is unchanged.",
+      "acceptance": [
+        "After a registration transaction succeeds, the roster reads policy state at or after that transaction's checkpoint, or reconciles from the transaction's effects/events, before classifying submitted entries; a submitted entry is never shown as withdrawn only because a read predates its registration.",
+        "A submitted entry whose claim cannot yet be observed shows a distinct confirming state with its digest; 'Re-register withdrawn claims' never includes it and the pending-transaction button never re-submits it.",
+        "'Claim withdrawn' appears only when the claim was observed in the policy earlier, or the policy was closed, and the claim is now absent; the detail text says which.",
+        "Offline tests cover an effects-confirmed registration against a stale snapshot, a genuinely withdrawn claim and an interrupted submission; no test mocks a success the chain did not return."
+      ],
+      "validation": "dapp unit tests for enrollment status derivation with stale and confirmed snapshots; make dapp-typecheck and make dapp-build; one testnet claim registration (1 claim, at most 0.03 SUI) under the standing grant showing the correct status without a reload, digest recorded."
+    },
+    {
+      "key": "SF-161",
+      "title": "Remove client/server hydration mismatches from the console pages",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/layout.tsx",
+        "dapp/src/app",
+        "dapp/src/components",
+        "dapp/src/hooks"
+      ],
+      "resources": [],
+      "description": "On main 0ca16547 every console route except Data and Device services throws 'Hydration failed because the server rendered text/HTML didn't match the client. As a result this tree will be regenerated on the client' on load (12 of 14 routes, logged out and connected). React discards the server-rendered tree and renders again, which doubles initial work, flashes content and hides genuine render bugs behind the regenerated tree. The static export must hydrate cleanly.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Headless Chrome re-check on 0ca16547 (dev server, testnet profile) recorded one hydration page error on each of /, /get-started, /devices, /enrollment, /deployments, /rollouts, /components, /firmware, /access, /handover, /settings and /budget; the 2283fc99 build showed none. Texts are in the evaluation journal comment on SF-170.",
+      "acceptance": [
+        "Loading each console route from the production static export produces no hydration warnings or errors in the browser console, logged out and with a connected wallet.",
+        "Values that legitimately differ between server and client (locale dates, wallet state, storage-backed state, network label) render through a mounted/client-only path or an explicitly commented suppressHydrationWarning, not by disabling server rendering wholesale.",
+        "An automated check (Playwright or jsdom) loads every route of the built export and fails on any hydration error; it runs in CI."
+      ],
+      "validation": "make dapp-typecheck, make dapp-build, the new per-route hydration check in CI; manual load of each route in the static export with and without a wallet."
+    },
+    {
+      "key": "SF-162",
+      "title": "Make dashboard tiles count reported health and admitting deployments only",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/page.tsx",
+        "dapp/src/hooks/useFleetHealth.ts",
+        "dapp/src/lib/deployment-control.ts"
+      ],
+      "resources": [],
+      "description": "The dashboard tile 'Devices (healthy)' shows 1 for a registered device that has never reported and that the Devices page labels 'Health unavailable'; when no health reporting is configured the tile falls back to the registered-device count under the 'healthy' label. 'Active deployments' shows 2 while one of the two deployments is paused ('Paused; resume to admit waiting devices'). An on-call engineer reading the headline numbers would believe every device is healthy and every deployment admitting.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Tiles read 'DEVICES (HEALTHY) 1' and 'ACTIVE DEPLOYMENTS 2' on both builds with device lab-gateway-01 'Health unavailable', 'Last seen never' and the 9:46 PM deployment paused (evaluation Step 33; re-check texts on SF-170). dapp/src/app/page.tsx renders devices.length when reported is false and pending.length as active.",
+      "acceptance": [
+        "Without health reporting the tile is labelled as a registered-device count with a 'health not reported' hint and never implies health; with reporting it shows healthy versus total.",
+        "'Active deployments' counts only deployments that can admit devices (not paused, cancelled, expired or complete); paused deployments are shown separately or in the hint.",
+        "Unit tests cover unreported, partially reported and paused cases."
+      ],
+      "validation": "dapp unit tests for the tile derivations; make dapp-typecheck and make dapp-build; manual check against a testnet fleet with one paused deployment."
+    },
+    {
+      "key": "SF-163",
+      "title": "Build staged rollouts from library versions and named cohorts",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/rollouts/page.tsx",
+        "dapp/src/lib/rollout.ts",
+        "dapp/src/lib/rollout-progress.ts",
+        "dapp/src/lib/catalog.ts"
+      ],
+      "resources": [],
+      "description": "'Create a gradual rollout' requires typing component, version, recipe blob ID, artifactSha256 and recipeSha256 by hand, cohorts as space-separated device object IDs, every duration in milliseconds (rate window, bake period, stall timeout) and the failure threshold in basis points. After creation nothing confirms success until the page is reloaded; the Members list shows object IDs instead of device names; 'Check device health and continue' advanced the decision counter from 1 to 2 with Granted still 0 of 1 and no explanation of the outcome. The headline Greengrass-replacement feature currently reads as an internal test harness.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 27\u201330: rollout 0xa909b8f1\u20263b19, create digest J6hPNC4i\u2026, advance digest C7ZxwDtS\u2026. On 0ca16547 the labels are unchanged (component, version, recipe, artifactSha256, recipeSha256, Cohorts, 'Rate window (ms)', 'Bake period (ms)', 'Stall timeout before pause (ms)'), the member line reads 'Cohort 1 \u00b7 0x913cdd67\u2026 \u00b7 Waiting' and the panel 'Active \u00b7 cohort 1 \u00b7 decision 2' with Granted 0 of 1.",
+      "acceptance": [
+        "The form selects a published library version (or a direct upload's recipe) and fills the recipe blob ID and both digests from it; manual entry stays available under an advanced section with digest validation.",
+        "Cohorts are built from device groups and named devices (search, multi-select, reorder) and shown by name with object IDs on demand; the immutable-snapshot semantics are explained next to the builder.",
+        "Durations are entered in seconds, minutes or hours and the failure threshold as a percentage; the exact policy values are shown in a review step before signing.",
+        "Creating a rollout shows a confirmed result (digest and link to the panel) without a reload, and every advance or evaluate decision reports its outcome in words: devices admitted, why none were admitted, and what must happen next.",
+        "Members and decision lists show device names; the manual-approval model ('return here to approve each step') is stated on the create screen."
+      ],
+      "validation": "dapp unit tests for form-to-transaction mapping and outcome messages; make dapp-typecheck and make dapp-build; one testnet rollout created from a library version under the standing grant, digests and cost recorded."
+    },
+    {
+      "key": "SF-164",
+      "title": "Keep rollout decision audits readable from current chain state",
+      "priority": "P1",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/sources/deployment_manager.move",
+        "contracts/tests",
+        "dapp/src/lib/rollout-progress.ts",
+        "dapp/src/lib/event-history.ts",
+        "dapp/src/app/rollouts/page.tsx",
+        "docs/SERVERLESS_FLEET_DATA.md"
+      ],
+      "resources": [],
+      "description": "The rollout panel's Decision audit reads RolloutDecision events by paging listEvents on the public fullnode. Public nodes prune event history: two minutes after creating a rollout the panel reported 'Decision history unavailable: requested data below earliest available; lowest available checkpoint is 394124393', and the same rollout the next day reports lowest available checkpoint 394277063. The audited health gate exists on chain, but operators on the supported public-RPC configuration cannot read their own audit trail, and the persistent 'some history may be missing' status offers nothing they can act on. Under the no-server strategy (SF-137) the audit must be readable without an archival endpoint.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Step 31 and the 0ca16547 re-check (rollout 0xa909b8f1\u20263b19 at decision 2). Reader: fetchRolloutDecisions in dapp/src/lib/rollout-progress.ts (listEvents descending, 20 pages); warnings from dapp/src/lib/event-history.ts.",
+      "acceptance": [
+        "Each rollout's decisions (revision, time, state, cohort, reason, admitted IDs) are readable from current object state or fleet-owned storage, for example a bounded on-chain decision log on the rollout record or a Walrus batch indexed from it, independent of fullnode event retention; contract changes are additive and upgrade-safe.",
+        "The panel shows the full decision history where it exists and states exactly which revisions are unreadable for rollouts created before the change.",
+        "The Data status indicator distinguishes history pruned by this connection from complete history, links to the connection explanation and never stacks duplicate warnings.",
+        "Move tests cover the decision log bounds; dapp tests cover reading and rendering; an upgrade test shows existing rollouts keep working."
+      ],
+      "validation": "make test-contracts, dapp unit tests, make dapp-typecheck and make dapp-build; an automatic testnet upgrade and rollout run under the standing grant that reads the audit after the fullnode's lowest checkpoint has advanced past the decision."
+    },
+    {
+      "key": "SF-165",
+      "title": "Choose, show and extend a release's storage period inside the publish flow",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/components/ComponentPublisher.tsx",
+        "dapp/src/components/GreengrassImport.tsx",
+        "dapp/src/components/FleetStorageChoice.tsx",
+        "dapp/src/lib/walrus.ts",
+        "dapp/src/app/firmware/page.tsx",
+        "dapp/src/app/components/page.tsx"
+      ],
+      "resources": [],
+      "description": "Publishing a version never asks how long the release must stay downloadable. The wallet-paid path silently uses the build's NEXT_PUBLIC_WALRUS_EPOCHS (5 epochs, about 5 days on testnet), the review step says nothing about expiry, and the success message prints 'storage expires at epoch N' together with a literal 'walrus extend --blob-obj-id \u2026 --epochs-extended 5' command-line instruction the app never introduced. A device that comes online after expiry cannot fetch the update, and the only remedy is a tool outside the product.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Step 20: version 0x5fc4aea7\u202612c1 with blobs expiring at epoch 568. On 0ca16547 wizard steps 2 and 3 still contain no storage-period field or expiry notice for wallet-paid uploads; ComponentPublisher still emits storage warnings and renewalCommand from dapp/src/lib/walrus.ts; only the fleet-paid FleetStorageChoice shows retention.",
+      "acceptance": [
+        "The publish wizard, the Greengrass import and the Deploy component upload show the storage period in days with its price, defaulting from fleet settings where configured, and let the operator change it before signing; the review step states the expiry date.",
+        "Library and deployment screens show each version's expiry and warn ahead of it (for example 7 days before), including for versions still targeted by desired state or active deployments.",
+        "Extending storage is an in-app action (wallet-paid or fleet-paid) and no customer screen prints a command-line instruction.",
+        "Offline tests cover the period and price computation, the warnings and the extend transaction builder."
+      ],
+      "validation": "dapp unit tests; make dapp-typecheck and make dapp-build; one testnet publish with a chosen period plus one in-app extension under the standing grant, WAL and SUI cost recorded."
+    },
+    {
+      "key": "SF-166",
+      "title": "Publish through alternative Walrus publishers when the configured one fails",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/walrus.ts",
+        "dapp/src/lib/deployment-manifest.ts",
+        "dapp/src/lib/constants.ts",
+        "dapp/src/components/ComponentPublisher.tsx",
+        "dapp/src/components/FleetSettings.tsx",
+        "docs/DEPLOYMENT_MANIFEST.md",
+        "scripts/publish.py"
+      ],
+      "resources": [],
+      "description": "Every upload goes to the single publisher URL in the deployment manifest. During the evaluation the public testnet publisher (publisher.walrus-testnet.walrus.space) returned HTTP 500 'could not find WAL coins with sufficient balance'; the wizard printed the raw JSON body and stopped, with no in-app way to choose another publisher. Firmware distribution was impossible until the deployment manifest was edited by hand on the vendor side. Other public publishers answered at the same time (one succeeded, two returned 502).",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 16\u201319. On 0ca16547 the manifest still carries one walrus.publisher_url and one aggregator_url (profiles/seal-testnet/frontend.env); Fleet settings has no storage endpoint control; the fleet-paid SDK path (dapp/src/lib/fleet-upload.ts) needs a fleet_storage deployment that the hosted testnet fleet lacks (SF-173).",
+      "acceptance": [
+        "The deployment manifest accepts an ordered list of publisher and aggregator URLs; uploads fail over to the next publisher on 5xx or network errors and reads fail over across aggregators, recording which endpoint served each blob; single-URL manifests keep working.",
+        "Publisher failures are shown in plain language (what failed, which endpoint, what the operator can do) with the raw response under technical details.",
+        "An operator can add a publisher URL for the session or the fleet from the console, validated and stored without rebuilding the app, and the fleet-paid SDK path is chosen automatically when fleet storage is configured.",
+        "Offline tests cover failover order, exhausted publishers and error rendering; no test mocks a success the publisher did not return."
+      ],
+      "validation": "dapp unit tests with simulated publisher responses; make dapp-typecheck and make dapp-build; one testnet publish through a secondary publisher under the standing grant."
+    },
+    {
+      "key": "SF-167",
+      "title": "Accept canonical Greengrass recipe casing and report every import finding at once",
+      "priority": "P2",
+      "area": "compatibility",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/lib/greengrass-recipe.ts",
+        "dapp/src/components/GreengrassImport.tsx",
+        "dapp/scripts",
+        "docs/GREENGRASS_COMPATIBILITY.md"
+      ],
+      "resources": [],
+      "description": "The Greengrass importer rejects recipes written the way AWS documents them: lifecycle keys must be lowercase install/run/shutdown (AWS examples use Install/Run/Shutdown) and the artifact key must be Uri (AWS uses URI). Findings arrive one layer per check: casing and configuration first, then configuration interpolation and unbound s3:// URIs, so a typical recipe needs three check cycles. Rejecting bootstrap, startup and recover with guidance is acceptable; the casing rule makes every existing recipe require hand editing.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 18\u201319. On 0ca16547 the same two-manifest recipe is 'Rejected' with unknown-lifecycle-step ('Lifecycle step names are exact lowercase install, run or shutdown'), unsupported-artifact-key ('Artifacts may contain only Uri, Unarchive, Permission, Digest and Algorithm') and configuration-without-command.",
+      "acceptance": [
+        "Lifecycle step names and artifact keys are matched case-insensitively as AWS does (Install/Run/Shutdown, URI/Uri), with the canonical spelling shown in the translated manifest; duplicates differing only by case are rejected with a message.",
+        "One 'Check translation' reports all findings for the recipe (structure, casing, configuration, interpolation, artifacts) in a single list, so a correct recipe needs at most one artifact-binding round.",
+        "docs/GREENGRASS_COMPATIBILITY.md and the in-app guidance state the accepted spellings; translation tests gain AWS-cased fixtures."
+      ],
+      "validation": "greengrass-recipe unit tests with AWS-documented recipe fixtures; make dapp-typecheck and make dapp-build."
+    },
+    {
+      "key": "SF-168",
+      "title": "Deploy library versions as a group's desired version",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "ota",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/firmware/page.tsx",
+        "dapp/src/lib/catalog.ts",
+        "contracts/sources/desired_state.move",
+        "contracts/sources/component_catalog.move",
+        "contracts/tests",
+        "suifleet-edge/src",
+        "scripts/test_ota.py"
+      ],
+      "resources": [],
+      "description": "The direct Deploy component route sets a group's desired version by default (devices converge, late joiners receive it, removed devices stop following), but 'Deploy this version' from the software library says 'Catalog versions deploy one-shot; desired state does not select them yet'. The publish-once/deploy-many route therefore loses the convergence model that makes group deployments safe, which is backwards for operators who keep an immutable library.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 21\u201322 (deployment digest 8vigsDjA\u2026). On 0ca16547 /firmware/?componentVersion=0x5fc4aea7\u202612c1 still shows the one-shot note (dapp/src/app/firmware/page.tsx).",
+      "acceptance": [
+        "Desired state can reference a catalog version with multi-platform manifests so a group converges on a library version exactly as on a direct upload; the daemon selects its platform manifest from the version.",
+        "The library deploy screen offers the desired-state checkbox with the same semantics and copy as the direct route; one-shot stays available.",
+        "Contract and daemon changes are additive and upgrade-safe; Move, daemon and simulator tests cover catalog-backed desired state, platform selection and supersession."
+      ],
+      "validation": "make test-contracts, make edge-test, make test-ota, make dapp-typecheck and make dapp-build; automatic testnet acceptance of a catalog-backed desired-state deployment under the standing grant."
+    },
+    {
+      "key": "SF-169",
+      "title": "Show new operators where to get, install and configure the device client",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/components/FirstRun.tsx",
+        "dapp/src/lib/onboarding.ts",
+        "dapp/src/app/enrollment/page.tsx",
+        "dapp/src/app/devices/page.tsx",
+        "docs/YOCTO_PACKAGING.md",
+        "docs/MACOS_RUNTIME.md",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "Nothing in the console says where the SuiFleet device client comes from, how to install it or what it needs. Get started says 'Start the SuiFleet client on the device and copy the device address it displays'; the register form wants 'the device's own address from the daemon'; Enrollment is the first place the binary name and 'suifleet --enroll' appear. A prospect cannot complete the first-device flow without leaving the product to search for documentation the app never links.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 6, 11 and 13; on 0ca16547 the FirstRun copy is unchanged in substance and Get started, Devices and Enrollment link to no download or installation guide.",
+      "acceptance": [
+        "Get started, the register-by-address form and Enrollment link to a maintained 'Install the device client' guide covering the supported platforms (Yocto image and recipe, macOS package, generic Linux), the config file, the network manifest and first-boot enrollment, with short exact commands shown in-app.",
+        "The device-address step explains how the client prints the address and what the operator should see.",
+        "Links resolve to published documentation (repository docs until the SF-172 site exists) and a link-check test covers them."
+      ],
+      "validation": "link check in CI, make dapp-typecheck and make dapp-build; a first-device walkthrough by someone without repository access, recorded in the issue."
+    },
+    {
+      "key": "SF-170",
+      "title": "Console polish items from the 2026-10-26 outsider evaluation",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/deployments/page.tsx",
+        "dapp/src/lib/telemetry.ts",
+        "dapp/src/app/devices/page.tsx",
+        "dapp/src/app/enrollment/page.tsx",
+        "dapp/src/components/FirstRun.tsx",
+        "dapp/src/components/ComponentPublisher.tsx",
+        "dapp/src/hooks/useDevices.ts"
+      ],
+      "resources": [],
+      "description": "Smaller defects met while walking the console as a first-time operator. Verified on 0ca16547: the deployment schedule editor labels its date pickers 'not before ms (UTC)', 'expires ms (UTC)', 'window start ms (UTC)' and 'window end ms (UTC)'; the device detail panel prints an environment variable name ('Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health', dapp/src/lib/telemetry.ts); the All deployments table's first column is blank because the update ID sits inside a collapsed 'Technical details' element. Observed on 2283fc99 and to re-verify: a failed registration's error stays on Get started after a successful refresh; the enrollment policy select omits a policy just created until reload; a roster Check run before groups finish loading rejects rows with 'group \u2026 is not one of your groups'; a created group appears only after several seconds with no pending state, so a second click creates a duplicate; the publish wizard lets an unconfirmed public upload reach Review before failing, and after going back the file input shows no file although the file is still staged.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation journal Steps 7, 9, 11, 13, 16, 23 and 24 and the 0ca16547 re-check texts, both attached as a comment on this issue.",
+      "acceptance": [
+        "Schedule editor labels name the field in words with the timezone (for example 'Not before (UTC)'); units never appear beside date pickers and placeholders are examples.",
+        "No customer-facing string contains an environment variable name, internal document path or ticket ID; a test scans rendered copy of the built app for NEXT_PUBLIC_, docs/ and SF-0 patterns.",
+        "Lists reflect a successful transaction immediately through an optimistic row or a pending state; actions that would duplicate are disabled while pending; stale error messages clear on the next successful action; roster Check waits for groups to load.",
+        "The publish wizard validates the delivery confirmation on step 2 and keeps the staged file visible when returning to that step."
+      ],
+      "validation": "dapp unit tests for the touched components; make dapp-typecheck and make dapp-build; a manual pass through the listed screens recorded in the issue."
+    },
+    {
+      "key": "SF-171",
+      "title": "Assign many devices to groups in one transaction",
+      "priority": "P2",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/devices/page.tsx",
+        "dapp/src/hooks/useDevices.ts",
+        "dapp/src/lib/fleet-protocol.ts",
+        "contracts/sources/device_group.move",
+        "contracts/tests"
+      ],
+      "resources": [],
+      "description": "Group membership changes happen one device per wallet approval in the Manage group dialog; the only bulk route is the default group at enrollment. Moving or adding hundreds of already-enrolled devices (a new site, a new canary set) is not viable one transaction at a time.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Step 10 (member add digest 9enxVruL\u2026); the dialog is unchanged on 0ca16547.",
+      "acceptance": [
+        "The Devices page supports selecting devices (filter, search, or a pasted list of serials or names) and adding them to or removing them from one or more groups in batched transactions with a bounded size, after a review of the changes and the number of approvals needed.",
+        "Partial failures report exactly which devices changed; nothing is retried blindly.",
+        "Contract entry points stay additive; Move and dapp tests cover batch limits and architecture mismatches."
+      ],
+      "validation": "make test-contracts, dapp unit tests, make dapp-typecheck and make dapp-build; one testnet batch of at least three devices under the standing grant."
+    },
+    {
+      "key": "SF-172",
+      "title": "Launch the suifleet.io landing site with app link, guided walkthrough and videos",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "site",
+        "docs/OPERATIONS.md",
+        "docs/SERVERLESS_FLEET_DATA.md",
+        "BUSINESS_PLAN.md",
+        ".github/workflows"
+      ],
+      "resources": [],
+      "description": "SuiFleet has no public entry point beyond the hosted console. Prospects need a landing site at suifleet.io that explains the product, links to the app, carries a step-by-step guide with short videos (sign in, fund, register a device, enroll a batch, publish a version, deploy to a group, run a staged rollout), documentation, pricing from the business plan, security and custody notes, and contact details. This follows the usual structure for Sui and other crypto applications: a static marketing site on the apex domain, the app on app.<domain>, documentation on docs.<domain>, and no application server.",
+      "evidence": "User request on 2026-10-27 after the outsider evaluation; the evaluation found no in-product path to documentation or to the device client (SF-169).",
+      "acceptance": [
+        "A static site source (for example under site/) builds reproducibly with pages for home (value proposition, 'Launch app'), how it works, the guide with embedded videos, pricing, documentation entry, security and custody, and contact/privacy; no tracking scripts without consent.",
+        "Each guide step matches the current console build and has a screencast recorded on testnet with no credentials or keys visible, reproducible from a checklist or script kept in the repository.",
+        "The hosting and DNS plan for suifleet.io, app.suifleet.io and docs.suifleet.io is documented, including whether the site is served from conventional static hosting or Walrus Sites, and the release process joins the release runbook.",
+        "Build and link checks run in CI; publication to the live domain requires explicit user authorization and is recorded separately."
+      ],
+      "validation": "site build and link check in CI; manual review of every page and video; no production publication without the user's go-ahead."
+    },
+    {
+      "key": "SF-173",
+      "title": "Deploy the complete fleet stack on the hosted testnet evaluation fleet",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "profiles/seal-testnet",
+        "scripts/redeploy.sh",
+        "scripts/publish.py",
+        "deployments",
+        "docs/TESTNET.md",
+        "docs/DEPLOYMENT_MANIFEST.md"
+      ],
+      "resources": [],
+      "description": "The hosted testnet console (seal-testnet profile) runs a deployment whose manifest has only the registry object. Network budget says 'Shared fleet funding is not available in this setup', Data and the publish wizard say 'Prepaid Walrus storage is not configured for this build (no fleet_storage package)', Device services says 'This fleet is not connected to the reporting service', Fleet settings cannot be saved ('not available in this fleet configuration') and health never reports. A prospect evaluating from the hosted app sees roughly a third of the product switched off.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Steps 4, 15, 32 and 33; on 0ca16547 the profiles/seal-testnet/frontend.env manifest lists registry as its only shared object and the quoted copy appears on /budget, /data, /services and /settings.",
+      "acceptance": [
+        "The evaluation fleet on testnet has fleet budget, fleet storage, fleet settings, data config and health reporting deployed and recorded in its deployment manifest, under the standing testnet grant and spend limits; package publishes are cached and identical code is never republished.",
+        "The hosted console points at that manifest and every 'not configured for this build' message disappears on the evaluation fleet; a documented script reproduces the setup.",
+        "Funding levels in SUI and WAL and a top-up procedure for the evaluation fleet are documented with costs recorded; no mainnet or production credentials are involved."
+      ],
+      "validation": "scripts/redeploy.sh dry run, then a testnet publish with effects evidence; manual pass through Budget, Data, Device services, Fleet settings and publishing on the hosted console; costs recorded in docs/TESTNET.md."
+    },
+    {
+      "key": "SF-174",
+      "title": "Recurring maintenance windows for deployments",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "extended",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/deployments/page.tsx",
+        "dapp/src/lib/deployment-control.ts",
+        "contracts/sources/deployment_manager.move",
+        "suifleet-edge/src",
+        "docs/GREENGRASS_PARITY_AUDIT.md"
+      ],
+      "resources": [],
+      "description": "Deployments support a single one-off window (window start and end) plus not-before, expiry and advance notice. Fleet operators with site rules such as 'Sundays 02:00\u201304:00 local time' need recurring windows interpreted in the site's timezone. Greengrass does not offer this natively, so this is an opportunity rather than parity; it is recorded from the evaluation for product review before any implementation is scheduled.",
+      "evidence": "2026-10-26 UI-only evaluation at main 2283fc99 (seal-testnet profile, agent wallet 0x0e4994\u20266965); re-checked 2026-10-27 at main 0ca16547. Evaluation Step 24; the schedule editor is unchanged on 0ca16547.",
+      "acceptance": [
+        "A product decision is recorded (scope, per-device timezone source, on-chain representation) before implementation starts; if declined, the ticket closes with the reason in the business or design documents.",
+        "If approved: a deployment can carry a recurring weekly window with a timezone that the daemon evaluates locally and reports as a deferral reason; the editor shows the next three admission windows; contract and daemon changes are additive and tested."
+      ],
+      "validation": "Move, daemon and simulator tests for recurring window evaluation; make dapp-typecheck and make dapp-build."
     }
   ]
 }
