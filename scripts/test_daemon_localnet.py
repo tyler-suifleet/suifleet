@@ -113,6 +113,11 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                     return bool(gas.get("gasCoins")) or int(gas.get("addressMistBalance") or 0) > 0
                 return bool(gas)
             wait_for(funded, "local faucet did not supply gas")
+            # Current package verification/storage can exceed the historical
+            # 500M budget on the pinned disposable chain. Reserve 1.5 SUI
+            # with a separately funded local-only fixture wallet.
+            for _ in range(2):
+                client("faucet", "--url", faucet_url, json_output=False)
             chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
 
             def transaction(*ptb):
@@ -137,7 +142,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 for name in names:
                     (contracts / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources/{name}"], cwd=ROOT))
             published = client("test-publish", contracts, "--build-env", "testnet", "--pubfile-path",
-                               root / "Pub.local.toml", "--gas-budget", "500000000", "--silence-warnings")
+                               root / "Pub.local.toml", "--gas-budget", "1500000000", "--silence-warnings")
             assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
             package = next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
             registry = created(published, "::device_registry::DeviceRegistry")[0]
@@ -187,7 +192,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 shutil.copytree(ROOT / "contracts/sources", contracts / "sources", dirs_exist_ok=True)
                 upgraded = client("test-upgrade", contracts, "--build-env", "testnet", "--pubfile-path",
                                   root / "Pub.local.toml", "--upgrade-capability", upgrade_cap,
-                                  "--gas-budget", "500000000", "--silence-warnings")
+                                  "--gas-budget", "1500000000", "--silence-warnings")
                 assert upgraded["effects"]["status"]["status"] == "success", upgraded["effects"]["status"]
                 package = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
                 manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
