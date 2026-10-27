@@ -15,7 +15,7 @@ export default function DashboardPage() {
   const { data: devices = [], isLoading: dl } = useDevices();
   const { data: deployments = [], isLoading: depl } = useDeployments();
   const { data: groups = [], isLoading: gl } = useGroups();
-  const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId).map((d) => d.objectId));
+  const { data: health = {} } = useFleetHealth(devices.filter((d) => d.ownerCapId || d.managed).map((d) => d.objectId));
   const healthTile = deviceHealthTile(devices.map(d => d.objectId), health);
   const now = useNow(5_000);
   const admissionTile = deploymentTile(deployments, now);

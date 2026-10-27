@@ -38,7 +38,7 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const React = appRequire("react");
 const { renderToStaticMarkup } = appRequire("react-dom/server");
 let reports = {};
-const devices = [{ objectId: "a", name: "Never reported", ownerCapId: "cap" }];
+let devices = [{ objectId: "a", name: "Never reported", ownerCapId: "cap" }];
 const Dashboard = loader({
   "@/hooks/useDevices": { useDevices: () => ({ data: devices }) },
   "@/hooks/useDeployments": { useDeployments: () => ({ data: [
@@ -46,7 +46,7 @@ const Dashboard = loader({
     deployment({ state: 1 }, { deploymentId: "paused", timestampMs: 0, targetGroups: [], targetDevices: ["a"] }),
   ] }) },
   "@/hooks/useGroups": { useGroups: () => ({ data: [] }) },
-  "@/hooks/useFleetHealth": { useFleetHealth: () => ({ data: reports }), useNow: () => 100 },
+  "@/hooks/useFleetHealth": { useFleetHealth: ids => ({ data: Object.fromEntries(ids.filter(id => reports[id]).map(id => [id, reports[id]])) }), useNow: () => 100 },
   "@/hooks/useFleetAlerts": { useFleetAlerts: () => ({ status: "available", items: [] }) },
   "@/lib/alerts": { historicalFailures: () => 0 },
   "@/lib/device-services": { deviceHref: () => "/devices" },
@@ -66,4 +66,11 @@ reports = { a: health("healthy") };
 markup = renderToStaticMarkup(React.createElement(Dashboard));
 assert.match(markup, /Devices \(healthy \/ total\)/);
 assert.match(markup, /1 \/ 1/);
+// Named-fleet inventory has management authority without an owner capability.
+devices = [{ objectId: "a", name: "Managed fleet device", managed: true }];
+markup = renderToStaticMarkup(React.createElement(Dashboard));
+assert.match(markup, /Devices \(healthy \/ total\)/);
+assert.match(markup, /1 \/ 1/);
+assert.doesNotMatch(markup, /Health not reported/);
+console.log("PASS: managed fleet health is requested without an owner capability");
 console.log("PASS: actual dashboard renders registered/unreported, healthy/total and one admitting + one paused deployment");
