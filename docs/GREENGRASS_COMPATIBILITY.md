@@ -61,13 +61,13 @@ The translator is [`dapp/src/lib/greengrass-recipe.ts`](../dapp/src/lib/greengra
 
   It prints the result as JSON, with guidance for every reason and reported difference. It exits with 0 when the recipe translates, 1 when it is rejected and 2 on a usage error.
 
-The input is one JSON or YAML recipe document, plus an operator-supplied artifact binding: `Uri` → `{artifactBlobId, artifactSha256}`. A Walrus upload must be authenticated by SHA-256. AWS `s3://` URIs are never fetched. The output is one of two outcomes:
+The input is one JSON or YAML recipe document, plus an operator-supplied artifact binding: `URI` → `{artifactBlobId, artifactSha256}`. A Walrus upload must be authenticated by SHA-256. AWS `s3://` URIs are never fetched. The output is one of two outcomes:
 
 - `translate`, with:
   - the ordered native catalog manifests `{os, arch, recipe}`;
   - the indexes of omitted manifests;
   - `informational`, the reported differences from AWS behaviour. The dApp requires the operator to acknowledge these before it uploads anything.
-- `reject`, which lists every reason, each with migration guidance.
+- `reject`, which lists every reason, each with migration guidance. Every manifest is checked in full, so one check reports every finding at once: structure, letter case, configuration, interpolation and artifacts. Only findings that need the bound upload, such as `artifact-digest-mismatch`, can appear after the operator binds the listed artifacts, so a correct recipe needs at most one artifact-binding round. Parse errors (below) are reported before translation.
 
 Either outcome may also carry:
 
@@ -83,7 +83,7 @@ The earlier `defer` outcome is gone: SF-015 and SF-027 have merged, and the case
 - tags, anchors and aliases, directives, non-string keys, and non-finite or unsafe numbers;
 - multiple documents, and syntax errors.
 
-Field names are exact: Greengrass's case variants, such as `Install`, are rejected as unknown, never guessed.
+**Letter case.** As in AWS, lifecycle step names, step keys and artifact keys are matched case-insensitively. The AWS-documented `Install`/`Run`/`Shutdown`, `URI`, `Script` and `RequiresPrivilege` are accepted, as are `install`, `Uri` or any other casing, and the translated manifest uses the canonical native spelling (lowercase `install`, `run`, `shutdown`). Two keys in one object that differ only in case, such as `Install` and `install` or `URI` and `Uri`, are rejected (`case-duplicate-key`), never resolved by picking one. All other field names (top-level, manifest, `Platform` and `ComponentDependencies` keys) are exact, and unknown fields are rejected, never ignored.
 
 | AWS field | Rule |
 |---|---|
@@ -95,13 +95,13 @@ Field names are exact: Greengrass's case variants, such as `Install`, are reject
 | `accessControl` | Rejected (`ipc-access-control`); the equivalent operator ACL is reported. See [Configuration and permissions](#configuration-and-permissions) |
 | `ComponentDependencies` | Every name is kept as given, including `__proto__`. Native comparator grammar; `DependencyType` must be HARD or SOFT. Every dependency becomes native HARD (the default), also AWS SOFT: AWS installs and starts both types first and SOFT only drops restart coupling, while a native SOFT dependency may be omitted when unavailable. The `ComponentDependencies` difference is reported: no AWS HARD restart coupling (a dependent is not restarted or stopped when a dependency restarts, errors or is replaced), and a dependent still starts if a dependency fails to become ready. x-ranges, hyphen ranges and `\|\|` are rejected. AWS-managed names (`aws.greengrass.*`, `aws.iot.*`, `variant.*`) are classified with the SF-038 catalog. A `replace` (the daemon provides the function, for example `aws.greengrass.Nucleus`) is dropped and reported. Every other classification is rejected (`aws-managed-dependency`) and reported in `managed_dependencies` |
 | `Manifests[].Platform` | `os`/`architecture` exact or `*` only; `amd64`→`x86_64`. Regex, `architecture.detail`, `runtime` and custom keys are rejected. Windows/macOS/x86 manifests are omitted and reported. No supported manifest, or a duplicate pair, is rejected |
-| `Manifests[].Artifacts` | Exactly one bound artifact. `Unarchive` other than `NONE`, or non-default `Permission` (Read `OWNER`, Execute `NONE`), is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
-| `install`, `run`, `shutdown` | String or `{Script}` (with `RequiresPrivilege: false` at most), mapped to the native command of the same name. Each is reported; see [Reported differences](#reported-differences). `shutdown` without `run` is rejected. An empty or whitespace-only script is rejected (`empty-step`) |
+| `Manifests[].Artifacts` | Exactly one bound artifact, with keys `URI`, `Unarchive`, `Permission` (`Read`, `Execute`), `Digest` and `Algorithm` in any letter case. `Unarchive` other than `NONE`, or non-default `Permission` (Read `OWNER`, Execute `NONE`), is rejected. An AWS `Digest` must be SHA-256 and equal the binding |
+| `install`, `run`, `shutdown` (any case, for example `Install`) | String or `{Script}` (with `RequiresPrivilege: false` at most), mapped to the native command of the same name. Each is reported; see [Reported differences](#reported-differences). `shutdown` without `run` is rejected. An empty or whitespace-only script is rejected (`empty-step`) |
 | A manifest with neither `install` nor `run` | Rejected (`no-lifecycle-command`). Natively it would hand the artifact to the platform updater |
-| `bootstrap`, `startup`, `recover`, `uninstall` | Rejected: no native equivalent |
+| `bootstrap`, `startup`, `recover`, `uninstall` (any case) | Rejected with guidance: no native equivalent |
 | Step `Timeout`, `Setenv`, `Lifecycle.Setenv`, `RequiresPrivilege` other than `false` (including the string `"true"`), `Skipif`, `BootstrapOnRollback` | Rejected |
 | Global `Lifecycle` / `Selections` | Rejected |
-| `{artifacts:path}/<Uri basename>` | Becomes `{artifact}`. Any other `{artifacts:…}` use, including `decompressedPath`, is rejected |
+| `{artifacts:path}/<URI basename>` | Becomes `{artifact}`. Any other `{artifacts:…}` use, including `decompressedPath`, is rejected |
 | `{work:path}` | Becomes `{work}` in `run`/`shutdown`; rejected in `install` |
 | `{configuration:/pointer}` | Rejected. Native commands receive the whole configuration as the `{configuration}` file, never inline values |
 | `{dep:…:…}`, `{iot:thingName}`, `{kernel:rootPath}`, unknown namespaces | Rejected. No other identity is substituted |
