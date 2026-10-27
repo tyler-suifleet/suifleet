@@ -332,3 +332,29 @@ historical, not exact-head evidence. No migration. Hosted CI and automatic Testn
 are pending on the updated head and were not watched or polled. Coordinator gates
 and fresh independent review remain required. Physical, actual-mainnet, manual
 real-wallet and production-provider acceptance remains unrun in #32/#159.
+
+## Page-test tracking base integration (2026-10-27)
+
+Integrated snapshot/current main `c4c0805c7abd8cfbfbf0d5e0df4a6f285b8da259`
+without conflicts. Upstream changes only backlog/publication records. Supplied
+independent feedback reports no unresolved source/security findings or threads;
+no additional functional repair or migration was necessary.
+
+Checks after integration:
+
+- Pinned network-none container command above, `make dapp-typecheck && make
+  dapp-build`: PASS, including offline prerequisites, TypeScript and static export.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_live_release_storage.py`: 3 PASS; same with
+  `test_tunneling_process_scan.py`: 2 PASS.
+- `make test-tracking`: 10 PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS with chain/wallet/storage fixtures.
+- `git diff --check` and snapshot-base ancestry: PASS.
+
+No new Move, daemon/systemd or public-network run. Prior Testnet receipts remain
+historical, not new exact-head evidence. Hosted CI and automatic Testnet remain
+pending on the pushed head and were not watched or polled. Coordinator gates and
+fresh independent review remain required. Physical, actual-mainnet, manual
+real-wallet and production-provider acceptance remains unrun in #32/#159.
