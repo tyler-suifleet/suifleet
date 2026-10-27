@@ -128,15 +128,18 @@ export async function protect(plaintext: Uint8Array, kind: BlobKind, sha256: str
 }
 
 class TransientPublisherError extends Error {}
+class PublisherHttpError extends Error {
+  constructor(public status: number, body: string) { super(`Walrus upload failed: HTTP ${status} ${body}`); }
+}
 class UploadCancelledError extends Error {}
 export class PublisherError extends Error {
-  constructor(public endpoint: string, public details: string) {
-    super(`Upload to ${endpoint} failed. Try again or add another publisher in Storage endpoints.`);
+  constructor(public endpoint: string, public details: string, reason = "publisher response or connection error") {
+    super(`Upload to ${endpoint} failed (${reason}). Try again or add another publisher in Storage endpoints.`);
   }
 }
 let sessionPublishers: string[] = [];
 const sessionKey = `suifleet:publishers:${NETWORK}:${WALRUS_PUBLISHER}`;
-function sessionEndpoints(): string[] {
+export function sessionEndpoints(): string[] {
   if (typeof sessionStorage === "undefined") return sessionPublishers;
   try {
     const saved: unknown = JSON.parse(sessionStorage.getItem(sessionKey) ?? "[]");
@@ -157,6 +160,12 @@ export function addSessionPublisher(value: string): string {
   return url;
 }
 
+export function removeSessionPublisher(value: string): void {
+  const next = sessionEndpoints().filter(url => url !== value);
+  if (typeof sessionStorage !== "undefined") sessionStorage.setItem(sessionKey, JSON.stringify(next));
+  sessionPublishers = next;
+}
+
 
 // Preserve the existing default Testnet failover for legacy single-URL manifests.
 // Explicit ordered lists and session overrides select their own routes.
@@ -169,7 +178,8 @@ const TESTNET_PUBLISHERS = [
 async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
   const defaults = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
     ? TESTNET_PUBLISHERS : [WALRUS_PUBLISHER];
-  const publishers = [...new Set([...sessionEndpoints(), ...(WALRUS_PUBLISHERS ?? defaults)])];
+  const overrides = sessionEndpoints();
+  const publishers = [...new Set([...overrides, ...(WALRUS_PUBLISHERS ?? defaults)])];
   const failures: string[] = [];
   // Bound fallback attempts, allowing transfer time at 128 KiB/s plus two
   // minutes for certification. Explicit custom/mainnet routes retain no deadline.
@@ -180,10 +190,15 @@ async function uploadBlob(body: Uint8Array, contentType: string, owner: string |
       return { ...storage, publisherUrl: publisher };
     } catch (error) {
       // Content-addressed bytes are unchanged, and public publishers pay for
-      // storage. Never replay a wallet transaction or retry malformed success.
+      // storage. Never replay a wallet transaction; only session overrides may
+      // fall through after a rejected request or malformed response.
       if (error instanceof UploadCancelledError) throw error;
       failures.push(`${publisher}: ${error instanceof Error ? error.message : String(error)}`);
-      if (!(error instanceof TransientPublisherError) || index === publishers.length - 1) throw new PublisherError(publisher, failures.join("\n"));
+      if ((!(error instanceof TransientPublisherError) && !overrides.includes(publisher)) || index === publishers.length - 1) {
+        const reason = error instanceof PublisherHttpError ? `HTTP ${error.status}`
+          : error instanceof TransientPublisherError ? "publisher unavailable or network failure" : "invalid publisher response";
+        throw new PublisherError(publisher, failures.join("\n"), reason);
+      }
     }
   }
   throw new Error("No Walrus publisher configured");
@@ -208,7 +223,7 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
       request.ontimeout = () => reject(new TransientPublisherError("Walrus upload timed out"));
       request.onload = () => {
         try {
-          if (request.status < 200 || request.status >= 300) throw new (request.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${request.status} ${request.responseText}`);
+          if (request.status < 200 || request.status >= 300) throw request.status >= 500 ? new TransientPublisherError(`Walrus upload failed: HTTP ${request.status} ${request.responseText}`) : new PublisherHttpError(request.status, request.responseText);
           const storage = parseStorage(JSON.parse(request.responseText), owner);
           progress({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
           resolve(storage);
@@ -235,7 +250,8 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
   }
 
   if (!res.ok) {
-    throw new (res.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    throw res.status >= 500 ? new TransientPublisherError(`Walrus upload failed: HTTP ${res.status} ${body}`) : new PublisherHttpError(res.status, body);
   }
   const storage = parseStorage(await res.json(), owner);
   progress?.({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
@@ -287,11 +303,12 @@ export const blobReadEndpoints = new Map<string, string>();
 export async function fetchBlob(blobId: string, init?: RequestInit): Promise<Response> {
   let last: Response | undefined;
   let uncertain = false;
-  for (const endpoint of WALRUS_AGGREGATORS ?? [WALRUS_AGGREGATOR]) {
+  for (const endpoint of new Set([...(WALRUS_AGGREGATORS ?? []), WALRUS_AGGREGATOR].filter(Boolean))) {
     init?.signal?.throwIfAborted();
     try {
-      const deadline = AbortSignal.timeout(30_000);
-      const response = await fetch(`${endpoint}/v1/blobs/${encodeURIComponent(blobId)}`, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline });
+      // Respect the caller's whole-transfer budget, including body reads.
+      const signal = init?.signal ?? AbortSignal.timeout(30_000);
+      const response = await fetch(`${endpoint}/v1/blobs/${encodeURIComponent(blobId)}`, { ...init, signal });
       if (response.ok) {
         if (blobReadEndpoints.size >= 256) blobReadEndpoints.delete(blobReadEndpoints.keys().next().value!);
         blobReadEndpoints.set(blobId, endpoint); return response;
@@ -299,7 +316,7 @@ export async function fetchBlob(blobId: string, init?: RequestInit): Promise<Res
       if (response.status !== 404 && response.status !== 410) uncertain = true;
       last = response;
       await response.body?.cancel();
-    } catch { uncertain = true; }
+    } catch { init?.signal?.throwIfAborted(); uncertain = true; }
   }
   if (uncertain) throw new Error("Walrus availability could not be determined; an aggregator failed");
   if (last) return last;

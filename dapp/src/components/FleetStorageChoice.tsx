@@ -3,11 +3,16 @@
 import { formatToken } from "@/lib/network-costs";
 import type { StorageView } from "@/lib/fleet-budget";
 
+export function fleetStorageSelected(choice: boolean | undefined, fleet: { configured?: boolean; store?: unknown }): boolean {
+  return choice ?? (fleet.configured ?? !!fleet.store);
+}
+
 /**
- * Choose where an upload's Walrus storage comes from: the publisher (the
- * default), or the fleet's prepaid storage (SF-083), which keeps the blob
+ * Choose where an upload's Walrus storage comes from: the publisher, or
+ * the fleet's prepaid storage (selected when configured), which keeps the blob
  * fleet-owned and asks the wallet to sign its registration and
- * certification. Disabled, with the reason, when fleet storage is unavailable.
+ * certification. An unavailable selected route stays visible and can be
+ * explicitly deselected; it is never silently replaced by public publishing.
  */
 export function FleetStorageChoice({ checked, onChange, available, storage, reason, disabled, retention }: {
   retention?: { target: number; maxFee: string; setTarget: (value: number) => void; setMaxFee: (value: string) => void };
@@ -15,7 +20,7 @@ export function FleetStorageChoice({ checked, onChange, available, storage, reas
 }) {
   return <div className="text-xs space-y-1">
     <label className="flex items-center gap-2">
-      <input type="checkbox" checked={checked && available} disabled={!available || disabled} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" checked={checked} disabled={disabled || (!available && !checked)} onChange={(e) => onChange(e.target.checked)} />
       Pay Walrus storage from the fleet&apos;s prepaid storage (fleet-owned blobs; your wallet signs registration and certification)
     </label>
     {available && storage && <p className="text-gray-500">Prepaid: {storage.poolSize.toString()} encoded bytes until Walrus epoch {storage.endEpoch ?? "?"}; {formatToken(storage.walBalance)} WAL for write fees.</p>}
