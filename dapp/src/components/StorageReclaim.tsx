@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 // SF-129 owner reclaim of storage deposits. Every action is a dry run first:
 // the transaction is simulated with the owner's own gas and the recoverable
@@ -100,7 +101,7 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
       } while (cursor);
       const scanned = await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!, undefined, resume);
       setPlan(DATA_CONFIG!.streamRetentionOrigin ? streamExpiryPlan(scanned, stream) : scanned);
-    } catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setScanError(formatStorageQueryError(cause, "Storage records")); }
     finally { setScanning(false); }
   }
   const count = plan ? plan.anchors.length + plan.loose.length : 0;
@@ -133,7 +134,7 @@ export function DeploymentReclaimPanel({ deployments }: { deployments: Deploymen
   async function scan() {
     setScanning(true); setScanError(undefined); setPlan(undefined);
     try { setPlan(await planDeploymentReclaim(client, deployments, account!.address)); }
-    catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { setScanError(formatStorageQueryError(cause, "Storage records")); }
     finally { setScanning(false); }
   }
   const eligible = plan?.filter((r) => r.eligible) ?? [], kept = plan?.filter((r) => !r.eligible && r.reason !== "still in progress") ?? [];

@@ -1,0 +1,52 @@
+# SF-190 storage empty state and query errors
+
+Implementation: Codex, configured/running model gpt-6.1-sol, session
+dispatch-8b5928d831354a3581713e3496b89f95, branch
+work/suifleet/sf-190-f661c6ee. Issue: https://github.com/tyler-suifleet/suifleet/issues/378.
+
+The fleet-storage query converts the reader's absent result to null, which is
+valid TanStack Query data. The hook preserves its public optional storage shape.
+The publishing choice explains how to create/fund storage and links to /budget/.
+Storage, retention, settings, usage, availability and reclaim scan read errors use
+one plain formatter; transport details and query keys are not shown. Mutation and
+simulation refusal diagnostics retain their existing behavior.
+
+Verification on 2026-10-27 (all passed):
+
+- Frozen dependency install: corepack pnpm --dir dapp install --frozen-lockfile.
+- corepack pnpm --dir dapp typecheck.
+- corepack pnpm --dir dapp build: all 16 static routes generated. Existing
+  Tailwind module-type warning remains.
+- node scripts/test_storage_errors.cjs: actual QueryClient null-success and
+  rejection semantics, rendered empty/loading/funded/error storage choice,
+  actionable budget link, formatter inputs and rendered usage failure.
+- node scripts/test_fleet_budget.cjs.
+- node scripts/test_storage_reclaim_panel.cjs.
+- node scripts/test_fleet_settings.cjs.
+- node scripts/test_storage_reclaim.cjs.
+- node scripts/test_budget_enrollment.cjs.
+- node scripts/test_fleet_settings_cost.cjs.
+- node scripts/test_frontend_queries.cjs.
+- git diff --check.
+- node scripts/test_storage_errors_testnet.cjs
+  /home/tyler/dev/codex/src/suifleet-worktrees/work-suifleet-sf-173-f4e32d34/profiles/seal-testnet
+  /tmp/sf190-final-read.json: fresh chain 4c78adac verified, repro budget
+  0x1843567958d3267dd9be968780c903a2461e65b21a01fafbc3d0ef9f372058a9
+  discovered from BudgetCreated events; actual fetchStorage returns absent under
+  package 0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374.
+  This uses the existing PR #363 public evaluation profile only as read input.
+  No writes, wallet, faucet, gas or changes to that profile.
+
+Local host versions: Node v24.21.0, pnpm 12.14.0, TypeScript 5.9.3,
+Next 16.4.1; locked dependencies, no dependency changes. The first budget test
+attempt exposed its source-slice harness's missing formatter injection; the
+harness now supplies the real formatter and checks the plain message. It passed
+on rerun.
+
+Limits: this is a read-only Testnet API reproduction plus rendered component
+regression, not a manual extension-wallet/browser walkthrough or hosted Site
+publication. Final manual real-wallet/provider, hardware and mainnet acceptance
+remains unrun in SF-031/#32 and SF-087/#159. No contracts/API/layout changes,
+so no package-upgrade or isolated-chain publication is required for this UI fix.
+Hosted exact-head CI, automatic Testnet and independent review remain required;
+they are pending at implementation handoff, with no approval or merge claimed.
