@@ -5,7 +5,8 @@ import { useFleetSelection } from "./useFleetSelection";
 import { useFleetDataConfig } from "./useFleetDataConfig";
 import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { currentHealth, fetchFleetHealth, HEALTH_REFRESH_MS, type DeviceHealth } from "@/lib/telemetry";
 
 /** The browser clock, re-read every few seconds so stale health expires on screen. */
