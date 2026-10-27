@@ -71,6 +71,89 @@ module fleet_data::fleet_data_tests {
         transfer::public_transfer(cap, OWNER);
         (s, system)
     }
+    fun policy(s: &mut ts::Scenario, kind: u8, epochs: u32) {
+        ts::next_tx(s, OWNER);
+        let mut fleet = ts::take_shared<FleetData>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(s, OWNER);
+        fleet_data::set_stream_retention(&mut fleet, &budget, &cap, kind, epochs);
+        assert!(fleet_data::stream_retention(&fleet, kind) == option::some(epochs));
+        ts::return_shared(fleet); ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+    }
+    #[test]
+    fun stream_policy_is_independent_and_updates_without_rewriting_history() {
+        let (mut s, system) = setup();
+        policy(&mut s, 0, 3); policy(&mut s, 1, 13); policy(&mut s, 2, 26); policy(&mut s, 0, 53);
+        ts::next_tx(&mut s, OWNER);
+        let fleet = ts::take_shared<FleetData>(&s);
+        assert!(fleet_data::stream_retention(&fleet, 0) == option::some(53));
+        assert!(fleet_data::stream_retention(&fleet, 1) == option::some(13));
+        assert!(fleet_data::stream_retention(&fleet, 2) == option::some(26));
+        ts::return_shared(fleet); destroy(system); ts::end(s);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EBounds)]
+    fun stream_policy_refuses_zero() { let (mut s, system) = setup(); policy(&mut s, 0, 0); destroy(system); ts::end(s); }
+    #[test, expected_failure(abort_code = fleet_data::EBounds)]
+    fun stream_policy_refuses_beyond_horizon() { let (mut s, system) = setup(); policy(&mut s, 0, 54); destroy(system); ts::end(s); }
+    #[test, expected_failure(abort_code = fleet_data::EBounds)]
+    fun stream_policy_refuses_unknown_kind() { let (mut s, system) = setup(); policy(&mut s, 3, 1); destroy(system); ts::end(s); }
+
+    fun stream_upload(s: &mut ts::Scenario, system: &mut System, kind: u8, root: u256): ID {
+        ts::next_tx(s, DEVICE);
+        let fleet = ts::take_shared<FleetData>(s);
+        let writer = ts::take_shared<DeviceData>(s);
+        let mut storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let account = ts::take_shared<GasAccount>(s);
+        let registry = ts::take_shared<DeviceRegistry>(s);
+        let cap = ts::take_from_address<DeviceCap>(s, DEVICE);
+        let clock = clock_at(s, 1);
+        let before = fleet_storage::pool_epochs(&storage);
+        let id = fleet_data::register_stream_blob(&fleet, &writer, &budget, &account,
+            &registry, &cap, &mut storage, system, kind, blob::derive_blob_id(root, 1, 100), root, 100, &clock, ts::ctx(s));
+        assert!(fleet_storage::pool_epochs(&storage) == before);
+        let epochs = fleet_data::stream_retention(&fleet, kind).destroy_some();
+        assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&storage, id).destroy_some()) == system.epoch() + epochs);
+        fleet_storage::certify_for_testing(&mut storage, system, id);
+        clock::destroy_for_testing(clock);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry); ts::return_to_address(DEVICE, cap);
+        id
+    }
+    #[test]
+    fun stream_write_buys_live_policy_without_consuming_pool() {
+        let (mut s, mut system) = setup();
+        policy(&mut s, 0, 3); policy(&mut s, 1, 13);
+        let a = stream_upload(&mut s, &mut system, 0, 500);
+        anchor(&mut s, a, 1, 0, DAY);
+        let b = stream_upload(&mut s, &mut system, 1, 501);
+        anchor(&mut s, b, 2, 1, DAY + 300_000);
+        policy(&mut s, 0, 26);
+        let c = stream_upload(&mut s, &mut system, 0, 502);
+        anchor(&mut s, c, 3, 0, 2 * DAY);
+        destroy(system); ts::end(s);
+    }
+
+    #[test]
+    fun stream_compact_history_keeps_prunable_expiry_index() {
+        let (mut s, mut system) = setup(); policy(&mut s, 0, 3);
+        let id = stream_upload(&mut s, &mut system, 0, 777);
+        let _head = compact(&mut s, id, 1, DAY, vector[]);
+        ts::next_tx(&mut s, OWNER);
+        let fleet = ts::take_shared<FleetData>(&s);
+        let mut writer = ts::take_shared<DeviceData>(&s);
+        let budget = ts::take_shared<FleetBudget>(&s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&s, OWNER);
+        let mut storage = ts::take_shared<FleetStorage>(&s);
+        assert!(fleet_data::has_anchor(&writer, 0));
+        fleet_data::prune_at_epoch_for_testing(&fleet, &mut writer, &budget, &cap, &mut storage, 3, vector[0]);
+        assert!(!fleet_data::has_anchor(&writer, 0));
+        assert!(!fleet_storage::has_blob(&storage, id));
+        assert!(fleet_data::compact_head(&writer).is_none());
+        assert!(fleet_data::anchor_count(&writer) == 1);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(budget); ts::return_shared(storage);
+        ts::return_to_address(OWNER, cap); destroy(system); ts::end(s);
+    }
     fun health(s: &mut ts::Scenario, seq: u64, at: u64) {
         ts::next_tx(s, DEVICE);
         let fleet = ts::take_shared<FleetData>(s);
@@ -497,15 +580,16 @@ module fleet_data::fleet_data_tests {
         prune(&mut s, 5, vector[0]);
         anchor(&mut s, a, 3, 0, 2 * DAY + 1); finish(s, system);
     }
-
     fun managed_setup(): (ts::Scenario, System, ID, ID) {
         let (mut s, system) = setup();
+        policy(&mut s, 0, 3);
         s.next_tx(OWNER);
         let cap = s.take_from_sender<BudgetOwnerCap>(); let bid = fleet_budget::budget_id(&cap);
         transfer::public_transfer(cap, OWNER);
         let mut r = s.take_shared<DeviceRegistry>(); customer::create(&mut r, string::utf8(b"Customer"), s.ctx());
         ts::return_shared(r); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        fleet_storage::configure_customer_charging(&mut c, &r, s.ctx());
         customer::set_entitlement(&mut c, &r, 1, 10000000, 1, s.ctx());
         let mut b = s.take_shared_by_id<FleetBudget>(bid); let cap = s.take_from_sender<BudgetOwnerCap>();
         customer::adopt_budget(&mut c, &mut b, cap, string::utf8(b"Existing"), s.ctx());
@@ -517,6 +601,26 @@ module fleet_data::fleet_data_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r); ts::return_shared(a);
         (s, system, fid, bid)
     }
+    #[test]
+    fun managed_stream_write_buys_live_policy_and_charges_allowance() {
+        let (mut s, mut system, fid, bid) = managed_setup(); s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<ManagedFleet>(fid);
+        let fleet = s.take_shared<FleetData>(); let writer = s.take_shared<DeviceData>();
+        let budget = s.take_shared_by_id<FleetBudget>(bid); let account = s.take_shared<GasAccount>();
+        let registry = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let mut storage = s.take_shared<FleetStorage>(); let before = fleet_storage::pool_size(&storage);
+        let clock = clock_at(&mut s, 1);
+        let blob = fleet_data::register_managed_stream_blob(&mut c, &f, &fleet, &writer,
+            &budget, &account, &registry, &cap, &mut storage, &mut system, 0,
+            blob::derive_blob_id(43, 1, 100), 43, 100, &clock, s.ctx());
+        assert!(customer::used(&c) > 0 && fleet_storage::pool_size(&storage) == before);
+        assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&storage, blob).destroy_some()) == 3);
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fleet); ts::return_shared(writer);
+        ts::return_shared(budget); ts::return_shared(account); ts::return_shared(registry); ts::return_shared(storage);
+        ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+
     #[test]
     fun customer_approval_preserves_original_archive_identity_after_adoption() {
         let (mut s, system, fid, bid) = managed_setup(); s.next_tx(OWNER);
@@ -634,8 +738,7 @@ module fleet_data::fleet_data_tests {
         sequence:u64,stream:vector<u8>,key:vector<u8>,content_type:vector<u8>,metadata:vector<u8>,upload:vector<u8>,
         chunk:u32,chunks:u32,total_size:u64,size:u64,sha256:vector<u8>,identifier:vector<u8>,ciphertext_size:u64,ciphertext_sha256:vector<u8>,
     }
-    #[test]
-    fun opaque_items_share_one_certified_anchor() {
+    fun opaque_items_reclaim(prune_epoch: u32) {
         let (mut s,mut system)=setup();
         let blob=upload(&mut s,&mut system,123,true);
         ts::next_tx(&mut s,DEVICE);
@@ -645,11 +748,31 @@ module fleet_data::fleet_data_tests {
         let cap=ts::take_from_address<DeviceCap>(&s,DEVICE);let clock=clock_at(&mut s,DAY);
         let first=ItemWire {sequence:1,stream:b"sensor",key:b"raw",content_type:b"application/octet-stream",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:3,size:3,sha256:zeros(32),identifier:b"data-00",ciphertext_size:100,ciphertext_sha256:zeros(32)};
         let second=ItemWire {sequence:2,stream:b"text",key:b"reading",content_type:b"text/plain",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:5,size:5,sha256:zeros(32),identifier:b"data-01",ciphertext_size:110,ciphertext_sha256:zeros(32)};
-        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,1,0,zeros(32),vector[sui::bcs::to_bytes(&first),sui::bcs::to_bytes(&second)],&clock,ts::ctx(&mut s));
+        let mut items = vector[sui::bcs::to_bytes(&first), sui::bcs::to_bytes(&second)];
+        if (prune_epoch > 0) {
+            while (items.length() < 16) items.push_back(sui::bcs::to_bytes(&first));
+        };
+        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,1,0,zeros(32),items,&clock,ts::ctx(&mut s));
+        if (prune_epoch > 0) assert!(fleet_data::item_exists_for_testing(&writer, 1, 15), 105);
         assert!(fleet_data::anchor_count(&writer)==1,100);
         assert!(fleet_data::item_exists_for_testing(&writer,1,0) && fleet_data::item_exists_for_testing(&writer,1,1),100);
         clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
-        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);destroy(system);ts::end(s);
+        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);
+        if (prune_epoch > 0) {
+            // A newer ordinary archive must survive opaque-batch reclamation.
+            let newer = upload(&mut s, &mut system, 124, true);
+            anchor(&mut s, newer, 2, 0, DAY * 2);
+            prune(&mut s, prune_epoch, vector[0]);
+            ts::next_tx(&mut s, OWNER);
+            let writer = ts::take_shared<DeviceData>(&s);
+            assert!(!fleet_data::has_anchor(&writer, 0), 101);
+            assert!(fleet_data::has_anchor(&writer, 1), 102);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 0), 103);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 1), 104);
+            assert!(!fleet_data::item_exists_for_testing(&writer, 1, 15), 106);
+            ts::return_shared(writer);
+        };
+        destroy(system);ts::end(s);
     }
     #[test]
     fun prune_removes_the_anchor_opaque_items() {
@@ -672,5 +795,10 @@ module fleet_data::fleet_data_tests {
         assert!(!fleet_data::item_exists_for_testing(&writer,7,0) && !fleet_data::item_exists_for_testing(&writer,7,1),100);
         ts::return_shared(writer); finish(s, system);
     }
+
+    #[test] fun opaque_items_share_one_certified_anchor() { opaque_items_reclaim(0) }
+    #[test] fun prune_expired_opaque_batch_removes_all_items() { opaque_items_reclaim(5) }
+    #[test, expected_failure(abort_code=fleet_data::EUnexpired)]
+    fun prune_opaque_batch_refuses_early_reclaim() { opaque_items_reclaim(4) }
 
 }

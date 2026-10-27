@@ -10,7 +10,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
 const page_ = path.resolve(__dirname, "../dapp/src/app/data/page.tsx"), fakes = path.resolve(__dirname, "browser/data-session-fakes.js");
 const faked = new Set(["@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/hooks/useFleetDataConfig", "@/hooks/useFleetSelection", "@/lib/fleet-data",
-  "@/components/DataUsage", "@/components/FleetDataBrowser", "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
+  "@/components/FleetDataBrowser", "@/components/DataUsage", "@/components/StreamRetention", "@/lib/stream-retention", "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
 const fakeDependencies = { name: "data-session-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => args.importer === page_ && faked.has(args.path) ? { path: fakes } : undefined);
 } };
@@ -98,6 +98,18 @@ const fakeDependencies = { name: "data-session-fakes", setup(b) {
     assert.equal((record.match(/refused · support/g) || []).length, 2, record);
     assert.equal(await reads(), 4);
     assert.deepEqual(await page.evaluate(() => [sessionStorage.length, localStorage.length]), [0, 0], "nothing persisted in web storage");
+    // A selected-fleet change invalidates both rendered plaintext and an in-flight read.
+    await openButton.click();
+    await page.waitForFunction(() => window.__control.reads.length === 5);
+    await page.evaluate(() => {
+      window.__control.fleet = 'fleet-b';
+      window.dispatchEvent(new Event('fixture-fleet-change'));
+    });
+    await settle();
+    assert.ok(!(await body()).includes('SECRET-LOG-LINE'), 'fleet switch discards plaintext');
+    await resolveRead(4);
+    await settle();
+    assert.ok(!(await body()).includes('SECRET-LOG-LINE'), 'old fleet read cannot publish into new scope');
     assert.deepEqual(errors, []);
     console.log("PASS: real browser Fleet archives page: plaintext and search query discarded at Seal session expiry; reads pending across expiry "
       + "(observed by the timer or not) never publish or resurrect plaintext; out-of-range shadow timestamp shown raw; fresh session reopens");

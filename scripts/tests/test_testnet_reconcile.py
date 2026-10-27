@@ -920,6 +920,29 @@ class RunFlow(unittest.TestCase):
             self.assertFalse(evidence['faucet']['success'])
             self.assertFalse(any('execute-signed-tx' in c or 'ptb' in c for c in commands))
 
+    def test_successful_faucet_credit_can_still_leave_full_sequence_underfunded(self):
+        # Run 40253439621: 1 SUI credited successfully, but the historical
+        # reservation plus the selected suites still require 3 SUI.
+        faucets = []
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args, _, patches, commands = self.harness(
+                root, self.state_with('publish base'),
+                balance=['1815945830', '2815945830'], required=3_000_000_000,
+                faucet=lambda argv: (faucets.append(argv), SimpleNamespace(returncode=0))[1])
+            with self.assertRaises(live.FundingShortfall):
+                self.run_flow(args, patches)
+            evidence = json.loads((root / 'evidence.json').read_text())
+            self.assertEqual(len(faucets), 1)
+            self.assertEqual(evidence['faucet']['cli_returncode'], 0)
+            self.assertEqual(evidence['faucet']['balance_change_mist'], 1_000_000_000)
+            self.assertEqual(evidence['faucet']['balance_before_mist'], 1_815_945_830)
+            self.assertFalse(evidence['faucet']['success'])
+            self.assertEqual(evidence['allowance_used_mist'], 0)
+            self.assertEqual(evidence['max_spend_mist'], 800_000_000)
+            self.assertEqual(evidence['transactions'], [])
+            self.assertFalse(any('execute-signed-tx' in c or 'ptb' in c for c in commands))
+
 
 class Quarantine(unittest.TestCase):
     """User-authorized one-time abandonment of one historical uncertain fixture."""

@@ -1,13 +1,14 @@
+import { useEffect, useState } from "react";
 // Test-only dependencies for the real Fleet archives page (scripts/test_data_session_browser.cjs).
 // Chain reads, Seal and Walrus are controlled so a read can be held open while
 // the signed Seal session expires; window.__control drives it from Playwright.
 const operator = "0x000000000000000000000000000000000000000000000000000000000000000a";
 const device = "0x00000000000000000000000000000000000000000000000000000000000000d1";
-const control = { keys: [], reads: [] };
+const control = { keys: [], reads: [], fleet: "fleet-a" };
 window.__control = control;
 
 const account = { address: operator, chains: ["sui:localnet"] };
-const client = { $extend: () => ({ walrus: {} }) };
+const client = { $extend: () => ({ walrus: { systemState: async () => ({committee:{epoch:0}}) } }) };
 const wallet = {
   stores: { $connection: { get: () => ({ account }) }, $currentNetwork: { get: () => "localnet" } },
   signPersonalMessage: async () => ({ signature: "signed" }),
@@ -29,9 +30,16 @@ export const useFleetTransaction = () => ({ mutateAsync: async () => {}, isPendi
 
 export const DATA_CONFIG = { budgetId: "0xb1", typeOrigin: "0x81", packageId: "0x81", fleetId: "0xf1" };
 export const useFleetDataConfig = () => DATA_CONFIG;
-export const useFleetSelection = () => ({ supported: false });
+export const useFleetSelection = () => {
+  const [identity, setIdentity] = useState(control.fleet);
+  useEffect(() => {
+    const changed = () => setIdentity(control.fleet);
+    window.addEventListener('fixture-fleet-change', changed);
+    return () => window.removeEventListener('fixture-fleet-change', changed);
+  }, []);
+  return { supported: false, identity };
+};
 export const fetchManagedBudget = async () => { throw Error("Unexpected managed budget read in support-session fixture"); };
-export { parseCompactHead } from "@/lib/fleet-bulk";
 export const readFleetData = async () => ({ support: [operator] });
 export const readDeviceData = async () => ({ id: "0xe1", anchor_count: "1" });
 export const listFleetDeviceIds = async () => ({ devices: [device], cursor: null, hasNextPage: false });
@@ -47,6 +55,15 @@ export const WALRUS_AGGREGATOR = "";
 export const walrus = () => ({});
 export const TESTNET_WALRUS_PACKAGE_CONFIG = {};
 
-// These separately tested panels are outside the archive-session lifecycle fixture.
+export const liveArchiveEntries = async (_client,_config,_device,entries) => entries;
+
+export const parseCompactHead = () => { throw Error('This session fixture has no compact history'); };
+
+// The policy panel has its own authority/async tests; this fixture isolates sessions.
+export const StreamRetentionPanel = () => null;
+
+// Usage metering is covered by test_data_metering.cjs; isolate Seal session lifetime here.
 export const DataUsage = () => null;
+
+// Generic browsing has its own real-browser harness; isolate archive sessions here.
 export const FleetDataBrowser = () => null;

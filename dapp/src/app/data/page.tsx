@@ -1,4 +1,6 @@
 "use client";
+import { liveArchiveEntries } from "@/lib/stream-retention";
+import { StreamRetentionPanel } from "@/components/StreamRetention";
 
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { fetchManagedBudget } from "@/lib/fleet-budget";
@@ -43,9 +45,9 @@ export default function FleetDataPage() {
   // under the discarded session no longer matches session.current.
   function expire(){session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setMessage('Your secure viewing session expired. Open the archive again to continue.');}
   useEffect(()=>{const linked=linkedDevice(new URLSearchParams(window.location.search).get('device'));if(linked)setDevice(linked);},[]);
-  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client]);
+  useEffect(()=>{generation.current++;session.current=undefined;setArchive(undefined);setOpened(undefined);setQuery(noQuery);setEntries([]);setAnchorCount(0);setMessage('');setBusy(false);},[account?.address,device,client,DATA_CONFIG,selection.identity]);
   // The access record and the signed session belong to one account.
-  useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client]);
+  useEffect(()=>{setAccess([]);setRole('unknown');},[account?.address,client,DATA_CONFIG,selection.identity]);
   // Plaintext lives only as long as the signed five-minute Seal session.
   useEffect(()=>{
     const timer=setInterval(()=>{if(session.current?.isExpired())expire();},5_000);
@@ -55,12 +57,12 @@ export default function FleetDataPage() {
     let live=true;
     if(DATA_CONFIG && account)void authority().then(a=>{if(live)setRole(a.kind);}).catch(()=>{if(live)setRole('none');});
     return()=>{live=false;};
-  },[account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
+  },[account?.address,client,DATA_CONFIG,selection.identity]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(()=>{
     let live=true;setFleetDevices([]);setCursor(null);setMore(false);
     if(DATA_CONFIG && account)void listFleetDeviceIds(client,DATA_CONFIG).then(page=>{if(live){setFleetDevices(page.devices);setCursor(page.cursor);setMore(page.hasNextPage);}}).catch(()=>{if(live)setMessage('Fleet index unavailable.');});
     return()=>{live=false;};
-  },[account?.address,client]);
+  },[account?.address,client,DATA_CONFIG,selection.identity]);
   async function loadMore(){
     if(!DATA_CONFIG)return;const current=generation.current;
     try{const page=await listFleetDeviceIds(client,DATA_CONFIG,cursor);if(current===generation.current){setFleetDevices(old=>[...new Set([...old,...page.devices])]);setCursor(page.cursor);setMore(page.hasNextPage);}}
@@ -88,10 +90,13 @@ export default function FleetDataPage() {
       const count=Number(writer?.anchor_count ?? 0);
       if(!Number.isSafeInteger(count)) throw Error('Archive index exceeds browser limits');
       const start=Math.max(0,count-32),{entries:page}=await readAnchorEntries(client,DATA_CONFIG,device,start,32);
-      if(current===generation.current){setEntries(page.reverse());setAnchorCount(count);}
+      const {walrus,TESTNET_WALRUS_PACKAGE_CONFIG}=await import('@mysten/walrus');
+      const epoch=(await client.$extend(walrus({packageConfig:TESTNET_WALRUS_PACKAGE_CONFIG})).walrus.systemState()).committee.epoch;
+      const live=await liveArchiveEntries(client,DATA_CONFIG,device,page,epoch);
+      if(current===generation.current){setEntries(live.reverse());setAnchorCount(count);}
     } catch {if(current===generation.current){setArchive(undefined);setEntries([]);setAnchorCount(0);setMessage('Archive index unavailable or permission revoked.');}}
   }
-  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>{void refresh();const timer=setInterval(()=>void refresh(),60_000);return ()=>clearInterval(timer);},[device,account?.address,client,DATA_CONFIG,selection.identity]); // eslint-disable-line react-hooks/exhaustive-deps
   function note(index:number,kind:number,authority:'owner'|'support'|undefined,outcome:'opened'|'refused') {
     if(!account || !authority)return;
     setAccess(log=>recordAccess(log,{atMs:Date.now(),account:account.address,authority,device,index,kind:(['logs','diagnostics','crash'] as const)[kind] ?? 'logs',outcome}));
@@ -127,7 +132,11 @@ export default function FleetDataPage() {
         if([3,4].includes(opened.schema) && opened.previous_head?.length){
           const previous=parseCompactHead(new Uint8Array(opened.previous_head));
           const previousIndex=Number(previous.index);
-          if(Number.isSafeInteger(previousIndex))setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,{index:previousIndex,anchor:previous.anchor}]);
+          if(Number.isSafeInteger(previousIndex)) {
+            const epoch=(await storage.systemState()).committee.epoch;
+            const live=await liveArchiveEntries(client,DATA_CONFIG,device,[{index:previousIndex,anchor:previous.anchor}],epoch);
+            if(current===generation.current && session.current===reading && !reading.isExpired())setEntries(old=>old.some(e=>e.index===previousIndex)?old:[...old,...live]);
+          }
         }
       }
     } catch {if(current===generation.current){note(index,kind,allowed?.kind,'refused');setMessage('Archive unavailable: identity, signature, policy, expiry, network or provider verification failed.');}}
@@ -152,6 +161,7 @@ export default function FleetDataPage() {
     } catch {setMessage('Diagnostic request unavailable or refused.');}
   }
   return <div className="max-w-5xl space-y-4"><PageHeader title="Data" subtitle="Browse device data, download verified bytes and manage scoped sharing in your browser" /><DataUsage /><FleetDataBrowser /><h2 className="text-xl font-semibold">Logs and diagnostics</h2>
+    <StreamRetentionPanel />
     {!DATA_CONFIG ? <p>Device data reporting is not set up for this fleet. Ask your administrator to finish the setup.</p> : <>
       <label>Device <select className="border rounded p-2" value={device} onChange={e=>setDevice(e.target.value)}><option value="">Choose a device</option>{fleetDevices.map(device=><option key={device} value={device}>{devices.find(d=>id(d.objectId)===id(device))?.name ?? device}</option>)}</select></label>
       {more && <button className="border rounded p-2 ml-3" onClick={()=>void loadMore()}>Load more devices</button>}

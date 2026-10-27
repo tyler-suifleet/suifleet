@@ -126,6 +126,49 @@ module fleet_storage::fleet_storage_tests {
 
     fun upload(scenario: &mut ts::Scenario, system: &mut System, size: u64, now: u64): ID { upload_as(scenario, system, DEVICE, DEVICE, size, now) }
 
+    fun stream_upload(s: &mut ts::Scenario, system: &mut System, epochs: u32): ID {
+        ts::next_tx(s, DEVICE);
+        let mut fs = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let account = ts::take_shared<GasAccount>(s);
+        let registry = ts::take_shared<DeviceRegistry>(s);
+        let cap = ts::take_from_address<DeviceCap>(s, DEVICE);
+        let clock = clock_at(s, 10);
+        let before_pool = fleet_storage::pool_size(&fs);
+        let before_wal = fleet_storage::wal_balance(&fs);
+        let before_fees = fleet_storage::total_write_fees(&fs);
+        let id = fleet_storage::register_blob_for_epochs(&mut fs, &budget, &account, &registry, &cap,
+            system, blob_id(BLOB), ROOT, BLOB, RS2, epochs, &clock, ts::ctx(s));
+        assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&fs, id).destroy_some()) == system.epoch() + epochs);
+        assert!(fleet_storage::pool_size(&fs) == before_pool);
+        assert!(before_wal - fleet_storage::wal_balance(&fs) == fleet_storage::total_write_fees(&fs) - before_fees);
+        clock::destroy_for_testing(clock); ts::return_shared(fs); ts::return_shared(budget);
+        ts::return_shared(account); ts::return_shared(registry); ts::return_to_address(DEVICE, cap); id
+    }
+    #[test]
+    fun owner_browser_can_extend_device_archive_without_executor() {
+        let (mut s, mut system) = setup(quota(POOL, 2));
+        let id = stream_upload(&mut s, &mut system, 13);
+        let (mut fs, budget, cap) = owner(&mut s);
+        fleet_storage::certify_for_testing(&mut fs, &system, id);
+        fleet_storage::extend_stream_blob(&mut fs, &budget, &cap, &mut system, id, 1, ts::ctx(&mut s));
+        assert!(fleet_storage::record_end_epoch(&fleet_storage::blob_record(&fs, id).destroy_some()) == 14);
+        owner_end(fs, budget, cap); finish(s, system);
+    }
+    #[test]
+    fun stream_capacity_and_write_costs_use_one_quota() {
+        let (mut s, mut system) = setup(quota(POOL, 2)); stream_upload(&mut s, &mut system, 13); finish(s, system);
+    }
+    #[test, expected_failure]
+    fun stream_purchase_cannot_spill_past_wal_allowance_into_pool() {
+        let (mut s, mut system) = setup(fleet_storage::new_quota(DAY, POOL, 2, 10_000, 0));
+        stream_upload(&mut s, &mut system, 3); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::ERateLimited)]
+    fun stream_upload_count_quota_is_shared_with_legacy_uploads() {
+        let (mut s, mut system) = setup(quota(POOL, 1)); upload(&mut s, &mut system, BLOB, 10);
+        stream_upload(&mut s, &mut system, 3); finish(s, system);
+    }
     fun pool(scenario: &mut ts::Scenario): u64 {
         ts::next_tx(scenario, OWNER);
         let fs = ts::take_shared<FleetStorage>(scenario);
@@ -951,6 +994,32 @@ module fleet_storage::fleet_storage_tests {
     }
 
     #[test]
+    fun stream_full_purchase_keeps_protected_reserves_and_creates_no_executor_work() {
+        let (mut s, mut system) = device_retention_fixture();
+        let (fs, budget, cap) = owner(&mut s);
+        let (before_wal, before_gas) = fleet_storage::retention_balances(&fs);
+        owner_end(fs, budget, cap);
+        let id = stream_upload(&mut s, &mut system, 13);
+        let (fs, budget, cap) = owner(&mut s);
+        let (after_wal, after_gas) = fleet_storage::retention_balances(&fs);
+        assert!(before_wal == after_wal && before_gas == after_gas);
+        assert!(fleet_storage::renewal(&fs, id).is_none());
+        owner_end(fs, budget, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun stream_purchase_never_creates_future_work_for_an_incompatible_legacy_floor() {
+        let (mut s, mut system) = device_retention_fixture();
+        stream_upload(&mut s, &mut system, 3); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_storage::EInvalidEpochs)]
+    fun browser_extension_cannot_strand_existing_prepaid_capacity() {
+        let (mut s, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut s);
+        fleet_storage::extend_stream_blob(&mut fs, &budget, &cap, &mut system, id, 1, ts::ctx(&mut s));
+        owner_end(fs, budget, cap); finish(s, system);
+    }
+
+    #[test]
     fun owner_approved_device_upload_prepays_renewal_atomically() {
         let (mut scenario, mut system) = device_retention_fixture();
         let id = upload(&mut scenario, &mut system, BLOB + 1, 20);
@@ -1147,5 +1216,34 @@ module fleet_storage::fleet_storage_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(a); ts::return_shared(r);
         ts::return_to_address(DEVICE, cap); finish(s, system);
     }
+    #[test]
+    fun managed_stream_purchase_charges_customer_and_preserves_pool() {
+        let (mut s, mut system, fid, bid) = managed_setup(POOL);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        let before = fleet_storage::pool_size(&fs);
+        fleet_storage::register_managed_blob_for_epochs(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, 3, &clock, s.ctx());
+        assert!(fleet_storage::pool_size(&fs) == before);
+        assert!(customer::used(&c) == encoded(&system, BLOB));
+        assert!(customer::active_devices(&c) == 1);
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::customer)]
+    fun managed_stream_purchase_cannot_bypass_customer_allowance() {
+        let (mut s, mut system, fid, bid) = managed_setup(0);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_managed_blob_for_epochs(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, 3, &clock, s.ctx());
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
+    }
+
 
 }

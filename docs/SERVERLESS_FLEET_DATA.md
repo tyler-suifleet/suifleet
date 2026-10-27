@@ -152,6 +152,9 @@ Production provider/fees/availability acceptance remains in #159.
 
 ### Protected retention integration
 
+This subsection describes legacy pool admission. The SF-141 write-time stream
+path below purchases the full period and needs no executor for that period.
+
 Actual SF-092 merge `2e9a7f4d1b35a9e69b6acc5da1a40ea39562e575` is integrated.
 The additive `configure_device_retention` / `clear_device_retention` owner calls
 use later-origin `DeviceRetentionKey` / `DeviceRetention` dynamic fields; existing
@@ -531,3 +534,20 @@ with a legacy marker; a device can re-anchor an older compact blob after another
 head. Readers reject its mismatched ciphertext sequence binding and report the
 older suffix unavailable. Device publishers must use fresh sequence-bound
 ciphertexts for each head; compact mode does not promise global deduplication.
+
+
+## Per-stream finite retention (SF-141)
+
+After the explicit storage/data upgrade and supported-device opt-in, the owner
+can set separate Walrus epoch periods for logs, diagnostics and crash archives in
+Data or Settings. Each new archive buys fresh capacity for that complete period,
+within the device's existing WAL/upload/byte quotas; no renewal worker is needed.
+Owners can extend a live archive through the browser before expiry. Live listings
+use current held expiry, and per-stream SF-129 reclaim previews select only
+anchored data. New compact streams retain temporary expiry indexes, which are
+removed with their blobs after exclusive expiry. Raw spools and unanchored
+ciphertext are never acknowledged or pruned by this consumer. Legacy layouts,
+package-callability and explicit rollout boundaries remain in force. See
+[per-stream retention and activation](RETENTION_RENEWAL.md) and
+[isolated-chain evidence](validation/sf141-localnet.json); no public epoch-563
+prune/rebate or external provider/wallet/hardware acceptance is implied.

@@ -29,6 +29,9 @@ pub struct Config {
     /// Opt in to multi-item encrypted patches on the existing upload path.
     #[serde(default)]
     pub quilt: bool,
+    /// Opt in only after upgrading fleet_data and storage to the stream API.
+    #[serde(default)]
+    pub stream_retention: bool,
     #[serde(default)] pub opaque: bool,
     #[serde(default)] pub walrus_streams: Vec<String>,
 }
@@ -65,6 +68,8 @@ struct Pending {
     #[serde(default)] previous_head: Option<Vec<u8>>,
     #[serde(default)] items: Vec<crate::fleet_data::QuiltItem>,
     #[serde(default)] size: Option<u64>,
+    /// Pin the registration API across restart/config changes.
+    #[serde(default)] stream_retention: bool,
     #[serde(default)] opaque_items: Vec<crate::opaque::Index>,
     #[serde(default)] opaque_sources: Vec<(u64, String, u64)>,
     #[serde(default)] attempts: u32,
@@ -180,7 +185,7 @@ mod quilt_tests {
     #[test]
     fn malformed_prepare_remains_fresh_across_failure_persistence_and_restart() {
         let initial = json!({"seq":1,"kind":0,"request_seq":0,"fingerprint":"", "anchor_index":0,
-            "logs":[1],"blob_id":"","root_hash":"","ciphertext_sha256":[1,2],
+            "logs":[1],"blob_id":"","root_hash":"","ciphertext_sha256":[1,2],"stream_retention":true,
             "items":[{"identifier":"item-00","size":10,"sha256":"ab"}]});
         let dir = std::env::temp_dir().join(format!("sf121-encoding-{}", rand::random::<u128>()));
         std::fs::create_dir(&dir).unwrap();
@@ -204,6 +209,7 @@ mod quilt_tests {
             assert!(restarted.root_hash.is_empty());
             assert_eq!(restarted.size, None);
             assert_eq!(restarted.logs, vec![1]);
+            assert!(restarted.stream_retention, "restart preserves the registration API selection");
             assert!(restarted.registration.is_none());
             accept_encoding(&mut restarted, &json!({"blob_id":"blob","root_hash":"root","size":100})).unwrap();
             assert_eq!(restarted.blob_id, "blob");
@@ -479,7 +485,7 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         atomic(&dir.join("ciphertext.bin"), &ciphertext)?;
         let pending = Pending { seq, kind, request_seq: if diagnostics { request_seq } else { completed.request_seq }, fingerprint, anchor_index: writer.anchor_count, logs,
             blob_id: String::new(), root_hash: String::new(), ciphertext_sha256: Sha256::digest(&ciphertext).to_vec(),
-            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: None,
+            registration: None, blob_object_id: None, certificate: None, certification_digest: None, anchor_digest: None, previous_head, shadows: shadow_fingerprint, items, size: None, stream_retention: config.stream_retention,
             opaque_items, opaque_sources, attempts: 0, created_ms: telemetry::now_ms(), retry_at_ms: 0 };
         atomic(&pending_path, &serde_json::to_vec(&pending)?)?; pending
     };
@@ -550,7 +556,8 @@ pub async fn tick(task: &Task, schedule: &mut Schedule, fleet_settings: Option<&
         }
         task.before_write().await?;
         let digest = task.sui.register_archive(&task.config, config, &task.cap, &pending.blob_id, &pending.root_hash,
-            pending.size.unwrap_or(std::fs::metadata(dir.join("ciphertext.bin"))?.len()), &dir.join("register.bcs")).await?;
+            pending.size.unwrap_or(std::fs::metadata(dir.join("ciphertext.bin"))?.len()),
+            pending.stream_retention.then_some(pending.kind), &dir.join("register.bcs")).await?;
         pending.registration = Some(digest); atomic(&pending_path, &serde_json::to_vec(&pending)?)?;
     }
     if pending.blob_object_id.is_none() {
