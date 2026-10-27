@@ -5,10 +5,11 @@ import Link from "next/link";
 import { useCurrentAccount, useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
+import { BudgetEnrollment } from "./BudgetEnrollment";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
 import { displaySui, formatSui, onboardingConfig, onboardingProgress, registrationInput, shortAddress, type OnboardingStep, type StepState } from "@/lib/onboarding";
-import { budgetSupported, buildRegisterAndEnrollTx, defaultReserve } from "@/lib/fleet-budget";
+import { budgetSupported, buildRegisterAndEnrollTx, defaultReserve, canFundEnrollment, enrollmentError } from "@/lib/fleet-budget";
 import { formatToken, type Estimate } from "@/lib/network-costs";
 import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/components/FleetBudget";
 import { useFleetSelection } from "@/hooks/useFleetSelection";
@@ -43,6 +44,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const [estimate, setEstimate] = useState<Estimate | undefined>();
   const { budget } = useFleetBudget();
   const [fromBudget, setFromBudget] = useState(true);
+  const budgetCanFund = !!budget && canFundEnrollment(budget);
   // Synchronous guard: a second click can arrive before React re-renders the disabled button.
   const inFlight = useRef(false);
   const form = useRef<HTMLFormElement>(null);
@@ -78,7 +80,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its daemon starts and reports in.` });
       await Promise.all([cache.invalidateQueries({ queryKey: ["devices"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] })]);
     } catch (cause) {
-      setError({ address, text: `${cause instanceof Error ? cause.message : "Wallet request failed"}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
+      setError({ address, text: `${enrollmentError(cause)}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
     } finally {
       inFlight.current = false;
       setPhase(null);
@@ -186,7 +188,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           const data = new FormData(event.currentTarget);
           try {
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
-            const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
+            const funding = budget && budgetCanFund && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
               reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
             void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding, fleet));
           } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
@@ -201,10 +203,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
             <input className={`mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono font-normal ${FOCUS}`} name="deviceAddress" required placeholder="0x…" autoComplete="off" spellCheck={false} />
             <span className="mt-1 block font-normal text-gray-600">The device’s own address from the daemon—not your wallet address.</span>
           </label>
-          {budget && <label className="flex items-start gap-2 sm:col-span-2">
-            <input type="checkbox" className={`mt-0.5 ${FOCUS}`} checked={fromBudget} onChange={(e) => setFromBudget(e.target.checked)} />
-            <span>Enroll in my fleet budget: send the device a {formatToken(budget.defaultLimits.floatCap)} SUI float and give its own account a {formatToken(defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap))} SUI reserve to draw from</span>
-          </label>}
+          {budget && <BudgetEnrollment budget={budget} selected={fromBudget} onChange={setFromBudget} />}
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
             <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending}>{mutation.isPending ? "Registering…" : "Register device"}</button>
