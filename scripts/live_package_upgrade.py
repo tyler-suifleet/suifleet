@@ -881,19 +881,6 @@ def run(args):
                 assert plain(client("object", inbox)["content"])["groups"] == [dm.object_id(group)]
                 check("pre-upgrade group indexed in place; device inbox at its derived address lists the group")
 
-            # Reuse the verified upgraded package and the same bounded ledger.
-            from rollout_audit_acceptance import run as audit_acceptance, checkpointed_step
-            audit_fixture = fixture.setdefault('rollout_audit', {})
-            def audit_step(label, ptb, calls):
-                return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
-                    client=client, sign=sign, mutate=mutate, ledger=ledger,
-                    operator=operator, chain=reconciler.Chain(rpc_url),
-                    checkpoint=checkpoint_setup, record_other=other_execution)
-            audit_acceptance(audit_step, client, manifest, device, evidence, root,
-                fixture=audit_fixture, save=lambda: save_state(state_path, state),
-                operator=operator, fixture_key=key_name,
-                retire=getattr(args, 'retire_rollout_audit', False))
-
             # 4. Daemon and deployments.
             components = root / "state" / "test-components"
             template = root / "device-template.toml"
@@ -995,6 +982,21 @@ def run(args):
             transaction("delete 4 deployments", *deletes)
             cleanup.clear()
             check("deployments deleted (storage rebate)")
+            # Temporal audit acceptance must never prevent daemon, receipt or
+            # cleanup regressions from running. Pending is evidence, not a pass.
+            # Reuse the verified upgraded package and the same bounded ledger.
+            from rollout_audit_acceptance import run_scheduled as audit_acceptance, checkpointed_step
+            audit_fixture = fixture.setdefault('rollout_audit', {})
+            def audit_step(label, ptb, calls):
+                return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
+                    client=client, sign=sign, mutate=mutate, ledger=ledger,
+                    operator=operator, chain=reconciler.Chain(rpc_url),
+                    checkpoint=checkpoint_setup, record_other=other_execution)
+            audit_acceptance(audit_step, client, manifest, device, evidence, root,
+                fixture=audit_fixture, save=lambda: save_state(state_path, state),
+                operator=operator, fixture_key=key_name,
+                retire=getattr(args, 'retire_rollout_audit', False))
+
     finally:
         if process and process.poll() is None:
             process.kill()

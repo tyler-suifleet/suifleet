@@ -146,9 +146,10 @@ current record's type/creator, component/version, rollout revision and membershi
 on each reuse, forbids event-history reads, and still requires the actual node
 retention floor to pass the original decision checkpoint before it accepts a
 complete current-state audit. Fresh runs check the floor once rather than
-sleeping five minutes. Only that explicit floor-pending result has an
-`infrastructure` scheduling hint; it remains unsuccessful, never passed or
-silently skipped. Other source/reader failures remain failures.
+sleeping five minutes. The direct acceptance function raises an explicit
+`RetentionPending` result; the protected runner now records it as pending rather
+than failing ordinary regression acceptance (see the repair below). Other
+source/reader failures remain failures.
 
 After genuine proof, normal runs retain the small aged record for repeated free
 reads. An operator may append `--retire-rollout-audit` to the normal explicitly
@@ -180,3 +181,32 @@ protected Testnet CI must create the new retained fixture once, preserve it
 across retries, and obtain actual post-pruning proof after the real floor
 advances. Independent source review and exact-head CI remain required; this
 repair does not establish that temporal evidence already passed.
+
+
+## 2026-10-27: separate temporal acceptance from regression status
+
+Review found that every new bytecode-pair fixture could block all protected
+acceptance for days while its decision aged. The runner now executes daemon,
+deployment, independent receipt-effects and cleanup checks **before** the audit.
+Only the explicit reader exit 3 (`RetentionPending`) is caught by
+`run_scheduled`; its evidence says `status: pending` and
+`acceptance_complete: false`, retains the exact fixture/checkpoint, and adds no
+passed audit check. Reader failures, invalid proofs, provenance mismatches and
+failed transaction effects still fail the run. No status policy or mandatory
+ordinary CI gate is changed.
+
+This uses the review's pending-evidence option, retaining the existing strict
+bytecode-pair provenance binding rather than adopting records across packages.
+New fixture keys may therefore still create new records and require independent
+aging; ordinary testnet checks can complete throughout that wait. SF-164's own
+required post-pruning temporal acceptance remains **unproven**, and a green
+ordinary testnet status alone does not complete this ticket. The coordinator must
+collect the real aged audit proof and fresh independent review before approval.
+No public testnet run or aged proof was produced by this feedback worker.
+
+Fresh offline checks: audit orchestration 21 tests passed; testnet regression
+suite 145 tests passed (1 skipped); rollout audit, browser cleanup and dashboard
+Node suites passed. These fixture/mocked-network tests are software regression
+evidence, not live-chain evidence. Hosted checks at the pushed head remain
+pending. Manual wallet/physical acceptance stays in SF-031/#32; actual mainnet,
+production provider and credential acceptance stays in SF-087/#159, all unrun.

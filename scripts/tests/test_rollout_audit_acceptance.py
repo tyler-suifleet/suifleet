@@ -182,6 +182,48 @@ class AuditAcceptanceTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 2)
 
 
+class ScheduledAuditTests(unittest.TestCase):
+    setUp = AuditAcceptanceTests.setUp
+    step = AuditAcceptanceTests.step
+    client = AuditAcceptanceTests.client
+
+    def test_pending_new_bytecode_fixture_does_not_fail_remaining_acceptance(self):
+        self.output.returncode = 3
+        completed = []
+        # Exercise real fixture creation, admission and pending reader handling,
+        # not a mocked success. Each fresh package key remains separately pending.
+        for key in ['base-head-one', 'base-head-two']:
+            fixture, evidence = {}, {'checks': []}
+            with tempfile.TemporaryDirectory() as root, patch.object(audit.subprocess, 'run', return_value=self.output):
+                audit.run_scheduled(self.step, self.client, self.manifest, 'device', evidence, root,
+                    fixture=fixture, save=lambda: None, operator='operator', fixture_key=key)
+                completed.append(key)
+            self.assertTrue(evidence['rollout_audit_pending']['retained'])
+            self.assertNotIn('rollout_audit', evidence)
+            self.assertEqual(evidence['checks'], [])
+        self.assertEqual(completed, ['base-head-one', 'base-head-two'])
+
+    def test_scheduled_reader_failure_still_fails(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(audit.subprocess, 'run', return_value=self.output):
+            with self.assertRaises(RuntimeError):
+                audit.run_scheduled(self.step, self.client, self.manifest, 'device', {'checks': []}, root,
+                    fixture={}, save=lambda: None, operator='operator', fixture_key='key')
+
+    def test_protected_run_performs_remaining_acceptance_before_audit(self):
+        import ast
+        source = (Path(__file__).resolve().parents[1] / 'live_package_upgrade.py').read_text()
+        tree = ast.parse(source)
+        calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+        audit_call = next(node for node in calls if isinstance(node.func, ast.Name) and node.func.id == 'audit_acceptance')
+        for label in ['head-package deployment to the device: applied, receipt Applied on chain',
+                      'independent gRPC reader confirmed all four receipt-writing transaction effects',
+                      'deployments deleted (storage rebate)']:
+            check = next(node for node in calls if isinstance(node.func, ast.Name) and node.func.id == 'check'
+                         and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == label)
+            self.assertLess(check.lineno, audit_call.lineno)
+        self.assertIn('from rollout_audit_acceptance import run_scheduled as audit_acceptance', source)
+
+
 class CheckpointedMutationTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()

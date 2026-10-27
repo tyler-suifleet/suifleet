@@ -52,6 +52,20 @@ def checkpointed_step(state_path, state, fixture, label, ptb, calls, *, client,
             gas=20_000_000, require_full=True), ledger)
 
 
+def run_scheduled(*args, **kwargs):
+    """Record temporal acceptance separately from ordinary testnet regressions.
+
+    Only the reader's explicit floor-pending exit is nonfatal. Invalid proofs,
+    provenance, effects and all other reader failures still fail the run.
+    """
+    try:
+        return run(*args, **kwargs)
+    except RetentionPending:
+        # run() persisted the exact original fixture and pending evidence.
+        # Do not add a passed check or reuse any earlier successful proof.
+        return None
+
+
 def run(step, client, manifest, device, evidence, root, *, fixture=None, save=None,
         operator=None, fixture_key=None, retire=False):
     if 'deployment_manager::DecisionKey' not in manifest.get('type_origins', {}):
@@ -130,7 +144,8 @@ def run(step, client, manifest, device, evidence, root, *, fixture=None, save=No
         output = subprocess.run(['node', 'scripts/read_rollout_audit_live.cjs', str(input_path)],
             capture_output=True, text=True, timeout=330)
         if output.returncode:
-            evidence['rollout_audit_pending'] = dict(record=record, checkpoint=fixture['checkpoint'],
+            evidence['rollout_audit_pending'] = dict(status='pending', acceptance_complete=False,
+                record=record, checkpoint=fixture['checkpoint'],
                 admission_digest=fixture['admission_digest'], retained=True)
             error = RetentionPending if output.returncode == 3 else RuntimeError
             raise error(output.stderr[-2000:] or 'post-pruning read failed; fixture retained')
