@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "chain": "4c78adac",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+  "upgrade_cap": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
+  "packages": {
+    "core": {
+      "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+      "version": "2",
+      "previous": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+      "digest": "8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv",
+      "net_gas_mist": 593883363
+    },
+    "fleet_storage": {
+      "package": "0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374",
+      "cap": "0x4e760eebfd12fde1008dc84213208c00446a7cdb773c3cb43f855acfa99e80a5",
+      "digest": "8jNtV7Wfxi4dAEbVLAAtuVt1KoLEqESSWecNzkyiSNgn",
+      "net_gas_mist": 136008400
+    },
+    "fleet_data": {
+      "package": "0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54",
+      "cap": "0x6401f64f7597386510315505769520c6a51507933fea4882ad31c2ac30deb206",
+      "digest": "BSPi1uJw9cQ5b1uDsUf6gHY2xvuJcnRRZN3377YPdRt1",
+      "net_gas_mist": 97512400
+    }
+  },
+  "objects": {
+    "budget": "0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904",
+    "budget_cap": "0xf03d5624a86fd86167be7d7f1d6e6560968926398fc151022788abfaff12f351",
+    "storage": "0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13",
+    "fleet": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40"
+  },
+  "configuration": {
+    "limits": {
+      "float_cap": 60000000,
+      "period_ms": 86400000,
+      "period_allowance": 250000000,
+      "max_draws": 6,
+      "min_draw_interval_ms": 600000
+    },
+    "low_balance_mist": 50000000,
+    "quota": {
+      "period_ms": 86400000,
+      "encoded_bytes": 536870912,
+      "uploads": 24,
+      "max_blob": 8388608,
+      "write_fees": 100000000
+    },
+    "settings": {
+      "check_interval_ms": 1800000,
+      "rollout_check_interval_ms": 60000,
+      "health_interval_ms": 600000,
+      "archive_interval_ms": 604800000,
+      "archive_retention_epochs": 3
+    },
+    "data_cadence": {
+      "health_interval_ms": 600000,
+      "batch_interval_ms": 86400000,
+      "emergency_interval_ms": 300000
+    }
+  },
+  "funding": {
+    "budget_balance_mist": 100000000,
+    "storage_wal_frost": 20000000,
+    "operator_balance_mist": 751997907,
+    "read_at": "2026-10-27T18:57:10Z"
+  },
+  "steps": {
+    "core:a277fdbb6df2794ae7ad91ef@1.81.1-e04cf9aa915c": {
+      "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+      "version": "2",
+      "previous": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+      "digest": "8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv",
+      "net_gas_mist": 593883363
+    },
+    "fleet_storage:532bd7fefe01c88be7df822ee85671f2c71c2610b6444dadd8d13d90afb40270": {
+      "package": "0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374",
+      "cap": "0x4e760eebfd12fde1008dc84213208c00446a7cdb773c3cb43f855acfa99e80a5",
+      "digest": "8jNtV7Wfxi4dAEbVLAAtuVt1KoLEqESSWecNzkyiSNgn",
+      "net_gas_mist": 136008400
+    },
+    "fleet_data:22ef6809048c15d41a9d9363790183030d7be00f406bde7a2b287d0276f9e0ee": {
+      "package": "0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54",
+      "cap": "0x6401f64f7597386510315505769520c6a51507933fea4882ad31c2ac30deb206",
+      "digest": "BSPi1uJw9cQ5b1uDsUf6gHY2xvuJcnRRZN3377YPdRt1",
+      "net_gas_mist": 97512400
+    },
+    "budget:0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d": {
+      "budget": "0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904",
+      "cap": "0xf03d5624a86fd86167be7d7f1d6e6560968926398fc151022788abfaff12f351",
+      "digest": "9Z3PKSxG3U5oqTcUFMb9hHpzucWmacTk3LLF2rKJQBqv",
+      "net_gas_mist": 4359299
+    },
+    "settings:0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904:27a9ffa6738e": {
+      "settings": {
+        "check_interval_ms": 1800000,
+        "rollout_check_interval_ms": 60000,
+        "health_interval_ms": 600000,
+        "archive_interval_ms": 604800000,
+        "archive_retention_epochs": 3
+      },
+      "digest": "2tbZaRKMWhvE3gvpc623agh1nyTvPVhwktW2V1BmfqRf",
+      "net_gas_mist": 3576835
+    },
+    "storage:0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374:0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904": {
+      "storage": "0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13",
+      "digest": "2MZw3qXG68NDH4QriJDffX7iHwWRFbVBYprJWFPRbKLc",
+      "net_gas_mist": 3242163
+    },
+    "initial-wal:0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13": {
+      "swap_mist": 20000000,
+      "digest": "9156qeohvRARWtwwBwZnbeBrAuLcrnKL9skX2Xn8n6bj",
+      "net_gas_mist": 1000571
+    },
+    "fleet_data:0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54:0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904:0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13": {
+      "fleet": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40",
+      "digest": "641KVTcdRh7hUmMeUxKa3P5rSigLUKtVjPFUztHAbHPE",
+      "net_gas_mist": 3508163
+    },
+    "data-cadence:0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40:006e7ec26ed3": {
+      "cadence": {
+        "health_interval_ms": 600000,
+        "batch_interval_ms": 86400000,
+        "emergency_interval_ms": 300000
+      },
+      "digest": "3Rn6TAaE1YsQveFpzuVFWTWrpxKeLUUHjXcLo8LDiTtQ",
+      "net_gas_mist": 1000414
+    }
+  }
+}
