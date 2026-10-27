@@ -17,7 +17,18 @@ import { buildPublishVersionTx } from '@/lib/catalog';
 import type { Transaction } from '@mysten/sui/transactions';
 
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
-const guidance=(code:string)=>GUIDANCE[code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code];
+// CLI migration guidance retains repository references; the customer UI explains
+// the same limits and next steps without internal engineering provenance.
+const CUSTOMER_GUIDANCE: Record<string,string> = {
+  'unsupported-component-type': 'Only aws.greengrass.generic components translate. Repackage Lambda functions or plugins as a generic component with a run command; the Lambda runtime is not supported.',
+  'ipc-access-control': 'accessControl authorizes the AWS IPC protocol, which SuiFleet does not implement. Port the component to the native IPC SDK, run it as a separately provisioned Unix user and have the operator add the suggested [ipc.components.<name>] ACL. Recipes never grant IPC privileges.',
+  'aws-managed-dependency': 'This AWS-managed component has no translatable native equivalent yet. Review the dependency results below, provide a native replacement and depend on that component instead.',
+  'privileged-step': 'RequiresPrivilege other than false has no native equivalent: components run as the device client user. Move privileged work into a platform installer configured by your administrator.',
+};
+const guidance=(code:string)=>{
+  const key=code.startsWith('ComponentDependencies.')?'aws-managed-dependency':code;
+  return CUSTOMER_GUIDANCE[key]??GUIDANCE[key];
+};
 
 export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
   const inFlight=useRef(false),active=useRef(true);
@@ -80,7 +91,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
   const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
   const differences=result?.informational??[];
   return <div className="space-y-3 border p-4"><h2>Import AWS Greengrass recipe</h2>
-    <p>Translates the supported Greengrass V2 subset (docs/GREENGRASS_COMPATIBILITY.md). AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance.</p>
+    <p>Imports the supported parts of a Greengrass V2 software definition. AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance.</p>
     <label className="block">Recipe (JSON or YAML)<textarea rows={10} className="w-full font-mono" value={text} onChange={e=>{setText(e.target.value);setResult(null);}}/></label>
     {uris.map(uri=><label key={uri} className="block">Artifact for <code>{uri}</code> <input type="file" onChange={e=>{const f=e.target.files?.[0];setFiles(({[uri]:_,...rest})=>f?{...rest,[uri]:f}:rest);setResult(null);}}/></label>)}
     <button disabled={busy||!text.trim()} onClick={check}>Check translation</button>
@@ -88,7 +99,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       <p>{result.outcome==='translate'?`Translates to ${result.manifests!.length} native manifest(s)`:'Rejected'}{result.omitted_manifests?.length?`; manifests ${result.omitted_manifests.join(', ')} omitted (platform not translated: Windows, macOS or 32-bit x86)`:''}</p>
       <ul>{result.reasons.map(r=><li key={r}><code>{r}</code>: {guidance(r)}</li>)}</ul>
       {result.manifests?.map((m,i)=><p key={i}>{i+1}. {m.os}/{m.arch} · recipe {m.recipe.schemaVersion}</p>)}
-      {result.managed_dependencies&&<ul>{Object.entries(result.managed_dependencies).map(([d,c])=><li key={d}><code>{d}</code>: {c.outcome}{c.reason?` (${c.reason})`:''}{c.tickets?.length?` · ${c.tickets.join(', ')}`:''}{c.implementation_ticket?` · ${c.implementation_ticket}`:''}</li>)}</ul>}
+      {result.managed_dependencies&&<ul>{Object.entries(result.managed_dependencies).map(([d,c])=><li key={d}><code>{d}</code>: {c.outcome}{c.reason?` (${c.reason})`:''}</li>)}</ul>}
       {result.ipc_acl&&<div><p>Equivalent operator IPC ACL for a ported component (recipes never grant it):</p><pre>{ipcAclToml(name,result.ipc_acl)}</pre>{result.ipc_acl.unmapped.length>0&&<p>No native equivalent: {result.ipc_acl.unmapped.join(', ')}</p>}</div>}
       {differences.length>0&&<div><p>Reported differences from AWS behaviour:</p><ul>{differences.map(d=><li key={d}><code>{d}</code>: {guidance(d)}</li>)}</ul>
         <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}

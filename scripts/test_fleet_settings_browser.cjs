@@ -62,6 +62,10 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const text = (id) => page.getByTestId(id).textContent();
       const cells = async (id) => (await page.getByTestId(id).locator("td").allTextContents()).map((t) => t.trim());
       const depositSui = async () => Number(/for \d+ month\(s\) of these settings([\d.]+) SUI/.exec(await text("deposit"))[1]);
+      await page.getByTestId("cost-planning").waitFor();
+      assert.equal(await page.getByTestId("cost-planning").getAttribute("open"), null, "cost planning stays optional");
+      await page.getByText("Saving settings does not buy a subscription or add money to your budget.", { exact: true }).waitFor();
+      await page.getByTestId("cost-planning").locator("summary").first().click();
       await waitText("Network cost per month, at cost");
       await waitText("testnet reference gas price (live)");
       return { page, errors, usdRequests, waitText, control, text, cells, depositSui };
@@ -120,7 +124,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       assert.equal(await depositSui(), unlogged);
       // Testnet's one-day epochs cannot keep archives a year within SF-130's 53-epoch bound.
       assert.ok(await page.locator("#archiveRetentionDays-365").isDisabled());
-      assert.match((await cells("archiveRetentionDays-365"))[1], /Unavailable here: needs 365 Walrus epochs of 1 day\(s\); the limit is 53/);
+      assert.match((await cells("archiveRetentionDays-365"))[1], /Not available on this network\. Choose a retention period of 53 days or less\./);
       // Network cost and the SuiFleet price are shown apart.
       assert.match(await text("network-cost"), /paid from your fleet budget/);
       assert.doesNotMatch(await text("network-cost"), /\$80\.00/);
@@ -263,7 +267,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
     // ── A deployment without SF-130's settings type origins: prices shown, saving disabled, nothing read ──
     {
       const { page, errors, waitText, control } = await open("unsupported");
-      await waitText("no on-chain fleet settings (SF-130)");
+      await waitText("Saving settings is not available in this fleet configuration");
       assert.ok(await page.getByRole("button", { name: "Save settings" }).isDisabled());
       assert.deepEqual([(await control()).signed.length, (await control()).settingsReads.length], [0, 0]);
       assert.deepEqual(errors, []);

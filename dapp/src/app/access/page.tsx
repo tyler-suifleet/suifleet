@@ -7,7 +7,7 @@ import { isValidSuiAddress, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useState } from "react";
 import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import type { Transaction } from "@mysten/sui/transactions";
-import { PageHeader } from "@/components/ui";
+import { PageHeader, InfoCard } from "@/components/ui";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useAccessPolicies, POLICIES_ENABLED } from "@/hooks/useAccessPolicies";
 import { useDevices } from "@/hooks/useDevices";
@@ -40,20 +40,20 @@ export default function AccessPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <PageHeader title="Access policies" subtitle="Choose which devices and accounts can open private software releases. This does not give them permission to publish updates or manage your fleet." />
-      <p className="text-xs text-gray-600">
+      <InfoCard title="Control who can open private software"><p>
         Grants and revocations are signed transactions; recipients use their own keys. Revocation stops future key
         release once key servers observe it, but cannot recall keys or plaintext already obtained, clear cached keys, or uninstall delivered software. Replacing the encryption key blocks new access to earlier releases. Encrypt and deploy replacement copies of any software devices still need.
-      </p>
+      </p></InfoCard>
       <ol className="list-decimal pl-5 text-sm space-y-1">
         <li>Name a policy for the releases you want to protect.</li>
         <li>Grant decryption to activated devices, groups you administer, or an account.</li>
         <li>Choose this policy when uploading a confidential release in <Link className="text-blue-700 underline" href="/firmware">Deploy component</Link>.</li>
       </ol>
-      {!POLICIES_ENABLED && <section role="status" className="border rounded p-4 space-y-2">
-        <h2 className="font-semibold">Access policies unavailable on this deployment</h2>
-        <p className="text-sm">This fleet was created before private-release access controls were available. Connecting a wallet will not add support.
+      {!POLICIES_ENABLED && <section role="status" className="rounded-xl border border-slate-200 bg-white p-6 space-y-3 shadow-sm">
+        <h2 className="font-semibold">Private releases are not enabled for this fleet</h2>
+        <p className="text-sm">The network configuration currently used by this app does not include private-release permissions. Connecting a different account will not enable them.
           Existing public OTA releases remain public; creating a policy cannot encrypt them retroactively.</p>
-        <p className="text-sm">Ask your fleet administrator to set up a supported private-release configuration.
+        <p className="text-sm">Ask your fleet administrator to enable private-release support for this fleet and connect the app to that verified configuration.
           Do not replace this fleet registry or use public delivery for confidential content.</p>
         <Link className="text-blue-700 underline text-sm" href="/devices">View this fleet’s devices</Link>
       </section>}

@@ -14,7 +14,7 @@ import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import { listFleetDeviceIds } from "@/lib/fleet-data";
 import { deviceAlerts, deviceHref, deviceServicesView, linkedDevice, utc, type ServicesView, type Unavailable } from "@/lib/device-services";
 import type { ShadowSyncHealth } from "@/lib/telemetry";
-import { HealthBadge, PageHeader, Section } from "@/components/ui";
+import { HealthBadge, PageHeader, Section, InfoCard } from "@/components/ui";
 
 export default function DeviceServicesPage() {
   const DATA_CONFIG = useFleetDataConfig();
@@ -46,8 +46,15 @@ export default function DeviceServicesPage() {
   const selectedDevice = selection.supported && !selection.fleet?.devices.includes(device) ? "" : device;
   const name = (device: string) => owned.find((d) => id(d.objectId) === id(device))?.name ?? device;
   return <div className="max-w-5xl space-y-4">
-    <PageHeader title="Device services" subtitle="View device configuration, data streams, messaging and alerts from verified device reports" />
-    {!DATA_CONFIG ? <p>Direct-chain fleet data is not configured for this deployment; device service views need the verified Sui path.</p>
+    <PageHeader title="Device services" subtitle="See how applications on a device are communicating, storing data and staying in sync." />
+    <InfoCard title="What can I monitor here?">
+      <p>This is a read-only view of the optional services used by your device applications. Choose a device to see its latest reported activity. For installed software and update versions, use the <Link className="font-medium text-blue-700 underline" href="/devices">Devices page</Link>.</p>
+    </InfoCard>
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {[['Configuration sync', 'Check whether saved device settings and reported values agree.'], ['Data buffers', 'See how much data is waiting locally and whether exports are falling behind.'], ['App messaging', 'Check application message queues and refused or dropped messages.'], ['Network bridge', 'Check the connection used to exchange messages with other systems.']].map(([title, text]) => <section key={title} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><h2 className="text-sm font-semibold">{title}</h2><p className="mt-2 text-xs leading-relaxed text-slate-500">{text}</p></section>)}
+
+    </div>
+    {!DATA_CONFIG ? <section className="rounded-xl border border-slate-200 bg-white p-6"><h2 className="font-semibold">Device reporting needs setup</h2><p className="mt-2 text-sm text-slate-600">This fleet is not connected to the reporting service used by this page. A device can be online without appearing here. Ask your administrator to configure reporting and update the device client if needed.</p><Link href="/devices" className="mt-4 inline-block text-sm font-medium text-blue-700">View devices →</Link></section>
       : !account ? <p>Connect a wallet to read this fleet.</p> : <>
       <label>Device <select className="border rounded p-2" value={selectedDevice} onChange={(e) => { setDevice(e.target.value); window.history.replaceState(null, "", e.target.value ? `?${new URLSearchParams({ device: e.target.value })}` : "?"); }}>
         <option value="">Choose a device</option>
@@ -92,7 +99,7 @@ function Services({ view, device }: { view: ServicesView; device: string }) {
   const more = (omitted: number) => omitted > 0 && <p className="text-xs text-gray-500">{omitted} more not listed (snapshot size limit).</p>;
   return <>
     <p className="text-xs text-gray-500">Signed report observed {utc(view.observedMs)}, recorded {utc(view.receivedMs)}.</p>
-    <Section title="Shadows">
+    <Section title="Configuration sync">
       {shadows.state === "disabled" ? off : <div className="space-y-2 text-sm" data-testid="shadows">
         <p>{shadows.shadows} shadows; {shadows.notificationsRefused} delta notifications refused ({shadows.notificationsRefusedRecent} since the previous report).</p>
         <p className="text-gray-600" data-testid="shadow-documents-link">{shadows.documents.reason} <Link className="text-[#4DA2FF] hover:underline" href={deviceHref("/data/", device)}>Open shadow documents</Link></p>
@@ -101,7 +108,7 @@ function Services({ view, device }: { view: ServicesView; device: string }) {
         {more(shadows.omitted)}
       </div>}
     </Section>
-    <Section title="Streams">
+    <Section title="Data buffers">
       {streams.state === "disabled" ? off : <div className="space-y-2 text-sm" data-testid="streams">
         {streams.streams.length === 0 && <p>No streams.</p>}
         {streams.streams.map((s) => <div key={s.name} className="border-b pb-2">

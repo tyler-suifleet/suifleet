@@ -12,13 +12,15 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
   try {
     await fs.access(path.join(output, 'index.html'));
     const fixture = path.join(temporary, 'fixture.js');
+    const storageFixture = path.join(temporary, 'storage.js');
+    await fs.writeFile(storageFixture, 'export const useFleetBlobStore = () => ({store:null});');
     await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
-      import {HistoryStatusView} from '@/components/HistoryStatus'; import {Section, HealthBadge} from '@/components/ui';
+      import {GreengrassImport} from '@/components/GreengrassImport'; import {HistoryStatusView} from '@/components/HistoryStatus'; import {Section, HealthBadge} from '@/components/ui';
       function App() { const [message, setMessage] = React.useState('History unavailable before checkpoint 123; use an archival endpoint.');
         return <main className="fleet-content"><h1>Console states</h1><button onClick={()=>setMessage('')}>Clear diagnostic</button>
           <Section title="Devices"><table><thead><tr><th>Device</th><th>Health</th></tr></thead><tbody><tr><td>Factory sensor</td><td><HealthBadge health={{status:'healthy',codes:[],reasons:['Signed report verified'],components:[]}} /></td></tr></tbody></table></Section>
           <Section title="Loading"><p role="status">Loading device reports…</p></Section><Section title="Error"><p role="alert">Could not refresh devices. Retry the connection.</p><button disabled>Unavailable action</button></Section>
-          <HistoryStatusView message={message}/></main>; } createRoot(document.getElementById('root')).render(<App/>);`, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'browser', outfile: fixture, jsx: 'automatic', nodePaths: [path.join(root, 'dapp/node_modules')], alias: { '@': path.join(root, 'dapp/src') }, define: { 'process.env': '{}', 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning' });
+          <GreengrassImport catalog="" owner="" execute={()=>{throw Error("No signing in presentation fixture");}} onPublished={()=>{}} disabled={true} policies={[]} protect={()=>{throw Error("No uploads in presentation fixture");}}/><HistoryStatusView message={message}/></main>; } createRoot(document.getElementById('root')).render(<App/>);`, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'browser', outfile: fixture, jsx: 'automatic', nodePaths: [path.join(root, 'dapp/node_modules')], alias: { '@': path.join(root, 'dapp/src'), '@/hooks/useFleetStorage': storageFixture }, define: { 'process.env': '{}', 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning' });
     const css = (await fs.readdir(path.join(output, '_next/static/chunks'))).filter(p=>p.endsWith('.css'));
     server = http.createServer(async (request, response) => {
       try {
@@ -44,6 +46,7 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       for (const route of routes) {
         await page.goto(base+route,{waitUntil:'networkidle'});
         await page.locator('h1').waitFor();
+        assert.doesNotMatch(await page.locator('main').textContent(), /SF-\d{3}|docs\/[A-Z_]+\.md/, `${route}: no internal tracker/document references, even in collapsed details`);
         assert.equal(await page.locator('h1').count(),1,`${route}: one page title`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${route}: no page overflow at ${width}`);
         const current=page.locator('nav[aria-label="Main"]:visible [aria-current="page"]');
@@ -51,6 +54,19 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       }
       await page.goto(base+'/fixture/',{waitUntil:'networkidle'});
       await page.getByRole('heading',{name:'Console states'}).waitFor();
+      // Exercise actual translation results, not just the empty import form.
+      const cases = JSON.parse(await fs.readFile(path.join(root, 'interfaces/compat/aws-recipe-cases.json')));
+      for (const code of ['unsupported-component-type', 'ipc-access-control', 'aws-managed-dependency', 'privileged-step']) {
+        const item = cases.find(c => [...(c.expected.reasons??[]), ...(c.expected.informational??[])].some(r => code === 'aws-managed-dependency' ? r.startsWith('ComponentDependencies.') || r === code : r === code));
+        assert.ok(item, `recipe fixture for ${code}`);
+        await page.getByRole('textbox', {name:'Recipe (JSON or YAML)'}).fill(item.recipe_text ?? JSON.stringify(item.recipe));
+        await page.getByRole('button', {name:'Check translation'}).click();
+        const result = page.locator('div[role="status"]').filter({has:page.locator('ul')});
+        await result.waitFor();
+        const text = await result.textContent();
+        assert.ok((code === 'aws-managed-dependency' ? /ComponentDependencies\.|aws-managed-dependency/.test(text) : text.includes(code)), `${code} rendered`);
+        assert.doesNotMatch(text, /SF-\d{3}|docs\/[A-Z_]+\.md|adapter ticket|roadmap gap/, `${code}: customer-facing rendered guidance`);
+      }
       const disclosure=page.locator('footer > details');
       assert.equal(await disclosure.getAttribute('open'),null);
       assert.equal(await page.getByText('History unavailable before checkpoint 123;', {exact:false}).isVisible(),false);
@@ -66,7 +82,7 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       await page.getByRole('button',{name:'Clear diagnostic'}).click(); assert.equal(await page.locator('footer').count(),0);
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 14 exported routes at desktop/mobile; navigation, page titles and overflow; populated/loading/error states; keyboard history disclosures and empty diagnostics. No external network or wallet.');
+    console.log('PASS: 14 exported routes at desktop/mobile; navigation, page titles and overflow; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No external network or wallet.');
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));

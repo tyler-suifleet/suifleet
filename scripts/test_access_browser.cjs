@@ -37,7 +37,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await visit("unsupported");
     await page.getByRole("heading", { name: "Access policies", exact: true }).waitFor();
     await page.getByText("Connect your wallet using", { exact: false }).waitFor();
-    await page.getByRole("heading", { name: "Access policies unavailable on this deployment" }).waitFor();
+    await page.getByRole("heading", { name: "Private releases are not enabled for this fleet" }).waitFor();
     await update({ connected: true });
     assert.equal(await page.getByRole("button", { name: "Create policy" }).count(), 0);
     await visit("missing"); await update({ connected: true });
