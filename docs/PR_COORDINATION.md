@@ -954,3 +954,23 @@ provision production keys, authorize Mainnet/hardware work, change CI allowances
 mark tickets Done, reset repair budgets or relax independent merge gates. The
 standalone helper is installed separately from the coordinator generation; record
 its exact commit/hash in the local installation receipt when updating it.
+
+
+### Ordinary CI runtime recovery (SF-179)
+
+The complete serial `CI / check` job has a 120-minute ceiling. Run 40542334953
+(job 122324581852) reached the former 60-minute limit on 2026-10-27; this scoped
+ceiling correction preserves every security, simulator, platform and integration
+step and the existing caches. It is headroom, not a measured completion time.
+All other job limits and merge gates remain unchanged.
+
+After this workflow correction merges, the orchestrator/operator must identify
+still-current affected PR heads and update their branches with the reviewed main
+revision through the normal integration path before rerunning CI. Rerunning an
+old workflow revision alone retains its old ceiling. Verify the open PR head and
+base, inspect `gh run view RUN --json headSha,workflowName,event,conclusion`, and
+only then use `gh run rerun RUN` for a run whose revision contains the corrected
+workflow. If integration already started a fresh CI run, use that run instead.
+Do not create empty commits, fabricate statuses or bypass checks. Hosted reruns
+and their results remain post-integration work; implementation workers hand off
+without watching CI.
