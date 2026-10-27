@@ -3884,6 +3884,36 @@
         "Changing pricing in BUSINESS_PLAN.md requires regenerating the data file; the procedure is documented."
       ],
       "validation": "Pricing data generation test; site build and link check; copy reviewed against BUSINESS_PLAN.md."
+    },
+    {
+      "key": "SF-180",
+      "title": "Give the public site a professional visual identity and SuiFleet logo",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "merge_depends_on": [
+        "SF-172"
+      ],
+      "paths": [
+        "site/src",
+        "site/build.py",
+        "site/check.py",
+        "site/tests",
+        "docs/brand"
+      ],
+      "resources": [],
+      "description": "User rejected the initial landing-page appearance and requested an extremely professional site plus a logo. Redesign the presentation with a cohesive enterprise identity, strong typography, purposeful layout and polished responsive behavior while retaining truthful product information and the functional static site/guide. Supply a usable transparent logo asset, accessible brand treatment and download. Do actual desktop/mobile browser review and publish a separate visual preview.",
+      "evidence": "Direct user feedback 2026-10-27: landing page looks shitty, want something extremely professional and make a logo. Existing SF172 build/layout interface is available on its committed branch; coordinate with its active worker, never edit its checkout. New generated logo concept exists privately in Codex generated_images; copy selected final asset into this issue worktree before referencing it.",
+      "acceptance": [
+        "A distinctive consistent brand appears in the navigation, hero, footer and favicon; logo is saved in repository with provenance and usable download, transparent background preserved.",
+        "Landing page uses clear operator/manufacturer language, confident typography, restrained color, deliberate spacing and a useful product visual; no invented customer logos, usage statistics, certifications or unmeasured cost claims.",
+        "All existing guide/pricing/security/contact links remain discoverable and work; keep script-free static-site policy, accessibility and strict security checks. No third-party tracking or fonts/scripts loaded at runtime.",
+        "Common layout and secondary-page styles share the same design; desktop and390px browser checks show no overflow, readable contrast, usable navigation and keyboard focus.",
+        "User receives a working draft preview of the redesigned site. SF172 remains a merge prerequisite. No mainnet publishing, credentials, DNS changes or real spending authorized by this visual task."
+      ],
+      "validation": "Run site build, site unit/negative/reproducibility/link checks and desktop/mobile rendered review with screenshots. Preserve meaningful existing checks and report exact commands; itemized small commits authored/committed by Tyler Bush."
     }
   ]
 }
