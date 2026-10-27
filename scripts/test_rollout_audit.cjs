@@ -52,7 +52,22 @@ const field = revision => ({ $kind: 'DynamicField', name: { type: type('Decision
   } }, deployment);
   assert.equal(cleanupTx.getData().commands[0].MoveCall.function, 'clear_decision_audit');
   await assert.rejects(cleanup({ async getDynamicField() { throw Error('transport down'); } }, deployment), /transport down/);
-  const { afterPruning } = require('./read_rollout_audit_live.cjs');
+  const { afterPruning, verifyRetainedFixture } = require('./read_rollout_audit_live.cjs');
+  const fixtureInput = { record: deployment, operator: id('0x2'), device: id('0x1'), revision: 2 };
+  const retainedRollout = { ...rolloutValue, revision: '2' };
+  const retainedRecord = { id: deployment, creator: fixtureInput.operator, component_name: 'audit-only',
+    version: '1', recipe_blob_id: 'not-executed', artifact_sha256: 'a'.repeat(64), created_at: '1', schema_version: '3' };
+  const retainedClient = {
+    async getObject() { return { object: { type: `${manifest.type_origins['deployment_manager::DeploymentRecord']}::deployment_manager::DeploymentRecord`, content: p.deployment_manager_DeploymentRecordBcs.serialize(retainedRecord).toBytes() } }; },
+    async getDynamicField() { return { dynamicField: { value: { type: `${manifest.type_origins['deployment_manager::Rollout']}::deployment_manager::Rollout`, bcs: p.deployment_manager_RolloutBcs.serialize(retainedRollout).toBytes() } } }; },
+  };
+  await verifyRetainedFixture(retainedClient, load, fixtureInput);
+  retainedRecord.creator = id('0x3');
+  await assert.rejects(verifyRetainedFixture(retainedClient, load, fixtureInput), /creator mismatch/);
+  retainedRecord.creator = fixtureInput.operator; retainedRollout.revision = '3';
+  await assert.rejects(verifyRetainedFixture(retainedClient, load, fixtureInput), /revision changed/);
+  retainedRollout.revision = '2'; retainedRollout.members = [id('0x4')];
+  await assert.rejects(verifyRetainedFixture(retainedClient, load, fixtureInput), /membership changed/);
   let checks = 0, reads = 0;
   const floor = { ledgerService: { async getServiceInfo() { return { response: { lowestAvailableCheckpoint: ++checks === 1 ? 8n : 11n } }; } } };
   const after = await afterPruning(floor, 10n, async () => { reads++; return 'stored'; }, { delay: async () => {} });

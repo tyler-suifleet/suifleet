@@ -158,6 +158,9 @@ def funding_shortfall(pools, required, largest_budget=PACKAGE_GAS):
 
 def failure_class(error):
     """Bounded scheduling hint: funding/uncertain/infrastructure need no source repair."""
+    from rollout_audit_acceptance import RetentionPending
+    if isinstance(error, RetentionPending):
+        return "infrastructure"  # Still unsuccessful; retry the SAME aged fixture.
     if isinstance(error, (Spent, FundingShortfall)):
         return "funding"
     if isinstance(error, reconciler.Uncertain):
@@ -210,6 +213,22 @@ def held_reservations(state, operator):
         else:
             outstanding = record["status"] == "unresolved"
         held += spec["reserved_mist"] if outstanding else 0
+    audit_markers = set()
+    for fixture in state.get('fixtures', {}).values():
+        audit = fixture.get('rollout_audit') or {}
+        pending = audit.get('pending_operation')
+        if not pending:
+            continue
+        if audit.get('binding', {}).get('operator') != operator:
+            raise RuntimeError('retained audit operation belongs to another operator')
+        tx = pending.get('tx') or {}
+        budget = int(tx.get('gas_budget', 20_000_000))
+        if not 0 < budget <= 20_000_000:
+            raise RuntimeError('invalid retained audit gas reservation')
+        identity = tx.get('digest') or json.dumps(pending, sort_keys=True)
+        if identity not in audit_markers:
+            held += budget
+            audit_markers.add(identity)
     return held
 
 
@@ -863,8 +882,17 @@ def run(args):
                 check("pre-upgrade group indexed in place; device inbox at its derived address lists the group")
 
             # Reuse the verified upgraded package and the same bounded ledger.
-            from rollout_audit_acceptance import run as audit_acceptance
-            audit_acceptance(transaction, client, manifest, device, evidence, root)
+            from rollout_audit_acceptance import run as audit_acceptance, checkpointed_step
+            audit_fixture = fixture.setdefault('rollout_audit', {})
+            def audit_step(label, ptb, calls):
+                return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
+                    client=client, sign=sign, mutate=mutate, ledger=ledger,
+                    operator=operator, chain=reconciler.Chain(rpc_url),
+                    checkpoint=checkpoint_setup, record_other=other_execution)
+            audit_acceptance(audit_step, client, manifest, device, evidence, root,
+                fixture=audit_fixture, save=lambda: save_state(state_path, state),
+                operator=operator, fixture_key=key_name,
+                retire=getattr(args, 'retire_rollout_audit', False))
 
             # 4. Daemon and deployments.
             components = root / "state" / "test-components"
@@ -1013,6 +1041,8 @@ if __name__ == "__main__":
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
     parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
+    parser.add_argument("--retire-rollout-audit", action="store_true",
+                        help="delete the retained audit only after real post-pruning proof; retires its automatic reuse")
     parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
                         help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()
