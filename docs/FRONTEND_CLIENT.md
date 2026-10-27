@@ -127,3 +127,30 @@ A fixture wallet is not a real extension acceptance run. Before marking SF-003 D
 See [wallet onboarding](WALLET_ONBOARDING.md) for Google zkLogin/Enoki configuration,
 Slush web, session custody, recovery, first registration and device-owner transfer.
 The existing manifest, authority and effects checks apply to every wallet type.
+
+## Static wallet metadata and favicon
+
+The static export includes `/favicon.ico` and explicitly links it from the shared
+layout. Slush initialization in dApp Kit core 1.6.38 / Slush wallet 1.3.4 otherwise
+fetches `https://api.slush.app/api/wallet/metadata` on every full page load. That
+endpoint was reported to reject the app.suifleet.io origin through CORS; the SDK
+then logs `Error fetching metadata` while retaining its fallback wallet.
+
+We use the supported `slushWalletConfig.metadataApiUrl` option to load
+`/wallet/slush.json` from the application's own origin. This is a snapshot of
+Slush wallet 1.3.4's bundled fallback ID, name, icon and enabled flag (Mysten Labs,
+Apache-2.0). It changes only wallet display/availability metadata; the default
+`https://my.slush.app` popup origin, session, account, signing and network checks
+remain the SDK's. Remote branding/disable updates are no longer fetched: review
+the snapshot when upgrading the wallet SDK or when provider availability changes.
+No cross-origin proxy, console suppression or credential handling is added.
+
+After building, run `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+scripts/test_dapp_presentation_browser.cjs`. CI runs the same test with its pinned
+headless browser and networking disabled. It discovers every app page and fails
+on console errors, uncaught exceptions, external startup requests or missing
+favicon/metadata at desktop and mobile widths. Public testnet price reads use
+an explicit gRPC unavailable-price fixture; all other external requests fail.
+This is a disconnected testnet
+console walkthrough, not an actual Slush login or public-chain transaction;
+manual wallet acceptance remains in SF-031/#32 and SF-087/#159.
