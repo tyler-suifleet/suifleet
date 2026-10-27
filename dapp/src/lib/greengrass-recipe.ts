@@ -39,9 +39,14 @@ const RANGE = new RegExp(`^(\\*|${COMPARATOR}( ${COMPARATOR})*)$`);
 const ONE_COMPARATOR = new RegExp(`^(>=|<=|>|<|=|\\^|~)?(${CORE})$`);
 const TOP_KEYS = new Set(["RecipeFormatVersion", "ComponentName", "ComponentVersion", "ComponentDescription",
   "ComponentPublisher", "ComponentConfiguration", "ComponentDependencies", "ComponentType", "ComponentSource", "Manifests", "Lifecycle"]);
-const STEP_KEYS = new Set(["Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback"]);
+// AWS matches lifecycle step names, step keys and artifact keys
+// case-insensitively (Install/install, URI/Uri); these are the canonical spellings.
+const STEP_KEYS = ["Script", "RequiresPrivilege", "Skipif", "Timeout", "Setenv", "BootstrapOnRollback"];
 const MAPPED_STEPS = new Set(["install", "run", "shutdown"]);
 const UNSUPPORTED_STEPS = new Set(["bootstrap", "startup", "recover", "uninstall"]);
+const LIFECYCLE_KEYS = [...MAPPED_STEPS, ...UNSUPPORTED_STEPS, "Setenv"];
+const ARTIFACT_KEYS = ["Uri", "Unarchive", "Permission", "Digest", "Algorithm"];
+const PERMISSION_KEYS = ["Read", "Execute"];
 const OS_MAP: Record<string, string> = { linux: "linux", "*": "*" };
 const ARCH_MAP: Record<string, string> = { amd64: "x86_64", aarch64: "aarch64", arm: "arm", "*": "*" };
 const OMITTED_OS = new Set(["windows", "darwin"]);
@@ -63,6 +68,7 @@ export const GUIDANCE: Record<string, string> = {
   "multiple-documents": "Supply exactly one YAML document per recipe.",
   "yaml-ambiguous-scalar": "A plain YAML scalar means different things under YAML 1.1 (the Greengrass parser) and YAML 1.2, for example yes/no/on/off, 0755, 1:20 or a << merge key. Quote it, or write the value you mean explicitly.",
   "yaml-non-json-value": "Use only JSON-compatible YAML: string keys, finite numbers, no tags, directives or anchors that change meaning.",
+  "case-duplicate-key": "Lifecycle step names, step keys and artifact keys are matched case-insensitively, as in AWS, so Install and install (or URI and Uri) are the same key. Keep only one of them.",
   "unknown-field": "Remove the field, or correct its spelling: Greengrass field names are matched exactly and unknown fields are never ignored.",
   "unsupported-format-version": "Set RecipeFormatVersion to '2020-01-25' (quoted in YAML).",
   "unsupported-component-type": "Only aws.greengrass.generic components translate. Repackage Lambda functions or plugins as a generic component with a run command (not Lambda compatibility; see docs/GREENGRASS_MANAGED_COMPONENTS.md).",
@@ -88,10 +94,10 @@ export const GUIDANCE: Record<string, string> = {
   "no-manifests": "Add at least one manifest.",
   "no-supported-platform": "Add a Linux x86_64, aarch64 or arm manifest; Windows and macOS have no native runtime, and 32-bit x86 is outside the supported import scope.",
   "artifact-count": "Each manifest needs exactly one artifact (and a recipe at most 16 manifests); combine files into one archive unpacked by install.",
-  "unsupported-artifact-key": "Artifacts may contain only Uri, Unarchive, Permission, Digest and Algorithm.",
+  "unsupported-artifact-key": "Artifacts may contain only URI, Unarchive, Permission, Digest and Algorithm, in any letter case as in AWS (URI or Uri).",
   "unsupported-unarchive": "Use Unarchive NONE and unpack the archive in install, for example tar -xf {artifacts:path}/<file>.",
   "unsupported-artifact-permission": "Use the default Permission (Read OWNER, Execute NONE); run the artifact through an interpreter or chmod it in install.",
-  "unbound-artifact": "Bind every artifact Uri to an authenticated Walrus upload (blob ID and SHA-256); s3:// URIs are never fetched.",
+  "unbound-artifact": "Bind every artifact URI to an authenticated Walrus upload (blob ID and SHA-256); s3:// URIs are never fetched.",
   "artifact-digest-mismatch": "The recipe Digest must be the SHA-256 (Algorithm SHA-256) of exactly the bound upload.",
   "no-lifecycle-command": "Add an install or run step. A native recipe without either hands its artifact to the platform updater, which an AWS component never does.",
   "invalid-step": "A lifecycle step must be a script string or an object with a Script string.",
@@ -100,7 +106,7 @@ export const GUIDANCE: Record<string, string> = {
   "privileged-step": "RequiresPrivilege other than false has no native equivalent: components run as the daemon user. Move privileged work into a platform installer (docs/PLATFORM_INSTALLERS.md).",
   "step-timeout-or-env": "Remove Timeout and Setenv: native step timeouts are operator configuration and the environment is cleared. Set variables inside the script.",
   "unsupported-lifecycle-step": "bootstrap, startup, recover and uninstall have no native equivalent: use install for setup, run for the long-running process (the supervisor restarts it), and platform tooling for reboots and removal.",
-  "unknown-lifecycle-step": "Lifecycle step names are exact lowercase install, run or shutdown.",
+  "unknown-lifecycle-step": "Lifecycle step names are install, run or shutdown, in any letter case as in AWS (Install, Run, Shutdown); the translated manifest uses lowercase.",
   "shutdown-without-run": "shutdown applies only to a supervised run command.",
   "native-placeholder-collision": "The script contains {artifact}, {artifacts}, {work}, {pid} or {configuration} literally, which the native daemon would substitute. Rename that text.",
   "quoted-variable": "Native substitutions are shell-quoted, so recipe variables inside quotes or next to backslashes would change meaning. Move them outside quotes.",
@@ -125,6 +131,22 @@ const has = (value: object, key: string) => Object.prototype.hasOwnProperty.call
 const define = <T>(target: Record<string, T>, key: string, value: T) =>
   Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 const BLANK = /^[ \t\n\r]*$/;
+
+/**
+ * Match keys case-insensitively, as AWS does: the values under their canonical
+ * names, in document order, and the keys that match none. Keys that differ
+ * only in case are rejected, never resolved by picking one.
+ */
+function fold(value: Record<string, unknown>, names: readonly string[], reasons: Set<string>): [Record<string, unknown>, string[]] {
+  const known: Record<string, unknown> = {}, unknown: string[] = [];
+  for (const [key, item] of Object.entries(value)) {
+    const canonical = names.find(n => n.toLowerCase() === key.toLowerCase());
+    if (canonical === undefined) unknown.push(key);
+    else if (has(known, canonical)) reasons.add("case-duplicate-key");
+    else define(known, canonical, item);
+  }
+  return [known, unknown];
+}
 
 /** SemVer 2.0.0 precedence key, as scripts/greengrass_managed.py `_key`. */
 function precedence(version: string): [number, number, number, number, [number, number, string][]] {
@@ -227,13 +249,14 @@ export function parseGreengrassRecipe(text: string): { recipe: unknown } | Trans
   return { recipe: value };
 }
 
-/** Every artifact Uri in a recipe's manifests, in order, for binding. */
+/** Every artifact URI (any letter case) in a recipe's manifests, in order, for binding. */
 export function artifactUris(recipe: unknown): string[] {
   const uris: string[] = [];
   const manifests = isObject(recipe) && Array.isArray(recipe.Manifests) ? recipe.Manifests : [];
   for (const manifest of manifests) {
     for (const artifact of isObject(manifest) && Array.isArray(manifest.Artifacts) ? manifest.Artifacts : []) {
-      if (isObject(artifact) && typeof artifact.Uri === "string" && !uris.includes(artifact.Uri)) uris.push(artifact.Uri);
+      const uri = isObject(artifact) ? fold(artifact, ARTIFACT_KEYS, new Set())[0].Uri : undefined;
+      if (typeof uri === "string" && !uris.includes(uri)) uris.push(uri);
     }
   }
   return uris;
@@ -269,11 +292,12 @@ function script(step: string, text: string, basename: string | null, reasons: Se
 function step(name: string, value: unknown, basename: string | null, reasons: Set<string>): string | null {
   let text: unknown = value;
   if (isObject(value)) {
-    if (Object.keys(value).some(k => !STEP_KEYS.has(k)) || has(value, "Skipif") || has(value, "BootstrapOnRollback")) reasons.add("unsupported-step-key");
+    const [keys, unknown] = fold(value, STEP_KEYS, reasons);
+    if (unknown.length || has(keys, "Skipif") || has(keys, "BootstrapOnRollback")) reasons.add("unsupported-step-key");
     // Only an explicit false keeps AWS semantics; Greengrass may coerce strings such as "true".
-    if (has(value, "RequiresPrivilege") && value.RequiresPrivilege !== false) reasons.add("privileged-step");
-    if (has(value, "Timeout") || has(value, "Setenv")) reasons.add("step-timeout-or-env");
-    text = value.Script;
+    if (has(keys, "RequiresPrivilege") && keys.RequiresPrivilege !== false) reasons.add("privileged-step");
+    if (has(keys, "Timeout") || has(keys, "Setenv")) reasons.add("step-timeout-or-env");
+    text = keys.Script;
   }
   if (typeof text !== "string") {
     reasons.add("invalid-step");
@@ -323,17 +347,19 @@ function artifact(manifest: Record<string, unknown>, bindings: Record<string, Ar
     reasons.add("artifact-count");
     return [null, null];
   }
-  const [entry] = artifacts;
-  if (!isObject(entry) || Object.keys(entry).some(k => !["Uri", "Unarchive", "Permission", "Digest", "Algorithm"].includes(k))) {
+  if (!isObject(artifacts[0])) {
     reasons.add("unsupported-artifact-key");
     return [null, null];
   }
+  // An unknown key is reported with every other finding for this artifact.
+  const [entry, unknown] = fold(artifacts[0], ARTIFACT_KEYS, reasons);
+  if (unknown.length) reasons.add("unsupported-artifact-key");
   const uri = entry.Uri;
   const basename = typeof uri === "string" ? uri.replace(/\/+$/, "").split("/").pop()! : null;
   if ((has(entry, "Unarchive") ? entry.Unarchive : "NONE") !== "NONE") reasons.add("unsupported-unarchive");
-  const permission = has(entry, "Permission") ? entry.Permission : {};
-  if (!isObject(permission) || Object.keys(permission).some(k => k !== "Read" && k !== "Execute")
-    || (has(permission, "Read") ? permission.Read : "OWNER") !== "OWNER" || (has(permission, "Execute") ? permission.Execute : "NONE") !== "NONE") {
+  const declared = has(entry, "Permission") ? entry.Permission : {};
+  const [permission, other] = isObject(declared) ? fold(declared, PERMISSION_KEYS, reasons) : [{}, [""]];
+  if (other.length || (has(permission, "Read") ? permission.Read : "OWNER") !== "OWNER" || (has(permission, "Execute") ? permission.Execute : "NONE") !== "NONE") {
     reasons.add("unsupported-artifact-permission");
   }
   const binding = typeof uri === "string" && has(bindings, uri) ? bindings[uri] : null;
@@ -463,36 +489,40 @@ export function translateGreengrassRecipe(recipe: unknown, bindings: Record<stri
     reasons.add("no-manifests");
     raw = [];
   }
+  // Every manifest is checked in full, so one check reports every finding.
   (raw as unknown[]).forEach((manifest, index) => {
-    if (!isObject(manifest) || Object.keys(manifest).some(k => !["Name", "Platform", "Lifecycle", "Selections", "Artifacts"].includes(k))) {
+    if (!isObject(manifest)) {
       reasons.add("unsupported-manifest-key");
       return;
     }
+    if (Object.keys(manifest).some(k => !["Name", "Platform", "Lifecycle", "Selections", "Artifacts"].includes(k))) reasons.add("unsupported-manifest-key");
     if (has(manifest, "Selections")) reasons.add("global-lifecycle-selections");
     const selected = platform(manifest.Platform, reasons);
     if (selected === "omit") { omitted.push(index); return; }
-    if (selected === null) return;
-    if (seen.has(selected.join("/"))) { reasons.add("duplicate-platform"); return; }
-    seen.add(selected.join("/"));
+    const distinct = selected !== null && !seen.has(selected.join("/"));
+    if (selected !== null && !distinct) reasons.add("duplicate-platform");
+    if (distinct) seen.add(selected.join("/"));
     const [binding, basename] = artifact(manifest, bindings, reasons);
-    let lifecycle = has(manifest, "Lifecycle") ? manifest.Lifecycle : {};
-    if (!isObject(lifecycle)) { reasons.add("invalid-step"); lifecycle = {}; }
+    let declared = has(manifest, "Lifecycle") ? manifest.Lifecycle : {};
+    if (!isObject(declared)) { reasons.add("invalid-step"); declared = {}; }
+    const [lifecycle, unknownSteps] = fold(declared as Record<string, unknown>, LIFECYCLE_KEYS, reasons);
+    if (unknownSteps.length) reasons.add("unknown-lifecycle-step");
     const commands: Record<string, string> = {};
-    for (const [stepName, value] of Object.entries(lifecycle as Record<string, unknown>)) {
+    for (const [stepName, value] of Object.entries(lifecycle)) {
       if (stepName === "Setenv") reasons.add("step-timeout-or-env");
       else if (MAPPED_STEPS.has(stepName)) {
         const command = step(stepName, value, basename, reasons);
         if (command !== null) commands[stepName] = command;
-      } else if (UNSUPPORTED_STEPS.has(stepName)) {
+      } else {
         step(stepName, value, basename, reasons);
         reasons.add("unsupported-lifecycle-step");
-      } else reasons.add("unknown-lifecycle-step");
+      }
     }
     if (has(commands, "shutdown") && !has(commands, "run")) reasons.add("shutdown-without-run");
     // Without install or run the daemon hands the artifact to the platform updater.
     if (!has(commands, "install") && !has(commands, "run")) reasons.add(defaults ? "configuration-without-command" : "no-lifecycle-command");
     for (const stepName of ["install", "run", "shutdown"]) if (has(commands, stepName)) note(`Lifecycle.${stepName}`);
-    if (!binding) return;
+    if (!binding || selected === null || !distinct) return;
     const native: ComponentRecipe = {
       schemaVersion: defaults ? "1.2" : dependent ? "1.1" : "1.0",
       componentName: name as string,
