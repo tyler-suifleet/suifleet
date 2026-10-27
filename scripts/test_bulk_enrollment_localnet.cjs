@@ -331,6 +331,8 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     await page.getByText("Accepting enrollments.").waitFor();
     const uiPolicy = await page.locator("#policy").inputValue();
     assert.match(uiPolicy, /^0x[0-9a-f]{64}$/);
+    // The new policy is a real option in the select without a reload.
+    assert.match(await page.locator("#policy option:checked").innerText(), /0 enrolled · 10 left/);
     assert.equal(normalizeSuiAddress((await e.readPolicy(client, uiPolicy)).operator), op);
 
     stage = "browser: CSV with template and conflicts";
