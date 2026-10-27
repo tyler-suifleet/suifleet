@@ -126,6 +126,20 @@ const chain = {
   const data = grant.getData();
   assert.equal(data.commands[0].MoveCall.module, "seal_policy");
   assert.equal(data.commands[0].MoveCall.function, "grant_device");
+  const managedDevice = { objectId: "0x22", managed: true };
+  const fleet = { id: "0xf1", customerId: "0xc1", administrator: true, devices: [managedDevice.objectId] };
+  const managedPolicy = { ...policy, fleet };
+  assert.equal(access.deviceGrantReason(managedPolicy, managedDevice), undefined);
+  assert.match(access.deviceGrantReason({ ...managedPolicy, fleet: { ...fleet, administrator: false } }, managedDevice), /administrator/);
+  assert.match(access.deviceGrantReason(managedPolicy, { objectId: "0x23", ownerCapId: "0x24" }), /not registered/);
+  assert.equal(access.deviceGrantReason(policy, { objectId: "0x22", ownerCapId: "0x24" }), undefined);
+  assert.match(access.deviceGrantReason(policy, managedDevice), /activated/);
+  const managed = access.buildGrantTx(managedPolicy, "device", managedDevice.objectId).getData();
+  assert.equal(managed.commands[0].MoveCall.module, "customer");
+  assert.equal(managed.commands[0].MoveCall.function, "policy_device");
+  assert.equal(managed.commands[0].MoveCall.arguments.length, 6);
+  assert.deepEqual(managed.inputs.slice(0, 4).map(input => input.UnresolvedObject.objectId),
+    [fleet.customerId, fleet.id, policy.objectId, fixture.shared_objects.registry.id].map(value => appRequire("@mysten/sui/utils").normalizeSuiAddress(value)));
   assert.equal(access.buildRotateTx(policy).getData().commands[0].MoveCall.function, "rotate_key_epoch");
   assert.throws(() => access.buildCreatePolicyTx("  ", "0x5"), /name/);
   console.log("PASS: confidential uploads encrypt before any request, never fall back to plaintext, carry no credentials and bind kind/digest");

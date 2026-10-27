@@ -1,3 +1,4 @@
+import type { DeviceObject } from "./sui";
 import type { NamedFleet } from "./customer-fleets";
 // Seal access policies (SF-022): who may obtain decryption keys for a
 // release. Granting decryption never grants publish, deploy or admin
@@ -25,6 +26,18 @@ export interface AccessPolicy {
 }
 
 export type Scope = "account" | "device" | "group";
+
+/** Managed inventory is registered in custody; its owner caps live in the
+ * fleet, not the wallet. Decryption grants still require policy authority. */
+export function deviceGrantReason(policy: AccessPolicy, device: DeviceObject): string | undefined {
+  if (policy.fleet) {
+    if (!policy.fleet.administrator) return "Requires a customer administrator credential";
+    if (!policy.fleet.devices.includes(device.objectId)) return "Device is not registered in this fleet";
+    return undefined;
+  }
+  if (!device.ownerCapId) return "Device must be activated in Devices first";
+  return undefined;
+}
 
 /** The call package, once the manifest enables access policies. */
 export function policyPackage(): string {
