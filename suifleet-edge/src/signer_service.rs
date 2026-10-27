@@ -1762,6 +1762,23 @@ mod tests {
         assert_eq!(service.keypair_path, Path::new("/etc/suifleet/device.key"));
 
         std::fs::write(&config_path, fill(block("config.toml"))).unwrap();
+        if std::env::consts::OS == "macos" {
+            // macOS refuses the signing service; the guide's substitution loads instead.
+            let refused = crate::config::Config::load(&config_path).unwrap_err().to_string();
+            assert!(refused.contains("signing service"), "{refused}");
+            let table = "[device.signer]\nkind = \"service\"\nsocket = \"/run/suifleet-signer/sign.sock\"\n";
+            assert!(guide.contains("replace the `[device.signer]` table with\n`keypair_path = \"/etc/suifleet/device.key\"` under `[device]`"));
+            let text = fill(block("config.toml"));
+            assert!(text.contains(table), "{text}");
+            let text = text.replace(table, "").replace("[device]\n", "[device]\nkeypair_path = \"/etc/suifleet/device.key\"\n");
+            std::fs::write(&config_path, text).unwrap();
+            let config = crate::config::Config::load(&config_path).unwrap();
+            assert!(config.device.signer.is_none());
+            assert_eq!(config.device.keypair_path, Path::new("/etc/suifleet/device.key"));
+            assert_eq!((config.device.device_object_id.as_str(), config.device.device_cap_id.as_str()), (object, cap));
+            std::fs::remove_dir_all(dir).unwrap();
+            return;
+        }
         let config = crate::config::Config::load(&config_path).unwrap();
         let signer = config.device.signer.as_ref().expect("the guide's config.toml uses the signing service");
         assert_eq!(signer.kind, "service");
