@@ -87,3 +87,8 @@ SF-176 owns that release. Builds and PRs do not authorize publication.
 
 No production publication, network transaction, video recording, real-wallet or
 physical-device acceptance has been performed for this static-site work.
+
+SF-176 selects Cloudflare Pages Direct Upload; see
+[the hosting runbook](../docs/STATIC_HOSTING.md) for credentials/environment setup,
+DNS/TLS change plan, release digests, preview/rollback gates and current blockers.
+This provider selection does not establish any live hostname or preview acceptance.

@@ -738,3 +738,11 @@ indexed history. Other authorization, data and execution errors fail closed.
 Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
+
+## Conventional static origins (SF-176)
+
+The selected host and gated release preparation for suifleet.io,
+app.suifleet.io and docs.suifleet.io are in [STATIC_HOSTING.md](STATIC_HOSTING.md).
+No live DNS, TLS, preview, production publication or rollback rehearsal is claimed.
+The marketing workflow is only the first stage; docs/recorded-console integration
+and provider provisioning remain SF-176 completion gates. Walrus is separate.
