@@ -276,3 +276,33 @@ No migration. Hosted CI and automatic Testnet are pending on the pushed head and
 were not watched or polled. Fresh independent review and exact-head/current-base
 checks remain required before coordinator integration. Deferred physical/mainnet,
 manual real-wallet and production-provider acceptance remains unrun in #32/#159.
+
+## Snapshot-provider base integration (2026-10-27)
+
+The supplied independent review reports no unresolved source/security defects or
+threads; its outstanding hosted CI/Testnet gates remain required. Integrated
+snapshot base `3602025ebee1954ba1042aaddb4fc299ec99e1e1` and current main
+`636d9e82` without conflicts. Upstream adds the shared tracker snapshot provider
+and isolates coordinator backoff fixtures. No additional SF-165 functional patch
+or migration was necessary.
+
+Verification after integration:
+
+- Pinned network-none container command above, running
+  `make dapp-typecheck && make dapp-build`: PASS, including full offline
+  prerequisites, TypeScript and 16 static pages; existing Tailwind module warning.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_tunneling_process_scan.py`: 2 PASS; same with
+  `test_live_release_storage.py`: 3 PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+  tools/pr-coordinator/tests -p test_transport.py`: 13 PASS; same with
+  `test_review_throughput.py`: 9 PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS with chain/wallet/storage fixtures.
+
+No new Move, daemon/systemd or public-network run. Previous receipts remain
+historical; no new exact-head Testnet evidence is claimed. Hosted CI and automatic
+Testnet are pending on the pushed head, not watched or polled. Fresh independent
+review and coordinator gates remain necessary. Physical, actual-mainnet, manual
+real-wallet and production-provider checks remain unrun in #32/#159.
