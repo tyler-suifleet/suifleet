@@ -405,6 +405,32 @@ Install the daemon, systemd service and real config through the validated image/
 
 The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC installation and A/B recovery are platform-owned; SuiFleet invokes configured installer commands.
 
+## Public website and domains (SF-172)
+
+The landing site at `suifleet.io` is built from `site/` with the standard library
+only, checked offline in CI (links, no-script/no-tracker policy, CSP, digests and
+guide screencasts) and published by uploading the exact reviewed build. The
+console is served at `app.suifleet.io` from the static export above and documentation
+at `docs.suifleet.io`. [site/README.md](../site/README.md) records the hosting and
+DNS plan (conventional static hosting for the apex and docs; the console's Walrus
+Site remains its verifiable copy) and the release checklist.
+
+Add these steps to every release that changes the console or what the site says:
+
+1. Rebuild `app.suifleet.io` from the release's verified manifest, as above.
+2. If a guide step's console labels changed, re-record its screencast on Testnet
+   with `site/guide/record_guide.py` ([checklist](../site/guide/RECORDING.md)) and
+   update `site/guide/steps.json` in the same change.
+3. Update `site/src/pages/pricing.html` together with any approved price change in
+   [the business plan](BUSINESS_PLAN.md), and the status notes on the home and
+   security pages together with launches.
+4. `make test-site site-check`, review every page and video, then publish only
+   with the user's explicit authorization for that release and verify the served
+   bytes with `site/verify_served.py`. Record the result in the release issue.
+
+No domain has been configured or published by this repository. Publication to
+any live domain requires the user's explicit go-ahead and is recorded separately.
+
 ## Execution privileges
 
 | Principal | Runs | Can write | Cannot |
