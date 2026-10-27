@@ -35,6 +35,8 @@ def refresh_effects(saved, request, state, executed):
         raise ValueError('refresh requires a distinct explicit operation')
     verified = []
     for operation in operations:
+        if operation.get('files', saved['files']) != request['files'] or operation.get('directory', saved.get('directory')) != request.get('directory') or 'marker' in operation:
+            raise ValueError('refresh cannot substitute a different pending operation export')
         intent = state['intents'].get('site/' + operation['name'])
         if not intent or intent.get('status') != 'success':
             raise ValueError('the pending Site transaction is not confirmed successful')

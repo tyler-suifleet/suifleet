@@ -64,3 +64,8 @@ class SiteRefreshTests(unittest.TestCase):
             with self.assertRaises(ValueError):live_site.refresh_effects(self.saved,request,self.state,lambda _:self.fail('must reject boundary before effects'))
         for result in [None,dict(digest='different',effects=dict(status=dict(status='success'))),dict(digest='known-digest',effects=dict(status=dict(status='failure')))]:
             with self.assertRaises(ValueError):live_site.refresh_effects(self.saved,self.request,self.state,lambda _:result)
+
+    def test_operation_export_overrides_cannot_cross_refresh_boundary(self):
+        for override in [dict(files={'/other.html':{}}),dict(directory='foreign'),dict(marker='different bytes')]:
+            saved=copy.deepcopy(self.saved);saved['operations'][0].update(override)
+            with self.assertRaises(ValueError):live_site.refresh_effects(saved,self.request,self.state,lambda _:self.fail('must reject operation override before effects'))

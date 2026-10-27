@@ -61,7 +61,7 @@ See [browser receipt](sf159-https-preview.json).
 ## Offline validation
 
 - `python3 -m unittest discover -s scripts/tests -p test_walrus_site.py -v`:
-  7 passed, including refresh boundary changes, unknown/failed/missing intents,
+  8 passed, including refresh boundary and operation-export changes, unknown/failed/missing intents,
   mismatched/missing effects and distinct-operation enforcement.
 - `node scripts/test_walrus_site_protocol.cjs`: passed existing pinned ABI,
   packing/ranges, hash byte order, path/symlink and allowance checks plus
