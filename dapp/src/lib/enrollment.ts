@@ -171,6 +171,12 @@ export interface JobEntry {
    * re-registered without an explicit operator decision.
    */
   submitted?: boolean;
+  /** Wallet returned successful effects; node confirmation may still be pending. */
+  registrationDigest?: string;
+  /** Persisted only after a chain snapshot actually contained this claim. */
+  observedRegistered?: boolean;
+  /** Policy version at the last positive observation; older reads cannot prove withdrawal. */
+  observedPolicyVersion?: string;
   /** Last failure affecting this entry; cleared by the next success. */
   error?: string;
 }
@@ -218,7 +224,10 @@ export function parseJob(text: string, expected: { operator: string; policyId: s
     claims.add(claim);
     const entry: JobEntry = { serial: e.serial, alias: e.alias, claim, groupId: e.groupId ? normalizeId(e.groupId) : undefined,
       group: typeof e.group === "string" && e.group ? e.group : undefined,
-      revoked: e.revoked === true || undefined, submitted: e.submitted === true || undefined, error: typeof e.error === "string" ? e.error : undefined };
+      revoked: e.revoked === true || undefined, submitted: e.submitted === true || undefined,
+      registrationDigest: typeof e.registrationDigest === "string" ? e.registrationDigest : undefined,
+      observedPolicyVersion: typeof e.observedPolicyVersion === "string" && /^[1-9][0-9]*$/.test(e.observedPolicyVersion) ? e.observedPolicyVersion : undefined,
+      observedRegistered: e.observedRegistered === true || undefined, error: typeof e.error === "string" ? e.error : undefined };
     job.entries.push(Object.fromEntries(Object.entries(entry).filter(([, value]) => value !== undefined)) as JobEntry);
   }
   if (Array.isArray(raw.log)) job.log = raw.log.filter((l: JobEvent) => typeof l?.action === "string").slice(-200);
@@ -318,6 +327,7 @@ export function credentialArchive(credentials: ClaimCredential[], policyId: stri
 // ── Chain reads ───────────────────────────────────────────────────────────────
 
 export interface PolicyState {
+  version?: string;
   fleet?: NamedFleet;
   id: string;
   operator: string;
@@ -334,10 +344,10 @@ export interface PolicyState {
 // they share a type origin (the manifest records the policy's).
 const policyCreatedType = () => `${normalizeId(requireManifest().type_origins["enrollment::EnrollmentPolicy"])}::enrollment::PolicyCreated`;
 
-function parsePolicy(object: { objectId: string; type: string; content: Uint8Array }): PolicyState {
+function parsePolicy(object: { objectId: string; type: string; content: Uint8Array; version?: string }): PolicyState {
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("enrollment::EnrollmentPolicy"))) throw new Error("Not an EnrollmentPolicy");
   const p = enrollment_EnrollmentPolicyBcs.parse(object.content);
-  return { id: object.objectId, operator: p.operator, registry: p.registry, claimsTable: p.claims.id, unusedClaims: Number(p.claims.size),
+  return { id: object.objectId, version: object.version, operator: p.operator, registry: p.registry, claimsTable: p.claims.id, unusedClaims: Number(p.claims.size),
     remaining: BigInt(p.remaining), expiresAtMs: BigInt(p.expires_at_ms), open: p.open, enrolled: BigInt(p.enrolled) };
 }
 
@@ -426,7 +436,8 @@ export type EntryStatus =
   | "unfunded"          // registered, enrollment gas below the job's amount
   | "awaiting-device"   // registered and funded; the device has not enrolled
   | "revoked"           // claim withdrawn before use
-  | "withdrawn"         // submitted earlier, now missing from the policy
+  | "confirming"        // submission outcome or policy visibility still uncertain
+  | "withdrawn"         // observed earlier, now absent, or policy closed
   | "binding"           // enrolled; alias/serial/group still to apply
   | "complete"
   | "conflict"          // enrolled, but its alias/serial/group cannot be applied
@@ -474,9 +485,22 @@ export async function snapshot(client: SuiGrpcClient, job: EnrollmentJob, fleet?
   return { policy, registered, enrollments, devices, groups, balances: await balances(client, pending.filter((c) => registered.has(c))) };
 }
 
+/** Remember positive observations only; a missing field is never proof of registration. */
+export function observeRegistrations(job: EnrollmentJob, chain: ChainSnapshot): EnrollmentJob {
+  let changed = false;
+  const entries = job.entries.map(entry => {
+    if (!chain.registered.has(entry.claim)) return entry;
+    const newerObservation = chain.policy.version && BigInt(chain.policy.version) > BigInt(entry.observedPolicyVersion ?? 0);
+    if (entry.observedRegistered && !newerObservation) return entry;
+    changed = true;
+    return { ...entry, observedRegistered: true, observedPolicyVersion: chain.policy.version };
+  });
+  return changed ? { ...job, entries } : job;
+}
+
 /**
- * Derive each entry's status from chain state alone, so an interrupted or
- * repeated run reconciles idempotently. A device is bound only through its
+ * Reconcile chain state with persisted submission/observation evidence, so
+ * an interrupted or repeated run never treats an uncertain absence as failure. A device is bound only through its
  * claim's DeviceEnrolled event under this job's policy and operator, and only
  * if the connected wallet holds that enrollment's owner cap.
  */
@@ -491,7 +515,16 @@ export function entryStatuses(job: EnrollmentJob, chain: ChainSnapshot): EntryVi
         return (chain.balances.get(entry.claim) ?? BigInt(0)) < fund ? { entry, status: "unfunded" } : { entry, status: "awaiting-device" };
       }
       if (entry.revoked) return { entry, status: "revoked" };
-      if (entry.submitted) return { entry, status: "withdrawn", detail: "no longer in the policy: revoked elsewhere, or its registration did not complete" };
+      if (entry.submitted || entry.observedRegistered || entry.registrationDigest) {
+        if (chain.policy.open === false) return { entry, status: "withdrawn", detail: "the policy is closed and the claim is absent" };
+        if (entry.observedRegistered && entry.observedPolicyVersion && chain.policy.version && BigInt(chain.policy.version) > BigInt(entry.observedPolicyVersion)) {
+          return { entry, status: "withdrawn", detail: "previously observed in the policy; absent after a later policy mutation (withdrawn elsewhere)" };
+        }
+        return { entry, status: "confirming", detail: entry.registrationDigest
+          ? `registration ${entry.registrationDigest}: waiting for the claim to appear in policy reads; do not submit again`
+          : entry.observedRegistered ? "waiting for a policy read newer than the last observed registration"
+          : "submission interrupted; outcome unknown. Refresh to reconcile before taking further action" };
+      }
       return { entry, status: "unregistered" };
     }
     if (enrollment.operator !== job.operator || enrollment.policyId !== job.policyId) {

@@ -133,13 +133,41 @@ const commands = (tx) => tx.getData().commands;
     groups: [group(1, "lab", [id("0xd12")])],
   };
   const views = e.entryStatuses(sJob, snap);
-  assert.deepEqual(views.map((v) => v.status), ["unregistered", "unfunded", "awaiting-device", "revoked", "withdrawn",
+  assert.deepEqual(views.map((v) => v.status), ["unregistered", "unfunded", "awaiting-device", "revoked", "confirming",
     "untrusted", "untrusted", "untrusted", "conflict", "conflict", "binding", "complete"]);
   assert.match(views[5].detail, /another operator/);
   assert.match(views[6].detail, /owner cap/);
   assert.match(views[8].detail, /already used by A9/);
   assert.match(views[9].detail, /group/);
   assert.deepEqual([views[10].needsMeta, views[10].needsGroup], [true, true]);
+
+  // SF-160: a successful submission is not a positive observation of policy
+  // reads. Missing fields on stale replicas must not invite another payment.
+  const submitted = { ...sJob, entries: [entry(5, { submitted: true, registrationDigest: "confirmed-registration-digest" })] };
+  const stale = { ...snap, policy: { open: true, version: "10" }, registered: new Set(), enrollments: new Map(), balances: new Map() };
+  let registrationViews = e.entryStatuses(submitted, stale);
+  assert.equal(registrationViews[0].status, "confirming");
+  assert.match(registrationViews[0].detail, /confirmed-registration-digest/);
+  assert.deepEqual(e.plan(submitted, registrationViews, stale), [], "a stale read must not schedule another payment");
+  assert.equal(e.observeRegistrations(submitted, stale), submitted, "absence must not create observation evidence");
+  const visible = { ...stale, policy: { open: true, version: "11" }, registered: new Set([claim(5)]), balances: new Map([[claim(5), fund]]) };
+  const observed = e.observeRegistrations(submitted, visible);
+  assert.equal(e.entryStatuses(observed, visible)[0].status, "awaiting-device");
+  assert.deepEqual(e.plan(observed, e.entryStatuses(observed, visible), visible), []);
+  const restored = e.parseJob(JSON.stringify(observed), { operator, policyId });
+  assert.equal(restored.entries[0].registrationDigest, "confirmed-registration-digest");
+  assert.equal(restored.entries[0].observedRegistered, true);
+  assert.equal(e.entryStatuses(restored, stale)[0].status, "confirming", "a snapshot before the observed registration cannot prove withdrawal");
+  assert.equal(e.entryStatuses(restored, { ...stale, policy: visible.policy })[0].status, "confirming", "absence without a policy mutation is not withdrawal");
+  const withdrawn = { ...stale, policy: { open: true, version: "12" } };
+  assert.equal(e.entryStatuses(restored, withdrawn)[0].status, "withdrawn");
+  assert.match(e.entryStatuses(restored, withdrawn)[0].detail, /previously observed/);
+  assert.match(e.entryStatuses(submitted, { ...stale, policy: { open: false } })[0].detail, /policy is closed/);
+  const interrupted = { ...submitted, entries: [entry(5, { submitted: true })] };
+  assert.equal(e.entryStatuses(interrupted, stale)[0].status, "confirming");
+  assert.match(e.entryStatuses(interrupted, stale)[0].detail, /outcome unknown/);
+  assert.deepEqual(e.plan(interrupted, e.entryStatuses(interrupted, stale), stale), []);
+  assert.equal(e.entryStatuses(interrupted, visible)[0].status, "awaiting-device");
 
   // ── Plans: chunked, idempotent top-ups, bounded commands ─────────────────
   const many = { ...e.newJob(operator, policyId), entries: Array.from({ length: 600 }, (_, i) => entry(100 + i)) };
