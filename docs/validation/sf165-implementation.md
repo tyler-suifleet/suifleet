@@ -306,3 +306,29 @@ historical; no new exact-head Testnet evidence is claimed. Hosted CI and automat
 Testnet are pending on the pushed head, not watched or polled. Fresh independent
 review and coordinator gates remain necessary. Physical, actual-mainnet, manual
 real-wallet and production-provider checks remain unrun in #32/#159.
+
+
+## Subscription-tracking base integration (2026-10-27)
+
+Integrated snapshot/current main `73d30d8620163fa47b14578b7c05b10f712cf4bc`
+without conflicts. Its changes are confined to the backlog/publication records for
+subscription tickets. Supplied independent feedback has no unresolved source or
+security findings or threads; no additional SF-165 functional repair was needed.
+
+Checks after integration:
+
+- Pinned network-none container command above, `make dapp-typecheck && make
+  dapp-build`: PASS, including offline prerequisites, TypeScript and static build.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_live_release_storage.py`: 3 PASS; same command with
+  `test_tunneling_process_scan.py`: 2 PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS with chain/wallet/storage fixtures.
+- `make test-tracking`: 10 PASS.
+
+No new Move, daemon/systemd or public-network run; previous Testnet receipts remain
+historical, not exact-head evidence. No migration. Hosted CI and automatic Testnet
+are pending on the updated head and were not watched or polled. Coordinator gates
+and fresh independent review remain required. Physical, actual-mainnet, manual
+real-wallet and production-provider acceptance remains unrun in #32/#159.
