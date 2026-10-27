@@ -13,7 +13,9 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
 
 const src = path.resolve(__dirname, "../dapp/src"), fakes = path.resolve(__dirname, "browser/fleet-settings-fakes.js");
 const importers = new Set([path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
-const faked = new Set(["@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);
+// Account reads now enter through the hydration-safe application hook. Keep
+// this component fixture on its controlled wallet boundary, like the SDK reads.
+const faked = new Set(["@/hooks/useCurrentAccount", "@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);
 const fakeDependencies = { name: "fleet-settings-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => importers.has(args.importer) && faked.has(args.path) ? { path: fakes } : undefined);
 } };
