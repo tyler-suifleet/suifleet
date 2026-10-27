@@ -39,6 +39,7 @@ function audit() {
     const cssPath = path.resolve(__dirname, "../dapp/src/app/globals.css");
     const css = (await appRequire("postcss")([appRequire("@tailwindcss/postcss")({ base: path.resolve(__dirname, "../dapp") })]).process(await fs.readFile(cssPath, "utf8"), { from: cssPath })).css;
     server = http.createServer(async (req, res) => {
+      if (req.url === "/wallet/slush.json") { res.setHeader("Content-Type", "application/json"); return res.end(await fs.readFile(path.resolve(__dirname, "../dapp/public/wallet/slush.json"))); }
       const type = { "/app.js": "text/javascript", "/app.css": "text/css" }[req.url] ?? "text/html";
       res.setHeader("Content-Type", type);
       res.end(req.url === "/app.js" ? await fs.readFile(bundle) : req.url === "/app.css" ? css : '<!doctype html><html lang="en"><head><title>Wallet acceptance</title><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body class="bg-[#f0f2f5] p-4 md:p-8"><div id="root"></div><script src="/app.js"></script></body></html>');
@@ -46,7 +47,7 @@ function audit() {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
-    await page.route("https://api.slush.app/api/wallet/metadata", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true }) }));
+    await page.route("https://api.slush.app/**", () => { throw new Error("Unexpected external Slush metadata request"); });
     await page.route("https://api.enoki.mystenlabs.com/**", (route) => route.abort());
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
     const screenshots = process.env.SCREENSHOT_DIR;

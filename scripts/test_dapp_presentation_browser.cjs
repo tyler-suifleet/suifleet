@@ -5,7 +5,10 @@ const assert = require('node:assert/strict');
 const { appRequire } = require('./frontend_test_utils.cjs');
 const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright');
 const root = path.resolve(__dirname, '..'), output = path.join(root, 'dapp/out');
-const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enrollment/', '/deployments/', '/rollouts/', '/components/', '/firmware/', '/access/', '/handover/', '/settings/', '/budget/'];
+// Discover pages so new routes automatically inherit the console regression gate.
+const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {recursive:true})
+  .filter(name => /(^|\/)page\.tsx$/.test(name))
+  .map(name => '/' + name.replace(/page\.tsx$/, ''));
 (async () => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'suifleet-console-'));
   let server, browser;
@@ -30,22 +33,41 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
         if (name.endsWith('/')) name += 'index.html';
         const file = path.resolve(output, '.' + name);
         if (!file.startsWith(output + path.sep)) { response.writeHead(403); return response.end(); }
-        response.setHeader('Content-Type', file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':'text/plain');
+        response.setHeader('Content-Type', file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':file.endsWith('.ico')?'image/x-icon':'text/plain');
         response.end(await fs.readFile(file));
       } catch { response.writeHead(404); response.end(); }
     });
     await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless:true, args:['--no-sandbox'] });
     const page = await browser.newPage(); const errors=[];
-    page.on('pageerror',error=>errors.push(error.message));
+    page.on('pageerror',error=>errors.push(`${page.url()}: ${error.message}`));
+    page.on('console',message=>{if(message.type()==='error') errors.push(`${page.url()}: ${message.text()}`);});
+    const externalRequests=[];
+    const isQuoteRead = url => url.origin === 'https://fullnode.testnet.sui.io' && url.pathname.startsWith('/sui.rpc.v2.');
+    page.on('request',request=>{const url=new URL(request.url()); if(url.hostname!=='127.0.0.1' && !isQuoteRead(url)) externalRequests.push(request.url());});
     // An accidental real network dependency fails rather than spending or using a real account.
-    await page.route('**/*', route => new URL(route.request().url()).hostname === '127.0.0.1' ? route.continue() : route.abort());
+    await page.route('**/*', route => {
+      const url = new URL(route.request().url());
+      if (url.hostname === '127.0.0.1') return route.continue();
+      // The disconnected budget estimator reads public testnet prices on mount.
+      // Exercise its unavailable-price state without inducing browser network errors.
+      if (isQuoteRead(url)) return route.fulfill({status:200, contentType:'application/grpc-web+proto', headers:{'grpc-status':'14','grpc-message':'Offline price fixture'}, body:''});
+      return route.abort();
+    });
     const base = `http://127.0.0.1:${server.address().port}`;
     for (const width of [1440,390]) {
       await page.setViewportSize({width,height:1000});
       for (const route of routes) {
         await page.goto(base+route,{waitUntil:'networkidle'});
         await page.locator('h1').waitFor();
+        assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'), '/favicon.ico');
+        const favicon = await page.request.get(base+'/favicon.ico');
+        assert.equal(favicon.status(),200,`${route}: exported favicon`);
+        assert.equal((await favicon.body()).readUInt16LE(2),1,'ICO signature');
+        const metadata = await page.request.get(base+'/wallet/slush.json');
+        assert.equal(metadata.status(),200);
+        assert.equal((await metadata.json()).walletName,'Slush');
+        assert.deepEqual(errors,[],`${route} at ${width}px: no console/page errors`);
         assert.doesNotMatch(await page.locator('main').textContent(), /SF-\d{3}|docs\/[A-Z_]+\.md/, `${route}: no internal tracker/document references, even in collapsed details`);
         assert.equal(await page.locator('h1').count(),1,`${route}: one page title`);
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${route}: no page overflow at ${width}`);
@@ -82,7 +104,8 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       await page.getByRole('button',{name:'Clear diagnostic'}).click(); assert.equal(await page.locator('footer').count(),0);
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 14 exported routes at desktop/mobile; navigation, page titles and overflow; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No external network or wallet.');
+    assert.deepEqual(externalRequests,[],'no external metadata or other startup requests');
+    console.log(`PASS: ${routes.length} exported routes at desktop/mobile; navigation, page titles and overflow; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No console errors, external network or wallet; testnet quote reads use an unavailable-price fixture.`);
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
