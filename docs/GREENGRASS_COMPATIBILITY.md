@@ -220,7 +220,7 @@ The runtime receipt is [`docs/validation/sf037-recipe-translation.json`](validat
 
 | Suite | Cases evaluated by the reference model | Current-API execution | Runtime execution |
 |---|---|---|---|
-| `aws-recipe-cases.json` | 83 recipes (18 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
+| `aws-recipe-cases.json` | 90 recipes (19 JSON/YAML texts) | Daemon and frontend validators (passing) | Passed: SF-037 translator, daemon validators and simulator run |
 | `pubsub-cases.json` | 53 filter/topic/match/ACL checks | Daemon pub/sub module (passing) | Passed: SF-032 daemon, IPC UIDs and Mosquitto ([receipt](validation/sf032-messaging.json)) |
 | `shadow-cases.json` | 55 steps across 10 sequences | Daemon shadow store, each step also after a reopen (passing) | Passed: SF-033 daemon, IPC UIDs, restarts and a verifying sync service ([receipt](validation/sf033-shadows.json)) |
 | `tunnel-cases.json` | 36 notification/configuration checks | Daemon adapter fixtures and actual proxy/systemd forwarding harness | Passed locally ([receipt](validation/sf063-tunneling.json)); live AWS/IAM/target unrun |
