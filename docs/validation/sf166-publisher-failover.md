@@ -1,0 +1,66 @@
+# SF-166 implementation evidence — 2026-10-27
+
+Owner: Codex, running model `gpt-6.1-sol`, session
+`dispatch-f8f004e41c1d4ca28cd658a87d236461`, branch
+`work/suifleet/sf-166-6bab6531`. Existing issue: #332. No dependencies.
+
+The browser accepts ordered manifest publisher/aggregator lists, preserving legacy
+single URLs. Publisher 5xx/network/timeout errors try unchanged protected bytes at
+the next publisher; cancellation, rejected requests and malformed successes stop.
+Uploads record their serving publisher. Read probes and archive readers fail over
+across configured aggregators, recording the serving endpoint without weakening
+archive authentication. Session overrides are validated, stored in tab session
+storage, and available from Settings without a rebuild. Fleet-paid storage is
+selected automatically when available and never retried through public publishing.
+Raw publisher failures are escaped under Technical details, with an endpoint and
+action in the visible message. Release upgrades/recovery preserve ordered lists.
+
+## Verification
+
+- `npx --yes pnpm@11.0.8 install --frozen-lockfile` in `dapp`: passed.
+- `make dapp-typecheck` in a disposable `suifleet-dev:latest` container with
+  `--network none`, this worktree mounted at `/workspace`, `INSIDE_DEV_CONTAINER=1`
+  and `pnpm_config_verify_deps_before_run=false`: passed, including the offline
+  testnet/manifest/frontend regressions and TypeScript. One existing environment
+  dependent test is skipped by the suite. Dependencies were installed with the
+  pinned lockfile; the pnpm option prevents cross-host/container reinstall prompts.
+- `node scripts/test_walrus_publishers.cjs`: passed on final source/tests; fetch/XHR
+  retry order, encryption reuse, exhausted/nonretryable/malformed responses,
+  escaped error rendering, read failover and uncertainty, session persistence,
+  rejected URLs, cancellation and failed session saves.
+- `node scripts/test_upload_progress.cjs`: passed.
+- `node scripts/test_fleet_bulk.cjs` and `node scripts/test_fleet_recovery.cjs`:
+  passed after archive-read integration.
+- `npx --yes pnpm@11.0.8 typecheck` in `dapp`: passed on final browser source.
+- `INSIDE_DEV_CONTAINER=1 make dapp-build` with a temporary PATH wrapper selecting
+  pnpm 11.0.8: passed on final browser source; static routes exported.
+- `INSIDE_DEV_CONTAINER=1 make test-publish`: passed on final Python source:
+  37 publisher tests and 27 release-plan tests, including list preservation when
+  the list differs from the legacy URL.
+- `git diff --check`: passed.
+
+Initial host Make runs could not find the stopped Compose service, pnpm or Sui.
+The first container run reached all frontend regressions but its final pnpm command
+requested a cross-environment reinstall. The successful commands above resolve
+those tooling issues; no failed test was suppressed or treated as acceptance.
+
+## Live secondary publisher
+
+[Machine-readable receipt](sf166-secondary-publisher.json). Direct gRPC preflight
+confirmed Sui Testnet `4c78adac`, epoch 1265. The real `uploadArtifact` implementation
+tried h2o-nodes then succeeded at n1stake. One-epoch sponsored publication reported
+563,787 FROST, with **zero wallet SUI spend and no wallet signature**. Independent
+gRPC reads verified the Blob owner and certification transaction successful effects;
+public aggregator readback matched the original SHA-256. The global testnet lock
+was held during publication and released; coordination is recorded in #11.
+No application package/UpgradeCap or existing app objects were changed.
+
+## Remaining gates and limits
+
+Hosted exact-head/current-base CI and independent review are pending at handoff.
+A session override affects this browser tab, not fleet-wide chain/device settings.
+The public publisher can charge its own storage budget; the reported FROST is not
+an invoice to the operator. The stored test blob expires at Walrus epoch 564
+(distinct from the Sui epoch). No final production-provider, real-wallet, physical
+Pi or mainnet acceptance was run; those remain SF-031/#32 and SF-087/#159 under
+the authorized implementation/acceptance split. No migration is required.
