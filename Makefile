@@ -538,6 +538,21 @@ live-seal-delivery:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_seal_delivery.py --wallet "$(SUIFLEET_WALLET)" \
 		$(if $(SUIFLEET_STATE),--state "$(SUIFLEET_STATE)") --evidence "$${SUIFLEET_EVIDENCE:-live-seal-evidence.json}"
 
+# SF-173 hosted evaluation fleet (docs/TESTNET.md#sf-173-hosted-evaluation-fleet):
+# bring profiles/seal-testnet to the complete fleet stack. Cached and
+# checkpointed; DRY_RUN=1 reads only. Mutations need SUIFLEET_TESTNET_LOCK_TOKEN.
+#   make evaluation-fleet SUIFLEET_WALLET=~/.config/suifleet/testnet/agent/client.yaml DRY_RUN=1
+.PHONY: evaluation-fleet verify-evaluation-fleet
+evaluation-fleet:
+	@test -n "$(SUIFLEET_WALLET)" || { echo "set SUIFLEET_WALLET to the dedicated agent wallet's client.yaml"; exit 1; }
+	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --example chain_facts
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 scripts/live_evaluation_fleet.py --wallet "$(SUIFLEET_WALLET)" \
+		$(if $(DRY_RUN),--dry-run) $(EVALUATION_ARGS) --evidence "$${SUIFLEET_EVIDENCE:-sf173-evaluation-fleet.json}"
+
+# Read-only: the console's own gating code and readers against the profile.
+verify-evaluation-fleet:
+	$(RUN) node scripts/verify_evaluation_fleet.cjs
+
 .PHONY: test-testnet
 test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'

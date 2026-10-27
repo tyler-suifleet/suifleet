@@ -1,0 +1,173 @@
+{
+  "ticket": "SF-173",
+  "model": "gpt-6.1-sol",
+  "date": "2026-10-27",
+  "chain": "4c78adac",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/usr/local/bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/opt/sui-network/sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1265,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "allowance_mist": 1200000000,
+  "allowance_used_mist": 964091608,
+  "faucet": {
+    "attempts": 1,
+    "cli_returncode": 0,
+    "balance_after_mist": 1716089515
+  },
+  "transactions": [
+    {
+      "label": "upgrade the evaluation fleet's sui_edge to current contracts",
+      "gas_budget_mist": 1200000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv",
+      "gas_mist": 593883363,
+      "allowance_used_mist": 593883363
+    },
+    {
+      "label": "publish the evaluation fleet's fleet_storage",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "not_submitted",
+      "allowance_used_mist": 593883363
+    },
+    {
+      "label": "publish the evaluation fleet's fleet_storage",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "8jNtV7Wfxi4dAEbVLAAtuVt1KoLEqESSWecNzkyiSNgn",
+      "gas_mist": 136008400,
+      "allowance_used_mist": 136008400
+    },
+    {
+      "label": "publish the evaluation fleet's fleet_data",
+      "gas_budget_mist": 300000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "BSPi1uJw9cQ5b1uDsUf6gHY2xvuJcnRRZN3377YPdRt1",
+      "gas_mist": 97512400,
+      "allowance_used_mist": 233520800
+    },
+    {
+      "label": "create the evaluation fleet budget with a deposit",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 100000000,
+      "status": "success",
+      "digest": "9Z3PKSxG3U5oqTcUFMb9hHpzucWmacTk3LLF2rKJQBqv",
+      "gas_mist": 4359299,
+      "allowance_used_mist": 337880099
+    },
+    {
+      "label": "save the evaluation fleet's settings",
+      "gas_budget_mist": 15000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2tbZaRKMWhvE3gvpc623agh1nyTvPVhwktW2V1BmfqRf",
+      "gas_mist": 3576835,
+      "allowance_used_mist": 341456934
+    },
+    {
+      "label": "create the evaluation fleet's prepaid Walrus storage",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2MZw3qXG68NDH4QriJDffX7iHwWRFbVBYprJWFPRbKLc",
+      "gas_mist": 3242163,
+      "allowance_used_mist": 344699097
+    },
+    {
+      "label": "fund the evaluation fleet's storage with WAL",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "9156qeohvRARWtwwBwZnbeBrAuLcrnKL9skX2Xn8n6bj",
+      "gas_mist": 1000571,
+      "allowance_used_mist": 365699668
+    },
+    {
+      "label": "create and configure the evaluation fleet's data index",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "641KVTcdRh7hUmMeUxKa3P5rSigLUKtVjPFUztHAbHPE",
+      "gas_mist": 3508163,
+      "allowance_used_mist": 369207831
+    },
+    {
+      "label": "set the evaluation fleet's health/batch/emergency cadence",
+      "gas_budget_mist": 15000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "3Rn6TAaE1YsQveFpzuVFWTWrpxKeLUUHjXcLo8LDiTtQ",
+      "gas_mist": 1000414,
+      "allowance_used_mist": 370208245
+    }
+  ],
+  "funding": {
+    "budget_balance_mist": 100000000,
+    "storage_wal_frost": 20000000,
+    "operator_balance_mist": 751997907,
+    "read_at": "2026-10-27T18:57:10Z"
+  },
+  "packages": {
+    "core": {
+      "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+      "version": "2",
+      "previous": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+      "digest": "8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv",
+      "net_gas_mist": 593883363
+    },
+    "fleet_storage": {
+      "package": "0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374",
+      "cap": "0x4e760eebfd12fde1008dc84213208c00446a7cdb773c3cb43f855acfa99e80a5",
+      "digest": "8jNtV7Wfxi4dAEbVLAAtuVt1KoLEqESSWecNzkyiSNgn",
+      "net_gas_mist": 136008400
+    },
+    "fleet_data": {
+      "package": "0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54",
+      "cap": "0x6401f64f7597386510315505769520c6a51507933fea4882ad31c2ac30deb206",
+      "digest": "BSPi1uJw9cQ5b1uDsUf6gHY2xvuJcnRRZN3377YPdRt1",
+      "net_gas_mist": 97512400
+    }
+  },
+  "objects": {
+    "budget": "0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904",
+    "budget_cap": "0xf03d5624a86fd86167be7d7f1d6e6560968926398fc151022788abfaff12f351",
+    "storage": "0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13",
+    "fleet": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40"
+  },
+  "limits": [
+    "Hosted Site update pending separate publisher-wallet authorization; current on-chain configuration is verified by the dApp readers.",
+    "No enrolled devices or health reports yet; no physical, Mainnet, production-provider or manual real-wallet acceptance claimed."
+  ],
+  "recovery": [
+    "First storage compilation refused before signing due to shared Move-cache permissions. Isolated copied cache used; no unknown transaction replay.",
+    "Alternate pubfile-mode transaction build refused before signing because Walrus uses Git dependency sources; normal publish builder used with exact bytecode/sender/budget verification and exact-byte execution.",
+    "Continuation ceiling 606116637 MIST deducted the first run usage; no second faucet."
+  ]
+}

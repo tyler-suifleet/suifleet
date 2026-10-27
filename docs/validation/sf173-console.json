@@ -1,0 +1,46 @@
+{
+  "checked_at": "2026-10-27T18:59:42.098Z",
+  "network": "testnet",
+  "chain": "4c78adac",
+  "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+  "package_version": "2",
+  "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+  "fleet_storage_package": "0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374",
+  "fleet_data_package": "0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54",
+  "budget": {
+    "id": "0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904",
+    "balance_mist": "100000000",
+    "devices": "0",
+    "paused": false
+  },
+  "settings": {
+    "checkIntervalMs": "1800000",
+    "rolloutCheckIntervalMs": "60000",
+    "healthIntervalMs": "600000",
+    "archiveIntervalMs": "604800000",
+    "archiveRetentionEpochs": "3"
+  },
+  "storage": {
+    "id": "0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13",
+    "wal_frost": "20000000",
+    "pool_bytes": "0",
+    "end_epoch": null
+  },
+  "fleet_data": {
+    "id": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40",
+    "devices": "0",
+    "health_interval_ms": "600000",
+    "batch_interval_ms": "86400000",
+    "emergency_interval_ms": "300000"
+  },
+  "checks": [
+    "frontend.env selects deployment.json, fleet-storage.json and fleet-data.json",
+    "budgetSupported/settingsSupported/storageConfig/DATA_CONFIG/settingsSaver all enabled in the dApp's own modules",
+    "fresh chain identity, package version, per-type origins and UpgradeCap",
+    "operator-owned budget and cap, saved settings, fleet storage and FleetData bindings read through the dApp's readers"
+  ],
+  "limits": [
+    "Read-only; no browser/wallet session",
+    "Health appears only after an enrolled device daemon reports (physical/target acceptance stays in #32)"
+  ]
+}
