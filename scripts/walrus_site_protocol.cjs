@@ -39,4 +39,16 @@ const VecMap=bcs.struct('VecMap',{contents:bcs.vector(bcs.struct('Entry',{key:bc
 const Range=bcs.struct('Range',{start:bcs.option(bcs.u64()),end:bcs.option(bcs.u64())});
 const Resource=bcs.struct('Resource',{path:bcs.string(),headers:VecMap,blob_id:bcs.u256(),blob_hash:bcs.u256(),range:bcs.option(Range)});
 const Routes=bcs.struct('Routes',{route_list:VecMap});
-module.exports={pin,sha,hashInt,verifyAbi,pack,reserve,settle,Resource,Routes};
+// A new packed blob contains the complete release, not just changed bytes.
+// Old equal-hash bindings can refer to expired storage and must not survive it.
+function resourcePlan(resources, previous){
+ const names=new Set(resources.map(r=>r.path));
+ assert.equal(names.size,resources.length,'duplicate Site resource');
+ return {rebind:[...resources],removed:Object.keys(previous).filter(name=>!names.has(name))};
+}
+function reusableBlob(blob, epoch){
+ assert(Number.isSafeInteger(epoch) && epoch>=0,'invalid Walrus epoch');
+ assert(blob?.certified_epoch!=null,'blob lacks on-chain certification');
+ assert(BigInt(blob.storage.end_epoch)>BigInt(epoch),'packed blob expired; explicit bounded renewal or new publication required');
+}
+module.exports={resourcePlan,reusableBlob,pin,sha,hashInt,verifyAbi,pack,reserve,settle,Resource,Routes};
