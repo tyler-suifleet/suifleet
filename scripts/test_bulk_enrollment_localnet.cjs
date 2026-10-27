@@ -214,7 +214,7 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     assert.deepEqual(steps.map((s) => [s.kind, s.entries.length]), [["claims", 10]], "resume did not re-plan only the remainder");
     await execute(steps[0].build(), operator, "register+fund 10 claims (resumed)");
     // As the page does: registered claims are marked, so one revoked later is never re-registered.
-    job = { ...job, entries: job.entries.map((x) => ({ ...x, submitted: true })) };
+    job = e.observeRegistrations({ ...job, entries: job.entries.map((x) => ({ ...x, submitted: true })) }, await e.snapshot(client, job));
     // Repeating a registration is harmless: duplicates are ignored on chain.
     await execute(e.buildClaimsTx(bulkPolicy, job.entries.slice(0, 5).map((x) => x.claim), []));
     ({ chain, views } = await statuses());
