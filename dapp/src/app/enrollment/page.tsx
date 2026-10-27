@@ -15,7 +15,7 @@ import { requireManifest } from "@/lib/deployment-manifest";
 import {
   BROWSER_CREDENTIAL_LIMIT, LIMITS, buildClosePolicyTx, buildCreatePolicyTx, buildRevokeClaimsTx, buildSetLimitsTx, buildTransferTx,
   checkReservations, chunk, createdPolicy, credentialArchive, entryStatuses, fetchPolicies, generateCredentials, loadJob, newJob,
-  parseJob, parseRoster, plan, policyAccepting, saveJob, snapshot, storedReservations,
+  observeRegistrations, recoverInterruptedRegistrations, parseJob, parseRoster, plan, policyAccepting, saveJob, snapshot, storedReservations,
   type EnrollmentJob, type EntryStatus, type EntryView, type PolicyState, type ReservationCheck,
 } from "@/lib/enrollment";
 import type { DeviceGroup, DeviceObject } from "@/lib/sui";
@@ -23,7 +23,7 @@ import type { Transaction } from "@mysten/sui/transactions";
 
 const STATUS_LABEL: Record<EntryStatus, string> = {
   unregistered: "Reserved", unfunded: "Needs enrollment gas", "awaiting-device": "Waiting for device", revoked: "Revoked",
-  withdrawn: "Claim withdrawn", binding: "Enrolled, naming", complete: "Enrolled", conflict: "Conflict", untrusted: "Not yours",
+  confirming: "Confirming registration", withdrawn: "Claim withdrawn", binding: "Enrolled, naming", complete: "Enrolled", conflict: "Conflict", untrusted: "Not yours",
 };
 const MIST = BigInt(1_000_000_000);
 const sui = (mist: bigint) => `${Number(mist) / 1e9} SUI`;
@@ -143,6 +143,11 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     queryFn: () => snapshot(client, jobRef.current, policy.fleet),
     refetchInterval: 60_000,
   });
+  useEffect(() => {
+    if (!chain.data) return;
+    const next = observeRegistrations(jobRef.current, chain.data);
+    if (next !== jobRef.current) { jobRef.current = next; saveJob(localStorage, next); setJobState(next); }
+  }, [chain.data]);
   const views = useMemo(() => chain.data ? entryStatuses(job, chain.data) : [], [job, chain.data]);
   const steps = chain.data ? plan(job, views, chain.data, policy.fleet) : [];
   const counts = views.reduce((c, v) => ({ ...c, [v.status]: (c[v.status] ?? 0) + 1 }), {} as Partial<Record<EntryStatus, number>>);
@@ -172,18 +177,18 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
       for (let i = 0; i < list.length && !stop.current; i++) {
         const step = list[i], claims = new Set(step.entries.map((e) => e.claim)), registers = new Set(step.registers?.map((e) => e.claim));
         let phase = "validating" as TransactionPhase;
+        let definiteFailure = false;
         setProgress({ step: i + 1, total: list.length, label: step.label });
         if (registers.size) markEntries(registers, { submitted: true });
         try {
-          const { digest } = await mutateAsync({ transaction: step.build(), onProgress: (p) => { phase = p; setProgress({ step: i + 1, total: list.length, label: step.label, phase: p }); } });
+          const { digest } = await mutateAsync({ transaction: step.build(), onDefiniteFailure: () => { definiteFailure = true; }, onSubmitted: (digest) => { if (registers.size) markEntries(registers, { registrationDigest: digest }); }, onProgress: (p) => { phase = p; setProgress({ step: i + 1, total: list.length, label: step.label, phase: p }); } });
           markEntries(claims, { error: undefined });
           record(step.label, claims.size, digest);
         } catch (e) {
           const message = (e as Error).message;
-          // Refused before or by the wallet: nothing executed, so these claims
-          // return to plain reservations. After the wallet returned a result
-          // (confirming), the outcome is the chain's and they stay submitted.
-          if (registers.size && phase !== "confirming") markEntries(registers, { submitted: undefined });
+          // Validation/refusal or explicit failed effects permit retry. A
+          // wallet transport failure is ambiguous and must stay submitted.
+          if (registers.size && (phase === "validating" || definiteFailure)) markEntries(registers, { submitted: undefined });
           markEntries(claims, { error: message });
           record(step.label, claims.size, undefined, message);
           onError(`${step.label}: ${message}`);
@@ -217,10 +222,24 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     if (!reserved.size || !confirm(`Remove ${reserved.size} reservations that were never used? Their names and serials become available again.`)) return;
     setJob({ ...job, entries: job.entries.filter((e) => !reserved.has(e.claim)) });
   }
+  async function recoverInterrupted() {
+    setProgress({ step: 1, total: 1, label: "Checking interrupted submissions" });
+    try {
+      // Refresh before offering recovery; never reset a now-visible claim.
+      const fresh = await chain.refetch();
+      if (!fresh.data || fresh.isError) return onError("Refresh failed; cannot reset interrupted submissions");
+      const current = jobRef.current;
+      const recovered = recoverInterruptedRegistrations(current, fresh.data);
+      const count = recovered.entries.filter((entry, i) => entry !== current.entries[i]).length;
+      if (!count) return onError("No unproven interrupted submissions remain. Confirmed registrations cannot be reset here.");
+      if (!confirm(`Reset ${count} interrupted submissions to reservations? Check your wallet history first and confirm they never executed. No digest was saved, so success cannot be ruled out. Running pending transactions again may pay registration funding TWICE. This does not revoke any on-chain claim.`)) return;
+      jobRef.current = recovered; setJob(recovered);
+    } finally { setProgress(null); }
+  }
   function reRegisterWithdrawn() {
     const withdrawn = new Set(views.filter((v) => v.status === "withdrawn").map((v) => v.entry.claim));
     if (!withdrawn.size || !confirm(`Re-register ${withdrawn.size} withdrawn claims? Only do this if their credentials were not leaked.`)) return;
-    markEntries(withdrawn, { submitted: undefined });
+    markEntries(withdrawn, { submitted: undefined, registrationDigest: undefined, observedRegistered: undefined, observedPolicyVersion: undefined });
     chain.refetch();
   }
   function importJob(text: string) {
@@ -264,6 +283,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
           {progress && <button className={button} onClick={() => { stop.current = true; }}>Stop after this transaction</button>}
           <button className={button} disabled={!!progress} onClick={() => chain.refetch()}>Refresh</button>
           <button className={button} disabled={!!progress} onClick={revokeUnused}>Revoke unused claims</button>
+          <button className={button} disabled={!!progress || !views.some(v => v.status === "confirming" && !v.entry.registrationDigest && !v.entry.observedRegistered)} onClick={recoverInterrupted}>Reset interrupted submissions</button>
           <button className={button} disabled={!!progress || !counts.withdrawn} onClick={reRegisterWithdrawn}>Re-register withdrawn claims</button>
           <button className={button} disabled={!!progress} onClick={forgetReserved}>Remove unused reservations</button>
           <button className={button} onClick={() => download(`suifleet-enrollment-job-${policy.id.slice(2, 10)}.json`, JSON.stringify(job, null, 2), "application/json")}>Export job</button>
