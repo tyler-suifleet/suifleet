@@ -387,6 +387,7 @@ test-manifest:
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_release_storage.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
