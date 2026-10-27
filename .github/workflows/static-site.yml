@@ -34,13 +34,13 @@ jobs:
           python3 site/check.py "$RUNNER_TEMP/site-a"
       - id: seal
         run: |
-          digest=$(python3 site/release.py seal "$RUNNER_TEMP/site-a" release --revision "$GITHUB_SHA" --hostname suifleet.io)
+          digest=$(python3 site/release.py seal "$RUNNER_TEMP/site-a" "$RUNNER_TEMP/marketing-release" --revision "$GITHUB_SHA" --hostname suifleet.io)
           echo "sha256=$digest" >> "$GITHUB_OUTPUT"
           echo "Marketing release: $GITHUB_SHA / $digest" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: marketing-release
-          path: release/
+          path: ${{ runner.temp }}/marketing-release/
           if-no-files-found: error
           retention-days: 90
   preview:
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: marketing-release
-          path: release
+          path: ${{ runner.temp }}/marketing-release
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.22.2
@@ -67,9 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
-          python3 site/release.py verify release --sha256 "$RELEASE_SHA256" > verified-release.json
-          tools/static-hosting/node_modules/.bin/wrangler pages deploy release/public --project-name suifleet-marketing-preview --branch preview --commit-hash "$GITHUB_SHA" | tee deployment.txt
-          python3 site/verify_served.py release/public https://preview.suifleet-marketing-preview.pages.dev
+          python3 site/release.py verify "$RUNNER_TEMP/marketing-release" --sha256 "$RELEASE_SHA256" > verified-release.json
+          tools/static-hosting/node_modules/.bin/wrangler pages deploy "$RUNNER_TEMP/marketing-release/public" --project-name suifleet-marketing-preview --branch preview --commit-hash "$GITHUB_SHA" | tee deployment.txt
+          python3 site/verify_served.py "$RUNNER_TEMP/marketing-release/public" https://preview.suifleet-marketing-preview.pages.dev
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
@@ -128,7 +128,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: marketing-release
-          path: release
+          path: ${{ runner.temp }}/marketing-release
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.22.2
@@ -142,10 +142,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
-          python3 site/release.py verify release --sha256 "$RELEASE_SHA256" > verified-release.json
+          python3 site/release.py verify "$RUNNER_TEMP/marketing-release" --sha256 "$RELEASE_SHA256" > verified-release.json
           printf '%s\n' "$AUTHORIZATION" > authorization.txt
-          tools/static-hosting/node_modules/.bin/wrangler pages deploy release/public --project-name suifleet-marketing --branch production --commit-hash "$GITHUB_SHA" | tee deployment.txt
-          python3 site/verify_served.py release/public https://suifleet.io
+          tools/static-hosting/node_modules/.bin/wrangler pages deploy "$RUNNER_TEMP/marketing-release/public" --project-name suifleet-marketing --branch production --commit-hash "$GITHUB_SHA" | tee deployment.txt
+          python3 site/verify_served.py "$RUNNER_TEMP/marketing-release/public" https://suifleet.io
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
