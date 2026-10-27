@@ -136,7 +136,8 @@ const TESTNET_PUBLISHERS = [
   "https://walrus-publisher-testnet.n1stake.com",
 ];
 
-async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
+export async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver, epochs = WALRUS_EPOCHS): Promise<StorageInfo> {
+  if (!Number.isSafeInteger(epochs) || epochs < 1) throw new Error("Choose a positive storage period");
   const publishers = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
     ? TESTNET_PUBLISHERS : [WALRUS_PUBLISHER];
   // Bound fallback attempts, allowing transfer time at 128 KiB/s plus two
@@ -144,7 +145,7 @@ async function uploadBlob(body: Uint8Array, contentType: string, owner: string |
   const timeoutMs = publishers.length > 1 ? 120_000 + Math.ceil(body.byteLength / 131_072) * 1_000 : undefined;
   for (const [index, publisher] of publishers.entries()) {
     try {
-      return await uploadToPublisher(publisher, body, contentType, owner, progress, timeoutMs);
+      return await uploadToPublisher(publisher, body, contentType, owner, progress, timeoutMs, epochs);
     } catch (error) {
       // Content-addressed bytes are unchanged, and public publishers pay for
       // storage. Never replay a wallet transaction or retry malformed success.
@@ -154,8 +155,8 @@ async function uploadBlob(body: Uint8Array, contentType: string, owner: string |
   throw new Error("No Walrus publisher configured");
 }
 
-async function uploadToPublisher(publisher: string, body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver, timeoutMs?: number): Promise<StorageInfo> {
-  const params = new URLSearchParams({ epochs: String(WALRUS_EPOCHS) });
+async function uploadToPublisher(publisher: string, body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver, timeoutMs?: number, epochs = WALRUS_EPOCHS): Promise<StorageInfo> {
+  const params = new URLSearchParams({ epochs: String(epochs) });
   // Send the Blob object to the operator so they, not the publisher, can extend it.
   if (owner) params.set("send_object_to", owner);
   // Fetch does not expose request-body progress. Use browser upload events,
@@ -255,6 +256,7 @@ export interface DeploymentStorage {
   artifact: Availability;
   /** The recipe is Seal-encrypted, so the artifact it names is not visible here. */
   confidential?: boolean;
+  artifactBlobId?: string;
 }
 
 /** Whether devices can still fetch a deployment's recipe and the artifact it names. */
@@ -267,7 +269,7 @@ export async function probeDeploymentStorage(recipeBlobId: string): Promise<Depl
     if (isEnvelope(bytes)) return { recipe: "available", artifact: "unknown", confidential: true };
     const recipe: unknown = JSON.parse(new TextDecoder().decode(bytes));
     assertComponentRecipe(recipe);
-    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId), confidential: false };
+    return { recipe: "available", artifact: await probeBlob(recipe.artifactBlobId), artifactBlobId: recipe.artifactBlobId, confidential: false };
   } catch {
     return { recipe: "unknown", artifact: "unknown" };
   }

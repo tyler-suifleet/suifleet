@@ -7,7 +7,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'suifleet-upload-browser-'));
   let server, browser;
   try {
-    const fixture = await fs.readFile(path.join(__dirname, '../manifests/fixture.localnet.json'), 'utf8');
+    const fixture = JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(__dirname, '../manifests/fixture.localnet.json'), 'utf8')), network: 'testnet', chain_identifier: '4c78adac' });
     const entry = path.join(__dirname, 'browser/upload-acceptance.jsx');
     await build({ entryPoints: [entry], outfile: path.join(directory, 'app.js'), bundle: true, platform: 'browser', jsx: 'automatic',
       alias: { '@': path.resolve(__dirname, '../dapp/src') }, nodePaths: [path.resolve(__dirname, '../dapp/node_modules')],
@@ -31,6 +31,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByRole('checkbox').first().check();
     const upload = () => page.locator('input[type=file]').setInputFiles({ name: 'test.bin', mimeType: 'application/octet-stream', buffer: Buffer.from('test artifact') });
     await upload();
+    await page.getByRole("button", { name: "Upload selected artifact" }).click();
     await page.waitForFunction(() => window.uploadAcceptance.count() === 1);
     await page.evaluate(() => window.uploadAcceptance.progress(0, 5, 10));
     await page.waitForFunction(() => document.querySelector('[role=progressbar]').getAttribute('aria-valuenow') === '50');
@@ -63,7 +64,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.evaluate(() => window.uploadAcceptance.finish(2));
     await page.waitForFunction(() => window.uploadAcceptance.walletCalls() === 1);
     assert.equal(await page.getByRole('button', { name: 'Deploying…', exact: true }).isDisabled(), true);
-    await page.getByRole('status').filter({ hasText: /Checking localnet/ }).waitFor();
+    await page.getByRole('status').filter({ hasText: /Checking testnet/ }).waitFor();
     await page.evaluate(() => window.uploadAcceptance.phase('wallet'));
     await page.getByRole('dialog').getByText(/Your wallet is preparing/).waitFor();
     await page.evaluate(() => window.uploadAcceptance.reject());

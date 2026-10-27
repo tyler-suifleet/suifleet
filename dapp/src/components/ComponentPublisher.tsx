@@ -5,10 +5,12 @@ import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { buildPublishVersionTx, type ComponentVersion } from "@/lib/catalog";
 import { validateComponent } from "@/lib/component-selector";
-import { uploadArtifact, uploadRecipe, storageWarnings, renewalCommand, type UploadProgress as Progress } from "@/lib/walrus";
+import { uploadArtifact, uploadRecipe, storageWarnings, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
-import { useFleetBlobStore } from "@/hooks/useFleetStorage";
+import { useReleasePeriod } from '@/hooks/useReleasePeriod';
+import { ReleaseStorageStatus } from './ReleaseStorageStatus';
+import { ReleasePeriod } from './ReleasePeriod';
 import { DeliveryFields } from "./DeliveryFields";
 import { FleetStorageChoice } from "./FleetStorageChoice";
 import { ConfigurationFields } from "./ConfigurationFields";
@@ -33,13 +35,14 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   const [step, setStep] = useState(1);
   const nextId = useRef(1), inFlight = useRef(false);
   const [rows, setRows] = useState<Row[]>([{ id: 0, os: "linux", arch: "x86_64", install: "" }]);
+  const period = useReleasePeriod(rows.flatMap(r => r.file ? [r.file.size] : []));
   const [configuration, setConfiguration] = useState(EMPTY_CONFIGURATION);
   const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
-  const fleet = useFleetBlobStore();
+  const fleet = period.prepaid;
   const [fleetPaid, setFleetPaid] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [phase, setPhase] = useState(""), [progress, setProgress] = useState<Progress | null>(null);
-  const [receipt, setReceipt] = useState<{ digest: string; warnings: string[] } | null>(null);
+  const [receipt, setReceipt] = useState<{ digest: string; warnings: string[]; blobs: StorageInfo[] } | null>(null);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { stepHeading.current?.focus(); }, [step, receipt]);
   function change(id: number, patch: Partial<Row>) { setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r)); }
@@ -73,8 +76,9 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       const protection = releaseProtection(client, delivery, policies.data ?? []);
       // Fleet-paid storage is never silently replaced by the publisher.
       if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
-      const store = fleetPaid ? fleet.store : undefined;
-      const manifests = [], warnings: string[] = [];
+      if (period.error || !period.epochs || period.loading || period.price === undefined) throw Error(period.error ?? "Wait for the storage period and price");
+      const store = fleetPaid ? period.fleetStore : period.publisherStore;
+      const manifests = [], warnings: string[] = [], blobs: StorageInfo[] = [];
       for (const [i, row] of rows.entries()) {
         if (!active.current || currentAddress.current !== owner) throw new Error("Wallet account changed. Reconnect the publishing account before retrying.");
         setPhase(`Uploading artifact ${i + 1} of ${rows.length} · ${row.os}/${row.arch}`); setProgress(null);
@@ -82,8 +86,8 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
         setPhase(`Uploading recipe ${i + 1} of ${rows.length} · ${row.os}/${row.arch}`); setProgress(null);
         const recipe = await uploadRecipe(recipeFor(row, artifact.blobId, artifact.sha256), owner, protection, setProgress, store);
         for (const [label, storage] of [["Artifact", artifact.storage], ["Recipe", recipe.storage]] as const) {
+          blobs.push(storage);
           warnings.push(`${row.os}/${row.arch} ${label}: storage expires at epoch ${storage.endEpoch ?? "unknown"}`, ...storageWarnings(storage));
-          const renewal = renewalCommand(storage); if (renewal) warnings.push(renewal);
         }
         manifests.push({ os: row.os, arch: row.arch, recipeBlobId: recipe.blobId, recipeSha256: recipe.sha256, artifactSha256: artifact.sha256 });
       }
@@ -91,7 +95,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       setProgress(null);
       const phases: Record<TransactionPhase, string> = { validating: "Verifying fleet network and publishing account…", wallet: "Confirm version publication in your wallet…", confirming: "Confirming transaction effects with the fleet node…" };
       const result = await execute({ transaction: buildPublishVersionTx(catalog, name, version, manifests), onProgress: p => setPhase(phases[p]) });
-      setReceipt({ digest: result.digest, warnings }); setPhase(""); onPublished();
+      setReceipt({ digest: result.digest, warnings, blobs }); setPhase(""); onPublished();
     } catch (e) {
       setError(`${String(e)} Publication was not confirmed. Any completed uploads remain on Walrus; check the library before retrying registration.`);
     } finally { inFlight.current = false; setBusy(false); setProgress(null); setPhase(""); }
@@ -101,7 +105,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     <p className="text-sm text-gray-600">Publishing adds a reusable, immutable release to your library. It does not deploy, install or start software on any device.</p>
     <ol aria-label="Publishing steps" className="flex flex-wrap gap-3 text-sm">{["Name & version", "Platform artifacts", "Review & publish"].map((s, i) => <li key={s} aria-current={step === i + 1 ? "step" : undefined} className={step === i + 1 ? "font-semibold text-blue-700" : "text-gray-500"}>{i + 1}. {s}</li>)}</ol>
     {error && <p role="alert" className="text-sm text-red-700 break-words">{error}</p>}
-    {receipt ? <div role="status" className="space-y-2 break-words"><h3 ref={stepHeading} tabIndex={-1} className="font-semibold">Version published</h3><p>{name} {version} is in the library. Choose “Deploy this version” there to select targets and review a deployment.</p><p className="text-xs">Confirmed transaction: {receipt.digest}</p><details><summary>Storage expiry and renewal</summary><pre className="whitespace-pre-wrap text-xs">{receipt.warnings.join("\n")}</pre></details></div> : <>
+    {receipt ? <div role="status" className="space-y-2 break-words"><h3 ref={stepHeading} tabIndex={-1} className="font-semibold">Version published</h3><p>{name} {version} is in the library. Choose “Deploy this version” there to select targets and review a deployment.</p><p className="text-xs">Confirmed transaction: {receipt.digest}</p><details><summary>Storage expiry and renewal</summary><pre className="whitespace-pre-wrap text-xs">{receipt.warnings.join("\n")}</pre></details>{receipt.blobs.map((b, i) => <ReleaseStorageStatus key={i} blobId={b.blobId} blobObjectId={b.blobObjectId} />)}</div> : <>
       <h3 ref={stepHeading} tabIndex={-1} className="font-semibold">{["Name & version", "Platform artifacts", "Review & publish"][step - 1]}</h3>
       <fieldset disabled={busy} className="space-y-4 min-w-0">
         {step === 1 && <><label className="block text-sm">Component name<input className={input} placeholder="my-app" value={name} onChange={e => setName(e.target.value)} /></label><label className="block text-sm">Semantic version<input className={input} placeholder="1.0.0" value={version} onChange={e => setVersion(e.target.value)} /></label><p className="text-sm text-gray-500">Use a stable name for your software. Published versions cannot be overwritten; publish a new version for changes.</p><button className={button} onClick={() => continueTo(2)}>Continue to platform artifacts</button></>}
@@ -115,11 +119,12 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
           <button className={button} disabled={rows.length >= 16} onClick={() => setRows(rs => [...rs, { id: nextId.current++, os: "linux", arch: "aarch64", install: "" }])}>Add platform</button>
           <details><summary className="cursor-pointer text-sm">Optional configuration and validation</summary><ConfigurationFields value={configuration} onChange={setConfiguration} disabled={busy} /></details>
           <DeliveryFields value={delivery} onChange={setDelivery} policies={policies.data ?? []} disabled={busy} />
+          <ReleasePeriod period={period} disabled={busy} fleetPaid={fleetPaid} />
           <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={busy} />
           {policies.error && <p role="alert">Access policies could not be loaded: {String(policies.error)}</p>}
           <div className="flex gap-2"><button className={button} onClick={() => setStep(1)}>Back to name & version</button><button className={button} onClick={() => continueTo(3)}>Review version</button></div>
         </>}
-        {step === 3 && <><h3 className="font-semibold">{name} · {version}</h3><p className="text-sm">{delivery.mode === "confidential" ? "Confidential · Seal encrypted before upload" : "Public · unencrypted"}</p><ol className="space-y-1 text-sm">{rows.map((r, i) => <li key={r.id} className="break-words">{i + 1}. {r.os}/{r.arch} · {r.file?.name}{r.install && ` · install: ${r.install}`}</li>)}</ol><p className="text-sm">Artifacts and recipes will upload first. Then confirm registration in your wallet. Success requires confirmed execution effects. No devices are targeted.</p><div className="flex flex-wrap gap-2"><button className={button} onClick={() => setStep(2)}>Edit platform artifacts</button><button className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={!catalog || !account || busy} onClick={publish}>{busy ? "Publishing…" : "Upload and publish version"}</button></div></>}
+        {step === 3 && <><ReleasePeriod period={period} disabled={busy} fleetPaid={fleetPaid} /><h3 className="font-semibold">{name} · {version}</h3><p className="text-sm">{delivery.mode === "confidential" ? "Confidential · Seal encrypted before upload" : "Public · unencrypted"}</p><ol className="space-y-1 text-sm">{rows.map((r, i) => <li key={r.id} className="break-words">{i + 1}. {r.os}/{r.arch} · {r.file?.name}{r.install && ` · install: ${r.install}`}</li>)}</ol><p className="text-sm">Artifacts and recipes will upload first. Then confirm registration in your wallet. Success requires confirmed execution effects. No devices are targeted.</p><div className="flex flex-wrap gap-2"><button className={button} onClick={() => setStep(2)}>Edit platform artifacts</button><button className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={!catalog || !account || busy} onClick={publish}>{busy ? "Publishing…" : "Upload and publish version"}</button></div></>}
       </fieldset>
       {busy && <div className="space-y-2"><p role="status" className="text-sm">{phase}</p>{progress && <UploadProgress progress={progress} label={phase} />}</div>}
     </>}

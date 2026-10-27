@@ -7,10 +7,12 @@ import { useCurrentAccount } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
-import { uploadArtifact, uploadRecipe, renewalCommand, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
+import { uploadArtifact, uploadRecipe, storageWarnings, type ComponentRecipe, type Protection, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
 import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
-import { useFleetBlobStore } from "@/hooks/useFleetStorage";
+import { useReleasePeriod } from '@/hooks/useReleasePeriod';
+import { ReleasePeriod } from '@/components/ReleasePeriod';
+import { ReleaseStorageStatus, ReleaseRecipeStorage } from '@/components/ReleaseStorageStatus';
 import { FleetStorageChoice } from "@/components/FleetStorageChoice";
 import type { BlobStore } from "@/lib/walrus";
 import { UploadProgress } from "@/components/UploadProgress";
@@ -54,7 +56,11 @@ export default function FirmwarePage() {
   // One release identity: the recipe reuses the artifact's protection.
   const [protection, setProtection] = useState<Protection | null>(null);
   // Fleet-paid storage (SF-083), chosen once for the artifact and its recipe.
-  const fleet = useFleetBlobStore();
+  const [selectedFile, setSelectedFile] = useState<File>();
+  const [uploadSize, setUploadSize] = useState<number[]>([]);
+  const chooseFile = (file: File) => { setSelectedFile(file); setUploadSize([file.size]); };
+  const period = useReleasePeriod(uploadSize);
+  const fleet = period.prepaid;
   const [fleetPaid, setFleetPaid] = useState(false);
   const [store, setStore] = useState<BlobStore | undefined>(undefined);
   const { mutateAsync: signAndExecute, isPending: txPending } = useFleetTransaction();
@@ -99,7 +105,8 @@ export default function FirmwarePage() {
       const release = releaseProtection(client, delivery, policies);
       // Fleet-paid storage is never silently replaced by the publisher.
       if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
-      const chosen = fleetPaid ? fleet.store : undefined;
+      if (period.error || !period.epochs || period.loading) throw Error(period.error ?? "Wait for storage settings");
+      const chosen = fleetPaid ? period.fleetStore : period.publisherStore;
       const result = await uploadArtifact(file, account?.address ?? null, release, setUploadProgress, chosen);
       setProtection(release);
       setStore(() => chosen);
@@ -111,7 +118,7 @@ export default function FirmwarePage() {
       uploadInFlight.current = false;
       setUploading(false);
     }
-  }, [componentName, version, account?.address, client, delivery, policies, step, fleetPaid, fleet.store, fleet.reason]);
+  }, [componentName, version, account?.address, client, delivery, policies, step, fleetPaid, fleet.store, fleet.reason, period]);
 
   const desiredTargets = desired && selectedDevices.size === 0 && selectedGroups.size > 0;
 
@@ -249,7 +256,7 @@ export default function FirmwarePage() {
       <PageHeader title="Deploy component" subtitle={catalogVersion ? "Review this published version and select deployment targets" : "Upload an artifact, define its lifecycle recipe, and deploy to device groups"} />
 
       {catalogError && <p role="alert">{catalogError}</p>}
-      {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}</li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}
+      {catalogVersion && <section aria-label="Published version review" className="rounded border bg-white p-4 space-y-2"><p>{catalogVersion.name} {catalogVersion.version} · immutable catalog version. Each device selects its own platform.</p><ol className="text-sm">{catalogVersion.manifests.map((m, i) => <li key={i}>{i + 1}. {m.os}/{m.arch}<ReleaseRecipeStorage recipeBlobId={m.recipeBlobId} recipeSha256={m.recipeSha256} /></li>)}</ol><p className="text-sm text-gray-500">Review targets below before submitting. Deployment requests delivery; installed and running state require device reports.</p><Link href="/components" className="text-sm text-blue-600">Back to software library</Link></section>}
       {/* Step indicators */}
       <div className="flex items-center gap-2 text-sm">
         {steps.map((s, i) => (
@@ -274,11 +281,12 @@ export default function FirmwarePage() {
           <Field label="Version" value={version} onChange={setVersion} placeholder="1.0.0" disabled={step !== "artifact" || uploading} />
         </div>
         <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={step !== "artifact" || uploading} />
+        <ReleasePeriod period={period} disabled={step !== "artifact" || uploading} fleetPaid={fleetPaid} />
         <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={step !== "artifact" || uploading} />
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) chooseFile(f); }}
           className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
             step !== "artifact" ? "border-gray-100 bg-gray-50 cursor-not-allowed" :
             dragOver ? "border-[#4DA2FF] bg-blue-50" :
@@ -295,11 +303,12 @@ export default function FirmwarePage() {
               <p className="text-xs text-gray-400 mt-1">Binaries, scripts, archives, .swu — anything</p>
               <label className="mt-2 inline-block text-sm text-[#4DA2FF] cursor-pointer hover:underline">
                 or browse
-                <input type="file" className="hidden" disabled={step !== "artifact" || uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                <input type="file" className="hidden" disabled={step !== "artifact" || uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) chooseFile(f); }} />
               </label>
             </>
           )}
         </div>
+        {selectedFile && step === "artifact" && <div className="text-sm"><p>Selected: {selectedFile.name}</p><button className="rounded border px-3 py-2" disabled={uploading || period.loading || !!period.error || period.price === undefined} onClick={() => handleFile(selectedFile)}>Upload selected artifact</button></div>}
         {artifact && (
           <div className="bg-gray-50 border border-gray-200 rounded p-3 text-xs font-mono space-y-1">
             <p><span className="text-gray-400">Artifact blob:</span> <span className="text-gray-700">{artifact.blobId}</span></p>
@@ -514,10 +523,11 @@ function CmdField({ label, hint, value, onChange, placeholder, disabled }: {
 /** Expiry, ownership and cost of a stored blob, with anything the operator must act on. */
 function StorageSummary({ label, storage }: { label: string; storage: StorageInfo }) {
   const warnings = storageWarnings(storage);
-  const renew = renewalCommand(storage);
+
   return (
     <div className="border border-gray-200 rounded p-3 text-xs space-y-1">
       <p className="font-medium text-gray-600">{label}</p>
+      <ReleaseStorageStatus blobId={storage.blobId} blobObjectId={storage.blobObjectId} />
       <p className="text-gray-600">Storage has a limited lifetime. The storage owner must renew it before expiry so devices can continue downloading.</p>
       <details><summary>Storage expiry and renewal details</summary>
       <p className="text-gray-500">
@@ -525,11 +535,6 @@ function StorageSummary({ label, storage }: { label: string; storage: StorageInf
         {storage.owner === "you" ? "your wallet" : storage.owner === "fleet" ? "your fleet budget (fleet storage)" : storage.owner === "publisher" ? "the publisher only" : "another owner"}
         {storage.costFrost !== undefined && <> · cost {storage.costFrost.toString()} FROST</>}
       </p>
-      {renew && storage.owner === "you" && (
-        <p className="text-gray-500">
-          Renew before it expires: <code className="font-mono text-gray-700">{renew}</code>
-        </p>
-      )}
       </details>
       {warnings.map((warning) => (
         <p key={warning} className="text-amber-700 bg-amber-50 rounded px-2 py-1">{warning}</p>
