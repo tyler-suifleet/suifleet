@@ -416,7 +416,7 @@ export async function fetchFleetHealth(client: Pick<SuiGrpcClient, "getDynamicFi
       const getObject = client.getObject?.bind(client);
       const ledgerService = client.ledgerService;
       const config = scope ? scope.config : DATA_CONFIG;
-      if (!config) return unavailable("Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health");
+      if (!config) return unavailable("device health reporting is not set up for this console; ask your administrator to configure fleet data");
       if (!getObject || !ledgerService) return unavailable("fleet data chain reads unavailable");
       return await fetchChainHealth({ getObject, getDynamicField: client.getDynamicField.bind(client), getObjects: client.getObjects?.bind(client), ledgerService }, config, deviceIds);
     } catch (error) { return unavailable(`fleet data unavailable: ${message(error)}`); }

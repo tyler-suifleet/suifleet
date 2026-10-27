@@ -31,7 +31,9 @@ respond.calls = [];
   assert.equal(ok.items.length, 1);
   assert.equal(respond.calls[0].url, "https://fleet.example/api/v1/alerts?owner=0xowner");
   assert.equal(respond.calls[0].init.headers.authorization, "Bearer tok");
-  assert.equal((await alerts.fetchAlerts("0xowner", "", "tok", respond(200, {}))).status, "unavailable", "no indexer configured");
+  const unconfigured = await alerts.fetchAlerts("0xowner", "", "tok", respond(200, {}));
+  assert.equal(unconfigured.status, "unavailable", "no indexer configured");
+  assert.doesNotMatch(unconfigured.reason, /NEXT_PUBLIC_|docs\/|SF-\d{3}/, "customer-facing reason");
   assert.equal((await alerts.fetchAlerts("0xowner", "https://x", "", respond(401, {}))).status, "unavailable");
   assert.equal((await alerts.fetchAlerts("0xowner", "https://x", "", respond(200, { items: [{ ...good, kind: "bogus" }], server_time_ms: 1 }))).status, "unavailable",
     "one invalid alert makes the list unavailable, not partially shown");
