@@ -486,6 +486,22 @@ const credentialsOf = (files) => [...files.keys()].filter((n) => n.endsWith("/cl
     assert.ok(!(await page.locator("table").first().innerText()).includes(named["pi-001"].deviceAddress.slice(0, 10)), "an address is shown by default");
     await page.getByLabel("Technical details").check();
     await page.getByText(named["pi-001"].deviceAddress).waitFor();
+
+    stage = "browser: a created group is shown at once and cannot be created twice";
+    await page.getByRole("button", { name: "Device groups" }).click();
+    await page.getByRole("button", { name: "Create group", exact: true }).click();
+    await page.getByPlaceholder("production-pi4s").fill("UI canaries");
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    const created = page.locator("tr", { has: page.getByText("UI canaries", { exact: true }) });
+    // Listed or pending as soon as the confirmed transaction returns, never "No device groups yet".
+    await created.waitFor({ timeout: 2000 });
+    const createButton = page.getByRole("button", { name: /^(Create group|Adding group…)$/ });
+    if (await created.getByText("adding to the list", { exact: false }).count()) assert.equal(await createButton.isDisabled(), true, "a pending group blocks a duplicate");
+    await created.getByRole("button", { name: "Manage" }).waitFor();
+    await page.getByRole("button", { name: "Create group", exact: true }).waitFor();
+    assert.equal(await createButton.isDisabled(), false);
+    assert.equal(await created.count(), 1);
+    assert.equal((await sui.fetchGroups(client, op)).filter((g) => g.name === "UI canaries").length, 1);
     assert.deepEqual(errors, []);
     evidence.browser.wallet_calls = await page.evaluate(() => window.enrollment.calls());
     evidence.browser.alerts = alerts;

@@ -128,10 +128,13 @@ function audit() {
     await register.click();
     await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
     await page.evaluate(() => window.acceptance.reset());
+    // A successful refresh replaces an earlier failure message with the current inventory.
+    await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+    await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor({ state: "detached" });
 
     // Duplicate submission: a double activation while the wallet is open signs once.
     const beforeSuccess = await page.evaluate(() => window.acceptance.signCalls());
-    await page.evaluate(() => { window.acceptance.hold(); window.acceptance.registerAs("First Pi"); });
+    await page.evaluate(() => { window.acceptance.hold(); window.acceptance.lag(); window.acceptance.registerAs("First Pi", "0x" + "2".repeat(64)); });
     await register.dblclick();
     await page.getByText("Approve the registration in your wallet…", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Registering…", exact: true }).click({ force: true }).catch(() => {});
@@ -140,6 +143,11 @@ function audit() {
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1);
     const confirmed = await page.getByRole("status").filter({ hasText: "Device registered." }).innerText();
     assert.match(confirmed, /not online until its client/);
+    // Until the inventory lists it, the registration shows as pending and cannot be repeated.
+    await page.getByRole("status").filter({ hasText: "First Pi: registered · adding to your inventory…" }).waitFor();
+    assert.equal(await register.isDisabled(), true, "pending registration blocks a duplicate");
+    await page.evaluate(() => window.acceptance.index());
+    await page.getByRole("status").filter({ hasText: "adding to your inventory" }).waitFor({ state: "detached" });
     const confirmation = page.getByText("Confirmation details", { exact: true });
     await confirmation.click();
     await page.getByText("Confirmed transaction " + "1".repeat(32) + ".", { exact: false }).waitFor();
