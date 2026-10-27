@@ -101,34 +101,70 @@ const exact = (v: object, fields: string[]) => Object.keys(v).sort().join() === 
 export const archiveAad = (config: FleetDataConfig, anchor: Anchor) => new TextEncoder().encode(
   `suifleet/fleet-data/v1/${config.chainIdentifier}/${config.fleetId}/${anchor.seq}/${anchor.kind}`);
 
-/** Fetch a bounded page from the chain's per-device index, never a relay index. */
-export async function readAnchors(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<Anchor[]> {
+async function readAnchorField(client: SuiGrpcClient, config: FleetDataConfig, writerId: string, index: bigint): Promise<Anchor | undefined> {
+  let field;
+  try {
+    field = await client.getDynamicField({ parentId: writerId, name: {
+      type: `${config.typeOrigin}::fleet_data::AnchorKey`, bcs: bcs.struct('AnchorKey', { index: bcs.u64() }).serialize({ index }).toBytes(),
+    } });
+  } catch (error) {
+    // SF-129 owners prune expired archives; their indices are never reused.
+    if (error instanceof ObjectError && error.reason === 'notFound') return undefined;
+    throw error;
+  }
+  if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`)) throw Error('Invalid archive index type');
+  return AnchorBcs.parse(field.dynamicField.value.bcs);
+}
+
+export interface AnchorEntry { index: number; anchor: Anchor }
+/** Pruned indices read per page beyond `limit`; callers continue from `next`. */
+const PRUNED_GAP_READS = 256;
+
+/** Fetch a bounded page from the chain's per-device index, never a relay index.
+ * Pruned indices are skipped; `next` is the first index not yet read. */
+export async function readAnchorEntries(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<{ entries: AnchorEntry[]; next: number }> {
   await readFleetData(client, config);
   if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 64) throw Error('Invalid archive page');
   const writer = await readDeviceData(client, config, deviceId);
-  if (!writer) return [];
+  if (!writer) return { entries: [], next: start };
   const count = BigInt(writer.anchor_count);
   const compact = await readCompactHead(client, config, writer.id);
   if (compact && (BigInt(compact.index) >= count || BigInt(compact.anchor.seq) > BigInt(writer.batch_seq))) throw Error('Compact archive root sequence mismatch');
-  const anchors: Anchor[] = [];
-  for (let index = BigInt(start); index < count && index < BigInt(start) + BigInt(limit); index++) {
+  const entries: AnchorEntry[] = [];
+  let index = BigInt(start), reads = 0;
+  for (; index < count && entries.length < limit && reads < limit + PRUNED_GAP_READS; index++, reads++) {
     if (compact && index === BigInt(compact.index)) {
-      anchors.push({ ...compact.anchor, index: Number(index) });
+      entries.push({ index: Number(index), anchor: { ...compact.anchor, index: Number(index) } });
       continue;
     }
-    let field;
-    try { field = await client.getDynamicField({ parentId: writer.id, name: {
-      type: `${config.typeOrigin}::fleet_data::AnchorKey`, bcs: bcs.struct('AnchorKey', { index: bcs.u64() }).serialize({ index }).toBytes(),
-    } }); } catch (error) {
-      if (compact && index >= BigInt(compact.first_index) && error instanceof ObjectError && error.reason === 'notFound') continue;
-      throw error;
-    }
-    if (normalizeStructTag(field.dynamicField.value.type) !== normalizeStructTag(`${config.typeOrigin}::fleet_data::Anchor`)) throw Error('Invalid archive index type');
-    const anchor = AnchorBcs.parse(field.dynamicField.value.bcs);
-    if (BigInt(anchor.seq) > BigInt(writer.batch_seq) || (anchors.length && BigInt(anchor.seq) <= BigInt(anchors[anchors.length - 1].seq))) throw Error('Archive index sequence mismatch');
-    anchors.push(compact ? { ...anchor, index: Number(index) } : anchor);
+    // Missing: pruned (SF-129) or inside compact history (SF-121), never reused.
+    const anchor = await readAnchorField(client, config, writer.id, index);
+    if (!anchor) continue;
+    const previous = entries[entries.length - 1]?.anchor;
+    if (BigInt(anchor.seq) > BigInt(writer.batch_seq) || (previous && BigInt(anchor.seq) <= BigInt(previous.seq))) throw Error('Archive index sequence mismatch');
+    entries.push({ index: Number(index), anchor: compact ? { ...anchor, index: Number(index) } : anchor });
   }
-  return anchors;
+  return { entries, next: Number(index) };
+}
+
+export async function readAnchors(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, start = 0, limit = 32): Promise<Anchor[]> {
+  return (await readAnchorEntries(client, config, deviceId, start, limit)).entries.map((entry) => entry.anchor);
+}
+
+/** Exactly one index: undefined when out of range or pruned, never a neighbour. */
+export async function readAnchorAt(client: SuiGrpcClient, config: FleetDataConfig, deviceId: string, index: number): Promise<Anchor | undefined> {
+  await readFleetData(client, config);
+  if (!Number.isSafeInteger(index) || index < 0) throw Error('Invalid archive index');
+  const writer = await readDeviceData(client, config, deviceId);
+  if (!writer || BigInt(index) >= BigInt(writer.anchor_count)) return undefined;
+  const compact = await readCompactHead(client, config, writer.id);
+  if (compact && BigInt(compact.index) === BigInt(index)) {
+    if (BigInt(compact.anchor.seq) > BigInt(writer.batch_seq)) throw Error('Compact archive root sequence mismatch');
+    return { ...compact.anchor, index };
+  }
+  const anchor = await readAnchorField(client, config, writer.id, BigInt(index));
+  if (anchor && BigInt(anchor.seq) > BigInt(writer.batch_seq)) throw Error('Archive index sequence mismatch');
+  return anchor;
 }
 
 /** Also used after fetching: the anchor's signer is historical chain authority,
@@ -308,8 +344,8 @@ export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<W
     }
     throw Error('Archive unavailable or beyond the 64-link history read limit');
   }
-  const [anchor] = await readAnchors(client, config, deviceId, index, 1);
-  if (!anchor || (anchor.index !== undefined && anchor.index !== index)) throw Error('Archive index does not exist');
+  const anchor = await readAnchorAt(client, config, deviceId, index);
+  if (!anchor) throw Error('Archive index does not exist or was pruned after expiry');
   return fetchAnchorArchive(client, walrus, config, deviceId, anchor, aggregator, decrypt, fetcher);
 }
 

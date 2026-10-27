@@ -79,7 +79,21 @@ const event = n => ({ event: { transactionDigest: `digest${n}`, eventIndex: 0, c
     attempts++; throw Error('requested data below earliest available');
   })() });
   await assert.rejects(history.incrementalEvents(pruned.client, '0x1::test::StillPruned'), /below earliest/);
-  assert.equal(attempts, 2, 'pruning recovery is bounded and never returns empty success');
+  assert.equal(attempts, 4, 'pruning recovery is bounded and never returns empty success');
+  // Transaction pruning ahead of the reported checkpoint floor: the floor
+  // checkpoint itself is partly pruned, so discovery resumes after it.
+  const ahead = fixture(); ahead.floor(20n);
+  ahead.client.ledgerService.listEvents = request => {
+    ahead.calls.push(request);
+    return { responses: (async function* () {
+      if (request.startCheckpoint <= 20n) throw Error('requested data below earliest available; lowest available tx_seq is 4135849854');
+      yield event(21); yield end('ahead-tip', 21n);
+    })() };
+  };
+  result = await history.incrementalEvents(ahead.client, '0x1::test::TxPrunedFloor');
+  assert.deepEqual(result.map(e => e.transactionDigest), ['digest21']);
+  assert.deepEqual(ahead.calls.map(c => c.startCheckpoint), [20n, 21n]);
+  assert.match(history.historySnapshot(), /History unavailable before checkpoint 21/);
   const quota = fixture(); quota.frames([end('quota', 1n)]);
   window.localStorage.setItem = () => { throw Error('quota exceeded'); };
   assert.deepEqual(await history.incrementalEvents(quota.client, '0x1::test::Quota'), []);

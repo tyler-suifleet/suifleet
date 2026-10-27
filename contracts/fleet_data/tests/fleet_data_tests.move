@@ -335,6 +335,169 @@ module fleet_data::fleet_data_tests {
         ts::return_to_address(OWNER, cap); ts::return_to_address(DEVICE, identity_cap); destroy(system); ts::end(s);
     }
 
+    // ── SF-129 storage reclaim ──────────────────────────────────────────────
+    // The fixture pool covers Walrus epochs [0, 5): blobs expire at epoch 5.
+
+    fun archives(s: &mut ts::Scenario, system: &mut System): (ID, ID) {
+        let a = upload(s, system, 42, true); anchor(s, a, 1, 0, 1);
+        let b = upload(s, system, 43, true); anchor(s, b, 2, 0, DAY + 1);
+        (a, b)
+    }
+    fun prune(s: &mut ts::Scenario, epoch: u32, indices: vector<u64>) {
+        ts::next_tx(s, OWNER);
+        let fleet = ts::take_shared<FleetData>(s);
+        let mut writer = ts::take_shared<DeviceData>(s);
+        let mut storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(s, OWNER);
+        fleet_data::prune_at_epoch_for_testing(&fleet, &mut writer, &budget, &cap, &mut storage, epoch, indices);
+        ts::return_shared(fleet); ts::return_shared(writer); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+    }
+    fun burn(s: &mut ts::Scenario, epoch: u32, ids: vector<ID>) {
+        ts::next_tx(s, OWNER);
+        let fleet = ts::take_shared<FleetData>(s);
+        let mut storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(s, OWNER);
+        fleet_data::burn_at_epoch_for_testing(&fleet, &budget, &cap, &mut storage, epoch, ids);
+        ts::return_shared(fleet); ts::return_shared(storage);
+        ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+    }
+    fun release(s: &mut ts::Scenario, id: ID): blob::Blob {
+        ts::next_tx(s, OWNER);
+        let mut storage = ts::take_shared<FleetStorage>(s);
+        let budget = ts::take_shared<FleetBudget>(s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(s, OWNER);
+        let released = fleet_storage::release_blob(&mut storage, &budget, &cap, id);
+        ts::return_shared(storage); ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+        released
+    }
+    fun counts(s: &mut ts::Scenario): (u64, u64, bool, bool) {
+        ts::next_tx(s, OWNER);
+        let writer = ts::take_shared<DeviceData>(s);
+        let storage = ts::take_shared<FleetStorage>(s);
+        let (count, blobs) = (fleet_data::anchor_count(&writer), fleet_storage::blob_count(&storage));
+        let (first, second) = (fleet_data::has_anchor(&writer, 0), fleet_data::has_anchor(&writer, 1));
+        ts::return_shared(writer); ts::return_shared(storage);
+        (count, blobs, first, second)
+    }
+
+    #[test]
+    fun prune_expired_anchor_burns_its_blob_and_keeps_newer_history() {
+        let (mut s, mut system) = setup();
+        let (a, b) = archives(&mut s, &mut system);
+        prune(&mut s, 5, vector[0]);
+        let (count, blobs, first, second) = counts(&mut s);
+        // The index never shrinks, so later anchors keep their positions.
+        assert!(count == 2 && blobs == 1 && !first && second);
+        ts::next_tx(&mut s, OWNER);
+        let storage = ts::take_shared<FleetStorage>(&s);
+        assert!(!fleet_storage::has_blob(&storage, a) && fleet_storage::has_blob(&storage, b));
+        ts::return_shared(storage);
+        // The next archive appends at the next index, not into the gap.
+        let c = upload(&mut s, &mut system, 44, true); anchor(&mut s, c, 3, 0, 2 * DAY + 1);
+        let (count, _, _, _) = counts(&mut s);
+        assert!(count == 3);
+        prune(&mut s, 6, vector[1, 2]);
+        let (_, blobs, _, second) = counts(&mut s);
+        assert!(blobs == 0 && !second);
+        finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EUnexpired)]
+    fun prune_refuses_unexpired_archive() {
+        let (mut s, mut system) = setup(); archives(&mut s, &mut system);
+        prune(&mut s, 4, vector[0]); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EUnexpired)]
+    fun prune_batch_is_atomic_when_one_archive_is_unexpired() {
+        let (mut s, mut system) = setup(); archives(&mut s, &mut system);
+        // An extended second archive must not be destroyed with the first.
+        ts::next_tx(&mut s, OWNER);
+        let mut storage = ts::take_shared<FleetStorage>(&s);
+        let budget = ts::take_shared<FleetBudget>(&s);
+        let cap = ts::take_from_address<BudgetOwnerCap>(&s, OWNER);
+        let b = second_blob(&s);
+        fleet_storage::extend_blob(&mut storage, &budget, &cap, &mut system, b, 2, ts::ctx(&mut s));
+        ts::return_shared(storage); ts::return_shared(budget); ts::return_to_address(OWNER, cap);
+        prune(&mut s, 5, vector[0, 1]); finish(s, system);
+    }
+    fun second_blob(s: &ts::Scenario): ID {
+        let writer = ts::take_shared<DeviceData>(s);
+        let id = fleet_data::anchored_blob(&writer, 1);
+        ts::return_shared(writer); id
+    }
+    #[test, expected_failure(abort_code = fleet_data::ENotFound)]
+    fun prune_twice_is_refused() {
+        let (mut s, mut system) = setup(); archives(&mut s, &mut system);
+        prune(&mut s, 5, vector[0]); prune(&mut s, 5, vector[0]); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EBounds)]
+    fun prune_requires_indices() {
+        let (mut s, system) = setup(); prune(&mut s, 5, vector[]); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = sui_edge::fleet_budget::ENotOwner)]
+    fun prune_requires_the_fleet_owner_cap() {
+        let (mut s, mut system) = setup(); archives(&mut s, &mut system);
+        ts::next_tx(&mut s, OWNER);
+        let registry = ts::take_shared<DeviceRegistry>(&s);
+        let other = fleet_budget::create(&registry, coin::mint_for_testing<SUI>(1_000, ts::ctx(&mut s)),
+            fleet_budget::new_limits(10, DAY, 10, 1, 0), 0, ts::ctx(&mut s));
+        ts::return_shared(registry);
+        let fleet = ts::take_shared<FleetData>(&s);
+        let mut writer = ts::take_shared<DeviceData>(&s);
+        let mut storage = ts::take_shared<FleetStorage>(&s);
+        let budget = ts::take_shared<FleetBudget>(&s);
+        fleet_data::prune_at_epoch_for_testing(&fleet, &mut writer, &budget, &other, &mut storage, 5, vector[0]);
+        abort 0
+    }
+    #[test]
+    fun released_blob_anchor_prunes_only_after_its_recorded_expiry() {
+        let (mut s, mut system) = setup(); let (a, _) = archives(&mut s, &mut system);
+        let released = release(&mut s, a);
+        prune(&mut s, 5, vector[0]);
+        let (count, blobs, first, _) = counts(&mut s);
+        assert!(count == 2 && blobs == 1 && !first);
+        destroy(released); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EUnexpired)]
+    fun released_blob_anchor_is_kept_until_expiry() {
+        let (mut s, mut system) = setup(); let (a, _) = archives(&mut s, &mut system);
+        let released = release(&mut s, a);
+        prune(&mut s, 4, vector[0]);
+        destroy(released); finish(s, system);
+    }
+    #[test]
+    fun burn_expired_unanchored_blob_then_prune_its_anchor() {
+        let (mut s, mut system) = setup();
+        let (a, _) = archives(&mut s, &mut system);
+        let loose = upload(&mut s, &mut system, 50, false);
+        burn(&mut s, 5, vector[loose, a]);
+        let (_, blobs, first, _) = counts(&mut s);
+        assert!(blobs == 1 && first);
+        // The anchor of a burned blob is then pruned without another burn.
+        prune(&mut s, 5, vector[0]);
+        let (_, blobs, first, _) = counts(&mut s);
+        assert!(blobs == 1 && !first);
+        finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::EUnexpired)]
+    fun burn_refuses_unexpired_blob() {
+        let (mut s, mut system) = setup(); let loose = upload(&mut s, &mut system, 50, false);
+        burn(&mut s, 4, vector[loose]); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = fleet_data::ENotFound)]
+    fun burn_refuses_unknown_blob() {
+        let (mut s, mut system) = setup(); let loose = upload(&mut s, &mut system, 50, false);
+        burn(&mut s, 5, vector[loose, loose]); finish(s, system);
+    }
+    #[test, expected_failure]
+    fun pruned_blob_cannot_be_anchored_again() {
+        let (mut s, mut system) = setup(); let (a, _) = archives(&mut s, &mut system);
+        prune(&mut s, 5, vector[0]);
+        anchor(&mut s, a, 3, 0, 2 * DAY + 1); finish(s, system);
+    }
+
     fun managed_setup(): (ts::Scenario, System, ID, ID) {
         let (mut s, system) = setup();
         s.next_tx(OWNER);
@@ -487,6 +650,27 @@ module fleet_data::fleet_data_tests {
         assert!(fleet_data::item_exists_for_testing(&writer,1,0) && fleet_data::item_exists_for_testing(&writer,1,1),100);
         clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
         ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);destroy(system);ts::end(s);
+    }
+    #[test]
+    fun prune_removes_the_anchor_opaque_items() {
+        let (mut s,mut system)=setup();
+        let blob=upload(&mut s,&mut system,123,true);
+        ts::next_tx(&mut s,DEVICE);
+        let fleet=ts::take_shared<FleetData>(&s);let mut writer=ts::take_shared<DeviceData>(&s);
+        let budget=ts::take_shared<FleetBudget>(&s);let account=ts::take_shared<GasAccount>(&s);
+        let registry=ts::take_shared<DeviceRegistry>(&s);let storage=ts::take_shared<FleetStorage>(&s);
+        let cap=ts::take_from_address<DeviceCap>(&s,DEVICE);let clock=clock_at(&mut s,DAY);
+        let item=ItemWire {sequence:1,stream:b"sensor",key:b"raw",content_type:b"application/octet-stream",metadata:b"{}",upload:zeros(64),chunk:0,chunks:1,total_size:3,size:3,sha256:zeros(32),identifier:b"data-00",ciphertext_size:100,ciphertext_sha256:zeros(32)};
+        fleet_data::anchor_items(&fleet,&mut writer,&budget,&account,&registry,&cap,&storage,blob,7,0,zeros(32),vector[sui::bcs::to_bytes(&item),sui::bcs::to_bytes(&item)],&clock,ts::ctx(&mut s));
+        clock::destroy_for_testing(clock);ts::return_shared(fleet);ts::return_shared(writer);ts::return_shared(storage);ts::return_shared(budget);
+        ts::return_shared(account);ts::return_shared(registry);ts::return_to_address(DEVICE,cap);
+        prune(&mut s, 5, vector[0]);
+        ts::next_tx(&mut s,OWNER);
+        let writer=ts::take_shared<DeviceData>(&s);
+        // Both item indexes go with the archive; the anchor count is kept.
+        assert!(!fleet_data::has_anchor(&writer,0) && fleet_data::anchor_count(&writer)==1,100);
+        assert!(!fleet_data::item_exists_for_testing(&writer,7,0) && !fleet_data::item_exists_for_testing(&writer,7,1),100);
+        ts::return_shared(writer); finish(s, system);
     }
 
 }

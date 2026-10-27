@@ -394,6 +394,9 @@ test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 scripts/check_archive_envelope.py
 	$(RUN) node scripts/measure_quilt_geometry.cjs --check
 	$(RUN) node scripts/test_fleet_recovery.cjs
+	$(RUN) node scripts/test_storage_reclaim.cjs
+	$(RUN) node scripts/test_storage_reclaim_panel.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_fleet_reclaim.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_fleet_recovery.py'
 	$(RUN) node scripts/test_pilot_load.cjs
 	$(RUN) node scripts/test_alerts.cjs
@@ -726,6 +729,12 @@ test-prospects:
 .PHONY: test-fleet-data-upgrade-localnet
 test-fleet-data-upgrade-localnet:
 	$(RUN) python3 scripts/test_protocol_localnet.py --fleet-data-upgrade
+
+# SF-129 reclaim lifecycle on a disposable network-none chain: base objects,
+# in-place core/data upgrades, expiry, prune/burn/retire and measured rebates.
+.PHONY: test-reclaim-localnet
+test-reclaim-localnet:
+	$(RUN) python3 scripts/test_reclaim_localnet.py
 
 # SF-091 integrated recovery drill on isolated infrastructure: restore/rollback,
 # browser outage/loss/export, real-daemon recovery and SF-092 payment failure

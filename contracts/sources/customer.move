@@ -620,7 +620,7 @@ module sui_edge::customer {
     }
     public fun commit_revision(customer: &Customer, fleet: &Fleet, plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
-        desired_state::commit_as(plan, group, clock, object::id(fleet).to_address());
+        desired_state::commit_as(plan, group, clock, object::id(fleet).to_address(), ctx);
     }
     fun assert_targets(fleet: &Fleet, groups: &vector<ID>, devices: &vector<ID>) {
         let mut i = 0;
