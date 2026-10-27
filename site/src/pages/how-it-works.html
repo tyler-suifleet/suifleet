@@ -1,0 +1,33 @@
+<div class="page">
+<h1>How it works</h1>
+<p class="lead">SuiFleet is three parts: a static web console, a client daemon on each device, and smart contracts on the Sui network. Release artifacts live on Walrus decentralized storage. None of them requires a SuiFleet-operated server.</p>
+
+<h2>The pieces</h2>
+<table>
+<thead><tr><th>Part</th><th>What it does</th><th>Where it runs</th></tr></thead>
+<tbody>
+<tr><td>Console</td><td>Sign in, register devices, publish versions, deploy, watch results and health.</td><td>Your browser, served as static files from <a href="{{app_url}}">app.suifleet.io</a>.</td></tr>
+<tr><td>Contracts</td><td>Hold devices, groups, deployments, permissions and the record of every report. Enforce who may do what.</td><td>Sui (Move packages).</td></tr>
+<tr><td>Storage</td><td>Holds release artifacts, recipes and encrypted device log archives.</td><td>Walrus, with Seal threshold encryption.</td></tr>
+<tr><td>Device client</td><td>Holds the device's own signing key, watches for deployments, verifies and applies them, reports signed results and health.</td><td>Each Linux device (systemd service).</td></tr>
+</tbody>
+</table>
+
+<h2>A release, end to end</h2>
+<ol class="steps-flow">
+<li><strong>Register.</strong> The device generates its own key on first boot and prints its address. You register that address in the console, which creates a Device record and a capability bound to it. For volume, a batch enrollment lets devices claim their own records with a one-time code.</li>
+<li><strong>Publish.</strong> In the console you upload the artifact and a recipe describing how to apply it. The browser encrypts both, stores them on Walrus and records their digests on chain.</li>
+<li><strong>Deploy.</strong> A deployment names the version and its targets: single devices or groups. The transaction is signed by your wallet, so the target list and the release authority are on the public record.</li>
+<li><strong>Apply.</strong> Each targeted device sees the deployment, checks its own membership, downloads and decrypts the artifact, verifies its digest and runs your configured install command.</li>
+<li><strong>Report.</strong> The device signs and submits its result. The console reads results and health directly from the chain and verifies the signatures in your browser.</li>
+</ol>
+
+<h2>What SuiFleet does not do</h2>
+<ul>
+<li>It does not install operating systems, choose partitions or reboot devices. Your platform tools own that, and SuiFleet runs the commands you configure.</li>
+<li>A signed report proves which device identity sent it, not that the hardware booted correctly or is uncompromised.</li>
+<li>Live telemetry pipelines are not part of the product. Devices publish bounded signed health on chain and encrypted logs to Walrus; you can keep any existing telemetry pipeline.</li>
+</ul>
+<p>Details: <a href="{{repo:docs/SERVERLESS_PRODUCT.md}}">operating without application servers</a>, <a href="{{repo:docs/MOVE_NATIVE_MODEL.md}}">the on-chain model</a> and <a href="{{repo:docs/STAGED_ROLLOUTS.md}}">staged rollouts</a>.</p>
+<p><a class="button primary" href="/guide/">Walk through the console</a></p>
+</div>
