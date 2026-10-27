@@ -65,6 +65,16 @@ class SiteTest(unittest.TestCase):
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
 
+    def test_logo_download_preserves_transparency(self):
+        for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:
+            html = build.output_path(self.out, page["path"]).read_text()
+            self.assertIn('href="/assets/suifleet-mark.png" download="SuiFleet-mark.png"', html)
+        png = (self.out / "assets" / "suifleet-mark.png").read_bytes()
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(png[12:16], b"IHDR")
+        self.assertEqual(png[25], 6, "Download must retain its RGBA alpha channel")
+        self.assertEqual(png, (SITE / "src" / "assets" / "suifleet-mark.png").read_bytes())
+
     def test_broken_internal_link(self):
         self.edit("index.html", 'href="/guide/"', 'href="/missing/"')
         self.assertTrue(any("broken link /missing/" in e for e in self.errors()))

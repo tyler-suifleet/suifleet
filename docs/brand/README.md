@@ -4,8 +4,8 @@ The user selected concept 09 on 2026-10-27: three sky-blue sailboats moving toge
 
 ## Assets
 
-- `site/src/assets/suifleet-logo-concept-09.png`: selected original horizontal logo, copied unchanged from built-in image generation. Available through the footer download link.
-- `site/src/assets/suifleet-mark.png`: transparent symbol-only derivative produced with built-in image editing from concept 09; no raster postprocessing.
+- `site/src/assets/suifleet-logo-concept-09.png`: selected original horizontal logo, copied unchanged from built-in image generation. Retained as the selected reference; this original has a solid white background.
+- `site/src/assets/suifleet-mark.png`: transparent symbol-only derivative produced with built-in image editing from concept 09; no raster postprocessing. Available through the footer’s “Download transparent logo” link as `SuiFleet-mark.png` (RGBA PNG with alpha transparency).
 - `site/src/assets/logo.svg`: manually authored vector interpretation of the selected three-sail/shared-wave motif, used for crisp navigation and small-size rendering.
 - `site/src/assets/favicon.svg`: the same vector motif for browser tabs.
 - `site/src/assets/fleet-wave.svg`: manually authored decorative waves echoing the shared wave in concept 09; no runtime scripts or external resources.
