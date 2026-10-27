@@ -65,6 +65,8 @@ function DevicesTab() {
   // Keyed by device address: registration knows it before the object ID exists.
   const pending = usePendingRows(isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
   const adding = pending.waiting.filter((row) => row.kind === "create");
+  // A registration not listed yet blocks another: the contract does not reject a second device for the same address.
+  const registering = isPending || adding.length > 0;
   const removing = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => normalizeSuiAddress(row.id)));
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -82,6 +84,9 @@ function DevicesTab() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const name = fd.get("name") as string, deviceAddress = fd.get("deviceAddress") as string;
+    if (registering) return;
+    const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === normalizeSuiAddress(deviceAddress));
+    if (unlisted) { alert(`“${unlisted.label}” is already registered with this address but is not listed yet. Refresh the page in a minute before registering it again.`); return; }
     const tx = buildRegisterDeviceTx(
       name,
       deviceAddress,
@@ -107,7 +112,7 @@ function DevicesTab() {
           <label className="flex items-center gap-1 text-xs text-gray-500">
             <input type="checkbox" checked={technical} onChange={(e) => setTechnical(e.target.checked)} /> Technical details
           </label>
-          <button onClick={() => setShowModal(true)} disabled={isPending} className="text-xs text-gray-500 hover:underline disabled:opacity-50">Register by address</button>
+          <button onClick={() => setShowModal(true)} disabled={registering} className="text-xs text-gray-500 hover:underline disabled:opacity-50">Register by address</button>
           <Link href="/enrollment" className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">Add devices</Link>
         </div>
       </div>
@@ -252,7 +257,7 @@ function DevicesTab() {
                 <option value="riscv64">riscv64</option>
               </select>
             </div>
-            <ModalButtons isPending={isPending} label="Register" onCancel={() => setShowModal(false)} />
+            <ModalButtons isPending={registering} label="Register" onCancel={() => setShowModal(false)} />
           </form>
         </Modal>
       )}
