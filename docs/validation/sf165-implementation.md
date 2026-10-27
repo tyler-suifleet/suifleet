@@ -223,3 +223,30 @@ errors still fail. No runtime daemon code or cleanup assertion changed.
 No new public-network transactions or Move changes. Hosted exact-head/current-base
 CI, automatic testnet and fresh independent review remain mandatory and pending;
 this repair is not approval. Deferred external checks remain unrun in #32/#159.
+
+## Current-base feedback integration (2026-10-27)
+
+The supplied feedback has no open source findings or review threads. Its remaining
+CI/testnet gates are preserved. Merged snapshot/current main
+`36a85bebecee7dfcc182056cb989801a7f7728a2` as `274621ed`, bringing in the
+reviewed enrollment reconciliation and bounded CI funding evidence without
+conflicts or additional functional edits.
+
+Verification after this merge:
+
+- The pinned network-none container/mount command above, running
+  `make dapp-typecheck && make dapp-build`: PASS; full offline prerequisites,
+  TypeScript and all 16 static pages. Existing Tailwind module-type warning only.
+- `node scripts/test_release_storage.cjs`: PASS.
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p
+  test_tunneling_process_scan.py`: 2 PASS.
+- Same command with `-p test_live_release_storage.py`: 3 PASS.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node
+  scripts/test_components_browser.cjs`: PASS (fixture chain/wallet/storage).
+- `git diff --check` and snapshot-base ancestry: PASS.
+
+No new Move, daemon/systemd or public-network run; prior receipts remain historical.
+No migration. Hosted exact-head/current-base CI and automatic Testnet are pending,
+not watched or polled; fresh independent review remains required. This is a base
+integration handoff, not approval. Physical/mainnet/manual-wallet/production-provider
+acceptance remains explicitly unrun in #32/#159.
