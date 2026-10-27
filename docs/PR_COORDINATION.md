@@ -974,3 +974,22 @@ workflow. If integration already started a fresh CI run, use that run instead.
 Do not create empty commits, fabricate statuses or bypass checks. Hosted reruns
 and their results remain post-integration work; implementation workers hand off
 without watching CI.
+
+Cancelled Actions jobs qualify for bounded owner repair only when fresh read-only
+API evidence identifies the same repository, PR head, completed workflow attempt,
+job ID and GitHub Actions check run, with the exact failure annotation
+"The job has exceeded the maximum execution time of …". The coordinator and
+dispatcher share this classifier. Evidence records only IDs/revisions and the
+fixed classification `job_timeout`; annotation text and API errors are not saved
+or printed. The repair snapshot presents the conclusion as `TIMED_OUT`, while
+the underlying cancelled check remains a failed merge gate. Fleet-status therefore
+continues to show CI failure and the coordinator names the existing repair owner.
+
+The latest attempt must still be current after reading annotations. Superseded or
+ambiguously ordered rollups, queued reruns, changed head/base, manual/concurrency
+cancellation, foreign check apps and unavailable/malformed/truncated evidence do
+not start repair. Responses above 100 jobs or annotations conservatively remain
+unclassified. No elapsed-time heuristic or log-text scraping grants repair.
+Existing per-check attempt budgets, ownership, live-worker fences, exact-head/base
+CI and independent review still apply. Installation is only through the reviewed
+merged-runtime path; this change does not restart services from a worktree.
