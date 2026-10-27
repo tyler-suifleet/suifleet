@@ -388,6 +388,7 @@ test-manifest:
 	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
+	$(RUN) node scripts/test_group_batch.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_data_browser.cjs
