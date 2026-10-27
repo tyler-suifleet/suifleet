@@ -714,3 +714,7 @@ indexed history. Other authorization, data and execution errors fail closed.
 Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
+
+## Company treasury
+
+Follow [TREASURY.md](TREASURY.md) for the proposed 2-of-3 hardware-key custody ceremony, recovery/rotation, manifest payment guard and bounded disposable testnet fixture. Production treasury keys, mainnet SuiNS target/default changes and the hardware signing ceremony are user-only final acceptance, not agent operations.
