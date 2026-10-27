@@ -407,6 +407,7 @@ test-manifest:
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
 	$(RUN) node scripts/test_dashboard_views.cjs
+	$(RUN) node scripts/test_rollout_audit.cjs
 	$(RUN) node scripts/test_shadow_documents.cjs
 	$(RUN) node scripts/test_fleet_relay.cjs
 	$(RUN) node scripts/test_walrus_node_writes.cjs
@@ -540,6 +541,7 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
@@ -829,3 +831,8 @@ test-customer-upgrade-localnet:
 .PHONY: test-data-metering
 test-data-metering:
 	$(RUN) node scripts/test_data_metering.cjs
+
+# SF164 populated-rollout compatible upgrade; disposable loopback chain only.
+.PHONY: test-rollout-audit-localnet
+test-rollout-audit-localnet:
+	$(RUN) python3 -c 'import sys; sys.path.insert(0,"scripts"); from test_protocol_localnet import main; main("scripts/test_rollout_audit_upgrade.cjs")'

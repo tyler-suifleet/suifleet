@@ -862,6 +862,10 @@ def run(args):
                 assert plain(client("object", inbox)["content"])["groups"] == [dm.object_id(group)]
                 check("pre-upgrade group indexed in place; device inbox at its derived address lists the group")
 
+            # Reuse the verified upgraded package and the same bounded ledger.
+            from rollout_audit_acceptance import run as audit_acceptance
+            audit_acceptance(transaction, client, manifest, device, evidence, root)
+
             # 4. Daemon and deployments.
             components = root / "state" / "test-components"
             template = root / "device-template.toml"
