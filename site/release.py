@@ -11,6 +11,9 @@ import json
 from pathlib import Path
 import re
 import shutil
+import sys
+sys.path.append(str(Path(__file__).resolve().parents[1] / "scripts"))
+from deployment_manifest import validate
 
 
 def digest(data):
@@ -36,6 +39,8 @@ def inventory(root):
     if len(files) > 20000:
         raise ValueError('Pages Free file limit exceeded')
     headers = (root / '_headers').read_text()
+    if any(len(line.encode()) > 2000 for line in headers.splitlines()):
+        raise ValueError('Pages header line limit exceeded')
     for required in ["/*", "Content-Security-Policy:", "frame-ancestors 'none'", 'Strict-Transport-Security: max-age=31536000', 'Referrer-Policy: strict-origin-when-cross-origin', 'X-Content-Type-Options: nosniff']:
         if required not in headers:
             raise ValueError(f'missing header policy: {required}')
@@ -53,8 +58,14 @@ def seal(source, out, revision, hostname):
         raise ValueError('output must be outside the input')
     if out.exists():
         raise ValueError('release output already exists')
-    if hostname == 'app.suifleet.io' and 'deployment-manifest.json' not in files:
-        raise ValueError('console release requires its deployment manifest')
+    if hostname == 'app.suifleet.io':
+        try:
+            validate(json.loads((source / 'deployment-manifest.json').read_text()))
+        except (KeyError, TypeError, FileNotFoundError) as error:
+            raise ValueError('invalid console deployment manifest') from error
+        provenance = json.loads((source / 'console-release.json').read_text())
+        if provenance['revision'] != revision or provenance['manifest_sha256'] != files['deployment-manifest.json']:
+            raise ValueError('console release provenance mismatch')
     shutil.copytree(source, out / 'public')
     record = {'schema': 1, 'revision': revision, 'hostname': hostname, 'files': files}
     data = (json.dumps(record, sort_keys=True, indent=2) + '\n').encode()

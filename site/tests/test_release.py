@@ -59,10 +59,11 @@ class ReleaseTests(unittest.TestCase):
             self.seal()
 
     def test_console_manifest_and_header_gate(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises((ValueError, FileNotFoundError)):
             self.seal('app.suifleet.io')
         (self.source / 'deployment-manifest.json').write_text('{}')
-        self.seal('app.suifleet.io')
+        with self.assertRaises(ValueError):
+            self.seal('app.suifleet.io')
         (self.source / '_headers').write_text('/*')
         with self.assertRaises(ValueError):
             release.inventory(self.source)
