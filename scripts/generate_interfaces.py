@@ -323,6 +323,7 @@ def generate(catalog, recipe):
           f'export const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS = {json.dumps(catalog["supported_deployment_schema_versions"])} as const;',
           f'export const CATALOG_TYPES = {json.dumps(catalog["optional_type_origins"]["component_catalog"])} as const;',
           f'export const HANDOVER_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_handover"])} as const;',
+          f'export const GROUP_BATCH_TYPES = {json.dumps(catalog["optional_type_origins"]["group_batch"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const CUSTOMER_TYPES = {json.dumps(catalog["optional_type_origins"]["customer"])} as const;',
@@ -386,6 +387,8 @@ def generate(catalog, recipe):
                     arguments += [f"tx.object({arg})"]
                 elif base == "std::string::String":
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.string({arg})"]
+                elif base == "std::option::Option<std::string::String>":
+                    types += [f"{arg}: string | null"]; arguments += [f'tx.pure.option("string", {arg})']
                 elif base in ["address", "sui::object::ID"]:
                     types += [f"{arg}: string"]; arguments += [f"tx.pure.address({arg})"]
                 elif base == "vector<std::string::String>":

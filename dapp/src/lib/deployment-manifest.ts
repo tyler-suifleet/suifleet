@@ -6,7 +6,7 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
-import { AUDIT_TYPES, BUDGET_TYPES, CATALOG_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
+import { AUDIT_TYPES, GROUP_BATCH_TYPES, BUDGET_TYPES, CATALOG_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
 export { BUDGET_TYPES, CATALOG_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
 function manifestTypes(m: DeploymentManifest): string[] {
   const types: string[] = [...REQUIRED_TYPES];
@@ -15,7 +15,7 @@ function manifestTypes(m: DeploymentManifest): string[] {
     if (present.length && present.length !== group.length) fail(`partial ${label} type origins`);
     types.push(...present);
   }
-  return [...types, ...HANDOVER_TYPES.filter(name => name in m.type_origins)];
+  return [...types, ...[...HANDOVER_TYPES, ...GROUP_BATCH_TYPES].filter(name => name in m.type_origins)];
 }
 export interface DeploymentManifest {
   schema_version: number;
@@ -72,7 +72,7 @@ export const MANIFEST = process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST
 export function requireManifest(): DeploymentManifest {
   return MANIFEST ?? fail("not configured; generate frontend.env from a verified manifest");
 }
-export function moveType(name: typeof AUDIT_TYPES[number] | typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number]): string {
+export function moveType(name: typeof AUDIT_TYPES[number] | typeof GROUP_BATCH_TYPES[number] | typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number]): string {
   const m = requireManifest();
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }
