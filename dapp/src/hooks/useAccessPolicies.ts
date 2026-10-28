@@ -1,7 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetSelection } from "./useFleetSelection";
 import { NETWORK } from "@/lib/constants";
 import { fetchAdministeredPolicies, fetchFleetPolicies, type AccessPolicy } from "@/lib/access-policy";
