@@ -125,7 +125,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(workflow.count(immutable_ref), 2)
         self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
         prepare, validate = workflow.split('\n  validate:', 1)
-        for job, execution in ((prepare, 'docker/setup-buildx-action'),
+        for job, execution in ((prepare, 'docker build --tag suifleet-dev:testnet'),
                                (validate, 'SUIFLEET_TESTNET_KEY')):
             selected = job.split('      - name: Checkout authenticated test revision', 1)[1]
             self.assertIn(immutable_ref, selected)

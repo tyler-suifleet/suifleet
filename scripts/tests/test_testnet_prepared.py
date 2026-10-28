@@ -108,6 +108,22 @@ class PreparedTests(unittest.TestCase):
         self.assertEqual(step['env']['BASE_REF'], '${{ needs.plan.outputs.base }}')
         self.assertIn('--status error', step['run'])
 
+    def test_revision_preparation_has_no_shared_actions_cache(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        prep=yaml.safe_load(workflow.read_text())['jobs']['prepare']
+        # workflow_run cache access is independent of GITHUB_TOKEN permissions.
+        # Keep revision execution away from both explicit and implicit cache actions.
+        self.assertFalse(any('cache' in s.get('uses', '') or
+                             'docker/setup-buildx-action@' in s.get('uses', '') or
+                             'docker/build-push-action@' in s.get('uses', '')
+                             for s in prep['steps']))
+        self.assertNotIn('type=gha', json.dumps(prep))
+        build=next(s for s in prep['steps'] if s.get('name') == 'Build isolated testnet environment')
+        self.assertIn('docker build --tag suifleet-dev:testnet', build['run'])
+        self.assertIn('--build-arg USER_UID="$USER_UID"', build['run'])
+        self.assertIn('--build-arg USER_GID="$USER_GID"', build['run'])
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
