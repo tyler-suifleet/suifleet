@@ -32,3 +32,23 @@ This establishes that the new keys derive the pinned identities, can sign actual
 ## Required hosted rollout evidence
 
 Normal independent review and exact-head CI still apply. After reviewed-main merge, confirm GHCR publication/access, same-run digest/provenance/pull, main-only environment and freshness refusals, per-wallet encrypted-history reuse, and simultaneous validation on different lanes. Measure queue time and execution time separately. No claim of a threefold speedup, hosted success or completed integration is made by these local checks. Mainnet, physical and manual production-wallet/provider acceptance remain separately tracked and unrun.
+
+## PR 402 feedback repair
+
+The initial Actions CodeQL report identified `actions/untrusted-checkout/critical`
+at the preparation checkout and a nonblocking `actions/excessive-secrets-exposure`
+at dynamic secret selection. Both revision checkouts now consume only the
+main-sourced planner's independently authenticated immutable SHA, followed by the
+existing checkout verification. Signing secret selection explicitly names only
+the three dedicated pool keys. No scanner suppression or authority check was removed.
+
+The feedback branch includes current main `120b5cb76e44a81cbaa09cdc2731c71907d0cee3`.
+Validation: testnet regressions 157 tests (one historical skip), live-common 60,
+security 23, authenticated cache tampering, YAML parse, diff check and actionlint
+(excluding only the pre-existing unsupported `concurrency.queue` diagnostic).
+An initial regression run failed because the validation checkout still used the
+event SHA; that missed edit was corrected before the final regression run.
+Hosted CodeQL and other exact-head CI, automatic testnet and independent review
+remain pending; this repair does not claim those checks passed. No live writes
+or hardware operations were performed during feedback repair. Deferred physical,
+mainnet and final provider/wallet acceptance remain in #32 and #159.
