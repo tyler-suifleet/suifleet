@@ -441,3 +441,46 @@ checks remain required. No new Move/OTA, browser, public-network or physical tes
 was run; historical Testnet publication/extension receipts are unchanged. Manual
 real-wallet/production-provider, physical and actual-mainnet acceptance remains
 unrun in #32/#159. No deployment, hardware programming or production credentials.
+
+## Wallet hydration base integration (2026-10-28)
+
+The review of `8bb6da80` found no unresolved source/security defect; CI and
+current-base automatic Testnet remained approval gates. The feedback snapshot's
+ordinary/security jobs succeeded for that older head, while its Testnet status
+was still pending against the previous base. Those results are not approval of
+the new integration.
+
+Merged snapshot/current main `935e96f84c2f74c7b67b98a3181a7520c98b4914`
+in `6834a574`. Resolved the Deployments import conflict by preserving release
+storage controls and using main's hydration-safe account hook. Applied that same
+hook to the three branch-owned account readers (`useReleasePeriod`,
+`ReleaseStorageStatus` and `ConfidentialRecipeStorage`) so saved-wallet restoration
+uses the shared rendering boundary. Transaction-time authority/network/effects
+checks remain in place. No contract, dependency or migration changes.
+
+Verification after integration:
+
+- Pinned `suifleet-sf165:ci-repair`, network disabled, checkout/store mounted at
+  original host paths: `make dapp-typecheck && make dapp-build` PASS, including
+  158 Testnet fixture tests, 60 operator tests, frontend prerequisites, TypeScript
+  and the 17-page production static export. One existing optional prerequisite
+  test skipped. Existing Tailwind module-type warning remains nonfatal.
+- Same container: `node scripts/test_release_storage.cjs` PASS;
+  `python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`
+  3 PASS.
+- Host Node 24.21.0, Chrome `/usr/bin/google-chrome`:
+  `scripts/test_components_browser.cjs`, `scripts/test_upload_browser.cjs` and
+  `scripts/test_wallet_browser.cjs` all PASS with chain/wallet/storage fixtures.
+- Same network-disabled pinned container: `make test-hydration` PASS for default
+  and Seal-Testnet exports. Every console route passed logged-out and saved-wallet
+  reconnection cases; the deliberate hydration-mismatch negative control was
+  detected in each profile. Seal-Testnet production build also PASS.
+- `git diff --check`, Tyler author/committer identity and snapshot/current-base
+  ancestry PASS.
+
+No new Move/OTA or public-network transaction was run. Historical chosen-period
+publish/extension receipts remain unchanged. Hosted CI and automatic Testnet must
+run for the pushed head; they are not watched or polled by this worker. Fresh
+independent review remains required. Manual real-wallet/production-provider,
+physical and actual-mainnet acceptance remains unrun in #32/#159. No merge,
+deployment, hardware programming or production credentials.
