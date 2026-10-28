@@ -6,7 +6,8 @@
 // Rescanning, continuing a scan or switching account discards the preview.
 import { ARCHIVE_STREAMS, streamExpiryPlan } from "@/lib/stream-retention";
 import { useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { PACKAGE_ID } from "@/lib/constants";
