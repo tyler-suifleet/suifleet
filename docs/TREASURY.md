@@ -152,6 +152,38 @@ effects, digests, gas and toolchain provenance go to the public evidence file;
 private keys never do. There are no package/UpgradeCap/type origins involved in
 these native SUI transfers. Retained fixture funds support SF-181–184 test payments.
 
+### Verified software/testnet evidence (2026-10-28 UTC)
+
+The [sanitized receipt](validation/sf185-testnet.json) records the pinned
+2-of-3 fixture funding and signed 1-MIST spend, both independently read back
+with successful effects at checkpoints 399994894 and 399995146. Total net gas
+was 2,988,198 MIST. The operator allowance consumed 11,000,099 MIST including
+the 10,000,000-MIST fixture grant, below the unchanged 30,000,000-MIST ceiling;
+the child spent 1,988,099 MIST from that already charged grant. No faucet,
+package publication or original application objects were involved.
+
+The initial spend builder rejected an untyped sender before signing/submission.
+After correcting the CLI address prefix, recovery reverified the funding effects
+and balance and continued the original allowance without funding again. The
+receipt retains the zero-cost refusal and both source heads. The wallet lease
+was asserted for mutations and released after acceptance.
+
+The key utility now uses exclusive creation and validates/reads one no-follow
+file descriptor. Offline regressions reject symlinks, hardlinks, public file
+permissions, directories and FIFOs, and deterministically replace the pathname
+after validation to prove reads retain the validated inode. Real signature tests
+cover alternate quorum, insufficient quorum, modified bytes and wrong sender.
+These repair the two confirmed `js/file-system-race` findings; fresh hosted
+CodeQL/security CI and independent review remain required and are not claimed
+passed by local tests.
+
+Recovery validation: pinned network-none `make INSIDE_DEV_CONTAINER=1 test-manifest`
+passed (one pre-existing historical-receipt test skipped because its revision is
+absent in this shallow checkout); 20 Python manifest tests, 38 publication tests,
+and 13 budget tests passed. The corrected sender syntax was exercised by the
+actual pinned-CLI testnet spend above. No frontend source or dependencies changed
+in recovery; the original pinned typecheck/build evidence remains historical.
+
 Pending external acceptance: user review of this runbook, named key holders,
 hardware ceremony/spend, mainnet address pin, SuiNS target/default, and production
 card settlement. Keep these in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
