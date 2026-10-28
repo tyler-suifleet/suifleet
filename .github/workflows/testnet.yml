@@ -12,13 +12,36 @@ permissions:
   actions: read
   pull-requests: read
   statuses: write
-concurrency:
-  group: suifleet-testnet-ci-wallet
-  cancel-in-progress: false
-  queue: max
 jobs:
+  # Reject failed/cancelled/superseded originating CI before taking a wallet
+  # queue position. This job cannot read the environment or execute PR code.
+  queue-plan:
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.queue.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Authenticate eligibility before joining the wallet queue
+        id: queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/testnet_ci.py --queue-plan
   validate:
-    if: github.ref == 'refs/heads/main'
+    needs: queue-plan
+    if: github.ref == 'refs/heads/main' && needs.queue-plan.outputs.run == 'true'
+    concurrency:
+      group: suifleet-testnet-ci-wallet
+      cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-22.04
     environment: live-package-upgrade
     timeout-minutes: 90
@@ -145,6 +168,10 @@ jobs:
   # inside the same serialized concurrency group as restore and upload.
   prune-fixture-history:
     needs: validate
+    concurrency:
+      group: suifleet-testnet-ci-wallet
+      cancel-in-progress: false
+      queue: max
     if: github.ref == 'refs/heads/main' && needs.validate.result == 'success' && needs.validate.outputs.run == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 15

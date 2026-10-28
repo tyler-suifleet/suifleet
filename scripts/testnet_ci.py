@@ -286,11 +286,14 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
+    parser.add_argument('--queue-plan', action='store_true', help='keyless eligibility only; the protected validate job must independently authenticate again')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
     # `error` marks a cancelled run: never a source failure, never success.
     parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
+    if args.queue_plan and (args.verify_checkout or args.status or args.recheck or args.probe_environment):
+        parser.error('queue planning cannot perform protected validation or status operations')
     repo = os.environ['GITHUB_REPOSITORY']
     if args.verify_checkout:
         if args.status or args.recheck or args.probe_environment:
@@ -313,7 +316,7 @@ if __name__ == '__main__':
         if args.recheck and (not selection or selection['head'] != os.environ['TEST_HEAD']
                              or selection['base'] != os.environ['BASE_REF']):
             raise RuntimeError('superseded head/base: no testnet mutation submitted')
-        if selection:
+        if selection and not args.queue_plan:
             saved = os.path.join(os.environ['RUNNER_TEMP'], ENVIRONMENT_RECORD) if os.environ.get('RUNNER_TEMP') else None
             if args.recheck:
                 verify_environment(repo, fallback=saved)
