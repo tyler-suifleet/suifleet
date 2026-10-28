@@ -1,0 +1,190 @@
+{
+  "started": "2026-10-27T23:58:52Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "fund run-owned customer",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 50000000,
+      "status": "success",
+      "digest": "HgXkb3Agf5DK4Jr7AbT9TDWmxw65kx7zcXRmXikGUYRw",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 51988000
+    },
+    {
+      "label": "create fresh zero-limit customer",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "G8GBH8guqFT2nzF7QHowpwzSUjmizr3S1XwhXXrsmE3v",
+      "gas_mist": 1000277,
+      "allowance_used_mist": 1000277
+    },
+    {
+      "label": "create fresh zero-limit customer",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2V2fbW7F7C5YuPm3CrriTEvjzRQDGPxD1avHeXcN4bHu",
+      "gas_mist": 19073077,
+      "allowance_used_mist": 20073354
+    },
+    {
+      "label": "zero limit refuses first registration",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "8Ges6NxQ8SX6k89EUn6gNQd5Kk7xkxP4eVRA7qUUgJrV",
+      "gas_mist": 1001041,
+      "allowance_used_mist": 21074395,
+      "abort": [
+        "customer",
+        "enroll_checked",
+        "2"
+      ]
+    },
+    {
+      "label": "registry grants one device",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "VfEE51WNCVMEAeBSeajpqf3bfA4oGzzbZAMofJ2rqFL",
+      "gas_mist": 1000289,
+      "allowance_used_mist": 52988289
+    },
+    {
+      "label": "first device at granted limit",
+      "gas_budget_mist": 15000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "8d1qnQHWaovogsCKqrt3AvFBnfqP9P9X6LpP2VrAwh7U",
+      "gas_mist": 1001041,
+      "allowance_used_mist": 22075436
+    },
+    {
+      "label": "complete originally bounded child funding",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "BtdJ6MxPpSCG3TQrFmaHHRpzYwa6SEGNA2GSW4okBXCS",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 74976289
+    },
+    {
+      "label": "first device at granted limit",
+      "gas_budget_mist": 40000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "SpzwTWN2Vf2dqdMziKUHJU1Wv4sBUS4chgUASgUuQwq",
+      "gas_mist": 26673940,
+      "allowance_used_mist": 48749376
+    },
+    {
+      "label": "limit boundary refuses second registration",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "pnuDZKbsMNDVQzaLG1HVx5Zv84icQowi9HShijywDy3",
+      "gas_mist": 1001066,
+      "allowance_used_mist": 49750442,
+      "abort": [
+        "customer",
+        "enroll_checked",
+        "2"
+      ]
+    },
+    {
+      "label": "registry raises device limit",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "CgtTSBV1PZRYqCM5mCLaZAh7hjt2xPUnFVtiFEufyNv9",
+      "gas_mist": 1000289,
+      "allowance_used_mist": 75976578
+    },
+    {
+      "label": "second device after raised grant",
+      "gas_budget_mist": 20249558,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "3TcGDY85d6D3jTLLctgX7a4wLNLjbF9nGCw4MXfWiYtT",
+      "gas_mist": 1001066,
+      "allowance_used_mist": 50751508
+    },
+    {
+      "label": "remove run-owned test device",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "E6AwmSGuejqMVzDdLhTc3eWWKkf8ZECodAucpXWTstKz",
+      "gas_mist": 0,
+      "allowance_used_mist": 50751508
+    },
+    {
+      "label": "return run-owned customer gas",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "7KyQFcNNpGDigCNx31HKMQfTFzghx2yrwYboVEPFnRMy",
+      "gas_mist": 1000099,
+      "allowance_used_mist": 51751607
+    }
+  ],
+  "checks": [
+    "fresh zero-limit refusal, registry grant, first registration, limit-boundary refusal, raised grant and production console capacity checks on Testnet",
+    "registered test device removed; empty customer/fleet retained; remaining child gas returned"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/home/tyler/.local/state/suifleet/sf185-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/home/tyler/.local/state/suifleet/sf185-tools/sui-network",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1266,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 422932153,
+  "max_spend_mist": 80000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "c4c0805c7abd8cfbfbf0d5e0df4a6f285b8da259",
+  "package": "0x1d7d4be86a6eaf12269eeef1efe7acbe029c607750d4bf42cbb81e12507034f3",
+  "registry": "0x7345ebfef88b8aefd8e3987b2e128268fcb5cffb1e4489ff91925ee35e0229c6",
+  "customer_origin": "0x1d7d4be86a6eaf12269eeef1efe7acbe029c607750d4bf42cbb81e12507034f3",
+  "end_balance_mist": 381399425,
+  "spent_mist": 41532728,
+  "allowance_used_mist": 75976578,
+  "finished": "2026-10-28T00:02:53Z",
+  "customer": "0x561265ea61427ba4a0a9d82ff0092d76032f8e7d2246a7a7a86f9ad18094f9bb",
+  "fleet": "0xe5d84119ace58783840e13877899e0d091a8478acfc422769f74b4eb5289a516",
+  "budget": "0xf057ecf1fc62c5b6ecc25c8f263711ec794009d6d1274ebee5e6b57b2ee812cd",
+  "limits": [
+    "Three exploratory runner transactions failed with InsufficientGas; their effects and costs are retained. No second successful device creation is claimed. Runner now scopes live walkthrough to first registration, boundary refusal and raised-grant capacity; Move tests independently cover the second device after raising the grant.",
+    "No manual extension wallet, physical device, production provider or mainnet acceptance."
+  ],
+  "implementation_commit": "1b26c4ce1b2db3197fff56e2e286939aa3768852",
+  "runner_notes": "The first funding signer attempt was refused before submission and consumed no allowance. Three effects-checked InsufficientGas failures were recovered in the same original 80,000,000-MIST run; funding was completed to 70,000,000 MIST, not replenished from refunds. The final checked scope is zero-limit refusal, first registration after grant, boundary refusal, raised-grant console allowance and cleanup. No second successful live registration is claimed."
+}
