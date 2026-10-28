@@ -1,5 +1,6 @@
 "use client";
 
+import { deviceCapacityMessage, registrationFailure } from "@/lib/customer-entitlements";
 import { Fragment, useEffect, useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
@@ -83,7 +84,7 @@ function DevicesTab() {
       { transaction: tx },
       {
         onSuccess: () => { setShowModal(false); setTimeout(() => refetch(), 3000); },
-        onError: (err) => alert(`Registration failed: ${err.message}`),
+        onError: (err) => alert(`Registration failed: ${registrationFailure(err.message)}`),
       }
     );
   }
@@ -103,6 +104,7 @@ function DevicesTab() {
         </div>
       </div>
 
+      {fleet && <p role="status" className="text-sm">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link href="/entitlements" className="underline">Device entitlements</Link></p>}
       {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
@@ -230,7 +232,7 @@ function DevicesTab() {
                 <option value="riscv64">riscv64</option>
               </select>
             </div>
-            <ModalButtons isPending={isPending} label="Register" onCancel={() => setShowModal(false)} />
+            <ModalButtons isPending={isPending || !!fleet && fleet.activeDevices >= fleet.deviceLimit} label="Register" onCancel={() => setShowModal(false)} />
           </form>
         </Modal>
       )}
