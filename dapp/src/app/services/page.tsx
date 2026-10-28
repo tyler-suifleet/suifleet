@@ -6,7 +6,8 @@ import { useFleetDataConfig } from "@/hooks/useFleetDataConfig";
 // SF-082 verified chain path. See lib/device-services.ts for the rules.
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { normalizeSuiAddress as id } from "@mysten/sui/utils";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
