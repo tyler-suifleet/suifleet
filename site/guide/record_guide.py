@@ -171,7 +171,7 @@ def run(args):
         commit = prior["console_commit"]
     live.evidence.update(package=fixture["head_package"], registry=fixture["registry"], console_commit=commit,
                          walrus_publisher=manifest["walrus"]["publisher_url"])
-    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--", "dapp"], cwd=ROOT).returncode:
+    if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all", "--", "dapp"], cwd=ROOT, text=True).strip():
         raise RuntimeError("console has uncommitted changes; commit the chosen build before recording")
     if any(p.is_file() and not p.name.endswith((".example", ".sample")) for p in (ROOT / "dapp").glob(".env*")):
         raise RuntimeError("local Next.js env files can override reproducible configuration")
