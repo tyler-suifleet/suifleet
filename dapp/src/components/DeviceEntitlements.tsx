@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useQuery } from "@tanstack/react-query";
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
