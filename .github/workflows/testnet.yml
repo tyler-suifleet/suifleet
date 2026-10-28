@@ -73,6 +73,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/testnet_ci.py
+      - name: Bind preparation to the authenticated status plan
+        if: steps.plan.outputs.run == 'true'
+        env:
+          STATUS_HEAD: ${{ needs.plan.outputs.head }}
+          STATUS_BASE: ${{ needs.plan.outputs.base }}
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: test "$TEST_HEAD" = "$STATUS_HEAD" && test "$BASE_REF" = "$STATUS_BASE"
       - name: Preserve trusted controller
         if: steps.plan.outputs.run == 'true'
         run: |
@@ -82,14 +90,14 @@ jobs:
           cp scripts/testnet_prepared.py "$RUNNER_TEMP/testnet_prepared.py"
       - name: Checkout authenticated test revision
         if: steps.plan.outputs.run == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          # Select an immutable event commit; the main-sourced planner separately
-          # authenticates it, and --verify-checkout fails closed on any mismatch.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+        env:
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        # Keep trusted scripts in the main checkout. Candidate code and its Git
+        # metadata live in a separate clone, mounted alone into test containers.
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout-candidate candidate
       - name: Verify checkout matches authenticated revision
+        working-directory: candidate
         if: steps.plan.outputs.run == 'true'
         env:
           TEST_HEAD: ${{ steps.plan.outputs.head }}
@@ -109,7 +117,7 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         if: steps.plan.outputs.run == 'true'
         with:
-          context: .
+          context: candidate
           load: true
           tags: suifleet-dev:testnet
           build-args: |
@@ -121,11 +129,12 @@ jobs:
         if: steps.plan.outputs.run == 'true'
         run: |
           docker run --rm -e CARGO_BUILD_JOBS=2 \
-            -v "$PWD:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
+            -v "$PWD/candidate:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
               git config --global --add safe.directory /workspace
               pnpm --dir dapp install --frozen-lockfile
               cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts'
       - name: Package secretless prepared tools
+        working-directory: candidate
         if: steps.plan.outputs.run == 'true'
         env:
           TEST_HEAD: ${{ steps.plan.outputs.head }}
@@ -275,14 +284,12 @@ jobs:
           python3 "$RUNNER_TEMP/testnet_prepared.py" --verify
       - name: Checkout authenticated test revision
         if: steps.plan.outputs.run == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          # Keep this immutable selection identical to the preparation checkout.
-          # The trusted controller verifies HEAD before any test code or key use.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
+        env:
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout-candidate candidate
       - name: Verify checkout matches authenticated revision
+        working-directory: candidate
         if: steps.plan.outputs.run == 'true'
         env:
           TEST_HEAD: ${{ steps.plan.outputs.head }}
@@ -292,7 +299,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LANE: ${{ needs.prepare.outputs.lane }}
-        run: python3 "$RUNNER_TEMP/testnet_fixture_cache.py" --destination encrypted-live-state --lane "$LANE"
+        run: python3 "$RUNNER_TEMP/testnet_fixture_cache.py" --destination candidate/encrypted-live-state --lane "$LANE"
       - name: Recheck head and base immediately before spending
         if: steps.plan.outputs.run == 'true'
         env:
@@ -310,10 +317,10 @@ jobs:
           PREPARED_IMAGE: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: |
-          mkdir -p evidence encrypted-live-state
+          mkdir -p candidate/evidence candidate/encrypted-live-state
           docker run --rm -e SUIFLEET_TESTNET_KEY -e SUIFLEET_TESTNET_ADDRESS -e SUIFLEET_TESTNET_LANE -e BASE_REF -e GITHUB_EVENT_NAME \
             -e SUIFLEET_FAUCET_TOOL=/opt/sui-network/sui \
-            -v "$PWD:/workspace" -w /workspace "$PREPARED_IMAGE" bash -ec '
+            -v "$PWD/candidate:/workspace" -w /workspace "$PREPARED_IMAGE" bash -ec '
               git config --global --add safe.directory /workspace
               mkdir -p dapp/node_modules suifleet-edge/target/debug/examples
               cp -a /opt/suifleet-prepared/node_modules/. dapp/node_modules/
@@ -321,11 +328,11 @@ jobs:
               cp /opt/suifleet-prepared/chain_facts suifleet-edge/target/debug/examples/chain_facts
               node scripts/ci_testnet.cjs'
       - name: Persist only authenticated fixture ciphertext
-        if: always() && steps.plan.outputs.run == 'true' && hashFiles('encrypted-live-state/fixture.bin') != ''
+        if: always() && steps.plan.outputs.run == 'true' && hashFiles('candidate/encrypted-live-state/fixture.bin') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ needs.prepare.outputs.fixture }}
-          path: encrypted-live-state/fixture.bin
+          path: candidate/encrypted-live-state/fixture.bin
           retention-days: 90
           overwrite: true
           if-no-files-found: error
@@ -333,7 +340,7 @@ jobs:
         if: always() && steps.plan.outputs.run == 'true'
         with:
           name: testnet-effects-${{ steps.plan.outputs.head }}
-          path: evidence/*.json
+          path: candidate/evidence/*.json
           retention-days: 90
       - name: Publish final exact-head status
         if: always() && steps.plan.outputs.run == 'true'
@@ -345,6 +352,7 @@ jobs:
           # controller classifies failures (source/infrastructure/funding/uncertain)
           # for repair scheduling only; any non-success still blocks merge.
           RESULT: ${{ job.status == 'success' && 'success' || (job.status == 'cancelled' && 'error' || 'failure') }}
+          TEST_EVIDENCE_DIR: candidate/evidence
           ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}
           DEPENDENCIES_OUTCOME: success
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --status "$RESULT"
