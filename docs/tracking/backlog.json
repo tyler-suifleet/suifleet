@@ -3785,9 +3785,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "scripts",
@@ -3795,7 +3793,7 @@
         ".github/workflows"
       ],
       "resources": [],
-      "description": "The landing-site guide (SF-172) needs a short video for each step: sign in, add funds, register a device, enroll a batch with claim credentials, publish a version, deploy to a group, create and advance a staged rollout, grant decryption through an access policy, fleet settings and budget. Hand-recorded videos go stale with every console release. Record them from a scripted browser walkthrough on testnet so they regenerate per release. The 2026-10-26 evaluation already drove the whole console headlessly with a Wallet-Standard wallet backed by the testnet agent key and a generated device key (14 transactions, about 0.12 SUI), so the same approach can produce consistent recordings.",
+      "description": "The landing-site guide (SF-172) needs a short video for each step: sign in, add funds, register a device, enroll a batch with claim credentials, publish a version, deploy to a group, create and advance a staged rollout, grant decryption through an access policy, fleet settings and budget. Hand-recorded videos go stale with every console release. Record them from a scripted browser walkthrough on testnet so they regenerate per release. The 2026-10-26 evaluation already drove the whole console headlessly with a Wallet-Standard wallet backed by the testnet agent key and a generated device key (14 transactions, about 0.12 SUI), so the same approach can produce consistent recordings.\n\nImplementation sequencing update under the user's instruction to keep work progressing: SF-172 / PR #362 has a committed static-site interface at 90279ace59fad70bfbd0bae27f11ceab70517588 on work/suifleet/sf-172-0a999e00. Independent source review found no actionable code defects; CI and final review remain merge gates.\n\nImplementation may start now using that exact committed site/guide interface in its own atomic worktree. Fetch and integrate the prerequisite branch as needed; do not edit SF-172's worktree or guess an uncommitted API. SF-172 remains a merge prerequisite (`merge_depends_on`), so this change does not approve or bypass its review/CI. Keep this ticket's actual acceptance criteria.\n\nFor hosting, the user selected conventional hosting with the console at app.suifleet.io. Prepare implementation and preview validation; production DNS, credentials and publication still follow the existing explicit authorization requirement. For recordings, preserve the testnet wallet lease, spend ceilings and secret-free video acceptance; no mock recording may be described as real testnet acceptance.",
       "evidence": "User request 2026-10-27 for a step-by-step guide with videos; SF-172 carries the written guide. The evaluation scaffolding and costs are described in the journal comment on SF-170/#336.",
       "acceptance": [
         "A repository script drives the console on testnet through each guide step and records one video per step (Playwright recordVideo or equivalent) with on-screen captions or a subtitle track explaining each action; no seed phrase, key, token or non-demo address appears.",
@@ -3803,7 +3801,10 @@
         "Videos ship with the site as static files or Walrus blobs within a documented size budget (for example at most 15 MB per video, WebM with an MP4 fallback) with poster images, embedded beside the matching guide step with transcript text for accessibility.",
         "Each guide step shows which console build its video was recorded against, and CI fails when the guide references a video that does not exist."
       ],
-      "validation": "One scripted recording run on testnet with recorded cost and digests; site build and link check in CI; manual review of every video for leaked secrets and accuracy."
+      "validation": "One scripted recording run on testnet with recorded cost and digests; site build and link check in CI; manual review of every video for leaked secrets and accuracy.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-176",
@@ -3812,9 +3813,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:infrastructure",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         ".github/workflows",
@@ -3823,7 +3822,7 @@
         "scripts/live_walrus_site.py"
       ],
       "resources": [],
-      "description": "SF-172 produces the site source and a hosting plan (site/README.md); this ticket makes the three hostnames live. User decision 2026-10-27: all three use conventional static hosting with no application server (SF-137): the marketing site at suifleet.io, the console at app.suifleet.io serving the Next static export of a recorded console release, and documentation at docs.suifleet.io. app.suifleet.io does not use a self-run Walrus portal or a redirect to wal.app; the Walrus Site build (SF-159) stays a separate, verifiable distribution. suifleet.io is registered at GoDaddy; select and verify the static host for each hostname here. The user will also register suifleet.sui on mainnet as the project's on-chain name; buying, renewing and configuring it are user actions. Implement DNS, TLS, security headers, sitemap, robots and Open Graph metadata, and a release pipeline that publishes to production only on explicit user authorization.",
+      "description": "SF-172 produces the site source and a hosting plan (site/README.md); this ticket makes the three hostnames live. User decision 2026-10-27: all three use conventional static hosting with no application server (SF-137): the marketing site at suifleet.io, the console at app.suifleet.io serving the Next static export of a recorded console release, and documentation at docs.suifleet.io. app.suifleet.io does not use a self-run Walrus portal or a redirect to wal.app; the Walrus Site build (SF-159) stays a separate, verifiable distribution. suifleet.io is registered at GoDaddy; select and verify the static host for each hostname here. The user will also register suifleet.sui on mainnet as the project's on-chain name; buying, renewing and configuring it are user actions. Implement DNS, TLS, security headers, sitemap, robots and Open Graph metadata, and a release pipeline that publishes to production only on explicit user authorization.\n\nImplementation sequencing update under the user's instruction to keep work progressing: SF-172 / PR #362 has a committed static-site interface at 90279ace59fad70bfbd0bae27f11ceab70517588 on work/suifleet/sf-172-0a999e00. Independent source review found no actionable code defects; CI and final review remain merge gates.\n\nImplementation may start now using that exact committed site/guide interface in its own atomic worktree. Fetch and integrate the prerequisite branch as needed; do not edit SF-172's worktree or guess an uncommitted API. SF-172 remains a merge prerequisite (`merge_depends_on`), so this change does not approve or bypass its review/CI. Keep this ticket's actual acceptance criteria.\n\nFor hosting, the user selected conventional hosting with the console at app.suifleet.io. Prepare implementation and preview validation; production DNS, credentials and publication still follow the existing explicit authorization requirement. For recordings, preserve the testnet wallet lease, spend ceilings and secret-free video acceptance; no mock recording may be described as real testnet acceptance.",
       "evidence": "SF-172 hosting plan in site/README.md (PR #362); SF-159 Walrus site publication and recovery on testnet; the static Walrus Site build section of docs/SERVERLESS_FLEET_DATA.md; release notes in docs/OPERATIONS.md. Hosting facts and the Slush connect-time warning on a quick-tunnel preview are in the #353 comments. SuiNS on 2026-10-27: suifleet.sui was unregistered; names of five or more characters cost about 10 USD to register and 5 USD a year to renew (on-chain price list); registrations last one year per purchase with a 30-day grace period after expiry (suins constants.move GRACE_PERIOD_MS).",
       "acceptance": [
         "Each hostname is served by conventional static hosting (user decision 2026-10-27). The runbook records the selected provider for each, its cost, how it applies the headers in site/src/_headers, and the DNS records at the GoDaddy registrar (or delegated DNS), CAA and TLS configuration, without secrets.",
@@ -3833,7 +3832,10 @@
         "The hostnames are prepared for wallet connect-time screening: stable owned domains with TLS and consistent metadata, stable preview hostnames (never quick tunnels) for real-wallet testing, and a documented review/allowlist request to the scanner provider before the mainnet release. The Slush connect check itself is recorded with the deferred real-wallet acceptance (SF-031/#32).",
         "The runbook documents suifleet.sui as the project's on-chain name: the SuinsRegistration NFT is held by the user's organization wallet, never an agent or CI wallet; its expiry, renewal procedure (renewable ahead up to the on-chain maximum, 30-day grace period after expiry) and the person responsible for renewal are recorded; the security and contact pages name it as the official on-chain identity once registered. Later uses (a target address for the mainnet publisher or treasury, an optional suifleet.wal.app mirror of a mainnet Walrus Site) need separate user authorization. Agents never buy, renew or reconfigure the name."
       ],
-      "validation": "Preview publication with recorded URLs and build hashes; production publication only after the user's explicit go-ahead, recorded in the issue; runbook review of the provider, DNS and suifleet.sui records."
+      "validation": "Preview publication with recorded URLs and build hashes; production publication only after the user's explicit go-ahead, recorded in the issue; runbook review of the provider, DNS and suifleet.sui records.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-177",
@@ -3842,9 +3844,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "docs",
@@ -3857,9 +3857,13 @@
       "acceptance": [
         "A documentation site builds from selected docs/ pages with navigation for operators, device integrators and administrators, using a pinned static generator reproducible in CI, with search and a link check; repository-internal pages (tracking, coordination, agent instructions) are excluded.",
         "Every page the console links to (SF-169) resolves on the docs site, the console's links are updated, and stable slugs or redirects keep links valid across reorganisation.",
-        "Visual design matches the SF-172 site and no tracking script loads without consent."
+        "Visual design matches the SF-172 site and no tracking script loads without consent.",
+        "Parallel development authorized by user 2026-10-27. Use the actual committed SF-172 interface at d5306c76179be15a09d5ae25740019f383a46a24: standard-library site/build.py --out DIR, site/src/layout.html, site/src/assets, site/src/site.json; implement docs in a separate site/docs subtree with explicit curated inputs and stable slugs. Inspect that commit read-only (git show); never edit the active SF-172 worktree or copy its dirty recording work. Coordinate any shared build/layout edits in #338. SF-172 must merge before this ticket integrates; no production DNS/credential publication is authorized by this dependency adjustment."
       ],
-      "validation": "Docs build and link check in CI; manual review of the install guide by someone without repository access."
+      "validation": "Docs build and link check in CI; manual review of the install guide by someone without repository access.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-178",
@@ -3868,9 +3872,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "scripts/subscription_pricing.py",
@@ -3883,9 +3885,13 @@
       "acceptance": [
         "The pricing page reads tiers, minimum, prepay discount and the configurable-cost explainer from the pricing table the console already uses or from a file generated by scripts/subscription_pricing.py, and a test fails when the page's numbers differ from the model.",
         "The page explains in plain language what the subscription includes, what customers pay directly in SUI and WAL, and the SUI-price repricing policy, and links to the console's fleet settings estimator.",
-        "Changing pricing in BUSINESS_PLAN.md requires regenerating the data file; the procedure is documented."
+        "Changing pricing in BUSINESS_PLAN.md requires regenerating the data file; the procedure is documented.",
+        "Parallel development authorized by user 2026-10-27. Use the actual committed SF-172 interface at d5306c76179be15a09d5ae25740019f383a46a24: site/build.py token expansion and site/src/pages/pricing.html, with canonical repository pricing data. Implement generated pricing data/rendering/tests against that pinned interface; do not guess an unpublished API or change the tariff. Inspect that commit read-only (git show); never edit the active SF-172 worktree. Coordinate shared build/layout edits in #338. SF-172 must merge before this ticket integrates; do not claim the landing site is deployed."
       ],
-      "validation": "Pricing data generation test; site build and link check; copy reviewed against BUSINESS_PLAN.md."
+      "validation": "Pricing data generation test; site build and link check; copy reviewed against BUSINESS_PLAN.md.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-181",
