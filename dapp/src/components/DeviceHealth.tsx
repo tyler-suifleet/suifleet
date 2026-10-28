@@ -54,4 +54,3 @@ export function HealthDetails({ health }: { health?: DeviceHealth }) {
     </div>
   );
 }
-

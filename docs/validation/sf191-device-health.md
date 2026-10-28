@@ -52,3 +52,36 @@ no approval is claimed. Physical/Mainnet and production-provider/manual real-wal
 acceptance remains unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 No contract/schema migration is required. Rebuild the frontend to deliver this fix.
+
+## CI feedback repair (2026-10-27)
+
+Inspected CI run 40605189950, job 122542819471. Its failing check was
+`scripts/test_fleet_ops.cjs:56`: the old `/on-chain fleet/` assertion rejected
+the new missing-configuration copy. Reproduced with `node scripts/test_fleet_ops.cjs`
+before editing. Updated the assertion to require the full operator message and
+exclude environment-variable names, retaining unavailable status and the throwing
+HTTP callback. Removed the trailing blank line flagged by independent review.
+
+Passed after repair:
+
+- `node scripts/test_fleet_ops.cjs`.
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete frontend/manifest regression target).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (16 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `make RUN= test-testnet` (offline fixtures: 145 tests, installed-container
+  toolchain check skipped on host; 60 live-common fixture tests; authenticated cache).
+- `git diff --check` and `git diff --check origin/main`.
+
+The initial `INSIDE_DEV_CONTAINER=1 make test-testnet` attempt failed only its
+installed-toolchain check because this host has no pinned `sui` executable.
+The host-mode run above passed without modifying checks. Fixture logs deliberately
+simulate connection resets/unknown transactions; no real network mutation occurred.
+No new live walkthrough or full cross-layer `make ci` run is claimed in this repair.
+The earlier read-only Testnet evidence remains as recorded above.
+
+Fetched and merged `origin/main`: already up to date at
+`c4c0805c7abd8cfbfbf0d5e0df4a6f285b8da259`, also the snapshot base. Fresh
+independent review and all new-head hosted CI/testnet gates remain pending;
+this repair is not approval. Deferred external acceptance remains #32/#159.
