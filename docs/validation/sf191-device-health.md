@@ -153,3 +153,30 @@ physical testing is claimed. Earlier read-only Testnet evidence remains historic
 Deferred physical/mainnet/provider/manual-wallet acceptance stays in #32/#159.
 No migration is required; delivery needs a frontend rebuild. The coordinator alone
 collects current checks, requests independent review and merges.
+
+## Entitlement-base integration (2026-10-28)
+
+Merged snapshot/current main `4846990ae2f81406487c4e0305e201cd0bf6556c`
+cleanly, preserving upstream SF-187 entitlement registration limits on the shared
+devices page and the existing three health states. The supplied independent review
+has no actionable source/security findings or open threads; its remaining gates
+are hosted CI and automatic testnet. Earlier copy/whitespace fixes remain present.
+
+Checks on the integrated tree, all passed:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target through claims tests; rendered three-state health regression).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages, including entitlements).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `node scripts/test_customer_entitlements.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_customer_entitlements_browser.cjs`
+  (real Chromium, fixture transport/wallet; invalid grants and unauthorized signing).
+- `git diff --check origin/main...HEAD`.
+
+Integration handoff only, not approval. New-head hosted CI, automatic testnet and
+fresh independent review are pending and required; no hosted CI polling performed.
+No new live walkthrough, wallet mutation, deployment, physical test or full
+cross-layer suite is claimed. Earlier read-only Testnet evidence is historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains #32/#159.
+No migration; frontend rebuild required for delivery. Only the coordinator merges.
