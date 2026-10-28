@@ -358,3 +358,45 @@ historical, not new exact-head evidence. Hosted CI and automatic Testnet remain
 pending on the pushed head and were not watched or polled. Coordinator gates and
 fresh independent review remain required. Physical, actual-mainnet, manual
 real-wallet and production-provider acceptance remains unrun in #32/#159.
+
+
+## Shared CI harness repair (2026-10-28)
+
+Run `40727057741` failed `check` because the dev image lacked PyYAML for
+`test_testnet_prepared.py`. Its Actions CodeQL gate reported five blocking
+checkout/TOCTOU findings in the merged SF-202 workflow. Reused the contained
+shared repairs from PR #348 (original commits `f2ea2759` and `940cae0b`), rather
+than maintaining a competing harness implementation. No scanner suppression,
+wallet permission, retry or spending-policy change is included.
+
+The dev image now installs distribution `python3-yaml`. The trusted controller
+remains at its workflow SHA; a separate clone holds authenticated immutable
+head/base inputs and is mounted alone into the test containers. Tests exercise
+real Git history, controller preservation, rejected refs/destinations, workflow
+path binding and final trusted status publication after a failed clone.
+
+Local verification on this repair:
+
+- `docker build -t suifleet-sf165:ci-repair --build-arg USER_UID="$(id -u)"
+  --build-arg USER_GID="$(id -g)" .`: PASS.
+- In that rebuilt image with `--network none`, `make test-testnet`: PASS,
+  158 testnet tests, 60 operator tests and authenticated Node cache checks.
+- Same image, `python3 -m unittest discover -s scripts/tests -p
+  test_security_audit.py`: 23 PASS; `node scripts/test_release_storage.cjs`:
+  PASS; `python3 -m unittest discover -s scripts/tests -p
+  test_live_release_storage.py`: 3 PASS.
+- Host offline `test_testnet*.py`: 158 tests, OK (one platform-dependent skip).
+- The first frontend command completed its offline prerequisites, then pnpm
+  refused the mismatched container checkout/store paths. The rerun mounts both
+  at their original host paths; no source or dependency change was needed.
+- Rebuilt image, network disabled, matching host checkout/store mounts:
+  `make dapp-typecheck && make dapp-build`: PASS, including all offline
+  prerequisites, TypeScript and 17-page production static export.
+
+Snapshot/current base `a8516400872d70defeb7c3059798b53b4f10f84f` was already
+included; `git merge origin/main` reported already up to date. No new Move,
+daemon/OTA, public-testnet mutation or hardware test was run. Hosted CodeQL,
+ordinary CI and automatic Testnet must validate the pushed head, followed by
+fresh independent review. No hosted CI watching or polling was performed.
+Manual real-wallet/production-provider, physical-device and mainnet acceptance
+remains deferred and unrun in #32/#159; this repair is not approval.
