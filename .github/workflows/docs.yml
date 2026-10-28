@@ -1,0 +1,28 @@
+name: Documentation
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Install hash-pinned renderer
+        run: python3 -m pip install --require-hashes -r site/docs/requirements.txt
+      - name: Build, link and reproducibility regressions
+        run: |
+          python3 -m unittest discover -s site/docs/tests -v
+          node site/docs/tests/search.cjs
+      - name: Build deployable docs artifact
+        run: python3 site/docs/build.py --out /tmp/suifleet-docs
+      - name: Check rendered links
+        run: python3 site/docs/build.py --check --out /tmp/suifleet-docs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: suifleet-docs
+          path: /tmp/suifleet-docs/
+          include-hidden-files: true
