@@ -112,6 +112,22 @@ changed no SF-170 file.
 - `python3 -m unittest discover -s scripts/tests -p test_testnet_prepared.py`
   (host Python with PyYAML): 6 tests passed.
 
+### Merge of main `935e96f8` (2026-10-28)
+
+This merge brings in SF-161 (PR #344), which reads the wallet account through
+the hydration-safe `@/hooks/useCurrentAccount`. Two import lines conflicted,
+in `enrollment/page.tsx` and `ComponentPublisher.tsx`. They now import the
+account from the new hook and keep SF-170's other imports. No other SF-170
+code changed.
+
+- `tsc --noEmit`, `next build` and the 17 node/browser scripts listed above,
+  plus `test_hydration.cjs` (every exported route, logged out and with a
+  reconnected wallet), `test_data_session_browser.cjs`,
+  `test_fleet_settings_browser.cjs` and `test_wallet_browser.cjs`
+  (`suifleet-dev:sf010-chrome`, `--network none`): all passed on the merged
+  tree.
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py`: 6 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
