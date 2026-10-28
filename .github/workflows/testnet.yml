@@ -63,9 +63,9 @@ jobs:
         if: steps.plan.outputs.run == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Immutable event commits only; the trusted planner independently
-          # authenticates the selected SHA and verifies the actual checkout below.
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          # Use only the SHA independently authenticated by the main-sourced planner.
+          # Never select executable code directly from workflow_run event fields.
+          ref: ${{ steps.plan.outputs.head }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify checkout matches authenticated revision
@@ -223,7 +223,7 @@ jobs:
         id: acceptance
         if: steps.plan.outputs.run == 'true'
         env:
-          SUIFLEET_TESTNET_KEY: ${{ secrets[needs.prepare.outputs.secret] }}
+          SUIFLEET_TESTNET_KEY: ${{ needs.prepare.outputs.lane == '0' && secrets.SUIFLEET_TESTNET_KEY || needs.prepare.outputs.lane == '1' && secrets.SUIFLEET_TESTNET_KEY_1 || needs.prepare.outputs.lane == '2' && secrets.SUIFLEET_TESTNET_KEY_2 || '' }}
           SUIFLEET_TESTNET_ADDRESS: ${{ needs.prepare.outputs.address }}
           SUIFLEET_TESTNET_LANE: ${{ needs.prepare.outputs.lane }}
           PREPARED_IMAGE: ${{ needs.prepare.outputs.image }}@${{ needs.prepare.outputs.digest }}

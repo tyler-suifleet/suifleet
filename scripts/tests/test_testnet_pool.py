@@ -72,6 +72,16 @@ class PoolTests(unittest.TestCase):
             with patch.dict(os.environ, {'GITHUB_EVENT_NAME':'workflow_run'}):
                 self.assertTrue(wallet.suites_relevant('base', lambda *a,**kw:type('Result',(),{'stdout':changed})()))
 
+    def test_workflow_can_access_only_the_three_dedicated_signing_secrets(self):
+        import re
+        workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
+        self.assertNotIn('secrets[', workflow)
+        self.assertEqual(set(re.findall(r'secrets\.([A-Z_0-9]+)', workflow)),
+                         {pool.lane_info(i)['secret'] for i in range(3)})
+        prepare, validate = workflow.split('\n  validate:', 1)
+        self.assertNotIn('secrets.', prepare)
+        self.assertNotIn('SUIFLEET_TESTNET_KEY:', validate.split('      - name: Run bounded testnet acceptance', 1)[0])
+
     def test_selected_wallet_config_and_allowances_are_preserved(self):
         for lane in range(3):
             with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{'SUIFLEET_TESTNET_LANE':str(lane),'SUIFLEET_TESTNET_ADDRESS':pool.ADDRESSES[lane]}):
