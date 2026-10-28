@@ -47,6 +47,24 @@ class WatchdogTests(unittest.TestCase):
         self.assertIn('observation grace', self.monitor(1061).tick(self.model)['status'])
         self.assertIn('would launch', self.monitor(1122).tick(self.model)['status'])
 
+    def test_real_dashboard_history_supplies_completion_not_open_inventory(self):
+        # Actual fleet-status layout: inventory excludes Done; queue retains it.
+        self.model['queue'] = {'suifleet': {'done':158, 'review':3}}
+        self.assertEqual(w.project_view(self.model,'suifleet')['counts']['done'],158)
+        self.monitor().tick(self.model)
+        self.model['queue']['suifleet']['done'] = 159
+        report = self.monitor(1061).tick(self.model)
+        self.assertIn('observation grace',report['status'])
+        self.assertEqual(report['next_check_at'],1121)
+
+    def test_completion_source_migration_does_not_invent_158_completions(self):
+        self.monitor().tick(self.model)
+        self.model['queue'] = {'suifleet': {'done':158, 'review':3}}
+        self.assertIn('would launch',self.monitor(1061).tick(self.model)['status'])
+        self.assertEqual(w.read(self.monitor().path)['observations']['suifleet']['progress_at'],1000)
+        self.model['queue']['suifleet']['done'] = 159
+        self.assertIn('observation grace',self.monitor(1062).tick(self.model)['status'])
+
     def test_worker_notice_and_nonterminal_churn_cannot_starve_recovery(self):
         self.monitor().tick(self.model)
         self.model['workers'] = [dict(project='suifleet', id='retry1', role='implementation', ticket='SF-1')]

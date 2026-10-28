@@ -98,6 +98,11 @@ def settings(config):
 def project_view(model, project, excluded=()):
     inventory = model.get('inventory', {}).get(project, {})
     counts = dict(inventory.get('breakdown', {}))
+    # Inventory breakdown describes OPEN tickets only. Completed history lives
+    # separately in the offline dashboard queue; do not silently sample zero.
+    history = model.get('queue', {}).get(project, {})
+    completion_source = 'local-ticket-history' if 'done' in history else 'legacy-inventory'
+    counts['done'] = history.get('done', counts.get('done', 0))
     for ticket in model.get('_watchdog_tickets', {}).get(project, []):
         if ticket['key'] in excluded:
             status = ticket['status']
@@ -112,7 +117,8 @@ def project_view(model, project, excluded=()):
     return dict(project=project, counts={k:counts.get(k, 0) for k in
                 ('backlog', 'in_progress', 'review', 'blocked', 'done')},
                 workers=workers, attention=attention,
-                inventory_available=inventory.get('state') == 'ok')
+                inventory_available=inventory.get('state') == 'ok',
+                completion_source=completion_source)
 
 
 def reason(view):
@@ -276,13 +282,14 @@ Keep the existing local status report current. Finish this bounded recovery pass
             # the grace period forever without completing a single ticket.
             done = view['counts']['done']
             completed = bool(old.get('inventory_available') and view['inventory_available']
+                             and old.get('completion_source') == view['completion_source']
                              and done > old.get('done', done))
             if completed:
                 changed.append(project)
             progress = self.now if not old or completed else old['progress_at']
             self.state['observations'][project] = dict(
                 fingerprint=fingerprint, progress_at=progress, done=done,
-                inventory_available=view['inventory_available'],
+                inventory_available=view['inventory_available'], completion_source=view['completion_source'],
                 activity_at=self.now if activity else old.get('activity_at', progress))
             diagnosis = reason(view)
             due = progress + self.options['stall_seconds']
