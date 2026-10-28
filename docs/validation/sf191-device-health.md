@@ -125,3 +125,31 @@ pending and required; no hosted CI polling was performed. This integration is no
 approval. No new device-health live walkthrough, full cross-layer suite, deployment,
 wallet mutation or physical result is claimed. Earlier read-only health evidence
 remains historical. Deferred external acceptance remains #32/#159. No migration.
+
+## Component-library base integration (2026-10-27)
+
+Merged snapshot/current base `5f64be85650dce50fc8af57c8e9c5137ac6d34a1`
+cleanly into the owner branch. Supplied independent feedback contains no remaining
+code/security finding and no open threads; prior copy assertion and whitespace
+repairs remain present. Upstream SF-195 component-library changes are preserved.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including all three rendered health states).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (16 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `node scripts/test_component_catalog.cjs` (29 catalog selection vectors and
+  same-/cross-catalog version uniqueness).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_components_browser.cjs`
+  (real Chrome; chain/wallet/storage fixtures).
+- `git diff --check origin/main...HEAD`.
+
+This is integration evidence, not approval. New-head hosted CI, automatic testnet
+and fresh independent review remain pending and required. No hosted CI polling,
+new live walkthrough, wallet mutation, deployment, full cross-layer suite or
+physical testing is claimed. Earlier read-only Testnet evidence remains historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance stays in #32/#159.
+No migration is required; delivery needs a frontend rebuild. The coordinator alone
+collects current checks, requests independent review and merges.
