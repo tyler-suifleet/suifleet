@@ -52,3 +52,5 @@ Hosted CodeQL and other exact-head CI, automatic testnet and independent review
 remain pending; this repair does not claim those checks passed. No live writes
 or hardware operations were performed during feedback repair. Deferred physical,
 mainnet and final provider/wallet acceptance remain in #32 and #159.
+
+Current-main integration for SF-188 supersedes the in-place `checkout_authenticated` helper with `checkout_candidate`: a separate immutable head/base clone is mounted into test containers while the trusted controller checkout remains intact. The Python checkout analysis limitation and authorized-writer risk above still apply; this integration does not establish a clean current-head scanner or live testnet result.
