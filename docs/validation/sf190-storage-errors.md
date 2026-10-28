@@ -68,3 +68,27 @@ PR #388 feedback repair (2026-10-27):
   git merge --no-edit origin/main: already up to date; this base is an ancestor.
   Hosted CI/automatic testnet and fresh independent review remain pending for
   the pushed repair head; the coordinator owns those gates and merging.
+
+PR #388 CodeQL repair (2026-10-27):
+
+- Inspected failed CI run 40614441766, job 122573736883. Its analysis
+  completed, then the unchanged security threshold rejected one HIGH finding:
+  `js/insecure-temporary-file` in the read-only Testnet repro receipt write.
+- Default receipts now live in an atomically created private temporary directory.
+  All receipt writes use exclusive creation (`wx`) and mode 0600, refusing an
+  existing file or symlink instead of overwriting its target.
+- Added `node scripts/test_storage_receipt.cjs` to the normal `test-manifest`
+  target. It executes the repro script with offline chain fixtures and real file
+  operations, covering private default output, explicit output, existing-file
+  refusal and symlink refusal without changing the target. Passed. The same
+  regression against the pre-repair script fails because an existing file is
+  overwritten rather than rejected.
+- Frontend typecheck, production build (16 routes), the eight regression scripts
+  above and the new receipt regression passed. Existing Tailwind warning remains.
+- Ran the read-only Testnet repro with its default receipt path: chain 4c78adac,
+  same absent storage record, zero chain writes/spend. No wallet/lock required.
+- Fetched origin/main and merged: already up to date at 0ae332e4. CodeQL CLI is
+  unavailable locally; a fresh hosted CodeQL result is required after push.
+  No scanner threshold, suppression, dependencies or app behavior changed.
+- Hosted CI/automatic Testnet and fresh independent review remain pending.
+  Deferred manual wallet/provider/physical/mainnet acceptance stays in #32/#159.
