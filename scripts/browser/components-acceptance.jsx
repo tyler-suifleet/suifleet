@@ -17,6 +17,9 @@ export const useCurrentAccount = () => {
   return current ? { address: current } : null;
 };
 export const useCurrentClient = () => client;
+// Present for hooks bundled through other imports (fleet storage/selection); unused by these pages.
+export const useCurrentNetwork = () => "localnet";
+export const useDAppKit = () => ({});
 export const useAccessPolicies = () => ({ data: [] });
 export const useDevices = () => ({ data: [{ objectId: "0x123", name: "Acceptance device", arch: "x86_64" }] });
 export const useGroups = () => ({ data: [] });
@@ -26,7 +29,16 @@ export async function fetchCatalogs() {
   if (state.error) throw new Error("Library network unavailable");
   return state.catalogs;
 }
-export async function discoverVersions() { return state.versions; }
+export async function discoverVersions(_client, catalogId) { return state.versions.filter(v => v.catalogId === catalogId); }
+// Another catalog of the same account (the repro: com.acme.GatewayAgent 1.4.2), plus an
+// older release repeated across catalogs that the library must tell apart.
+if (location.search.includes("twoCatalogs")) {
+  const entry = (objectId, catalogId, name, version, arch) => ({ objectId, catalogId, publisher: "0xa", name, version,
+    manifests: [{ os: "linux", arch, recipeBlobId: `recipe-${objectId}`, recipeSha256: "a".repeat(64), artifactSha256: "b".repeat(64) }] });
+  state.catalogs = [{ objectId: "0xc" }, { objectId: "0xd" }];
+  state.versions = [entry("0x201", "0xd", "com.acme.GatewayAgent", "1.4.2", "aarch64"), entry("0x202", "0xc", "com.acme.GatewayAgent", "1.4.1", "x86_64"),
+    entry("0x203", "0xd", "com.acme.GatewayAgent", "1.4.1", "aarch64"), entry("0x204", "0xd", "com.example.Hello", "1.0.0", "x86_64")];
+}
 export async function fetchVersion() { return JSON.parse(sessionStorage.getItem("published")); }
 export const useDeploymentStorage = () => ({ data: { recipe: "available", artifact: "available", confidential: false } });
 export const useFleetTransaction = () => ({ isPending: false, mutateAsync: ({ transaction, onProgress }) => {
