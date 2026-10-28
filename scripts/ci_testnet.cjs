@@ -7,9 +7,16 @@ const { spawnSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const { seal, open } = require('./testnet_cache.cjs');
 const req = createRequire(path.resolve('dapp/package.json'));
-const expected = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac';
+const wallets = [
+  '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac',
+  '0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec',
+  '0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4',
+];
 async function main() {
   process.umask(0o077);
+  const lane = process.env.SUIFLEET_TESTNET_LANE ?? '0';
+  if (!/^[012]$/.test(lane)) throw Error('invalid dedicated CI lane');
+  const expected = wallets[Number(lane)];
   const secret = process.env.SUIFLEET_TESTNET_KEY;
   delete process.env.SUIFLEET_TESTNET_KEY;
   if (!secret || process.env.SUIFLEET_TESTNET_ADDRESS !== expected) throw Error('dedicated CI credentials missing/mismatched');
