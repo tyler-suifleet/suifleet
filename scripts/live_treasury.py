@@ -59,7 +59,7 @@ def run(args):
                 return result.stdout.strip()
             return sign
         live.signer = signer
-        submit = live.exact_ptb(['--sender', address, '--split-coins', 'gas', '[1]', '--assign', 'spend',
+        submit = live.exact_ptb(['--sender', f'@{address}', '--split-coins', 'gas', '[1]', '--assign', 'spend',
                                  '--transfer-objects', '[spend]', f'@{live.operator}'], args.wallet)
         live.execute('2-of-3 multisig signed spend to dedicated agent', submit, gas=5_000_000,
                      sender=live.child(args.wallet, funding), require_full=True)
