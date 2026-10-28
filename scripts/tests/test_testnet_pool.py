@@ -67,6 +67,11 @@ class PoolTests(unittest.TestCase):
             cache.prune('a/b',12,get,deleted.append,name=name)
             self.assertEqual(deleted,[])
 
+    def test_pool_and_preparation_changes_require_the_live_security_suites(self):
+        for changed in ('scripts/testnet_pool.py','scripts/testnet_prepared.py','scripts/testnet_fixture_cache.py'):
+            with patch.dict(os.environ, {'GITHUB_EVENT_NAME':'workflow_run'}):
+                self.assertTrue(wallet.suites_relevant('base', lambda *a,**kw:type('Result',(),{'stdout':changed})()))
+
     def test_selected_wallet_config_and_allowances_are_preserved(self):
         for lane in range(3):
             with tempfile.TemporaryDirectory() as d, patch.dict(os.environ,{'SUIFLEET_TESTNET_LANE':str(lane),'SUIFLEET_TESTNET_ADDRESS':pool.ADDRESSES[lane]}):

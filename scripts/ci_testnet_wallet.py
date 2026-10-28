@@ -21,7 +21,8 @@ PACKAGE_UPGRADE_CEILING = 1_600_000_000
 SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 1_500_000_000),
           ('wallet', 'scripts/live_wallet_gate.py', 150_000_000))
 SUITE_PATHS = ('contracts/', 'dapp/', 'interfaces/', 'suifleet-edge/', 'scripts/browser/', 'scripts/live_',
-               'scripts/ci_testnet', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
+               'scripts/ci_testnet', 'scripts/testnet_pool.py', 'scripts/testnet_prepared.py',
+               'scripts/testnet_fixture_cache.py', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
                'scripts/sui_toolchain.py', 'scripts/sui_tx_inspect.cjs', 'Dockerfile')
 # Funded test keys a suite keeps beside the wallet until their sweep succeeds.
 PENDING_KEYS = ('live-browser-key.hex', 'live-security-device.key')
