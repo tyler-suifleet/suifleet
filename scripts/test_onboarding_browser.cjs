@@ -47,7 +47,11 @@ function audit() {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
-    await page.route("https://api.slush.app/**", () => { throw new Error("Unexpected external Slush metadata request"); });
+    const externalSlushRequests = [];
+    await page.route("https://api.slush.app/**", (route) => {
+      externalSlushRequests.push(route.request().url());
+      return route.abort();
+    });
     await page.route("https://api.enoki.mystenlabs.com/**", (route) => route.abort());
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
     const screenshots = process.env.SCREENSHOT_DIR;
@@ -189,6 +193,7 @@ function audit() {
 
     await page.evaluate(() => window.acceptance.disconnect());
     await progress.getByText("Not connected", { exact: true }).waitFor();
+    assert.deepEqual(externalSlushRequests, [], "No external Slush metadata requests");
     assert.deepEqual(errors, []);
     console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
   } finally {
