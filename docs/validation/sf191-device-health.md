@@ -335,3 +335,29 @@ the pushed head/current base remain pending; no CI polling or merge performed.
 Prior read-only testnet walkthrough remains historical. Physical/mainnet and final
 provider/manual-wallet acceptance remain unrun in #32 and #159. No migration;
 frontend rebuild required for delivery. Model: gpt-6.1-sol.
+
+## Wallet hydration base integration (2026-10-28)
+
+Integrated snapshot/current fetched main
+`935e96f84c2f74c7b67b98a3181a7520c98b4914` cleanly. The shared Devices page
+retains main's hydration-safe account hook and this ticket's selected-fleet health
+configuration. Both workflow fork guards and upstream candidate checkout/base
+advancement regressions remain. Supplied review found no remaining code defect
+or open thread; this pass addresses base advancement.
+
+Checks on the integrated tree:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`: complete target passed, including all three health states.
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`: passed; 17 static pages.
+- `make RUN= test-testnet`: 159 tests OK (one installed-container toolchain check skipped on host), 60 live-common fixture tests OK, authenticated cache PASS. These are offline fixtures, including intentional connection/transaction failures.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`: passed every exported route logged out and with a reconnected fixture wallet, including the mismatch detector negative control.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`: passed.
+- `git diff --check origin/main...HEAD`: passed.
+
+No new live walkthrough, wallet mutation, deployment, physical test, full
+cross-layer suite or local CodeQL scan is claimed. Historical read-only Testnet
+health evidence remains above. Hosted CI/automatic testnet and fresh independent
+review remain required for the pushed head/current base; no hosted polling.
+Physical/mainnet/production-provider/manual-wallet acceptance remains deferred
+and unrun in #32 and #159. No migration; frontend rebuild required for delivery.
+Model: gpt-6.1-sol.
