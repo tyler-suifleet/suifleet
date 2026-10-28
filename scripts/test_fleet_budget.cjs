@@ -454,6 +454,11 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
   console.log('PASS: budget pause/resume and withdrawal survive failed, stale-error and loading account queries without misleading account UI');
 }
 
+// Both registration error handlers must survive integration with entitlement checks.
+const { registrationFailure } = load('lib/customer-entitlements.ts');
+assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in fleet_budget::pay, abort code: 11'))), /no longer has enough SUI/);
+assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in customer::register_device, abort code: 2'))), /Device entitlements/);
+
 // Get started renders an honest enrollment preview even for a newly empty budget.
 const React = appRequire('react');
 const { renderToStaticMarkup } = appRequire('react-dom/server');
