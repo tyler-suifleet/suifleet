@@ -73,6 +73,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && pnpm --version
 
+# Workflow-structure regressions use PyYAML. Keep this dependency after the
+# large pinned CLI/browser layers so adding it preserves their build cache.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── Create non-root user matching host UID/GID ───────────────────────────────
 
 RUN groupadd --gid ${USER_GID} dev \
@@ -97,12 +102,6 @@ ENV CARGO_HOME=/home/dev/.cargo \
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --component rust-src \
     && cargo --version
-
-# Offline CI tests parse the actual Actions workflow to check wallet isolation.
-USER root
-RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml \
-    && rm -rf /var/lib/apt/lists/*
-USER dev
 
 WORKDIR /workspace
 
