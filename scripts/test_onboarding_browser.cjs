@@ -61,6 +61,8 @@ function audit() {
       }
       await page.setViewportSize({ width: 1280, height: 900 });
     }
+    // Timers flow normally; the pending-timeout check below fast-forwards them.
+    await page.clock.install();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.getByText("Get started with SuiFleet", { exact: true }).waitFor();
     const register = page.getByRole("button", { name: "Register device", exact: true });
@@ -146,8 +148,22 @@ function audit() {
     // Until the inventory lists it, the registration shows as pending and cannot be repeated.
     await page.getByRole("status").filter({ hasText: "First Pi: registered · adding to your inventory…" }).waitFor();
     assert.equal(await register.isDisabled(), true, "pending registration blocks a duplicate");
+    // Past the pending timeout the button re-enables, but the same unlisted address is still refused before signing.
+    await page.clock.fastForward(62_000);
+    await page.getByRole("status").filter({ hasText: "First Pi was registered but is not listed yet." }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Register device" && !b.disabled));
+    await page.getByRole("textbox", { name: "Device name", exact: true }).fill("First Pi again");
+    await page.getByRole("textbox", { name: /^Device public address/ }).fill("0x" + "2".repeat(64));
+    await register.click();
+    await page.getByRole("alert").filter({ hasText: "“First Pi” is already registered with this address but is not listed yet." }).waitFor();
+    assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1, "stale unlisted registration is not signed twice");
+    await page.getByRole("textbox", { name: "Device name", exact: true }).fill("");
+    await page.getByRole("textbox", { name: /^Device public address/ }).fill("");
+    // Once indexing catches up, a refresh lists the device and clears the refusal.
     await page.evaluate(() => window.acceptance.index());
-    await page.getByRole("status").filter({ hasText: "adding to your inventory" }).waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+    await page.getByRole("status").filter({ hasText: "was registered but is not listed yet" }).waitFor({ state: "detached" });
+    await page.getByRole("alert").filter({ hasText: "already registered with this address" }).waitFor({ state: "detached" });
     const confirmation = page.getByText("Confirmation details", { exact: true });
     await confirmation.click();
     await page.getByText("Confirmed transaction " + "1".repeat(32) + ".", { exact: false }).waitFor();
@@ -197,7 +213,7 @@ function audit() {
     await page.evaluate(() => window.acceptance.disconnect());
     await progress.getByText("Not connected", { exact: true }).waitFor();
     assert.deepEqual(errors, []);
-    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
+    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard (including past the pending timeout), rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

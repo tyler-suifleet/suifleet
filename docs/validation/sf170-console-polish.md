@@ -76,6 +76,29 @@ and Devices share the device list's rows.
   `test_storage_reclaim.cjs`, `test_deployment_control.cjs`,
   `test_device_history_browser.cjs` (`suifleet-dev:sf010-chrome`): passed.
 
+### Review fix: Get started re-registration after the pending timeout
+
+Codex review of `2a53249b` found that Get started disabled Register device
+only while a registration was waiting. After 60 seconds an unlisted
+registration becomes stale, the button re-enabled and the same address could
+be signed again. The form now refuses an address that matches a waiting or
+stale registration before building the transaction, as Devices already does.
+
+- `node scripts/test_onboarding_browser.cjs` now fast-forwards the page clock
+  past the timeout, checks the stale notice and the enabled button, submits
+  the same address and checks the refusal and that no second signing request
+  is made; a refresh after indexing lists the device and clears the refusal.
+  Passed; fails on `2a53249b` (no refusal is shown).
+- `tsc --noEmit`, `next build`, `test_pending_rows.cjs`, `test_alerts.cjs`,
+  `test_fleet_ops.cjs`, `test_seal_frontend.cjs`, `test_telemetry.cjs`,
+  `test_enrollment_frontend.cjs`, `test_storage_reclaim.cjs`,
+  `test_deployment_control.cjs`, `test_onboarding.cjs`,
+  `test_customer_entitlements.cjs`, `test_dashboard_stats.cjs`,
+  `test_devices_pending_browser.cjs`, `test_components_browser.cjs`,
+  `test_onboarding_browser.cjs`, `test_customer_entitlements_browser.cjs`,
+  `test_upload_browser.cjs`, `test_dapp_presentation_browser.cjs`
+  (`suifleet-dev:sf010-chrome`): passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useCurrentAccount, useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
+import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
 import { displaySui, formatSui, onboardingConfig, onboardingProgress, registrationInput, shortAddress, type OnboardingStep, type StepState } from "@/lib/onboarding";
@@ -197,6 +198,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           const data = new FormData(event.currentTarget);
           try {
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
+            // A confirmed registration that is still unlisted, even past the pending timeout, must not be signed again.
+            const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === input.deviceAddress);
+            if (unlisted) throw new Error(`“${unlisted.label}” is already registered with this address but is not listed yet. Refresh in a minute before registering it again.`);
             const funding = budget && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
               reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
             void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding, fleet), input);
