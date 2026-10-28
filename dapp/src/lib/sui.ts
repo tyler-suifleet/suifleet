@@ -207,9 +207,15 @@ export function buildCreateGroupTx(name: string, description: string, fleet?: Na
 export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef, inboxExists?: boolean, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
+  appendAddDeviceToGroup(tx, groupObjectId, device, inboxExists, fleet);
+  return tx;
+}
+
+/** The calls of `buildAddDeviceToGroupTx`, appended to a batch (SF-171). */
+export function appendAddDeviceToGroup(tx: Transaction, groupObjectId: string, device: DeviceRef, inboxExists?: boolean, fleet?: NamedFleet) {
   if (fleet) {
     tx.moveCall({ target: `${PACKAGE_ID}::customer::add_to_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(device.objectId)] });
-    return tx;
+    return;
   }
   const ownerCapId = device.ownerCapId;
   if (inboxSupported() && ownerCapId && inboxExists !== undefined) {
@@ -220,23 +226,20 @@ export function buildAddDeviceToGroupTx(groupObjectId: string, device: DeviceRef
   } else {
     withDevice(tx, device, (target) => calls.device_group_add_device(tx, PACKAGE_ID, groupObjectId, target));
   }
-  return tx;
 }
 
 /** Also unlists the group from the device's inbox when it exists. */
 export function buildRemoveDeviceFromGroupTx(groupObjectId: string, deviceId: string, inboxExists = false, fleet?: NamedFleet): Transaction {
   requireManifest();
   const tx = new Transaction();
-  if (fleet) {
-    tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_from_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(deviceId)] });
-    return tx;
-  }
-  if (inboxSupported() && inboxExists) {
-    calls.fleet_inbox_remove_member(tx, PACKAGE_ID, groupObjectId, inboxIdFor(deviceId));
-  } else {
-    calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
-  }
+  appendRemoveDeviceFromGroup(tx, groupObjectId, deviceId, inboxExists, fleet);
   return tx;
+}
+
+export function appendRemoveDeviceFromGroup(tx: Transaction, groupObjectId: string, deviceId: string, inboxExists = false, fleet?: NamedFleet) {
+  if (fleet) tx.moveCall({ target: `${PACKAGE_ID}::customer::remove_from_group`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(groupObjectId), tx.pure.id(deviceId)] });
+  else if (inboxSupported() && inboxExists) calls.fleet_inbox_remove_member(tx, PACKAGE_ID, groupObjectId, inboxIdFor(deviceId));
+  else calls.device_group_remove_device(tx, PACKAGE_ID, groupObjectId, deviceId);
 }
 
 export function buildDeleteGroupTx(groupObjectId: string, fleet?: NamedFleet): Transaction {
