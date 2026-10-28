@@ -204,11 +204,93 @@ def testnet_failure(pr):
             'classification': match.group(2) or 'source'}
 
 
+# GitHub Actions reports job-limit expiry as CANCELLED, not always TIMED_OUT.
+TIMEOUT_ANNOTATION = re.compile(
+    r'The job has exceeded the maximum execution time of [0-9]+h[0-9]+m[0-9]+s\.?')
+
+
+def annotate_job_timeouts(pr, repository, read):
+    """Attach sanitized, revision-bound evidence; unavailable reads fail closed.
+
+    read is an authenticated JSON GET. Never cache mutable run attempts or print
+    exceptions: subprocess errors can carry credentials/argv. Large/truncated
+    responses conservatively remain ordinary cancellations.
+    """
+    for check in pr.get('statusCheckRollup', []):
+        check.pop('_job_timeout', None)
+        if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
+                or check.get('conclusion') != 'CANCELLED'):
+            continue
+        match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
+                             + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
+        if not match:
+            continue
+        run_id, job_id = map(int, match.groups())
+        prefix = f'repos/{repository}'
+        try:
+            run_path = f'{prefix}/actions/runs/{run_id}'
+            run = read(run_path)
+            attempt = run['run_attempt']
+            if (run['id'] != run_id or run['head_sha'] != pr.get('headRefOid')
+                    or run['status'] != 'completed'
+                    or run['conclusion'] not in ('cancelled', 'failure', 'timed_out')
+                    or run['head_repository']['full_name'] != repository
+                    or not isinstance(attempt, int) or attempt < 1):
+                continue
+            jobs = read(f'{run_path}/attempts/{attempt}/jobs?per_page=100')
+            if jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100:
+                continue
+            matches = [job for job in jobs['jobs'] if job['id'] == job_id]
+            if len(matches) != 1:
+                continue
+            job = matches[0]
+            if (job['run_id'] != run_id or job['head_sha'] != pr['headRefOid']
+                    or job['status'] != 'completed' or job['conclusion'] != 'cancelled'
+                    or job['name'] != check['name']
+                    or job['started_at'] != check.get('startedAt')
+                    or job['completed_at'] != check.get('completedAt')):
+                continue
+            verified = read(f'{prefix}/check-runs/{job_id}')
+            count = verified['output']['annotations_count']
+            if (verified['id'] != job_id or verified['head_sha'] != pr['headRefOid']
+                    or verified['app']['slug'] != 'github-actions'
+                    or verified['check_suite']['id'] != run['check_suite_id']
+                    or verified['name'] != check['name']
+                    or verified['status'] != 'completed' or verified['conclusion'] != 'cancelled'
+                    or verified['details_url'] != check['detailsUrl']
+                    or not isinstance(count, int) or not 0 < count <= 100):
+                continue
+            annotations = read(f'{prefix}/check-runs/{job_id}/annotations?per_page=100')
+            if len(annotations) != count or not any(
+                    row.get('annotation_level') == 'failure'
+                    and TIMEOUT_ANNOTATION.fullmatch(row.get('message') or '') for row in annotations):
+                continue
+            # A rerun may start while the annotations are read.
+            fresh = read(run_path)
+            if any(fresh.get(key) != run.get(key) for key in
+                   ('id', 'head_sha', 'run_attempt', 'status', 'conclusion', 'check_suite_id')):
+                continue
+            check['_job_timeout'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'],
+                                         url=check['detailsUrl'], run=run_id, job=job_id, attempt=attempt)
+        except Exception:
+            # Evidence failures never grant repair and never leak remote text.
+            continue
+    return pr
+
+
+def verified_job_timeout(pr, check):
+    proof = check.get('_job_timeout') or {}
+    return (bool(pr.get('headRefOid')) and bool(pr.get('baseRefOid'))
+            and proof.get('head') == pr['headRefOid'] and proof.get('base') == pr['baseRefOid']
+            and proof.get('url') == check.get('detailsUrl')
+            and all(isinstance(proof.get(key), int) and proof[key] > 0 for key in ('run', 'job', 'attempt')))
+
+
 def failed_checks(pr):
     """Only actionable completed runs with a durable evidence link can start repair.
 
     Every reported check is a merge requirement under this coordinator's policy.
-    Status errors, cancelled runs and unlinked failures stay blockers,
+    Status errors, unverified cancellations and unlinked failures stay blockers,
     but cannot safely identify a source repair. Rollups can contain old reruns:
     select the newest observation per workflow/name before considering failures.
     """
@@ -234,10 +316,14 @@ def failed_checks(pr):
     failures = []
     for check in latest:
         if (check.get('status') == 'COMPLETED'
-                and check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
+                and (check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
+                     or (check.get('conclusion') == 'CANCELLED' and verified_job_timeout(pr, check)))
                 and check.get('detailsUrl')):
-            failures.append({key: check.get(key) for key in
-                             ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+            failure = {key: check.get(key) for key in
+                       ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')}
+            if check.get('conclusion') == 'CANCELLED':
+                failure.update(conclusion='TIMED_OUT', classification='job_timeout')
+            failures.append(failure)
     testnet = testnet_failure(pr)
     if testnet:
         failures.append(testnet)
@@ -784,7 +870,8 @@ class Coordinator:
         pr['_receipts'] = {r['node_id']:r['hash'] for r in self.store.db.execute('SELECT node_id,hash FROM publications WHERE project=? AND pr=?',(project['id'],number))}
         pr['threads'] = threads
         pr['_acceptance_policy'] = project.get('acceptance_policy', {})
-        return pr
+        return annotate_job_timeouts(pr, project['repository'],
+                                     lambda path: json.loads(self.gh(project, ['api', path])))
 
     def owners(self, project):
         rows = json.loads(run(['ticket', '--project', project['id'], 'list']))
