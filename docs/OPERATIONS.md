@@ -405,6 +405,30 @@ Install the daemon, systemd service and real config through the validated image/
 
 The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC installation and A/B recovery are platform-owned; SuiFleet invokes configured installer commands.
 
+## Public website and domains (SF-172)
+
+The proposed landing site is built from `site/` with standard-library Python.
+`make test-site site-check` runs offline build, link, metadata, privacy and
+checksum checks; CI also compares two independent builds for reproducibility.
+The written guide includes an offline console screenshot, not testnet execution
+proof. Videos (SF-175), hosting/DNS/TLS/publication (SF-176), documentation
+(SF-177) and generated pricing (SF-178) remain separately tracked.
+
+[site/README.md](../site/README.md) documents conventional static hosting for
+`suifleet.io`, `app.suifleet.io` and `docs.suifleet.io`, with the existing Walrus
+Site console distribution kept separate. These are planned origins, not a claim
+that this work configured DNS or launched a service.
+
+For a release, rebuild the console with its verified manifest, update the written
+guide and screenshot when labels change, and update proposed pricing/status
+claims with their canonical sources. Run the site checks, review every page at
+mobile/desktop widths, follow external links and verify contact delivery. After
+SF-175, review each recording too. Obtain explicit user authorization before any
+live-domain publication, upload only the reviewed artifact and verify its bytes
+and response headers using `site/verify_served.py`. Record authorization, revision,
+artifact checksums and deployment results in the release issue; retain the prior
+artifact for rollback. No live domain was configured or published by SF-172.
+
 ## Execution privileges
 
 | Principal | Runs | Can write | Cannot |
@@ -714,3 +738,21 @@ indexed history. Other authorization, data and execution errors fail closed.
 Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
+
+## Conventional static origins (SF-176)
+
+The selected host and gated release preparation for suifleet.io,
+app.suifleet.io and docs.suifleet.io are in [STATIC_HOSTING.md](STATIC_HOSTING.md).
+No live DNS, TLS, preview, production publication or rollback rehearsal is claimed.
+The three-origin source build is integrated; actual recorded-console acceptance,
+provider provisioning and hosted preview checks remain unrun. Walrus is separate.
+
+### Conventional three-origin static release (SF-176)
+
+The [static hosting runbook](STATIC_HOSTING.md) defines the Cloudflare Pages
+provider/DNS/TLS plan. `static-site.yml` builds marketing, docs and the testnet
+console export at one revision; `collection.json` binds their sealed file lists.
+Production requires main-only dispatch, the exact collection digest, Tyler's
+issue authorization and protected environment approval. Preview credentials stay
+in a separate account. Source builds and offline restore fixtures do not establish
+live provider, DNS, TLS, recorded-wallet or hosted rollback acceptance.

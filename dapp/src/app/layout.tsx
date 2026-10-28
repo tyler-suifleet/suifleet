@@ -38,11 +38,17 @@ const NAV_GROUPS = [
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   return (
     <html lang="en">
       <head>
         <title>SuiFleet</title>
         <meta name="description" content="Decentralized edge fleet management on Sui" />
+        <meta property="og:title" content="SuiFleet console" />
+        <meta property="og:description" content="Manage edge fleets on Sui. Public testnet preview." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://app.suifleet.io/" />
+        <link rel="canonical" href={"https://app.suifleet.io" + pathname} />
       </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:shadow-lg">Skip to content</a>
