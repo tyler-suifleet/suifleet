@@ -24,33 +24,34 @@ endpoints. Never copy the script-free marketing CSP onto the console blindly.
 
 ## Current state and completion gates
 
-The committed workflow is the **marketing origin preparation only**. It builds
-and seals on PRs/main and, once provisioned, uploads main builds to a dedicated
-preview project. Its optional production dispatch is protected as described below.
-It does not implement or claim the full three-origin acceptance yet.
+The workflow now builds and seals all three origins: the SF-172 marketing source,
+the committed SF-177 docs builder (3844c2a9), and the console at the workflow
+revision using the reviewed `profiles/seal-testnet` deployment profile. The console
+receipt binds the revision and manifest digest; it explicitly records manual
+recording acceptance as unrun. This is a source release candidate, not evidence of
+a recorded real-wallet release. Production authorization must also state
+`Recorded console release accepted` after that acceptance actually occurs.
+SF-172 and SF-177 remain upstream merge/review prerequisites.
 
-At implementation time repository hosting secret/variable listings were empty;
-only the existing testnet GitHub environment existed. No provider account, Pages
-projects, registrar/DNS ownership, TLS certificates, preview URLs, production
-publication, preview rollback rehearsal or recorded console release was verified.
-SF-176 stays Blocked with its claim reserved, not Review/Done. Next work:
+`site/prepare_hosted.py` copies outputs to new directories. It removes the private
+docs build marker, adds docs HSTS, and supplies console discovery files and CSP
+hashes for the actual Next inline scripts. It validates the deployment manifest,
+rejects external script sources and removes Walrus routing metadata only from the
+conventional-host copy. The Walrus distribution is unchanged. The console policy
+is deliberately restricted to the testnet profile; new provider/wallet endpoints
+require reviewed policy and browser failure-path checks before enabling them.
 
-1. User/operator provisions the preview account/projects and credentials. Production
-   credentials, registrar changes and publication require explicit user authorization.
-2. Integrate the reviewed SF-177 docs builder after coordinating its committed
-   interface; extend the main workflow to build/check/seal that artifact. SF-172
-   remains a merge prerequisite. Do not substitute a placeholder docs site.
-3. Select the recorded console release (full revision, deployment manifest and
-   exact export file hashes); validate its manifest with the existing deployment
-   validator and bind its recording evidence. Add its release artifact, compatible
-   CSP, robots, sitemap and metadata checks. `site/release.py` only requires the
-   manifest file's presence; it does **not** establish valid chain IDs or release
-   provenance. It must not be treated as console acceptance by itself.
-4. Publish all three previews, verify served bytes/headers, rehearse restoring an
-   earlier retained bundle, and record URLs, project/deployment IDs and hashes in
-   [SF-176/#353](https://github.com/tyler-suifleet/suifleet/issues/353).
-5. Obtain independent review and ordinary/security/automatic-testnet CI. Only
-   then request the concrete production authorization and complete DNS/TLS checks.
+No provider account/projects, credentials, registrar ownership, TLS certificates,
+real preview publication or hosted rollback has been verified. These external
+provider checks remain pending in SF-176/#353; final real-wallet/provider/mainnet
+acceptance stays in #32/#159. Offline A→B→A fixture restoration is a regression
+check only, never a provider deployment or rollback receipt. Source completion
+does not authorize provisioning credentials or DNS/production publication.
+
+Before release, provision isolated preview projects through an authorized operator,
+record real three-origin preview URLs/deployment IDs and digests, check served
+bytes/headers/TLS and rehearse preview rollback. Obtain independent review and
+exact-head CI; obtain explicit production authorization only after those checks.
 
 ## Account and workflow setup
 
@@ -81,8 +82,9 @@ input authorization comment must be written by `therealtime` in #353 and contain
 `Authorize production publication`, the full revision and SHA256.
 A comment URL or a model starting the workflow does not grant authorization.
 
-`static-site.yml` runs offline tests and reproducible marketing builds, uploads
-`marketing-release`, and records the release.json SHA256. Every main push attempts
+`static-site.yml` runs offline tests, builds all three origins, uploads
+`static-release`, and records the collection.json SHA256. Each collection entry
+binds one release.json digest, which binds every public file. Every main push attempts
 the stable preview publication; absent configuration is a failure, not acceptance.
 Production is dispatch-only on main, requires that exact digest and the authorization
 comment URL in #353. It rebuilds deterministically and refuses a changed source
@@ -153,7 +155,7 @@ requires the user's authorization, restores the retained approved artifact witho
 edits/rebuild, repeats served-byte/TLS/header verification and records its outcome.
 The workflow archives upload output even when verification fails; a failed served
 check means the deployment may have happened and requires reconciliation, not a
-blind retry. No rollback rehearsal has run yet.
+blind retry. No hosted rollback rehearsal has run yet; the offline fixture is explicitly separate.
 
 ## Wallet screening and on-chain identity
 

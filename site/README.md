@@ -92,3 +92,9 @@ SF-176 selects Cloudflare Pages Direct Upload; see
 [the hosting runbook](../docs/STATIC_HOSTING.md) for credentials/environment setup,
 DNS/TLS change plan, release digests, preview/rollback gates and current blockers.
 This provider selection does not establish any live hostname or preview acceptance.
+
+The SF-176 workflow now builds marketing, the committed SF-177 docs builder and
+an exact console source revision bound to the testnet deployment manifest. See
+`site/prepare_hosted.py`, `site/collection.py` and the runbook for the artifact
+contract. Offline fixture restoration is not real preview/rollback acceptance;
+provider setup, real preview and recorded-wallet release acceptance remain unrun.
