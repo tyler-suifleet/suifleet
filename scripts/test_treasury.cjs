@@ -26,7 +26,10 @@ try {
   const call = mode => execFileSync(process.execPath,[path.join(__dirname,'testnet_treasury.cjs'),mode,state],{encoding:'utf8'});
   const first = JSON.parse(call('create'));
   assert.deepEqual(JSON.parse(call('create')),first,'fixture must reuse its keys');
-  assert.equal(fs.statSync(state).mode & 0o077,0);
+  const initialFd = fs.openSync(state,fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    assert.equal(fs.fstatSync(initialFd).mode & 0o077,0);
+  } finally { fs.closeSync(initialFd); }
   assert.match(call('self-test'),/PASS/);
   const tx = new Transaction();
   tx.setSender(first.treasury_payee); tx.setGasOwner(first.treasury_payee);
