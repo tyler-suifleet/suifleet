@@ -121,12 +121,66 @@ class TrustTests(unittest.TestCase):
     def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
-        checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
-        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertEqual(workflow.count('ref: ${{ steps.plan.outputs.head }}'), 2)
-        verify = checkout.index('--verify-checkout')
-        self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
-        self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
+        self.assertNotIn('github.event.workflow_run.head_sha', workflow)
+        prepare, validate = workflow.split('\n  validate:\n', 1)
+        for job in (prepare, validate):
+            selected = job.split('      - name: Select authenticated test revision', 1)[1]
+            self.assertIn('TEST_HEAD: ${{ steps.plan.outputs.head }}', selected.split('--checkout')[0])
+            self.assertIn('python3 "$RUNNER_TEMP/testnet_ci.py" --checkout', selected)
+            verification = selected.index('--verify-checkout')
+            self.assertLess(selected.index('--checkout'), verification)
+            self.assertLess(verification, selected.index('docker/' if job == prepare else 'Restore encrypted fixture artifact'))
+
+    def test_authenticated_checkout_fetches_exact_commit_and_fails_closed(self):
+        from testnet_ci import checkout_authenticated
+        run = Mock(return_value=type('Result', (), {'stdout': 'a'*40 + '\n'})())
+        checkout_authenticated('a'*40, run)
+        self.assertEqual(run.call_args_list[0].args[0], ['git', 'fetch', '--no-tags', 'origin', 'a'*40])
+        self.assertEqual(run.call_args_list[1].args[0], ['git', '-c', 'advice.detachedHead=false', 'checkout', '--detach', 'a'*40])
+        for ref in ['main', '--upload-pack=evil', 'a'*39, 'a'*40 + '\n', None]:
+            denied = Mock()
+            with self.assertRaises(RuntimeError):
+                checkout_authenticated(ref, denied)
+            denied.assert_not_called()
+        with self.assertRaises(RuntimeError):
+            checkout_authenticated('b'*40, run)
+        failed = Mock(side_effect=__import__('subprocess').CalledProcessError(1, 'git'))
+        with self.assertRaises(__import__('subprocess').CalledProcessError):
+            checkout_authenticated('a'*40, failed)
+        self.assertEqual(failed.call_count, 1)
+
+    def test_authenticated_checkout_real_git_repository(self):
+        import subprocess
+        import tempfile
+        from testnet_ci import checkout_authenticated
+        with tempfile.TemporaryDirectory() as tmp:
+            remote, work = Path(tmp)/'remote', Path(tmp)/'work'
+            def git(*args, cwd=remote):
+                return subprocess.run(['git', *args], cwd=cwd, check=True,
+                                      text=True, capture_output=True).stdout.strip()
+            remote.mkdir()
+            git('init')
+            git('config', 'user.name', 'Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            (remote/'value').write_text('first')
+            git('add', 'value'); git('commit', '-m', 'first')
+            first = git('rev-parse', 'HEAD')
+            git('clone', str(remote), str(work))
+            (remote/'value').write_text('selected')
+            git('commit', '-am', 'selected')
+            selected = git('rev-parse', 'HEAD')
+            def run(args, **kwargs):
+                return subprocess.run(args, cwd=work, **kwargs)
+            checkout_authenticated(selected, run)
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=work), selected)
+            self.assertEqual((work/'value').read_text(), 'selected')
+            # An older authenticated commit must also be selected exactly.
+            checkout_authenticated(first, run)
+            self.assertEqual((work/'value').read_text(), 'first')
+            with self.assertRaises(subprocess.CalledProcessError):
+                checkout_authenticated('0'*40, run)
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=work), first)
 
     def test_live_gate_checkout_and_token_permissions(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()

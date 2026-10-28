@@ -59,15 +59,11 @@ jobs:
           cp scripts/testnet_fixture_cache.py "$RUNNER_TEMP/testnet_fixture_cache.py"
           cp scripts/testnet_pool.py "$RUNNER_TEMP/testnet_pool.py"
           cp scripts/testnet_prepared.py "$RUNNER_TEMP/testnet_prepared.py"
-      - name: Checkout authenticated test revision
+      - name: Select authenticated test revision
         if: steps.plan.outputs.run == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          # Use only the SHA independently authenticated by the main-sourced planner.
-          # Never select executable code directly from workflow_run event fields.
-          ref: ${{ steps.plan.outputs.head }}
-          fetch-depth: 0
-          persist-credentials: false
+        env:
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout
       - name: Verify checkout matches authenticated revision
         if: steps.plan.outputs.run == 'true'
         env:
@@ -194,13 +190,11 @@ jobs:
           docker pull "$IMAGE@$PREPARED_DIGEST"
           docker logout ghcr.io
           python3 "$RUNNER_TEMP/testnet_prepared.py" --verify
-      - name: Checkout authenticated test revision
+      - name: Select authenticated test revision
         if: steps.plan.outputs.run == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: ${{ steps.plan.outputs.head }}
-          fetch-depth: 0
-          persist-credentials: false
+        env:
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+        run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout
       - name: Verify checkout matches authenticated revision
         if: steps.plan.outputs.run == 'true'
         env:
