@@ -6,6 +6,7 @@ import FirmwarePage from '../../dapp/src/app/firmware/page';
 const device = { objectId: '0x123', name: 'Acceptance device', arch: 'x86_64' };
 export const useCurrentAccount = () => ({ address: '0xa' });
 export const useCurrentClient = () => ({});
+export const useCurrentNetwork = () => 'localnet';
 export const useDevices = () => ({ data: [device] });
 export const useGroups = () => ({ data: [] });
 export const useAccessPolicies = () => ({ data: [] });
