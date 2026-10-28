@@ -41,10 +41,10 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 0);
     await page.getByPlaceholder('my-app', { exact: true }).fill('same-file');
     await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
-    // Confidential delivery (the default) without Seal key servers is rejected before upload.
+    // Confidential delivery (the default) without an encryption service is rejected before upload.
     await selectSame();
     await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 3);
-    assert.match((await alerts())[2], /Confidential delivery needs Seal key servers/);
+    assert.match((await alerts())[2], /encryption service is not configured; nothing was uploaded/);
     assert.equal(await cleared(), true);
     await page.getByRole('radio').nth(1).check();
     await selectSame();
