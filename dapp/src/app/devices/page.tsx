@@ -22,6 +22,8 @@ import { buildDeregisterManagedDeviceTx } from "@/lib/customer-fleets";
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { DATA_CONFIG } from "@/lib/fleet-data";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
+import { BulkGroupMembership } from "@/components/BulkGroupMembership";
+import { filterDevices, resolveDeviceList, type ListResolution } from "@/lib/group-batch";
 import { PageHeader, HealthBadge } from "@/components/ui";
 import type { DeviceRef } from "@/lib/sui";
 
@@ -62,6 +64,20 @@ function DevicesTab() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [technical, setTechnical] = useState(false);
   const groups = useGroups(), deployments = useDeployments();
+  // Bulk group membership (SF-171): select by filter, search or a pasted list.
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [pasting, setPasting] = useState(false);
+  const [pasted, setPasted] = useState<ListResolution | null>(null);
+  const [bulk, setBulk] = useState(false);
+  const shown = filterDevices(devices, query, groups.data ?? []);
+  const toggle = (ids: string[], on: boolean) => setSelected((current) => {
+    const next = new Set(current);
+    for (const id of ids) if (on) next.add(id); else next.delete(id);
+    return next;
+  });
+  // Selection never includes devices that left the fleet.
+  const selectedIds = devices.filter((d) => selected.has(d.objectId)).map((d) => d.objectId);
   const [linkedDevice, setLinkedDevice] = useState<string | null>(null);
   useEffect(() => {
     const select = () => { const id = new URLSearchParams(window.location.search).get("device"); setLinkedDevice(id); setExpanded(id); };
@@ -104,6 +120,36 @@ function DevicesTab() {
       </div>
 
       {fleet && <p role="status" className="text-sm">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link href="/entitlements" className="underline">Device entitlements</Link></p>}
+      {devices.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <input type="search" aria-label="Filter devices" value={query} onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter by name, serial, architecture or group" className="border border-gray-300 rounded px-3 py-1.5 w-72" />
+          <button onClick={() => toggle(shown.map((d) => d.objectId), true)} className="text-xs text-[#4DA2FF] hover:underline">Select {shown.length} shown</button>
+          <button onClick={() => setSelected(new Set())} disabled={!selectedIds.length} className="text-xs text-gray-500 hover:underline disabled:opacity-40">Clear selection</button>
+          <button onClick={() => setPasting(!pasting)} className="text-xs text-gray-500 hover:underline">Paste a list</button>
+          <span className="text-xs text-gray-500">{selectedIds.length} selected</span>
+          <button onClick={() => setBulk(true)} disabled={!selectedIds.length || !groups.data}
+            className="ml-auto border border-[#4DA2FF] text-[#4DA2FF] hover:bg-blue-50 text-sm px-3 py-1.5 rounded disabled:opacity-40">Change groups…</button>
+        </div>
+      )}
+      {pasting && (
+        <form className="space-y-2 text-sm" onSubmit={(e) => {
+          e.preventDefault();
+          const result = resolveDeviceList(new FormData(e.currentTarget).get("list") as string, devices);
+          setPasted(result); toggle(result.matched.map((d) => d.objectId), true);
+        }}>
+          <textarea name="list" aria-label="Serials or names" rows={4} placeholder="One serial, name or object ID per line"
+            className="w-full border border-gray-300 rounded px-3 py-2 font-mono text-xs" />
+          <button type="submit" className="text-xs text-[#4DA2FF] hover:underline">Select listed devices</button>
+          {pasted && (
+            <p role="status" className="text-xs text-gray-600">
+              Selected {pasted.matched.length} listed device(s).
+              {pasted.unmatched.length > 0 && <> Not found: {pasted.unmatched.join(", ")}.</>}
+              {pasted.ambiguous.length > 0 && <> Matches several devices, not selected: {pasted.ambiguous.join(", ")}.</>}
+            </p>
+          )}
+        </form>
+      )}
       {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
@@ -117,15 +163,21 @@ function DevicesTab() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
+                <th className="py-2 pl-4"><input type="checkbox" aria-label="Select all shown"
+                  checked={shown.length > 0 && shown.every((d) => selected.has(d.objectId))}
+                  onChange={(e) => toggle(shown.map((d) => d.objectId), e.target.checked)} /></th>
                 {["Status", "Name", "Serial", "Architecture", "Last seen", ...(technical ? ["Device address", "Object ID"] : []), "Actions"].map((h) => (
                   <th key={h} className="py-2 px-4 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {devices.map((d) => (
+              {shown.length === 0 && <tr><td colSpan={technical ? 9 : 7} className="p-6 text-center text-sm text-gray-400">No devices match the filter.</td></tr>}
+              {shown.map((d) => (
                 <Fragment key={d.objectId}>
                 <tr className="hover:bg-gray-50">
+                  <td className="py-3 pl-4"><input type="checkbox" aria-label={`Select ${d.name}`} checked={selected.has(d.objectId)}
+                    onChange={(e) => toggle([d.objectId], e.target.checked)} /></td>
                   <td className="py-3 px-4">
                     {(d.ownerCapId || d.managed) ? (
                       <button onClick={() => setExpanded(expanded === d.objectId ? null : d.objectId)} className="text-left" title="Show installed components and health">
@@ -193,7 +245,7 @@ function DevicesTab() {
                 </tr>
                 {expanded === d.objectId && (
                   <tr className="bg-gray-50" data-testid="health-details">
-                    <td colSpan={technical ? 8 : 6} className="px-4 py-3 space-y-4">
+                    <td colSpan={technical ? 9 : 7} className="px-4 py-3 space-y-4">
                       <h2 className="font-semibold">{d.name} — device details</h2>
                       <p className="text-sm">Current groups: {groups.error || !groups.data ? "Membership unavailable" : groups.data.filter(group => group.deviceIds.includes(d.objectId)).map(group => group.name).join(", ") || "No group"}</p>
                       <HealthDetails health={health[d.objectId]} />
@@ -210,6 +262,12 @@ function DevicesTab() {
           </table>
         )}
       </div>
+
+      {bulk && groups.data && (
+        <BulkGroupMembership devices={devices} groups={groups.data} selected={selectedIds} fleet={fleet}
+          reloadGroups={() => groups.refetch()}
+          onClose={() => { setBulk(false); void groups.refetch(); }} />
+      )}
 
       {showModal && (
         <Modal title="Register core device by address" onClose={() => setShowModal(false)}>
@@ -499,6 +557,7 @@ function GroupsTab() {
 
             <div>
               <p className="text-xs font-medium text-gray-500 uppercase mb-2">Add device</p>
+              <p className="text-xs text-gray-500 mb-2">To change many devices at once, select them on the Devices tab and choose Change groups.</p>
               {devices.filter((d) => !managedGroup.deviceIds.includes(d.objectId)).length === 0 ? (
                 <p className="text-sm text-gray-400">All devices are already in this group.</p>
               ) : (
