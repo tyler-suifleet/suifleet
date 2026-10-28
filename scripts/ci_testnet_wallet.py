@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+from testnet_pool import configured_address
+ADDRESS = configured_address()
 # A fresh SF-125 inbox base->head fixture costs about 0.85 SUI (run 40092917058).
 # After SF-136 the base alone costs ~0.55 SUI (localnet 532,828,600 MIST) and an
 # unchanged head upgrade about as much: ~1.2 SUI with setup and full PTB budgets.
@@ -87,7 +88,7 @@ envs:
   ws: null
   basic_auth: null
 active_env: testnet
-active_address: '{ADDRESS}'
+active_address: '{configured_address()}'
 ''')
         wallet.chmod(0o600)
         selected = SUITES if relevant(base) else ()
