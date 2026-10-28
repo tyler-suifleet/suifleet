@@ -260,3 +260,47 @@ live walkthrough, wallet mutation, deployment, physical testing or full cross-la
 suite was performed. Earlier read-only Testnet evidence remains historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains #32/#159.
 No migration; frontend rebuild required for delivery. Only the coordinator merges.
+
+
+## Shared CI failure repair (2026-10-28)
+
+Inspected failed run `40728594292`, jobs `122958453942` and `122958454155`.
+The check job failed because the Docker image lacked PyYAML, required by the
+workflow-structure tests. The sanitized Actions CodeQL report contained five
+critical untrusted-checkout findings in the shared testnet workflow.
+Reused the scoped shared fixes from PR #388 (`06ec9958`, `5071bae2`): install
+`python3-yaml` and reject fork-origin workflow runs at both preparation and
+protected validation job boundaries. Immutable planner-selected SHA verification,
+main-only environment restrictions, successful originating CI and spend controls
+remain enforced. No scanner suppression or retry-only workaround was added.
+
+Snapshot and freshly fetched main remain
+`a8516400872d70defeb7c3059798b53b4f10f84f`, already an ancestor of this branch;
+no additional base merge was necessary. Latest independent source review reported
+no actionable SF-191 source defects or open threads.
+
+Checks run for this repair, all exit 0 unless explicitly noted:
+
+- `docker build -t suifleet-sf191:ci-repair .` (actual Dockerfile; cached layers).
+- In that image with the host UID/GID and checkout mounted at `/workspace`:
+  `python3 -c "import yaml; print(yaml.__version__)"` (5.4.1),
+  `make RUN= test-testnet` (158 tests, 60 live-common tests, authenticated cache),
+  and `python3 -m unittest discover -s scripts/tests -p test_security_audit.py`
+  (23 tests).
+- The fork-origin condition regression fails as expected against the old workflow
+  from `c848594b`, proving it detects the missing job guards.
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `git diff --check` and base ancestry verification.
+
+An initial container test invocation failed on checkout permissions using its
+default UID; rerunning with the host UID/GID passed. Hosted CodeQL was not run
+locally: its new exact-head result, ordinary CI, automatic testnet and fresh
+independent review remain mandatory coordinator gates after push. No hosted CI
+polling, live mutation, deployment or physical acceptance was performed. Deferred
+physical/mainnet/production-provider/manual-wallet acceptance remains in
+https://github.com/tyler-suifleet/suifleet/issues/32 and
+https://github.com/tyler-suifleet/suifleet/issues/159. No migration is required.
