@@ -61,8 +61,9 @@ export function useFleetSelection() { return useContext(Context); }
 
 /** Remount local forms, decrypted plaintext and sessions on every identity
  * change; unresolved/revoked selection never renders prior fleet content. */
-export function FleetScope({ children }: { children: ReactNode }) {
+export function FleetScope({ children, allowWithoutFleet = false }: { children: ReactNode; allowWithoutFleet?: boolean }) {
   const selection = useFleetSelection();
+  if (allowWithoutFleet) return <div key={selection.identity}>{children}</div>;
   const warnings = selection.warnings?.map(message => <p role="status" key={message}>{message}</p>);
   if (selection.supported && !selection.fleet) return <>{warnings}<p role="status">{selection.loading ? "Verifying fleet access…" : "Select or create a fleet to continue."}</p></>;
   return <div key={selection.identity}>{warnings}{children}</div>;
