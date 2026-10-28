@@ -28,16 +28,18 @@ const NAV = [
   { href: "/firmware",    label: "Deploy component" },
   { href: "/access",      label: "Access policies" },
   { href: "/handover",    label: "Administration" },
+  { href: "/entitlements", label: "Device entitlements" },
   { href: "/settings",    label: "Fleet settings" },
   { href: "/budget",      label: "Network budget" },
 ];
 const NAV_GROUPS = [
   { label: "Workspace", routes: ["/", "/get-started"] },
   { label: "Fleet operations", routes: ["/devices", "/services", "/deployments", "/rollouts", "/components", "/firmware", "/data"] },
-  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/settings", "/budget"] },
+  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/entitlements", "/settings", "/budget"] },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   return (
     <html lang="en">
       <head>
@@ -77,7 +79,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <main id="main-content" className="fleet-content flex-1 min-w-0 p-4 md:p-8 lg:px-10">
                   <div className="mx-auto w-full max-w-7xl">
                     <FleetSwitcher />
-                    <FleetScope>{children}</FleetScope>
+                    <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>
                     <HistoryStatus />
                   </div>
                 </main>

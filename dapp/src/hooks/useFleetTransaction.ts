@@ -1,5 +1,6 @@
 "use client";
 
+import { checkDeviceCapacity } from "@/lib/customer-entitlements";
 import { getSession, isEnokiWallet } from "@mysten/enoki";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
@@ -43,6 +44,7 @@ export function useFleetTransaction() {
           transaction = withManagedBudgetCap(transaction, current, budget.capId);
         }
       }
+      await checkDeviceCapacity(client, transaction);
       const connectedWallet = wallet.stores.$connection.get().wallet;
       if (connectedWallet && isEnokiWallet(connectedWallet)) {
         const session = await getSession(connectedWallet);
