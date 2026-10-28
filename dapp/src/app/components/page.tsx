@@ -1,7 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { fetchCatalogs, discoverVersions, buildCreateCatalogTx } from "@/lib/catalog";

@@ -1,6 +1,7 @@
 "use client";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useEffect, useRef, useState } from 'react';
-import { useCurrentAccount, useCurrentClient, useCurrentNetwork, useDAppKit } from '@mysten/dapp-kit-react';
+import { useCurrentClient, useCurrentNetwork, useDAppKit } from '@mysten/dapp-kit-react';
 import { SessionKey } from '@mysten/seal';
 import { requireManifest, verifyDeployment } from '@/lib/deployment-manifest';
 import { sealNamespace } from '@/lib/access-policy';
