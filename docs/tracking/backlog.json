@@ -4024,6 +4024,258 @@
         "Testnet uses a disposable testnet multisig with the same shape so SF-181 to SF-184 can be exercised end to end, and its address is recorded."
       ],
       "validation": "Manifest schema tests; testnet multisig creation and one signed spend with recorded digests; runbook review by the user."
+    },
+    {
+      "key": "SF-186",
+      "title": "Keep main's testnet profile in step with the upgraded testnet package",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "profiles/seal-testnet",
+        "scripts/live_evaluation_fleet.py",
+        "scripts",
+        ".github/workflows"
+      ],
+      "resources": [],
+      "description": "The SF-173 work upgraded the seal-testnet package to v2 (tx 8PYQzsbgUMrAmt65Q9RGH4D11f2R1UDsGrKkJwoQJzbv, checkpoint 399882791). Main's profiles/seal-testnet/frontend.env still names v1, so every console built from main, including the live app.suifleet.io, fails all connected reads and writes with 'Deployment manifest: UpgradeCap does not identify latest call package/version'. The corrected profile exists only in draft PR #363.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case LIVE-P0 in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Main carries the current seal-testnet profile, either split out of PR #363 or merged with it, and a console built from main connects and reads balances, inventory, library, deployments and enrollment without the UpgradeCap error.",
+        "A CI or scheduled check compares each committed profile's call package with the chain's UpgradeCap (free gRPC reads) and fails with a clear message when a profile falls behind an upgrade.",
+        "Any workflow that upgrades a shared testnet package regenerates and commits the profile in the same change, or records why not."
+      ],
+      "validation": "Profile consistency check against testnet; console build from main connected walkthrough."
+    },
+    {
+      "key": "SF-187",
+      "title": "Give new customer accounts a usable device limit and a way to grant entitlements",
+      "priority": "P0",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "contracts/sources/customer.move",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "customer::create starts every customer with device_limit 0, so the first device registration aborts with a raw 'MoveAbort ... customer::enroll_checked abort code 2' (ELimit). Only test scripts call set_entitlement; no console screen or operator tool grants an entitlement. A new customer cannot register any device.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case GS-5a in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "A new customer can register devices on testnet without out-of-band help: a documented default allowance, a trial entitlement, or an operator grant screen in Administration (choose one and record it; subscriptions under SF-181 later drive the same entitlement).",
+        "When the limit is reached, the console says so in plain language (limit, active count, how to raise it) before signing; no raw MoveAbort text is shown.",
+        "Move and console tests cover a zero-limit customer, the limit boundary and the grant path."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-188",
+      "title": "Do not pre-select fleet-budget enrollment when the budget cannot cover the device float",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/get-started",
+        "dapp/src/components",
+        "dapp/src/lib/fleet-budget.ts"
+      ],
+      "resources": [],
+      "description": "On Get started, 'Enroll in my fleet budget' is pre-checked even when the new fleet budget holds 0 SUI, and registration aborts with a raw 'fleet_budget::pay abort code 11'.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case GS-5b in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "The option is unchecked or disabled with an explanation when the budget balance cannot cover the device float, and offers a link to fund the budget.",
+        "If the budget drops between preview and signing, the failure is explained in plain language, not as a raw MoveAbort.",
+        "Component tests cover empty, insufficient and sufficient budgets."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-189",
+      "title": "Allow access-policy grants to devices in a customer (managed) fleet",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/access",
+        "dapp/src/components",
+        "dapp/src/lib/access-policy.ts",
+        "contracts/sources/seal_policy.move"
+      ],
+      "resources": [],
+      "description": "In a customer fleet, the Access device picker lists only devices whose owner cap the wallet holds. Registered fleet devices are excluded and the page says 'No activated devices available. Enroll and activate a device in Devices first.', so decryption cannot be granted to them.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case AC-4a in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Devices registered in the selected customer fleet appear in the grant picker when the connected credential may administer that fleet, and a grant transaction succeeds on testnet with effects checked.",
+        "Devices the credential cannot grant to are shown with the reason instead of disappearing.",
+        "Tests cover owner-cap devices, customer-fleet devices and an unauthorized credential."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-190",
+      "title": "Show a plain message instead of a raw query error when a fleet has no storage",
+      "priority": "P1",
+      "area": "storage",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/components",
+        "dapp/src/lib/storage-reclaim.ts",
+        "dapp/src/lib/fleet-settings.ts"
+      ],
+      "resources": [],
+      "description": "In the publish wizard, the fleet-storage choice for a new fleet without storage shows 'Fleet storage unavailable: [\"fleet-storage\",\"testnet\",\"0x1843\u2026\",\"0x4253\u2026\"] data is undefined'.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case CO-4c in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "A fleet without storage shows a plain explanation and the action to create or fund storage; no query key or 'undefined' text is shown.",
+        "Query errors in all storage views go through one formatter with tests."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-191",
+      "title": "Make device-detail health text agree with the fleet's data configuration",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app/devices",
+        "dapp/src/components"
+      ],
+      "resources": [],
+      "description": "Device details say 'Configure the on-chain fleet (NEXT_PUBLIC_FLEET_DATA) to read health' while the page header says health comes from verified reports. Fleet data is configured; the device is simply not in the configured data fleet. This overlaps SF-170 acceptance 2 (PR #350); verify there first and close this ticket as a duplicate if that change fixes it.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case DV-3 in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Device details distinguish 'fleet data not configured', 'device not in the configured data fleet' and 'no report yet', with no environment-variable names in operator text.",
+        "Tests cover each case."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-192",
+      "title": "Remove the console errors logged on every page (favicon and Slush metadata CORS)",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/public",
+        "dapp/src/app/layout.tsx",
+        "dapp/src/lib"
+      ],
+      "resources": [],
+      "description": "Every page logs console errors on app.suifleet.io: favicon.ico returns 404, and the Slush wallet metadata request (https://api.slush.app/api/wallet/metadata) is blocked by CORS for the origin, followed by 'Error fetching metadata'.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case SH-9 in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "The export ships a favicon and no page logs a 404 for it.",
+        "The Slush metadata failure is fixed (allowed origin or an option that avoids the request) or caught and reported once as a warning without breaking connection; the cause is documented.",
+        "A browser test fails on unexpected console errors for every route."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-193",
+      "title": "Word signed-out empty states as signed out",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/app",
+        "dapp/src/components"
+      ],
+      "resources": [],
+      "description": "Signed out, the dashboard shows 0 tiles and 'Alerts unavailable: alerts not loaded yet. Check the fleet configuration and chain connection', Rollouts says 'No staged rollouts created by this account', and Administration says 'No supported resources found for this account'. Each implies a connected account.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case DB-7 in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Every page detects the signed-out state and shows a sign-in prompt with a one-line description of the page, instead of account or configuration error wording.",
+        "A test renders each route signed out and checks for the prompt."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-194",
+      "title": "Let operators re-select the same file after a validation alert on Deploy component",
+      "priority": "P2",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/components",
+        "dapp/src/app/firmware"
+      ],
+      "resources": [],
+      "description": "On Deploy component, after the name/version alert, choosing the same file again does nothing because the file input is not reset; a different file is needed.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case FW-7b in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Re-selecting the same file after any validation alert re-runs validation.",
+        "A component test covers the same-file re-selection."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-195",
+      "title": "Check version uniqueness across every catalog the account publishes to",
+      "priority": "P2",
+      "area": "fleet",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "dapp/src/components",
+        "dapp/src/lib",
+        "contracts/sources/component_catalog.move"
+      ],
+      "resources": [],
+      "description": "The publish wizard's duplicate check covers only the current catalog. A name and version already published in another of the account's catalogs (com.acme.GatewayAgent 1.4.2) passes, so the library can list two identical entries.",
+      "evidence": "Claude page-by-page test of app.suifleet.io and a local build of main 4d3adbee with the PR #363 testnet profile, 2026-10-27; case CO-5c in the test results (screenshots retained in the session evidence).",
+      "acceptance": [
+        "Publishing a name and version that already exists in any catalog visible in the library is blocked or requires an explicit choice, with the existing entry shown.",
+        "The library distinguishes same-named entries from different catalogs if they are allowed.",
+        "Tests cover same-catalog and cross-catalog duplicates."
+      ],
+      "validation": "Frontend typecheck and build, component tests, testnet walkthrough of the repro."
+    },
+    {
+      "key": "SF-196",
+      "title": "Require a second factor for sensitive fleet actions",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "contracts/sources",
+        "dapp/src",
+        "docs/WALLET_ONBOARDING.md",
+        "docs/OPERATIONS.md",
+        "docs/SECURITY_CI.md"
+      ],
+      "resources": [],
+      "description": "User request 2026-10-27: 'I think we should have 2FA'. SuiFleet signs in with a wallet, so a single compromised wallet or Google-backed zkLogin session can today publish firmware, deploy to every device, change access policies, withdraw budgets and hand over fleets. A second factor should protect those actions. Candidate designs: Sui multisig administrator addresses (for example wallet plus passkey or hardware key, k-of-n), a passkey (WebAuthn) co-signer, an on-chain approval step where a second credential confirms pending sensitive actions, and time-delayed execution with a cancel window. The console must stay serverless (SF-137).",
+      "evidence": "User request 2026-10-27; customer.move credentials/administrators; docs/WALLET_ONBOARDING.md (Enoki/zkLogin); SF-185 treasury multisig.",
+      "acceptance": [
+        "A design note lists the protected actions (at least publish, deploy and rollout advance to production groups, access-policy changes, budget and storage withdrawals, credential and administrator changes, fleet handover) and compares the candidate designs on security, usability, Slush and zkLogin compatibility, cost and recovery. It recommends one, and the user approves it before implementation.",
+        "The approved design is implemented end to end: an organization can require the second factor, sensitive actions without it fail on chain (not only in the UI), and the console guides setup, approval and recovery when a factor is lost.",
+        "Move tests cover bypass attempts through old package entry points and direct calls. A testnet run records digests for setup, an approved action, a rejected action and recovery.",
+        "Docs explain setup for operators."
+      ],
+      "validation": "Move tests and security check, frontend tests, testnet effects, real-wallet acceptance under SF-031/#32 policy."
     }
   ]
 }
