@@ -181,6 +181,9 @@ def main():
             slot = next(s for s in config['implementation_slots'] if s['project'] == args.project and s['family'] == owner['agent'])
             print(json.dumps(resume(dispatcher,project,slot,args.ticket,args.reason,args.runtime.resolve()/'worker.py')))
         finally:
+            # A first signal during restoration must not abort parent restart.
+            for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+                signal.signal(number, signal.SIG_IGN)
             # Release authority before restarting their sole normal owners.
             stack.close()
             subprocess.run(['systemctl','--user','start',*services],check=True)

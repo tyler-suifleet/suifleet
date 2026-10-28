@@ -148,8 +148,8 @@ class ControlLifecycleTests(unittest.TestCase):
     def test_main_restarts_after_success_failure_and_each_termination_signal(self):
         for failure, stage in [(None, 'resume'), (RuntimeError('resume failed'), 'resume')] + [
                 (number, stage) for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
-                for stage in ('stop', 'resume')]:
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                for stage in ('stop', 'resume', 'close', 'start')]:
+            with self.subTest(failure=failure, stage=stage), tempfile.TemporaryDirectory() as temporary:
                 state = Path(temporary)
                 config = state/'config.json'
                 config.write_text(json.dumps(dict(projects=[dict(id='project')],
@@ -173,13 +173,19 @@ class ControlLifecycleTests(unittest.TestCase):
                         for name in ('activation.lock','dispatcher.lock','daemon.lock'):
                             with (state/name).open('a') as lock:
                                 real_flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        if isinstance(failure, int) and stage == 'start':
+                            os.kill(os.getpid(), failure)
                         events.append('start')
                     return Mock(returncode=0)
                 dispatcher = Mock()
                 dispatcher.ticket.return_value = dict(agent='Codex')
+                def close():
+                    if isinstance(failure, int) and stage == 'close':
+                        os.kill(os.getpid(), failure)
+                dispatcher.db.close.side_effect = close
                 def resume(*args):
                     events.append('resume')
-                    if isinstance(failure, int):
+                    if isinstance(failure, int) and stage == 'resume':
                         os.kill(os.getpid(), failure)
                     if isinstance(failure, Exception):
                         raise failure
@@ -194,7 +200,7 @@ class ControlLifecycleTests(unittest.TestCase):
                      patch('dispatcher.Dispatcher',return_value=dispatcher), \
                      patch.object(control,'resume',side_effect=resume), patch('builtins.print'):
                     try:
-                        if failure is None:
+                        if failure is None or stage in ('close', 'start'):
                             control.main()
                         else:
                             with self.assertRaises(InterruptedError if isinstance(failure,int) else RuntimeError):
@@ -202,7 +208,7 @@ class ControlLifecycleTests(unittest.TestCase):
                     finally:
                         sys.path.remove(str(state.resolve()))
                 expected = ['activation.lock','stop']
-                if not isinstance(failure,int) or stage == 'resume':
+                if not isinstance(failure,int) or stage != 'stop':
                     expected += ['dispatcher.lock','daemon.lock','resume']
                     dispatcher.db.close.assert_called_once()
                 expected += ['start']
