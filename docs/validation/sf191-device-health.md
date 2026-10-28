@@ -100,3 +100,28 @@ wallet mutation, full cross-layer suite or physical result is claimed. Existing
 read-only Testnet evidence above remains historical evidence. New-head hosted CI,
 automatic testnet and fresh independent review remain required and pending; the
 coordinator collects them after this handoff. Deferred acceptance stays #32/#159.
+
+## Profile-base integration (2026-10-27)
+
+Merged snapshot/current base `0a7721c809616362a4d214cb8f8c77a5c47d3c29`
+cleanly. This brings in profile verification scripts/workflow and refreshed Testnet
+profile configuration; no additional source defect was reported by the supplied
+independent review and no health behavior change was needed.
+
+Passed on the integrated tree (all exit 0):
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including the three rendered health states and fleet-ops regression).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (16 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `node scripts/test_profiles.cjs` (5 passed).
+- `node scripts/check_profiles.cjs` (read-only gRPC verification of the committed
+  seal-testnet profile, chain `4c78adac`, package version 2; no wallet or writes).
+- `git diff --check origin/main`.
+
+Hosted CI/automatic testnet for the pushed head and fresh independent review remain
+pending and required; no hosted CI polling was performed. This integration is not
+approval. No new device-health live walkthrough, full cross-layer suite, deployment,
+wallet mutation or physical result is claimed. Earlier read-only health evidence
+remains historical. Deferred external acceptance remains #32/#159. No migration.
