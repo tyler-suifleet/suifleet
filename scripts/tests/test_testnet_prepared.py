@@ -76,6 +76,20 @@ class PreparedTests(unittest.TestCase):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
+        # Event SHA is immutable, but it is not sufficient authorization: both
+        # checkouts must immediately compare HEAD with the server-selected SHA.
+        for job in (prep, live):
+            steps = job['steps']
+            index = next(i for i, step in enumerate(steps)
+                         if step.get('name') == 'Checkout authenticated test revision')
+            checkout, verify = steps[index:index+2]
+            self.assertEqual(checkout['with']['ref'],
+                             '${{ github.event.workflow_run.head_sha || github.sha }}')
+            self.assertFalse(checkout['with']['persist-credentials'])
+            self.assertEqual(verify['if'], checkout['if'])
+            self.assertEqual(verify['env']['TEST_HEAD'], '${{ steps.plan.outputs.head }}')
+            self.assertEqual(verify['run'],
+                             'python3 "$RUNNER_TEMP/testnet_ci.py" --verify-checkout')
         self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
         self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')

@@ -122,8 +122,8 @@ class TrustTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
-        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertEqual(workflow.count('ref: ${{ steps.plan.outputs.head }}'), 2)
+        self.assertEqual(workflow.count('ref: ${{ github.event.workflow_run.head_sha || github.sha }}'), 2)
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
