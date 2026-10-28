@@ -389,6 +389,7 @@ test-manifest:
 	$(RUN) node scripts/test_walrus_publishers.cjs
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
+	$(RUN) node scripts/test_group_batch.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_data_browser.cjs
@@ -829,6 +830,10 @@ test-customer-fleets:
 test-customer-upgrade-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_protocol_localnet.py --customer-upgrade
+# SF-171: run in a disposable network-none container with Git history and warm Move cache.
+.PHONY: test-group-batch-localnet
+test-group-batch-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --group-batch
 .PHONY: test-data-metering
 test-data-metering:
 	$(RUN) node scripts/test_data_metering.cjs

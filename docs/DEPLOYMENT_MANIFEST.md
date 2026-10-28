@@ -122,6 +122,12 @@ without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md
 
 Treasury payment configuration and user-only multisig/SuiNS operations are documented in [TREASURY.md](TREASURY.md). `resolve --treasury-payee ADDRESS` and publication `--treasury-payee ADDRESS` pin a reviewed address; publication preserves the previous payee when omitted, including recovery. Missing payees preserve legacy nonpayment use, while the frontend payment guard fails closed.
 
+The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
+tells clients the package has the bounded batch membership entry points. Like
+`fleet_handover`, it is a single-type group recorded with its own introduction
+origin; manifests without it keep the single-device calls. See
+[bulk group membership](GROUP_BATCH.md).
+
 ## Committed public profiles
 
 `node scripts/check_profiles.cjs` verifies every `profiles/*/deployment.json`
