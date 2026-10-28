@@ -72,6 +72,41 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_candidate_clone_preserves_controller_and_has_complete_history(self):
+        import subprocess
+        from testnet_ci import checkout_candidate
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            origin = root/'origin'; controller = root/'controller'
+            def git(*args, cwd=origin):
+                return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
+            origin.mkdir()
+            git('init', '-q')
+            git('config', 'user.name', 'Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            (origin/'controller.py').write_text('trusted')
+            git('add', '.'); git('commit', '-qm', 'base')
+            base = git('rev-parse', 'HEAD')
+            git('clone', '--no-hardlinks', str(origin), str(controller), cwd=root)
+            git('checkout', '--detach', base, cwd=controller)
+            (origin/'controller.py').write_text('candidate')
+            git('commit', '-qam', 'head')
+            head = git('rev-parse', 'HEAD')
+            def run(args, **kwargs):
+                return subprocess.run(args, cwd=controller, **kwargs)
+            checkout_candidate(head, base, controller/'candidate', run)
+            self.assertEqual((controller/'controller.py').read_text(), 'trusted')
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=controller), base)
+            self.assertEqual((controller/'candidate/controller.py').read_text(), 'candidate')
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=controller/'candidate'), head)
+            self.assertEqual(git('show', base+':controller.py', cwd=controller/'candidate'), 'trusted')
+            self.assertTrue((controller/'candidate/.git').is_dir())
+            for bad in ('main', head+'\n', ''):
+                with self.assertRaises(RuntimeError):
+                    checkout_candidate(bad, base, root/'absent', run)
+            with self.assertRaises(RuntimeError):
+                checkout_candidate(head, base, controller/'candidate', run)
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
@@ -87,6 +122,20 @@ class PreparedTests(unittest.TestCase):
         self.assertLess(names.index('Pull and verify immutable prepared image without signing credentials'),names.index('Run bounded testnet acceptance'))
         self.assertLess(names.index('Recheck head and base immediately before spending'),names.index('Run bounded testnet acceptance'))
         self.assertNotIn('cargo build',json.dumps(live));self.assertNotIn('pnpm --dir',json.dumps(live))
+        for job in (prep, live):
+            checkouts = [step for step in job['steps'] if step.get('uses', '').startswith('actions/checkout@')]
+            self.assertEqual(len(checkouts), 1)
+            self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
+            commands = [step.get('run', '') for step in job['steps']]
+            self.assertTrue(any('--checkout-candidate candidate' in command for command in commands))
+            for command in commands:
+                if 'docker run ' in command:
+                    self.assertIn('-v "$PWD/candidate:/workspace"', command)
+                    self.assertNotIn('-v "$PWD:/workspace"', command)
+        final = next(step for step in steps if step.get('name') == 'Publish final exact-head status')
+        self.assertNotIn('working-directory', final)  # Also report a failed clone.
+        self.assertEqual(final['env']['TEST_EVIDENCE_DIR'], 'candidate/evidence')
+
         self.assertIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
 
 
