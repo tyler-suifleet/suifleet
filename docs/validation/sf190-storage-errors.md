@@ -92,3 +92,22 @@ PR #388 CodeQL repair (2026-10-27):
   No scanner threshold, suppression, dependencies or app behavior changed.
 - Hosted CI/automatic Testnet and fresh independent review remain pending.
   Deferred manual wallet/provider/physical/mainnet acceptance stays in #32/#159.
+
+PR #388 receipt-regression CodeQL repair (2026-10-27):
+
+- Inspected exact failed run 40623904566/job 122604155500 and its sanitized
+  javascript-typescript security artifact: three HIGH `js/file-system-race`
+  findings at scripts/test_storage_receipt.cjs lines 49, 51 and 55. The test
+  checked receipt permissions by pathname before reopening that pathname.
+- Receipt inspection now opens once, reads permissions with fstatSync and reads
+  content through the same descriptor, closing it in finally. Existing-file and
+  symlink refusal assertions and default directory/file permission checks remain.
+  No suppressions or security gate changes.
+- Receipt regression, frontend typecheck/build and all eight frontend regression
+  scripts listed above passed; git diff --check passed. The existing Tailwind
+  module-type warning remains. No application, dependency or chain code changed;
+  no new testnet run or write was needed for this test-only repair.
+- Fetched and merged origin/main: already up to date at 0ae332e4. CodeQL CLI is
+  unavailable locally; hosted CodeQL, ordinary CI, automatic testnet and fresh
+  independent review remain pending after push. Deferred acceptance remains
+  unrun in #32/#159; this repair is not approval.

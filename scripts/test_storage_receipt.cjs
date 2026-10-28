@@ -41,23 +41,30 @@ async function run(receipt) {
   await new Promise(resolve => setImmediate(resolve));
   return { error, output, exitCode: context.process.exitCode };
 }
+function readReceipt(file) {
+  const descriptor = fs.openSync(file, 'r');
+  try {
+    return { mode: fs.fstatSync(descriptor).mode & 0o777, text: fs.readFileSync(descriptor, 'utf8') };
+  } finally { fs.closeSync(descriptor); }
+}
 (async () => {
   try {
     const explicit = path.join(directory, 'explicit.json');
     assert.equal((await run(explicit)).output.writes, 0);
-    assert.equal(fs.statSync(explicit).mode & 0o777, 0o600);
-    const original = fs.readFileSync(explicit, 'utf8');
+    const initial = readReceipt(explicit);
+    assert.equal(initial.mode, 0o600);
+    const original = initial.text;
     assert.equal((await run(explicit)).error?.code, 'EEXIST');
-    assert.equal(fs.readFileSync(explicit, 'utf8'), original);
+    assert.equal(readReceipt(explicit).text, original);
     const link = path.join(directory, 'symlink.json');
     fs.symlinkSync(explicit, link);
     assert.equal((await run(link)).error?.code, 'EEXIST');
-    assert.equal(fs.readFileSync(explicit, 'utf8'), original);
+    assert.equal(readReceipt(explicit).text, original);
     assert.equal((await run()).output.writes, 0);
     const privateDirectory = fs.readdirSync(directory).find(name => name.startsWith('sf190-testnet-'));
     assert(privateDirectory);
     assert.equal(fs.statSync(path.join(directory, privateDirectory)).mode & 0o777, 0o700);
-    assert.equal(fs.statSync(path.join(directory, privateDirectory, 'receipt.json')).mode & 0o777, 0o600);
+    assert.equal(readReceipt(path.join(directory, privateDirectory, 'receipt.json')).mode, 0o600);
     console.log('PASS: offline repro receipts are private; existing files and symlinks are rejected without overwrite');
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
