@@ -25,6 +25,50 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     page.on('pageerror', error => { errors.push(error.message); console.error(error.message); });
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
+    // SF-194: after any validation alert the same file can be chosen again. A
+    // browser only fires change for a different value, so each selection must
+    // clear the input; re-selecting must then re-run validation.
+    const fileInput = page.locator('input[type=file]');
+    const selectSame = async () => {
+      await fileInput.setInputFiles({ name: 'same.bin', mimeType: 'application/octet-stream', buffer: Buffer.from('same artifact') });
+      assert.equal(await cleared(), true);
+      // SF-165 reviews the period/price before the explicit upload action.
+      await page.getByRole('button', { name: 'Upload selected artifact' }).click();
+    };
+    const cleared = () => fileInput.evaluate(input => input.value === '' && input.files.length === 0);
+    const alerts = () => page.evaluate(() => window.uploadAcceptance.alerts());
+    for (const expected of [1, 2]) {
+      await selectSame();
+      await page.waitForFunction(n => window.uploadAcceptance.alerts().length === n, expected);
+      assert.match((await alerts())[expected - 1], /Enter component name and version/);
+      assert.equal(await cleared(), true);
+    }
+    assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 0);
+    await page.getByPlaceholder('my-app', { exact: true }).fill('same-file');
+    await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
+    // Confidential delivery (the default) without Seal key servers is rejected before upload.
+    await selectSame();
+    await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 3);
+    assert.match((await alerts())[2], /Confidential delivery needs Seal key servers/);
+    assert.equal(await cleared(), true);
+    await page.getByRole('radio').nth(1).check();
+    await selectSame();
+    await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 4);
+    assert.match((await alerts())[3], /Confirm that this content may be stored publicly/);
+    assert.equal(await cleared(), true);
+    await page.getByRole('checkbox').first().check();
+    await selectSame();
+    await page.waitForFunction(() => window.uploadAcceptance.count() === 1);
+    await page.evaluate(() => window.uploadAcceptance.finish(0, 503));
+    await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 5);
+    assert.match((await alerts())[4], /Upload failed/);
+    assert.equal(await cleared(), true);
+    await selectSame();
+    await page.waitForFunction(() => window.uploadAcceptance.count() === 2);
+    await page.evaluate(() => window.uploadAcceptance.finish(1));
+    await page.getByText(/same\.bin.*uploaded/).waitFor();
+    // The main flow starts from a fresh page and fixture state.
+    await page.reload();
     await page.getByPlaceholder('my-app', { exact: true }).fill('upload-test');
     await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
     await page.getByRole('radio').nth(1).check();
@@ -79,7 +123,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByText('Deployment created', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 4);
     assert.deepEqual(errors, []);
-    console.log('PASS: real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation allow explicit retry; success shown without React key warnings');
+    console.log('PASS: same file re-selectable after missing-name, confidential-setup, public-acknowledgement and upload-failure alerts; real upload UI progress/unknown total/processing; duplicate clicks yield one upload; upload failure and wallet cancellation allow explicit retry; success shown without React key warnings');
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise(resolve => server.close(resolve));
