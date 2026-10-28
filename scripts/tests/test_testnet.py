@@ -121,17 +121,13 @@ class TrustTests(unittest.TestCase):
     def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
-        immutable_ref = "ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
-        self.assertEqual(workflow.count(immutable_ref), 2)
+        checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
+        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
         self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
-        prepare, validate = workflow.split('\n  validate:', 1)
-        for job, execution in ((prepare, 'docker build --tag suifleet-dev:testnet'),
-                               (validate, 'SUIFLEET_TESTNET_KEY')):
-            selected = job.split('      - name: Checkout authenticated test revision', 1)[1]
-            self.assertIn(immutable_ref, selected)
-            verification = selected.split('      - name: Verify checkout matches authenticated revision', 1)[1]
-            self.assertIn('TEST_HEAD: ${{ steps.plan.outputs.head }}', verification)
-            self.assertLess(verification.index('--verify-checkout'), verification.index(execution))
+        self.assertEqual(workflow.count('--checkout-candidate candidate'), 2)
+        verify = checkout.index('--verify-checkout')
+        self.assertLess(verify, checkout.index('docker build --tag suifleet-dev:testnet'))
+        self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
 
     def test_live_gate_checkout_and_token_permissions(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()
@@ -522,7 +518,7 @@ class TrustTests(unittest.TestCase):
         self.assertIn("if: inputs.gate == 'hardware'", workflow)
         testnet = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('-e GITHUB_EVENT_NAME', testnet)
-        self.assertIn('path: evidence/*.json', testnet)
+        self.assertIn('path: candidate/evidence/*.json', testnet)
 
     def test_unchanged_custodied_fixture_reuses_state_without_mutation(self):
         import live_package_upgrade as live
