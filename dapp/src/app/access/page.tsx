@@ -5,7 +5,7 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 import Link from "next/link";
 import { isValidSuiAddress, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import type { Transaction } from "@mysten/sui/transactions";
 import { PageHeader, InfoCard } from "@/components/ui";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
