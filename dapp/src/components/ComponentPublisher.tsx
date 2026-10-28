@@ -17,6 +17,8 @@ import { ConfigurationFields } from "./ConfigurationFields";
 import { UploadProgress } from "./UploadProgress";
 import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
 import { assertComponentRecipe, type ComponentRecipe } from "@/lib/recipe-schema";
+import { assertVersionAvailable } from "@/lib/component-library";
+import { ExistingLibraryEntry } from "./ExistingLibraryEntry";
 
 type Row = { id: number; os: string; arch: string; file?: File; install: string };
 const input = "block w-full rounded border border-gray-300 bg-white p-2 text-sm";
@@ -49,7 +51,8 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   function validateIdentity() {
     // Validate with the same contract-facing validator used for registration.
     validateComponent(name, version, rows.map(r => ({ os: r.os, arch: r.arch, recipeBlobId: "pending", recipeSha256: "0".repeat(64), artifactSha256: "0".repeat(64) })));
-    if (versions.some(v => v.catalogId === catalog && v.name === name && v.version === version)) throw new Error("This immutable version already exists. Choose a new version number.");
+    // Every catalog in the library, not only the selected one: the contract cannot see across catalogs.
+    assertVersionAvailable(versions, catalog, name, version);
   }
   function continueTo(next: number) {
     setError("");
@@ -105,6 +108,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     <p className="text-sm text-gray-600">Publishing adds a reusable, immutable release to your library. It does not deploy, install or start software on any device.</p>
     <ol aria-label="Publishing steps" className="flex flex-wrap gap-3 text-sm">{["Name & version", "Platform artifacts", "Review & publish"].map((s, i) => <li key={s} aria-current={step === i + 1 ? "step" : undefined} className={step === i + 1 ? "font-semibold text-blue-700" : "text-gray-500"}>{i + 1}. {s}</li>)}</ol>
     {error && <p role="alert" className="text-sm text-red-700 break-words">{error}</p>}
+    {!receipt && <ExistingLibraryEntry versions={versions} catalog={catalog} name={name} version={version} />}
     {receipt ? <div role="status" className="space-y-2 break-words"><h3 ref={stepHeading} tabIndex={-1} className="font-semibold">Version published</h3><p>{name} {version} is in the library. Choose “Deploy this version” there to select targets and review a deployment.</p><p className="text-xs">Confirmed transaction: {receipt.digest}</p><details><summary>Storage expiry and renewal</summary><pre className="whitespace-pre-wrap text-xs">{receipt.warnings.join("\n")}</pre></details>{receipt.blobs.map((b, i) => <ReleaseStorageStatus key={i} blobId={b.blobId} blobObjectId={b.blobObjectId} />)}</div> : <>
       <h3 ref={stepHeading} tabIndex={-1} className="font-semibold">{["Name & version", "Platform artifacts", "Review & publish"][step - 1]}</h3>
       <fieldset disabled={busy} className="space-y-4 min-w-0">
