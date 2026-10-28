@@ -282,17 +282,42 @@ def verify_checkout(expected, run=subprocess.run):
         raise RuntimeError('checkout does not match authenticated revision')
 
 
+def checkout_authenticated(expected, base, selection, run=subprocess.run):
+    """Select only a freshly authorized immutable commit, with hooks disabled.
+
+    The trusted controller owns selection and verification as one operation;
+    neither a branch name nor FETCH_HEAD can choose executable revision code.
+    """
+    if not isinstance(expected, str) or not SHA.fullmatch(expected):
+        raise RuntimeError('checkout expectation must be an immutable commit SHA')
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise RuntimeError('checkout base must be an immutable commit SHA')
+    if not selection or selection.get('head') != expected or selection.get('base') != base:
+        raise RuntimeError('superseded head/base: no revision checked out')
+    git = ['git', '-c', 'core.hooksPath=/dev/null']
+    run(git + ['fetch', '--no-tags', 'origin', expected], check=True)
+    run(git + ['checkout', '--detach', expected], check=True)
+    verify_checkout(expected, run)
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
+    parser.add_argument('--checkout-authenticated', action='store_true')
     # `error` marks a cancelled run: never a source failure, never success.
     parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
-    if args.verify_checkout:
+    if args.checkout_authenticated:
+        if args.status or args.recheck or args.probe_environment or args.verify_checkout:
+            parser.error('authenticated checkout cannot perform other operations')
+        with open(os.environ['GITHUB_EVENT_PATH']) as stream:
+            selection = plan(os.environ['GITHUB_EVENT_NAME'], json.load(stream), repo)
+        checkout_authenticated(os.environ['TEST_HEAD'], os.environ['BASE_REF'], selection)
+    elif args.verify_checkout:
         if args.status or args.recheck or args.probe_environment:
             parser.error('checkout verification cannot perform other operations')
         verify_checkout(os.environ['TEST_HEAD'])
