@@ -4,7 +4,8 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { PageHeader, ConnectionRequired } from "@/components/ui";
 import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import { useDevices } from "@/hooks/useDevices";

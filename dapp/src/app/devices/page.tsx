@@ -2,7 +2,8 @@
 
 import { deviceCapacityMessage, registrationFailure } from "@/lib/customer-entitlements";
 import { Fragment, useEffect, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { buildIndexGroupTx, existingInboxes, inboxSupported, LISTING_BATCH, unlistedMembers } from "@/lib/fleet-inbox";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";

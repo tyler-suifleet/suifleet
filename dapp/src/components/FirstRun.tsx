@@ -3,7 +3,8 @@
 import { deviceCapacityMessage, registrationFailure } from "@/lib/customer-entitlements";
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useCurrentAccount, useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { NETWORK } from "@/lib/constants";
