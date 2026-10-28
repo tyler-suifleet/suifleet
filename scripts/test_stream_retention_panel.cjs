@@ -14,6 +14,7 @@ const react={
  useEffect(fn,deps){const i=cursor++;const prev=slots[i];if(!prev || deps.some((d,j)=>d!==prev.deps[j])){effects.push(()=>{prev?.cleanup?.();slots[i]={deps,cleanup:fn()};});}},
 };
 const dependencies={react,
+ "@/hooks/useCurrentAccount":{useCurrentAccount:()=>account},
  '@mysten/dapp-kit-react':{useCurrentClient:()=>client,useCurrentAccount:()=>account},
  '@/lib/customer-fleets':{fetchCustomerFleets:async()=>[{...selection.fleet,administrator:admin}]},
  '@/lib/data-authority':{selectedDataAuthority:loader()('lib/data-authority.ts').selectedDataAuthority},

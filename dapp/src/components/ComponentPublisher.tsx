@@ -3,7 +3,8 @@ import { PublisherFailure } from "./PublisherFailure";
 import { PublisherError } from "@/lib/walrus";
 
 import { useEffect, useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { buildPublishVersionTx, type ComponentVersion } from "@/lib/catalog";
 import { validateComponent } from "@/lib/component-selector";

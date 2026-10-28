@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { addSessionPublisher, sessionEndpoints, removeSessionPublisher } from "@/lib/walrus";
 import { NETWORK } from "@/lib/constants";

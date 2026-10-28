@@ -1,6 +1,7 @@
 "use client";
 
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useState } from "react";
 import { fetchRetention, retentionOrigin } from "@/lib/retention";
 import { parseToken } from "@/lib/network-costs";
