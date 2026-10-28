@@ -15,6 +15,7 @@ REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
 CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
 SEAL_POLICY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["seal_policy"])
 HANDOVER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_handover"])
+GROUP_BATCH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["group_batch"])
 BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
 INBOX_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_inbox"])
 ROLLOUT_HEALTH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_health"])
@@ -30,7 +31,7 @@ def manifest_types(manifest):
         if present and len(present) != len(group):
             raise ValueError(f"partial {label} type origins")
         types += tuple(present)
-    return types + tuple(n for n in HANDOVER_TYPES if n in manifest["type_origins"])
+    return types + tuple(n for n in HANDOVER_TYPES + GROUP_BATCH_TYPES if n in manifest["type_origins"])
 
 CLIENT_VERSIONS = {"dapp": "0.1.1", "edge": "0.2.2"}
 
@@ -223,7 +224,7 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES + GROUP_BATCH_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.1" if all(n in table for n in SHARD_TYPES) else "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.2" if all(n in table for n in SHARD_TYPES) else "0.2.1", "max_exclusive": "0.3.0"}},
