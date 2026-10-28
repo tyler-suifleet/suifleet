@@ -4434,6 +4434,30 @@
         "Focused offline tests cover stall/progress, duplicate/restarted ticks, uncertain launch, surviving descendants, timeout/nonzero/cooldown and config rejection. Additive install only, then verify actual timer and first launch."
       ],
       "validation": "Offline meaningful unit/integration tests, Python compile, additive installation check and actual timer/worker verification; small Tyler-authored commits, normal review. User explicitly authorizes watchdog activation."
+    },
+    {
+      "key": "SF-202",
+      "title": "Prepare testnet CI in parallel and validate through an isolated wallet pool",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/testnet.yml",
+        "scripts",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "User authorized moving secretless preparation outside wallet concurrency and a small pool of dedicated testnet CI wallets. Reduce queue time without weakening exact-head/base authentication, protected signing, spending limits, encrypted fixture handling or independent review.",
+      "evidence": "Measured run40704016195 waited46min then executed15min: Docker3m6s, dependencies2m2s, live acceptance9m38s. Whole-workflow single-wallet concurrency unnecessarily serializes preparation.",
+      "acceptance": [
+        "Authenticate revisions and prepare dependencies outside wallet concurrency without exposing signing credentials; protected signing rechecks exact head/base and prepared artifact provenance/integrity before execution.",
+        "Bounded configurable pool schedules one wallet per run, per-wallet serialized mutations and isolated authenticated encrypted fixture restore/upload/pruning; never duplicate acceptance through a fanout matrix.",
+        "Retain primary dedicated CI wallet, provision only explicitly authorized dedicated testnet pool identities securely, no printed/committed keys, preserve per-run non-replenishing budgets and testnet-only checks.",
+        "Tests cover parallel preparation, pool selection, same-wallet exclusion, distinct wallet/cache isolation, stale or tampered prepared artifacts and fixtures, one-wallet fallback and failures; record real hosted and live limitations honestly."
+      ],
+      "validation": "Focused offline workflow/security/controller/cache regressions, meaningful parallelism/isolation tests, locked preparation build, dedicated testnet smoke under shared-wallet leases/budgets; normal exact-head independent review and CI."
     }
   ]
 }
