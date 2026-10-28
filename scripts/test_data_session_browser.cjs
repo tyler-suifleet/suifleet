@@ -9,7 +9,9 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 
 const page_ = path.resolve(__dirname, "../dapp/src/app/data/page.tsx"), fakes = path.resolve(__dirname, "browser/data-session-fakes.js");
-const faked = new Set(["@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/hooks/useFleetDataConfig", "@/hooks/useFleetSelection", "@/lib/fleet-data",
+// Account reads now enter through the hydration-safe application hook. Keep
+// this component fixture on its controlled wallet boundary, like the SDK reads.
+const faked = new Set(["@/hooks/useCurrentAccount", "@mysten/dapp-kit-react", "@mysten/seal", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetTransaction", "@/hooks/useFleetDataConfig", "@/hooks/useFleetSelection", "@/lib/fleet-data",
   "@/components/FleetDataBrowser", "@/components/DataUsage", "@/components/StreamRetention", "@/lib/stream-retention", "@/lib/fleet-bulk", "@/lib/fleet-budget", "@/lib/deployment-manifest", "@/lib/seal", "@/lib/constants"]);
 const fakeDependencies = { name: "data-session-fakes", setup(b) {
   b.onResolve({ filter: /.*/ }, (args) => args.importer === page_ && faked.has(args.path) ? { path: fakes } : undefined);

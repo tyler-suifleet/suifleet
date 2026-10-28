@@ -272,7 +272,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -850,3 +850,10 @@ test-data-metering:
 .PHONY: test-rollout-audit-localnet
 test-rollout-audit-localnet:
 	$(RUN) python3 -c 'import sys; sys.path.insert(0,"scripts"); from test_protocol_localnet import main; main("scripts/test_rollout_audit_upgrade.cjs")'
+
+# Validate the actual export with a fixture wallet and blocked external I/O.
+.PHONY: test-hydration
+test-hydration:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
+	$(RUN) bash -c 'set -a; source profiles/seal-testnet/frontend.env; set +a; cd dapp && pnpm build'
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
