@@ -1138,7 +1138,9 @@ class ClassifiedStatus(unittest.TestCase):
         self.assertIn("job.status == 'cancelled' && 'error'", workflow)
         self.assertIn('ACCEPTANCE_OUTCOME: ${{ steps.acceptance.outcome }}', workflow)
         self.assertIn('id: acceptance', workflow)
-        self.assertIn('DEPENDENCIES_OUTCOME: ${{ steps.dependencies.outcome }}', workflow)
+        # Validation is reachable only after the secretless preparation job succeeds.
+        self.assertIn("needs.prepare.outputs.run == 'true'", workflow)
+        self.assertIn('DEPENDENCIES_OUTCOME: success', workflow)
 
 
 if __name__ == '__main__':
