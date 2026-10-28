@@ -229,9 +229,9 @@ Do not move a ticket to Review or mark a draft Ready just to dispatch it. Do not
 hardware/authorization blocker. Re-read existing notes and specify only work that can proceed under current authorization.
 Check ALL affected queues, not only the first failed PR; a blocked treasury decision must not prevent unrelated reviews.
 If the command or another necessary operational route is missing/broken, repair that infrastructure under its existing
-issue claim (or publish/claim a scoped Codex issue if none exists), test and install the contained fix under the user's
-standing operational-recovery authorization. Do not merely report 'no supported route' and exit. Never bypass ownership
-or acceptance gates. Verify launched worker identities and actual results; report failures honestly.
+issue claim (or publish/claim a scoped Codex issue if none exists), implement and test the contained fix, then hand it
+to normal PR review. Installation is permitted only through the reviewed merged-only path; never install unreviewed
+working-tree changes. Record the pending review as the next action. Never bypass ownership or acceptance gates. Verify launched worker identities and actual results; report failures honestly.
 Prefer bounded operational fixes. Service restarts must preserve child workers and respect maintenance holds.
 Verify actual PID/start identities and changed tracker/PR state; a successful command alone is insufficient evidence.
 Do not expose credentials or put raw logs into the report. Write {result} as one JSON object:

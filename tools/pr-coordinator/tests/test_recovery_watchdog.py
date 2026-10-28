@@ -100,6 +100,11 @@ class WatchdogTests(unittest.TestCase):
             self.assertNotIn('GH_TOKEN', kwargs['env'])
             self.assertNotIn('PR_COORDINATOR_CLAIM_TOKEN', kwargs['env'])
             self.assertNotIn('PR_COORDINATOR_ACTIVE', kwargs['env'])
+            prompt = (Path(state['run']['directory'])/'prompt.txt').read_text()
+            self.assertIn('hand it\nto normal PR review', prompt)
+            self.assertIn('only through the reviewed merged-only path', prompt)
+            self.assertIn('never install unreviewed\nworking-tree changes', prompt)
+            self.assertNotIn('test and install the contained fix', prompt)
             self.assertTrue(kwargs['start_new_session'])
             return child
         with patch.dict(os.environ, GH_TOKEN='secret', PR_COORDINATOR_CLAIM_TOKEN='claim', PR_COORDINATOR_ACTIVE='1'), \
