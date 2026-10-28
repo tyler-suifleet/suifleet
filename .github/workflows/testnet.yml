@@ -14,7 +14,7 @@ permissions:
   statuses: write
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
@@ -178,7 +178,7 @@ jobs:
         run: python3 scripts/testnet_ci.py --status error
   validate:
     needs: [prepare, publish]
-    if: github.ref == 'refs/heads/main' && needs.prepare.outputs.run == 'true'
+    if: github.ref == 'refs/heads/main' && needs.prepare.outputs.run == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     concurrency:
       group: ${{ needs.prepare.outputs.concurrency }}
       cancel-in-progress: false
