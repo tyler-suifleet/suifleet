@@ -45,6 +45,15 @@ Additional catalog creation/selection, manifest IDs/digests and Greengrass impor
 under advanced tools/details. Catalog selection changes the destination for new
 publications, while browsing continues to show all the publisher’s catalogs.
 
+A name and version must be unique across the whole library, not only within the
+selected catalog. The contract keys versions by `name@version` inside one catalog
+and cannot see the publisher's other catalogs, so the publisher and Greengrass
+import check every catalog shown in the library before uploading or signing. A
+match blocks publication and shows the existing entry, its catalog and a link to
+deploy it. Versions published before this check may repeat a name and version in
+two catalogs; the library labels each such entry with its catalog. A wallet or
+script that calls the contract directly is not covered by this client check.
+
 ## Regression checks
 
 Use the locked frontend dependencies and pinned Node/pnpm baseline from
@@ -66,7 +75,9 @@ Wallet Standard submission and storage responses are controlled fixtures; it
 uses no public network or production credentials. It covers loading/disconnect,
 setup rejection, library errors/search, guided multi-platform ordering, upload
 progress/failure, confidential fail-closed behavior, duplicate clicks, wallet
-rejection/retry, effects-confirmation UI states, immutable duplicate detection,
+rejection/retry, effects-confirmation UI states, same- and cross-catalog
+duplicate detection (publisher and import) with the existing entry shown,
+catalog labels on repeated library entries,
 accessible control names, mobile reflow and deployment navigation without writes.
 The separate wallet regression exercises the actual application wallet hook and
 independent effects checking. Seal tests in `make dapp-typecheck` exercise real
