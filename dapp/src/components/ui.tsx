@@ -69,8 +69,8 @@ export function ConnectionRequired({ title, description }: { title: string; desc
       <div aria-hidden="true" className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="4" y="5" width="16" height="14" rx="3"/><path d="M15 10h5v5h-5z"/></svg>
       </div>
-      <h2 className="font-semibold text-slate-900">Connect your account to continue</h2>
-      <p role="status" className="mt-2 max-w-lg text-sm leading-relaxed text-slate-600">Use the wallet control in the top bar to connect the account that manages your fleet.</p>
+      <h2 className="font-semibold text-slate-900">Sign in to continue</h2>
+      <p role="status" className="mt-2 max-w-lg text-sm leading-relaxed text-slate-600">Sign in with the wallet control in the top bar, using the account that manages your fleet.</p>
       <Link href="/get-started" className="mt-5 inline-flex text-sm font-medium text-blue-700 hover:underline">New to SuiFleet? Set up your first device →</Link>
     </section>
   </div>;
