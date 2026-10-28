@@ -98,6 +98,13 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --component rust-src \
     && cargo --version
 
+# Offline workflow-structure regressions parse YAML. Keep test-only packages in
+# a final layer so adding them preserves the checksum-pinned toolchain cache.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
+USER dev
+
 WORKDIR /workspace
 
 CMD ["sleep", "infinity"]
