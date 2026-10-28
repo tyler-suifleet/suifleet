@@ -85,3 +85,18 @@ Fetched and merged `origin/main`: already up to date at
 `c4c0805c7abd8cfbfbf0d5e0df4a6f285b8da259`, also the snapshot base. Fresh
 independent review and all new-head hosted CI/testnet gates remain pending;
 this repair is not approval. Deferred external acceptance remains #32/#159.
+
+## Current-base integration (2026-10-27)
+
+Integrated snapshot/current `origin/main`
+`0ae332e4cd24e3ccc1e66ea3d7ec1bde13090797` with a merge commit. Upstream
+changes are confined to the two tracking JSON documents; no frontend conflict or
+additional source repair was needed. The earlier CI assertion and whitespace
+feedback fixes remain present. After integration, passed frontend typecheck,
+production build (16 static pages), Chrome dashboard regression, and the complete
+`INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+target. `git diff --check origin/main` also passed. No new live test, deployment,
+wallet mutation, full cross-layer suite or physical result is claimed. Existing
+read-only Testnet evidence above remains historical evidence. New-head hosted CI,
+automatic testnet and fresh independent review remain required and pending; the
+coordinator collects them after this handoff. Deferred acceptance stays #32/#159.
