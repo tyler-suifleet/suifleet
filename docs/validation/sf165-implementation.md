@@ -400,3 +400,44 @@ ordinary CI and automatic Testnet must validate the pushed head, followed by
 fresh independent review. No hosted CI watching or polling was performed.
 Manual real-wallet/production-provider, physical-device and mainnet acceptance
 remains deferred and unrun in #32/#159; this repair is not approval.
+
+## Current-base feedback integration (2026-10-28)
+
+The independent review of `ea36e1a1` reported no actionable source/security
+findings; its remaining blockers were hosted CI and automatic Testnet. The next
+snapshot includes successful ordinary/security jobs for that old head, but its
+Testnet status remains pending against the previous base. Those results do not
+approve this integration.
+
+Merged snapshot/current main `24b7752b95901e78b05f4afe4eac1759579b7ece`,
+including the ordinary CI runtime budget and authenticated coordinator timeout
+recovery. The shared YAML dependency and candidate-isolation fixes already match
+main. Resolved two equivalent tunnel-probe conflicts by retaining main's function
+and both existing regression invocations. No dapp, contract, edge, interface or
+dependency changes were needed; no migration is required.
+
+Verification after integration:
+
+- Pinned `suifleet-sf165:ci-repair`, network disabled, checkout and pnpm store
+  mounted at their original host paths: `make dapp-typecheck && make dapp-build`
+  PASS, including 158 Testnet fixture tests, 60 operator tests, frontend offline
+  prerequisites, TypeScript and all 17 static pages. An existing optional
+  prerequisite test was skipped; no live transaction was submitted.
+- Same container: `node scripts/test_release_storage.cjs` PASS;
+  `python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`
+  3 PASS; `-p 'test_tunneling_process*.py'` 4 PASS;
+  `python3 -m unittest discover -s tools/pr-coordinator/tests -p test_job_timeouts.py`
+  9 PASS (offline authenticated timeout fixtures).
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_security_audit.py`: 23 PASS. CI YAML parses, retains the 120-minute
+  check budget and invokes both tunnel regression suites. `git diff --check`
+  and snapshot-base ancestry PASS.
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+  tools/pr-coordinator/tests`: all 422 tests PASS (offline fixtures).
+
+Hosted CI/automatic Testnet for the new pushed head remains pending and was not
+watched or polled. Fresh independent review and successful exact-head/current-base
+checks remain required. No new Move/OTA, browser, public-network or physical test
+was run; historical Testnet publication/extension receipts are unchanged. Manual
+real-wallet/production-provider, physical and actual-mainnet acceptance remains
+unrun in #32/#159. No deployment, hardware programming or production credentials.
