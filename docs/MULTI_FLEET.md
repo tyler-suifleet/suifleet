@@ -40,6 +40,8 @@ reporting check the exact fleet inventory. An administrator of two fleets cannot
 insert one fleet's device/group into the other. Immutable catalog versions remain
 explicitly shared, authenticated inputs. Catalog publishing authority stays with
 the catalog publisher; customer membership does not confer publisher authority.
+Administrators change many memberships at once with the bounded batch entry
+points described in [bulk group membership](GROUP_BATCH.md).
 
 FleetData, storage, gas accounts and authenticated archive identities keep their
 existing budget/storage/registry bindings and layouts. Explicit support grants
