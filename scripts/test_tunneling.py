@@ -46,16 +46,16 @@ def wait_for(fn, label, timeout=15):
 
 def proxy_pids(proc=Path("/proc")):
     pids = []
-    for entry in proc.iterdir():
-        if not entry.name.isdigit():
+    for process in proc.iterdir():
+        if not process.name.isdigit():
             continue
         try:
-            name = (entry / "comm").read_text().strip()
+            name = (process / "comm").read_text().strip()
         except (FileNotFoundError, ProcessLookupError):
-            # A process may exit after enumeration or while comm is read.
+            # Processes can exit after enumeration or while procfs is read.
             continue
         if name == "suifleet-localp":
-            pids.append(int(entry.name))
+            pids.append(int(process.name))
     return pids
 
 
