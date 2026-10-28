@@ -118,3 +118,32 @@ root, receipt/index keys and relocated group/catalog keys retain their own
 introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
+
+## Committed public profiles
+
+`node scripts/check_profiles.cjs` verifies every `profiles/*/deployment.json`
+against fresh gRPC chain identity, package/version/type origins, UpgradeCap and
+registry facts using the console's verifier. It also requires `frontend.env` to
+contain exactly the same manifest. Install locked dApp dependencies first.
+The read-only **Deployment profiles** workflow runs on PRs, main pushes and every
+six hours; it uses no wallet or transaction credentials. A stale profile fails
+with its path and regeneration instructions. Network failures also fail the check.
+
+Any workflow or operator upgrading a shared testnet package must regenerate and
+commit its profile's `deployment.json` and `frontend.env` in the same change,
+preserving introduction-package type origins and the existing shared registry.
+Run the checker before rebuilding the console. If publication cannot be included,
+record the reason, transaction digest, latest package/version and recovery action
+in the existing issue/PR; never describe the old profile as usable. Disposable CI
+package-upgrade fixtures are not shared console deployments and do not update
+committed profiles. The SF-173 evaluation upgrade is the shared deployment case:
+its v2 metadata was extracted into SF-186 independently of the evaluation fleet.
+
+This check establishes read-only deployment compatibility, not manual wallet,
+production Seal-provider or hardware acceptance (retained in #32 and #159).
+
+For a public account read smoke test (no signer), run
+`node scripts/verify_profile_console.cjs profiles/seal-testnet 0xPUBLIC_OWNER_ADDRESS`.
+It runs the console's inventory, library, deployment and enrollment queries plus
+a balance read after deployment verification. This does not simulate a browser
+wallet connection or authorize writes.
