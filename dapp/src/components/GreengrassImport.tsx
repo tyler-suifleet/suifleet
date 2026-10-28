@@ -13,7 +13,9 @@ import type { AccessPolicy } from '@/lib/access-policy';
 import { DeliveryFields } from '@/components/DeliveryFields';
 import { FleetStorageChoice, fleetStorageSelected } from '@/components/FleetStorageChoice';
 import { useFleetBlobStore } from '@/hooks/useFleetStorage';
-import { buildPublishVersionTx } from '@/lib/catalog';
+import { buildPublishVersionTx, type ComponentVersion } from '@/lib/catalog';
+import { assertVersionAvailable } from '@/lib/component-library';
+import { ExistingLibraryEntry } from '@/components/ExistingLibraryEntry';
 import type { Transaction } from '@mysten/sui/transactions';
 
 async function sha256(file:File){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await file.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');}
@@ -30,7 +32,7 @@ const guidance=(code:string)=>{
   return CUSTOMER_GUIDANCE[key]??GUIDANCE[key];
 };
 
-export function GreengrassImport({catalog,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
+export function GreengrassImport({catalog,versions,owner,execute,onPublished,disabled,policies,protect,onBusyChange}:{catalog:string;versions:ComponentVersion[];owner:string;execute:(a:{transaction:Transaction})=>Promise<unknown>;onPublished:()=>void;disabled:boolean;policies:AccessPolicy[];protect:(delivery:Delivery)=>Protection;onBusyChange?:(busy:boolean)=>void}) {
   const inFlight=useRef(false),active=useRef(true);
   useEffect(()=>{active.current=true;return ()=>{active.current=false;};},[]);
   const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
@@ -60,6 +62,8 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       // Reject an unusable native recipe before any artifact upload.
       for(const m of preview.manifests) assertComponentRecipe(m.recipe);
       if(!catalog) throw new Error('Choose a catalog');
+      // The same release identity may already be published from any of the account's catalogs.
+      assertVersionAvailable(versions,catalog,preview.manifests[0].recipe.componentName,preview.manifests[0].recipe.componentVersion);
       // One release identity for every artifact and recipe; no plaintext fallback.
       const protection=protect(delivery);
       // Fleet-paid storage is never silently replaced by the publisher.
@@ -91,6 +95,8 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
   }
   const name=parsed&&'recipe' in parsed&&typeof (parsed.recipe as {ComponentName?:unknown})?.ComponentName==='string'?(parsed.recipe as {ComponentName:string}).ComponentName:'component';
   const differences=result?.informational??[];
+  // The translated release identity, shown against the whole library before anything is uploaded.
+  const identity=result?.outcome==='translate'?result.manifests?.[0]?.recipe:undefined;
   return <div className="space-y-3 border p-4"><h2>Import AWS Greengrass recipe</h2>
     <p>Imports the supported parts of a Greengrass V2 software definition. AWS IPC, Lambda and the nucleus environment are not emulated; unsupported fields are rejected with guidance. Lifecycle steps and artifact keys may use any letter case, as in AWS (Install/Run/Shutdown or install/run/shutdown, URI or Uri). One check lists every finding; bind the listed artifacts and check again.</p>
     <label className="block">Recipe (JSON or YAML)<textarea rows={10} className="w-full font-mono" value={text} onChange={e=>{setText(e.target.value);setResult(null);}}/></label>
@@ -105,6 +111,7 @@ export function GreengrassImport({catalog,owner,execute,onPublished,disabled,pol
       {differences.length>0&&<div><p>Reported differences from AWS behaviour:</p><ul>{differences.map(d=><li key={d}><code>{d}</code>: {guidance(d)}</li>)}</ul>
         <label><input type="checkbox" checked={acknowledged} onChange={e=>setAcknowledged(e.target.checked)}/> I reviewed these differences</label></div>}
     </div>}
+    {identity&&<ExistingLibraryEntry versions={versions} catalog={catalog} name={identity.componentName} version={identity.componentVersion}/>}
     <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={busy}/>
     <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={busy}/>
     <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
