@@ -2,7 +2,8 @@
 import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NETWORK } from "@/lib/constants";
 import { useDevices } from "@/hooks/useDevices";

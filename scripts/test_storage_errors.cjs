@@ -12,6 +12,7 @@ for (const error of [raw, new Error('transport secret'), undefined, null, 'undef
 let storageResult, storageError, budgetError, readFailure, loading = false, queries = [];
 const budget = { id: '0xb', capId: '0xc' }, config = { packageId: '0xp' };
 const load = loader({
+  '@/hooks/useCurrentAccount': { useCurrentAccount: () => ({ address: '0xa' }) },
   '@mysten/dapp-kit-react': { useCurrentAccount: () => ({ address: '0xa' }), useCurrentClient: () => ({}) },
   '@tanstack/react-query': { useQuery(options) {
     queries.push(options);
