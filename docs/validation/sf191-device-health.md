@@ -230,3 +230,33 @@ new live walkthrough, wallet mutation, deployment, full cross-layer suite or
 physical testing was performed. Earlier read-only Testnet evidence is historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains in #32/#159.
 No migration; frontend rebuild required for delivery. Only the coordinator merges.
+
+
+## File-selection and testnet-CI base integration (2026-10-28)
+
+Merged snapshot/current fetched main `a8516400872d70defeb7c3059798b53b4f10f84f`
+cleanly. The supplied independent review has no actionable source/security defects
+or open threads; its pending-CI limitation remains a coordinator gate. No health
+behavior repair was needed. Upstream same-file selection and authenticated testnet
+preparation/wallet-lane changes remain intact.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including rendered three-state health and fleet-ops copy tests).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_upload_browser.cjs`
+  (same-file selection after validation/upload alerts and failure/retry paths).
+- `make RUN= test-testnet` (157 tests, one installed-toolchain check skipped on host;
+  60 live-common fixture tests; authenticated cache tests). Connection-reset and
+  unknown-transaction output is deliberate offline fixture evidence, not live writes.
+- `git diff --check origin/main...HEAD` and staged whitespace check.
+
+Integration handoff only, not approval. New-head hosted CI, automatic testnet and
+fresh independent review remain pending and required. No hosted CI polling, new
+live walkthrough, wallet mutation, deployment, physical testing or full cross-layer
+suite was performed. Earlier read-only Testnet evidence remains historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains #32/#159.
+No migration; frontend rebuild required for delivery. Only the coordinator merges.
