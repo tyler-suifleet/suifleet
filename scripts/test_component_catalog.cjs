@@ -34,3 +34,15 @@ assert.throws(()=>catalog.buildCatalogDeploymentTx('0x41',[],[],false,undefined,
 assert.throws(()=>catalog.buildCatalogDeploymentTx('0x41',['0x61'],['0x71'],false,undefined,true),/groups only/);
 assert.equal(catalog.buildCatalogDeploymentTx('0x41',['0x61'],['0x71']).getData().commands[0].MoveCall.function,'create_deployment');
 console.log('PASS: catalog desired PTBs, both authority paths, atomic multi-group revisions, paused admission and one-shot fallback');
+// Version identity is unique across every catalog in the account's library, not only the selected one.
+const {existingVersions,assertVersionAvailable,crossCatalogDuplicates,catalogLabel}=loader()('lib/component-library.ts');
+const entry=(objectId,catalogId,name,version)=>({objectId,catalogId,publisher:'0xa',name,version,manifests:[]});
+const library=[entry('0x1','0xc','com.acme.GatewayAgent','1.4.2'),entry('0x2','0x0d','com.acme.GatewayAgent','1.4.1'),entry('0x3','0xD','com.acme.GatewayAgent','1.4.0'),entry('0x4','0xc','com.acme.GatewayAgent','1.4.0'),entry('0x5','0xc','com.acme.Other','1.4.1')];
+assert.throws(()=>assertVersionAvailable(library,'0xc','com.acme.GatewayAgent','1.4.2'),e=>/already in your library\. Published/.test(e.message)&&!/another/.test(e.message),'same-catalog duplicate');
+assert.throws(()=>assertVersionAvailable(library,'0x000c','com.acme.GatewayAgent','1.4.1'),/com\.acme\.GatewayAgent 1\.4\.1 is already in your library, published from another of your publisher catalogs/,'cross-catalog duplicate');
+assert.throws(()=>assertVersionAvailable(library,'0xd','com.acme.GatewayAgent','1.4.2'),/another of your publisher catalogs/,'cross-catalog duplicate from the other direction');
+for(const [name,version] of [['com.acme.GatewayAgent','1.4.3'],['com.acme.gatewayagent','1.4.2'],['com.acme.GatewayAgent','1.4.2+build'],['com.acme.Other','1.4.2']]) assert.doesNotThrow(()=>assertVersionAvailable(library,'0xc',name,version),`${name} ${version} is distinct on chain`);
+assert.deepEqual(existingVersions(library,'com.acme.GatewayAgent','1.4.0').map(v=>v.objectId),['0x3','0x4']);
+assert.deepEqual([...crossCatalogDuplicates(library)].sort(),['0x3','0x4']);
+assert.notEqual(catalogLabel('0xc'),catalogLabel('0xd'));assert.equal(catalogLabel('0xD'),catalogLabel('0x0d'));
+console.log(`PASS: ${cases.length} independent catalog selection vectors, SemVer discovery ordering and same-/cross-catalog version uniqueness`);
