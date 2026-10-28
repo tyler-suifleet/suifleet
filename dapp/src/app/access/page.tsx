@@ -149,8 +149,8 @@ function PolicyCard({ policy, pending, run }: {
               <option value="account">Account address</option>
             </select>
           </label>
-          {scope !== "account" ? <label className="min-w-0">{scope === "device" ? "Activated device" : "Group"}
-            <select aria-label={scope === "device" ? "Activated device" : "Group"} className="block border rounded px-3 py-2 max-w-full" value={subject} onChange={e => setSubject(e.target.value)} disabled={recipientQuery.isPending || !!recipientQuery.error}>
+          {scope !== "account" ? <label className="min-w-0">{scope === "device" ? "Device" : "Group"}
+            <select aria-label={scope === "device" ? "Device" : "Group"} className="block border rounded px-3 py-2 max-w-full" value={subject} onChange={e => setSubject(e.target.value)} disabled={recipientQuery.isPending || !!recipientQuery.error}>
               <option value="">Choose a {scope}…</option>
               {recipients.map(r => <option key={r.objectId} value={r.objectId} disabled={!!r.reason}>
                 {r.name} ({r.objectId.slice(0, 8)}…){r.reason ? ` — ${r.reason}` : ""}

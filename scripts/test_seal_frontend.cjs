@@ -130,6 +130,7 @@ const chain = {
   const fleet = { id: "0xf1", customerId: "0xc1", administrator: true, devices: [managedDevice.objectId] };
   const managedPolicy = { ...policy, fleet };
   assert.equal(access.deviceGrantReason(managedPolicy, managedDevice), undefined);
+  assert.equal(access.deviceGrantReason(managedPolicy, { ...managedDevice, objectId: "0x" + "22".padStart(64, "0") }), undefined);
   assert.match(access.deviceGrantReason({ ...managedPolicy, fleet: { ...fleet, administrator: false } }, managedDevice), /administrator/);
   assert.match(access.deviceGrantReason(managedPolicy, { objectId: "0x23", ownerCapId: "0x24" }), /not registered/);
   assert.equal(access.deviceGrantReason(policy, { objectId: "0x22", ownerCapId: "0x24" }), undefined);

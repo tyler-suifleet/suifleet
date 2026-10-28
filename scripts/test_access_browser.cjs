@@ -56,13 +56,13 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     const card = page.getByRole("region", { name: "Policy Production sensors" });
     await card.waitFor();
     assert.equal(await card.getByRole("option", { name: /Legacy unactivated.*must be activated/ }).evaluate(option => option.disabled), true);
-    await card.getByLabel("Activated device").selectOption({ label: "Granted sensor (0x000000…)" });
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Granted sensor (0x000000…)" });
     assert.equal(await card.getByRole("button", { name: "Grant decryption" }).isDisabled(), true);
     await card.getByText("This recipient already has a grant.").waitFor();
-    await card.getByLabel("Activated device").selectOption({ label: "Factory sensor (0x000000…)" });
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Factory sensor (0x000000…)" });
     await update({ fail: true }); await card.getByRole("button", { name: "Grant decryption" }).click();
     await page.getByText("Wallet rejected the transaction", { exact: true }).waitFor();
-    assert.notEqual(await card.getByLabel("Activated device").inputValue(), "");
+    assert.notEqual(await card.getByLabel("Device", { exact: true }).inputValue(), "");
     await update({ fail: false }); await card.getByRole("button", { name: "Grant decryption" }).click();
     await page.waitForFunction(() => window.accessCalls.length === 2);
     await card.getByLabel("Recipient type").selectOption("group");
@@ -93,7 +93,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     }
     await update({ managed: "admin", recipients: "ready" });
     await card.getByLabel("Recipient type").selectOption("device");
-    await card.getByLabel("Activated device").selectOption({ label: "Customer sensor (0x000000…)" });
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Customer sensor (0x000000…)" });
     await card.getByRole("button", { name: "Grant decryption" }).click();
     assert.equal(await page.evaluate(() => window.accessCalls.at(-1).commands[0].MoveCall.function), "policy_device");
     await update({ managed: "reader" });
