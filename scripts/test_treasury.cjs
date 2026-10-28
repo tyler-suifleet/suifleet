@@ -42,7 +42,44 @@ try {
   const wrongSender = await tx.build();
   assert.throws(() => execFileSync(process.execPath,[path.join(__dirname,'testnet_treasury.cjs'),'sign',state],
     {input:Buffer.from(wrongSender).toString('base64'),stdio:['pipe','pipe','pipe']}));
-  console.log('PASS: pinned testnet descriptor/address; private reusable fixture; quorum and tamper rejection');
+  // Unsafe existing files fail closed in both create/reuse and signing modes.
+  const utility = path.join(__dirname,'testnet_treasury.cjs');
+  const rejected = target => {
+    for (const mode of ['create', 'self-test', 'sign']) {
+      assert.throws(() => execFileSync(process.execPath,[utility,mode,target],
+        {input:'',stdio:['pipe','pipe','pipe'],timeout:5000}));
+    }
+  };
+  const link = path.join(dir,'symlink.json');
+  fs.symlinkSync(state,link); rejected(link);
+  const hardlink = path.join(dir,'hardlink.json');
+  fs.linkSync(state,hardlink); rejected(hardlink); fs.unlinkSync(hardlink);
+  fs.chmodSync(state,0o644); rejected(state); fs.chmodSync(state,0o600);
+  rejected(dir);
+  const fifo = path.join(dir,'fifo');
+  execFileSync('mkfifo',[fifo]); rejected(fifo);
+  // Deterministically replace the pathname just after descriptor validation.
+  // Reads must keep using the validated inode, never the new pathname.
+  const preload = path.join(dir,'swap.cjs');
+  fs.writeFileSync(preload, `
+    const fs = require('node:fs');
+    const original = fs.fstatSync;
+    let swapped = false;
+    fs.fstatSync = function(fd, ...args) {
+      const info = original.call(this,fd,...args);
+      if (!swapped && info.isFile()) {
+        swapped = true;
+        fs.renameSync(process.argv[3],process.argv[3]+'.original');
+        fs.writeFileSync(process.argv[3],'untrusted replacement',{mode:0o644});
+      }
+      return info;
+    };
+  `);
+  const swapped = JSON.parse(execFileSync(process.execPath,['--require',preload,utility,'create',state],
+    {encoding:'utf8'}));
+  assert.deepEqual(swapped,first,'path replacement cannot replace validated keys');
+  assert.equal(fs.readFileSync(state,'utf8'),'untrusted replacement');
+  console.log('PASS: pinned descriptor; quorum/tamper/wrong-sender rejection; symlink, hardlink, permissions, directory, FIFO and validation/read race regressions');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}
 
 })().catch(error => {console.error(error);process.exit(1);});
