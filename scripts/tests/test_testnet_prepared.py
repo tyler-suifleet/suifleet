@@ -111,17 +111,30 @@ class PreparedTests(unittest.TestCase):
             base = git('rev-parse', 'HEAD')
             git('clone', '--no-hardlinks', str(origin), str(controller), cwd=root)
             git('checkout', '--detach', base, cwd=controller)
+            # Main may advance after the controller clone. Keep this new base
+            # off the candidate ancestry so fetching only head cannot supply it.
+            (origin/'base-info').write_text('new base')
+            git('add', 'base-info'); git('commit', '-qm', 'advanced base')
+            advanced_base = git('rev-parse', 'HEAD')
+            git('checkout', '--detach', base)
             (origin/'controller.py').write_text('candidate')
             git('commit', '-qam', 'head')
             head = git('rev-parse', 'HEAD')
             def run(args, **kwargs):
                 return subprocess.run(args, cwd=controller, **kwargs)
-            checkout_candidate(head, base, controller/'candidate', run)
+            checkout_candidate(head, advanced_base, controller/'candidate', run)
             self.assertEqual((controller/'controller.py').read_text(), 'trusted')
             self.assertEqual(git('rev-parse', 'HEAD', cwd=controller), base)
             self.assertEqual((controller/'candidate/controller.py').read_text(), 'candidate')
             self.assertEqual(git('rev-parse', 'HEAD', cwd=controller/'candidate'), head)
             self.assertEqual(git('show', base+':controller.py', cwd=controller/'candidate'), 'trusted')
+            # Exercise the same archive operation used to prepare base contracts.
+            import io
+            import tarfile
+            archived = subprocess.check_output(
+                ['git', 'archive', advanced_base, 'base-info'], cwd=controller/'candidate')
+            with tarfile.open(fileobj=io.BytesIO(archived)) as archive:
+                self.assertEqual(archive.extractfile('base-info').read(), b'new base')
             self.assertTrue((controller/'candidate/.git').is_dir())
             for bad in ('main', head+'\n', ''):
                 with self.assertRaises(RuntimeError):

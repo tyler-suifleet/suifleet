@@ -100,6 +100,7 @@ the wallet/network/effects boundary described above.
 make dapp-install
 make dapp-typecheck       # manifest, wallet boundary, receipts and query regressions
 make dapp-build
+make test-hydration       # actual static exports, every route, saved fixture wallet too
 # Browser Wallet Standard acceptance with a disposable fixture wallet:
 CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_wallet_browser.cjs
 ```
@@ -127,3 +128,24 @@ A fixture wallet is not a real extension acceptance run. Before marking SF-003 D
 See [wallet onboarding](WALLET_ONBOARDING.md) for Google zkLogin/Enoki configuration,
 Slush web, session custody, recovery, first registration and device-owner transfer.
 The existing manifest, authority and effects checks apply to every wallet type.
+
+## Static-export hydration
+
+Application renders read accounts through `hooks/useCurrentAccount.ts`. The SDK
+can restore a saved wallet before React hydrates a route; its live store snapshot
+then differs from the disconnected export. The wrapper uses a disconnected
+server/hydration snapshot and exposes the subscribed SDK account after mount.
+Transaction-time account/network/authority checks still read the live wallet.
+Storage-backed selection loads in effects; configured network labels are build
+constants and query-backed locale dates appear after client reads. No page SSR
+is disabled and hydration warnings are not suppressed.
+
+`make test-hydration` runs after `dapp-build` in `make ci`. It first checks that
+export, then rebuilds with the public Seal testnet profile and repeats. The real
+Chrome test discovers every console page, hard-loads each route logged out and
+with a saved Wallet Standard fixture session, and uses a different browser locale
+and timezone. A deliberate server-text mismatch must produce a hydration error,
+proving that the detector is live. Unexpected page errors and hydration console
+messages fail. External requests are blocked, signing is refused, and contexts
+use disposable browser storage. This does not establish real extension-wallet,
+provider, public-chain or physical-device acceptance (tracked in #32 and #159).
