@@ -10,7 +10,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
   try {
     const manifest = JSON.parse(fsSync.readFileSync(path.resolve(__dirname, "../manifests/fixture.localnet.json")));
     const bundle = path.join(dir, "app.js");
-    await build({ entryPoints: [path.resolve(__dirname, "browser/wallet-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") }, define: { "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)), ACCEPTANCE_MANIFEST: JSON.stringify(manifest) }, logLevel: "warning" });
+    await build({ entryPoints: [path.resolve(__dirname, "browser/wallet-acceptance.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic", nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": path.resolve(__dirname, "../dapp/src") }, define: { "process.env": "{}", "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(manifest)), ACCEPTANCE_MANIFEST: JSON.stringify(manifest) }, logLevel: "warning" });
     server = http.createServer(async (req, res) => {
       res.setHeader("Content-Type", req.url === "/app.js" ? "text/javascript" : "text/html");
       res.end(req.url === "/app.js" ? await fs.readFile(bundle) : '<!doctype html><html><head><title>Wallet acceptance</title></head><body><div id="root"></div><script src="/app.js"></script></body></html>');
@@ -20,7 +20,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     const page = await browser.newPage();
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page.waitForSelector("#sign");
+    await page.waitForSelector("#sign").catch(error => { console.error(errors); throw error; });
     await page.waitForFunction(() => window.acceptance.wallets().includes("SuiFleet Acceptance Wallet"));
     await page.getByRole("button", { name: "Connect Wallet", exact: true }).click();
     await page.getByRole("button", { name: "SuiFleet Acceptance Wallet", exact: false }).click();
