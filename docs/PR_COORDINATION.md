@@ -955,6 +955,45 @@ mark tickets Done, reset repair budgets or relax independent merge gates. The
 standalone helper is installed separately from the coordinator generation; record
 its exact commit/hash in the local installation receipt when updating it.
 
+
+### Ordinary CI runtime recovery (SF-179)
+
+The complete serial `CI / check` job has a 120-minute ceiling. Run 40542334953
+(job 122324581852) reached the former 60-minute limit on 2026-10-27; this scoped
+ceiling correction preserves every security, simulator, platform and integration
+step and the existing caches. It is headroom, not a measured completion time.
+All other job limits and merge gates remain unchanged.
+
+After this workflow correction merges, the orchestrator/operator must identify
+still-current affected PR heads and update their branches with the reviewed main
+revision through the normal integration path before rerunning CI. Rerunning an
+old workflow revision alone retains its old ceiling. Verify the open PR head and
+base, inspect `gh run view RUN --json headSha,workflowName,event,conclusion`, and
+only then use `gh run rerun RUN` for a run whose revision contains the corrected
+workflow. If integration already started a fresh CI run, use that run instead.
+Do not create empty commits, fabricate statuses or bypass checks. Hosted reruns
+and their results remain post-integration work; implementation workers hand off
+without watching CI.
+
+Cancelled Actions jobs qualify for bounded owner repair only when fresh read-only
+API evidence identifies the same repository, PR head, completed workflow attempt,
+job ID and GitHub Actions check run, with the exact failure annotation
+"The job has exceeded the maximum execution time of …". The coordinator and
+dispatcher share this classifier. Evidence records only IDs/revisions and the
+fixed classification `job_timeout`; annotation text and API errors are not saved
+or printed. The repair snapshot presents the conclusion as `TIMED_OUT`, while
+the underlying cancelled check remains a failed merge gate. Fleet-status therefore
+continues to show CI failure and the coordinator names the existing repair owner.
+
+The latest attempt must still be current after reading annotations. Superseded or
+ambiguously ordered rollups, queued reruns, changed head/base, manual/concurrency
+cancellation, foreign check apps and unavailable/malformed/truncated evidence do
+not start repair. Responses above 100 jobs or annotations conservatively remain
+unclassified. No elapsed-time heuristic or log-text scraping grants repair.
+Existing per-check attempt budgets, ownership, live-worker fences, exact-head/base
+CI and independent review still apply. Installation is only through the reviewed
+merged-runtime path; this change does not restart services from a worktree.
+
 ### Shared discovery snapshots
 
 The coordinator uses the installed atomic-ticketing engine's `ticket_snapshot.py`
