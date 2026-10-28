@@ -78,6 +78,23 @@ class PreparedTests(unittest.TestCase):
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
         self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
         self.assertNotIn('secrets.',json.dumps(prep))
+        self.assertEqual(prep['needs'], 'plan')
+        self.assertTrue(all(value == 'read' for value in prep['permissions'].values()))
+        self.assertNotIn('--status', json.dumps(prep))
+        for name in ('plan', 'preparation-status'):
+            job = jobs[name]
+            self.assertEqual(job['permissions']['statuses'], 'write')
+            checkouts = [s for s in job['steps'] if 'checkout@' in s.get('uses', '')]
+            self.assertEqual(len(checkouts), 1)
+            self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
+            self.assertNotIn('docker ', json.dumps(job))
+        self.assertIn('--status pending', json.dumps(jobs['plan']))
+        failure = jobs['preparation-status']
+        self.assertEqual(failure['needs'], ['plan', 'prepare'])
+        self.assertIn('needs.plan.outputs.head', json.dumps(failure))
+        self.assertIn("always()", failure['if'])
+        self.assertIn("needs.prepare.result != 'success'", failure['if'])
+        self.assertIn('--status error', json.dumps(failure))
         self.assertEqual(live['environment'],'live-package-upgrade')
         self.assertEqual(live['concurrency'],prune['concurrency'])
         self.assertEqual(live['needs'], ['prepare', 'publish'])
