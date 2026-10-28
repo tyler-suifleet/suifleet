@@ -34,7 +34,7 @@ def install_locked(home, projects, enable):
         raise ValueError('Node must be available for the configured Codex CLI')
     root = home/'.local/lib/pr-coordinator/recovery-watchdog'
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    names = ('recovery_watchdog.py', 'recovery_worker.py')
+    names = ('recovery_watchdog.py', 'recovery_worker.py', 'recovery_control.py')
     digest = hashlib.sha256(b''.join((source/n).read_bytes() for n in names)).hexdigest()
     generation = root/digest
     if generation.exists():

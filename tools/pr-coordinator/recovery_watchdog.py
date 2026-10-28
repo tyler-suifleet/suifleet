@@ -220,6 +220,18 @@ existing explicit authorization. Follow dedicated testnet grants and spending/re
 Respect authentication/quota reset times. Legitimate running CI, a live resource lease or genuinely deferred acceptance is
 not a reason to launch idle models. Do not poll/wait for CI; leave a specific next check instead. Never change the user's
 feature decisions to manufacture eligibility. Report product/credential blockers plainly.
+Recovery means taking action, not only diagnosing and leaving a handoff. A missing operational route is a repairable
+software gap, not an external blocker. For a stopped Blocked/draft implementation with concrete code/CI repairs, use:
+python3 {MODULE_DIR/'recovery_control.py'} --project PROJECT --ticket TICKET --reason 'specific authorized repair and evidence needed'
+This supported command preserves the original model/claim/branch, proves old workers/helpers stopped, checks dependencies,
+resource leases and competing repairs, reserves a durable replacement, and hands supervision back to the dispatcher.
+Do not move a ticket to Review or mark a draft Ready just to dispatch it. Do not resume a genuine credential/product/
+hardware/authorization blocker. Re-read existing notes and specify only work that can proceed under current authorization.
+Check ALL affected queues, not only the first failed PR; a blocked treasury decision must not prevent unrelated reviews.
+If the command or another necessary operational route is missing/broken, repair that infrastructure under its existing
+issue claim (or publish/claim a scoped Codex issue if none exists), test and install the contained fix under the user's
+standing operational-recovery authorization. Do not merely report 'no supported route' and exit. Never bypass ownership
+or acceptance gates. Verify launched worker identities and actual results; report failures honestly.
 Prefer bounded operational fixes. Service restarts must preserve child workers and respect maintenance holds.
 Verify actual PID/start identities and changed tracker/PR state; a successful command alone is insufficient evidence.
 Do not expose credentials or put raw logs into the report. Write {result} as one JSON object:
