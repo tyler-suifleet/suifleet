@@ -121,6 +121,28 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(b); ts::return_shared(r);
         did
     }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::customer)]
+    fun zero_limit_refuses_first_device() {
+        let mut s = setup(); let f = fleet(&mut s);
+        register(&mut s, f, @0xD1); s.end();
+    }
+    #[test]
+    fun registry_grant_unblocks_zero_limit_and_can_raise_boundary() {
+        let mut s = setup(); let f = fleet(&mut s);
+        allow_devices(&mut s, 1); register(&mut s, f, @0xD1); s.next_tx(OWNER);
+        allow_devices(&mut s, 2); register(&mut s, f, @0xD2); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); assert!(customer::active_devices(&c) == 2);
+        ts::return_shared(c); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::device_registry)]
+    fun customer_admin_cannot_grant_registry_entitlement() {
+        let mut s = setup(); let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, OTHER, true, true, s.ctx()); ts::return_shared(c);
+        s.next_tx(OTHER);
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 3, 0, 0, s.ctx());
+        ts::return_shared(c); ts::return_shared(r); s.end();
+    }
     #[test]
     fun two_fleets_share_device_accounting_and_budget_custody() {
         let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
