@@ -23,9 +23,17 @@ class TrustTests(unittest.TestCase):
             diagnostic = daemon_progress(journal, log)
             self.assertTrue(diagnostic['initialized'])
             self.assertEqual(list(diagnostic['outcomes'].values()),
-                             [dict(status=1, reported=False, has_error=True)])
+                             [dict(error_categories=[], status=1, reported=False, has_error=True)])
             self.assertEqual(diagnostic['log_counts']['RPC request timeout'], 1)
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            journal.write_text(json.dumps(dict(deployments={'0x1': dict(status=2,
+                error='PRIVATE-CANARY: RPC request timeout; deployment has no authenticated recipe digest')})))
+            diagnostic = daemon_progress(journal, log)
+            self.assertEqual(list(diagnostic['outcomes'].values())[0]['error_categories'],
+                ['deployment has no authenticated recipe digest', 'RPC request timeout'])
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            log.write_text('Deployment schema rejected PRIVATE-CANARY')
+            self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
