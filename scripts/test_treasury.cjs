@@ -26,10 +26,15 @@ try {
   const call = mode => execFileSync(process.execPath,[path.join(__dirname,'testnet_treasury.cjs'),mode,state],{encoding:'utf8'});
   const first = JSON.parse(call('create'));
   assert.deepEqual(JSON.parse(call('create')),first,'fixture must reuse its keys');
-  const initialFd = fs.openSync(state,fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  try {
-    assert.equal(fs.fstatSync(initialFd).mode & 0o077,0);
-  } finally { fs.closeSync(initialFd); }
+  // Check creation permissions in an isolated process. The later intentional
+  // pathname replacement must not share metadata-check flow with this check.
+  execFileSync(process.execPath,['-e', `
+    const fs = require('node:fs');
+    const assert = require('node:assert/strict');
+    const fd = fs.openSync(process.argv[1],fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try { assert.equal(fs.fstatSync(fd).mode & 0o077,0); }
+    finally { fs.closeSync(fd); }
+  `,state],{stdio:['ignore','pipe','pipe']});
   assert.match(call('self-test'),/PASS/);
   const tx = new Transaction();
   tx.setSender(first.treasury_payee); tx.setGasOwner(first.treasury_payee);
