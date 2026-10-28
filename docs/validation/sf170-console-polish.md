@@ -99,6 +99,19 @@ stale registration before building the transaction, as Devices already does.
   `test_upload_browser.cjs`, `test_dapp_presentation_browser.cjs`
   (`suifleet-dev:sf010-chrome`): passed.
 
+### Merge of main `24b7752b` (2026-10-28)
+
+CI run 40730581287 on `e844acfb` failed in `check` (`test_testnet_prepared.py`
+could not import `yaml`) and in Security CodeQL (actions). Both failures came
+from main and also occurred on `a8516400`. PR #361 (SF-179) fixed them, and
+this merge brings that fix into the branch. The merge had no conflicts and
+changed no SF-170 file.
+
+- `tsc --noEmit`, `next build` and the same 17 node/browser scripts listed
+  above (`suifleet-dev:sf010-chrome`): passed on the merged tree.
+- `python3 -m unittest discover -s scripts/tests -p test_testnet_prepared.py`
+  (host Python with PyYAML): 6 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
