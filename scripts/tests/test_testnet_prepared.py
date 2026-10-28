@@ -76,6 +76,8 @@ class PreparedTests(unittest.TestCase):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
+        for job in (prep, live):
+            self.assertIn('github.event.workflow_run.head_repository.full_name == github.repository', job['if'])
         self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
         self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')
