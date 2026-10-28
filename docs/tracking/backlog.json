@@ -4276,6 +4276,30 @@
         "Docs explain setup for operators."
       ],
       "validation": "Move tests and security check, frontend tests, testnet effects, real-wallet acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-197",
+      "title": "Automatically dispatch a bounded recovery agent when fleet work stops progressing",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Add a recurring recovery-agent supervisor beyond the current service/status monitor. Start one bounded Codex recovery session from a concrete offline diagnostic snapshot when work stalls; install and enable for SuiFleet. Support explicitly configured projects without replacing coordinator or dispatcher.",
+      "evidence": "User explicitly asks for an automated agent prompted to get things moving, after repeated stalls despite active services. Existing five-minute check-progress.py only restarts stopped services and writes status.",
+      "acceptance": [
+        "Offline progress/stall detector and five-minute timer dispatch a real recovery agent; healthy active progress and empty/deferred-only work do not create idle agents.",
+        "One recovery agent globally with PID/start-time and descendant fencing, durable intent/exit receipts, bounded runtime, cooldown, restart adoption, maintenance guards and no recursive spawning.",
+        "Recovery prompt preserves ownership, stopped-worker proofs, CI/security/independent-review gates and deployment limits; no account rotation or fabricated success; legitimate CI/provider waits produce a concrete next-check time.",
+        "Private local reports record diagnosis/actions/verification/blockers/next check without credentials; no new periodic GitHub polling.",
+        "Focused offline tests cover stall/progress, duplicate/restarted ticks, uncertain launch, surviving descendants, timeout/nonzero/cooldown and config rejection. Additive install only, then verify actual timer and first launch."
+      ],
+      "validation": "Offline meaningful unit/integration tests, Python compile, additive installation check and actual timer/worker verification; small Tyler-authored commits, normal review. User explicitly authorizes watchdog activation."
     }
   ]
 }
