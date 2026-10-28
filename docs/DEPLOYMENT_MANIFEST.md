@@ -119,14 +119,23 @@ introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
 
+The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
+tells clients the package has the bounded batch membership entry points. Like
+`fleet_handover`, it is a single-type group recorded with its own introduction
+origin; manifests without it keep the single-device calls. See
+[bulk group membership](GROUP_BATCH.md).
+
 ## Ordered browser storage endpoints (SF-166)
 
 `walrus.publisher_urls` and `walrus.aggregator_urls` optionally specify nonempty
-ordered URL lists. The browser uses each list instead of its corresponding legacy
-`publisher_url` or `aggregator_url`; retain the legacy fields for older clients.
+ordered URL lists. The browser uses the publisher list instead of the legacy
+`publisher_url`, and tries the aggregator list before the legacy `aggregator_url`.
+Retain the legacy fields for older clients.
 Publisher HTTP 5xx, network errors and timeouts try the next endpoint with the same
-protected bytes. Rejected requests, cancellation and malformed success responses
-stop publication. Fleet-paid SDK uploads never fall back to public publishers.
+protected bytes. Rejected requests and malformed success responses stop publication
+for configured publishers; session overrides fall through to the remaining endpoints.
+Cancellation always stops publication. Fleet-paid SDK uploads never fall back to
+public publishers.
 Successful uploads record `StorageInfo.publisherUrl`; browser reads record the
 serving aggregator in `blobReadEndpoints`. Read probes try all aggregators before
 reporting unavailable/unknown; download links use the last successful aggregator or the first configured one.
@@ -145,12 +154,6 @@ changes this browser, not device configuration or other operators' consoles.
 Publisher errors give an action and endpoint; raw responses appear only under
 Technical details. When fleet storage is available, component publication selects
 it automatically; an explicit operator choice can still select public publishing.
-
-The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
-tells clients the package has the bounded batch membership entry points. Like
-`fleet_handover`, it is a single-type group recorded with its own introduction
-origin; manifests without it keep the single-device calls. See
-[bulk group membership](GROUP_BATCH.md).
 
 ## Committed public profiles
 
