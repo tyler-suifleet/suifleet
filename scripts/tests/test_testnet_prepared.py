@@ -80,12 +80,31 @@ class PreparedTests(unittest.TestCase):
         self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')
         self.assertEqual(live['concurrency'],prune['concurrency'])
+        self.assertEqual(live['needs'], ['prepare', 'publish'])
+        publisher=jobs['publish']
+        self.assertEqual(publisher['permissions'], {'contents':'read', 'actions':'read', 'packages':'write', 'statuses':'write'})
+        checkouts=[s for s in publisher['steps'] if 'checkout@' in s.get('uses','')]
+        self.assertEqual(len(checkouts), 1)
+        self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
+        self.assertNotIn('docker run', json.dumps(publisher))
+        self.assertNotIn('docker build', json.dumps(publisher))
+        self.assertIn('docker load', json.dumps(publisher))
+        self.assertIn('needs.publish.outputs.digest', json.dumps(live))
+        upload=next(s for s in prep['steps'] if 'upload-artifact@' in s.get('uses',''))
+        download=next(s for s in publisher['steps'] if 'download-artifact@' in s.get('uses',''))
+        self.assertEqual(upload['with']['name'], 'prepared-image-${{ github.run_id }}-${{ github.run_attempt }}')
+        self.assertEqual(download['with']['name'], upload['with']['name'])
+        self.assertNotIn('run-id', download['with'])
+        self.assertNotIn('repository', download['with'])
+        terminal=publisher['steps'][-1]
+        self.assertEqual(terminal['if'], 'failure() || cancelled()')
+        self.assertIn('--status error', terminal['run'])
         self.assertNotIn('strategy',live) # one acceptance, never one per pool member
         steps=live['steps'];names=[s.get('name','') for s in steps]
         self.assertLess(names.index('Pull and verify immutable prepared image without signing credentials'),names.index('Run bounded testnet acceptance'))
         self.assertLess(names.index('Recheck head and base immediately before spending'),names.index('Run bounded testnet acceptance'))
         self.assertNotIn('cargo build',json.dumps(live));self.assertNotIn('pnpm --dir',json.dumps(live))
-        self.assertIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
+        self.assertNotIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
 
 
 if __name__=='__main__':unittest.main()
