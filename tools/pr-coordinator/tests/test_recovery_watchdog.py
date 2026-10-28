@@ -38,31 +38,80 @@ class WatchdogTests(unittest.TestCase):
         return monitor, folder
 
     def test_requires_observed_stall_and_offline_only_default(self):
-        self.assertIn('healthy', self.monitor().tick(self.model)['status'])
+        self.assertIn('observation grace', self.monitor().tick(self.model)['status'])
         self.assertIn('would launch', self.monitor(1061).tick(self.model)['status'])
 
     def test_real_progress_restarts_stall_clock(self):
         self.monitor().tick(self.model)
-        self.model['inventory']['suifleet']['breakdown']['review'] = 2
-        self.assertIn('healthy', self.monitor(1061).tick(self.model)['status'])
+        self.model['inventory']['suifleet']['breakdown'].update(review=2, done=1)
+        self.assertIn('observation grace', self.monitor(1061).tick(self.model)['status'])
         self.assertIn('would launch', self.monitor(1122).tick(self.model)['status'])
+
+    def test_worker_notice_and_nonterminal_churn_cannot_starve_recovery(self):
+        self.monitor().tick(self.model)
+        self.model['workers'] = [dict(project='suifleet', id='retry1', role='implementation', ticket='SF-1')]
+        self.model['attention'] = [dict(project='suifleet', state='ci-failed', ticket='SF-1', pr=1)]
+        self.model['inventory']['suifleet']['breakdown'].update(review=2, in_progress=1)
+        self.monitor(1020).tick(self.model)
+        self.model['workers'] = []
+        self.model['attention'] = []
+        self.model['inventory']['suifleet']['breakdown'].update(review=3, in_progress=0)
+        self.monitor(1050).tick(self.model)
+        self.model['attention'] = [dict(project='suifleet', state='ci-failed', ticket='SF-2', pr=2)]
+        self.assertIn('would launch', self.monitor(1061).tick(self.model)['status'])
+        observation = w.read(self.monitor().path)['observations']['suifleet']
+        self.assertEqual(observation['progress_at'], 1000)
+        self.assertEqual(observation['activity_at'], 1061)
+
+    def test_long_active_worker_exit_does_not_grant_another_idle_grace(self):
+        self.model['workers'] = [dict(project='suifleet', id='worker1', role='implementation', ticket='SF-1')]
+        self.monitor().tick(self.model)
+        self.assertIn('workers active', self.monitor(5000).tick(self.model)['status'])
+        self.model['workers'] = []
+        self.assertIn('would launch', self.monitor(5001).tick(self.model)['status'])
+
+    def test_legacy_state_migration_keeps_original_recovery_deadline(self):
+        monitor = self.monitor()
+        monitor.tick(self.model)
+        old = w.read(monitor.path)
+        observation = old['observations']['suifleet']
+        for key in ('done', 'inventory_available', 'activity_at'):
+            observation.pop(key)
+        w.atomic(monitor.path, old)
+        self.assertIn('would launch', self.monitor(1061).tick(self.model)['status'])
+        self.assertEqual(w.read(monitor.path)['observations']['suifleet']['progress_at'],1000)
+
+    def test_inventory_loss_and_return_do_not_manufacture_completion(self):
+        self.model['inventory']['suifleet']['breakdown']['done'] = 5
+        self.monitor().tick(self.model)
+        self.monitor(1050).tick({})
+        self.assertIn('would launch',self.monitor(1061).tick(self.model)['status'])
+        self.assertEqual(w.read(self.monitor().path)['observations']['suifleet']['progress_at'],1000)
+
+    def test_grace_has_an_explicit_deadline_and_boundary_is_due(self):
+        report = self.monitor().tick(self.model)
+        self.assertEqual(report['next_check_at'],1060)
+        report = self.monitor(1059).tick(self.model)
+        self.assertIn('observation grace',report['status'])
+        self.assertEqual(report['projects'][0]['recovery_due_at'],1060)
+        self.assertIn('would launch',self.monitor(1060).tick(self.model)['status'])
 
     def test_normal_active_work_does_not_launch_an_idle_recovery_agent(self):
         self.model['workers'] = [dict(project='suifleet', id='job1', role='implementation', ticket='SF-1')]
         self.monitor().tick(self.model)
-        self.assertIn('healthy', self.monitor(5000).tick(self.model, execute=True)['status'])
+        self.assertIn('workers active', self.monitor(5000).tick(self.model, execute=True)['status'])
 
     def test_closed_or_only_external_acceptance_does_not_launch(self):
         self.model['inventory']['suifleet']['breakdown'] = {'blocked':4}
         self.monitor().tick(self.model)
-        self.assertIn('healthy', self.monitor(5000).tick(self.model, execute=True)['status'])
+        self.assertIn('no actionable', self.monitor(5000).tick(self.model, execute=True)['status'])
 
     def test_deferred_acceptance_backlog_does_not_spawn_recovery(self):
         self.config['projects'][0]['acceptance_policy'] = {'development_defaults':{'acceptance_only_tickets':['SF-031']}}
         self.model['inventory']['suifleet']['breakdown'] = {'backlog':1}
         self.model['_watchdog_tickets'] = {'suifleet':[dict(key='SF-031',status='backlog')]}
         self.monitor().tick(self.model)
-        self.assertIn('healthy',self.monitor(5000).tick(self.model,execute=True)['status'])
+        self.assertIn('no actionable',self.monitor(5000).tick(self.model,execute=True)['status'])
 
     def test_timestamp_only_and_obsolete_retry_noise_are_not_progress(self):
         self.monitor().tick(self.model)
@@ -74,7 +123,7 @@ class WatchdogTests(unittest.TestCase):
         self.model['inventory']['suifleet']['breakdown'] = {}
         self.model['attention'] = [dict(project='other', state='ci-failed')]
         self.monitor().tick(self.model)
-        self.assertIn('healthy', self.monitor(5000).tick(self.model)['status'])
+        self.assertIn('no actionable', self.monitor(5000).tick(self.model)['status'])
 
     def test_missing_observability_gets_a_bounded_diagnosis(self):
         self.monitor().tick({})
@@ -237,7 +286,7 @@ class WatchdogTests(unittest.TestCase):
         w.atomic(folder/'result.json',dict(outcome='recovered',actions=['restarted'],verification=[],blockers=[],next_check_at=1300))
         with patch.object(w,'survivors',return_value=[]): monitor.tick(self.model)
         self.assertEqual(w.read(monitor.path)['snapshot_verification']['changed_projects'],[])
-        self.model['inventory']['suifleet']['breakdown']['review']=2
+        self.model['inventory']['suifleet']['breakdown'].update(review=2, done=1)
         self.monitor(1100).tick(self.model)
         self.assertEqual(w.read(monitor.path)['snapshot_verification']['changed_projects'],['suifleet'])
 

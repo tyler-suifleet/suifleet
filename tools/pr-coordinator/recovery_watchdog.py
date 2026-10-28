@@ -261,30 +261,55 @@ Keep the existing local status report current. Finish this bounded recovery pass
     def tick(self, model, execute=False, kick=False):
         if self.reconcile():
             return self.state['report']
-        candidates, changed = [], []
+        candidates, changed, activity_changed, waiting, active = [], [], [], [], []
         for project in self.options['projects']:
             project_config = next(p for p in self.config['projects'] if p['id'] == project)
             excluded = project_config.get('acceptance_policy', {}).get('development_defaults', {}).get('acceptance_only_tickets', [])
             view = project_view(model, project, excluded)
             fingerprint = hashlib.sha256(json.dumps(view, sort_keys=True).encode()).hexdigest()
             old = self.state['observations'].get(project, {})
-            if old and old.get('fingerprint') != fingerprint:
+            activity = old.get('fingerprint') != fingerprint
+            if old and activity:
+                activity_changed.append(project)
+            # Starts, exits, nonterminal state flips and CI-notice churn are
+            # activity, not completion. Otherwise retrying failures can extend
+            # the grace period forever without completing a single ticket.
+            done = view['counts']['done']
+            completed = bool(old.get('inventory_available') and view['inventory_available']
+                             and done > old.get('done', done))
+            if completed:
                 changed.append(project)
-            progress = self.now if old.get('fingerprint') != fingerprint else old['progress_at']
-            self.state['observations'][project] = dict(fingerprint=fingerprint, progress_at=progress)
+            progress = self.now if not old or completed else old['progress_at']
+            self.state['observations'][project] = dict(
+                fingerprint=fingerprint, progress_at=progress, done=done,
+                inventory_available=view['inventory_available'],
+                activity_at=self.now if activity else old.get('activity_at', progress))
             diagnosis = reason(view)
-            if diagnosis and (kick or self.now-progress >= self.options['stall_seconds']):
-                candidates.append(dict(reason=diagnosis, unchanged_seconds=self.now-progress, view=view))
+            due = progress + self.options['stall_seconds']
+            if diagnosis:
+                if kick or self.now >= due:
+                    candidates.append(dict(reason=diagnosis, no_completion_seconds=self.now-progress, view=view))
+                else:
+                    waiting.append(dict(project=project, reason=diagnosis, recovery_due_at=due))
+            elif view['workers']:
+                active.append(project)
         if self.state.get('last_result'):
             self.state['snapshot_verification'] = dict(checked_at=self.now, changed_projects=changed,
-                detail='Observed queue/worker/attention changes' if changed else
-                       'No new measurable progress in this observation; agent report is not proof of recovery')
+                activity_changed_projects=activity_changed,
+                detail='Observed completed-ticket progress' if changed else
+                       'No completed-ticket progress; worker/notice activity is not proof of recovery')
         if not self.options['enabled'] or (self.root/'disabled').exists():
             return self.save('disabled')
         if self.now < self.state.get('not_before', 0):
-            return self.save('cooldown or reported provider wait', next_check_at=self.state['not_before'])
+            return self.save('cooldown or reported provider wait', next_check_at=self.state['not_before'],
+                             pending_projects=[c['view']['project'] for c in candidates])
         if not candidates:
-            return self.save('healthy progress, observation grace or no actionable work')
+            if waiting:
+                return self.save('observation grace; recovery scheduled', projects=waiting,
+                                 next_check_at=min(p['recovery_due_at'] for p in waiting))
+            if active:
+                return self.save('workers active; supervision continues', projects=active)
+            return self.save('no actionable development work')
         if not execute:
             return self.save('would launch recovery agent', candidates=candidates)
         # Activation and explicit maintenance holds block new recovery sessions.
