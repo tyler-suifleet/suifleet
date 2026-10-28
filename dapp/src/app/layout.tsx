@@ -29,13 +29,14 @@ const NAV = [
   { href: "/firmware",    label: "Deploy component", description: "Choose software, select your devices and review an update before deploying." },
   { href: "/access",      label: "Access policies", description: "Choose which devices and accounts can open private software releases." },
   { href: "/handover",    label: "Administration", description: "Transfer control of selected devices and resources to another administrator." },
+  { href: "/entitlements", label: "Device entitlements", description: "Review your customer device limit and, as registry administrator, grant device limits to customers." },
   { href: "/settings",    label: "Fleet settings", description: "Choose when devices check for updates, send health reports and upload data." },
   { href: "/budget",      label: "Network budget", description: "Keep devices funded for activity and storage, with spending limits you control." },
 ];
 const NAV_GROUPS = [
   { label: "Workspace", routes: ["/", "/get-started"] },
   { label: "Fleet operations", routes: ["/devices", "/services", "/deployments", "/rollouts", "/components", "/firmware", "/data"] },
-  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/settings", "/budget"] },
+  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/entitlements", "/settings", "/budget"] },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -99,7 +100,7 @@ const isActive = (href: string, pathname: string) => href === "/" ? pathname ===
 function SignedOutGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(), connection = useWalletConnection();
   const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
-  if (connection.account) return <FleetScope>{children}</FleetScope>;
+  if (connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
   if (!route) return <>{children}</>;
   if (connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
   return <ConnectionRequired title={route.label} description={route.description} />;

@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const { appRequire } = require('./frontend_test_utils.cjs');
 const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright');
 const root = path.resolve(__dirname, '..'), output = path.join(root, 'dapp/out');
-const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enrollment/', '/deployments/', '/rollouts/', '/components/', '/firmware/', '/access/', '/handover/', '/settings/', '/budget/'];
+const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enrollment/', '/deployments/', '/rollouts/', '/components/', '/firmware/', '/access/', '/handover/', '/entitlements/', '/settings/', '/budget/'];
 (async () => {
   // Every app route, so a new page cannot skip the signed-out check.
   const pages = (await fs.readdir(path.join(root, 'dapp/src/app'), { withFileTypes: true }))
@@ -99,7 +99,7 @@ const routes = ['/', '/get-started/', '/devices/', '/services/', '/data/', '/enr
       await page.getByRole('button',{name:'Clear diagnostic'}).click(); assert.equal(await page.locator('footer').count(),0);
     }
     assert.deepEqual(errors,[]);
-    console.log('PASS: 14 exported routes at desktop/mobile; navigation, page titles and overflow; signed-out sign-in prompt with page description and no account/configuration wording on every fleet route, and the Get started sign-in step; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No external network or wallet.');
+    console.log('PASS: 15 exported routes at desktop/mobile; navigation, page titles and overflow; signed-out sign-in prompt with page description and no account/configuration wording on every fleet route, and the Get started sign-in step; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No external network or wallet.');
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
