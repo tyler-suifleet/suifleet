@@ -109,6 +109,11 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await crossCatalog.locator("input[type=file]").setInputFiles({ name: "hello.tar", mimeType: "application/octet-stream", buffer: Buffer.from("fixture import") });
     await crossCatalog.getByRole("button", { name: "Check translation", exact: true }).click();
     await crossCatalog.getByText("Translates to 1 native manifest(s)", { exact: true }).waitFor();
+    // The import view shows the matching entry (catalog, platforms, deploy link) before any upload.
+    const importEntry = crossCatalog.getByRole("region", { name: "Existing library entry" });
+    await importEntry.getByText(`${example.recipe.ComponentName} ${example.recipe.ComponentVersion} is already in your library`, { exact: true }).waitFor();
+    await importEntry.getByText("Catalog 0x0000…000d · another of your publisher catalogs · linux/x86_64", { exact: true }).waitFor();
+    assert.equal(await importEntry.getByRole("link", { name: "Deploy the existing version" }).getAttribute("href"), "/firmware?componentVersion=0x204");
     const acknowledgeImport = crossCatalog.getByRole("checkbox", { name: "I reviewed these differences" });
     if (await acknowledgeImport.count()) await acknowledgeImport.check();
     await crossCatalog.getByRole("radio").nth(1).check();
@@ -117,6 +122,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await crossCatalog.getByRole("status").filter({ hasText: `${example.recipe.ComponentName} ${example.recipe.ComponentVersion} is already in your library, published from another` }).waitFor();
     assert.equal(await crossCatalog.evaluate(() => window.componentsAcceptance.count()), 0, "duplicate import must not upload");
     assert.equal(await crossCatalog.evaluate(() => window.componentsAcceptance.calls().length), 0, "duplicate import must not register");
+    assert.equal(await importEntry.getByRole("link", { name: "Deploy the existing version" }).count(), 1, "existing entry stays visible after the blocked import");
     await crossCatalog.close();
     const disconnected = await browser.newPage();
     await disconnected.goto(`${origin}/?disconnected`);

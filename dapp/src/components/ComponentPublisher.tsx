@@ -15,8 +15,8 @@ import { ConfigurationFields } from "./ConfigurationFields";
 import { UploadProgress } from "./UploadProgress";
 import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
 import { assertComponentRecipe, type ComponentRecipe } from "@/lib/recipe-schema";
-import { assertVersionAvailable, catalogLabel, existingVersions, sameCatalog } from "@/lib/component-library";
-import Link from "next/link";
+import { assertVersionAvailable } from "@/lib/component-library";
+import { ExistingLibraryEntry } from "./ExistingLibraryEntry";
 
 type Row = { id: number; os: string; arch: string; file?: File; install: string };
 const input = "block w-full rounded border border-gray-300 bg-white p-2 text-sm";
@@ -44,7 +44,6 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   const [receipt, setReceipt] = useState<{ digest: string; warnings: string[] } | null>(null);
   const stepHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { stepHeading.current?.focus(); }, [step, receipt]);
-  const existing = existingVersions(versions, name, version);
   function change(id: number, patch: Partial<Row>) { setRows(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r)); }
   function validateIdentity() {
     // Validate with the same contract-facing validator used for registration.
@@ -105,7 +104,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     <p className="text-sm text-gray-600">Publishing adds a reusable, immutable release to your library. It does not deploy, install or start software on any device.</p>
     <ol aria-label="Publishing steps" className="flex flex-wrap gap-3 text-sm">{["Name & version", "Platform artifacts", "Review & publish"].map((s, i) => <li key={s} aria-current={step === i + 1 ? "step" : undefined} className={step === i + 1 ? "font-semibold text-blue-700" : "text-gray-500"}>{i + 1}. {s}</li>)}</ol>
     {error && <p role="alert" className="text-sm text-red-700 break-words">{error}</p>}
-    {!receipt && existing.length > 0 && <section aria-label="Existing library entry" className="rounded border border-amber-300 bg-amber-50 p-3 text-sm space-y-2 break-words"><p className="font-medium">{name} {version} is already in your library</p>{existing.map(v => <div key={v.objectId} className="space-y-1"><p>{catalogLabel(v.catalogId)}{sameCatalog(v.catalogId, catalog) ? " · selected publisher catalog" : " · another of your publisher catalogs"} · {v.manifests.map(m => `${m.os}/${m.arch}`).join(", ")}</p><Link href={`/firmware?componentVersion=${v.objectId}`} className="text-blue-700 underline">Deploy the existing version</Link><details className="text-xs text-gray-500"><summary className="cursor-pointer">Technical details</summary><p className="break-all">Version object: {v.objectId}</p><p className="break-all">Catalog: {v.catalogId}</p></details></div>)}<p>Publish a new version number for changed software.</p></section>}
+    {!receipt && <ExistingLibraryEntry versions={versions} catalog={catalog} name={name} version={version} />}
     {receipt ? <div role="status" className="space-y-2 break-words"><h3 ref={stepHeading} tabIndex={-1} className="font-semibold">Version published</h3><p>{name} {version} is in the library. Choose “Deploy this version” there to select targets and review a deployment.</p><p className="text-xs">Confirmed transaction: {receipt.digest}</p><details><summary>Storage expiry and renewal</summary><pre className="whitespace-pre-wrap text-xs">{receipt.warnings.join("\n")}</pre></details></div> : <>
       <h3 ref={stepHeading} tabIndex={-1} className="font-semibold">{["Name & version", "Platform artifacts", "Review & publish"][step - 1]}</h3>
       <fieldset disabled={busy} className="space-y-4 min-w-0">
