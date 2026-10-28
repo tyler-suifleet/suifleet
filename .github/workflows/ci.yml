@@ -21,7 +21,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    # SF-179: complete serial suite exceeded 60m (run 40542334953).
+    # Keep all coverage; allow cold builds/integrations a bounded two hours.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -109,6 +111,7 @@ jobs:
       - name: Configured secure tunnel destination with actual proxy and systemd
         run: |
           python3 -m unittest scripts.tests.test_tunneling -v
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_processes.py -v
           make package-tunneling
           python3 scripts/test_tunneling.py --package /tmp/suifleet-tunnel.tar.gz
 

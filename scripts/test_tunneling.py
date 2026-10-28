@@ -52,7 +52,7 @@ def proxy_pids(proc=Path("/proc")):
         try:
             name = (process / "comm").read_text().strip()
         except (FileNotFoundError, ProcessLookupError):
-            # Processes may exit after enumeration, including during SIGKILL cleanup.
+            # Processes can exit after enumeration or while procfs is read.
             continue
         if name == "suifleet-localp":
             pids.append(int(process.name))
