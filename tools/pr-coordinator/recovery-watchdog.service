@@ -1,0 +1,14 @@
+[Unit]
+Description=Detect stalled fleet work and dispatch one bounded recovery agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/recovery-watchdog/current/recovery_watchdog.py --config %h/.config/pr-coordinator/config.json --execute
+Environment="PATH=@NODE_DIRECTORY@:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+TimeoutStartSec=90
+TimeoutStopSec=10
+KillMode=process
+UMask=0077
+Nice=5
