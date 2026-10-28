@@ -282,20 +282,42 @@ def verify_checkout(expected, run=subprocess.run):
         raise RuntimeError('checkout does not match authenticated revision')
 
 
+def checkout_authenticated(expected, run=subprocess.run):
+    """Materialize the planner's immutable object, never a mutable PR/branch ref.
+
+    Executed from the preserved main controller without a token. Reject malformed
+    expectations before git runs, and verify the object both before and after
+    checkout so a moved remote branch cannot change the selected revision.
+    """
+    if not isinstance(expected, str) or not SHA.fullmatch(expected):
+        raise RuntimeError('checkout expectation must be an immutable commit SHA')
+    run(['git', 'fetch', '--no-tags', 'origin', expected], check=True)
+    actual = run(['git', 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'],
+                 text=True, capture_output=True, check=True).stdout.strip()
+    if actual != expected:
+        raise RuntimeError('fetched object does not match authenticated revision')
+    run(['git', '-c', 'core.hooksPath=/dev/null', 'checkout', '--detach', expected], check=True)
+    verify_checkout(expected, run)
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
+    parser.add_argument('--checkout', action='store_true')
     # `error` marks a cancelled run: never a source failure, never success.
     parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
-    if args.verify_checkout:
+    if args.checkout or args.verify_checkout:
         if args.status or args.recheck or args.probe_environment:
             parser.error('checkout verification cannot perform other operations')
-        verify_checkout(os.environ['TEST_HEAD'])
+        if args.checkout:
+            checkout_authenticated(os.environ['TEST_HEAD'])
+        else:
+            verify_checkout(os.environ['TEST_HEAD'])
     elif args.probe_environment:
         if args.status or args.recheck:
             parser.error('probe cannot publish status or authorize a run')

@@ -84,6 +84,19 @@ class PreparedTests(unittest.TestCase):
         steps=live['steps'];names=[s.get('name','') for s in steps]
         self.assertLess(names.index('Pull and verify immutable prepared image without signing credentials'),names.index('Run bounded testnet acceptance'))
         self.assertLess(names.index('Recheck head and base immediately before spending'),names.index('Run bounded testnet acceptance'))
+        for job in (prep, live):
+            job_steps = job['steps']
+            checkout = next(s for s in job_steps if s.get('name') == 'Checkout authenticated test revision')
+            self.assertEqual(checkout['run'], 'python3 "$RUNNER_TEMP/testnet_ci.py" --checkout')
+            self.assertEqual(checkout['env'], {'TEST_HEAD': '${{ steps.plan.outputs.head }}'})
+            self.assertEqual(checkout['if'], "steps.plan.outputs.run == 'true'")
+            preserved = next(s for s in job_steps if s.get('name') == 'Preserve trusted controller')
+            self.assertLess(job_steps.index(preserved), job_steps.index(checkout))
+            self.assertIn('cp scripts/testnet_ci.py "$RUNNER_TEMP/testnet_ci.py"', preserved['run'])
+            for step in job_steps:
+                if step.get('uses', '').startswith('actions/checkout@'):
+                    self.assertEqual(step['with']['ref'], '${{ github.workflow_sha }}')
+                    self.assertFalse(step['with']['persist-credentials'])
         self.assertNotIn('cargo build',json.dumps(live));self.assertNotIn('pnpm --dir',json.dumps(live))
         self.assertIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
 
