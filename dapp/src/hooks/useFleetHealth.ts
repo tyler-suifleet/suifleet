@@ -10,7 +10,7 @@ import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { currentHealth, fetchFleetHealth, HEALTH_REFRESH_MS, type DeviceHealth } from "@/lib/telemetry";
 
 /** The browser clock, re-read every few seconds so stale health expires on screen. */
-function useNow(periodMs: number): number {
+export function useNow(periodMs: number): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), periodMs);
