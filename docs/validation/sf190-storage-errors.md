@@ -50,3 +50,21 @@ remains unrun in SF-031/#32 and SF-087/#159. No contracts/API/layout changes,
 so no package-upgrade or isolated-chain publication is required for this UI fix.
 Hosted exact-head CI, automatic Testnet and independent review remain required;
 they are pending at implementation handoff, with no approval or merge claimed.
+
+PR #388 feedback repair (2026-10-27):
+
+- Device-retention query now converts an absent optional archive policy to null.
+  The regression executes the actual panel query function with the real reader
+  and QueryClient, verifying notFound succeeds and transport failure rejects.
+- Gas/Walrus quote errors use the shared formatter. Setup/funding links appear
+  only for missing budget/storage, not loading, configuration or read failures.
+- Source coverage now includes reclaim and component storage views.
+- Re-ran frontend typecheck, production build (16 routes), all eight scripts
+  listed above and git diff --check: passed. Existing Tailwind warning remains.
+- Re-ran the read-only testnet command above with receipt
+  /tmp/sf190-feedback-read.json: chain 4c78adac, same absent repro record, zero
+  writes/spend. No manual wallet/browser acceptance claimed.
+- Fetched origin/main c4c0805c7abd8cfbfbf0d5e0df4a6f285b8da259 and ran
+  git merge --no-edit origin/main: already up to date; this base is an ancestor.
+  Hosted CI/automatic testnet and fresh independent review remain pending for
+  the pushed repair head; the coordinator owns those gates and merging.

@@ -426,7 +426,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
   const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
-    queryFn: () => fetchDeviceRetention(client, config, storage) });
+    queryFn: async () => (await fetchDeviceRetention(client, config, storage)) ?? null });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">

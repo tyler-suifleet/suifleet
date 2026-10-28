@@ -24,6 +24,6 @@ export function FleetStorageChoice({ checked, onChange, available, storage, reas
       <label>Maximum renewal WAL per blob <input className="border w-20" value={retention.maxFee} onChange={(e) => retention.setMaxFee(e.target.value)} /></label>
       <p>Every artifact and recipe uploaded here reserves this finite target atomically. Deposit enough protected WAL and execution SUI first. New uploads fail if the complete fleet closure or reserves are insufficient.</p>
     </div>}
-    {!available && reason && <p className="text-gray-500">{reason} <a className="underline" href="/budget/">Create or fund fleet storage</a></p>}
+    {!available && reason && <p className="text-gray-500">{reason} {(reason === "Create a fleet budget on the Network budget page first." || reason === "Create and fund fleet storage on the Network budget page first.") && <a className="underline" href="/budget/">Create or fund fleet storage</a>}</p>}
   </div>;
 }
