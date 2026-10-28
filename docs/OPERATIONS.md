@@ -714,3 +714,60 @@ indexed history. Other authorization, data and execution errors fail closed.
 Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
+
+## Customer device entitlements (SF-187)
+
+The chosen onboarding policy is an **operator grant in Administration → Device
+entitlements** (`/entitlements`). New customers start at zero; there is no automatic
+trial or subscription purchase. The customer copies the customer ID shown on that
+page and asks the registry administrator to grant a device limit. The registry
+administrator connects its wallet, enters that ID and the desired total limit,
+and approves `customer::set_entitlement`. The screen works without customer fleet
+membership, so the registry administrator can grant another customer’s limit.
+Only the registry’s on-chain administrator can grant; being a customer/fleet admin
+alone does not confer entitlement authority. Verify the customer ID and requested
+capacity before approval. A small initial grant such as 3 devices enables first
+registration on testnet. SF-181 subscriptions can later use the same entitlement.
+
+Limits count active devices across **all** customer fleets. At the boundary,
+registration is disabled with the count, limit and grant instructions; every
+managed registration transaction also re-reads capacity before wallet approval.
+Concurrent registrations can still race after that read; the contract remains
+authoritative and the console reports a refused registration without raw MoveAbort
+text. Refresh before retrying. Grants cannot lower the limit below active usage.
+This screen preserves the current allowance and period, does not reset usage,
+and does not deposit SUI/WAL or purchase a subscription. Coordinate entitlement
+writers: do not submit simultaneous device-limit and billing-allowance changes.
+
+Verification: `make test-customer-fleets` includes the entitlement helper and real
+Chromium component fixtures (fixture wallet/transport); `sui move test --path
+contracts customer_tests` covers zero-limit refusal, the limit boundary, registry
+grants and customer-admin refusal. These do not establish manual extension-wallet,
+production-provider or physical acceptance; those remain SF-031/#32 and SF-087/#159.
+
+An automated Testnet walkthrough can reuse a verified test fixture without
+publishing or touching existing customers:
+
+```bash
+# Hold/assert network:suifleet-testnet; pass its token only through the environment.
+# Use the pinned release/transaction CLIs and chain_facts helper from TESTNET.md.
+python3 scripts/live_customer_entitlements.py \
+  --wallet /home/tyler/.config/suifleet/testnet/agent/client.yaml \
+  --package TEST_FIXTURE_PACKAGE --registry TEST_FIXTURE_REGISTRY \
+  --upgrade-cap TEST_FIXTURE_UPGRADE_CAP --evidence /private/runtime/entitlements.json
+```
+
+The caller supplies `SUIFLEET_TESTNET_LOCK_TOKEN`; every mutation asserts it. The
+runner verifies chain/account, registry authority, UpgradeCap and type origins,
+uses an 80,000,000-MIST non-replenishing allowance including a 70,000,000-MIST
+run-owned customer gas grant, and does not publish. It checks the actual console
+capacity helper against Testnet before signing. It deletes its registered device
+and returns child gas; the empty customer/default fleet remain because no customer
+deletion API exists. Failed runs retain a private identity directory for explicit
+recovery under the original allowance. Do not replay or reset that allowance.
+Container-specific wallet paths may require a private `client.yaml` path adapter;
+keep its existing dedicated keystore binding and leave the shared config intact.
+
+The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
+including exploratory failures and limits; it is not proof of a manual extension
+wallet walkthrough or a live deployment of this frontend.
