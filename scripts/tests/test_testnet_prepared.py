@@ -72,6 +72,42 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_preparation_has_no_write_token_and_status_jobs_use_only_controller(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        jobs=yaml.safe_load(workflow.read_text())['jobs']
+        prep=jobs['prepare']
+        self.assertEqual(prep['needs'], 'plan')
+        self.assertEqual(prep['if'], "needs.plan.outputs.run == 'true'")
+        self.assertTrue(all(value == 'read' for value in prep['permissions'].values()))
+        names=[s.get('name', '') for s in prep['steps']]
+        binding=next(s for s in prep['steps'] if s.get('name') == 'Bind preparation to initial authenticated selection')
+        self.assertNotIn('if', binding)
+        self.assertEqual(binding['env']['INITIAL_HEAD'], '${{ needs.plan.outputs.head }}')
+        self.assertEqual(binding['env']['INITIAL_BASE'], '${{ needs.plan.outputs.base }}')
+        self.assertIn('test "$INITIAL_HEAD" = "$TEST_HEAD"', binding['run'])
+        self.assertIn('test "$INITIAL_BASE" = "$BASE_REF"', binding['run'])
+        self.assertLess(names.index(binding['name']), names.index('Checkout authenticated test revision'))
+        self.assertNotIn('--status', json.dumps(prep))
+        self.assertNotIn('secrets.', json.dumps(prep))
+        for name in ('plan', 'preparation-status'):
+            job=jobs[name]
+            self.assertEqual(job['permissions']['statuses'], 'write')
+            checkouts=[s for s in job['steps'] if 'checkout@' in s.get('uses','')]
+            self.assertEqual(len(checkouts), 1)
+            self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
+            self.assertFalse(checkouts[0]['with']['persist-credentials'])
+            self.assertNotIn('docker', json.dumps(job))
+            self.assertNotIn('secrets.', json.dumps(job))
+        self.assertIn('--status pending', json.dumps(jobs['plan']))
+        terminal=jobs['preparation-status']
+        self.assertEqual(terminal['needs'], ['plan', 'prepare'])
+        self.assertEqual(terminal['if'], "always() && needs.plan.outputs.run == 'true' && needs.prepare.result != 'success'")
+        step=terminal['steps'][-1]
+        self.assertEqual(step['env']['TEST_HEAD'], '${{ needs.plan.outputs.head }}')
+        self.assertEqual(step['env']['BASE_REF'], '${{ needs.plan.outputs.base }}')
+        self.assertIn('--status error', step['run'])
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'

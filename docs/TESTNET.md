@@ -411,3 +411,12 @@ The runtime derives the address from the selected secret and rejects any mismatc
 Preparation uses a repository-linked GHCR package named `suifleet-testnet-prepared`. Only the isolated `publish` job and the separate main-sourced image-retention job receive `packages: write`; validation has `packages: read`. Fixture deletion remains isolated in the main-only `actions: write` job and uses the same lane lock as restore/upload. Image retention preserves at least ten recent versions and all versions younger than 48 hours, verifies producer workflows are completed before deletion, touches only this package's workflow run tags and deletes at most 50 versions per pass. Queued/running validation inputs are retained regardless of age.
 
 Set pool size to `1` to return to the primary lane for future runs; let existing lane jobs drain before removing any secret or ciphertext history. Setting the variable to `3` has no effect on older main workflows; protected main rollout is required. The first hosted run must establish GHCR package access, provenance/pull success and overlapping different-lane validation. Local image, signer and offline graph tests do not establish that hosted result or a measured throughput improvement.
+
+The automatic controller publishes the initial pending status in a controller-only
+`plan` job. Revision preparation receives only read permissions; it cannot publish
+commit statuses or write registry packages. A separate controller-only
+`preparation-status` job reports failed, cancelled or skipped preparation as a
+terminal error using the initial authenticated selection, even if preparation
+fails before producing outputs. Preparation still authenticates its selection
+independently before executing revision code. Neither status job checks out test
+revision files or executes the prepared image.

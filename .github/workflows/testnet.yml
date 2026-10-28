@@ -13,15 +13,45 @@ permissions:
   pull-requests: read
   statuses: write
 jobs:
-  prepare:
+  plan:
     if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    outputs:
+      run: ${{ steps.plan.outputs.run }}
+      head: ${{ steps.plan.outputs.head }}
+      base: ${{ steps.plan.outputs.base }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Authenticate exact revision and skip superseded work
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/testnet_ci.py
+      - name: Publish pending exact-head status
+        if: steps.plan.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          BASE_REF: ${{ steps.plan.outputs.base }}
+        run: python3 scripts/testnet_ci.py --status pending
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     permissions:
       contents: read
       actions: read
       pull-requests: read
-      statuses: write
     outputs:
       run: ${{ steps.plan.outputs.run }}
       head: ${{ steps.plan.outputs.head }}
@@ -42,13 +72,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/testnet_ci.py
-      - name: Publish pending exact-head status
-        if: steps.plan.outputs.run == 'true'
+      - name: Bind preparation to initial authenticated selection
         env:
-          GH_TOKEN: ${{ github.token }}
+          INITIAL_HEAD: ${{ needs.plan.outputs.head }}
+          INITIAL_BASE: ${{ needs.plan.outputs.base }}
           TEST_HEAD: ${{ steps.plan.outputs.head }}
           BASE_REF: ${{ steps.plan.outputs.base }}
-        run: python3 scripts/testnet_ci.py --status pending
+        run: |
+          test "$INITIAL_HEAD" = "$TEST_HEAD"
+          test "$INITIAL_BASE" = "$BASE_REF"
       - name: Preserve trusted controller
         if: steps.plan.outputs.run == 'true'
         run: |
@@ -121,13 +153,25 @@ jobs:
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
+  preparation-status:
+    needs: [plan, prepare]
+    if: always() && needs.plan.outputs.run == 'true' && needs.prepare.result != 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Publish preparation failure as a terminal error
-        if: always() && steps.plan.outputs.run == 'true' && job.status != 'success'
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_HEAD: ${{ steps.plan.outputs.head }}
-          BASE_REF: ${{ steps.plan.outputs.base }}
-        run: python3 "$RUNNER_TEMP/testnet_ci.py" --status error
+          TEST_HEAD: ${{ needs.plan.outputs.head }}
+          BASE_REF: ${{ needs.plan.outputs.base }}
+        run: python3 scripts/testnet_ci.py --status error
   publish:
     needs: prepare
     if: github.ref == 'refs/heads/main' && needs.prepare.outputs.run == 'true'
