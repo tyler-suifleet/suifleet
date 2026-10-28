@@ -73,6 +73,11 @@ The generator emits them as `FLEET_SETTINGS` (TypeScript) and
 `fleet_settings_values` (Rust), and a generated Move test checks the contract's
 `defaults()` and accepts every bound. See [FLEET_SETTINGS.md](FLEET_SETTINGS.md).
 
+The additive SF-171 batch membership calls take `Option<String>`, which the
+generated TypeScript encoder accepts as `string | null`. Their
+`group_batch` optional origin group is described in
+[bulk group membership](GROUP_BATCH.md).
+
 The additive SF-089 handover API and `fleet_handover::Handover` BCS layout are in
 the same reviewed ABI. Its optional origin group permits existing deployments
 without handover to keep working. Manifest resolution records the new type's own
