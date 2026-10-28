@@ -122,8 +122,13 @@ class TrustTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
-        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertEqual(workflow.count('ref: ${{ steps.plan.outputs.head }}'), 2)
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
+        self.assertEqual(workflow.count("ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"), 2)
+        # Each job must verify the actual checkout against independent server
+        # facts before executing revision code or providing signing credentials.
+        for job in workflow.split('      - name: Checkout authenticated test revision')[1:]:
+            self.assertLess(job.index('--verify-checkout'), job.index('docker run') if 'docker run' in job else job.index('SUIFLEET_TESTNET_KEY'))
+            self.assertIn('TEST_HEAD: ${{ steps.plan.outputs.head }}', job[:job.index('--verify-checkout')])
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))

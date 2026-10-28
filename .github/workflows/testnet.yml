@@ -63,9 +63,9 @@ jobs:
         if: steps.plan.outputs.run == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Use only the SHA independently authenticated by the main-sourced planner.
-          # Never select executable code directly from workflow_run event fields.
-          ref: ${{ steps.plan.outputs.head }}
+          # Pin checkout to an immutable event commit, then independently verify
+          # it against the trusted planner before executing any revision code.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify checkout matches authenticated revision
@@ -198,7 +198,8 @@ jobs:
         if: steps.plan.outputs.run == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ steps.plan.outputs.head }}
+          # Keep the immutable event pin and independent planner check in both jobs.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Verify checkout matches authenticated revision
