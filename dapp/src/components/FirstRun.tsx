@@ -1,5 +1,6 @@
 "use client";
 
+import { deviceCapacityMessage, registrationFailure } from "@/lib/customer-entitlements";
 import { useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useCurrentAccount, useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
@@ -78,7 +79,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its daemon starts and reports in.` });
       await Promise.all([cache.invalidateQueries({ queryKey: ["devices"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] })]);
     } catch (cause) {
-      setError({ address, text: `${cause instanceof Error ? cause.message : "Wallet request failed"}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
+      setError({ address, text: `${registrationFailure(cause instanceof Error ? cause.message : "Wallet request failed")}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
     } finally {
       inFlight.current = false;
       setPhase(null);
@@ -168,6 +169,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     <StepCard id="register" index={3} title="Register your first device" state={steps[2].state}>
       {!account ? <p className="text-gray-700">Connect your account and add funds first.</p> : <>
         <p className="text-gray-700">Start the SuiFleet client on the device and copy the device address it displays. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
+        {fleet && <p role="status">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link className={LINK} href="/entitlements">Device entitlements</Link></p>}
         {devices.error && <p role="alert" className="text-red-800">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
         {devices.isLoading && <p role="status">Loading inventory…</p>}
         {devices.isSuccess && (devices.data.length === 0
@@ -207,7 +209,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           </label>}
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
-            <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending}>{mutation.isPending ? "Registering…" : "Register device"}</button>
+            <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
             {!ready && state.isSuccess && <p className="text-gray-600">Add funds to this account to enable registration.</p>}
           </div>
         </form>
