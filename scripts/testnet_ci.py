@@ -282,22 +282,25 @@ def verify_checkout(expected, run=subprocess.run):
         raise RuntimeError('checkout does not match authenticated revision')
 
 
-def checkout_authenticated(expected, run=subprocess.run):
-    """Materialize the planner's immutable object, never a mutable PR/branch ref.
+def checkout_candidate(head, base, destination, run=subprocess.run):
+    """Keep the trusted controller intact; clone immutable test inputs separately.
 
-    Executed from the preserved main controller without a token. Reject malformed
-    expectations before git runs, and verify the object both before and after
-    checkout so a moved remote branch cannot change the selected revision.
+    No candidate hooks, filters or scripts run on the controller host. Candidate
+    execution remains confined to the explicit Docker mount after verification.
     """
-    if not isinstance(expected, str) or not SHA.fullmatch(expected):
-        raise RuntimeError('checkout expectation must be an immutable commit SHA')
-    run(['git', 'fetch', '--no-tags', 'origin', expected], check=True)
-    actual = run(['git', 'rev-parse', '--verify', 'FETCH_HEAD^{commit}'],
+    if not all(isinstance(ref, str) and SHA.fullmatch(ref) for ref in (head, base)):
+        raise RuntimeError('candidate requires immutable head and base')
+    destination = Path(destination)
+    if destination.exists() or destination.is_symlink():
+        raise RuntimeError('candidate destination already exists')
+    run(['git', 'fetch', '--no-tags', 'origin', head, base], check=True)
+    run(['git', 'clone', '--no-hardlinks', '--no-checkout', '.', str(destination)], check=True)
+    run(['git', '-C', str(destination), '-c', 'core.hooksPath=/dev/null',
+         'checkout', '--detach', head], check=True)
+    actual = run(['git', '-C', str(destination), 'rev-parse', '--verify', 'HEAD'],
                  text=True, capture_output=True, check=True).stdout.strip()
-    if actual != expected:
-        raise RuntimeError('fetched object does not match authenticated revision')
-    run(['git', '-c', 'core.hooksPath=/dev/null', 'checkout', '--detach', expected], check=True)
-    verify_checkout(expected, run)
+    if actual != head:
+        raise RuntimeError('candidate does not match authenticated revision')
 
 
 if __name__ == '__main__':
@@ -306,18 +309,19 @@ if __name__ == '__main__':
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
-    parser.add_argument('--checkout', action='store_true')
+    parser.add_argument('--checkout-candidate', type=Path)
     # `error` marks a cancelled run: never a source failure, never success.
     parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
     repo = os.environ['GITHUB_REPOSITORY']
-    if args.checkout or args.verify_checkout:
+    if args.checkout_candidate:
+        if args.status or args.recheck or args.probe_environment or args.verify_checkout:
+            parser.error('candidate checkout cannot perform other operations')
+        checkout_candidate(os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.checkout_candidate)
+    elif args.verify_checkout:
         if args.status or args.recheck or args.probe_environment:
             parser.error('checkout verification cannot perform other operations')
-        if args.checkout:
-            checkout_authenticated(os.environ['TEST_HEAD'])
-        else:
-            verify_checkout(os.environ['TEST_HEAD'])
+        verify_checkout(os.environ['TEST_HEAD'])
     elif args.probe_environment:
         if args.status or args.recheck:
             parser.error('probe cannot publish status or authorize a run')
@@ -326,6 +330,7 @@ if __name__ == '__main__':
             sort_keys=True))
     elif args.status:
         failure = failure_class(os.environ.get('ACCEPTANCE_OUTCOME', ''),
+                                evidence_dir=os.environ.get('TEST_EVIDENCE_DIR', 'evidence'),
                                 dependencies=os.environ.get('DEPENDENCIES_OUTCOME', '')) if args.status == 'failure' else None
         status(repo, os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.status,
                f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}', failure)

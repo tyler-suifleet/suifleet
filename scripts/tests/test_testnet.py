@@ -118,62 +118,13 @@ class TrustTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verify_checkout(ref, run)
 
-    def test_authenticated_checkout_rejects_mutable_refs_and_wrong_fetched_object(self):
-        from testnet_ci import checkout_authenticated
-        for ref in ['main', 'refs/pull/1/head', '', 'a'*39, 'a'*40+'\n', '--help', None]:
-            run = Mock()
-            with self.assertRaises(RuntimeError):
-                checkout_authenticated(ref, run)
-            run.assert_not_called()
-        run = Mock(return_value=type('Result', (), {'stdout': 'b'*40})())
-        with self.assertRaisesRegex(RuntimeError, 'fetched object'):
-            checkout_authenticated('a'*40, run)
-        self.assertEqual(run.call_count, 2)  # never checks out a mismatched fetch
-        run = Mock(return_value=type('Result', (), {'stdout': 'a'*40})())
-        checkout_authenticated('a'*40, run)
-        self.assertEqual(run.call_args_list[0].args[0], ['git', 'fetch', '--no-tags', 'origin', 'a'*40])
-        self.assertEqual(run.call_args_list[2].args[0],
-                         ['git', '-c', 'core.hooksPath=/dev/null', 'checkout', '--detach', 'a'*40])
-        self.assertEqual(run.call_count, 4)  # verifies actual HEAD after checkout
-
-    def test_authenticated_checkout_uses_original_commit_after_branch_moves(self):
-        import subprocess
-        import tempfile
-        from testnet_ci import checkout_authenticated
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            remote, work = root/'remote', root/'work'
-            def git(*args, cwd=remote):
-                return subprocess.check_output(['git', *args], cwd=cwd, text=True,
-                                               stderr=subprocess.DEVNULL).strip()
-            remote.mkdir()
-            git('init', '-b', 'main')
-            git('config', 'user.name', 'Tyler Bush')
-            git('config', 'user.email', 'tyler.jonathan.bush@gmail.com')
-            (remote/'file').write_text('authenticated')
-            git('add', 'file'); git('commit', '-m', 'original')
-            expected = git('rev-parse', 'HEAD')
-            git('clone', str(remote), str(work), cwd=root)
-            (remote/'file').write_text('moved branch')
-            git('commit', '-am', 'branch moved')
-            def run(args, **kwargs):
-                return subprocess.run(args, cwd=work, **kwargs)
-            checkout_authenticated(expected, run)
-            self.assertEqual(git('rev-parse', 'HEAD', cwd=work), expected)
-            self.assertEqual((work/'file').read_text(), 'authenticated')
-            self.assertEqual(git('symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD', cwd=work), 'origin/main')
-            # A missing immutable object fails closed, retaining the verified HEAD.
-            with self.assertRaises(subprocess.CalledProcessError):
-                checkout_authenticated('f'*40, run)
-            self.assertEqual(git('rev-parse', 'HEAD', cwd=work), expected)
-
     def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
         self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
         self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
-        self.assertEqual(workflow.count('run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout'), 2)
+        self.assertEqual(workflow.count('--checkout-candidate candidate'), 2)
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
@@ -567,7 +518,7 @@ class TrustTests(unittest.TestCase):
         self.assertIn("if: inputs.gate == 'hardware'", workflow)
         testnet = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('-e GITHUB_EVENT_NAME', testnet)
-        self.assertIn('path: evidence/*.json', testnet)
+        self.assertIn('path: candidate/evidence/*.json', testnet)
 
     def test_unchanged_custodied_fixture_reuses_state_without_mutation(self):
         import live_package_upgrade as live
