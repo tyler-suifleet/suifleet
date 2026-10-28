@@ -78,7 +78,12 @@ try {
   const swapped = JSON.parse(execFileSync(process.execPath,['--require',preload,utility,'create',state],
     {encoding:'utf8'}));
   assert.deepEqual(swapped,first,'path replacement cannot replace validated keys');
-  assert.equal(fs.readFileSync(state,'utf8'),'untrusted replacement');
+  // Inspect the replacement through its own descriptor too; do not introduce
+  // a pathname stat/read pair into the regression test itself.
+  const replacementFd = fs.openSync(state,fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  try {
+    assert.equal(fs.readFileSync(replacementFd,'utf8'),'untrusted replacement');
+  } finally { fs.closeSync(replacementFd); }
   console.log('PASS: pinned descriptor; quorum/tamper/wrong-sender rejection; symlink, hardlink, permissions, directory, FIFO and validation/read race regressions');
 } finally {fs.rmSync(dir,{recursive:true,force:true});}
 
