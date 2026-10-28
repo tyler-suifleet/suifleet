@@ -1,6 +1,7 @@
 "use client";
 import { useState } from 'react';
-import { useCurrentAccount, useCurrentClient } from '@mysten/dapp-kit-react';
+import { useCurrentAccount } from '@/hooks/useCurrentAccount';
+import { useCurrentClient } from '@mysten/dapp-kit-react';
 import { useQuery } from '@tanstack/react-query';
 import { useDevices } from '@/hooks/useDevices';
 import { fetchFleetDevices } from '@/lib/sui';

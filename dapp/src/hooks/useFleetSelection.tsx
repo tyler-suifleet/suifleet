@@ -1,6 +1,7 @@
 "use client";
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { useCurrentAccount, useCurrentClient, useCurrentNetwork } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient, useCurrentNetwork } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { NETWORK, REGISTRY_ID } from "@/lib/constants";
 import { MANIFEST } from "@/lib/deployment-manifest";
