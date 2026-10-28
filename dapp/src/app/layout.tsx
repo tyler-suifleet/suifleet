@@ -12,6 +12,7 @@ import "./globals.css";
 import Link from "next/link";
 import { HistoryStatus } from "@/components/HistoryStatus";
 import { ConnectionRequired } from "@/components/ui";
+import { useHydrated } from "@/hooks/useCurrentAccount";
 
 // dApp Kit UI registers custom elements and must only load in the browser.
 const ConnectButton = dynamic(() => import("@mysten/dapp-kit-react/ui").then((ui) => ui.ConnectButton), { ssr: false });
@@ -96,13 +97,15 @@ const isActive = (href: string, pathname: string) => href === "/" ? pathname ===
 
 // Fleet pages read the connected account; signed out they would show empty
 // totals or account errors. Get started carries its own sign-in step, so it
-// renders signed out without waiting for a fleet selection.
+// renders signed out without waiting for a fleet selection. A saved wallet can
+// reconnect before hydration, so the server and hydration renders show the
+// sign-in check and only the mounted client trusts the live connection.
 function SignedOutGate({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname(), connection = useWalletConnection();
+  const pathname = usePathname(), connection = useWalletConnection(), hydrated = useHydrated();
   const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
-  if (connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
+  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
   if (!route) return <>{children}</>;
-  if (connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
+  if (!hydrated || connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
   return <ConnectionRequired title={route.label} description={route.description} />;
 }
 
