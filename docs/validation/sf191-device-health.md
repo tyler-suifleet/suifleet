@@ -205,3 +205,28 @@ new live walkthrough, wallet mutation, deployment, full cross-layer suite or
 physical testing was performed. Earlier read-only Testnet evidence is historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains in #32/#159.
 No migration; frontend rebuild required for delivery. Only the coordinator merges.
+
+## Dashboard-count base integration (2026-10-28)
+
+Merged snapshot/current fetched main `dc440a525b2a4b3c6b0961d75f8085b9aaee1728`
+cleanly. Upstream dashboard counts and the shared health hook are preserved alongside
+SF-191's selected-fleet configuration and three health states. The supplied
+independent review has no actionable source/security finding or open thread;
+no additional behavior repair was needed.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target through claims tests, including rendered health states and
+  upstream dashboard count/admission regressions).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `git diff --check origin/main...HEAD`.
+
+Integration handoff only, not approval. New-head hosted CI, automatic testnet and
+fresh independent review remain pending and required. No hosted CI polling,
+new live walkthrough, wallet mutation, deployment, full cross-layer suite or
+physical testing was performed. Earlier read-only Testnet evidence is historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains in #32/#159.
+No migration; frontend rebuild required for delivery. Only the coordinator merges.
