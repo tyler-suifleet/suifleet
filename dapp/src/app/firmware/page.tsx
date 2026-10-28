@@ -295,7 +295,7 @@ export default function FirmwarePage() {
               <p className="text-xs text-gray-400 mt-1">Binaries, scripts, archives, .swu — anything</p>
               <label className="mt-2 inline-block text-sm text-[#4DA2FF] cursor-pointer hover:underline">
                 or browse
-                <input type="file" className="hidden" disabled={step !== "artifact" || uploading} onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+                <input type="file" className="hidden" disabled={step !== "artifact" || uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) handleFile(f); }} />
               </label>
             </>
           )}
