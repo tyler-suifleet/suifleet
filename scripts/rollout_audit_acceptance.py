@@ -113,7 +113,13 @@ def run(step, client, manifest, device, evidence, root, *, fixture=None, save=No
         content = observed.get('content') or {}
         fields = plain(content)
         expected_type = f"{manifest['type_origins']['deployment_manager::DeploymentRecord']}::deployment_manager::DeploymentRecord"
-        if (content.get('type') != expected_type or 'Shared' not in (observed.get('owner') or {})
+        # The pinned gRPC CLI returns objType beside a flat content map;
+        # wrapped Move JSON carries type inside content instead. Validate every
+        # supplied type so conflicting metadata cannot bypass the binding.
+        types = [value for value in (observed.get('objType'), content.get('type'))
+                 if value is not None]
+        if (not types or any(value != expected_type for value in types)
+                or 'Shared' not in (observed.get('owner') or {})
                 or fields.get('creator') != operator or fields.get('component_name') != 'audit-only'
                 or fields.get('version') != '1' or str(fields.get('schema_version')) != '3'):
             raise RuntimeError('retained audit target identity changed; no admission submitted')

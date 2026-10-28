@@ -32,9 +32,10 @@ class AuditAcceptanceTests(unittest.TestCase):
     def client(self, *args):
         self.reads.append(args)
         if args[0] == 'object':
-            return {'owner': {'Shared': {}}, 'content': {
-                'type': 'origin::deployment_manager::DeploymentRecord', 'fields': {
-                    'creator': 'operator', 'component_name': 'audit-only', 'version': '1', 'schema_version': '3'}}}
+            # Match Sui 1.82.1 gRPC CLI object JSON (not JSON-RPC wrappers).
+            return {'owner': {'Shared': {}},
+                'objType': 'origin::deployment_manager::DeploymentRecord', 'content': {
+                    'creator': 'operator', 'component_name': 'audit-only', 'version': '1', 'schema_version': '3'}}
         return {'digest': args[-1], 'checkpoint': '10', 'effects': {'status': {'status': 'success'}}}
 
     def invoke(self, **kw):
@@ -99,13 +100,45 @@ class AuditAcceptanceTests(unittest.TestCase):
         original = self.client
         def client(*args):
             result = original(*args)
-            result['content']['fields']['creator'] = 'other-operator'
+            result['content']['creator'] = 'other-operator'
             return result
         self.client = client
         with self.assertRaisesRegex(RuntimeError, 'target identity changed'):
             self.invoke()
         self.assertEqual(len(self.calls), 1)
         self.assertNotIn('admission_digest', self.fixture)
+
+    def test_wrapped_move_json_still_validates_and_admits(self):
+        original = self.client
+        def client(*args):
+            result = original(*args)
+            if args[0] == 'object':
+                result['content'] = {'type': result.pop('objType'), 'fields': result['content']}
+            return result
+        self.client = client
+        self.admit()
+        self.assertEqual(len(self.calls), 2)
+
+    def test_missing_wrong_or_conflicting_type_never_admits(self):
+        original = self.client
+        for alteration in ['missing', 'wrong', 'conflicting']:
+            with self.subTest(alteration=alteration):
+                self.fixture, self.calls = {}, []
+                def client(*args):
+                    result = original(*args)
+                    if alteration == 'missing':
+                        result.pop('objType')
+                    elif alteration == 'wrong':
+                        result['objType'] = 'other::deployment_manager::DeploymentRecord'
+                    else:
+                        result['content'] = {'type': 'other::deployment_manager::DeploymentRecord',
+                                             'fields': result['content']}
+                    return result
+                self.client = client
+                with self.assertRaisesRegex(RuntimeError, 'target identity changed'):
+                    self.invoke()
+                self.assertEqual(len(self.calls), 1)
+                self.assertNotIn('admission_digest', self.fixture)
 
     def test_false_floor_or_incomplete_reader_result_never_proves_acceptance(self):
         self.admit()
