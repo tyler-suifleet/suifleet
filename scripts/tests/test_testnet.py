@@ -121,12 +121,68 @@ class TrustTests(unittest.TestCase):
     def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
-        checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
+        checkout = workflow.split('      - name: Select and verify freshly authenticated immutable revision', 1)[1]
         self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertEqual(workflow.count('ref: ${{ steps.plan.outputs.head }}'), 2)
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
+        self.assertEqual(workflow.count('--checkout-authenticated'), 2)
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
+
+    def test_authenticated_checkout_rejects_mutable_and_stale_selections_before_git(self):
+        from testnet_ci import checkout_authenticated
+        run = Mock()
+        selection = {'head': 'a'*40, 'base': 'b'*40}
+        for head, base, selected in [('main', 'b'*40, selection),
+                                     ('a'*40, 'main', selection),
+                                     ('a'*40, 'b'*40, None),
+                                     ('c'*40, 'b'*40, selection),
+                                     ('a'*40, 'c'*40, selection)]:
+            with self.assertRaises(RuntimeError):
+                checkout_authenticated(head, base, selected, run)
+        run.assert_not_called()
+
+    def test_authenticated_checkout_stops_on_fetch_failure_or_head_mismatch(self):
+        from testnet_ci import checkout_authenticated
+        import subprocess
+        selection = {'head': 'a'*40, 'base': 'b'*40}
+        run = Mock(side_effect=subprocess.CalledProcessError(1, 'git fetch'))
+        with self.assertRaises(subprocess.CalledProcessError):
+            checkout_authenticated('a'*40, 'b'*40, selection, run)
+        self.assertEqual(run.call_count, 1)
+        run = Mock(return_value=type('Result', (), {'stdout': 'c'*40 + '\n'})())
+        with self.assertRaisesRegex(RuntimeError, 'does not match'):
+            checkout_authenticated('a'*40, 'b'*40, selection, run)
+
+    def test_authenticated_checkout_uses_exact_commit_and_disables_hooks(self):
+        from testnet_ci import checkout_authenticated
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            origin = root/'origin'; work = root/'work'
+            def git(*args, cwd=origin):
+                return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
+            origin.mkdir()
+            git('init', '-q')
+            git('config', 'user.name', 'Test Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            (origin/'value').write_text('first')
+            git('add', 'value'); git('commit', '-qm', 'first')
+            first = git('rev-parse', 'HEAD')
+            git('clone', '-q', str(origin), str(work))
+            (origin/'value').write_text('second')
+            git('commit', '-qam', 'second')
+            second = git('rev-parse', 'HEAD')
+            hook = work/'.git/hooks/post-checkout'
+            canary = root/'hook-ran'
+            hook.write_text(f'#!/bin/sh\ntouch "{canary}"\n'); hook.chmod(0o755)
+            def run(args, **kwargs):
+                return subprocess.run(args, cwd=work, **kwargs)
+            checkout_authenticated(first, second, {'head': first, 'base': second}, run)
+            self.assertEqual(git('rev-parse', 'HEAD', cwd=work), first)
+            self.assertEqual((work/'value').read_text(), 'first')
+            self.assertFalse(canary.exists())
 
     def test_live_gate_checkout_and_token_permissions(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/live-gates.yml').read_text()
