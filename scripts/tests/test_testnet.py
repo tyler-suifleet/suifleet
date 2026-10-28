@@ -125,12 +125,12 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(workflow.count(immutable_ref), 2)
         self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
         prepare, validate = workflow.split('\n  validate:', 1)
-        for job, execution in ((prepare, 'docker/setup-buildx-action'),
-                               (validate, 'SUIFLEET_TESTNET_KEY')):
+        for job, execution, selection in ((prepare, 'docker/setup-buildx-action', 'needs.plan'),
+                                          (validate, 'SUIFLEET_TESTNET_KEY', 'steps.plan')):
             selected = job.split('      - name: Checkout authenticated test revision', 1)[1]
             self.assertIn(immutable_ref, selected)
             verification = selected.split('      - name: Verify checkout matches authenticated revision', 1)[1]
-            self.assertIn('TEST_HEAD: ${{ steps.plan.outputs.head }}', verification)
+            self.assertIn('TEST_HEAD: ${{ ' + selection + '.outputs.head }}', verification)
             self.assertLess(verification.index('--verify-checkout'), verification.index(execution))
 
     def test_live_gate_checkout_and_token_permissions(self):

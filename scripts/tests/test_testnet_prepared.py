@@ -76,6 +76,18 @@ class PreparedTests(unittest.TestCase):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
+        self.assertEqual(prep['needs'], 'plan')
+        self.assertEqual(prep['permissions'], {'contents':'read', 'actions':'read', 'pull-requests':'read'})
+        for name in ('plan', 'preparation-status'):
+            trusted = jobs[name]
+            self.assertEqual(trusted['permissions']['statuses'], 'write')
+            for step in trusted['steps']:
+                if 'checkout@' in step.get('uses', ''):
+                    self.assertEqual(step['with']['ref'], '${{ github.workflow_sha }}')
+        failure = jobs['preparation-status']
+        self.assertEqual(failure['needs'], ['plan', 'prepare'])
+        self.assertIn("needs.prepare.result != 'success'", failure['if'])
+        self.assertIn('--status error', failure['steps'][-1]['run'])
         self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
         self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')
