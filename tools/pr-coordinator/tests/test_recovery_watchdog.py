@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from unittest.mock import patch, Mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -286,13 +287,14 @@ class WatchdogTests(unittest.TestCase):
         w.atomic(folder/'command.json',[sys.executable,'-c',code,str(helper_file)])
         w.atomic(folder/'limits.json',dict(timeout_seconds=5))
         (folder/'prompt.txt').write_text('test')
+        nonce = uuid.uuid4().hex
         proc = subprocess.run([sys.executable,str(ROOT/'recovery_worker.py'),str(folder)],
-            env={**os.environ,'SUIFLEET_RECOVERY_RUN':'escaped-test'}, start_new_session=True,timeout=10)
+            env={**os.environ,'SUIFLEET_RECOVERY_RUN':nonce}, start_new_session=True,timeout=10)
         helper = int(helper_file.read_text())
         try:
             self.assertEqual(proc.returncode,0)
             receipt=w.read(folder/'process.json')
-            run=dict(nonce='escaped-test',directory=str(folder),pid=receipt['pid'],started=receipt['started'])
+            run=dict(nonce=nonce,directory=str(folder),pid=receipt['pid'],started=receipt['started'])
             self.assertIn(helper,w.survivors(run))
         finally:
             try: os.kill(helper,9)
@@ -315,14 +317,15 @@ class WatchdogTests(unittest.TestCase):
                  'import subprocess,sys,time; subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"]); time.sleep(60)'])
         w.atomic(folder/'limits.json', dict(timeout_seconds=0.3))
         (folder/'prompt.txt').write_text('test')
-        env = {**os.environ,'SUIFLEET_RECOVERY_RUN':'wrapper-test'}
+        nonce = uuid.uuid4().hex
+        env = {**os.environ,'SUIFLEET_RECOVERY_RUN':nonce}
         proc = subprocess.run([sys.executable,str(ROOT/'recovery_worker.py'),str(folder)], env=env,
                               start_new_session=True, timeout=10, capture_output=True)
         self.assertEqual(proc.returncode,124,proc.stderr)
         self.assertEqual(w.read(folder/'exit.json')['returncode'],124)
         self.assertEqual((folder/'worker.log').stat().st_mode & 0o777, 0o600)
         receipt = w.read(folder/'process.json')
-        run = dict(nonce='wrapper-test', directory=str(folder), pid=receipt['pid'], started=receipt['started'])
+        run = dict(nonce=nonce, directory=str(folder), pid=receipt['pid'], started=receipt['started'])
         self.assertEqual(w.survivors(run),[])
 
 
