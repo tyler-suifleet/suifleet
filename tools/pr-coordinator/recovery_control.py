@@ -5,11 +5,12 @@ Run only from the watchdog/operator, never from a normal model worker. The
 existing dispatcher owns the new receipt and subsequent heartbeat/handoff.
 """
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import fcntl
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -121,6 +122,28 @@ def resume(dispatcher, project, slot, key, reason, worker_path):
         raise
 
 
+@contextmanager
+def interruption_cleanup():
+    """Unwind authority locks and restart parents on catchable termination.
+
+    Ignore subsequent termination signals while the finally block restores
+    services. SIGKILL/host loss cannot be handled by a Python cleanup block.
+    """
+    numbers = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    previous = {number: signal.getsignal(number) for number in numbers}
+    def interrupted(number, frame):
+        for pending in numbers:
+            signal.signal(pending, signal.SIG_IGN)
+        raise InterruptedError('recovery control terminated')
+    try:
+        for number in numbers:
+            signal.signal(number, interrupted)
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, default=Path.home()/'.config/pr-coordinator/config.json')
@@ -143,7 +166,7 @@ def main():
     services = ('ticket-dispatcher.service', 'pr-coordinator.service')
     require(all(subprocess.run(['systemctl','--user','is-active','--quiet',s]).returncode == 0 for s in services), 'services must already be active; respect operator maintenance')
     require(all(subprocess.check_output(['systemctl','--user','show',s,'--property=KillMode','--value'],text=True).strip() == 'process' for s in services), 'parent stops must preserve children')
-    with ExitStack() as stack:
+    with interruption_cleanup(), ExitStack() as stack:
         for name in ('activation.lock',):
             lock = stack.enter_context((args.state/name).open('a'))
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

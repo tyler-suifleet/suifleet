@@ -1,4 +1,7 @@
 import json
+import fcntl
+import os
+import signal
 from pathlib import Path
 import sqlite3
 import sys
@@ -139,6 +142,73 @@ class RetainedRecoveryTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): self.resume()
             self.d.db.execute('DELETE FROM '+table)
         self.child.assert_not_called()
+
+
+class ControlLifecycleTests(unittest.TestCase):
+    def test_main_restarts_after_success_failure_and_each_termination_signal(self):
+        for failure, stage in [(None, 'resume'), (RuntimeError('resume failed'), 'resume')] + [
+                (number, stage) for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+                for stage in ('stop', 'resume')]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
+                state = Path(temporary)
+                config = state/'config.json'
+                config.write_text(json.dumps(dict(projects=[dict(id='project')],
+                    implementation_slots=[dict(project='project', family='Codex')],
+                    workers={'Codex':['codex']}, recovery_watchdog=dict(
+                        enabled=True, projects=['project'], stall_seconds=60,
+                        cooldown_seconds=300, timeout_seconds=120))))
+                events = []
+                previous = {n: signal.getsignal(n) for n in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+                real_flock = fcntl.flock
+                def flock(stream, operation):
+                    events.append(Path(stream.name).name)
+                    return real_flock(stream, operation)
+                def run(command, **kwargs):
+                    if 'stop' in command:
+                        events.append('stop')
+                        if isinstance(failure, int) and stage == 'stop':
+                            os.kill(os.getpid(), failure)
+                    if 'start' in command:
+                        # All authority locks must be released before restarting.
+                        for name in ('activation.lock','dispatcher.lock','daemon.lock'):
+                            with (state/name).open('a') as lock:
+                                real_flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        events.append('start')
+                    return Mock(returncode=0)
+                dispatcher = Mock()
+                dispatcher.ticket.return_value = dict(agent='Codex')
+                def resume(*args):
+                    events.append('resume')
+                    if isinstance(failure, int):
+                        os.kill(os.getpid(), failure)
+                    if isinstance(failure, Exception):
+                        raise failure
+                    return dict(ok=True)
+                argv = ['recovery_control.py','--config',str(config),'--state',str(state),
+                        '--runtime',str(state),'--project','project','--ticket','SF-1',
+                        '--reason','Repair the confirmed code defect']
+                with patch.dict(os.environ, {'PR_COORDINATOR_ACTIVE':''}), patch.object(sys,'argv',argv), \
+                     patch.object(control.subprocess,'run',side_effect=run), \
+                     patch.object(control.subprocess,'check_output',return_value='process'), \
+                     patch.object(control.fcntl,'flock',side_effect=flock), \
+                     patch('dispatcher.Dispatcher',return_value=dispatcher), \
+                     patch.object(control,'resume',side_effect=resume), patch('builtins.print'):
+                    try:
+                        if failure is None:
+                            control.main()
+                        else:
+                            with self.assertRaises(InterruptedError if isinstance(failure,int) else RuntimeError):
+                                control.main()
+                    finally:
+                        sys.path.remove(str(state.resolve()))
+                expected = ['activation.lock','stop']
+                if not isinstance(failure,int) or stage == 'resume':
+                    expected += ['dispatcher.lock','daemon.lock','resume']
+                    dispatcher.db.close.assert_called_once()
+                expected += ['start']
+                self.assertEqual(events, expected)
+                for number, handler in previous.items():
+                    self.assertEqual(signal.getsignal(number), handler)
 
 
 if __name__ == '__main__': unittest.main()
