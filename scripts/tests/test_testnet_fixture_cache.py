@@ -122,7 +122,7 @@ class FixtureArtifacts(unittest.TestCase):
         self.assertNotIn('cache-to:',workflow)
         self.assertNotIn('actions/cache/save',workflow)
         self.assertIn('name: ${{ needs.prepare.outputs.fixture }}',workflow)
-        self.assertIn('path: encrypted-live-state/fixture.bin',workflow)
+        self.assertIn('path: candidate/encrypted-live-state/fixture.bin',workflow)
         self.assertNotIn('path: live-state',workflow)
         self.assertIn('cp scripts/testnet_fixture_cache.py "$RUNNER_TEMP/testnet_fixture_cache.py"',workflow)
 
