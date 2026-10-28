@@ -118,12 +118,12 @@ class TrustTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verify_checkout(ref, run)
 
-    def test_workflow_checks_immutable_event_commit_before_revision_execution(self):
+    def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
-        self.assertIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', checkout)
+        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
+        self.assertEqual(workflow.count('ref: ${{ steps.plan.outputs.head }}'), 2)
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
