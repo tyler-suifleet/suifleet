@@ -380,3 +380,23 @@ evidence into a durable local journal. The SF-082 fixture smoke creates no objec
 or transactions and needs no shared-wallet mutation lock. It never funds, signs,
 submits, uploads or purchases. Testnet costs remain Testnet observations; final
 Mainnet bill and production acceptance stay in SF-135/#267 and SF-087/#159.
+
+**SF-162 CI funding repair (2026-10-27, run 40553437410).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/40553437410)
+stopped in funding preflight with no submitted transactions and zero allowance
+used. Its single successful faucet request raised the CI wallet balance from
+2,522,518,519 to 3,522,518,519 MIST, below the selected suites' 3,250,000,000
+MIST plus the preserved 400,000,000 MIST historical reservation. This was a
+wallet-balance shortfall; no spend ceiling, retry limit or reservation was changed.
+
+A separate bounded maintenance operation took `network:suifleet-testnet`, verified
+chain `4c78adac` and the pinned network CLI checksum, and requested the faucet
+once for the dedicated CI address `0x99894c1a…dcac`. Transaction
+`7Ho1bmXbiuRyPB6ESXqm2DG3roKLeR4etrDNJh41ZAKv` was independently read back:
+successful effects at checkpoint 399872387, a 1,000,000,000 MIST credit to that
+address, and 1,000,000 MIST net gas paid by the faucet. The resulting balance
+was 4,522,518,519 MIST, exceeding the unchanged 3,650,000,000 MIST preflight.
+The network lock was released promptly. No package publication, object mutation,
+fixture replay or reservation clearing occurred. This repairs funding only;
+the next exact-head/current-base automatic CI/testnet run and independent review
+remain required and are not claimed passed by this maintenance evidence.
