@@ -332,6 +332,21 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "add_many_to_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "vector<sui::object::ID>",
+          "std::option::Option<std::string::String>",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "add_to_group": {
         "visibility": "Public",
         "entry": false,
@@ -814,6 +829,15 @@ export const MOVE_ABI = {
           "&vector<sui::object::ID>"
         ]
       },
+      "max_group_batch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [],
+        "returns": [
+          "u64"
+        ]
+      },
       "new_catalog_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -1007,6 +1031,19 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::device_group::DeviceGroup",
           "sui::object::ID",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove_many_from_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "vector<sui::object::ID>",
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
@@ -1574,6 +1611,31 @@ export const MOVE_ABI = {
           [
             "budget_id",
             "sui::object::ID"
+          ]
+        ]
+      },
+      "GroupBatchApplied": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "fleet_id",
+            "sui::object::ID"
+          ],
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "added",
+            "bool"
+          ],
+          [
+            "count",
+            "u64"
           ]
         ]
       },
@@ -3651,6 +3713,17 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "sui_edge::device_registry::DeviceOwnerCap"
+        ]
+      },
+      "arch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Device"
+        ],
+        "returns": [
+          "std::string::String"
         ]
       },
       "assert_admin": {

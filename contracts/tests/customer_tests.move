@@ -108,12 +108,13 @@ module sui_edge::customer_tests {
         ts::return_shared(c); ts::return_shared(r);
         s.next_tx(OWNER);
     }
-    fun register(s: &mut ts::Scenario, fid: ID, address: address): ID {
+    fun register(s: &mut ts::Scenario, fid: ID, address: address): ID { register_arch(s, fid, address, b"x86_64") }
+    fun register_arch(s: &mut ts::Scenario, fid: ID, address: address, arch: vector<u8>): ID {
         let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
         let mut r = s.take_shared<DeviceRegistry>();
         let mut b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f));
         let clock = sui::clock::create_for_testing(s.ctx());
-        customer::register_device(&mut c, &mut f, &mut b, &mut r, utf8(b"Device"), address, utf8(b"x86_64"), &clock, s.ctx());
+        customer::register_device(&mut c, &mut f, &mut b, &mut r, utf8(b"Device"), address, utf8(arch), &clock, s.ctx());
         let ids = customer::devices(&f);
         let did = ids[ids.length() - 1];
         sui::clock::destroy_for_testing(clock);
@@ -662,4 +663,158 @@ module sui_edge::customer_tests {
     #[test]
     fun managed_sharded_rollout_deletion_removes_extensions() { managed_extension_shard_cleanup(false); }
 
+
+    // SF-171 batch membership: bounded, all-or-none, fleet-bound and
+    // optionally pinned to the reviewed architecture.
+    fun batch_fixture(count: u64): (ts::Scenario, ID, vector<ID>) {
+        let mut s = setup(); let a = fleet(&mut s);
+        allow_devices(&mut s, count + 1);
+        let mut ids = vector[];
+        let mut i = 0;
+        while (i < count) {
+            let arch = if (i == 0) b"aarch64" else b"x86_64";
+            ids.push_back(register_arch(&mut s, a, sui::address::from_u256(0xD00 + (i as u256)), arch));
+            s.next_tx(OWNER); i = i + 1;
+        };
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_group(&c, &mut f, utf8(b"Batch"), utf8(b""), &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f);
+        s.next_tx(OWNER);
+        (s, a, ids)
+    }
+    fun batch_add(s: &mut ts::Scenario, fid: ID, ids: vector<ID>, arch: Option<std::string::String>) {
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>(); let r = s.take_shared<DeviceRegistry>();
+        customer::add_many_to_group(&c, &mut f, &mut g, &r, ids, arch, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(g); ts::return_shared(r);
+        s.next_tx(OWNER);
+    }
+    fun batch_remove(s: &mut ts::Scenario, fid: ID, ids: vector<ID>) {
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::remove_many_from_group(&c, &mut f, &mut g, ids, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(g);
+        s.next_tx(OWNER);
+    }
+    fun members(s: &mut ts::Scenario): u64 {
+        let g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        let n = sui_edge::device_group::member_count(&g);
+        ts::return_shared(g); s.next_tx(OWNER); n
+    }
+    #[test]
+    fun batch_add_and_remove_keep_group_accounting() {
+        let (mut s, fid, ids) = batch_fixture(4);
+        let x86 = vector[ids[1], ids[2], ids[3]];
+        batch_add(&mut s, fid, x86, option::some(utf8(b"x86_64")));
+        batch_add(&mut s, fid, vector[ids[0]], option::some(utf8(b"aarch64")));
+        assert!(members(&mut s) == 4);
+        batch_remove(&mut s, fid, ids);
+        assert!(members(&mut s) == 0);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::delete_group(&c, &mut f, g, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test]
+    fun batch_add_without_arch_accepts_mixed_architectures() {
+        let (mut s, fid, ids) = batch_fixture(3);
+        batch_add(&mut s, fid, ids, option::none());
+        assert!(members(&mut s) == 3);
+        s.end();
+    }
+    #[test]
+    fun batch_accepts_the_maximum_size() {
+        let (mut s, fid, ids) = batch_fixture(customer::max_group_batch());
+        batch_add(&mut s, fid, ids, option::none());
+        assert!(members(&mut s) == customer::max_group_batch());
+        batch_remove(&mut s, fid, ids);
+        assert!(members(&mut s) == 0);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 7, location = sui_edge::customer)]
+    fun batch_rejects_more_than_the_maximum() {
+        let (mut s, fid, ids) = batch_fixture(customer::max_group_batch() + 1);
+        batch_add(&mut s, fid, ids, option::none());
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 7, location = sui_edge::customer)]
+    fun batch_rejects_an_empty_add() {
+        let (mut s, fid, _) = batch_fixture(1);
+        batch_add(&mut s, fid, vector[], option::none());
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 7, location = sui_edge::customer)]
+    fun batch_rejects_an_empty_remove() {
+        let (mut s, fid, _) = batch_fixture(1);
+        batch_remove(&mut s, fid, vector[]);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 8, location = sui_edge::customer)]
+    fun batch_rejects_an_architecture_mismatch() {
+        let (mut s, fid, ids) = batch_fixture(3);
+        // ids[0] is aarch64: the whole x86_64 batch aborts.
+        batch_add(&mut s, fid, ids, option::some(utf8(b"x86_64")));
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 8, location = sui_edge::customer)]
+    fun batch_arch_check_rejects_an_unregistered_id() {
+        let (mut s, fid, _) = batch_fixture(1);
+        batch_add(&mut s, fid, vector[object::id_from_address(@0xBAD)], option::some(utf8(b"x86_64")));
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::device_group)]
+    fun batch_rejects_a_duplicate_device() {
+        let (mut s, fid, ids) = batch_fixture(2);
+        batch_add(&mut s, fid, vector[ids[1], ids[1]], option::none());
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::device_group)]
+    fun batch_remove_rejects_a_non_member() {
+        let (mut s, fid, ids) = batch_fixture(2);
+        batch_add(&mut s, fid, vector[ids[1]], option::none());
+        batch_remove(&mut s, fid, ids);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun batch_rejects_a_foreign_fleet_device() {
+        let (mut s, fid, ids) = batch_fixture(1);
+        let other = fleet(&mut s);
+        let foreign = register(&mut s, other, @0xF00); s.next_tx(OWNER);
+        batch_add(&mut s, fid, vector[ids[0], foreign], option::none());
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun batch_rejects_a_non_administrator() {
+        let (mut s, fid, ids) = batch_fixture(1);
+        let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, OTHER, true, false, s.ctx());
+        ts::return_shared(c); s.next_tx(OTHER);
+        batch_add(&mut s, fid, ids, option::none());
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun batch_rejects_a_foreign_registry() {
+        let (mut s, fid, ids) = batch_fixture(1);
+        device_registry::init_for_testing(s.ctx()); s.next_tx(OWNER);
+        let foreign = ts::most_recent_id_shared<DeviceRegistry>().destroy_some();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        let r = s.take_shared_by_id<DeviceRegistry>(foreign);
+        customer::add_many_to_group(&c, &mut f, &mut g, &r, ids, option::none(), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(g); ts::return_shared(r); s.end();
+    }
+    #[test]
+    fun batch_changes_an_indexed_managed_group() {
+        let (mut s, fid, da, db, _) = indexed_group();
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut g = s.take_shared<sui_edge::device_group::DeviceGroup>();
+        customer::adopt_indexed_group(&c, &mut f, &mut g, vector[da, db], s.ctx());
+        customer::remove_many_from_group(&c, &mut f, &mut g, vector[da, db], s.ctx());
+        assert!(sui_edge::device_group::member_count(&g) == 0);
+        let r = s.take_shared<DeviceRegistry>();
+        customer::add_many_to_group(&c, &mut f, &mut g, &r, vector[db, da], option::some(utf8(b"x86_64")), s.ctx());
+        assert!(sui_edge::device_group::contains_device(&g, da) && sui_edge::device_group::member_count(&g) == 2);
+        ts::return_shared(r); ts::return_shared(g); ts::return_shared(c); ts::return_shared(f); s.end();
+    }
 }
