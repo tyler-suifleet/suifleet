@@ -82,8 +82,7 @@ ABORT = _Abort()
 # Every mutation is charged to testnet_budget's strict, non-replenishing allowance.
 DIGEST = re.compile(r"transaction '([1-9A-HJ-NP-Za-km-z]{32,44})'")
 # The dedicated testnet wallets (agent, CI) of docs/TESTNET.md.
-TESTNET_WALLETS = {"0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
-                   "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"}
+from testnet_pool import TESTNET_WALLETS
 
 
 def wait_for(condition, message, process=None, timeout=240):
