@@ -180,3 +180,28 @@ No new live walkthrough, wallet mutation, deployment, physical test or full
 cross-layer suite is claimed. Earlier read-only Testnet evidence is historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains #32/#159.
 No migration; frontend rebuild required for delivery. Only the coordinator merges.
+
+## Bulk-membership base integration (2026-10-28)
+
+Merged snapshot/current fetched main `7a741c9fd90a1573d9109f3f7ad85ba52008dd97`
+cleanly into the owner branch. SF-171 adds bulk group membership on the shared
+Devices page; the selected-fleet health configuration and three health states
+remain intact. The supplied independent review reports no actionable source or
+security defect and no open threads. Prior copy and whitespace fixes remain.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target through claims tests; includes rendered health states,
+  fleet-ops copy regression and upstream bulk-group regression tests).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `git diff --check origin/main...HEAD`.
+
+Integration handoff only, not approval. New-head hosted CI, automatic testnet and
+fresh independent review remain pending and required. No hosted CI polling,
+new live walkthrough, wallet mutation, deployment, full cross-layer suite or
+physical testing was performed. Earlier read-only Testnet evidence is historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains in #32/#159.
+No migration; frontend rebuild required for delivery. Only the coordinator merges.
