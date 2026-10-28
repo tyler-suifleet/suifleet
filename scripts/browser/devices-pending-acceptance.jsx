@@ -1,5 +1,6 @@
 import React, { useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import DevicesPage from '../../dapp/src/app/devices/page';
 // Registrations land in `unindexed` while indexing lags; `index()` lists them.
 let devices=[{objectId:'0xda',name:'Alpha Pi',deviceAddress:'0xa',arch:'aarch64',ownerCapId:'0xca'}];
@@ -26,4 +27,5 @@ export const useFleetTransaction=()=>{const [isPending,setPending]=useState(fals
   if(lagging)unindexed.push(row);else{devices=[...devices,row];notify();}
   setPending(false);onSuccess?.({digest:'fixture'});},50);}};};
 window.acceptance={signCalls:()=>signCalls,index:()=>{lagging=false;devices=[...devices,...unindexed.splice(0)];notify();}};
-createRoot(document.getElementById('root')).render(<DevicesPage/>);
+// Device groups uses real queries; the provider lets that tab mount.
+createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><DevicesPage/></QueryClientProvider>);

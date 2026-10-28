@@ -63,7 +63,7 @@ function DevicesTab() {
   const { data: devices = [], isLoading, isSuccess, refetch } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
   // Keyed by device address: registration knows it before the object ID exists.
-  const pending = usePendingRows(isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
+  const pending = usePendingRows("devices", isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
   const adding = pending.waiting.filter((row) => row.kind === "create");
   // A registration not listed yet blocks another: the contract does not reject a second device for the same address.
   const registering = isPending || adding.length > 0;
@@ -274,7 +274,7 @@ function GroupsTab() {
   const { data: groups = [], isLoading, isSuccess, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
-  const pending = usePendingRows(isSuccess ? groups.map((g) => g.objectId) : undefined, refetch);
+  const pending = usePendingRows("groups", isSuccess ? groups.map((g) => g.objectId) : undefined, refetch);
   const deleting = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => row.id));
   const creating = pending.waiting.some((row) => row.kind === "create");
   const [showCreate, setShowCreate] = useState(false);

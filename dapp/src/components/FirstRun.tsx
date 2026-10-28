@@ -38,7 +38,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient();
   const wallet = useDAppKit(), currentWallet = useCurrentWallet();
   const devices = useDevices(), mutation = useFleetTransaction();
-  const pending = usePendingRows(devices.isSuccess ? devices.data.map((d) => d.deviceAddress) : undefined, devices.refetch);
+  const pending = usePendingRows("devices", devices.isSuccess ? devices.data.map((d) => d.deviceAddress) : undefined, devices.refetch);
   const [message, setMessage] = useState<{ address: string; text: string } | null>(null);
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
   const [phase, setPhase] = useState<TransactionPhase | null>(null);

@@ -22,11 +22,17 @@ const {build}=appRequire('esbuild'),{chromium}=appRequire('playwright');
   assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),1);
   // Forcing the click while pending must not open the form or sign again.
   await open.click({force:true});assert.equal(await page.locator('form').count(),0);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),1);
+  // Leaving the tab and returning keeps the pending row and the guard.
+  await page.getByRole('button',{name:'Device groups'}).click();await open.waitFor({state:'detached'});
+  await page.getByRole('button',{name:'Devices',exact:true}).click();await page.getByRole('link',{name:'Alpha Pi',exact:true}).waitFor();
+  await page.getByRole('status').filter({hasText:'Registered · adding to the list…'}).waitFor();
+  assert.equal(await open.isDisabled(),true,'pending registration still blocks Register by address after Devices -> Device groups -> Devices');
+  await open.click({force:true});assert.equal(await page.locator('form').count(),0);assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),1);
   await page.evaluate(()=>window.acceptance.index());
   await page.getByRole('link',{name:'Second Pi',exact:true}).waitFor();
   await page.getByRole('status').filter({hasText:'adding to the list'}).waitFor({state:'detached'});
   assert.equal(await open.isDisabled(),false,'listing the device re-enables registration');
   assert.equal(await page.evaluate(()=>window.acceptance.signCalls()),1);assert.deepEqual(dialogs,[]);
-  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate and re-enables once listed');
+  assert.deepEqual(errors,[]);console.log('PASS Devices screen: lagged registration shows pending, blocks a duplicate (also after switching tabs) and re-enables once listed');
  }finally{if(browser)await browser.close();if(server)await new Promise(resolve=>server.close(resolve));await fs.rm(directory,{recursive:true,force:true});}
 })().catch(error=>{console.error(error);process.exitCode=1});

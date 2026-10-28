@@ -55,6 +55,27 @@ pending, and a submission whose address matches an unlisted registration
 - `tsc --noEmit`, `next build`, `test_pending_rows.cjs`, `test_onboarding.cjs`,
   `test_fleet_ops.cjs`, `test_telemetry.cjs` (`suifleet-dev:sf037`): passed.
 
+### Review fix: pending rows lost on tab switch
+
+Codex review of `d3dd3448` found that pending rows lived in the Devices tab's
+own state, so Devices → Device groups → Devices dropped a lagged registration
+and re-enabled Register by address for the same address. Pending rows are now
+kept in a store shared by every screen, keyed by the fleet selection identity
+(chain, registry, network, account, fleet) and the list, so they survive tab
+and screen changes but never carry into another account or fleet. Get started
+and Devices share the device list's rows.
+
+- `node scripts/test_devices_pending_browser.cjs` now switches to Device groups
+  and back while the registration is pending and checks that the pending row
+  and the disabled button remain and a forced click does not sign. Passed;
+  fails on `d3dd3448` (the pending row is gone after returning).
+- `tsc --noEmit`, `test_pending_rows.cjs`, `test_onboarding_browser.cjs`,
+  `test_components_browser.cjs`, `test_dapp_presentation_browser.cjs`,
+  `test_onboarding.cjs`, `next build`, `test_alerts.cjs`, `test_fleet_ops.cjs`,
+  `test_seal_frontend.cjs`, `test_telemetry.cjs`, `test_enrollment_frontend.cjs`,
+  `test_storage_reclaim.cjs`, `test_deployment_control.cjs`,
+  `test_device_history_browser.cjs` (`suifleet-dev:sf010-chrome`): passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
