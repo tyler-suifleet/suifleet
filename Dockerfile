@@ -98,6 +98,12 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain "${RUST_VERSION}" --profile minimal --component rust-src \
     && cargo --version
 
+# Offline CI tests parse the actual Actions workflow to check wallet isolation.
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
+USER dev
+
 WORKDIR /workspace
 
 CMD ["sleep", "infinity"]
