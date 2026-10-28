@@ -72,6 +72,20 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_privileged_jobs_reject_fork_origins_before_checkout(self):
+        import yaml
+        workflow = Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        jobs = yaml.safe_load(workflow.read_text())['jobs']
+        guard = "(github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)"
+        for name in ('queue-plan', 'prepare', 'validate'):
+            with self.subTest(job=name):
+                # Guard the whole job, including build actions with package-write
+                # authority; a later Python verifier alone is not a job boundary.
+                self.assertIn(guard, jobs[name]['if'])
+                self.assertIn("github.ref == 'refs/heads/main'", jobs[name]['if'])
+        self.assertIn("needs.queue-plan.outputs.run == 'true'", jobs['prepare']['if'])
+        self.assertIn("needs.prepare.outputs.run == 'true'", jobs['validate']['if'])
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
