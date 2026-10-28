@@ -13,6 +13,7 @@ import { ComponentPublisher } from "@/components/ComponentPublisher";
 import { GreengrassImport } from "@/components/GreengrassImport";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
 import { releaseProtection } from "@/lib/delivery";
+import { catalogLabel, crossCatalogDuplicates } from "@/lib/component-library";
 import Link from "next/link";
 
 const button = "rounded border border-gray-300 bg-white px-3 py-2 text-sm disabled:opacity-50";
@@ -53,6 +54,8 @@ export default function ComponentsPage() {
   const term = search.trim().toLowerCase();
   const filtered = all.filter(v => `${v.name} ${v.version} ${v.manifests.map(m => `${m.os}/${m.arch}`).join(" ")}`.toLowerCase().includes(term));
   const names = [...new Set(filtered.map(v => v.name))];
+  // Older publications may repeat a name and version from another catalog; label which catalog each one is in.
+  const repeated = crossCatalogDuplicates(all);
   const refresh = () => { void catalogs.refetch(); void versions.refetch(); };
   return <div className="max-w-5xl space-y-5 [overflow-wrap:anywhere]">
     <div className="flex flex-wrap items-start justify-between gap-3"><PageHeader title="Components" subtitle="Your software library · reusable components and immutable versions" />
@@ -64,7 +67,7 @@ export default function ComponentsPage() {
       {message && <p role="status" className="text-sm">{message}</p>}{createError && <p role="alert" className="text-sm text-red-700">{createError}</p>}
       {view !== "library" && <>
         {loading ? <p role="status">Loading publishing settings…</p> : error ? null : !selected ? <section className="rounded border bg-white p-6 space-y-3"><h2 className="font-semibold">Set up publishing</h2><p className="text-sm">Your first publication needs a publisher catalog on Sui. This one-time wallet transaction creates the container for your immutable releases.</p><button className={button} disabled={creating} onClick={create}>{creating ? "Setting up…" : "Set up publishing"}</button> <button className={button} disabled={creating} onClick={() => setView("library")}>Back to library</button></section> : <div key={`${account.address}/${selected}/${view}`} className="space-y-4">
-          {view === "publish" ? <ComponentPublisher catalog={selected} versions={all} onClose={() => setView("library")} onPublished={refresh} /> : <><button className={button} disabled={importBusy} onClick={() => setView("library")}>Back to library</button><GreengrassImport onBusyChange={setImportBusy} catalog={selected} owner={account.address} execute={execute} onPublished={refresh} disabled={false} policies={policies.data ?? []} protect={d => releaseProtection(client, d, policies.data ?? [])} /></>}
+          {view === "publish" ? <ComponentPublisher catalog={selected} versions={all} onClose={() => setView("library")} onPublished={refresh} /> : <><button className={button} disabled={importBusy} onClick={() => setView("library")}>Back to library</button><GreengrassImport onBusyChange={setImportBusy} catalog={selected} versions={all} owner={account.address} execute={execute} onPublished={refresh} disabled={false} policies={policies.data ?? []} protect={d => releaseProtection(client, d, policies.data ?? [])} /></>}
         </div>}
       </>}
       {view === "library" && <>
@@ -72,7 +75,8 @@ export default function ComponentsPage() {
         {loading ? <p role="status" className="rounded border bg-white p-6">Loading software library…</p> : error ? null : all.length === 0 ? <div className="rounded border bg-white p-6 space-y-2"><h2 className="font-semibold">No component versions yet</h2><p className="text-sm text-gray-600">Publish your first version with a name, version number and platform artifact. You can deploy it to devices later.</p><button className={button} disabled={creating} onClick={() => setView("publish")}>Publish your first version</button></div> : names.length === 0 ? <p role="status">No versions match “{search}”. Try another name, version or platform.</p> : <>
           <p role="status" className="text-sm text-gray-500">{names.length} component{names.length === 1 ? "" : "s"} · {filtered.length} version{filtered.length === 1 ? "" : "s"}</p>
           {names.map(name => <section key={name} aria-label={name} className="rounded border bg-white overflow-hidden"><h2 className="border-b bg-gray-50 px-4 py-3 font-semibold break-words">{name}</h2><div className="divide-y">{filtered.filter(v => v.name === name).map(v => <article key={v.objectId} className="p-4 space-y-3 min-w-0">
-            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium min-w-0">Version {v.version}</h3><Link href={`/firmware?componentVersion=${v.objectId}`} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700">Deploy this version</Link></div>
+            <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium min-w-0">Version {v.version}{repeated.has(v.objectId) && <span className="text-sm font-normal text-gray-600"> · {catalogLabel(v.catalogId)}</span>}</h3><Link href={`/firmware?componentVersion=${v.objectId}`} className="rounded border border-blue-200 px-3 py-2 text-sm text-blue-700">Deploy this version</Link></div>
+            {repeated.has(v.objectId) && <p className="text-sm text-amber-800">This version number is also published from another of your publisher catalogs. The entries are separate releases; compare their platforms and details before deploying.</p>}
             <ol aria-label="Platforms in selection order" className="space-y-2">{v.manifests.map((m, i) => <li key={i}><PlatformAvailability manifest={m} index={i} /></li>)}</ol>
             <details className="text-xs text-gray-500"><summary className="cursor-pointer">Manifest and publisher details</summary><div className="mt-2 space-y-2 break-all"><p>Version object: {v.objectId}</p><p>Publisher: {v.publisher}</p><p>Catalog: {v.catalogId}</p>{v.manifests.map((m, i) => <div key={i}><p>{i + 1}. Recipe: {m.recipeBlobId}</p><p>Recipe SHA-256: {m.recipeSha256}</p><p>Artifact SHA-256: {m.artifactSha256}</p></div>)}</div></details>
           </article>)}</div></section>)}
