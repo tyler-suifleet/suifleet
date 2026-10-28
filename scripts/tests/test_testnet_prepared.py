@@ -72,6 +72,24 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_preparation_has_only_workflow_run_cache_scope(self):
+        import yaml
+        workflows = Path(__file__).resolve().parents[2]/'.github/workflows'
+        # BaseLoader preserves the YAML 1.2 `on` key as a string.
+        controller = yaml.load((workflows/'testnet.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(controller['on']), {'workflow_run'})
+        self.assertEqual(controller['on']['workflow_run']['workflows'], ['CI'])
+        self.assertEqual(controller['on']['workflow_run']['types'], ['completed'])
+        request = yaml.load((workflows/'testnet-request.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(request['on']), {'schedule', 'workflow_dispatch'})
+        job = request['jobs']['request']
+        self.assertEqual(job['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(job['permissions'], {'actions': 'write'})
+        self.assertEqual(len(job['steps']), 1)
+        self.assertEqual(job['steps'][0]['run'], 'gh workflow run ci.yml --ref main')
+        self.assertNotIn('checkout', json.dumps(job))
+        self.assertNotIn('secrets.', json.dumps(job))
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'

@@ -202,7 +202,7 @@ def plan(event_name, event, repo, get=api):
     sha = run['head_sha']
     if not SHA.fullmatch(sha):
         return None
-    if run['event'] == 'push' and run['head_branch'] == 'main':
+    if run['event'] in ('push', 'workflow_dispatch', 'schedule') and run['head_branch'] == 'main':
         return {'head': sha, 'base': get(f'repos/{repo}/commits/{sha}')["parents"][0]["sha"], 'pr': ''} if sha == base else None
     if run['event'] != 'pull_request':
         return None

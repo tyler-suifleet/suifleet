@@ -194,6 +194,24 @@ class TrustTests(unittest.TestCase):
             self.assertEqual(before,live.contracts_digest(root,compiled=built))
             self.assertNotEqual(before,live.contracts_digest(root,compiled={'digest':[2]*32}))
 
+    def test_successful_main_ci_requests_bind_current_main(self):
+        run = dict(status='completed', conclusion='success', workflow_id=7,
+                   repository={'full_name': 'a/b'}, head_sha='a'*40, head_branch='main')
+        def get(url):
+            if url.endswith('/commits/main'): return {'sha': 'a'*40}
+            if '/commits/' in url: return {'parents': [{'sha': 'b'*40}]}
+            if '/runs/' in url: return run
+            if '/workflows/' in url: return {'path': '.github/workflows/ci.yml'}
+            raise AssertionError(url)
+        for event in ('push', 'workflow_dispatch', 'schedule'):
+            run.update(event=event, head_sha='a'*40, head_branch='main')
+            self.assertEqual(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get),
+                             {'head': 'a'*40, 'base': 'b'*40, 'pr': ''})
+            run['head_sha'] = 'c'*40
+            self.assertIsNone(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get))
+            run.update(head_sha='a'*40, head_branch='other')
+            self.assertIsNone(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get))
+
     def test_exact_sha_actor_and_main_binding(self):
         pr = self.fixture()
         run = dict(status='completed', conclusion='success', workflow_id=7,
