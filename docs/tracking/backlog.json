@@ -4253,7 +4253,7 @@
     },
     {
       "key": "SF-196",
-      "title": "Require a second factor for sensitive fleet actions",
+      "title": "Add optional second-factor protection for sensitive fleet actions",
       "priority": "P1",
       "area": "security",
       "phase": "fleet",
@@ -4267,15 +4267,143 @@
         "docs/SECURITY_CI.md"
       ],
       "resources": [],
-      "description": "User request 2026-10-27: 'I think we should have 2FA'. SuiFleet signs in with a wallet, so a single compromised wallet or Google-backed zkLogin session can today publish firmware, deploy to every device, change access policies, withdraw budgets and hand over fleets. A second factor should protect those actions. Candidate designs: Sui multisig administrator addresses (for example wallet plus passkey or hardware key, k-of-n), a passkey (WebAuthn) co-signer, an on-chain approval step where a second credential confirms pending sensitive actions, and time-delayed execution with a cancel window. The console must stay serverless (SF-137).",
-      "evidence": "User request 2026-10-27; customer.move credentials/administrators; docs/WALLET_ONBOARDING.md (Enoki/zkLogin); SF-185 treasury multisig.",
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. SuiFleet signs in with a wallet, so a single compromised wallet or zkLogin session can today publish firmware, deploy to every device, change access policies, withdraw budgets and hand over fleets. This ticket builds the shared framework: the list of protected actions, an on-chain per-organization security policy that says which mechanisms are required, enforcement that cannot be bypassed by calling contracts directly, and the console settings page. SF-201 and SF-198 to SF-200 implement the four mechanisms on top of it. The console stays serverless (SF-137).",
+      "evidence": "User requests 2026-10-27 ('I think we should have 2FA'; 'support all of these options as optional for security'); customer.move credentials/administrators; docs/WALLET_ONBOARDING.md; SF-185 treasury multisig.",
       "acceptance": [
-        "A design note lists the protected actions (at least publish, deploy and rollout advance to production groups, access-policy changes, budget and storage withdrawals, credential and administrator changes, fleet handover) and compares the candidate designs on security, usability, Slush and zkLogin compatibility, cost and recovery. It recommends one, and the user approves it before implementation.",
-        "The approved design is implemented end to end: an organization can require the second factor, sensitive actions without it fail on chain (not only in the UI), and the console guides setup, approval and recovery when a factor is lost.",
-        "Move tests cover bypass attempts through old package entry points and direct calls. A testnet run records digests for setup, an approved action, a rejected action and recovery.",
-        "Docs explain setup for operators."
+        "A design note defines the protected actions (at least publish, deploy and rollout advance, access-policy changes, budget and storage withdrawals, credential and administrator changes, fleet handover), how the four mechanisms combine (for example multisig plus delay), defaults (all off) and recovery when a factor is lost. The user reviews it before the mechanisms are built.",
+        "Each organization has an on-chain security policy. Protected actions check it on chain, so direct or old-package calls cannot skip a required factor. Turning protection off or weakening it requires the factors currently in force.",
+        "A Security settings page shows the policy, lets administrators enable each mechanism, and explains each in plain language.",
+        "Move tests cover policy changes, bypass attempts through old entry points and the weakening rule. A testnet run records the digests."
       ],
-      "validation": "Move tests and security check, frontend tests, testnet effects, real-wallet acceptance under SF-031/#32 policy."
+      "validation": "Move tests and security check, frontend tests, testnet effects."
+    },
+    {
+      "key": "SF-201",
+      "title": "Let organizations use a multisig administrator address",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. An organization's administrator credential can be a Sui multisig address (k-of-n over wallet, hardware-key or passkey members), so protected actions need several signatures.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Administrators can register a multisig address as a credential, see its members and threshold, and the console builds, collects and submits partial signatures without a server (for example by exporting and importing the unsigned transaction).",
+        "Slush, an extension wallet and a hardware wallet can each act as a member.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-198",
+      "title": "Let organizations require a passkey co-signature",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action also needs a signature from the administrator's passkey (WebAuthn, as supported by Sui's passkey signature scheme) in addition to the wallet.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Administrators can enrol and remove passkeys from the console; a protected action prompts for the passkey and fails on chain without it.",
+        "Browser and platform support and the lost-device recovery path are documented.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-199",
+      "title": "Let organizations require a second person to approve sensitive actions",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action is proposed on chain and runs only after a different authorised credential approves it.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Proposals show what will happen, who proposed it and when it expires; another credential can approve or reject; the proposer cannot approve their own request; expired proposals cannot execute.",
+        "Pending approvals are visible on the dashboard.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-200",
+      "title": "Let organizations delay sensitive actions with a cancel window",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action is queued and can be executed only after a configured delay, during which any administrator can cancel it.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "The delay is configurable per action class within documented bounds; queued actions show a countdown and a cancel button; execution before the delay or after cancellation fails on chain.",
+        "Emergency actions that must stay fast (for example pausing a deployment) are excluded and listed in the design note.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-197",
+      "title": "Automatically dispatch a bounded recovery agent when fleet work stops progressing",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Add a recurring recovery-agent supervisor beyond the current service/status monitor. Start one bounded Codex recovery session from a concrete offline diagnostic snapshot when work stalls; install and enable for SuiFleet. Support explicitly configured projects without replacing coordinator or dispatcher.",
+      "evidence": "User explicitly asks for an automated agent prompted to get things moving, after repeated stalls despite active services. Existing five-minute check-progress.py only restarts stopped services and writes status.",
+      "acceptance": [
+        "Offline progress/stall detector and five-minute timer dispatch a real recovery agent; healthy active progress and empty/deferred-only work do not create idle agents.",
+        "One recovery agent globally with PID/start-time and descendant fencing, durable intent/exit receipts, bounded runtime, cooldown, restart adoption, maintenance guards and no recursive spawning.",
+        "Recovery prompt preserves ownership, stopped-worker proofs, CI/security/independent-review gates and deployment limits; no account rotation or fabricated success; legitimate CI/provider waits produce a concrete next-check time.",
+        "Private local reports record diagnosis/actions/verification/blockers/next check without credentials; no new periodic GitHub polling.",
+        "Focused offline tests cover stall/progress, duplicate/restarted ticks, uncertain launch, surviving descendants, timeout/nonzero/cooldown and config rejection. Additive install only, then verify actual timer and first launch."
+      ],
+      "validation": "Offline meaningful unit/integration tests, Python compile, additive installation check and actual timer/worker verification; small Tyler-authored commits, normal review. User explicitly authorizes watchdog activation."
     }
   ]
 }
