@@ -145,9 +145,11 @@ remain the SDK's. Remote branding/disable updates are no longer fetched: review
 the snapshot when upgrading the wallet SDK or when provider availability changes.
 No cross-origin proxy, console suppression or credential handling is added.
 
-After building, run `CHROME_EXECUTABLE=/usr/bin/google-chrome node
-scripts/test_dapp_presentation_browser.cjs`. CI runs the same test with its pinned
-headless browser and networking disabled. It discovers every app page and fails
+After building in the pinned development container, run
+`CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell node
+scripts/test_dapp_presentation_browser.cjs`. For a host run, set
+`CHROME_EXECUTABLE` to the installed Chrome path. CI runs the same test with its
+pinned headless browser and networking disabled. It discovers every app page and fails
 on console errors, uncaught exceptions, external startup requests or missing
 favicon/metadata at desktop and mobile widths. Public testnet price reads use
 an explicit gRPC unavailable-price fixture; all other external requests fail.
