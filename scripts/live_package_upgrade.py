@@ -552,10 +552,8 @@ def run(args):
     compatibility = toolchain.preflight(tools, facts, expected)
     evidence["toolchain"] = dict(tools, compatibility=compatibility)
     if args.network == 'testnet':
-        assert operator in {
-            '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965',
-            '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac',
-        }, 'wallet is outside dedicated testnet grant'
+        from testnet_pool import TESTNET_WALLETS
+        assert operator in TESTNET_WALLETS, 'wallet is outside dedicated testnet grant'
     state_path = Path(args.state) if args.state else wallet.parent / "live-state.json"
     state = load_state(state_path, chain, operator)
     # Fund the whole selected suite sequence up front, never one suite at a time,
