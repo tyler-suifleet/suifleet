@@ -304,3 +304,34 @@ polling, live mutation, deployment or physical acceptance was performed. Deferre
 physical/mainnet/production-provider/manual-wallet acceptance remains in
 https://github.com/tyler-suifleet/suifleet/issues/32 and
 https://github.com/tyler-suifleet/suifleet/issues/159. No migration is required.
+
+## Current-base conflict repair (2026-10-28)
+
+Integrated snapshot/current fetched main `24b7752b95901e78b05f4afe4eac1759579b7ece`.
+The only textual conflict was adjacent additions in
+`scripts/tests/test_testnet_prepared.py`; both the fork-origin condition regression
+and main's authenticated candidate clone/controller-isolation regression remain.
+The merged workflow preserves both the fork-origin guard and main's isolated
+candidate checkout. Supplied independent review had no actionable source finding
+or open thread. No health behavior change was necessary.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including all three rendered health cases).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build`
+  (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `make RUN= test-testnet`: 159 tests, one installed-container toolchain test
+  skipped on host; 60 live-common fixture tests and authenticated cache PASS.
+  These are offline fixtures, including intentional transaction failures; no
+  wallet mutation or public-network acceptance was performed.
+- `python3 -m unittest discover -s scripts/tests -p test_security_audit.py`:
+  23 tests OK (scanner harness tests, not an actual CodeQL scan).
+- `git diff --check origin/main...HEAD` and staged whitespace check.
+
+Repair handoff only. Hosted CI/automatic testnet and fresh independent review of
+the pushed head/current base remain pending; no CI polling or merge performed.
+Prior read-only testnet walkthrough remains historical. Physical/mainnet and final
+provider/manual-wallet acceptance remain unrun in #32 and #159. No migration;
+frontend rebuild required for delivery. Model: gpt-6.1-sol.
