@@ -19,7 +19,7 @@ import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
                          failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
-                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF)
+                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF, annotate_job_timeouts)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -813,7 +813,8 @@ resolve conflicts, then continue the unfinished software and rerun all required 
                                   cwd=project['root'], env=env))
         pr['_testnet_status'] = next((row for row in statuses.get('statuses', [])
                                       if row.get('context') == 'testnet/package-upgrade'), None)
-        return pr
+        return annotate_job_timeouts(pr, project['repository'], lambda path: json.loads(
+            run(['gh', 'api', path], cwd=project['root'], env=env)))
 
     def failure_superseded(self, project, record):
         pr = self.fresh_pr(project, record['pr'])

@@ -118,11 +118,11 @@ class FixtureArtifacts(unittest.TestCase):
 
     def test_workflow_never_exports_a_readonly_runtime_cache(self):
         workflow=(Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
-        self.assertIn('cache-from: type=gha',workflow)
+        self.assertNotIn('cache-from:',workflow)
         self.assertNotIn('cache-to:',workflow)
         self.assertNotIn('actions/cache/save',workflow)
         self.assertIn('name: ${{ needs.prepare.outputs.fixture }}',workflow)
-        self.assertIn('path: encrypted-live-state/fixture.bin',workflow)
+        self.assertIn('path: candidate/encrypted-live-state/fixture.bin',workflow)
         self.assertNotIn('path: live-state',workflow)
         self.assertIn('cp scripts/testnet_fixture_cache.py "$RUNNER_TEMP/testnet_fixture_cache.py"',workflow)
 
