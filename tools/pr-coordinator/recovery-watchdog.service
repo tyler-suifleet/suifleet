@@ -7,7 +7,8 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/bin/python3 %h/.local/lib/pr-coordinator/recovery-watchdog/current/recovery_watchdog.py --config %h/.config/pr-coordinator/config.json --execute
 Environment="PATH=@NODE_DIRECTORY@:%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
-TimeoutStartSec=90
+# Allow bounded fleet (60s) and per-project ticket (45s) reads plus launch overhead.
+TimeoutStartSec=@OBSERVATION_TIMEOUT@
 TimeoutStopSec=10
 KillMode=process
 UMask=0077

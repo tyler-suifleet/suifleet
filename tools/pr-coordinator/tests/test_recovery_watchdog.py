@@ -96,7 +96,7 @@ class WatchdogTests(unittest.TestCase):
         def launch(*args, **kwargs):
             state = w.read(monitor.path)
             self.assertEqual(state['run']['phase'], 'launching')
-            self.assertTrue((Path(state['run']['directory'])/'prompt.txt').exists())
+            self.assertEqual((Path(state['run']['directory'])/'prompt.txt').stat().st_mode & 0o777, 0o600)
             self.assertNotIn('GH_TOKEN', kwargs['env'])
             self.assertNotIn('PR_COORDINATOR_CLAIM_TOKEN', kwargs['env'])
             self.assertNotIn('PR_COORDINATOR_ACTIVE', kwargs['env'])
@@ -200,6 +200,9 @@ class WatchdogTests(unittest.TestCase):
         self.assertFalse(w.read(config)['recovery_watchdog']['enabled'])
         self.assertEqual((generation/'recovery_watchdog.py').read_bytes(), (ROOT/'recovery_watchdog.py').read_bytes())
         self.assertTrue((home/'.config/systemd/user/recovery-watchdog.timer').exists())
+        service = (home/'.config/systemd/user/recovery-watchdog.service').read_text()
+        self.assertIn('TimeoutStartSec=165', service)
+        self.assertNotIn('@OBSERVATION_TIMEOUT@', service)
 
     def test_escaped_helper_fences_a_successfully_exited_wrapper(self):
         folder = self.base/'escape'
@@ -245,6 +248,7 @@ class WatchdogTests(unittest.TestCase):
                               start_new_session=True, timeout=10, capture_output=True)
         self.assertEqual(proc.returncode,124,proc.stderr)
         self.assertEqual(w.read(folder/'exit.json')['returncode'],124)
+        self.assertEqual((folder/'worker.log').stat().st_mode & 0o777, 0o600)
         receipt = w.read(folder/'process.json')
         run = dict(nonce='wrapper-test', directory=str(folder), pid=receipt['pid'], started=receipt['started'])
         self.assertEqual(w.survivors(run),[])

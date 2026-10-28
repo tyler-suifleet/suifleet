@@ -38,7 +38,7 @@ Install only the additive watchdog component from the implementation checkout:
 python3 tools/pr-coordinator/install_watchdog.py --project suifleet --enable
 ```
 
-The installer stages a content-addressed watchdog generation, sets its own `current` link, installs its timer/service, and adds only `recovery_watchdog` to the existing private configuration. It preserves the full prior configuration in a private backup, rejects concurrent configuration changes and holds the runtime activation lock while installing. It does not replace or restart the review coordinator, dispatcher or their workers. Node's resolved directory is included in the service PATH for the configured Codex CLI.
+The installer stages a content-addressed watchdog generation, sets its own `current` link, installs its timer/service, and adds only `recovery_watchdog` to the existing private configuration. It preserves the full prior configuration in a private backup, rejects concurrent configuration changes and holds the runtime activation lock while installing. It does not replace or restart the review coordinator, dispatcher or their workers. Node's resolved directory is included in the service PATH for the configured Codex CLI. The service observation timeout allows 60 seconds for fleet status, 45 seconds per enabled project for ticket inventory, and 60 seconds of launch overhead. Reinstall after changing the enabled project list. Manual worker launches also use private file permissions.
 
 Multiple projects are explicit opt-ins:
 

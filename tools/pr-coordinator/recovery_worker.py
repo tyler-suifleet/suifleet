@@ -28,6 +28,8 @@ def stop_group(child):
 
 
 def main():
+    # Manual launches need the same private outputs as the systemd service.
+    os.umask(0o077)
     directory = Path(sys.argv[1])
     atomic(directory/'process.json', identity(os.getpid()))
     child = None

@@ -65,6 +65,7 @@ def install_locked(home, projects, enable):
     units.mkdir(parents=True, exist_ok=True)
     for name in ('recovery-watchdog.service', 'recovery-watchdog.timer'):
         text = (source/name).read_text().replace('@NODE_DIRECTORY@', str(Path(node).parent))
+        text = text.replace('@OBSERVATION_TIMEOUT@', str(120 + 45 * len(projects)))
         (units/name).write_text(text)
     if enable:
         subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)

@@ -228,7 +228,8 @@ Do not expose credentials or put raw logs into the report. Write {result} as one
 Use a next-check time between 5 minutes and 24 hours after completion; align known provider waits with their reset.
 Keep the existing local status report current. Finish this bounded recovery pass, write the result, then EXIT.
 '''
-        (directory/'prompt.txt').write_text(prompt)
+        with os.fdopen(os.open(directory/'prompt.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+            stream.write(prompt)
         self.state['run'] = dict(phase='launching', nonce=nonce, directory=str(directory))
         self.state['not_before'] = self.now+self.options['cooldown_seconds']
         self.save('launch intent recorded', candidates=candidates)
