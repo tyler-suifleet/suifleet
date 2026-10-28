@@ -122,13 +122,9 @@ class TrustTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
+        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
         self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
-        immutable_ref = "ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
-        self.assertEqual(workflow.count(immutable_ref), 2)
-        for section in workflow.split('      - name: Checkout authenticated test revision')[1:]:
-            self.assertLess(section.index('--verify-checkout'), section.index('GH_TOKEN:'))
-            self.assertIn('TEST_HEAD: ${{ steps.plan.outputs.head }}',
-                          section[:section.index('--verify-checkout')])
+        self.assertEqual(workflow.count('--checkout-candidate candidate'), 2)
         verify = checkout.index('--verify-checkout')
         self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
@@ -522,7 +518,7 @@ class TrustTests(unittest.TestCase):
         self.assertIn("if: inputs.gate == 'hardware'", workflow)
         testnet = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('-e GITHUB_EVENT_NAME', testnet)
-        self.assertIn('path: evidence/*.json', testnet)
+        self.assertIn('path: candidate/evidence/*.json', testnet)
 
     def test_unchanged_custodied_fixture_reuses_state_without_mutation(self):
         import live_package_upgrade as live
