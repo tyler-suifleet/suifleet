@@ -3,7 +3,7 @@
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 import { Fragment, useState, useCallback, useEffect, useRef } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useGroups } from "@/hooks/useGroups";
 import { useDevices } from "@/hooks/useDevices";
