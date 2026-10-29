@@ -11,6 +11,25 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_preparation_status_receipt_binds_api_id_and_exact_attempt(self):
+        import io
+        from contextlib import redirect_stdout
+        import testnet_ci
+        env = dict(PREPARATION_RESULT='failure', GITHUB_RUN_ID='42',
+                   GITHUB_RUN_ATTEMPT='2', GITHUB_SHA='c'*40)
+        with patch.dict('os.environ', env), patch.object(testnet_ci, 'api', return_value={'id': 90}) as api:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                testnet_ci.status('owner/repo', 'a'*40, 'b'*40, 'error', 'https://example.test/run')
+            receipt = json.loads(output.getvalue().split('SUIFLEET_PREPARATION_V1 ', 1)[1])
+            self.assertEqual(receipt, dict(status=90, head='a'*40, base='b'*40,
+                                           run=42, attempt=2, controller='c'*40))
+            self.assertEqual(api.call_args.args[1]['state'], 'error')
+            for result in ('cancelled', 'skipped', 'success', ''):
+                with patch.dict('os.environ', {'PREPARATION_RESULT': result}), redirect_stdout(io.StringIO()) as output:
+                    testnet_ci.status('owner/repo', 'a'*40, 'b'*40, 'error', 'https://example.test/run')
+                self.assertEqual(output.getvalue(), '')
+
     def test_receipt_timeout_diagnostics_exclude_private_journal_and_log_values(self):
         import tempfile
         from live_package_upgrade import daemon_progress
