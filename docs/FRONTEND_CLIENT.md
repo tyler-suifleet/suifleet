@@ -178,3 +178,13 @@ proving that the detector is live. Unexpected page errors and hydration console
 messages fail. External requests are blocked, signing is refused, and contexts
 use disposable browser storage. This does not establish real extension-wallet,
 provider, public-chain or physical-device acceptance (tracked in #32 and #159).
+
+The presentation CI step rebuilds the default export after `make ci`, whose final
+`test-hydration` target leaves a Seal testnet profile export in `dapp/out`. That
+profile enables customer fleet selection and intentionally replaces scoped pages
+with a fleet-selection prompt while logged out. The default export exposes every
+page title for the presentation assertions; testing the profile instead would
+exercise the access prompt rather than page content. Both the rebuild and browser
+gate run with container networking disabled. Separate hydration checks still run
+for every route on both exports. Browser failures include the route, viewport,
+captured errors and unexpected external requests.

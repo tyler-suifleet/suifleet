@@ -59,7 +59,9 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
       await page.setViewportSize({width,height:1000});
       for (const route of routes) {
         await page.goto(base+route,{waitUntil:'networkidle'});
-        await page.locator('h1').waitFor();
+        await page.locator('h1').waitFor().catch(error => {
+          throw new Error(`${route} at ${width}px: page title unavailable; console/page errors: ${JSON.stringify(errors)}; external requests: ${JSON.stringify(externalRequests)}`, {cause:error});
+        });
         assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'), '/favicon.ico');
         const favicon = await page.request.get(base+'/favicon.ico');
         assert.equal(favicon.status(),200,`${route}: exported favicon`);
