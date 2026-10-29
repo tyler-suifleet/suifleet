@@ -20,6 +20,7 @@ import argparse
 import hashlib
 from html.parser import HTMLParser
 import json
+import re
 from pathlib import Path
 import sys
 from urllib.parse import unquote, urlsplit
@@ -186,16 +187,31 @@ def check_videos(out, require):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("network") != "testnet" or manifest.get("chain") != "4c78adac":
         errors.append("guide videos must be recorded on Sui testnet (chain 4c78adac)")
+    if not re.fullmatch(r"[0-9a-f]{40}", manifest.get("console_commit", "")):
+        errors.append("guide video console_commit must identify a full Git commit")
     seen = set()
     for video in manifest.get("videos", []):
+        if not re.fullmatch(r"[0-9a-f]{40}", video.get("console_commit", manifest.get("console_commit", ""))):
+            errors.append(f"guide video {video['step']} has an invalid console commit")
         if video["step"] not in steps:
             errors.append(f"video for unknown guide step {video['step']}")
+        if video["step"] in seen:
+            errors.append(f"duplicate video for {video['step']}")
         seen.add(video["step"])
-        for key in ("file", "poster"):
+        if require:
+            for required in ("poster", "fallback"):
+                if not video.get(required):
+                    errors.append(f"guide {video['step']} missing {required}")
+        for key in ("file", "poster", "fallback"):
             name = video.get(key)
             if not name:
                 continue
+            if Path(name).name != name:
+                errors.append(f"unsafe guide media filename {name}")
+                continue
             built = out / "media" / "guide" / name
+            if built.exists() and key != "poster" and built.stat().st_size > 15_000_000:
+                errors.append(f"guide media {name} exceeds 15 MB")
             digest = video.get(key + "_sha256")
             if not built.is_file() or hashlib.sha256(built.read_bytes()).hexdigest() != digest:
                 errors.append(f"guide {key} {name} is missing or does not match its recorded digest")
