@@ -128,6 +128,18 @@ code changed.
   tree.
 - `python3 -m unittest scripts/tests/test_testnet_prepared.py`: 6 tests passed.
 
+### Merge of main `95ac2b20` (2026-10-28)
+
+This merge brings in the SF-172 landing site (`site/`) and testnet CI
+preparation changes. It merged without conflicts and changes nothing under
+`dapp/`.
+
+- `tsc --noEmit`, `next build` and the same 21 node/browser scripts as the
+  previous merge (`suifleet-dev:sf010-chrome`, `--network none`, isolated
+  tmpfs copy): all passed on the merged tree.
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py`: 8 tests passed.
+- `python3 -m unittest discover -s site/tests`: 18 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
