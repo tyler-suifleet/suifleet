@@ -451,3 +451,35 @@ No new live walkthrough, full cross-layer suite, local CodeQL, deployment or
 hardware result is claimed. Earlier read-only Testnet evidence is historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun in
 SF-031/#32 and SF-087/#159. No migration; frontend rebuild required for delivery.
+
+
+### Public-site base integration (2026-10-29)
+
+The feedback snapshot for `d9deb5de85d221d7dcd08867b98f9e88c4f50e41`
+contains no actionable source defect or open thread. Integrated snapshot and
+fetched main `0189768b8216a966545f193919956a7495e25d27` cleanly in
+`ffd99587d99e9fcab0e4dd33c136a6006f743a90`, preserving the reviewed public-site
+redesign and tracking updates. No additional behavior fix was needed.
+Worker model: gpt-6.1-sol.
+
+Checks after integration, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including the three rendered health states).
+- In `dapp`: `npx --yes pnpm@11.0.8 typecheck` and
+  `npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`
+  (all exported console routes, logged out and reconnected fixture wallet).
+- `make RUN= test-testnet` (163 tests OK, one installed-container toolchain
+  check skipped on host; 60 live-common fixture tests OK; authenticated cache PASS).
+  Funding, connection and uncertain-transaction messages are offline fixtures.
+- `git diff --check origin/main...HEAD` and snapshot-base ancestry check.
+
+Repair handoff only: hosted CI and automatic testnet for the pushed head remain
+pending/uncollected, with no hosted CI polling. Fresh independent review is still
+required; only the coordinator merges. No new live walkthrough, wallet writes,
+deployment, physical tests, local CodeQL or full cross-layer suite is claimed.
+Earlier read-only Testnet evidence remains historical. Physical/mainnet and final
+provider/manual-wallet acceptance remain unrun in SF-031/#32 and SF-087/#159.
+No migration is needed; delivery requires a frontend rebuild.
