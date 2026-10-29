@@ -62,38 +62,12 @@ test-native-seal:
 
 # The daemon speaks gRPC; the simulator is served through the test-only shim
 # example (suifleet-edge/examples/grpc_sim_shim.rs).
+OTA_TEST_JOBS ?= 3
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
-	$(RUN) python3 scripts/test_ota.py
-	$(RUN) python3 scripts/test_ota.py --poll-reads
-	$(RUN) python3 scripts/test_ota.py --platform-installer
-	$(RUN) python3 scripts/test_catalog_ota.py
-	$(RUN) python3 scripts/test_dependency_ota.py
-	$(RUN) python3 scripts/test_ota.py --firmware-helper
-	$(RUN) python3 scripts/test_firmware_restart.py
-	$(RUN) python3 scripts/test_supervisor.py
-	$(RUN) python3 scripts/test_configuration.py
-	$(RUN) python3 scripts/test_greengrass_runtime.py
-	$(RUN) python3 scripts/test_daemon_update.py
-	$(RUN) python3 scripts/test_desired_state.py
-	$(RUN) python3 scripts/test_inbox_ota.py
-	$(RUN) python3 scripts/test_handover_ota.py
-	$(RUN) python3 scripts/test_deployment_control.py
-	$(RUN) python3 scripts/test_telemetry.py
-	$(RUN) python3 scripts/test_logs.py
-	$(RUN) python3 scripts/test_cloudwatch_logs.py
-	$(RUN) python3 scripts/test_console.py
-	$(RUN) python3 scripts/test_rollout.py
-	$(RUN) python3 scripts/test_cadence_ota.py
-	$(RUN) python3 scripts/test_budget_ota.py
-	$(RUN) python3 scripts/test_fleet_settings_ota.py
-	$(RUN) python3 scripts/test_recovery_ota.py
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt --stream-retention
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ota_suites.py
+	$(RUN) python3 scripts/run_ota_suites.py --jobs $(OTA_TEST_JOBS)
 
 .PHONY: test-opaque
 test-opaque:
