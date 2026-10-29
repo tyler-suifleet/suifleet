@@ -78,7 +78,7 @@ class PreparedTests(unittest.TestCase):
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs']
         # Evaluate the actual Actions conditions for trusted, fork and manual events.
-        for job in ('prepare', 'validate'):
+        for job in ('plan', 'validate'):
             condition=jobs[job]['if']
             for event, repository, conclusion, expected in (
                 ('workflow_run', 'owner/repo', 'success', True),
@@ -93,6 +93,24 @@ class PreparedTests(unittest.TestCase):
                 script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition+'));'
                 result=subprocess.check_output(['node', '-e', script, json.dumps(context)], text=True).strip()
                 self.assertEqual(result, str(expected).lower(), (job, event, repository))
+
+    def test_preparation_has_only_workflow_run_cache_scope(self):
+        import yaml
+        workflows = Path(__file__).resolve().parents[2]/'.github/workflows'
+        # BaseLoader preserves the YAML 1.2 `on` key as a string.
+        controller = yaml.load((workflows/'testnet.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(controller['on']), {'workflow_run'})
+        self.assertEqual(controller['on']['workflow_run']['workflows'], ['CI'])
+        self.assertEqual(controller['on']['workflow_run']['types'], ['completed'])
+        request = yaml.load((workflows/'testnet-request.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(request['on']), {'schedule', 'workflow_dispatch'})
+        job = request['jobs']['request']
+        self.assertEqual(job['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(job['permissions'], {'actions': 'write'})
+        self.assertEqual(len(job['steps']), 1)
+        self.assertEqual(job['steps'][0]['run'], 'gh workflow run ci.yml --ref main')
+        self.assertNotIn('checkout', json.dumps(job))
+        self.assertNotIn('secrets.', json.dumps(job))
 
     def test_candidate_clone_preserves_controller_and_has_complete_history(self):
         import subprocess
@@ -142,14 +160,61 @@ class PreparedTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 checkout_candidate(head, base, controller/'candidate', run)
 
+    def test_revision_preparation_has_no_shared_actions_cache(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        prep=yaml.safe_load(workflow.read_text())['jobs']['prepare']
+        # workflow_run cache access is independent of GITHUB_TOKEN permissions.
+        # Keep revision execution away from both explicit and implicit cache actions.
+        self.assertFalse(any('cache' in s.get('uses', '') or
+                             'docker/setup-buildx-action@' in s.get('uses', '') or
+                             'docker/build-push-action@' in s.get('uses', '')
+                             for s in prep['steps']))
+        self.assertNotIn('type=gha', json.dumps(prep))
+        build=next(s for s in prep['steps'] if s.get('name') == 'Build isolated testnet environment')
+        self.assertIn('docker build --tag suifleet-dev:testnet', build['run'])
+        self.assertIn('--build-arg USER_UID="$USER_UID"', build['run'])
+        self.assertIn('--build-arg USER_GID="$USER_GID"', build['run'])
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
+        self.assertEqual(prep['needs'], 'plan')
+        self.assertEqual(prep['permissions'], {'contents':'read', 'actions':'read', 'pull-requests':'read'})
+        for name in ('plan', 'preparation-status'):
+            trusted = jobs[name]
+            self.assertEqual(trusted['permissions']['statuses'], 'write')
+            for step in trusted['steps']:
+                if 'checkout@' in step.get('uses', ''):
+                    self.assertEqual(step['with']['ref'], '${{ github.workflow_sha }}')
+        failure = jobs['preparation-status']
+        self.assertEqual(failure['needs'], ['plan', 'prepare'])
+        self.assertIn("needs.prepare.result != 'success'", failure['if'])
+        self.assertIn('--status error', failure['steps'][-1]['run'])
         self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
         self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')
         self.assertEqual(live['concurrency'],prune['concurrency'])
+        self.assertEqual(live['needs'], ['prepare', 'publish'])
+        publisher=jobs['publish']
+        self.assertEqual(publisher['permissions'], {'contents':'read', 'actions':'read', 'packages':'write', 'statuses':'write'})
+        checkouts=[s for s in publisher['steps'] if 'checkout@' in s.get('uses','')]
+        self.assertEqual(len(checkouts), 1)
+        self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
+        self.assertNotIn('docker run', json.dumps(publisher))
+        self.assertNotIn('docker build', json.dumps(publisher))
+        self.assertIn('docker load', json.dumps(publisher))
+        self.assertIn('needs.publish.outputs.digest', json.dumps(live))
+        upload=next(s for s in prep['steps'] if 'upload-artifact@' in s.get('uses',''))
+        download=next(s for s in publisher['steps'] if 'download-artifact@' in s.get('uses',''))
+        self.assertEqual(upload['with']['name'], 'prepared-image-${{ github.run_id }}-${{ github.run_attempt }}')
+        self.assertEqual(download['with']['name'], upload['with']['name'])
+        self.assertNotIn('run-id', download['with'])
+        self.assertNotIn('repository', download['with'])
+        terminal=publisher['steps'][-1]
+        self.assertEqual(terminal['if'], 'failure() || cancelled()')
+        self.assertIn('--status error', terminal['run'])
         self.assertNotIn('strategy',live) # one acceptance, never one per pool member
         steps=live['steps'];names=[s.get('name','') for s in steps]
         self.assertLess(names.index('Pull and verify immutable prepared image without signing credentials'),names.index('Run bounded testnet acceptance'))
@@ -169,7 +234,7 @@ class PreparedTests(unittest.TestCase):
         self.assertNotIn('working-directory', final)  # Also report a failed clone.
         self.assertEqual(final['env']['TEST_EVIDENCE_DIR'], 'candidate/evidence')
 
-        self.assertIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
+        self.assertNotIn('packages',prep['permissions']);self.assertNotIn('actions: write',workflow.read_text().split('  prune-fixture-history:')[0])
 
 
 if __name__=='__main__':unittest.main()
