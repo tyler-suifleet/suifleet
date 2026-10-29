@@ -36,7 +36,7 @@
       ],
       "actions": [
         "Choose Network budget in the sidebar.",
-        "Enter an Initial deposit (SUI) and click Create budget and deposit, then approve the transaction.",
+        "Enter Deposit (SUI) and click Deposit, then approve. If this build offers Create budget and deposit instead, enter the Initial deposit first.",
         "Later deposits use the Deposit button. Open Device balances, spending limits and withdrawals to cap or withdraw per-device funds.",
         "Optionally create fleet storage under Storage funding to prepay Walrus storage for uploads and log archives."
       ],
@@ -112,7 +112,7 @@
         "Choose Components in the sidebar. The first time, click Set up publishing to create your publisher catalog.",
         "Click Publish version, enter the Component name and Semantic version, and continue.",
         "For each platform choose the Operating system and Architecture, attach the Artifact and, if needed, an Install command.",
-        "Under Delivery keep Confidential and choose the Access policy. Public is for content anyone may read.",
+        "Under Delivery keep Confidential and choose the Access policy for proprietary software. The scripted testnet demo chooses Public (unencrypted) and confirms that its example artifact contains nothing confidential.",
         "Click Review version, then Upload and publish version, and approve the transaction."
       ],
       "result": "Version published, with the confirmed transaction digest. The version appears in the component library.",
@@ -178,6 +178,50 @@
         {
           "label": "Staged rollouts",
           "path": "docs/STAGED_ROLLOUTS.md"
+        }
+      ]
+    },
+    {
+      "id": "access-policy",
+      "title": "Grant decryption",
+      "console_route": "access/",
+      "console_label": "Access policies",
+      "summary": "Policies control who may request decryption keys for confidential releases.",
+      "before": [
+        "A group you administer."
+      ],
+      "actions": [
+        "Open Access policies and create a named policy.",
+        "Choose Group as the recipient type, select the demo group and click Grant decryption.",
+        "Approve the transaction. The group appears under granted recipients."
+      ],
+      "result": "The group may request keys according to current membership; already decrypted bytes cannot be recalled.",
+      "docs": [
+        {
+          "label": "Confidential delivery",
+          "path": "docs/CONFIDENTIAL_DELIVERY.md"
+        }
+      ]
+    },
+    {
+      "id": "fleet-settings",
+      "title": "Choose fleet settings",
+      "console_route": "settings/",
+      "console_label": "Fleet settings",
+      "summary": "Choose how often devices check for updates and report health. Budget estimates are planning tools.",
+      "before": [
+        "A selected fleet and its network budget."
+      ],
+      "actions": [
+        "Open Fleet settings and choose a device reporting interval.",
+        "Review the estimate, then click Save settings and approve.",
+        "Open Network budget to review the balance separately. Saving settings does not fund the budget."
+      ],
+      "result": "Settings are saved on chain; devices apply them at their next check.",
+      "docs": [
+        {
+          "label": "Fleet settings",
+          "path": "docs/FLEET_SETTINGS.md"
         }
       ]
     }
