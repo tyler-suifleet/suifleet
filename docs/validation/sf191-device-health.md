@@ -483,3 +483,37 @@ deployment, physical tests, local CodeQL or full cross-layer suite is claimed.
 Earlier read-only Testnet evidence remains historical. Physical/mainnet and final
 provider/manual-wallet acceptance remain unrun in SF-031/#32 and SF-087/#159.
 No migration is needed; delivery requires a frontend rebuild.
+
+
+### Preparation-routing base integration (2026-10-29)
+
+Feedback on `aa250fc09b5b78de61724b2398a1c9211597505a` contains no
+remaining source/security defect or open thread. Clean merge
+`1119e1a007dd87491f0f8d9f36c492b6e9cbf4f9` integrates snapshot/fetched main
+`1a821c116bb210440a1f005a7662a01bc3b2d57a`, including authenticated CI
+preparation-error routing. Existing health-copy fixes remain unchanged.
+Worker: Codex, gpt-6.1-sol.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target; all three rendered health states covered).
+- In `dapp`: `npx --yes pnpm@11.0.8 typecheck` and
+  `npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`
+  (every exported console route, logged out and reconnected fixture wallet).
+- `make RUN= test-testnet`: 164 tests OK (one installed-container toolchain
+  check skipped on host), 60 common tests OK, authenticated-cache tests PASS.
+  Failure/funding/transaction messages are offline fixtures, not live writes.
+- `python3 -m unittest discover -s tools/pr-coordinator/tests -p test_preparation_failures.py`:
+  17 tests OK; no network or wallet operations.
+- `git diff --check origin/main...HEAD`; snapshot-base ancestry verified.
+
+Repair/integration handoff only, not approval. New-head hosted CI and automatic
+testnet are pending/uncollected; no hosted CI polling. Coordinator must collect
+exact-head/current-base checks and fresh independent review before merging.
+No new live walkthrough, wallet write, deployment, hardware test, local CodeQL or
+full cross-layer suite is claimed. Earlier read-only Testnet repro is historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun in
+SF-031/#32 and SF-087/#159. No migration; delivery requires a frontend rebuild.
