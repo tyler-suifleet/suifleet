@@ -361,3 +361,30 @@ review remain required for the pushed head/current base; no hosted polling.
 Physical/mainnet/production-provider/manual-wallet acceptance remains deferred
 and unrun in #32 and #159. No migration; frontend rebuild required for delivery.
 Model: gpt-6.1-sol.
+
+
+### Current-base workflow integration repair (2026-10-28)
+
+Integrated snapshot/current fetched main `95ac2b202db17014d691eb1646d955829aa2200a`
+in merge `c3d95b8b28452b62245839c6806ff626cc5b38f8`. Independent review
+reported no actionable code/security defects and no open threads. Resolved the
+workflow conflict by retaining upstream separated plan/prepare/publish jobs and
+same-repository guards at plan and validate. Adapted the fork-condition regression
+to plan and retained upstream workflow-run cache-scope tests. Health behavior is unchanged.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest` (complete target, including rendered three-state health and operator-copy regressions).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs` (all routes, logged out and reconnected fixture wallet, with negative control).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `make RUN= test-testnet` (162 tests OK, one installed-container toolchain test skipped on host; 60 live-common fixture tests OK; authenticated cache PASS). Failure/uncertain-transaction output is intentional offline fixture evidence, not live writes.
+- `git diff --check origin/main...HEAD` and base ancestry check.
+
+Repair handoff only: hosted CI and automatic public-testnet status for the new
+head remain pending/uncollected; no hosted polling. Fresh independent review is
+required and only the coordinator merges. No new live walkthrough, wallet write,
+deployment, hardware test, full cross-layer suite or local CodeQL claimed. Earlier
+read-only Testnet repro remains historical. Deferred physical/mainnet/provider/manual
+wallet acceptance remains unrun in #32 and #159. No migration; frontend rebuild
+required for delivery. Model ownership/testing evidence is recorded in the PR handoff.
