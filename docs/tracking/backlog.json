@@ -4434,6 +4434,29 @@
         "Tests cover parallel preparation, pool selection, same-wallet exclusion, distinct wallet/cache isolation, stale or tampered prepared artifacts and fixtures, one-wallet fallback and failures; record real hosted and live limitations honestly."
       ],
       "validation": "Focused offline workflow/security/controller/cache regressions, meaningful parallelism/isolation tests, locked preparation build, dedicated testnet smoke under shared-wallet leases/budgets; normal exact-head independent review and CI."
+    },
+    {
+      "key": "SF-203",
+      "title": "Reduce CI critical path with bounded isolated OTA simulator concurrency",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "Makefile",
+        "scripts",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User requests fixing CI throughput. Preserve every existing test and security/live acceptance gate while reducing sequential simulator wall time.",
+      "evidence": "Main CI run40791684530 check took55m53s; test-ota consumed23m44s. Independent simulator invocations currently run sequentially.",
+      "acceptance": [
+        "Audit suite isolation before concurrency; prebuild shared binaries once and preserve all existing simulator invocations.",
+        "Bound concurrency with a sequential fallback; separate suite logs, propagate all failures, and clean up child processes on interruption.",
+        "Prove overlap and failure behavior with meaningful runner tests and run the full real OTA simulator suite; record timing without claiming hosted gains before measurement."
+      ],
+      "validation": "Runner concurrency/failure/interruption tests, full real OTA simulator suite, Makefile command coverage and relevant offline CI/security regressions."
     }
   ]
 }
