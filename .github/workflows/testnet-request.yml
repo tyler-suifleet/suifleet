@@ -1,0 +1,21 @@
+# Scheduled/manual requests run ordinary CI first. Only its successful workflow_run
+# enters testnet preparation, whose Actions cache scope is read-only.
+name: Request automatic testnet
+on:
+  schedule:
+    - cron: '23 8 * * *'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  request:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Request ordinary main CI before testnet acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run ci.yml --ref main
