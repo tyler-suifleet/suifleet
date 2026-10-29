@@ -1427,7 +1427,7 @@ td.num,th.num {
   .site-header nav ul {
     gap:20px;
     justify-content:flex-start;
-    width:max-content
+    flex-wrap:wrap
   }
 
   .site-header nav {
