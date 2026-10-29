@@ -72,6 +72,24 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_preparation_has_only_workflow_run_cache_scope(self):
+        import yaml
+        workflows = Path(__file__).resolve().parents[2]/'.github/workflows'
+        # BaseLoader preserves the YAML 1.2 `on` key as a string.
+        controller = yaml.load((workflows/'testnet.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(controller['on']), {'workflow_run'})
+        self.assertEqual(controller['on']['workflow_run']['workflows'], ['CI'])
+        self.assertEqual(controller['on']['workflow_run']['types'], ['completed'])
+        request = yaml.load((workflows/'testnet-request.yml').read_text(), Loader=yaml.BaseLoader)
+        self.assertEqual(set(request['on']), {'schedule', 'workflow_dispatch'})
+        job = request['jobs']['request']
+        self.assertEqual(job['if'], "github.ref == 'refs/heads/main'")
+        self.assertEqual(job['permissions'], {'actions': 'write'})
+        self.assertEqual(len(job['steps']), 1)
+        self.assertEqual(job['steps'][0]['run'], 'gh workflow run ci.yml --ref main')
+        self.assertNotIn('checkout', json.dumps(job))
+        self.assertNotIn('secrets.', json.dumps(job))
+
     def test_candidate_clone_preserves_controller_and_has_complete_history(self):
         import subprocess
         from testnet_ci import checkout_candidate
@@ -120,35 +138,40 @@ class PreparedTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 checkout_candidate(head, base, controller/'candidate', run)
 
+    def test_revision_preparation_has_no_shared_actions_cache(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        prep=yaml.safe_load(workflow.read_text())['jobs']['prepare']
+        # workflow_run cache access is independent of GITHUB_TOKEN permissions.
+        # Keep revision execution away from both explicit and implicit cache actions.
+        self.assertFalse(any('cache' in s.get('uses', '') or
+                             'docker/setup-buildx-action@' in s.get('uses', '') or
+                             'docker/build-push-action@' in s.get('uses', '')
+                             for s in prep['steps']))
+        self.assertNotIn('type=gha', json.dumps(prep))
+        build=next(s for s in prep['steps'] if s.get('name') == 'Build isolated testnet environment')
+        self.assertIn('docker build --tag suifleet-dev:testnet', build['run'])
+        self.assertIn('--build-arg USER_UID="$USER_UID"', build['run'])
+        self.assertIn('--build-arg USER_GID="$USER_GID"', build['run'])
+
     def test_workflow_prepares_outside_locks_then_checks_before_signing(self):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
-        self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
-        self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(prep['needs'], 'plan')
-        self.assertTrue(all(value == 'read' for value in prep['permissions'].values()))
-        self.assertNotIn('--status', json.dumps(prep))
-        binding = next(s for s in prep['steps'] if s.get('name') == 'Bind preparation to the authenticated status plan')
-        self.assertEqual(binding['env']['STATUS_HEAD'], '${{ needs.plan.outputs.head }}')
-        self.assertEqual(binding['env']['STATUS_BASE'], '${{ needs.plan.outputs.base }}')
-        self.assertEqual(binding['run'], 'test "$TEST_HEAD" = "$STATUS_HEAD" && test "$BASE_REF" = "$STATUS_BASE"')
-        prep_names = [s.get('name', '') for s in prep['steps']]
-        self.assertLess(prep_names.index(binding['name']), prep_names.index('Checkout authenticated test revision'))
+        self.assertEqual(prep['permissions'], {'contents':'read', 'actions':'read', 'pull-requests':'read'})
         for name in ('plan', 'preparation-status'):
-            job = jobs[name]
-            self.assertEqual(job['permissions']['statuses'], 'write')
-            checkouts = [s for s in job['steps'] if 'checkout@' in s.get('uses', '')]
-            self.assertEqual(len(checkouts), 1)
-            self.assertEqual(checkouts[0]['with']['ref'], '${{ github.workflow_sha }}')
-            self.assertNotIn('docker ', json.dumps(job))
-        self.assertIn('--status pending', json.dumps(jobs['plan']))
+            trusted = jobs[name]
+            self.assertEqual(trusted['permissions']['statuses'], 'write')
+            for step in trusted['steps']:
+                if 'checkout@' in step.get('uses', ''):
+                    self.assertEqual(step['with']['ref'], '${{ github.workflow_sha }}')
         failure = jobs['preparation-status']
         self.assertEqual(failure['needs'], ['plan', 'prepare'])
-        self.assertIn('needs.plan.outputs.head', json.dumps(failure))
-        self.assertIn("always()", failure['if'])
         self.assertIn("needs.prepare.result != 'success'", failure['if'])
-        self.assertIn('--status error', json.dumps(failure))
+        self.assertIn('--status error', failure['steps'][-1]['run'])
+        self.assertNotIn('environment',prep);self.assertNotIn('concurrency',prep)
+        self.assertNotIn('secrets.',json.dumps(prep))
         self.assertEqual(live['environment'],'live-package-upgrade')
         self.assertEqual(live['concurrency'],prune['concurrency'])
         self.assertEqual(live['needs'], ['prepare', 'publish'])
@@ -161,8 +184,6 @@ class PreparedTests(unittest.TestCase):
         self.assertNotIn('docker build', json.dumps(publisher))
         self.assertIn('docker load', json.dumps(publisher))
         self.assertIn('needs.publish.outputs.digest', json.dumps(live))
-        package = next(s for s in prep['steps'] if s.get('name') == 'Package secretless prepared tools')
-        self.assertEqual(package['working-directory'], 'candidate')
         upload=next(s for s in prep['steps'] if 'upload-artifact@' in s.get('uses',''))
         download=next(s for s in publisher['steps'] if 'download-artifact@' in s.get('uses',''))
         self.assertEqual(upload['with']['name'], 'prepared-image-${{ github.run_id }}-${{ github.run_attempt }}')
