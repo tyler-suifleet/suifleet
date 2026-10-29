@@ -779,8 +779,8 @@ resolve conflicts, then continue the unfinished software and rerun all required 
         if self.db.execute(f"SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN ({','.join('?'*len(CI_TERMINAL))})",
                            (digest, *CI_TERMINAL)).fetchone():
             return  # One redirect at a time per claim.
-        failures = json.loads(observation['failures'])
-        if any(row.get('repair_owner') for row in failures):
+        failures = [row for row in json.loads(observation['failures']) if not row.get('repair_owner')]
+        if not failures:
             return  # Shared controller repair is already owned; never stop product workers.
         completed = []
         for failure in failures:
@@ -795,7 +795,7 @@ resolve conflicts, then continue the unfinished software and rerun all required 
         self.db.execute('''INSERT OR IGNORE INTO ci_redirects(source,project,family,claim,ticket,pr,branch,head,base,fingerprint,
                            failures,state,reason,retry_after,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                         (row['session'], project['id'], row['family'], digest, claim['key'], observation['pr'], claim['branch'],
-                         observation['head'], observation['base'], observation['fingerprint'], observation['failures'], state, reason,
+                         observation['head'], observation['base'], observation['fingerprint'], json.dumps(failures), state, reason,
                          max(completed) + CI_REDIRECT_GRACE, time.time(), time.time()))
         print(f"{project['id']}: {claim['key']} PR#{observation['pr']} failed CI on active implementation: {state}", flush=True)
 

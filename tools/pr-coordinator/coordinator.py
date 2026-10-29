@@ -225,7 +225,9 @@ def annotate_preparation_failure(pr, repository, read, logs):
         return pr
     match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
                          + r'/actions/runs/([0-9]+)', status.get('target_url') or '')
-    if not match or status.get('creator', {}).get('login') != 'github-actions[bot]':
+    # Combined commit statuses omit creator. The trusted job's status-ID-bound
+    # receipt below authenticates the producer instead.
+    if not match:
         return pr
     prefix = f'repos/{repository}'
     path = f'{prefix}/actions/runs/{match[1]}'
@@ -284,9 +286,16 @@ def annotate_preparation_failure(pr, repository, read, logs):
         failed_steps = [row['name'] for row in prepare['steps'] if row['conclusion'] == 'failure']
         if not failed_steps:
             return pr
+        repair_owner = None
+        if (repository == 'tyler-suifleet/suifleet'
+                and failed_steps == ['Checkout authenticated test revision']):
+            # The incident owner applies only while its existing repair is open.
+            # Later checkout failures must use the ordinary bounded repair path.
+            repair = read(f'{prefix}/pulls/406')
+            if repair['state'] == 'open' and not repair['merged']:
+                repair_owner = 'SF-204'
         pr['_preparation_failure'] = dict(**expected, url=status['target_url'],
-            repair_owner='SF-204' if repository == 'tyler-suifleet/suifleet'
-            and failed_steps == ['Checkout authenticated test revision'] else None)
+                                           repair_owner=repair_owner)
     except Exception:
         pass  # Missing, cancelled, unavailable and malformed evidence fail closed.
     return pr
@@ -437,8 +446,12 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     if not failures:
         return None
     shared = sorted({row['repair_owner'] for row in failures if row.get('repair_owner')})
-    if shared:
-        return 'shared controller repair owner ' + ', '.join(shared) + '; activation/exact-head validation pending'
+    if shared and pr.get('state') == 'OPEN' and not pr.get('isCrossRepository'):
+        responsibility = 'shared controller repair owner ' + ', '.join(shared) + '; activation/exact-head validation pending'
+        local = [row for row in failures if not row.get('repair_owner')]
+        if local:
+            responsibility += '; local failures: ' + ci_responsibility(pr, owner, local, blocker)
+        return responsibility
     if pr.get('isCrossRepository') or pr.get('state') != 'OPEN':
         return 'no automatic repair: not an open same-repository PR'
     if not owner:

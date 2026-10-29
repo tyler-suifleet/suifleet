@@ -18,8 +18,7 @@ class PreparationFailures(unittest.TestCase):
         self.path = self.prefix + '/actions/runs/42'
         self.status = dict(id=90, state='error', context=c.TESTNET_CONTEXT,
                            description='base:' + self.pr['baseRefOid'],
-                           target_url='https://github.com/tyler-suifleet/suifleet/actions/runs/42',
-                           creator={'login': 'github-actions[bot]'})
+                           target_url='https://github.com/tyler-suifleet/suifleet/actions/runs/42')
         self.pr['_testnet_status'] = self.status
         self.run = dict(id=42, run_attempt=2, head_sha='c' * 40, head_branch='main',
                         event='workflow_run', path='.github/workflows/testnet.yml',
@@ -39,6 +38,7 @@ class PreparationFailures(unittest.TestCase):
             self.prefix + '/compare/' + 'c' * 40 + '...' + self.pr['baseRefOid']:
                 {'merge_base_commit': {'sha': 'c' * 40}},
             self.prefix + '/commits/' + self.pr['headRefOid'] + '/status': {'statuses': [self.status]},
+            self.prefix + '/pulls/406': {'state': 'open', 'merged': False},
             self.prefix + '/pulls/7': {'head': {'sha': self.pr['headRefOid']}},
             self.prefix + '/git/ref/heads/main': {'object': {'sha': self.pr['baseRefOid']}},
         }
@@ -60,6 +60,24 @@ class PreparationFailures(unittest.TestCase):
         self.assertEqual(self.status['state'], 'error')
         self.assertNotIn('SUIFLEET_PREPARATION_V1', json.dumps(self.pr))
 
+    def test_closed_incident_does_not_own_future_checkout_failures(self):
+        for state, merged in [('closed', True), ('closed', False)]:
+            with self.subTest(merged=merged):
+                self.setUp()
+                self.data[self.prefix + '/pulls/406'] = dict(state=state, merged=merged)
+                self.assertNotIn('repair_owner', self.classify()[0])
+
+    def test_mixed_responsibility_exposes_local_owner_and_eligibility(self):
+        failures = self.classify() + [dict(name='check')]
+        owner = dict(agent='Codex', status='review')
+        responsibility = c.ci_responsibility(self.pr, owner, failures)
+        self.assertIn('SF-204', responsibility)
+        self.assertIn('Codex coordinator CI repair', responsibility)
+        self.pr['state'] = 'CLOSED'
+        self.assertIn('not an open', c.ci_responsibility(self.pr, owner, failures))
+        self.pr.update(state='OPEN', isCrossRepository=True)
+        self.assertIn('not an open', c.ci_responsibility(self.pr, owner, failures))
+
     def test_nonshared_failure_uses_normal_bounded_check_budget(self):
         self.jobs[1]['steps'][0]['name'] = 'Build tools'
         failures = self.classify()
@@ -70,8 +88,7 @@ class PreparationFailures(unittest.TestCase):
     def test_reject_status_and_producer_mutations(self):
         for key, value in [('state', 'pending'), ('state', 'success'), ('description', 'base:' + 'f'*40),
                            ('target_url', 'https://github.com/foreign/repo/actions/runs/42'),
-                           ('target_url', 'https://github.com/tyler-suifleet/suifleet/actions/runs/42/attempts/1'),
-                           ('creator', {'login': 'attacker'})]:
+                           ('target_url', 'https://github.com/tyler-suifleet/suifleet/actions/runs/42/attempts/1')]:
             with self.subTest(key=key, value=value):
                 self.setUp()
                 self.status[key] = value
@@ -152,6 +169,22 @@ class PreparationFailures(unittest.TestCase):
                 {'id': 'suifleet'}, {}, {'token': 'local-fixture'},
                 {'fingerprint': 'f', 'failures': json.dumps(failures)})
             self.assertEqual(dispatcher.db.execute('SELECT count(*) FROM ci_redirects').fetchone()[0], 0)
+
+    def test_mixed_failure_redirect_preserves_local_work(self):
+        shared = self.classify()
+        local = dict(name='check', completedAt='2026-01-01T00:00:00Z')
+        dispatcher = d.Dispatcher.__new__(d.Dispatcher)
+        import sqlite3
+        dispatcher.db = sqlite3.connect(':memory:')
+        dispatcher.db.executescript('CREATE TABLE ci_redirects(\n            source,project,family,claim,ticket,pr,branch,head,base,fingerprint,\n            failures,state,reason,retry_after,created,updated,members);')
+        dispatcher.detect_redirect(
+            {'id': 'suifleet'}, {'session': 'owner', 'family': 'Codex'},
+            {'token': 'fixture', 'key': 'SF-205', 'branch': 'work/x'},
+            dict(fingerprint='f', failures=json.dumps(shared + [local]),
+                 pr=7, head='h', base='b'))
+        row = dispatcher.db.execute('SELECT failures,state FROM ci_redirects').fetchone()
+        self.assertEqual(json.loads(row[0]), [local])
+        self.assertEqual(row[1], 'pending')
 
     def test_dispatcher_fresh_reads_share_classifier(self):
         self.pr.update(headRefName='work/x')
