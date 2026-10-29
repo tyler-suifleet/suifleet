@@ -36,6 +36,14 @@ jobs:
       - name: Offline subscription pricing tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_subscription_pricing.py -v
 
+      - name: suifleet.io site build, reproducibility and link checks
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s site/tests -v
+          python3 site/build.py --out "$RUNNER_TEMP/site-a"
+          python3 site/build.py --out "$RUNNER_TEMP/site-b"
+          diff -r "$RUNNER_TEMP/site-a" "$RUNNER_TEMP/site-b"
+          python3 site/check.py "$RUNNER_TEMP/site-a"
+
       - name: Offline PR coordinator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/pr-coordinator/tests -v
 
