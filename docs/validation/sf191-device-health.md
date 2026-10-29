@@ -415,3 +415,39 @@ mutation, deployment, hardware test, full cross-layer suite or local CodeQL
 claimed. Prior read-only Testnet repro remains historical. Physical/mainnet and
 final provider/manual-wallet acceptance remains unrun in #32 and #159. No
 migration; frontend rebuild required for delivery. Coordinator alone merges.
+
+### Current-base feedback integration (2026-10-29)
+
+The supplied independent review for `bfd3ba1167dd1311c10d634fcc04c8f10f47e4ab`
+found no actionable source/security defects and no open threads. Its hosted
+checks were pending at review time. The repair snapshot advances main to
+`9d1b68cd2df85b3d7dbf2a56897d1b07a2b2e106`; this base was cleanly merged in
+`b458e9e7bc9b12bd8cf5b4064d0a69c2e2773594`. Upstream SF-203 OTA runner,
+Makefile, operational documentation and tracking changes are preserved.
+No additional frontend behavior change was needed. Worker model: gpt-6.1-sol.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including rendered missing-configuration, missing-membership
+  and no-report health cases).
+- In `dapp`: `npx --yes pnpm@11.0.8 typecheck` and
+  `npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`
+  (every exported console route, logged out and reconnected fixture wallet).
+- `python3 -m unittest discover -s scripts/tests -p test_ota_suites.py`
+  (6 tests; reported child failure/timeout output is intentional fixture evidence).
+- `make RUN= test-testnet` (163 tests OK, one installed-container toolchain
+  check skipped on host; 60 live-common fixture tests OK; authenticated cache PASS).
+  Connection failures, uncertain transactions and funding messages are offline
+  fixtures, not live wallet operations.
+- `git diff --check origin/main...HEAD`; snapshot base ancestry verification.
+
+This is a repair handoff, not approval. New-head hosted CI and automatic testnet
+remain pending/uncollected; no hosted CI polling was performed. The coordinator
+must collect actual exact-head/current-base checks and a fresh independent review.
+No new live walkthrough, full cross-layer suite, local CodeQL, deployment or
+hardware result is claimed. Earlier read-only Testnet evidence is historical.
+Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun in
+SF-031/#32 and SF-087/#159. No migration; frontend rebuild required for delivery.
