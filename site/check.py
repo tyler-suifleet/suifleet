@@ -28,7 +28,7 @@ SITE = Path(__file__).resolve().parent
 ROOT = SITE.parent
 FORBIDDEN_TAGS = {"script", "iframe", "object", "embed", "form", "frame", "applet"}
 URL_ATTRS = {"href", "src", "poster", "action", "data", "srcset"}
-CSP = "default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'"
+CSP = "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'"
 
 
 class Page(HTMLParser):
