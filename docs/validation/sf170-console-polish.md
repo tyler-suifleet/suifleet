@@ -155,6 +155,23 @@ nothing under `dapp/`.
   passed on the merged tree.
 - `python3 -m unittest scripts.tests.test_testnet_prepared`: 9 tests passed.
 
+### Merge of main `9d1b68cd` (2026-10-29)
+
+This merge brings in PR #404 (SF-203), which runs the OTA simulator suites
+with bounded concurrency. It touches the `test-ota` Makefile target, adds
+`scripts/run_ota_suites.py` and its tests, and changes nothing under `dapp/`.
+The Makefile merged automatically; this branch's `test_pending_rows` line in
+`test-manifest` is kept.
+
+- `tsc --noEmit` and `test_pending_rows`, `alerts`, `fleet_ops`,
+  `seal_frontend`, `telemetry`, `enrollment_frontend`, `storage_reclaim`,
+  `deployment_control`, `onboarding`, `devices_pending_browser`,
+  `components_browser`, `onboarding_browser` and `dapp_presentation_browser`
+  (`suifleet-dev:sf010-chrome`, isolated tmpfs copy): all passed on the
+  merged tree.
+- `python3 -m unittest discover -s scripts/tests -p test_ota_suites.py`:
+  6 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
