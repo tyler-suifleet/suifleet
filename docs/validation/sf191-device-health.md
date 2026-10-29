@@ -388,3 +388,30 @@ deployment, hardware test, full cross-layer suite or local CodeQL claimed. Earli
 read-only Testnet repro remains historical. Deferred physical/mainnet/provider/manual
 wallet acceptance remains unrun in #32 and #159. No migration; frontend rebuild
 required for delivery. Model ownership/testing evidence is recorded in the PR handoff.
+
+### 2026-10-29 candidate-checkout repair integration
+
+The supplied independent review found no actionable code/security findings or
+open threads. The snapshot's automatic testnet run 40804044186 failed before
+wallet use: `fatal: unable to read tree` in the shallow controller's candidate
+checkout. Main PR #406 already repairs this failure. Merged snapshot/current
+fetched main `b3994cf9522502365df1e4fa7021bb030639f0ea` cleanly, retaining its
+unshallow fetch and real-Git regression (independent head/base, history,
+hook/filter canaries, missing refs), plus this branch's fork guards. No health
+behavior changes were necessary.
+
+Checks on the integrated tree, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest` (complete target; rendered health/configuration/membership/report regressions included).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs` (all exported console routes, logged out and reconnected fixture wallet).
+- `make RUN= test-testnet` (163 tests OK, one installed-container toolchain check skipped on host; 60 live-common fixture tests OK; authenticated cache PASS). Transaction/connection failure diagnostics are intentional offline fixtures, not live writes.
+- `git diff --check origin/main...HEAD`; snapshot/current fetched base ancestry verified.
+
+Repair handoff only: new-head hosted CI/automatic testnet and fresh independent
+review remain required; no hosted CI polling. No new live walkthrough, wallet
+mutation, deployment, hardware test, full cross-layer suite or local CodeQL
+claimed. Prior read-only Testnet repro remains historical. Physical/mainnet and
+final provider/manual-wallet acceptance remains unrun in #32 and #159. No
+migration; frontend rebuild required for delivery. Coordinator alone merges.
