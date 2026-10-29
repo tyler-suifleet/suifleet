@@ -187,6 +187,20 @@ plus tracking records. It touches only `site/`, `docs/brand/` and
   `dapp_presentation_browser` and `hydration`.
 - `python3 -m unittest discover -s site/tests`: 19 tests passed.
 
+### Merge of main `1a821c11` (2026-10-29)
+
+This merge brings in PR #408 (SF-205), authenticated testnet preparation
+errors and bounded repair ownership. It touches only the testnet workflow,
+`scripts/testnet_ci.py`, the PR coordinator and their tests and docs. It
+merged without conflicts and changes nothing under `dapp/`.
+
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed.
+  The same 15 scripts as the previous merge passed.
+- `python3 -m unittest scripts.tests.test_testnet`: 45 tests passed.
+- `python3 -m unittest discover -s tools/pr-coordinator/tests -p
+  test_preparation_failures.py`: 17 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
