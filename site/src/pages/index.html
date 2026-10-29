@@ -1,41 +1,230 @@
 <section class="hero">
-<span class="badge">Public testnet preview</span>
-<h1>Software updates for device fleets, with release authority you can verify.</h1>
-<p class="lead">SuiFleet deploys software and configuration to Linux devices. Release authority, deployment targets and signed device results are recorded on a public ledger, confidential artifacts are encrypted for the devices allowed to read them, and there is no SuiFleet application server between you and your fleet.</p>
+<div class="hero-copy">
+<a class="preview-label" href="/security/#status">
+<span class="status-dot">
+</span> PUBLIC TESTNET PREVIEW <span aria-hidden="true">↗</span>
+</a>
+<h1>Your fleet.<br>
+<span>Under control.</span>
+</h1>
+<p class="hero-description">Deploy software, manage access, and know what’s running. Bring every device into one clear view.</p>
 <div class="actions">
-<a class="button primary" href="{{app_url}}">Launch app</a>
-<a class="button" href="/guide/">Follow the guide</a>
-<a class="button" href="/how-it-works/">How it works</a>
+<a class="button primary" href="{{app_url}}">Explore the console <span aria-hidden="true">↗</span>
+</a>
+<a class="text-link" href="/guide/">Get started <span aria-hidden="true">→</span>
+</a>
+</div>
+<p class="hero-footnote">Built for device teams. Open source by design.</p>
+</div>
+<figure class="fleet-visual" aria-label="Illustrative staged deployment from a pilot group to the wider fleet">
+<div class="visual-topbar">
+<span class="visual-brand">
+<img src="/assets/logo.svg" width="22" height="22" alt=""> Fleet overview</span>
+<span class="example-label">EXAMPLE</span>
+</div>
+<div class="visual-body">
+<div class="visual-heading">
+<div>
+<span class="visual-eyebrow">SOFTWARE DEPLOYMENT</span>
+<h2>A clear path forward.</h2>
+</div>
+<span class="live-pill">
+<span class="status-dot">
+</span>Rolling out</span>
+</div>
+<div class="release-summary">
+<div class="package-symbol" aria-hidden="true">↗</div>
+<div>
+<strong>Gateway application</strong>
+<span>Release 2.4.0</span>
+</div>
+<span class="verified-label">✓ Verified</span>
+</div>
+<div class="rollout-stages">
+<div class="stage complete">
+<span>✓</span>
+<strong>Publish</strong>
+</div>
+<span class="stage-line complete">
+</span>
+<div class="stage current">
+<span>02</span>
+<strong>Pilot group</strong>
+</div>
+<span class="stage-line">
+</span>
+<div class="stage">
+<span>03</span>
+<strong>Wider fleet</strong>
+</div>
+</div>
+<div class="device-list">
+<div class="device-list-heading">
+<span>Device</span>
+<span>Update result</span>
+</div>
+<div>
+<span class="device-name">
+<span class="device-symbol" aria-hidden="true">
+</span>Gateway · North</span>
+<span class="applied">✓ Applied</span>
+</div>
+<div>
+<span class="device-name">
+<span class="device-symbol" aria-hidden="true">
+</span>Gateway · West</span>
+<span class="applied">✓ Applied</span>
+</div>
+<div>
+<span class="device-name">
+<span class="device-symbol" aria-hidden="true">
+</span>Gateway · South</span>
+<span class="updating">
+<span class="status-dot">
+</span>Updating</span>
+</div>
+</div>
+<div class="visual-bottom">
+<span class="shield-symbol" aria-hidden="true">✓</span>
+<span>Encrypted delivery. Signed device results.</span>
+</div>
+</div>
+<figcaption>One release. A controlled rollout. A result for each device.</figcaption>
+</figure>
+</section>
+<section class="use-cases" aria-label="Device fleet applications">
+<span>MADE FOR THE DEVICES<br>
+THAT KEEP THINGS MOVING</span>
+<ul>
+<li>Industrial systems</li>
+<li>Connected products</li>
+<li>Edge gateways</li>
+</ul>
+</section>
+<section class="workflow-section" id="workflow">
+<div class="section-heading">
+<span class="eyebrow">FROM RELEASE TO REAL WORLD</span>
+<h2>Less friction.<br>
+More forward motion.</h2>
+<p>A focused workspace for the work that matters: getting the right software onto the right devices.</p>
+</div>
+<div class="workflow-grid">
+<article>
+<span class="feature-number">01 / PREPARE</span>
+<div class="feature-glyph publish-glyph" aria-hidden="true">↑</div>
+<h3>One release.<br>
+Ready for your fleet.</h3>
+<p>Package your application and installation steps together. Encrypt private releases before they leave your browser.</p>
+<a class="text-link" href="/how-it-works/">Prepare a release <span aria-hidden="true">↗</span>
+</a>
+</article>
+<article>
+<span class="feature-number">02 / DEPLOY</span>
+<div class="feature-glyph rollout-glyph" aria-hidden="true">↗</div>
+<h3>Start small.<br>
+Scale with confidence.</h3>
+<p>Choose a device group, begin with a pilot, and expand in stages. Set the health and failure thresholds that govern each wave.</p>
+<a class="text-link" href="/guide/">Explore staged rollouts <span aria-hidden="true">↗</span>
+</a>
+</article>
+<article>
+<span class="feature-number">03 / UNDERSTAND</span>
+<div class="feature-glyph results-glyph" aria-hidden="true">✓</div>
+<h3>Know what ran.<br>
+See what happened.</h3>
+<p>Find deployed versions, signed results and available diagnostics by device or group. Investigate an update without losing the bigger picture.</p>
+<a class="text-link" href="/how-it-works/">See how it works <span aria-hidden="true">↗</span>
+</a>
+</article>
 </div>
 </section>
-
-<section>
-<div class="cards">
-<div class="card"><h3>Verifiable release authority</h3><p>Only the wallets you authorize can publish a version or start a deployment. Anyone you share a fleet with can check who released what, to which devices, and when.</p></div>
-<div class="card"><h3>Tamper-evident update records</h3><p>Devices sign their own results. Signatures let you verify the reporting identity and detect altered results. A report is the device’s claim, not independent proof of healthy hardware.</p></div>
-<div class="card"><h3>Encrypted delivery</h3><p>With confidential delivery, artifacts are encrypted in your browser before upload. Only the accounts, devices and groups named in the access policy can decrypt them.</p></div>
-<div class="card"><h3>Staged rollouts</h3><p>Release to a first wave, check signed post-update health, then widen. A rollout stops when failures cross the threshold you set.</p></div>
-<div class="card"><h3>No lock-in, no servers</h3><p>The console is a static web app. Devices talk to public Sui and Walrus networks. The client and contracts are MIT-licensed open source.</p></div>
-<div class="card"><h3>Priced from measured usage</h3><p>A per-device price with network fees included, built from the cost of the transactions and storage a fleet uses. See <a href="/pricing/">pricing</a>.</p></div>
+<div class="platform-band">
+<section class="platform-section">
+<div>
+<span class="eyebrow">YOUR HARDWARE. YOUR WAY.</span>
+<h2>Fits your devices.<br>
+Respects your platform.</h2>
+<p>Keep your image, installer and reboot policy. SuiFleet delivers the release; your platform stays in charge of how it is installed.</p>
+<a class="text-link" href="/docs/">Find your integration path <span aria-hidden="true">↗</span>
+</a>
+</div>
+<div class="platform-stack">
+<div class="platform-layer">
+<span class="layer-index">01</span>
+<div>
+<strong>Your fleet</strong>
+<span>Gateways, embedded products, industrial devices</span>
+</div>
+</div>
+<div class="platform-layer">
+<span class="layer-index">02</span>
+<div>
+<strong>Your installation workflow</strong>
+<span>SWUpdate, RAUC, or your own commands</span>
+</div>
+</div>
+<div class="platform-layer highlighted">
+<span class="layer-index">03</span>
+<div>
+<strong>SuiFleet device client</strong>
+<span>Verify the release. Apply the recipe. Report the result.</span>
+</div>
+<img src="/assets/logo.svg" alt="" width="32" height="32">
+</div>
+<div class="platform-tags">
+<span>Linux</span>
+<span>Yocto</span>
+<span>Debian-style systems</span>
+<span>Custom installers</span>
+</div>
 </div>
 </section>
-
-<div class="band">
-<section>
-<h2>From first device to staged rollout</h2>
-<ol class="steps-flow">
-<li><strong>Sign in</strong> with a Sui wallet or a Google account, and fund the fleet's network budget.</li>
-<li><strong>Register devices</strong> one at a time, or enroll a manufacturing batch that claims itself on first boot.</li>
-<li><strong>Publish a version</strong>: upload the artifact and its recipe, encrypted, to Walrus.</li>
-<li><strong>Deploy</strong> it to a device group, or run a <strong>staged rollout</strong> gated on device health.</li>
-</ol>
-<p><a class="button primary" href="/guide/">Read the walkthrough</a></p>
+</div>
+<div class="trust-band">
+<section class="trust-section">
+<div>
+<span class="eyebrow">CONTROL YOU CAN VERIFY</span>
+<h2>Your releases.<br>
+Your rules.</h2>
+<p>Your team controls who can publish, deploy and read private releases. Shared records make release authority and device reports independently checkable.</p>
+<a class="button light" href="/security/">Explore security &amp; ownership <span aria-hidden="true">↗</span>
+</a>
+</div>
+<div class="trust-points">
+<article>
+<span>01</span>
+<div>
+<h3>Private means protected.</h3>
+<p>Confidential artifacts are encrypted before upload and decrypted by authorized recipients.</p>
+</div>
+</article>
+<article>
+<span>02</span>
+<div>
+<h3>Results carry an identity.</h3>
+<p>Device signatures let you check who reported an outcome and whether that report was altered.</p>
+</div>
+</article>
+<article>
+<span>03</span>
+<div>
+<h3>No extra fleet backend.</h3>
+<p>The console and device client use Sui and Walrus directly. Your fleet does not depend on a SuiFleet application server.</p>
+</div>
+</article>
+</div>
 </section>
 </div>
-
-<section>
-<h2>Built for embedded Linux teams</h2>
-<p>SuiFleet's client is a small Rust daemon for Linux devices, packaged for Yocto, Debian-style systems, macOS and Windows test hosts. It verifies every artifact against the digest you published, runs the lifecycle commands you configured and reports the result. Your platform's updater (for example SWUpdate or RAUC) stays in charge of partitions, reboots and firmware rollback.</p>
-<p>Teams moving from AWS IoT Greengrass can map their deployment model onto SuiFleet; full Greengrass recipe and API compatibility is on the roadmap, not a current claim. Read the <a href="/docs/">documentation</a> or the <a href="/security/">security and custody notes</a>.</p>
-<div class="note"><p><strong>Status.</strong> SuiFleet runs on Sui testnet today. Mainnet service, production key providers and hardware-signed devices are not yet launched. Do not use the preview for production devices.</p></div>
+<section class="closing-section">
+<span class="eyebrow">LET’S GET YOUR FLEET MOVING</span>
+<h2>Start with one device.<br>
+Build from there.</h2>
+<p>Take the walkthrough and send your first update.</p>
+<div class="actions">
+<a class="button primary" href="/guide/">Follow the guide <span aria-hidden="true">→</span>
+</a>
+<a class="text-link" href="/contact/">Talk about your fleet <span aria-hidden="true">↗</span>
+</a>
+</div>
+<p class="preview-note">Currently on testnet. The preview is for evaluation, not production devices.</p>
 </section>
