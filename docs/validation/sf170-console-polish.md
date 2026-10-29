@@ -172,6 +172,21 @@ The Makefile merged automatically; this branch's `test_pending_rows` line in
 - `python3 -m unittest discover -s scripts/tests -p test_ota_suites.py`:
   6 tests passed.
 
+### Merge of main `0189768b` (2026-10-29)
+
+This merge brings in PR #365 (SF-180), the public site's visual identity,
+plus tracking records. It touches only `site/`, `docs/brand/` and
+`docs/tracking/`, merged without conflicts and changes nothing under `dapp/`.
+
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed.
+  These scripts passed: `test_pending_rows`, `alerts`, `fleet_ops`,
+  `seal_frontend`, `telemetry`, `enrollment_frontend`, `storage_reclaim`,
+  `deployment_control`, `onboarding`, `devices_pending_browser`,
+  `components_browser`, `onboarding_browser`, `upload_browser`,
+  `dapp_presentation_browser` and `hydration`.
+- `python3 -m unittest discover -s site/tests`: 19 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
