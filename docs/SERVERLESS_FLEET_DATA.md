@@ -406,6 +406,11 @@ build on Testnet, not a production domain or manual wallet session. No SuiFleet
 application server is required; browsers still need Sui fullnodes, Walrus
 nodes/portal and configured Seal providers. Mainnet publication remains unauthorized.
 
+The public console domain `app.suifleet.io` and the landing site are planned in
+[site/README.md](../site/README.md) (SF-172): conventional static hosting serves the
+same reproducible export, and this Walrus Site stays the console's independently
+verifiable copy. No domain is configured by this repository.
+
 ## Validation and acceptance status
 
 Historical foundation receipts (`sf082-foundation.json`, `sf082-resume.json`) are
