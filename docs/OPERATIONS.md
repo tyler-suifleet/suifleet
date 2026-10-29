@@ -54,6 +54,23 @@ The daemon executable is `suifleet-edge/target/release/suifleet`; the Next stati
 
 The simulator is stdlib Python. It uses temporary keys, local HTTP servers and a harmless updater; it never spends gas or programs hardware. It validates recipe/artifact digests, direct/live-group targeting, bad hashes, unsupported lifecycle, untrusted operators, deleted objects, pagination, enrollment baseline, offline catch-up, restart deduplication and failed status retry. It also checks identity/signature against an independent Mysten SDK vector.
 
+`make test-ota` builds the daemon and shim once, verifies the quilt fixture signer,
+then runs all 29 independent simulator invocations through `scripts/run_ota_suites.py`.
+The default `OTA_TEST_JOBS=3` overlaps suites that each use private temporary state
+and dynamically allocated loopback listeners. Use `make test-ota OTA_TEST_JOBS=1`
+for sequential diagnosis or a memory-constrained machine (supported range: 1–8).
+Builds and other CI targets remain sequential; this does not parallelize wallet or
+hardware operations. Every suite still runs, and any failure or suite timeout fails
+the target. Interruptions stop launches and signal active suite process groups so
+Python cleanup can run before a bounded forced stop. Suites must continue cleaning
+up their own detached processes in `finally` blocks.
+
+Each invocation creates `ci-logs/ota/run-*/` with separate suite logs and a
+`summary.json` containing exit codes, timeouts and durations. CI's existing
+`ci-logs` artifact includes them. Progress reports show starts, completions and the
+active suites every 30 seconds; failed suites also print their log tail. A local
+simulator pass does not establish physical-device or public-network acceptance.
+
 `make test-component` (also run by `make check` and CI) covers the harmless versioned test component in [tests/components/suifleet-test-app](../tests/components/suifleet-test-app/README.md). Its fixture tests run the real shell scripts, under a busybox-only `PATH` too when busybox is installed. It then runs the real daemon against the same simulator with `suifleet-test-updater` as `apply.command`, for v1, v2, an injected install failure and an injected health failure. It checks statuses, reports and the device receipts' version, run ID and artifact SHA-256.
 
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.
