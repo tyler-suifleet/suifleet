@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; media-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>{{page_title}}</title>
+<meta name="description" content="{{description}}">
+{{canonical}}<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+<div class="wrap header-row">
+<a class="brand" href="/"><img src="/assets/logo.svg" alt="" width="28" height="28"> SuiFleet</a>
+<nav aria-label="Main">
+<ul>
+{{nav}}
+</ul>
+</nav>
+<a class="button primary" href="{{app_url}}">Launch app</a>
+</div>
+</header>
+<main id="main">
+{{content}}
+</main>
+<footer class="site-footer">
+<div class="wrap footer-row">
+<p>SuiFleet is in public testnet preview. Mainnet service has not launched; see <a href="/security/#status">current status</a>.</p>
+<ul>
+<li><a href="/docs/">Documentation</a></li>
+<li><a href="/security/">Security</a></li>
+<li><a href="/privacy/">Privacy</a></li>
+<li><a href="/contact/">Contact</a></li>
+<li><a href="{{repo_url}}">Source (MIT)</a></li>
+</ul>
+</div>
+</footer>
+</body>
+</html>

@@ -61,7 +61,8 @@ class TestnetQueueTests(unittest.TestCase):
     def test_workflow_separates_keyless_plan_from_serialized_wallet_jobs(self):
         workflow = (ROOT/'.github/workflows/testnet.yml').read_text()
         header,jobs = workflow.split('\njobs:\n',1)
-        queue,rest = jobs.split('\n  prepare:\n',1)
+        queue,rest = jobs.split('\n  plan:\n',1)
+        plan,rest = rest.split('\n  prepare:\n',1)
         prepare,rest = rest.split('\n  validate:\n',1)
         validate,prune = rest.split('\n  prune-fixture-history:\n',1)
         self.assertNotIn('concurrency:',header)
@@ -70,9 +71,10 @@ class TestnetQueueTests(unittest.TestCase):
         self.assertIn("github.event.workflow_run.conclusion == 'success'",queue)
         self.assertIn('ref: ${{ github.workflow_sha }}',queue)
         self.assertIn('--queue-plan',queue)
-        self.assertIn('needs: queue-plan',prepare)
-        self.assertIn("needs.queue-plan.outputs.run == 'true'",prepare)
-        self.assertIn('needs: prepare',validate)
+        self.assertIn('needs: queue-plan',plan)
+        self.assertIn('needs: plan',prepare)
+        self.assertIn("needs.queue-plan.outputs.run == 'true'",plan)
+        self.assertIn('needs: [prepare, publish]',validate)
         for protected in (validate,prune):
             self.assertIn('group: ${{ needs.prepare.outputs.concurrency }}',protected)
             self.assertIn('cancel-in-progress: false',protected)
