@@ -105,6 +105,12 @@ class PreparedTests(unittest.TestCase):
         self.assertNotIn('secrets.', json.dumps(job))
 
     def test_candidate_clone_preserves_controller_and_has_complete_history(self):
+        self.check_candidate_clone(shallow=False)
+
+    def test_shallow_controller_keeps_unreferenced_head_and_base(self):
+        self.check_candidate_clone(shallow=True)
+
+    def check_candidate_clone(self, shallow):
         import subprocess
         from testnet_ci import checkout_candidate
         with tempfile.TemporaryDirectory() as d:
@@ -116,10 +122,15 @@ class PreparedTests(unittest.TestCase):
             git('init', '-q')
             git('config', 'user.name', 'Fixture')
             git('config', 'user.email', 'fixture@example.invalid')
+            (origin/'history').write_text('ancestor')
+            git('add', '.'); git('commit', '-qm', 'ancestor')
+            ancestor = git('rev-parse', 'HEAD')
             (origin/'controller.py').write_text('trusted')
             git('add', '.'); git('commit', '-qm', 'base')
             base = git('rev-parse', 'HEAD')
-            git('clone', '--no-hardlinks', str(origin), str(controller), cwd=root)
+            # file:// forces transport semantics: local-path clones ignore --depth.
+            git('clone', *(['--depth=1'] if shallow else []), origin.as_uri(), str(controller), cwd=root)
+            self.assertEqual(git('rev-parse', '--is-shallow-repository', cwd=controller), str(shallow).lower())
             git('checkout', '--detach', base, cwd=controller)
             # Main may advance after the controller clone. Keep this new base
             # off the candidate ancestry so fetching only head cannot supply it.
@@ -128,6 +139,13 @@ class PreparedTests(unittest.TestCase):
             advanced_base = git('rev-parse', 'HEAD')
             git('checkout', '--detach', base)
             (origin/'controller.py').write_text('candidate')
+            (origin/'.gitattributes').write_text('controller.py filter=canary\n')
+            git('add', '.gitattributes')
+            marker = root/'executed'
+            hook = controller/'.git/hooks/post-checkout'
+            hook.write_text('#!/bin/sh\ntouch ' + str(marker) + '\n')
+            hook.chmod(0o755)
+            git('config', 'filter.canary.smudge', 'touch ' + str(marker), cwd=controller)
             git('commit', '-qam', 'head')
             head = git('rev-parse', 'HEAD')
             def run(args, **kwargs):
@@ -145,10 +163,22 @@ class PreparedTests(unittest.TestCase):
                 ['git', 'archive', advanced_base, 'base-info'], cwd=controller/'candidate')
             with tarfile.open(fileobj=io.BytesIO(archived)) as archive:
                 self.assertEqual(archive.extractfile('base-info').read(), b'new base')
+            archived_head = subprocess.check_output(
+                ['git', 'archive', head, 'controller.py'], cwd=controller/'candidate')
+            with tarfile.open(fileobj=io.BytesIO(archived_head)) as archive:
+                self.assertEqual(archive.extractfile('controller.py').read(), b'candidate')
             self.assertTrue((controller/'candidate/.git').is_dir())
+            self.assertFalse(marker.exists())
+            self.assertEqual(git('rev-parse', '--is-shallow-repository', cwd=controller/'candidate'), 'false')
+            self.assertEqual(git('show', ancestor+':history', cwd=controller/'candidate'), 'ancestor')
+            with self.assertRaises(subprocess.CalledProcessError):
+                checkout_candidate('0'*40, base, controller/'missing', run)
+            self.assertFalse((controller/'missing').exists())
             for bad in ('main', head+'\n', ''):
                 with self.assertRaises(RuntimeError):
                     checkout_candidate(bad, base, root/'absent', run)
+                with self.assertRaises(RuntimeError):
+                    checkout_candidate(head, bad, root/'absent', run)
             with self.assertRaises(RuntimeError):
                 checkout_candidate(head, base, controller/'candidate', run)
 

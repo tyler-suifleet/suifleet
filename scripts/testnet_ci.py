@@ -293,7 +293,17 @@ def checkout_candidate(head, base, destination, run=subprocess.run):
     destination = Path(destination)
     if destination.exists() or destination.is_symlink():
         raise RuntimeError('candidate destination already exists')
-    run(['git', 'fetch', '--no-tags', 'origin', head, base], check=True)
+    # Local clones of shallow repositories can omit fetched commits that are
+    # reachable only through FETCH_HEAD. Remove the shallow boundary before
+    # copying the object database, including both independently selected inputs.
+    shallow = run(['git', 'rev-parse', '--is-shallow-repository'],
+                  text=True, capture_output=True, check=True).stdout.strip()
+    if shallow not in ('true', 'false'):
+        raise RuntimeError('cannot determine controller history availability')
+    fetch = ['git', 'fetch', '--no-tags']
+    if shallow == 'true':
+        fetch.append('--unshallow')
+    run([*fetch, 'origin', head, base], check=True)
     run(['git', 'clone', '--no-hardlinks', '--no-checkout', '.', str(destination)], check=True)
     run(['git', '-C', str(destination), '-c', 'core.hooksPath=/dev/null',
          'checkout', '--detach', head], check=True)
