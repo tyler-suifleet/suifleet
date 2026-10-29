@@ -538,6 +538,27 @@ class Store:
                 return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
 
+    @staticmethod
+    def never_started_review(row, family, directory):
+        """Only an empty pre-launch receipt proves no wrapper was invoked.
+
+        launch() writes snapshot/command/prompt before spawning. Missing or
+        nonempty directories are uncertain, and a retry is permitted only once.
+        """
+        if (row['kind'] != 'review' or row['family'] != family
+                or row['status'] != 'failed' or row['attempts'] != 0
+                or row['error'] != 'launch interrupted before worker started'
+                or row['directory'] != str(directory)
+                or any(row[name] is not None for name in
+                       ('pid', 'started', 'launch_intent', 'retry_after', 'result',
+                        'comment_id', 'review_id')) or row['publication_done']):
+            return False
+        path = Path(row['directory'])
+        try:
+            return not path.is_symlink() and path.is_dir() and next(path.iterdir(), None) is None
+        except OSError:
+            return False
+
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -553,6 +574,10 @@ class Store:
             if ci_repair and self.ci_repair_blocker(project, pr):
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],fingerprint)).fetchone()
+            if previous and self.never_started_review(previous, family, directory):
+                self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",
+                                (time.time(), previous['id']))
+                self.db.execute('COMMIT'); return previous['id']
             if previous and previous['status'] == 'retry' and previous['retry_after'] <= time.time():
                 self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",(time.time(),previous['id']))
                 self.db.execute('COMMIT');return previous['id']
