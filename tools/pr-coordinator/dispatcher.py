@@ -19,7 +19,7 @@ import uuid
 
 from coordinator import (network_authorization, process_identity, runnable_identity, worker_stopped, run, effective_policy,
                          failed_checks, repair_feedback, terminal_lines, quota_reset, claim_processes, uninspectable_reason,
-                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF, annotate_job_timeouts, annotate_preparation_failure)
+                         QUOTA_GRACE, QUOTA_RETRIES, CI_HANDOFF, annotate_job_timeouts, annotate_preparation_failure, preparation_job_logs)
 
 TICKET_KEY = re.compile(r'[A-Z][A-Z0-9]*-[0-9]+')
 COMMIT = re.compile(r'[0-9a-f]{40}')
@@ -817,7 +817,8 @@ resolve conflicts, then continue the unfinished software and rerun all required 
                                       if row.get('context') == 'testnet/package-upgrade'), None)
         annotate_preparation_failure(pr, project['repository'], lambda path: json.loads(
             run(['gh', 'api', path], cwd=project['root'], env=env)),
-            lambda path: run(['gh', 'api', path], cwd=project['root'], env=env))
+            lambda path: preparation_job_logs(
+                lambda args: run(['gh', *args], cwd=project['root'], env=env), path))
         return annotate_job_timeouts(pr, project['repository'], lambda path: json.loads(
             run(['gh', 'api', path], cwd=project['root'], env=env)))
 

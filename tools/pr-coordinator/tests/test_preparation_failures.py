@@ -1,6 +1,7 @@
 """Authenticated preparation ERROR routing; no network or wallet access."""
 import copy
 import json
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -42,6 +43,25 @@ class PreparationFailures(unittest.TestCase):
             self.prefix + '/pulls/7': {'head': {'sha': self.pr['headRefOid']}},
             self.prefix + '/git/ref/heads/main': {'object': {'sha': self.pr['baseRefOid']}},
         }
+
+    def ansi_log(self):
+        return ('2026-10-29T10:00:00.000Z \x1b[36;1mpython3 scripts/testnet_ci.py --status error\x1b[0m\n'
+                '2026-10-29T10:00:01.000Z \x1b[32mSUIFLEET_PREPARATION_V1 '
+                + json.dumps(self.receipt) + '\x1b[0m\n')
+
+    def test_log_reader_old_cli_fallback_is_narrow(self):
+        from unittest.mock import Mock
+        path = self.prefix + '/actions/jobs/3/logs'
+        api = Mock(side_effect=[subprocess.CalledProcessError(
+            1, ['gh'], stderr='unknown flag: --allow-escape-sequences'), self.ansi_log()])
+        self.assertEqual(c.preparation_job_logs(api, path), self.ansi_log())
+        self.assertEqual(api.call_args_list[0].args, (['api', path, '--allow-escape-sequences'],))
+        self.assertEqual(api.call_args_list[1].args, (['api', path],))
+        for message in ['HTTP 403', 'the response contains terminal escape sequences']:
+            api = Mock(side_effect=subprocess.CalledProcessError(1, ['gh'], stderr=message))
+            with self.assertRaises(subprocess.CalledProcessError):
+                c.preparation_job_logs(api, path)
+            self.assertEqual(api.call_count, 1)
 
     def classify(self, read=None, log=None):
         c.annotate_preparation_failure(
@@ -193,8 +213,10 @@ class PreparationFailures(unittest.TestCase):
                 return 'fixture-private'
             if args[:3] == ['gh', 'pr', 'view']:
                 return json.dumps(self.pr)
-            if args[-1].endswith('/logs'):
-                return 'SUIFLEET_PREPARATION_V1 ' + json.dumps(self.receipt) + '\n'
+            if '/logs' in args[2]:
+                if '--allow-escape-sequences' not in args:
+                    raise subprocess.CalledProcessError(1, args, stderr='the response contains terminal escape sequences')
+                return self.ansi_log()
             return json.dumps(self.data[args[-1]])
         worker = d.Dispatcher.__new__(d.Dispatcher)
         with patch.object(d, 'run', side_effect=run):
@@ -242,7 +264,9 @@ class PreparationFailures(unittest.TestCase):
                         'nodes': [], 'pageInfo': {'hasNextPage': False}}}}}})
                 path = args[1]
                 if path.endswith('/logs'):
-                    return 'SUIFLEET_PREPARATION_V1 ' + json.dumps(self.receipt) + '\n'
+                    if '--allow-escape-sequences' not in args:
+                        raise subprocess.CalledProcessError(1, args, stderr='the response contains terminal escape sequences')
+                    return self.ansi_log()
                 if path in self.data:
                     return json.dumps(self.data[path])
                 if '/compare/' in path:

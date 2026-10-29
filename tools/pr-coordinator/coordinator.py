@@ -213,6 +213,18 @@ def testnet_failure(pr):
     return result
 
 
+def preparation_job_logs(api, path):
+    """Read Actions text with modern gh, retaining compatibility with old gh."""
+    try:
+        return api(['api', path, '--allow-escape-sequences'])
+    except subprocess.CalledProcessError as error:
+        # Only old CLI flag rejection permits a retry. Auth/network/log errors
+        # remain unavailable evidence; never mask them with another read path.
+        if 'unknown flag: --allow-escape-sequences' not in (error.stderr or ''):
+            raise
+        return api(['api', path])
+
+
 def annotate_preparation_failure(pr, repository, read, logs):
     """A trusted main job's status-ID receipt authenticates ERROR, never its URL alone.
 
@@ -262,6 +274,9 @@ def annotate_preparation_failure(pr, repository, read, logs):
         text = logs(f"{prefix}/actions/jobs/{publisher['id']}/logs")
         if len(text) > 1024 * 1024:
             return pr
+        # Ignore ANSI SGR styling (including the run-script echo) before
+        # matching complete receipt lines; preserve all provenance checks.
+        text = re.sub(r'\x1b\[[0-9;]*m', '', text)
         # GitHub prefixes each log line with an ISO timestamp.
         receipts = re.findall(r'^(?:[0-9T:Z. -]+ )?SUIFLEET_PREPARATION_V1 (\{[^\n]+\})\s*$',
                               text, re.MULTILINE)
@@ -976,7 +991,7 @@ class Coordinator:
         pr['_acceptance_policy'] = project.get('acceptance_policy', {})
         annotate_preparation_failure(pr, project['repository'],
                                      lambda path: json.loads(self.gh(project, ['api', path])),
-                                     lambda path: self.gh(project, ['api', path]))
+                                     lambda path: preparation_job_logs(lambda args: self.gh(project, args), path))
         return annotate_job_timeouts(pr, project['repository'],
                                      lambda path: json.loads(self.gh(project, ['api', path])))
 
