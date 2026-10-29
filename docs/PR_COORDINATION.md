@@ -1015,3 +1015,38 @@ served as fallback. Existing exact-head/base and review gates remain in force.
 
 An older ticket engine keeps the previous live transport until upgraded. Updating
 source on main does not bypass the existing runtime activation/validation policy.
+
+### Authenticated preparation errors (SF-205)
+
+A terminal `ERROR` status can represent preparation failure or cancellation.
+Only preparation failure can enter owner repair, and only after fresh API
+evidence authenticates the main-branch `testnet.yml` workflow_run, completed
+attempt, successful plan and status publisher, and failed prepare job. The
+trusted status publisher emits a small `SUIFLEET_PREPARATION_V1` receipt in its
+job log binding the API-created status ID, candidate head, current base,
+controller revision, run and attempt. The coordinator and dispatcher read that
+specific authenticated job log; they retain only the parsed IDs/revisions.
+They recheck the latest attempt/status and current PR head/base after the read.
+A forged status URL alone cannot supply this receipt. Missing, expired,
+ambiguous or unavailable evidence, cancellation and historical runs without
+receipts remain unclassified blockers and never launch preparation repair.
+
+Verified failures in `Checkout authenticated test revision` in SuiFleet route
+to the existing **SF-204 / PR #406** incident owner while PR #406 is open and
+unmerged. After it closes, checkout failures use ordinary bounded owner repair;
+unavailable incident state fails closed. Each affected PR retains a
+durable observation naming that owner, while the coordinator excludes this shared
+failure from per-PR repair dispatch/budgets and the dispatcher does not interrupt
+product workers for it. Mixed observations still route their local failures and
+report both repair responsibilities. SF-204's existing implementation/review reservation is
+preserved; this route is an incident assignment, not proof the defect is fixed.
+Other verified preparation failures use the existing bounded owner-repair path.
+Source feedback and base integration still follow their ordinary review paths.
+
+Installation remains merged-only. Both the main-sourced receipt producer and
+reviewed coordinator must be active before new receipts can be recognized.
+SF-204 controller activation, the historical stalled runs and actual subsequent
+exact-head/current-base hosted validation remain unresolved until the operator
+records real evidence. This implementation neither backfills receipts nor posts
+success, reruns transactions, resets budgets or waives CI, testnet, security or
+independent review. There is no Testnet spend for offline routing validation.

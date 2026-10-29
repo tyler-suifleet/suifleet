@@ -268,8 +268,16 @@ def description(base, state, failure=None):
 
 def status(repo, head, base, state, url, failure=None):
     assert SHA.fullmatch(head) and SHA.fullmatch(base)
-    api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
+    result = api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
         description=description(base, state, failure), target_url=url))
+    # Only the trusted preparation-status job sets this flag. Its authenticated
+    # job log binds the published status ID to this controller and attempt.
+    if state == 'error' and os.environ.get('PREPARATION_RESULT') == 'failure':
+        receipt = dict(status=result['id'], head=head, base=base,
+                       run=int(os.environ['GITHUB_RUN_ID']),
+                       attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+                       controller=os.environ['GITHUB_SHA'])
+        print('SUIFLEET_PREPARATION_V1 ' + json.dumps(receipt, sort_keys=True))
 
 
 def verify_checkout(expected, run=subprocess.run):

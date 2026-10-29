@@ -175,6 +175,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TEST_HEAD: ${{ needs.plan.outputs.head }}
           BASE_REF: ${{ needs.plan.outputs.base }}
+          PREPARATION_RESULT: ${{ needs.prepare.result }}
         run: python3 scripts/testnet_ci.py --status error
   publish:
     needs: prepare
