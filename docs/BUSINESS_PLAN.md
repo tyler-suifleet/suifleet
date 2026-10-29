@@ -84,6 +84,8 @@ Prepared by Claude (claude-opus-5-5) at the user's request on 2026-10-23; the us
 
 ### Proposed price list
 
+The public [pricing page](../site/src/pages/pricing.html) shows this list labelled as proposed. Regenerate it after pricing changes using the procedure in [PUBLIC_PRICING.md](business/PUBLIC_PRICING.md); publish a changed tariff only with the user's approval.
+
 Platform plan, graduated per device per month (each band applies only to the devices in it):
 
 | Devices | Price |

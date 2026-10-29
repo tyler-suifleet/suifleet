@@ -4,16 +4,13 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-  schedule:
-    - cron: '23 8 * * *'
-  workflow_dispatch:
 permissions:
   contents: read
   actions: read
   pull-requests: read
   statuses: write
 jobs:
-  prepare:
+  plan:
     if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-22.04
     timeout-minutes: 45
@@ -22,18 +19,10 @@ jobs:
       actions: read
       pull-requests: read
       statuses: write
-      packages: write
     outputs:
       run: ${{ steps.plan.outputs.run }}
       head: ${{ steps.plan.outputs.head }}
       base: ${{ steps.plan.outputs.base }}
-      lane: ${{ steps.lane.outputs.lane }}
-      address: ${{ steps.lane.outputs.address }}
-      secret: ${{ steps.lane.outputs.secret }}
-      fixture: ${{ steps.lane.outputs.fixture }}
-      concurrency: ${{ steps.lane.outputs.concurrency }}
-      image: ${{ steps.publish.outputs.image }}
-      digest: ${{ steps.publish.outputs.digest }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -52,90 +41,168 @@ jobs:
           TEST_HEAD: ${{ steps.plan.outputs.head }}
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: python3 scripts/testnet_ci.py --status pending
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.run == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      run: ${{ needs.plan.outputs.run }}
+      head: ${{ needs.plan.outputs.head }}
+      base: ${{ needs.plan.outputs.base }}
+      lane: ${{ steps.lane.outputs.lane }}
+      address: ${{ steps.lane.outputs.address }}
+      secret: ${{ steps.lane.outputs.secret }}
+      fixture: ${{ steps.lane.outputs.fixture }}
+      concurrency: ${{ steps.lane.outputs.concurrency }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
       - name: Preserve trusted controller
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         run: |
           cp scripts/testnet_ci.py "$RUNNER_TEMP/testnet_ci.py"
           cp scripts/testnet_fixture_cache.py "$RUNNER_TEMP/testnet_fixture_cache.py"
           cp scripts/testnet_pool.py "$RUNNER_TEMP/testnet_pool.py"
           cp scripts/testnet_prepared.py "$RUNNER_TEMP/testnet_prepared.py"
       - name: Checkout authenticated test revision
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         env:
-          TEST_HEAD: ${{ steps.plan.outputs.head }}
-          BASE_REF: ${{ steps.plan.outputs.base }}
+          TEST_HEAD: ${{ needs.plan.outputs.head }}
+          BASE_REF: ${{ needs.plan.outputs.base }}
         # Keep trusted scripts in the main checkout. Candidate code and its Git
         # metadata live in a separate clone, mounted alone into test containers.
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --checkout-candidate candidate
       - name: Verify checkout matches authenticated revision
         working-directory: candidate
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         env:
-          TEST_HEAD: ${{ steps.plan.outputs.head }}
+          TEST_HEAD: ${{ needs.plan.outputs.head }}
         run: python3 "$RUNNER_TEMP/testnet_ci.py" --verify-checkout
       - name: Select one dedicated wallet lane
         id: lane
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         env:
           SUIFLEET_TESTNET_POOL_SIZE: ${{ vars.SUIFLEET_TESTNET_POOL_SIZE || '1' }}
         run: python3 "$RUNNER_TEMP/testnet_pool.py" --select
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
-        if: steps.plan.outputs.run == 'true'
       - name: Runner identity
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         id: ids
         run: echo "uid=$(id -u)" >> "$GITHUB_OUTPUT" && echo "gid=$(id -g)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        if: steps.plan.outputs.run == 'true'
-        with:
-          context: candidate
-          load: true
-          tags: suifleet-dev:testnet
-          build-args: |
-            USER_UID=${{ steps.ids.outputs.uid }}
-            USER_GID=${{ steps.ids.outputs.gid }}
-          cache-from: type=gha
+      # Revision builds use only disposable runner-local layers, never Actions caches.
+      - name: Build isolated testnet environment
+        if: needs.plan.outputs.run == 'true'
+        env:
+          USER_UID: ${{ steps.ids.outputs.uid }}
+          USER_GID: ${{ steps.ids.outputs.gid }}
+        run: |
+          docker build --tag suifleet-dev:testnet \
+            --build-arg USER_UID="$USER_UID" --build-arg USER_GID="$USER_GID" candidate
       - name: Build testnet dependencies without signing credentials
         id: dependencies
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         run: |
           docker run --rm -e CARGO_BUILD_JOBS=2 \
             -v "$PWD/candidate:/workspace" -w /workspace suifleet-dev:testnet bash -ec '
               git config --global --add safe.directory /workspace
               pnpm --dir dapp install --frozen-lockfile
               cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --example chain_facts'
-      - name: Package and publish secretless prepared tools
+      - name: Package secretless prepared tools
         working-directory: candidate
-        id: publish
-        if: steps.plan.outputs.run == 'true'
+        if: needs.plan.outputs.run == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
-          TEST_HEAD: ${{ steps.plan.outputs.head }}
-          BASE_REF: ${{ steps.plan.outputs.base }}
+          TEST_HEAD: ${{ needs.plan.outputs.head }}
+          BASE_REF: ${{ needs.plan.outputs.base }}
           CONTROLLER_SHA: ${{ github.workflow_sha }}
         run: |
           set -euo pipefail
           python3 "$RUNNER_TEMP/testnet_prepared.py" --package "$RUNNER_TEMP/prepared-context"
           strip --strip-debug "$RUNNER_TEMP/prepared-context/suifleet" "$RUNNER_TEMP/prepared-context/chain_facts"
-          IMAGE="$(python3 "$RUNNER_TEMP/testnet_prepared.py")"
+          docker build -t suifleet-prepared:transfer "$RUNNER_TEMP/prepared-context"
+          docker save suifleet-prepared:transfer | gzip -1 > "$RUNNER_TEMP/prepared-image.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: needs.plan.outputs.run == 'true'
+        with:
+          name: prepared-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prepared-image.tar.gz
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+  preparation-status:
+    needs: [plan, prepare]
+    if: always() && needs.plan.outputs.run == 'true' && needs.prepare.result != 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Publish preparation failure as a terminal error
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_HEAD: ${{ needs.plan.outputs.head }}
+          BASE_REF: ${{ needs.plan.outputs.base }}
+        run: python3 scripts/testnet_ci.py --status error
+  publish:
+    needs: prepare
+    if: github.ref == 'refs/heads/main' && needs.prepare.outputs.run == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+      statuses: write
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      # This job only checks out the trusted controller, never test-revision files. The archive
+      # is loaded as image data only; registry credentials stay in this runner.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: prepared-image-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prepared-transfer
+      - name: Publish prepared image without executing it
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker load -i "$RUNNER_TEMP/prepared-transfer/prepared-image.tar.gz"
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}-testnet-prepared"
           TAG="$IMAGE:run-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          docker tag suifleet-prepared:transfer "$TAG"
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          docker build -t "$TAG" "$RUNNER_TEMP/prepared-context"
           docker push "$TAG"
           DIGEST="$(docker image inspect "$TAG" --format '{{index .RepoDigests 0}}')"
           DIGEST="${DIGEST##*@}"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           docker logout ghcr.io
-      - name: Publish preparation failure as a terminal error
-        if: always() && steps.plan.outputs.run == 'true' && job.status != 'success'
+      - name: Publish registry failure as a terminal error
+        if: failure() || cancelled()
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_HEAD: ${{ steps.plan.outputs.head }}
-          BASE_REF: ${{ steps.plan.outputs.base }}
-        run: python3 "$RUNNER_TEMP/testnet_ci.py" --status error
+          TEST_HEAD: ${{ needs.prepare.outputs.head }}
+          BASE_REF: ${{ needs.prepare.outputs.base }}
+        run: python3 scripts/testnet_ci.py --status error
   validate:
-    needs: prepare
+    needs: [prepare, publish]
     if: github.ref == 'refs/heads/main' && needs.prepare.outputs.run == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     concurrency:
       group: ${{ needs.prepare.outputs.concurrency }}
@@ -184,7 +251,7 @@ jobs:
         if: steps.plan.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          PREPARED_DIGEST: ${{ needs.prepare.outputs.digest }}
+          PREPARED_DIGEST: ${{ needs.publish.outputs.digest }}
           TEST_HEAD: ${{ steps.plan.outputs.head }}
           BASE_REF: ${{ steps.plan.outputs.base }}
           CONTROLLER_SHA: ${{ github.workflow_sha }}
@@ -227,7 +294,7 @@ jobs:
           SUIFLEET_TESTNET_KEY: ${{ needs.prepare.outputs.lane == '0' && secrets.SUIFLEET_TESTNET_KEY || needs.prepare.outputs.lane == '1' && secrets.SUIFLEET_TESTNET_KEY_1 || needs.prepare.outputs.lane == '2' && secrets.SUIFLEET_TESTNET_KEY_2 || '' }}
           SUIFLEET_TESTNET_ADDRESS: ${{ needs.prepare.outputs.address }}
           SUIFLEET_TESTNET_LANE: ${{ needs.prepare.outputs.lane }}
-          PREPARED_IMAGE: ${{ needs.prepare.outputs.image }}@${{ needs.prepare.outputs.digest }}
+          PREPARED_IMAGE: ${{ needs.publish.outputs.image }}@${{ needs.publish.outputs.digest }}
           BASE_REF: ${{ steps.plan.outputs.base }}
         run: |
           mkdir -p candidate/evidence candidate/encrypted-live-state
