@@ -1,0 +1,41 @@
+<section class="hero">
+<span class="badge">Public testnet preview</span>
+<h1>Software updates for device fleets, with release authority you can verify.</h1>
+<p class="lead">SuiFleet deploys software and configuration to Linux devices. Release authority, deployment targets and signed device results are recorded on a public ledger, confidential artifacts are encrypted for the devices allowed to read them, and there is no SuiFleet application server between you and your fleet.</p>
+<div class="actions">
+<a class="button primary" href="{{app_url}}">Launch app</a>
+<a class="button" href="/guide/">Follow the guide</a>
+<a class="button" href="/how-it-works/">How it works</a>
+</div>
+</section>
+
+<section>
+<div class="cards">
+<div class="card"><h3>Verifiable release authority</h3><p>Only the wallets you authorize can publish a version or start a deployment. Anyone you share a fleet with can check who released what, to which devices, and when.</p></div>
+<div class="card"><h3>Tamper-evident update records</h3><p>Devices sign their own results. Signatures let you verify the reporting identity and detect altered results. A report is the device’s claim, not independent proof of healthy hardware.</p></div>
+<div class="card"><h3>Encrypted delivery</h3><p>With confidential delivery, artifacts are encrypted in your browser before upload. Only the accounts, devices and groups named in the access policy can decrypt them.</p></div>
+<div class="card"><h3>Staged rollouts</h3><p>Release to a first wave, check signed post-update health, then widen. A rollout stops when failures cross the threshold you set.</p></div>
+<div class="card"><h3>No lock-in, no servers</h3><p>The console is a static web app. Devices talk to public Sui and Walrus networks. The client and contracts are MIT-licensed open source.</p></div>
+<div class="card"><h3>Priced from measured usage</h3><p>A per-device price with network fees included, built from the cost of the transactions and storage a fleet uses. See <a href="/pricing/">pricing</a>.</p></div>
+</div>
+</section>
+
+<div class="band">
+<section>
+<h2>From first device to staged rollout</h2>
+<ol class="steps-flow">
+<li><strong>Sign in</strong> with a Sui wallet or a Google account, and fund the fleet's network budget.</li>
+<li><strong>Register devices</strong> one at a time, or enroll a manufacturing batch that claims itself on first boot.</li>
+<li><strong>Publish a version</strong>: upload the artifact and its recipe, encrypted, to Walrus.</li>
+<li><strong>Deploy</strong> it to a device group, or run a <strong>staged rollout</strong> gated on device health.</li>
+</ol>
+<p><a class="button primary" href="/guide/">Read the walkthrough</a></p>
+</section>
+</div>
+
+<section>
+<h2>Built for embedded Linux teams</h2>
+<p>SuiFleet's client is a small Rust daemon for Linux devices, packaged for Yocto, Debian-style systems, macOS and Windows test hosts. It verifies every artifact against the digest you published, runs the lifecycle commands you configured and reports the result. Your platform's updater (for example SWUpdate or RAUC) stays in charge of partitions, reboots and firmware rollback.</p>
+<p>Teams moving from AWS IoT Greengrass can map their deployment model onto SuiFleet; full Greengrass recipe and API compatibility is on the roadmap, not a current claim. Read the <a href="/docs/">documentation</a> or the <a href="/security/">security and custody notes</a>.</p>
+<div class="note"><p><strong>Status.</strong> SuiFleet runs on Sui testnet today. Mainnet service, production key providers and hardware-signed devices are not yet launched. Do not use the preview for production devices.</p></div>
+</section>

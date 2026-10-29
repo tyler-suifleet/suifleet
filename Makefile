@@ -361,6 +361,18 @@ tracking-plan:
 test-tracking:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_tracking.py'
 
+# suifleet.io landing site (SF-172, site/README.md): standard-library Python, so
+# these run on the host as well as in the dev image. No step publishes anything.
+.PHONY: site-build site-check test-site
+site-build:
+	python3 site/build.py --out site/dist
+
+site-check: site-build
+	python3 site/check.py site/dist
+
+test-site:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s site/tests -v
+
 # Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
 .PHONY: test-disk-cleanup
 test-disk-cleanup:
