@@ -630,3 +630,43 @@ publication and extension receipts remain historical evidence. Manual real-walle
 production-provider, physical and actual-mainnet acceptance stays explicitly unrun
 in #32 and #159. Next: coordinator exact-head/current-base ordinary/security CI,
 automatic Testnet and fresh independent review. No merge or deployment performed.
+
+
+## Preparation-routing base integration (2026-10-29)
+
+The supplied independent review of `840dd8ee` reported no actionable source or
+security defects and no open threads. The feedback snapshot shows its ordinary
+CI and automatic Testnet succeeded, but Testnet binds base `0189768b`, while
+the snapshot/current base is `1a821c116bb210440a1f005a7662a01bc3b2d57a`.
+Merge `3f69670a` integrates that base cleanly. Upstream changes authenticate
+preparation error receipts and retain bounded coordinator repair ownership.
+SF-165 application, contracts and interfaces are unchanged; no migration needed.
+
+Post-integration verification:
+
+- Network-none `suifleet-sf165:ci-repair`, user UID:GID, checkout and pnpm store
+  at identical host paths, `INSIDE_DEV_CONTAINER=1`: `make dapp-typecheck &&
+  make dapp-build && node scripts/test_release_storage.cjs && node
+  scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs &&
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_live_release_storage.py`: PASS, including offline prerequisites,
+  TypeScript, static export and three Python tests. Input-based prerequisite
+  skips remain explicit. Log: `/tmp/sf165-base1a821-checks.log`.
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_testnet.py`: 45 tests PASS. Log: `/tmp/sf165-testnet-unit.log`.
+- Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+  `scripts/test_components_browser.cjs`, `scripts/test_upload_browser.cjs` and
+  `scripts/test_wallet_browser.cjs`: all PASS; chain/wallet/storage are fixtures.
+
+New-head hosted ordinary/security CI and automatic Testnet remain pending
+coordinator verification, followed by fresh independent review. No hosted checks
+were watched or polled. No new Move/full OTA or public-network mutation ran; no
+mutation lock was needed. Historical chosen-period publish/extension receipts
+remain unchanged and are not new-head automatic Testnet evidence. Manual
+real-wallet/production-provider, physical and actual-mainnet acceptance remains
+explicitly unrun in #32 and #159. No deployment or hardware programming performed.
+
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+  tools/pr-coordinator/tests`: 439 tests PASS in 203.457s; expected negative-case
+  diagnostics occur in the log `/tmp/sf165-coordinator.log`.
+- `git diff --check`: PASS; snapshot base ancestry verified.
