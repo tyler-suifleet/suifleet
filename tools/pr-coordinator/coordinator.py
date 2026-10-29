@@ -191,17 +191,105 @@ def testnet_failure(pr):
 
     Commit statuses are per head and the combined status keeps only the newest
     per context, so a queued/running rerun (pending), a cancelled run (error),
-    a stale base or a status without a durable Actions run never qualifies."""
+    a stale base or a status without a durable Actions run never qualifies.
+    ERROR qualifies only with a freshly authenticated preparation receipt."""
     status = pr.get('_testnet_status') or {}
-    if status.get('state') != 'failure':
+    preparation = pr.get('_preparation_failure') or {}
+    verified = (status.get('state') == 'error' and preparation.get('status') == status.get('id')
+                and preparation.get('head') == pr.get('headRefOid')
+                and preparation.get('base') == pr.get('baseRefOid')
+                and preparation.get('url') == status.get('target_url'))
+    if status.get('state') != 'failure' and not verified:
         return None
     match = TESTNET_DESCRIPTION.fullmatch(status.get('description') or '')
     url = status.get('target_url') or ''
     if not match or match.group(1) != pr.get('baseRefOid') or not RUN_URL.fullmatch(url):
         return None
-    return {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
+    result = {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
             'detailsUrl': url, 'startedAt': status.get('created_at'), 'completedAt': status.get('updated_at'),
-            'classification': match.group(2) or 'source'}
+            'classification': 'preparation' if verified else match.group(2) or 'source'}
+    if verified and preparation.get('repair_owner'):
+        result['repair_owner'] = preparation['repair_owner']
+    return result
+
+
+def annotate_preparation_failure(pr, repository, read, logs):
+    """A trusted main job's status-ID receipt authenticates ERROR, never its URL alone.
+
+    Historical runs without receipts remain unavailable. No logs or remote error
+    text are persisted. The newest status and attempt are re-read after evidence.
+    """
+    pr.pop('_preparation_failure', None)
+    status = pr.get('_testnet_status') or {}
+    if pr.get('baseRefName') != 'main' or status.get('state') != 'error' or status.get('description') != 'base:' + pr.get('baseRefOid', ''):
+        return pr
+    match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
+                         + r'/actions/runs/([0-9]+)', status.get('target_url') or '')
+    if not match or status.get('creator', {}).get('login') != 'github-actions[bot]':
+        return pr
+    prefix = f'repos/{repository}'
+    path = f'{prefix}/actions/runs/{match[1]}'
+    try:
+        run = read(path)
+        attempt = run['run_attempt']
+        if (run['id'] != int(match[1]) or type(attempt) is not int or attempt < 1
+                or run['event'] != 'workflow_run' or run['head_branch'] != 'main'
+                or run['path'] != '.github/workflows/testnet.yml'
+                or run['head_repository']['full_name'] != repository
+                or run['repository']['full_name'] != repository
+                or run['status'] != 'completed' or run['conclusion'] != 'failure'):
+            return pr
+        comparison = read(f"{prefix}/compare/{run['head_sha']}...{pr['baseRefOid']}")
+        if comparison['merge_base_commit']['sha'] != run['head_sha']:
+            return pr
+        jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
+        if jobs['total_count'] != len(jobs['jobs']) or not 0 < jobs['total_count'] <= 100:
+            return pr
+        def job(name, conclusion):
+            matches = [row for row in jobs['jobs'] if row['name'] == name]
+            if len(matches) != 1:
+                raise ValueError('ambiguous job')
+            row = matches[0]
+            if (row['run_id'] != run['id'] or row['head_sha'] != run['head_sha']
+                    or row['run_attempt'] != attempt or row['status'] != 'completed' or row['conclusion'] != conclusion):
+                raise ValueError('untrusted job')
+            return row
+        job('plan', 'success')
+        prepare = job('prepare', 'failure')
+        publisher = job('preparation-status', 'success')
+        text = logs(f"{prefix}/actions/jobs/{publisher['id']}/logs")
+        if len(text) > 1024 * 1024:
+            return pr
+        # GitHub prefixes each log line with an ISO timestamp.
+        receipts = re.findall(r'^(?:[0-9T:Z. -]+ )?SUIFLEET_PREPARATION_V1 (\{[^\n]+\})\s*$',
+                              text, re.MULTILINE)
+        expected = dict(status=status['id'], head=pr['headRefOid'], base=pr['baseRefOid'],
+                        run=run['id'], attempt=attempt, controller=run['head_sha'])
+        if len(receipts) != 1 or json.loads(receipts[0]) != expected:
+            return pr
+        fresh = read(path)
+        if any(fresh.get(key) != run.get(key) for key in
+               ('id', 'head_sha', 'run_attempt', 'status', 'conclusion')):
+            return pr
+        latest = read(f"{prefix}/commits/{pr['headRefOid']}/status")
+        latest = next(row for row in latest['statuses'] if row['context'] == TESTNET_CONTEXT)
+        if any(latest.get(key) != status.get(key) for key in
+               ('id', 'state', 'description', 'target_url')):
+            return pr
+        # Current PR/base may have moved while logs were downloaded.
+        current = read(f"{prefix}/pulls/{pr['number']}")
+        base = read(f"{prefix}/git/ref/heads/{quote(pr['baseRefName'], safe='/')}")
+        if current['head']['sha'] != pr['headRefOid'] or base['object']['sha'] != pr['baseRefOid']:
+            return pr
+        failed_steps = [row['name'] for row in prepare['steps'] if row['conclusion'] == 'failure']
+        if not failed_steps:
+            return pr
+        pr['_preparation_failure'] = dict(**expected, url=status['target_url'],
+            repair_owner='SF-204' if repository == 'tyler-suifleet/suifleet'
+            and failed_steps == ['Checkout authenticated test revision'] else None)
+    except Exception:
+        pass  # Missing, cancelled, unavailable and malformed evidence fail closed.
+    return pr
 
 
 # GitHub Actions reports job-limit expiry as CANCELLED, not always TIMED_OUT.
@@ -348,6 +436,9 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     """Name who actually repairs current-head failures, independent of readiness."""
     if not failures:
         return None
+    shared = sorted({row['repair_owner'] for row in failures if row.get('repair_owner')})
+    if shared:
+        return 'shared controller repair owner ' + ', '.join(shared) + '; activation/exact-head validation pending'
     if pr.get('isCrossRepository') or pr.get('state') != 'OPEN':
         return 'no automatic repair: not an open same-repository PR'
     if not owner:
@@ -870,6 +961,9 @@ class Coordinator:
         pr['_receipts'] = {r['node_id']:r['hash'] for r in self.store.db.execute('SELECT node_id,hash FROM publications WHERE project=? AND pr=?',(project['id'],number))}
         pr['threads'] = threads
         pr['_acceptance_policy'] = project.get('acceptance_policy', {})
+        annotate_preparation_failure(pr, project['repository'],
+                                     lambda path: json.loads(self.gh(project, ['api', path])),
+                                     lambda path: self.gh(project, ['api', path]))
         return annotate_job_timeouts(pr, project['repository'],
                                      lambda path: json.loads(self.gh(project, ['api', path])))
 
@@ -1508,7 +1602,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute('DELETE FROM ci_check_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
-                repair = {**pr, '_ci_repair': failures} if failures else None
+                # Shared controller defects retain their existing implementation owner.
+                # Observe every affected PR, but do not consume its budget or dispatch
+                # a redundant worker (including the shared owner's already-reviewed PR).
+                local_failures = [row for row in failures if not row.get('repair_owner')]
+                repair = {**pr, '_ci_repair': local_failures} if local_failures else None
                 repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
                 responsibility = ci_responsibility(pr, owner, failures, repair_blocker)
                 if execute:
