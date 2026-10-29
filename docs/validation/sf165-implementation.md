@@ -521,3 +521,39 @@ verification after push and were not watched or polled. The coordinator must
 require their actual exact-head/current-base success and fresh independent review.
 Manual real-wallet/production-provider, physical and actual-mainnet acceptance
 remains unrun in #32/#159. No deployment, hardware or production credentials.
+
+
+## Current-base checkout repair integration (2026-10-29)
+
+The feedback snapshot has no unresolved source/security findings or open threads.
+Its ordinary/security checks succeeded for `512ca1b2`, but automatic Testnet
+reported an error against old base `95ac2b20`. That is not current-base acceptance.
+Merged snapshot/current main `b3994cf9522502365df1e4fa7021bb030639f0ea`
+without conflicts. The upstream delta changes only `scripts/testnet_ci.py` and
+`scripts/tests/test_testnet_prepared.py`: shallow controllers now unshallow before
+copying authenticated candidate history. SF-165 application and contract code is
+unchanged; no migration is required.
+
+Post-integration checks:
+
+- `suifleet-sf165:ci-repair`, network disabled, identical host checkout/store mounts:
+  `make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+  && python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`:
+  all PASS, including 162 offline Testnet tests, 60 operator tests, TypeScript,
+  production static export and 3 live-release harness tests. Existing optional
+  prerequisite skip and nonfatal Tailwind module-type warning remain.
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_testnet_prepared.py`: 9 PASS, including real shallow clone, missing
+  candidate, independently advanced base and hook/filter nonexecution cases.
+- Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+  `scripts/test_components_browser.cjs`, `scripts/test_upload_browser.cjs` and
+  `scripts/test_wallet_browser.cjs`: all PASS, fixture chain/wallet/storage only.
+
+Hosted exact-head/current-base CI and automatic Testnet remain pending on the
+new pushed revision; they are not watched or polled by this worker. The coordinator
+must enforce actual success and obtain fresh independent review. Historical chosen
+period publication/extension receipts remain historical evidence, not a new run.
+No new Move, OTA, public-network or profile hydration run was performed.
+Manual real-wallet/provider, physical and actual-mainnet acceptance remains
+explicitly unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
