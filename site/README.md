@@ -2,6 +2,9 @@
 
 Static product pages, a written console guide, an offline console screenshot,
 proposed pricing, documentation entry, security/custody and contact/privacy.
+The nine guide steps include testnet WebM/MP4 recordings, posters, transcripts
+and console-build provenance. Regeneration and spending controls are described
+in [guide/RECORDING.md](guide/RECORDING.md).
 Standard-library Python 3.10+; no install or network needed to build:
 
 ```sh
