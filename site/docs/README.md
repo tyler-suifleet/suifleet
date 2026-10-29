@@ -51,17 +51,16 @@ this origin. Adding analytics requires reviewed consent behavior first.
 
 ## SF-172 integration and hosting handoff
 
-This subtree uses the actual committed SF-172 design at
-d5306c76179be15a09d5ae25740019f383a46a24: copied logo/favicon/style assets and
-the same header, footer, colors and typography. It leaves site/build.py,
-site/src/layout.html, site/src/site.json and recording work untouched.
-The only layout changes are documentation navigation, local search and article
-layout. Shared assets were read with git show, not from the active worktree.
+This subtree follows the committed SF-172 site interface and the SF-180 identity
+merged in PR #365: the three-sail logo/favicon, shared stylesheet and self-hosted
+Inter font (with its license) match site/src/assets. Font loading is restricted to
+this origin in both the HTML CSP and emitted hosting headers. The logo preserves
+its wide aspect ratio; documentation navigation, search and article rules live in
+docs.css. Reconcile these copied assets whenever the public site identity changes.
 
-SF-172 merged in PR #362. Its final reviewed logo, favicon and shared stylesheet
-are reconciled here; documentation-specific layout remains in docs.css. The build remains
-independent: site/build.py serves suifleet.io, while this builder produces the
-separate docs.suifleet.io document root.
+The build remains independent: site/build.py serves suifleet.io, while this builder
+produces the separate docs.suifleet.io document root. No landing-site sources or
+recording work are modified.
 
 SF-176 owns hosting, TLS and DNS. Serve the built directory with directory-index
 routing and a real 404 status using 404.html; apply the emitted _headers or

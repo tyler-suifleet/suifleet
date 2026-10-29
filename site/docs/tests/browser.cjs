@@ -17,13 +17,17 @@ const assert = require("node:assert/strict");
       const file = path.resolve(out, "." + rel);
       assert.ok(file.startsWith(out + path.sep));
       const ext = path.extname(file);
-      const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml" };
+      const types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
       await route.fulfill({ body: await fs.readFile(file), contentType: types[ext] || "application/octet-stream" });
     });
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("https://docs.suifleet.io/install/");
       await page.getByRole("heading", { name: "Install the SuiFleet device client", exact: true }).waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      assert.ok(await page.evaluate(() => document.fonts.check('16px Inter')));
+      const logo = await page.locator('.brand img').boundingBox();
+      assert.ok(Math.abs(logo.width / logo.height - 180 / 110) < 0.02);
       const overflow = await page.evaluate(() => [...document.querySelectorAll("*")].filter(el => el.getBoundingClientRect().right > innerWidth).map(el => [el.tagName, el.className, Math.round(el.getBoundingClientRect().right)]));
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), JSON.stringify({width, overflow}));
       await page.getByRole("searchbox").fill("provisioning media");
