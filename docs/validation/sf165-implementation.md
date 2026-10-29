@@ -484,3 +484,40 @@ run for the pushed head; they are not watched or polled by this worker. Fresh
 independent review remains required. Manual real-wallet/production-provider,
 physical and actual-mainnet acceptance remains unrun in #32/#159. No merge,
 deployment, hardware programming or production credentials.
+
+
+## Current CI/site base integration (2026-10-28)
+
+The feedback snapshot for `2dccb5c7` contains no unresolved source/security
+findings and no open threads. Its ordinary/security checks succeeded, but its
+pending automatic Testnet status names the older base `935e96f8`; it is not
+current-base acceptance. Merged snapshot/current main
+`95ac2b202db17014d691eb1646d955829aa2200a` without conflicts. Upstream changes
+are CI/Testnet preparation, proof checks, site and documentation; no upstream
+application, contract, daemon or interface delta. Release storage behavior and
+its existing migration boundary are preserved.
+
+Verification after integration:
+
+- `suifleet-sf165:ci-repair`, network disabled, identical host checkout/store
+  mounts: `make dapp-typecheck && make dapp-build` PASS. Includes 161 offline
+  Testnet harness tests, 60 operator tests, manifest/frontend prerequisites,
+  TypeScript and the production static export. Existing optional prerequisite
+  skip and nonfatal Tailwind module-type warning remain.
+- Same container: `node scripts/test_release_storage.cjs` PASS and
+  `python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`
+  3 PASS.
+- Host Chrome `/usr/bin/google-chrome`, `CHROME_EXECUTABLE` set:
+  `node scripts/test_components_browser.cjs`, `node scripts/test_upload_browser.cjs`
+  and `node scripts/test_wallet_browser.cjs` all PASS (fixture chain/wallet/storage).
+- Host `python3 -m unittest discover -s site/tests -p test_site.py`: 18 PASS.
+- Host `python3 -m unittest discover -s scripts/tests -p 'test_tunneling_process*.py'`:
+  4 PASS.
+
+No new Move, OTA, hydration-profile or public-network test was run in this repair.
+Historical chosen-period publish/extension evidence remains unchanged; no new
+exact-head automatic Testnet success is asserted. Hosted CI/Testnet are pending
+verification after push and were not watched or polled. The coordinator must
+require their actual exact-head/current-base success and fresh independent review.
+Manual real-wallet/production-provider, physical and actual-mainnet acceptance
+remains unrun in #32/#159. No deployment, hardware or production credentials.
