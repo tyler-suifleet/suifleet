@@ -75,14 +75,20 @@ def render_guide(config):
         out.append(f'<p>{html.escape(step["summary"])}</p>')
         video = videos.get(step["id"])
         if video:
+            for key in ("file", "poster", "fallback"):
+                name = video.get(key)
+                if name and Path(name).name != name:
+                    raise BuildError(f"unsafe guide media filename: {name}")
             poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
+            fallback = (f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else "")
             out.append(f'<figure class="screencast"><video controls preload="none" width="{video["width"]}" height="{video["height"]}"{poster}>'
-                       f'<source src="/media/guide/{video["file"]}" type="video/webm">'
+                       f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
                        f'Your browser cannot play this WebM screencast. <a href="/media/guide/{video["file"]}">Download it</a>.</video>'
                        f'<figcaption>{html.escape(video["caption"])} Recorded on Sui {html.escape(manifest["network"])} '
-                       f'from console build <code>{html.escape(manifest["console_commit"][:12])}</code> on {html.escape(manifest["recorded"])}.</figcaption></figure>')
+                       f'from console build <code>{html.escape(video.get("console_commit", manifest["console_commit"])[:12])}</code> on {html.escape(manifest["recorded"])}.</figcaption></figure>')
         else:
             out.append('<p class="pending-video">Screencast not yet recorded for this step.</p>')
+        out.append('<details class="transcript"><summary>Transcript and instructions</summary>')
         if step.get("before"):
             out.append("<h3>Before you start</h3><ul>")
             out += [f"<li>{html.escape(item)}</li>" for item in step["before"]]
@@ -94,7 +100,7 @@ def render_guide(config):
         links = [f'<a class="button" href="{config["app_url"]}{route}">Open {html.escape(step["console_label"])} in the console</a>']
         links += [f'<a href="{repo_url(config, d["path"])}">{html.escape(d["label"])}</a>' for d in step.get("docs", [])]
         out.append('<p class="step-links">' + " ".join(links) + "</p>")
-        out.append("</section>")
+        out.append("</details></section>")
     return "\n".join(out)
 
 
@@ -149,7 +155,7 @@ def build(out):
     if manifest:
         (out / "media" / "guide").mkdir(parents=True)
         for video in manifest["videos"]:
-            for key in ("file", "poster"):
+            for key in ("file", "poster", "fallback"):
                 if video.get(key):
                     shutil.copyfile(MEDIA / "guide" / video[key], out / "media" / "guide" / video[key])
     for name in ("_headers", "robots.txt"):
