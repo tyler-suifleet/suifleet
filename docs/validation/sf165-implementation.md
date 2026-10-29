@@ -557,3 +557,42 @@ No new Move, OTA, public-network or profile hydration run was performed.
 Manual real-wallet/provider, physical and actual-mainnet acceptance remains
 explicitly unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+## OTA runner base integration (2026-10-29)
+
+The supplied review of `1461e587` reports no unresolved code/security findings
+and no open review threads. The feedback snapshot records ordinary/security CI
+success for that head, but automatic Testnet is pending against older base
+`b3994cf9`; neither establishes acceptance against the newly advanced base.
+Merged snapshot/current main `9d1b68cd2df85b3d7dbf2a56897d1b07a2b2e106`
+without conflicts in `5d04afea`. Upstream changes are the bounded OTA suite runner,
+its Makefile wiring, operational documentation and tracking records. The application,
+contracts and interfaces are unchanged from the independently reviewed head.
+No migration is required.
+
+Post-integration checks:
+
+- `suifleet-sf165:ci-repair`, network disabled, checkout and pnpm store mounted at
+  identical host paths: `make dapp-typecheck && make dapp-build && node
+  scripts/test_release_storage.cjs && python3 -m unittest discover -s scripts/tests
+  -p test_live_release_storage.py`: PASS, including offline prerequisites,
+  TypeScript, production static export, release storage regressions and 3 Python
+  harness tests. Full command output retained locally at
+  `/tmp/sf165-current-base-checks.log`. Optional prerequisite skips remain explicit.
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_ota_suites.py`: 6 PASS, including bounded overlap, failure propagation,
+  timeout, process-group interruption and complete suite inventory. The printed
+  failure/timeout diagnostics are expected assertions of the negative cases.
+- Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+  `scripts/test_components_browser.cjs`, `scripts/test_upload_browser.cjs` and
+  `scripts/test_wallet_browser.cjs`: all PASS; chain/wallet/storage are fixtures.
+- `git diff --check`: PASS. Merge author and committer are Tyler Bush.
+
+Hosted exact-head/current-base CI and automatic Testnet remain pending for the new
+push. They were not watched or polled; the coordinator must enforce actual success
+and obtain fresh independent review. No new Move, full OTA, profile hydration or
+public-network transaction was run. Historical publication/extension receipts are
+unchanged, not new-head automatic Testnet evidence. No network mutation lock was
+needed. Manual real-wallet/provider, physical and actual-mainnet acceptance remains
+explicitly unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
