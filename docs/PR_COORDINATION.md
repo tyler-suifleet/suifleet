@@ -1030,10 +1030,13 @@ ambiguous or unavailable evidence, cancellation and historical runs without
 receipts remain unclassified blockers and never launch preparation repair.
 
 Verified failures in `Checkout authenticated test revision` in SuiFleet route
-to the existing **SF-204 / PR #406** incident owner. Each affected PR retains a
+to the existing **SF-204 / PR #406** incident owner while PR #406 is open and
+unmerged. After it closes, checkout failures use ordinary bounded owner repair;
+unavailable incident state fails closed. Each affected PR retains a
 durable observation naming that owner, while the coordinator excludes this shared
 failure from per-PR repair dispatch/budgets and the dispatcher does not interrupt
-product workers for it. SF-204's existing implementation/review reservation is
+product workers for it. Mixed observations still route their local failures and
+report both repair responsibilities. SF-204's existing implementation/review reservation is
 preserved; this route is an incident assignment, not proof the defect is fixed.
 Other verified preparation failures use the existing bounded owner-repair path.
 Source feedback and base integration still follow their ordinary review paths.
