@@ -427,6 +427,31 @@ class PublicPricingTests(unittest.TestCase):
         self.assertIn(f'| Monthly minimum | ${self.prices["base"]["monthlyMinimumUsd"]} |', plan)
         self.assertIn(f'| Annual prepay | {self.prices["base"]["annualPrepayDiscountPercent"]}% discount |', plan)
 
+    def test_public_offers_match_plan_and_render_from_policy(self):
+        from unittest.mock import patch
+        offers = self.policy['public_offers']
+        managed, at_cost, partners = (offers[key] for key in ('managed', 'at_cost', 'design_partners'))
+        plan = self.site.PLAN.read_text()
+        self.assertIn(f'Managed plan: the platform price plus {self.site.usd(managed["premium_usd_per_device_month"])} per device per month, with a ${managed["monthly_minimum_usd"]} monthly minimum.', plan)
+        self.assertIn(f'Up to {at_cost["max_devices"]:,} devices per organization', plan)
+        self.assertIn(f'about {self.site.usd(at_cost["estimated_usd_per_device_month"])} per device per month', plan)
+        self.assertIn(f'Up to {partners["max_devices"]:,} devices each at cost for {partners["term_months"]} months', plan)
+        page = self.site.generated()
+        for text in ('Managed plan', '$0.10 per device per month', '$199.00 monthly minimum',
+                     '100 devices per organization', '$0.01', '5,000 devices each at cost for 12 months',
+                     'community support only', 'Billed annually in advance', 'case study'):
+            self.assertIn(text, page)
+        # Each canonical offer field must affect the page and invalidate committed output.
+        for group, values in offers.items():
+            for key, value in values.items():
+                policy = copy.deepcopy(self.policy)
+                policy['public_offers'][group][key] = str(Decimal(str(value)) + 1) if isinstance(value, str) else value + 1
+                changed = self.site.render(self.prices, policy, 'digest')
+                self.assertNotEqual(self.site.render(self.prices, self.policy, 'digest'), changed)
+                with patch.object(self.site, 'generated', return_value=changed):
+                    with self.assertRaisesRegex(ValueError, 'stale'):
+                        self.site.generate(check=True)
+
     def test_model_changes_invalidate_page(self):
         from unittest.mock import patch
         original = self.site.generated()

@@ -15,6 +15,11 @@
   "hedge": {"term_sui_purchased_fraction": "1"},
   "renewal_repricing_trigger_multiple": "3",
   "renewal_notice_days": 30,
+  "public_offers": {
+    "managed": {"premium_usd_per_device_month": "0.10", "monthly_minimum_usd": "199"},
+    "at_cost": {"max_devices": 100, "estimated_usd_per_device_month": "0.01"},
+    "design_partners": {"max_devices": 5000, "term_months": 12}
+  },
   "payment_fee_fraction": "0.03",
   "payment_fixed_usd_per_invoice": "0.30"
 }

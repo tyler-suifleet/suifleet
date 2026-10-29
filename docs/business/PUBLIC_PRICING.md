@@ -6,8 +6,9 @@ by the console (`fleet-pricing.ts`, including validation and optional deployment
 overrides) and the offline landing-page generator. It includes graduated tiers,
 minimum, activation, annual discount, data allowance and settings/add-on prices.
 `subscription-policy.json` schema 2 supplies the term hedge, renewal trigger and
-notice period. The console's optional environment override does not change the
-public proposal; quotes must identify their configured prices.
+notice period. Its `public_offers` section supplies the managed-plan premium and
+minimum, at-cost device cap and estimate, and design-partner device cap and term.
+The console's optional environment override does not change the public proposal; quotes must identify their configured prices.
 
 When changing the proposal in `docs/BUSINESS_PLAN.md`:
 
@@ -28,8 +29,9 @@ When changing the proposal in `docs/BUSINESS_PLAN.md`:
 SF-178 uses the SF-172 committed site interface at
 `d5306c76179be15a09d5ae25740019f383a46a24`: ordinary page HTML with `app` and `repo`
 tokens. It changes no build/layout API. SF-172 must merge before SF-178 integrates.
-The page deliberately describes default platform/data/settings pricing rather
-than duplicating additional hand-maintained managed-plan or entry-offer numbers.
+The page renders platform/data/settings prices, the Managed plan and entry offers
+from these canonical sources. Tests compare offer terms with the business plan
+and require regeneration when those terms change.
 SUI and WAL network estimates remain separate from subscription prices; the
 all-in proposal and customer-funded volume arrangements are explained explicitly.
 
