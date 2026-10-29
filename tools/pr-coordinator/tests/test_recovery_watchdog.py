@@ -326,7 +326,15 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual((folder/'worker.log').stat().st_mode & 0o777, 0o600)
         receipt = w.read(folder/'process.json')
         run = dict(nonce=nonce, directory=str(folder), pid=receipt['pid'], started=receipt['started'])
-        self.assertEqual(w.survivors(run),[])
+        # SIGKILL is asynchronous for grandchildren that the wrapper cannot
+        # waitpid. Allow the kernel to finish termination on a loaded host;
+        # a genuinely surviving descendant still fails this bounded check.
+        deadline = time.monotonic() + 3
+        remaining = w.survivors(run)
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.02)
+            remaining = w.survivors(run)
+        self.assertEqual(remaining,[])
 
 
 if __name__ == '__main__':
