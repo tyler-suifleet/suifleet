@@ -9,6 +9,15 @@ controls and must not be reported as consumed fees.
 
 ## Accounts
 
+For the landing guide's scripted console recordings, use
+[`site/guide/RECORDING.md`](../site/guide/RECORDING.md). Its `--check` mode only
+reads the matching cached package fixture, chain, type origins and UpgradeCap.
+An actual run requires the shared-wallet lease, journals signing digests before
+submission, charges retained demo gas and new funding to a non-replenishing
+allowance, and records independent effects and fees. Raw frames and persistent
+demo signing state stay private outside the checkout. A partial recording is
+not nine-step video acceptance or manual real-wallet acceptance.
+
 The user created two dedicated **testnet-only** accounts on 2026-10-14 and authorized agents to spend their testnet SUI on acceptance runs: publishing and upgrading test packages, and the transactions those runs need.
 
 | Account | Address | Key lives in | Used by |
