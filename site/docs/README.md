@@ -58,8 +58,8 @@ site/src/layout.html, site/src/site.json and recording work untouched.
 The only layout changes are documentation navigation, local search and article
 layout. Shared assets were read with git show, not from the active worktree.
 
-SF-172 must merge before SF-177 integrates. Reconcile deliberate branding updates
-against its final reviewed assets then; do not copy dirty work. The build remains
+SF-172 merged in PR #362. Its final reviewed logo, favicon and shared stylesheet
+are reconciled here; documentation-specific layout remains in docs.css. The build remains
 independent: site/build.py serves suifleet.io, while this builder produces the
 separate docs.suifleet.io document root.
 

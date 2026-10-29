@@ -63,7 +63,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .guide-step { border-top: 1px solid var(--line); margin-top: 2rem; }
 .step-number { display: inline-flex; width: 2rem; height: 2rem; border-radius: 50%; background: var(--brand); color: #fff; align-items: center; justify-content: center; font-size: 1rem; margin-right: .4rem; vertical-align: middle; }
 .screencast { margin: 1rem 0; }
-.screencast video { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.screencast video, .screencast img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
 .screencast figcaption { font-size: .85rem; color: var(--muted); }
 .pending-video { color: var(--warn); font-style: italic; }
 .step-links { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
@@ -74,6 +74,9 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .site-footer ul { display: flex; gap: 1rem; list-style: none; padding: 0; margin: 0; flex-wrap: wrap; }
 
 @media (max-width: 640px) {
+  .header-row { justify-content: space-between; gap: .75rem; padding-top: .75rem; padding-bottom: .75rem; }
+  .site-header nav { order: 3; flex-basis: 100%; }
+  .site-header nav ul { gap: .5rem 1rem; }
   .hero h1 { font-size: 2rem; }
   .guide-index { columns: 1; }
 }
