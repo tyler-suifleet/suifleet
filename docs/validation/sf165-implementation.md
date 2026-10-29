@@ -596,3 +596,37 @@ unchanged, not new-head automatic Testnet evidence. No network mutation lock was
 needed. Manual real-wallet/provider, physical and actual-mainnet acceptance remains
 explicitly unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+
+## Current-base integration after independent approval (2026-10-29)
+
+The supplied independent review approved f5fba837 against 9d1b68cd and reported
+no actionable source/security findings or open threads. The snapshot base advanced
+to 0189768b8216a966545f193919956a7495e25d27. Merge 0a65f122 integrates
+that base cleanly; its actual delta contains only the public site, brand assets
+and tracking records. SF-165 dapp, scripts, contracts and interfaces are unchanged.
+No functional feedback patch or migration is required.
+
+Post-integration checks:
+
+- Network-none `suifleet-sf165:ci-repair`, user UID:GID, checkout/store mounted
+  at their identical host paths, `INSIDE_DEV_CONTAINER=1`:
+  `make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+  && node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs
+  && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_live_release_storage.py`: PASS, including offline prerequisites,
+  TypeScript, static production export, release/Seal/publisher regressions and
+  three Python tests. Input-based prerequisite skips remain explicit.
+  Local log: `/tmp/sf165-base0189768-checks.log`.
+- `make site-check test-site`: PASS, built site checker plus 19 offline tests.
+  Local log: `/tmp/sf165-site-checks.log`.
+- `git diff --check`: PASS.
+
+Hosted CI and automatic Testnet for the new pushed head remain pending coordinator
+verification; no hosted CI was watched or polled. The supplied prior-head Testnet
+success refers to base 9d1b68cd and is not evidence for this new head/base. No new
+Move/full OTA run or public-network mutation was performed. Existing chosen-period
+publication and extension receipts remain historical evidence. Manual real-wallet,
+production-provider, physical and actual-mainnet acceptance stays explicitly unrun
+in #32 and #159. Next: coordinator exact-head/current-base ordinary/security CI,
+automatic Testnet and fresh independent review. No merge or deployment performed.
