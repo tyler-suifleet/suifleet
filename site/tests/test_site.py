@@ -3,6 +3,7 @@
     python3 -m unittest discover -s site/tests -v
 """
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -148,6 +149,30 @@ class SiteTest(unittest.TestCase):
         self.assertEqual(verify_served.served_path("index.html"), "/")
         self.assertEqual(verify_served.served_path("guide/index.html"), "/guide/")
         self.assertEqual(verify_served.served_path("assets/style.css"), "/assets/style.css")
+
+    def test_served_header_fetch_failure_is_reported(self):
+        # All file reads succeed; only the final header request fails.
+        def fetch(url):
+            if fetch.remaining == 0:
+                raise OSError("connection closed")
+            fetch.remaining -= 1
+            name = url.removeprefix("https://suifleet.io/")
+            path = self.out / name
+            if path.is_dir():
+                path /= "index.html"
+            return path.read_bytes(), {}
+
+        fetch.remaining = sum(
+            line.split("  ", 1)[1] not in ("_headers", "404.html")
+            for line in (self.out / "SHA256SUMS").read_text().splitlines()
+        )
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", ["verify_served.py", str(self.out), "https://suifleet.io"]), \
+                mock.patch.object(verify_served, "fetch", side_effect=fetch), \
+                mock.patch.object(sys, "stdout", output):
+            with self.assertRaisesRegex(SystemExit, "1 problem\\(s\\)"):
+                verify_served.main()
+        self.assertIn("ERROR: home page headers: fetch failed: connection closed", output.getvalue())
 
 
 if __name__ == "__main__":

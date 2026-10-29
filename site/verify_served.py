@@ -58,10 +58,14 @@ def main():
             continue
         if hashlib.sha256(body).hexdigest() != digest:
             problems.append(f"{name}: served bytes differ from the reviewed build")
-    _, headers = fetch(origin + "/")
-    for header, expected in HEADERS.items():
-        if expected not in headers.get(header, ""):
-            problems.append(f"home page header {header} missing or lacks {expected!r}")
+    try:
+        _, headers = fetch(origin + "/")
+    except Exception as error:  # noqa: BLE001 - report alongside file failures
+        problems.append(f"home page headers: fetch failed: {error}")
+    else:
+        for header, expected in HEADERS.items():
+            if expected not in headers.get(header, ""):
+                problems.append(f"home page header {header} missing or lacks {expected!r}")
     for problem in problems:
         print("ERROR:", problem)
     if problems:
