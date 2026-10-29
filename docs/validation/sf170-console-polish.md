@@ -140,6 +140,21 @@ preparation changes. It merged without conflicts and changes nothing under
 - `python3 -m unittest scripts/tests/test_testnet_prepared.py`: 8 tests passed.
 - `python3 -m unittest discover -s site/tests`: 18 tests passed.
 
+### Merge of main `b3994cf9` (2026-10-29)
+
+This merge brings in PR #406, which repairs the authenticated testnet
+candidate checkout from shallow controllers (the cause of the
+`testnet/package-upgrade` error on the previous head). It touches only
+`scripts/testnet_ci.py` and its tests, merged without conflicts and changes
+nothing under `dapp/`.
+
+- `tsc --noEmit` and `test_pending_rows`, `alerts`, `fleet_ops`,
+  `enrollment_frontend`, `deployment_control`, `onboarding`,
+  `devices_pending_browser` and `dapp_presentation_browser`
+  (`suifleet-dev:sf010-chrome`, `--network none`, isolated tmpfs copy): all
+  passed on the merged tree.
+- `python3 -m unittest scripts.tests.test_testnet_prepared`: 9 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
