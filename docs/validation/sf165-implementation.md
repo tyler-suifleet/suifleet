@@ -670,3 +670,40 @@ explicitly unrun in #32 and #159. No deployment or hardware programming performe
   tools/pr-coordinator/tests`: 439 tests PASS in 203.457s; expected negative-case
   diagnostics occur in the log `/tmp/sf165-coordinator.log`.
 - `git diff --check`: PASS; snapshot base ancestry verified.
+
+## Guide-recording base integration (2026-10-29)
+
+The independent review of `44882be8` reports no actionable source/security findings
+or open threads. Its remaining gates are exact-head/current-base hosted CI,
+automatic Testnet and fresh evidence review. The supplied feedback snapshot shows
+ordinary CI successful and Testnet pending for the prior base `1a821c11`.
+Merge `fbc5e6fc` cleanly integrates snapshot/current main
+`9e22b599916bd838921eeb9cb98d643f133bca53`, including reviewed guide recordings.
+SF-165 application, contracts and interfaces are unchanged; no migration needed.
+
+Post-integration checks:
+
+- Network-none `suifleet-sf165:ci-repair`, UID:GID, checkout and pnpm store mounted
+  at identical host paths, `INSIDE_DEV_CONTAINER=1`: `make dapp-typecheck &&
+  make dapp-build && node scripts/test_release_storage.cjs && node
+  scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs &&
+  PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_live_release_storage.py`: PASS, including offline prerequisites,
+  TypeScript, production static export and three Python tests. Input-based
+  prerequisite skips remain explicit. Log: `/tmp/sf165-base9e22-checks.log`.
+- Host `make site-check test-site`: PASS, site integrity and 25 tests.
+  Log: `/tmp/sf165-base9e22-site.log`.
+- Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+  -p test_testnet.py`: 45 tests PASS. Log: `/tmp/sf165-base9e22-testnet.log`.
+- Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+  `site/tests/recording_browser.cjs`, `scripts/test_components_browser.cjs`,
+  `scripts/test_upload_browser.cjs` and `scripts/test_wallet_browser.cjs`: all
+  PASS; chain/wallet/storage fixtures only.
+- `git diff --check`: PASS; snapshot base ancestry verified.
+
+Hosted ordinary/security CI and automatic Testnet remain pending on the new head;
+not watched or polled. No new Move/full OTA run or public-network mutation ran.
+Historical chosen-period publication/extension receipts are not new-head CI
+results. Manual real-wallet/production-provider, physical and actual-mainnet
+acceptance remains explicitly unrun in #32 and #159. Next: coordinator enforces
+actual exact-head/current-base CI/Testnet and fresh independent review.
