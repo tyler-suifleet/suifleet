@@ -181,7 +181,7 @@ class BatchController:
             fresh = self.source(project, pr, owner)
             if not fresh or fresh['source_receipt'] != member['source_receipt']:
                 raise BatchInvalidated('batch source review or acceptance changed')
-            self.c.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
+            # source() revalidates the non-expiring Review claim and dependencies.
         if self.main(project) != batch['base']:
             raise BatchInvalidated('integration base changed')
 
@@ -550,9 +550,7 @@ class BatchController:
             source = self.source(project, pr, self.c.owner(project, pr, owners))
             if source:
                 candidates.append(source)
-                if execute:
-                    owner = self.c.owner(project, pr, owners)
-                    self.c.ticket(project, 'heartbeat', owner['key'], '--token', owner['token'])
+                # source() already validates Review ownership without renewing a lease.
         held = {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
         if len(active) > 1:
