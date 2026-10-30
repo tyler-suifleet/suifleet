@@ -1,0 +1,121 @@
+{
+  "started": "2026-10-28T02:16:06Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "fund disposable 2-of-3 testnet treasury",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 10000000,
+      "status": "success",
+      "digest": "2gHwB9kjTedcfvr1TgryszxQGqJMQDjz8THo6fSwbvyg",
+      "gas_mist": 1000099,
+      "allowance_used_mist": 11000099
+    },
+    {
+      "label": "2-of-3 multisig signed spend to dedicated agent",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "not_submitted",
+      "allowance_used_mist": 0
+    },
+    {
+      "label": "2-of-3 multisig signed spend to dedicated agent",
+      "gas_budget_mist": 5000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2MDUteEwjrmQurf1XBuGmx8E7bwUsLuGVx77tSjCMrjP",
+      "gas_mist": 1988099,
+      "allowance_used_mist": 1988099
+    }
+  ],
+  "checks": [],
+  "chain_identifier": "4c78adac",
+  "treasury_payee": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+  "threshold": 2,
+  "public_keys": [
+    {
+      "scheme": "ED25519",
+      "public_key": "ACBJflOEA/+Fa5DRhrAwUYGWA0v81vG1XyHA7la8D6IK",
+      "weight": 1
+    },
+    {
+      "scheme": "ED25519",
+      "public_key": "AAcOxGa+9sZeYOX/o1c+QmUxY4j3LlW04/msXvD2bZSt",
+      "weight": 1
+    },
+    {
+      "scheme": "ED25519",
+      "public_key": "AN++kCHuKGpzXe1v0MQwgXaquNgyRcoBQQRmF/QZV+wA",
+      "weight": 1
+    }
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/home/tyler/.local/state/suifleet/sf185-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/home/tyler/.local/state/suifleet/sf185-tools/sui-network",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1266,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 370399326,
+  "max_spend_mist": 30000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "0a62963785cd2a9091c4491163b359c938b75947",
+  "initial_started": "2026-10-28T02:15:09Z",
+  "initial_head": "b95e6193171f8483c45332601312515c8b108e84",
+  "initial_start_balance_mist": 381399425,
+  "recovery": "Funding retained; first spend refused before signing by PTB parser; continued same 0.03 SUI allowance with corrected typed sender. No repeated funding.",
+  "independent_cli_address_verified": true,
+  "funding_effects_reverified": true,
+  "result": "success",
+  "limits": [
+    "Disposable software testnet keys only; not production hardware custody.",
+    "No mainnet, SuiNS, production-provider or physical operations."
+  ],
+  "independent_effects_readback": [
+    {
+      "digest": "2gHwB9kjTedcfvr1TgryszxQGqJMQDjz8THo6fSwbvyg",
+      "status": "success",
+      "checkpoint": "399994894",
+      "net_gas_mist": 1000099,
+      "sender": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965"
+    },
+    {
+      "digest": "2MDUteEwjrmQurf1XBuGmx8E7bwUsLuGVx77tSjCMrjP",
+      "status": "success",
+      "checkpoint": "399995146",
+      "net_gas_mist": 1988099,
+      "sender": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e"
+    }
+  ],
+  "operator_allowance_used_mist": 11000099,
+  "child_allowance_used_mist": 1988099,
+  "child_allowance_mist": 10000000,
+  "net_gas_mist": 2988198,
+  "allowance_accounting": "Operator charged 10M funding plus 1,000,099 gas; child gas is paid from the already charged 10M grant, not charged twice. Not-submitted attempt cost zero. No credit/refund replenishes allowance."
+}

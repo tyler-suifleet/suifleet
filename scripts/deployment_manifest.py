@@ -86,7 +86,15 @@ def endpoint(value):
     return value
 
 
+def treasury_payee(payee):
+    if not isinstance(payee, str) or not re.fullmatch(r"0x[0-9a-f]{64}", payee) or int(payee, 16) == 0:
+        raise ValueError("treasury payee mismatch: malformed pinned address; payment blocked")
+    return payee
+
+
 def validate(manifest):
+    if "treasury_payee" in manifest:
+        treasury_payee(manifest["treasury_payee"])
     if type(manifest["schema_version"]) is not int or type(manifest["protocol_version"]) is not int or manifest["schema_version"] != _PROTOCOL["manifest_schema_version"] or manifest["protocol_version"] != _PROTOCOL["protocol_version"]:
         raise ValueError("unsupported manifest schema/protocol")
     if manifest["network"] not in ("localnet", "devnet", "testnet", "mainnet"):
@@ -233,6 +241,8 @@ def resolve(args, read=chain_facts):
         manifest["walrus"]["publisher_urls"] = args.publisher_urls
     elif getattr(args, "publisher_mirror", None):
         manifest["walrus"]["publisher_urls"] = [args.publisher, *args.publisher_mirror]
+    if getattr(args, "treasury_payee", None) is not None:
+        manifest["treasury_payee"] = args.treasury_payee
     if getattr(args, "aggregator_mirror", None):
         manifest["walrus"]["aggregator_urls"] = args.aggregator_mirror
     return verify(manifest, read)
@@ -287,6 +297,7 @@ def main():
         resolve_parser.add_argument("--" + name, required=True)
     resolve_parser.add_argument("--publisher-mirror", action="append", help="additional publisher, in failover order")
     resolve_parser.add_argument("--aggregator-mirror", action="append", help="ordered device mirror, repeat for each URL; replaces legacy device endpoint")
+    resolve_parser.add_argument("--treasury-payee", help="reviewed canonical treasury multisig address; omitted disables payments")
     resolve_parser.add_argument("--output", type=Path, required=True)
     for name in ("verify", "generate"):
         command = sub.add_parser(name)
