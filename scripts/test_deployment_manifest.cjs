@@ -8,6 +8,20 @@ const { parseManifest, verifyDeployment, moveType, REQUIRED_TYPES, CATALOG_TYPES
 const copy = () => structuredClone(fixture);
 (async () => {
   assert.deepEqual(parseManifest(JSON.stringify(fixture)), fixture);
+  if (!process.argv[2]) {
+    const payee = '0x' + 'ab'.repeat(32);
+    const payment = {...copy(), treasury_payee: payee};
+    process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(payment);
+    const { treasuryPayee } = loader()('lib/deployment-manifest.ts');
+    assert.equal(treasuryPayee(), payee);
+    assert.equal(treasuryPayee(payee), payee);
+    assert.throws(() => treasuryPayee('0x' + 'cd'.repeat(32)), /treasury payee mismatch/);
+    process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(fixture);
+    assert.throws(() => loader()('lib/deployment-manifest.ts').treasuryPayee(), /treasury payee mismatch/);
+    for (const value of [null, '', 'suifleet.sui', '0x1', '0x' + '00'.repeat(32), '0x' + 'AB'.repeat(32), 12, {}]) {
+      assert.throws(() => parseManifest(JSON.stringify({...payment, treasury_payee: value})), /treasury payee mismatch/);
+    }
+  }
   if (process.argv[2]) {
     const { SuiGrpcClient } = appRequire("@mysten/sui/grpc");
     await verifyDeployment(new SuiGrpcClient({ network: fixture.network, baseUrl: fixture.rpc_url }), fixture);
