@@ -103,7 +103,7 @@ function choice() {
   } finally { client.clear(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
-for (const file of ['components/DataUsage.tsx', 'components/FleetBudget.tsx', 'components/FleetSettings.tsx', 'hooks/useFleetStorage.ts', 'components/StorageReclaim.tsx', 'app/components/page.tsx']) {
+for (const file of ['components/DataUsage.tsx', 'components/FleetBudget.tsx', 'components/FleetSettings.tsx', 'hooks/useFleetStorage.ts', 'hooks/useReleasePeriod.ts', 'components/StorageReclaim.tsx', 'app/components/page.tsx']) {
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../dapp/src', file), 'utf8');
   assert.doesNotMatch(source, /\.error\??\.message/, file + ' must not render raw query errors');
   assert.match(source, /formatStorageQueryError/);
@@ -111,3 +111,25 @@ for (const file of ['components/DataUsage.tsx', 'components/FleetBudget.tsx', 'c
 
 const settingsSource = require('node:fs').readFileSync(require('node:path').join(__dirname, '../dapp/src/components/FleetSettings.tsx'), 'utf8');
 assert.doesNotMatch(settingsSource, /\$\{(?:walrusError|gasError)\}/, 'price read errors must use the shared formatter');
+
+// Exercise each read-error branch of the publish-period hook with raw internals.
+for (const failed of ['fleet', 'release-schedule', 'release-defaults', 'release-price']) {
+  const periodLoad = loader({
+    react: { useState: () => [undefined, () => {}] },
+    '@/hooks/useCurrentAccount': { useCurrentAccount: () => undefined },
+    '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
+    './useFleetStorage': {
+      useFleetStorage: () => ({ budget: { id: '0xb' }, budgetError: failed === 'fleet' ? raw : undefined }),
+      useFleetBlobStore: () => ({}),
+    },
+    './useFleetTransaction': { useFleetTransaction: () => ({}) },
+    '@tanstack/react-query': { useQuery: ({ queryKey }) => ({
+      data: queryKey[0] === 'release-schedule' ? { epoch: 10, epochDurationMs: 86400000, firstEpochStartMs: 1, maxEpochs: 365 } : undefined,
+      error: queryKey[0] === failed ? raw : undefined,
+    }) },
+  });
+  const period = periodLoad('hooks/useReleasePeriod.ts').useReleasePeriod([100]);
+  const html = renderToStaticMarkup(createElement(loader()('components/ReleasePeriod.tsx').ReleasePeriod, { period }));
+  assert.match(html, /could not be loaded/);
+  assert.doesNotMatch(html, /fleet-storage|0x1843|data is undefined/);
+}

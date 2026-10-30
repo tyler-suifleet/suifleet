@@ -9,6 +9,7 @@ import { WALRUS_EPOCHS, NETWORK } from '@/lib/constants';
 import { DAY, periodEpochs, expiryTime, storageSchedule, releaseWalrus, buildExtendFleetReleaseTx, requireFleetUploadPeriod } from '@/lib/release-storage';
 import { uploadBlob, type BlobStore } from '@/lib/walrus';
 import { useFleetTransaction } from './useFleetTransaction';
+import { formatStorageQueryError } from '@/lib/storage-errors';
 
 export function useReleasePeriod(sizes: number[]) {
   const client = useCurrentClient(), account = useCurrentAccount();
@@ -46,6 +47,9 @@ export function useReleasePeriod(sizes: number[]) {
     return blob;
   };
   return { days, setDays, epochs, schedule: s, expiry: s && epochs ? expiryTime(s.epoch + epochs, s) : undefined,
-    price: quote.data, error: error ?? fleet.budgetError?.message ?? schedule.error?.message ?? settings.error?.message ?? quote.error?.message,
+    price: quote.data, error: error ?? (fleet.budgetError ? formatStorageQueryError(fleet.budgetError, 'Fleet budget') :
+      schedule.error ? formatStorageQueryError(schedule.error, 'Storage schedule') :
+      settings.error ? formatStorageQueryError(settings.error, 'Storage defaults') :
+      quote.error ? formatStorageQueryError(quote.error, 'Storage price') : undefined),
     prepaid, loading: !s || fleet.loading || settings.isLoading || quote.isLoading, publisherStore, fleetStore, fleet };
 }
