@@ -81,7 +81,13 @@ function audit() {
     await page.getByText("You hold this fleet’s keys", { exact: true }).waitFor();
     await layout("disconnected");
 
-    // Keyboard: the first tab stop is the progress navigation with a visible focus indicator.
+    // Keyboard: public guides precede progress navigation; every link has visible focus.
+    for (const [name, slug] of [["Install the device client", "install"], ["Enrollment guide", "enrollment"], ["Publish and deploy components", "components"]]) {
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
+      assert.equal(await page.evaluate(() => document.activeElement?.href), `https://docs.suifleet.io/${slug}/`);
+      assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
+    }
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Sign in");
     assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
