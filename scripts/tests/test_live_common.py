@@ -645,6 +645,46 @@ class WalrusUploadTests(unittest.TestCase):
                 walrus.put("recipe", b"body")
         self.assertEqual(reads, [f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged"])
 
+    def test_cached_not_found_is_revalidated_without_republishing(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        missing = urllib.error.HTTPError("u", 404, "not propagated", {}, None)
+        with patch.object(walrus, "store", return_value=json.loads(self.STORED)) as store, \
+                patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                    missing, nullcontext(io.BytesIO(b"body"))]) as reads:
+            self.assertEqual(walrus.put("recipe", b"body"), "blob1")
+        store.assert_called_once_with(b"body")
+        first, second = [call.args[0] for call in reads.call_args_list]
+        self.assertEqual(first.full_url, f"{walrus.aggregator}/v1/blobs/blob1")
+        self.assertTrue(second.full_url.startswith(first.full_url + "?suifleet_readback="))
+        self.assertEqual(second.get_header("Cache-control"), "no-cache")
+        self.assertIsNone(walrus.read_error)
+
+    def test_revalidation_preserves_integrity_and_failure_diagnostics(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        for status in (404, 503):
+            with self.subTest(status=status), patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                    urllib.error.HTTPError("u", status, "unavailable", {}, None),
+                    nullcontext(io.BytesIO(b"wrong bytes"))]) as reads:
+                self.assertFalse(walrus.readable("blob1", b"body"))
+                self.assertEqual(reads.call_count, 2)
+                self.assertIn("bytes differ", walrus.read_error)
+        for failure in (urllib.error.HTTPError("u", 403, "forbidden", {}, None), TimeoutError()):
+            with patch.object(live_common.urllib.request, "urlopen", side_effect=failure) as reads:
+                self.assertFalse(walrus.readable("blob1", b"body"))
+                self.assertEqual(reads.call_count, 1)
+        with patch.object(walrus, "store", return_value=json.loads(self.STORED)), \
+                patch.object(live_common.urllib.request, "urlopen", side_effect=
+                    urllib.error.HTTPError("u", 503, "down", {}, None)) as reads, \
+                patch.object(live_common, "wait_for", side_effect=lambda check, message, **kw:
+                    check() or (_ for _ in ()).throw(AssertionError(message))):
+            with self.assertRaisesRegex(AssertionError, "last read: HTTP 503"):
+                walrus.put("recipe", b"body")
+            self.assertEqual(reads.call_count, 2)
+
 
 class WalletFixtureTests(unittest.TestCase):
     def test_head_fixture_is_keyed_by_release_compiler(self):
