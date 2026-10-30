@@ -600,6 +600,33 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    @staticmethod
+    def retire_recovered_repairs(db, sources, replacement):
+        """Coordinator-owned, atomic one-use retirement after confirmed launch.
+
+        Caller holds daemon/dispatcher authority locks and has verified all stop,
+        claim and retry fences. Preserve original job receipts and audit the new
+        supervising dispatcher receipt. Any mismatch leaves sources reserved.
+        """
+        from recovery_control import recoverable_repair
+        if not replacement.get('pid') or not replacement.get('started'):
+            raise RuntimeError('replacement identity uncertain')
+        db.execute('CREATE TABLE IF NOT EXISTS recovered_repairs ('
+                   'job INTEGER PRIMARY KEY, replacement TEXT, created REAL)')
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            for source in sources:
+                current = db.execute('SELECT * FROM jobs WHERE id=?', (source['id'],)).fetchone()
+                if current is None or dict(current) != source or not recoverable_repair(current):
+                    raise RuntimeError('repair source changed before retirement')
+                db.execute('INSERT INTO recovered_repairs VALUES(?,?,?)',
+                           (source['id'], json.dumps(replacement, sort_keys=True), time.time()))
+                db.execute("UPDATE jobs SET status='superseded' WHERE id=?", (source['id'],))
+            db.execute('COMMIT')
+        except BaseException:
+            db.execute('ROLLBACK')
+            raise
+
     def migrate_check_budgets(self):
         """Attribute legacy attempts only when durable snapshots verify their scope.
 
