@@ -18,6 +18,64 @@ def fixture():
     return pr,owner,review
 
 
+class NeverStartedReview(unittest.TestCase):
+    def fixture(self, root, kind='review'):
+        store=c.Store(root/'jobs.sqlite3')
+        directory=root/'receipt'; directory.mkdir()
+        pr=fixture()[0]
+        job=store.reserve('project',pr,'Claude',kind,directory)
+        store.db.execute("UPDATE jobs SET status='failed',error='launch interrupted before worker started' WHERE id=?",(job,))
+        return store,directory,pr,job
+
+    def test_restart_reuses_same_row_once_and_keeps_per_pr_exclusion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);store,directory,pr,job=self.fixture(root)
+            store.db.close();store=c.Store(root/'jobs.sqlite3')
+            self.assertEqual(store.reserve('project',pr,'Claude','review',directory),job)
+            self.assertIsNone(store.reserve('project',pr,'Codex','fix',root/'fix'))
+            store.db.execute("UPDATE jobs SET status='failed' WHERE id=?",(job,))
+            self.assertIsNone(store.reserve('project',pr,'Claude','review',directory))
+            self.assertEqual(store.db.execute('SELECT attempts FROM jobs WHERE id=?',(job,)).fetchone()[0],1)
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0],1)
+
+    def test_any_launch_file_retains_uncertainty(self):
+        for name in ['snapshot.json','command.json','prompt.txt','process.json','exit.json','result.json','checkout','unknown']:
+            with self.subTest(name=name),tempfile.TemporaryDirectory() as temporary:
+                store,directory,pr,job=self.fixture(Path(temporary))
+                (directory/name).touch()
+                self.assertIsNone(store.reserve('project',pr,'Claude','review',directory))
+
+    def test_ambiguous_identity_or_other_state_never_retries(self):
+        for field,value in [('pid',123),('started','1'),('launch_intent','{}'),('result','{}'),
+                            ('retry_after',0),('comment_id','comment'),('review_id','review'),
+                            ('publication_done',1),('error','unknown'),('status','orphaned'),('attempts',1)]:
+            with self.subTest(field=field),tempfile.TemporaryDirectory() as temporary:
+                store,directory,pr,job=self.fixture(Path(temporary))
+                store.db.execute(f'UPDATE jobs SET {field}=? WHERE id=?',(value,job))
+                self.assertIsNone(store.reserve('project',pr,'Claude','review',directory))
+
+    def test_missing_symlink_and_different_directory_are_not_proof(self):
+        for variant in ['missing','symlink','different']:
+            with self.subTest(variant=variant),tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);store,directory,pr,job=self.fixture(root)
+                if variant=='missing': directory.rmdir()
+                elif variant=='symlink':
+                    directory.rmdir();target=root/'target';target.mkdir();directory.symlink_to(target)
+                else: directory=root/'other';directory.mkdir()
+                self.assertIsNone(store.reserve('project',pr,'Claude','review',directory))
+
+    def test_repair_family_capacity_and_provider_backoff_still_gate(self):
+        for variant in ['repair','family','capacity','backoff']:
+            with self.subTest(variant=variant),tempfile.TemporaryDirectory() as temporary:
+                root=Path(temporary);store,directory,pr,job=self.fixture(root,'fix' if variant=='repair' else 'review')
+                family='Codex' if variant=='family' else 'Claude'
+                if variant=='capacity':
+                    self.assertIsNotNone(store.reserve('project',{**pr,'number':999},'Claude','review',root/'busy'))
+                if variant=='backoff':
+                    store.db.execute('INSERT OR REPLACE INTO quarantine_backoff VALUES(?,?,?,?)',('Claude','review',1,c.time.time()+600))
+                self.assertIsNone(store.reserve('project',pr,family,'fix' if variant=='repair' else 'review',directory))
+
+
 class Gates(unittest.TestCase):
     def test_public_testnet_requires_explicit_validated_project_grant(self):
         self.assertIn('not authorized',c.network_authorization({}))
