@@ -483,3 +483,25 @@ repairs funding only: exact-head/current-base hosted CI, automatic testnet and
 fresh independent review remain required, pending coordinator collection.
 Production-provider/manual-wallet/physical/mainnet acceptance remains unrun in
 SF-031/#32 and SF-087/#159.
+
+**SF-169 CI lane 2 funding repair (2026-10-30, run 41121707186).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41121707186)
+used CI lane 2 (`0xea997324…c6b4`) and stopped in funding preflight before any
+setup or transaction: the lane held 2,574,548,008 MIST against the unchanged
+3,250,000,000 MIST whole-suite requirement, and its one bounded faucet attempt
+added nothing (the balance was unchanged afterwards). This is a funding
+shortfall, not an application failure or an uncertain transaction.
+
+A read-only check verified chain `4c78adac`, the pinned network CLI SHA-256
+`de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b` and the
+same 2,574,548,008 MIST balance (2,496,189,118 address plus 78,358,890 coin).
+With `network:suifleet-testnet` held and asserted, one faucet request
+succeeded: `iuB7rkz8GW4FxrzBzTWsMvSWCYur3Um6CvH8dcTBfWv`. Transaction readback
+confirmed successful effects at checkpoint `401021329`, with 1,000,000 MIST
+computation paid by the faucet. The lane then held 3,574,548,008 MIST
+(3,496,189,118 address balance), above the requirement and the 0.7 SUI
+single-pool minimum. The lock was released immediately. No signing key was
+used, no package/object transaction was submitted, and no fixture state,
+reservation, spending ceiling or retry bound changed. A fresh normal automatic
+run, fresh independent review and exact-head/current-base CI are still
+required before merge.
