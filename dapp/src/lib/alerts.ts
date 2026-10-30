@@ -63,7 +63,7 @@ export function parseAlert(raw: unknown): FleetAlert {
 
 /** Alerts for the owner's devices; never rejects. */
 export async function fetchAlerts(owner: string, url = TELEMETRY_URL, token = "", fetcher: typeof fetch = fetch): Promise<AlertsResult> {
-  if (!url) return { status: "unavailable", reason: "no fleet indexer configured (NEXT_PUBLIC_SUIFLEET_TELEMETRY_URL)" };
+  if (!url) return { status: "unavailable", reason: "alert reporting is not set up for this console; ask your administrator to configure it" };
   try {
     const query = new URLSearchParams({ owner });
     const response = await fetcher(`${url.replace(/\/+$/, "")}/v1/alerts?${query}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
