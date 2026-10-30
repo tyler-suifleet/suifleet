@@ -7,6 +7,7 @@ database read-only, contacts GitHub only with explicit --refresh-github, and nev
 tokens, claim blobs, prompts, PR bodies/comments or worker logs.
 """
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -23,6 +24,19 @@ QUOTA_RETRIES = 4  # Same bound as coordinator.QUOTA_RETRIES (asserted by tests)
 JOB_OPEN = ('reserved', 'running', 'retry', 'orphaned', 'quarantined', 'quota_wait', 'quota_launch')
 ROLE = {'review': 'review', 'fix': 'repair'}
 CI_MAX_AGE = 900
+BATCH_TERMINAL = ('done', 'invalidated', 'failed')
+BATCH_ACTIVE = ('collecting', 'building', 'branch_publishing', 'pr_creating', 'awaiting_ci',
+                'awaiting_review', 'ready', 'approving_members', 'build_uncertain', 'publish_pending', 'published', 'reconciling')
+PIPELINE_LABELS = {
+    'actively-working': 'actively working', 'queued-in-batch': 'queued in batch',
+    'changes-requested': 'changes requested', 'conflict': 'merge conflict',
+    'ci-failed': 'CI failed', 'needs-source-review': 'needs source review',
+    'awaiting-ci': 'awaiting CI', 'awaiting-acceptance': 'awaiting acceptance',
+    'ready-for-batch': 'source ready for batch',
+    'awaiting-evidence-review': 'awaiting evidence review', 'ready-to-merge': 'ready to merge',
+    'unavailable': 'evidence unavailable',
+}
+_SOURCE_MODULE = None
 # Dispatcher CI repair-first redirects (SF-116) that pause a live implementation.
 REDIRECT_PAUSING = ('guarding', 'interrupting', 'releasing')
 REDIRECT_PAUSED = ('stopped', 'integrating', 'resuming')
@@ -156,6 +170,34 @@ def short_key(key):
     return str(key).split('::', 1)[-1] if key else None
 
 
+def source_fingerprint(data):
+    """Use the coordinator's canonical receipt binding, never review prose.
+
+    The separately installed dashboard also supports older coordinator generations:
+    an unavailable helper means unknown source evidence, not inferred approval.
+    """
+    global _SOURCE_MODULE
+    if (not all(k in data for k in ('headRefOid', 'comments', 'reviews', 'threads'))
+            or not all(isinstance(data[k], list) for k in ('comments', 'reviews', 'threads'))):
+        return None
+    try:
+        directory = Path(__file__).resolve().parent
+        path = directory/'current/coordinator.py'
+        if not path.is_file():
+            path = directory/'coordinator.py'
+        info = path.stat()
+        stamp = (str(path.resolve()), info.st_mtime_ns, info.st_size)
+        if _SOURCE_MODULE is None or _SOURCE_MODULE[0] != stamp:
+            spec = importlib.util.spec_from_file_location('dashboard_source_receipts', path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _SOURCE_MODULE = (stamp, module)
+        helper = getattr(_SOURCE_MODULE[1], 'source_feedback', None)
+        return helper(data) if helper else None
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, ImportError, SyntaxError):
+        return None
+
+
 class SnapshotCache:
     """Public projection of PR job snapshots, reparsed only when a file changes."""
 
@@ -206,8 +248,19 @@ def project_snapshot(data, mtime):
             or (ticket.get('key') is not None and not isinstance(ticket.get('key'), str)):
         raise ValueError('malformed snapshot identity')
     state = testnet.get('state')
+    full_head = data.get('headRefOid')
+    full_base = data.get('baseRefOid')
+    full_head = full_head if isinstance(full_head, str) and re.fullmatch(r'[0-9a-f]{40}', full_head) else None
+    full_base = full_base if isinstance(full_base, str) and re.fullmatch(r'[0-9a-f]{40}', full_base) else None
+    threads = data.get('threads')
+    unresolved = (any(not t.get('isResolved') for t in threads)
+                  if isinstance(threads, list) and all(isinstance(t, dict) and type(t.get('isResolved')) is bool for t in threads)
+                  else None)
     return dict(pr=number, title=safe_text(data.get('title'), 120), branch=branch,
                 head=str(data.get('headRefOid') or '')[:12], draft=bool(data.get('isDraft')),
+                head_oid=full_head, base_oid=full_base, source_head=full_head,
+                source_fingerprint=source_fingerprint(data), unresolved_threads=unresolved,
+                mergeable=data.get('mergeable') if data.get('mergeable') in ('MERGEABLE', 'CONFLICTING', 'UNKNOWN') else None,
                 ticket=short_key(ticket.get('key')), ticket_title=safe_text(spec.get('title'), 120) or None,
                 checks=outcome, testnet=(safe_text(state, 30) or 'missing') if data.get('_testnet_required') else None,
                 mtime=mtime)
@@ -464,10 +517,178 @@ def cached_ci(paths, config, now, project):
                         or not all(type(v) is int and 0 <= v <= 100 for v in value['checks'].values())):
                     continue
                 result[(p['id'], number)] = {k: value[k] for k in
-                    ('pr', 'title', 'branch', 'head', 'draft', 'checks', 'testnet', 'mtime', 'source')}
+                    ('pr', 'title', 'branch', 'head', 'head_oid', 'base_oid', 'draft', 'checks', 'testnet', 'mtime', 'source')}
         except (KeyError, TypeError, ValueError, AttributeError):
             continue
     return result
+
+
+def observed_prs(paths, config, now, project):
+    """Fresh coordinator decision projections; never request GitHub here."""
+    result = {}
+    for settings in config.get('projects', []):
+        name = settings.get('id')
+        if (project is not None and name != project) or not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_.-]+', name):
+            continue
+        directory = Path(paths['reviews']).parent/name/'pr-observations'
+        for path in directory.glob('pr-*.json'):
+            try:
+                if path.is_symlink() or path.stat().st_size > 262144:
+                    continue
+                raw = read_json(path)
+                if (raw.get('schema') != 1 or raw.get('project') != name or raw.get('repository') != settings.get('repository')
+                        or type(raw.get('observed')) not in (int, float) or not 0 < raw['observed'] <= now+300
+                        or not isinstance(raw.get('source_fingerprint'), str)
+                        or not re.fullmatch(r'[0-9a-f]{64}', raw['source_fingerprint'])):
+                    continue
+                view = project_snapshot(raw['pr'], raw['observed'])
+                if type(view['pr']) is not int or view['pr'] <= 0 or not view['head_oid'] or not view['base_oid']:
+                    continue
+                view.update(source_fingerprint=raw['source_fingerprint'], source='coordinator observation',
+                            closed=raw['pr'].get('state') != 'OPEN')
+                result[(name, view['pr'])] = view
+            except (OSError, ValueError, TypeError, KeyError, AttributeError):
+                continue
+    return result
+
+
+def batch_receipts(db):
+    """Public, read-only projection; old installations need no migration."""
+    if not db.execute("SELECT 1 FROM sqlite_master WHERE name='integration_batches'").fetchone():
+        return {'state': 'unavailable', 'detail': 'batch receipt schema not installed', 'rows': []}
+    try:
+        rows = []
+        for raw in db.execute('SELECT project,id,status,base,head,pr,members,updated FROM integration_batches'):
+            row = dict(raw)
+            if row['status'] in BATCH_TERMINAL:
+                continue
+            if (row['status'] not in BATCH_ACTIVE or not isinstance(row['project'], str)
+                    or not isinstance(row['id'], str) or not row['id']
+                    or not isinstance(row['base'], str) or not re.fullmatch(r'[0-9a-f]{40}', row['base'])
+                    or row['pr'] is not None and (type(row['pr']) is not int or row['pr'] <= 0)
+                    or row['head'] is not None and (not isinstance(row['head'], str)
+                                                   or not re.fullmatch(r'[0-9a-f]{40}', row['head']))):
+                raise ValueError('invalid batch identity')
+            members = json.loads(row['members'])
+            if (not isinstance(members, list) or not all(isinstance(m, dict) and type(m.get('pr')) is int
+                    and m['pr'] > 0 and isinstance(m.get('head'), str)
+                    and re.fullmatch(r'[0-9a-f]{40}', m['head']) for m in members)):
+                raise ValueError('invalid batch member projection')
+            if len({m['pr'] for m in members}) != len(members):
+                raise ValueError('duplicate batch member')
+            # Never expose full manifests, owner receipts, claim hashes or error strings.
+            row['members'] = [{'pr': m['pr'], 'head': m['head']} for m in members]
+            row['id'] = safe_text(row['id'], 48)
+            rows.append(row)
+        return {'state': 'ok', 'rows': rows}
+    except (sqlite3.DatabaseError, ValueError, TypeError, KeyError):
+        return {'state': 'unavailable', 'detail': 'batch receipts unreadable', 'rows': []}
+
+
+def pipeline_stage(snapshot, review, *, active=False, batch=None, candidate=False, now=None, batch_mode=False):
+    """One explanatory state per PR. This projection never grants merge authority."""
+    if active:
+        return 'actively-working', 'PID-verified worker assigned to this PR'
+    if not snapshot or snapshot.get('corrupt') or snapshot.get('ci_mismatch'):
+        return 'unavailable', 'current PR snapshot unavailable or revisions disagree'
+    if now is not None and now - snapshot.get('mtime', 0) > CI_MAX_AGE:
+        return 'unavailable', 'PR evidence is stale; refresh GitHub for current checks'
+    if batch is not None:
+        if batch.get('status') == 'build_uncertain':
+            return 'unavailable', 'interrupted candidate build is retained for verified recovery'
+        if (snapshot.get('base_oid') != batch.get('base')
+                or (candidate and snapshot.get('head_oid') != batch.get('head'))):
+            return 'unavailable', 'batch revision no longer matches current PR evidence'
+        if not candidate:
+            return 'queued-in-batch', f"held in integration batch {batch['id']} ({safe_text(batch['status'], 30)})"
+    if snapshot.get('mergeable') == 'CONFLICTING':
+        return 'conflict', 'candidate has a recorded merge conflict'
+    if snapshot.get('unresolved_threads') is True or (review or {}).get('verdict') == 'changes_requested':
+        return 'changes-requested', 'unresolved review feedback needs an implementation change'
+    checks = snapshot.get('checks') or {}
+    if checks.get('failed', 0) or snapshot.get('testnet') in ('failure', 'error'):
+        return 'ci-failed', 'ordinary or testnet validation failed'
+    if candidate:
+        if checks.get('pending', 0) or not sum(checks.values()):
+            return 'awaiting-ci', 'combined candidate CI is pending'
+        if snapshot.get('testnet') not in (None, 'success'):
+            return 'awaiting-acceptance', 'combined candidate testnet evidence is pending or stale'
+        if batch['status'] == 'ready':
+            return 'ready-to-merge', 'coordinator recorded combined integration readiness; publication rechecks still apply'
+        return 'awaiting-evidence-review', 'combined candidate awaits independent integration evidence review'
+    if not snapshot.get('head_oid') or not snapshot.get('source_fingerprint'):
+        return 'unavailable', 'source-review identity or feedback evidence is unavailable'
+    if not review or review.get('source_complete') is not True:
+        return 'needs-source-review', 'no current published typed source-complete receipt'
+    if batch_mode and review.get('acceptance_ready') is True:
+        return 'ready-for-batch', 'source receipt ready; combined candidate will supply CI and testnet evidence'
+    if checks.get('pending', 0) or not sum(checks.values()):
+        return 'awaiting-ci', 'source review complete; ordinary CI is pending'
+    if review.get('acceptance_ready') is not True:
+        return 'awaiting-acceptance', 'source review complete; ticket acceptance evidence remains outstanding'
+    if snapshot.get('testnet') not in (None, 'success'):
+        return 'awaiting-acceptance', 'ordinary CI passed; current-base testnet evidence is pending or stale'
+    if (review.get('verdict') == 'approve' and review.get('acceptance_complete') is True
+            and review.get('base_oid') and review['base_oid'] == snapshot.get('base_oid')
+            and snapshot.get('mergeable') == 'MERGEABLE' and snapshot.get('unresolved_threads') is False):
+        return 'ready-to-merge', 'published complete review and recorded checks passed; coordinator rechecks before merging'
+    return 'awaiting-evidence-review', 'source review complete; final acceptance/evidence review is outstanding'
+
+
+def derive_pipeline(snapshots, jobs, tickets, workers, batches, cache, now, batch_projects=()):
+    """Derived PR states are independent of authoritative ticket/issue totals."""
+    active = {(w['project'], w.get('pr')) for w in workers if w.get('pr')}
+    memberships, candidates = {}, {}
+    ambiguous = set()
+    for row in batches.get('rows', []):
+        if row.get('pr'):
+            candidates[(row['project'], row['pr'])] = row
+        for member in row['members']:
+            key = (row['project'], member['pr'])
+            if key in memberships:
+                ambiguous.add(key)
+            memberships[key] = (row, member['head'])
+    rows = []
+    for key, snapshot in sorted(snapshots.items()):
+        owner = next((t for (p, _), t in tickets.items() if p == key[0]
+                      and (short_key(t['key']) == snapshot.get('ticket') or t.get('branch') == snapshot.get('branch'))), None)
+        review = None
+        for job in reversed(jobs):
+            if ((job['project'], job['pr']) != key or job['kind'] != 'review' or job['status'] != 'done'
+                    or not job.get('publication_done') or job.get('head') != snapshot.get('head_oid')):
+                continue
+            evidence = cache.get(job['directory'])
+            if (not evidence or not snapshot.get('source_fingerprint')
+                    or evidence.get('source_fingerprint') != snapshot['source_fingerprint']):
+                continue
+            if owner is None or job['family'] == owner.get('agent') or job['family'] not in ('Codex', 'Claude'):
+                continue
+            try:
+                result = json.loads(job.get('result') or '{}')
+                if not isinstance(result, dict):
+                    continue
+                review = {k: result.get(k) for k in ('verdict', 'source_complete', 'acceptance_ready', 'acceptance_complete')}
+                review['base_oid'] = evidence.get('base_oid')
+                break
+            except (TypeError, ValueError):
+                continue
+        member = memberships.get(key)
+        batch = candidates.get(key) or (member[0] if member else None)
+        if key in active:
+            stage, reason = pipeline_stage(snapshot, review, active=True, now=now)
+        elif key in ambiguous or member and member[1] != snapshot.get('head_oid') or member and key in candidates:
+            stage, reason = 'unavailable', 'batch membership is ambiguous or source head has changed'
+        else:
+            stage, reason = pipeline_stage(snapshot, review, active=key in active, batch=batch,
+                                           candidate=key in candidates, now=now, batch_mode=key[0] in batch_projects)
+        rows.append(dict(project=key[0], pr=key[1], ticket=short_key(owner['key']) if owner else None,
+                         integration=key in candidates, state=stage, reason=reason,
+                         title=snapshot.get('title') or '', observed=snapshot.get('mtime')))
+    counts = {}
+    for row in rows:
+        counts[row['state']] = counts.get(row['state'], 0) + 1
+    return dict(rows=rows, counts=counts, total=len(rows), batch_receipts=batches['state'],
+                detail=batches.get('detail'))
 
 
 def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
@@ -549,7 +770,8 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         db = connect(paths['reviews'])
         try:
             columns = {r[1] for r in db.execute('PRAGMA table_info(jobs)')}
-            optional = ', '.join(c if c in columns else f'NULL AS {c}' for c in ('error', 'created', 'retry_after', 'attempts'))
+            optional = ', '.join(c if c in columns else f'NULL AS {c}' for c in
+                                 ('error', 'created', 'retry_after', 'attempts', 'result', 'publication_done'))
             jobs = [dict(r) for r in db.execute(f'SELECT id,project,pr,family,kind,head,status,directory,pid,started,{optional} FROM jobs ORDER BY id')]
             merged = set()
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='integrations'").fetchone():
@@ -561,7 +783,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
             if db.execute("SELECT 1 FROM sqlite_master WHERE name='ci_observations'").fetchone():
                 observations = [dict(r) for r in db.execute('SELECT project,pr,ticket,owner_status,head,draft,failures,fingerprint,'
                                                             'responsibility,observed FROM ci_observations ORDER BY project,pr')]
-            return jobs, merged, pauses, observations
+            return jobs, merged, pauses, observations, batch_receipts(db)
         finally:
             db.close()
 
@@ -573,7 +795,9 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
     tickets, refresh, locks = tickets_data or ([], {}, [])
     runs, backoff, redirects, capacities = dispatch_data or ([], [], [], [])
     capacity_for = {r["source"]: r for r in capacities}
-    jobs, merged, pauses, observations = reviews_data or ([], set(), [], [])
+    jobs, merged, pauses, observations, batches = reviews_data or (
+        [], set(), [], [], {'state': 'unavailable', 'detail': 'review store unavailable', 'rows': []})
+    batches['rows'] = [b for b in batches['rows'] if wanted(b['project'])]
     by_ticket = {}
     for row in tickets:
         if not wanted(row['project']):
@@ -620,6 +844,19 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                 pr_snapshot[key] = {**previous, 'ci_mismatch': True}
             continue
         pr_snapshot[key] = {**(previous or {}), **snapshot}
+        if pr_snapshot[key].get('source_head') != pr_snapshot[key].get('head_oid'):
+            pr_snapshot[key]['source_fingerprint'] = None
+    for key, observation in observed_prs(paths, config, now, project).items():
+        if observation.pop('closed', False) or key in merged:
+            pr_snapshot.pop(key, None)
+            continue
+        previous = pr_snapshot.get(key)
+        if previous and previous.get('mtime', 0) > observation['mtime']:
+            continue
+        title = (previous or {}).get('title')
+        pr_snapshot[key] = {**(previous or {}), **observation}
+        if not observation.get('title') and title:
+            pr_snapshot[key]['title'] = title
     branch_pr = {(k[0], s.get('branch')): k[1] for k, s in pr_snapshot.items() if s.get('branch')}
 
     def pr_for(project_id, key, branch=None):
@@ -939,6 +1176,10 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
+    model['pipeline'] = derive_pipeline(pr_snapshot, jobs, by_ticket, model['workers'], batches, cache, now,
+        batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True})
+    if model['sources'].get('reviews', {}).get('state') != 'ok':
+        model['pipeline']['unavailable'] = 'review store unavailable'
     order = {s: i for i, s in enumerate(['ci-failed', 'ci-stale', 'ci-unknown', 'ci-repair-requested', 'uncertain', 'retry', 'quota-wait', 'stale', 'lingering',
                                           'unverified', 'orphaned', 'manual', 'pausing', 'paused', 'waiting', 'ci-pending',
                                           'awaiting-review', 'review', 'blocked', 'failed', 'quarantined', 'parked'])}
@@ -1032,6 +1273,23 @@ def render(model, width=100, delta=None, interval=None):
         lines.append(fit('! ' + warning, width))
 
     lines += render_inventory(model, width)
+    pipeline = model.get('pipeline', {})
+    lines += ['', 'PR PIPELINE (derived waits; separate from ticket totals)']
+    if pipeline.get('unavailable'):
+        lines.append(fit('  Unknown: ' + pipeline['unavailable'], width))
+    elif not pipeline.get('rows'):
+        lines.append('  No usable local PR evidence; not proof of an empty GitHub queue.')
+    else:
+        candidates = sum(row['integration'] for row in pipeline['rows'])
+        lines.append(fit(f"  {pipeline['total'] - candidates} source PRs · {candidates} integration candidates"
+                         ' · one state per PR; observed evidence, not merge authorization', width))
+        for state, label_text in PIPELINE_LABELS.items():
+            rows = [row for row in pipeline['rows'] if row['state'] == state]
+            if rows:
+                references = ', '.join(f"{row['project']}#{row['pr']}" for row in rows)
+                lines.append(fit(f'  {label_text}: {len(rows)} — {references}', width))
+    if pipeline.get('batch_receipts') == 'unavailable':
+        lines.append(fit('  Batch status unavailable: ' + (pipeline.get('detail') or 'no usable receipts'), width))
     lines += ['', 'CAPACITY (active = PID+start-time verified; held = unverified/waiting; retained = parked/quarantined)']
     if not model['capacity']:
         lines.append('  ' + ('No configured slots.' if model['sources'].get('config', {}).get('state') == 'ok' else 'Configuration unavailable.'))
@@ -1210,6 +1468,11 @@ def main(argv=None):
 
 if __name__ == '__main__':
     try:
-        sys.exit(main())
+        current = Path(__file__).resolve().parent/'current/dashboard.py'
+        if current.is_file() and current.resolve() != Path(__file__).resolve():
+            import runpy
+            runpy.run_path(str(current.resolve()), run_name='__main__')
+        else:
+            sys.exit(main())
     except BrokenPipeError:
         sys.exit(0)

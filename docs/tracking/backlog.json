@@ -4510,6 +4510,32 @@
         "Prove overlap and failure behavior with meaningful runner tests and run the full real OTA simulator suite; record timing without claiming hosted gains before measurement."
       ],
       "validation": "Runner concurrency/failure/interruption tests, full real OTA simulator suite, Makefile command coverage and relevant offline CI/security regressions."
+    },
+    {
+      "key": "SF-207",
+      "title": "Batch reviewed PR integration and separate source review from evidence waits",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        ".github/workflows",
+        "scripts/testnet_ci.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User explicitly requests batch integration instead of repeatedly rebasing, reviewing and running CI on every PR after each main merge. Implement a guarded integration candidate for a bounded group of reviewed PRs, retain source-review proof when unchanged, and expose actionable waiting states. Preserve independent source review, protected controller/wallet boundaries, actual combined-code CI/testnet acceptance and serial exact-revision main publication.",
+      "evidence": "Last24h observed125repair jobs and142reviews across23PRs:129blocked,9approve,4changes_requested. Current coordinator requires baseIncluded for each branch and resumes fixes even for tracking-only upstream changes, causing repeated branch/CI/review cycles.",
+      "acceptance": [
+        "Prepare a bounded batch from eligible independently source-reviewed PRs on one pinned base, isolate conflicts and ineligible/blocked PRs without resetting unrelated branches.",
+        "Validate the actual combined candidate through ordinary/security CI and normal authenticated testnet before integration; record immutable member heads, base and candidate provenance and recheck membership/feedback/authority before nonforce serial publication.",
+        "Preserve Tyler author/committer and verified merge issue/atomic/Project reconciliation for all members; partial failures retain recoverable durable receipts, never fake approval, checks or acceptance.",
+        "Separate source-complete/evidence-wait from actionable changes and avoid repeating source review for unchanged content; status reports distinguish review, CI, acceptance, conflict and active work.",
+        "Regression tests prove batch correctness, changed-head/base/feedback rejection, conflicts, failed checks, source evidence reuse limits, restart/recovery and issue reconciliation. Document operation, rollout and remaining live limitations."
+      ],
+      "validation": "Meaningful coordinator/planner and CI trust-boundary tests plus offline real-Git batch integration scenarios, status regressions and recorded actual activation evidence; no weakened wallet/mainnet/hardware/secret protections."
     }
   ]
 }
