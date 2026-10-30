@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 import importlib.util
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -73,23 +74,26 @@ class PreparedTests(unittest.TestCase):
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
     def test_workflow_rejects_fork_runs_before_preparation_or_wallet_access(self):
-        import subprocess
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs']
-        # Evaluate actual Actions conditions for trusted, fork and failed CI events.
-        for job in ('queue-plan', 'plan', 'prepare', 'validate'):
-            condition=jobs[job]['if'].replace('needs.queue-plan', "needs['queue-plan']")
+        # Evaluate the actual Actions conditions for trusted, fork and manual events.
+        for job in ('queue-plan', 'plan', 'validate'):
+            condition=jobs[job]['if']
             for event, repository, conclusion, expected in (
                 ('workflow_run', 'owner/repo', 'success', True),
                 ('workflow_run', 'fork/repo', 'success', False),
-                ('workflow_run', 'owner/repo', 'failure', False),
+                # Only admission owns the originating CI conclusion guard.
+                ('workflow_run', 'owner/repo', 'failure', job != 'queue-plan'),
+                ('workflow_run', 'owner/repo', 'cancelled', job != 'queue-plan'),
+                ('workflow_dispatch', None, None, True),
+                ('schedule', None, None, True),
             ):
                 context={'github': {'ref': 'refs/heads/main', 'event_name': event,
                     'repository': 'owner/repo', 'event': {'workflow_run': {
                         'head_repository': {'full_name': repository}, 'conclusion': conclusion}}},
-                    'needs': {name: {'outputs': {'run': 'true' if conclusion == 'success' else 'false'}} for name in ('queue-plan', 'plan', 'prepare')}}
-                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition+'));'
+                    'needs': {'queue-plan': {'outputs': {'run': 'true'}}, 'prepare': {'outputs': {'run': 'true'}}}}
+                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition.replace('needs.queue-plan', "needs['queue-plan']")+'));'
                 result=subprocess.check_output(['node', '-e', script, json.dumps(context)], text=True).strip()
                 self.assertEqual(result, str(expected).lower(), (job, event, repository))
 
