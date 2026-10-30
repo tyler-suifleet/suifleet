@@ -94,6 +94,9 @@ The [component software library](COMPONENT_LIBRARY.md) separates browsing and
 guided immutable version publishing from target selection/deployment. It retains
 the wallet/network/effects boundary described above.
 
+See [staged rollout creation and decisions](STAGED_ROLLOUTS.md) for library recipe
+selection, named immutable cohorts, policy review and explicit admission approvals.
+
 ## Verification
 
 ```bash
