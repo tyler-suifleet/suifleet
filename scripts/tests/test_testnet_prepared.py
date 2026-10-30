@@ -129,6 +129,28 @@ class PreparedTests(unittest.TestCase):
         self.assertNotIn('checkout', json.dumps(job))
         self.assertNotIn('secrets.', json.dumps(job))
 
+    def test_workflow_rejects_fork_runs_before_preparation_or_wallet_access(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        jobs=yaml.safe_load(workflow.read_text())['jobs']
+        # Evaluate the actual Actions conditions for trusted and fork workflow completions.
+        for job in ('queue-plan', 'plan', 'prepare', 'validate'):
+            # Actions permits hyphens in property names; JavaScript requires brackets.
+            condition=jobs[job]['if'].replace('needs.queue-plan', 'needs["queue-plan"]')
+            for event, repository, conclusion, expected in (
+                ('workflow_run', 'owner/repo', 'success', True),
+                ('workflow_run', 'fork/repo', 'success', False),
+                ('workflow_run', 'owner/repo', 'failure', job not in ('queue-plan', 'plan')),
+            ):
+                context={'github': {'ref': 'refs/heads/main', 'event_name': event,
+                    'repository': 'owner/repo', 'event': {'workflow_run': {
+                        'head_repository': {'full_name': repository}, 'conclusion': conclusion}}},
+                    'needs': {'queue-plan': {'outputs': {'run': 'true' if conclusion == 'success' else 'false'}},
+                        'plan': {'outputs': {'run': 'true'}}, 'prepare': {'outputs': {'run': 'true'}}}}
+                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition+'));'
+                result=subprocess.check_output(['node', '-e', script, json.dumps(context)], text=True).strip()
+                self.assertEqual(result, str(expected).lower(), (job, event, repository))
+
     def test_candidate_clone_preserves_controller_and_has_complete_history(self):
         self.check_candidate_clone(shallow=False)
 
@@ -263,6 +285,8 @@ class PreparedTests(unittest.TestCase):
         self.assertEqual(live['environment'],'live-package-upgrade')
         self.assertEqual(live['concurrency'],prune['concurrency'])
         self.assertEqual(live['needs'], ['prepare', 'publish'])
+        packaging=next(s for s in prep['steps'] if s.get('name') == 'Package secretless prepared tools')
+        self.assertEqual(packaging['working-directory'], 'candidate')
         publisher=jobs['publish']
         self.assertEqual(publisher['permissions'], {'contents':'read', 'actions':'read', 'packages':'write', 'statuses':'write'})
         checkouts=[s for s in publisher['steps'] if 'checkout@' in s.get('uses','')]

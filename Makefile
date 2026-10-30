@@ -360,6 +360,7 @@ test-disk-cleanup:
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
 	$(RUN) node scripts/test_deployment_manifest.cjs
+	$(RUN) node scripts/test_treasury.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
