@@ -10,8 +10,9 @@ python3 -m pip install --disable-pip-version-check --require-hashes --upgrade \
   --target .ci-cache/aws-export-python -r sdk/stream-export/requirements.txt
 # Build the isolated compatibility fixture from immutable upstream source.
 # No MinIO server or data is installed on the host; the binary runs network-none.
-# Use HTTP/1.1 for preparation: sum.golang.org has returned HTTP/2 INTERNAL_ERROR
-# during checksum tile reads in CI. TLS and Go checksum verification stay enabled.
+# The checksum service can reset multiplexed HTTP/2 streams during this large
+# dependency fetch. Use HTTP/1.1 for this build only; retain TLS and Go checksum
+# verification, the immutable source revision, and fail-fast build behavior.
 mkdir -p .ci-cache/minio-bin
 docker run --rm --user 0:0 -e GOBIN=/out -e GOMAXPROCS=2 -e GODEBUG=http2client=0 \
   -v "$PWD/.ci-cache/minio-bin:/out" \

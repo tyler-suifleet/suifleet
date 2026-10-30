@@ -6,6 +6,7 @@ on:
       - 'contracts/**'
       - 'scripts/check_move_security.py'
       - 'scripts/build_move_prover.py'
+      - 'scripts/tests/test_build_move_prover.py'
       - 'scripts/check_move_proofs.py'
       - 'scripts/check_move_native_proofs.py'
       - 'scripts/check_move_object_proofs.py'
@@ -25,6 +26,7 @@ on:
       - 'contracts/**'
       - 'scripts/check_move_security.py'
       - 'scripts/build_move_prover.py'
+      - 'scripts/tests/test_build_move_prover.py'
       - 'scripts/check_move_proofs.py'
       - 'scripts/check_move_native_proofs.py'
       - 'scripts/check_move_object_proofs.py'
@@ -55,6 +57,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+      - name: Proof-tool download failure-path regressions
+        run: python3 -m unittest discover -s scripts/tests -p test_build_move_prover.py -v
       - name: Match container identity to cache owner
         id: ids
         run: |
