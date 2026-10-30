@@ -251,6 +251,20 @@ Checks on the merged tree:
 - `python3 -m unittest scripts.tests.test_testnet scripts.tests.test_testnet_queue
   scripts.tests.test_testnet_prepared`: 59 tests passed.
 
+### After merging main 00b1076c
+
+This merge brings in PR #410 (SF-206 review-reservation retry in the PR
+coordinator). It merged cleanly and touches no SF-170 frontend file.
+
+Checks on the merged tree:
+
+- `git diff --check` passed; main `00b1076c` is an ancestor of the head.
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed,
+  and the same 18 frontend/browser scripts passed.
+- `unshare -rpf --mount-proc python3 -m unittest tests.test_coordinator`
+  (in `tools/pr-coordinator`): 58 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
