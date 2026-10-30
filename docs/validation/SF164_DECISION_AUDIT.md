@@ -210,3 +210,49 @@ Node suites passed. These fixture/mocked-network tests are software regression
 evidence, not live-chain evidence. Hosted checks at the pushed head remain
 pending. Manual wallet/physical acceptance stays in SF-031/#32; actual mainnet,
 production provider and credential acceptance stays in SF-087/#159, all unrun.
+
+
+## 2026-10-29: automatic Walrus readback repair
+
+Run [40983901029](https://github.com/tyler-suifleet/suifleet/actions/runs/40983901029)
+passed package-upgrade/daemon/effects checks, then failed in upgrade-security
+before its legacy deployment submission: recipe blob
+`poePOhIDfdeXBCIomNee_lutPJlyYRT5KDNubxjU_d8` did not read back within
+120 seconds. A subsequent read-only canonical GET returned HTTP 200 and the
+338-byte recipe for `sec-14fd2c48`. The old verifier discarded HTTP errors,
+so historical propagation delay versus a cached negative response cannot be
+resolved from that log. This is not evidence of a contract failure.
+
+The verifier now follows a 404/5xx with one cache-bypassing GET (fresh query and
+`Cache-Control: no-cache`) per poll, retaining the 120-second wait and a combined
+30-second per-poll request timeout (two 15-second requests). It never republishes
+or accepts different bytes. Other client errors and transport errors return to
+the bounded poll; timeout reports the last HTTP/transport/integrity diagnostic.
+Offline tests reproduce a stale canonical 404 followed by a valid uncached read,
+reject mismatched uncached bytes, and verify persistent failure stays bounded.
+This mitigates cached failures; a sustained propagation/service outage still
+fails acceptance. No hosted rerun was requested or watched by this worker.
+
+Downloaded run evidence records package-upgrade net spend 6,271,404 MIST,
+allowance use 81,240,838 MIST; upgrade-security net spend 78,911,318 MIST,
+allowance use 120,855,047 MIST. Its five transactions all have successful effects,
+including legacy cleanup `F5444BEeDrhTAhziLEa7QhjDSxtopAvwzc2hgPLV67b3`
+and device sweep `GTyRZy3wxFo8ijHcDPLBpmaaQZUzoAaQJjwBiUQC3JGa`.
+No failed or uncertain wallet submission is being replayed. No machine-session
+wallet mutation or funding occurred in this repair.
+
+Fresh local verification: `python3 -m unittest discover -s scripts/tests -p
+ test_live_common.py` (62 passed); pattern `test_testnet*.py` (163 run, one
+skip, OK); pattern `test_rollout_audit_acceptance.py` (23 passed);
+`node scripts/test_rollout_audit.cjs` and `node scripts/test_testnet_cache.cjs`
+(passed); `git diff --check` (passed). These are offline regressions, not a
+successful public-Walrus run. No application/contract sources changed.
+
+The failed run still has only `rollout_audit_pending`, record
+`0xd4bc63d59a85b665a3506905871e45ac3e5d965b74d11073f59112ed87bb782e`,
+checkpoint `400724206`, admission
+`4TVmcq8jHRCdmF2pSGuzQEPJ84bK8rhFeL59qchkgNWS`. Actual automatic
+current-head/base validation must supply the aged current-state audit proof,
+then fresh independent review and all hosted checks must pass. Acceptance is
+incomplete. Physical/manual wallet checks remain in SF-031/#32; mainnet and
+production/provider checks remain in SF-087/#159, all explicitly unrun.
