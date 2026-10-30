@@ -3,7 +3,8 @@
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 import { useState } from "react";
-import { buildDeploymentControlTx, controlReason, type DeploymentControl } from "@/lib/deployment-control";
+import { buildDeploymentControlTx, type DeploymentControl } from "@/lib/deployment-control";
+import { ControlEditor } from "@/components/DeploymentControlEditor";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
@@ -67,7 +68,6 @@ export default function DeploymentsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs text-gray-500 bg-gray-50">
-                <Th>Update</Th>
                 <Th>Component</Th>
                 <Th>Version</Th>
                 <Th>Targets</Th>
@@ -129,10 +129,7 @@ function DeploymentRow({
   return (
     <>
       <tr className="hover:bg-gray-50 align-top">
-        <td className="py-3 px-4 font-mono text-xs text-gray-400 max-w-[140px]">
-          <details><summary className="cursor-pointer text-blue-700">Technical details</summary><span className="break-all">{d.deploymentId}</span></details>
-        </td>
-        <td className="py-3 pr-4 font-medium">{d.componentName}</td>
+        <td className="py-3 px-4 font-medium">{d.componentName}</td>
         <td className="py-3 pr-4 text-gray-500">{d.version}</td>
         <td className="py-3 pr-4">
           <div className="space-y-1">
@@ -166,7 +163,7 @@ function DeploymentRow({
         </td>
       </tr>
       <tr className="bg-gray-50 border-b border-gray-200">
-        <td colSpan={6} className="px-4 pb-3">
+        <td colSpan={5} className="px-4 pb-3">
           <ControlEditor key={`${d.deploymentId}/${d.control.revision}`} control={d.control} canEdit={canDelete} pending={isPending} onSave={onControl} />
           <div className="text-xs text-gray-400 space-x-4">
             {d.receiptsVerified ? d.resolvedDeviceIds.map((id) => (
@@ -185,6 +182,7 @@ function DeploymentRow({
             {d.schemaVersion === "2" ? <span>Catalog deployment · each device selects its platform recipe</span> : d.recipeBlobId ? <StorageBadge recipeBlobId={d.recipeBlobId} /> : <span>No recipe blob</span>}
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>
+          <details className="mt-2 text-xs text-gray-500"><summary className="cursor-pointer text-blue-700">Technical details</summary><p>Update ID: <span className="font-mono break-all">{d.deploymentId}</span></p></details>
         </td>
       </tr>
     </>
@@ -211,41 +209,4 @@ function StorageBadge({ recipeBlobId }: { recipeBlobId: string }) {
 
 function Th({ children }: { children: React.ReactNode }) {
   return <th className="py-2 px-4 font-medium">{children}</th>;
-}
-
-function ControlEditor({ control, canEdit, pending, onSave }: {
-  control: DeploymentControl; canEdit: boolean; pending: boolean; onSave: (c: DeploymentControl) => void;
-}) {
-  const [draft, setDraft] = useState(control);
-  const [editing, setEditing] = useState(false);
-  const send = (c: DeploymentControl) => {
-    try { onSave(c); } catch (error) { alert(error instanceof Error ? error.message : String(error)); }
-  };
-  const dateFields = ["not_before_ms", "expires_ms", "window_start_ms", "window_end_ms"] as const;
-  return <div className="py-3 text-xs space-y-2 text-gray-700">
-    <p role="status">{controlReason(control)}</p>
-    <p>Cancellation/pause/expiry stop admission. An admitted apply finishes; they never roll it back. Device deferral reasons and advance notices are recorded in its journal/log.</p>
-    <p>Extending an expired schedule cannot reopen admission on devices that already observed expiry. Create a new deployment to reach the whole fleet.</p>
-    <p>Not before: {displayTime(control.not_before_ms)} · Expires: {displayTime(control.expires_ms)} · Window: {displayTime(control.window_start_ms)} – {displayTime(control.window_end_ms)} · Notice: {Number(control.notice_ms) / 1000}s</p>
-    {canEdit && control.state !== 2 && <div className="flex gap-3">
-      <button disabled={pending} onClick={() => send({ ...control, state: control.state === 1 ? 0 : 1 })}>{control.state === 1 ? "Resume" : "Pause"}</button>
-      <button disabled={pending} onClick={() => { if (confirm("Permanently cancel admission? Already admitted applies may finish.")) send({ ...control, state: 2 }); }}>Cancel permanently</button>
-      <button disabled={pending} onClick={() => setEditing(!editing)}>Edit schedule / notice</button>
-    </div>}
-    {editing && <form className="flex flex-wrap gap-3" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
-      {dateFields.map((field) => <label key={field}>{field.replaceAll("_", " ")} (UTC)
-        <input aria-label={field} className="block border p-1" type="datetime-local" step="1"
-          value={draft[field] === "0" || Number.isNaN(new Date(Number(draft[field])).getTime()) ? "" : new Date(Number(draft[field])).toISOString().slice(0, 19)}
-          onChange={(e) => setDraft({ ...draft, [field]: e.target.value ? String(Date.parse(`${e.target.value}Z`)) : "0" })} />
-      </label>)}
-      <label>Advance notice (seconds, 0–604800)<input className="block border p-1" type="number" min="0" max="604800" step="1" value={Number(draft.notice_ms) / 1000}
-        onChange={(e) => setDraft({ ...draft, notice_ms: String(Number(e.target.value) * 1000) })} /></label>
-      <button disabled={pending} type="submit">Save schedule</button>
-    </form>}
-  </div>;
-}
-function displayTime(value: string) {
-  if (value === "0") return "unset";
-  const time = new Date(Number(value));
-  return Number.isNaN(time.getTime()) ? `UTC milliseconds ${value}` : time.toISOString();
 }

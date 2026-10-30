@@ -99,10 +99,16 @@ const chain = {
   const policy = { objectId: policyId, capId: "0x7", name: "p", version: "1", keyEpoch: "4", accounts: [], devices: [], groups: [] };
   assert.equal(delivery.DEFAULT_DELIVERY.mode, "confidential");
   assert.throws(() => delivery.releaseProtection(chain, { ...delivery.DEFAULT_DELIVERY }, [policy]), /access policy/);
-  assert.throws(() => delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: true }, [policy], null), /key servers/);
+  assert.throws(() => delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: true }, [policy], null), /encryption service is not configured; nothing was uploaded/);
   assert.throws(() => delivery.releaseProtection(chain, { mode: "public", policyId: "", publicAcknowledged: false }, [policy]), /Confirm/);
   assert.equal(delivery.releaseProtection(chain, { mode: "public", policyId: "", publicAcknowledged: true }, []).kind, "public");
   assert.equal(delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: false }, [policy]).kind, "confidential");
+  // The publish form's step check enforces the same conditions without encrypting or uploading.
+  assert.throws(() => delivery.checkDelivery({ mode: "public", policyId: "", publicAcknowledged: false }, []), /Confirm/);
+  assert.throws(() => delivery.checkDelivery({ ...delivery.DEFAULT_DELIVERY }, [policy]), /access policy/);
+  assert.throws(() => delivery.checkDelivery({ mode: "confidential", policyId, publicAcknowledged: false }, [policy], null), /not configured/);
+  assert.equal(delivery.checkDelivery({ mode: "public", policyId: "", publicAcknowledged: true }, []), undefined);
+  assert.equal(delivery.checkDelivery({ mode: "confidential", policyId, publicAcknowledged: false }, [policy]), policy);
 
   // Explicitly public: the plaintext itself.
   const publicUpload = await walrus.uploadArtifact(file, "0x5", { kind: "public" });
