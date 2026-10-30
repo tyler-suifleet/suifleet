@@ -430,7 +430,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     { error: new Error('Device index mismatch'), data: stale },
     { data: undefined },
   ]) {
-    const sandbox = { exports: {}, require: appRequire, ...budget, runwayDays: costs.runwayDays, NETWORK: 'fixture',
+    const sandbox = { exports: {}, require: appRequire, ...budget, formatStorageQueryError: load('lib/storage-errors.ts').formatStorageQueryError, runwayDays: costs.runwayDays, NETWORK: 'fixture',
       useFleetSelection: () => ({}), useCurrentAccount: () => ({ address: 'owner' }), useCurrentClient: () => ({}),
       useFleetBudget: () => ({ budget: { ...view, paused } }),
       useDevices: () => ({ isSuccess: true, data: [{ objectId: 'device', ownerCapId: 'cap', name: 'Pi' }] }),
@@ -446,7 +446,7 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
     assert.ok(html.includes('Withdraw unallocated funds'));
     assert.ok(html.includes('Deposited 100 SUI'));
     assert.match(html, /<button[^>]*disabled=""[^>]*>Enroll all unenrolled devices<\/button>/);
-    assert.ok(html.includes(query.error ? query.error.message : 'Loading budget accounts'));
+    assert.ok(html.includes(query.error ? 'Budget accounts could not be loaded' : 'Loading budget accounts'));
     for (const hidden of ['<table', 'not enrolled', 'Enroll with float', '999 SUI', 'No draws this period', 'days left', '<ul']) {
       assert.ok(!html.includes(hidden), `unavailable account data must not render ${hidden}`);
     }
