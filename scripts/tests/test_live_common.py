@@ -911,5 +911,33 @@ class ShardedReceiptViewTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
 
 
+class CatalogDesiredStateTests(unittest.TestCase):
+    def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
+        run = Mock()
+        run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}
+        expected = {"revision": "2", "components": {"contents": [{"key": "app", "value": "0x123"}]}}
+        run.object.side_effect = [
+            {"objType": "0x2::dynamic_field::Field<0xabc::device_group::MembersKey, vector<address>>"},
+            {"objType": "0x2::dynamic_field::Field<0xabc::desired_state::DesiredKey, 0xabc::desired_state::DesiredState>",
+             "content": {"fields": {"value": {"fields": expected}}}},
+        ]
+        with patch.object(live_upgrade_security.dm, "rpc", side_effect=AssertionError("legacy JSON-RPC used")):
+            self.assertEqual(live_upgrade_security.desired_state(run, "group"), expected)
+        run.client.assert_called_once_with("dynamic-field", "group")
+        self.assertEqual(run.object.call_args_list, [unittest.mock.call("other"), unittest.mock.call("desired")])
+
+    def test_missing_or_ambiguous_desired_field_fails_acceptance(self):
+        for count in (0, 2):
+            with self.subTest(count=count):
+                run = Mock()
+                run.client.return_value = {"dynamicFields": [{"fieldId": str(i)} for i in range(count)]}
+                run.object.return_value = {
+                    "objType": "0x2::dynamic_field::Field<0xabc::desired_state::DesiredKey, 0xabc::desired_state::DesiredState>",
+                    "content": {"value": {"revision": "2"}},
+                }
+                with self.assertRaisesRegex(AssertionError, "expected one DesiredKey"):
+                    live_upgrade_security.desired_state(run, "group")
+
+
 if __name__ == "__main__":
     unittest.main()
