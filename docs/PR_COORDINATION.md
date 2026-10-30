@@ -1060,6 +1060,29 @@ records real evidence. This implementation neither backfills receipts nor posts
 success, reruns transactions, resets budgets or waives CI, testnet, security or
 independent review. There is no Testnet spend for offline routing validation.
 
+### Manual implementation origins in stopped-repair recovery
+
+A manually implemented ticket may have no dispatcher implementation receipt.
+For that case, the operator can pass `--manual-origin /private/origin.json` to
+`recovery_control.py`. This is existing process evidence, not a way to reconstruct
+a stopped identity from prose or choose an arbitrary absent PID. The private,
+operator-owned regular JSON file must already predate the stopped repair. It
+records `pid` (integer), `sid` (integer session ID, required to equal `pid`), `started` (Linux process start ticks as a string),
+`recorded_at` (Unix timestamp), `claim` (SHA-256 of the claim token), and the exact
+`session`, `branch`, `worktree`, `agent` and `model` from the original claim. Do
+not put a raw claim token in this receipt or publish it. The original worker must
+have been launched as a session leader (for example with `start_new_session=True`);
+a receipt without that recorded session identity is insufficient.
+
+The controller verifies the original PID is absent, its session has stopped, and
+no claim helper remains or denies inspection. It repeats those checks before
+spawn, rejects changed receipt bytes, and saves the exact verified bytes with the replacement
+audit without reading the source file again. Existing dispatcher-origin recovery keeps its original stop checks.
+Missing origin evidence retains the reservation; do not manufacture a historical
+receipt or mark the ticket Review to force dispatch. Install this route only
+after its source PR merges; CI, independent review and all resource/provider
+waits still apply.
+
 
 ## Reviewed integration batches
 
