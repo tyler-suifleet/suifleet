@@ -1082,3 +1082,125 @@ Missing origin evidence retains the reservation; do not manufacture a historical
 receipt or mark the ticket Review to force dispatch. Install this route only
 after its source PR merges; CI, independent review and all resource/provider
 waits still apply.
+
+
+## Reviewed integration batches
+
+SF-207 adds an opt-in integration path per configured project. Enable it only in
+the reviewed, merged and installed runtime; the default remains the existing
+single-PR path. A typical project setting is:
+
+```json
+"integration_batch": {"enabled": true, "max_members": 4, "collection_seconds": 120}
+```
+
+The coordinator collects up to four source-ready PRs against one pinned `main`
+revision. Other implementations may continue, but the coordinator freezes its
+own main publication while that integration epoch is active. Source branches are
+not rebased merely because another PR merged. A short collection deadline allows
+a smaller batch when fewer PRs are ready. Each project has an independent epoch.
+Batches contain one implementation owner family; mixed queues are split so the
+combined reviewer is independent of every member, including Claude-owned PRs.
+Activation verifies that independence against each recorded member owner.
+
+A source review is not merge approval. Review workers report explicit
+`source_complete` and `acceptance_ready` booleans: code/security findings must be
+resolved, and remaining acceptance must be automated candidate validation or an
+explicit trusted deferral. Historical `blocked` prose is never upgraded into a
+source receipt. The published receipt binds the exact source head, reviewed
+scope, non-receipt feedback, threads, policy and reviewer family. CI and advancing
+main do not change that source identity. Changed code, scope or feedback requires
+a fresh source review; a source receipt alone never authorizes publication.
+
+The service creates a separate `integration/batch/…` branch and integration PR,
+using Tyler's author and committer identity for each conflict-free merge step.
+Before merging a member, it checks every source commit's author, committer and
+additional authorship attribution. Rejections become durable owner repair context
+for that exact head/base and are excluded from collection until repaired.
+The source heads remain in the Git ancestry. The actual combined candidate runs
+ordinary/security CI and the existing main-sourced protected testnet workflow.
+After those checks succeed, an independent integration reviewer checks the
+combined changes, all member acceptance evidence and the immutable manifest.
+No individual source-head status is forged from the candidate's result.
+After combined validation and approval, the service publishes formal member
+approvals through the configured independent GitHub review account. Those records
+cite the original source proof and actual combined candidate evidence; they do
+not claim another model run. Only known coordinator-generated change requests
+can be superseded this way. Human, edited or foreign-account requests remain
+blocking. Batch mode requires that independent review account to be configured.
+
+Before one nonforce publication, the service rechecks the candidate, pinned base,
+source heads, feedback, source receipts, claims and dependencies. Changed inputs
+invalidate that candidate without resetting unrelated source branches. Conflicts
+are excluded and routed to the owning worker. Failed groups are split in bounded
+smaller combinations; a failing singleton is held for a real owner repair using
+its combined-candidate failure evidence. A failed combination is not blindly
+submitted forever. Done, failed and invalidated candidates release their disposable
+Git worktrees; durable receipts and Git objects remain. Cleanup retries on later
+ticks if a local Git operation fails. Transient Git/GitHub/worker-launch errors
+retain the same candidate and completed checks; only positively identified input
+changes invalidate it.
+
+### Interrupted and uncertain batch operations
+
+An interrupted `building` or `build_uncertain` epoch retries automatically only
+when it has no head, PR or publication intent and `ls-remote` confirms its branch
+is absent. The coordinator revalidates the pinned inputs, removes only its own
+disposable worktree and rebuilds in the same epoch. An unavailable remote read
+retains the fence. Never reset member branches or delete durable receipts.
+
+For other uncertain writes, the sole integration operator must inspect the batch
+row and its recorded branch/head/base, then use the authenticated repository:
+
+- `pr_creating`: query open PRs by the exact recorded head branch. One PR with the
+  recorded head SHA and base `main` is adopted on the next tick without another
+  POST. If no PR exists, first establish that the original request is no longer
+  in flight, verify the remote branch SHA, then create exactly one PR from that
+  recorded branch to `main` using `gh pr create`; the next tick adopts it. Multiple
+  matches or mismatched revisions require investigation, never blind recreation.
+- `publish_pending`: fetch main and check `git merge-base --is-ancestor HEAD_SHA
+  origin/main` with the recorded candidate SHA. Success automatically reconciles
+  on the next tick. If absent, retain the fence: the sole orchestrator must recheck
+  every publication gate and resolve the original push outcome before any retry.
+  An operator must not directly push main merely to clear this state. A moved base
+  requires a new reviewed candidate; uncertain publication is never replayed.
+- A `building`/`build_uncertain` epoch with an unexpected remote branch remains
+  fenced. Inspect remote PRs and ref history first. If publication actually occurred,
+  preserve the receipts and escalate for explicit recovery; do not delete the ref
+  or rewrite the database to force a retry. If verified unrelated accidental ref
+  creation is reversed by the operator, the normal absent-ref guard permits retry.
+
+Do not edit the coordinator database to fabricate checks, review or publication.
+These fences preserve reservations while the operator resolves external outcomes.
+
+After GitHub confirms the integration PR and original source PRs as merged, the
+existing reconciliation closes each implementation issue and marks its atomic
+claim/Project item Done. Runtime activation verifies the entire recorded merge
+chain, typed independent source proofs, exact combined approval and actual merged
+candidate. A partial or tampered batch cannot authorize installation.
+
+`fleet-status` retains GitHub/atomic totals and adds a derived PR pipeline section:
+source review, ordinary CI, acceptance, evidence review, queued batch, conflict,
+active work and ready. Integration candidates are shown separately from source
+PRs; neither worker counts nor batch membership are added to issue totals.
+Missing or stale data is displayed as unavailable.
+
+### First installation and rollback
+
+The older supervisor intentionally pins its own protocol and cannot silently gain
+batch-proof support. After SF-207 passes normal review/CI and merges, use a clean
+checkout of the fetched main revision:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet
+```
+
+This explicit path verifies committed main, existing reviewed merge evidence,
+source bytes and offline tests before switching both supervisor and runtime under
+activation/parent authority locks. It preserves private configuration and running
+model workers and rolls back the generation/supervisor together on failure. Then
+enable `integration_batch` in the private project configuration and restart only
+the coordinator parent through the existing serialized operation. Do not install
+this PR's unmerged files or disable live-wallet, CI or independent-review gates.
+An actual hosted batch, post-merge issue reconciliation and installed activation
+remain rollout acceptance until observed; offline fixtures do not establish them.
