@@ -6,6 +6,7 @@ pub const PROTOCOL_VERSION: u64 = 1;
 pub const MANIFEST_SCHEMA_VERSION: u64 = 1;
 pub const DEPLOYMENT_SCHEMA_VERSION: u64 = 1;
 pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3, 4];
+pub const SUBSCRIPTION_TYPES: &[&str] = &["customer::SubscriptionKey", "subscription::Offer", "subscription::Account", "subscription::Deposited", "subscription::Collected", "subscription::PlanChanged", "subscription::Refunded"];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
@@ -311,6 +312,11 @@ pub mod customer {
         pub policy_id: [u8; 32],
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct SubscriptionKey {
+        pub dummy_field: bool,
+    }
+    impl SubscriptionKey { pub const MOVE_TYPE: &'static str = "customer::SubscriptionKey"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -1381,6 +1387,78 @@ pub mod seal_policy {
         pub version: u64,
     }
     impl PolicyMigrated { pub const MOVE_TYPE: &'static str = "seal_policy::PolicyMigrated"; }
+}
+pub mod subscription {
+    use super::*;
+    pub const MODULE: &str = "subscription";
+    pub const CANCEL: &str = "cancel";
+    pub const COLLECT: &str = "collect";
+    pub const DEPOSIT: &str = "deposit";
+    pub const OFFER: &str = "offer";
+    pub const OPEN: &str = "open";
+    pub const RENEW: &str = "renew";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Account {
+        pub id: [u8; 32],
+        pub customer_id: [u8; 32],
+        pub registry_id: [u8; 32],
+        pub treasury: [u8; 32],
+        pub balance: super::Balance,
+        pub tier: u64,
+        pub device_limit: u64,
+        pub allowance: u64,
+        pub fee: u64,
+        pub remaining: u64,
+        pub period_ms: u64,
+        pub next_due_ms: u64,
+        pub term_end_ms: u64,
+        pub cancelled: bool,
+    }
+    impl Account { pub const MOVE_TYPE: &'static str = "subscription::Account"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Collected {
+        pub account_id: [u8; 32],
+        pub amount: u64,
+        pub through_ms: u64,
+    }
+    impl Collected { pub const MOVE_TYPE: &'static str = "subscription::Collected"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Deposited {
+        pub account_id: [u8; 32],
+        pub amount: u64,
+    }
+    impl Deposited { pub const MOVE_TYPE: &'static str = "subscription::Deposited"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Offer {
+        pub id: [u8; 32],
+        pub registry_id: [u8; 32],
+        pub treasury: [u8; 32],
+        pub tier: u64,
+        pub device_limit: u64,
+        pub allowance: u64,
+        pub fee: u64,
+        pub periods: u64,
+        pub period_ms: u64,
+        pub published_at_ms: u64,
+        pub expires_at_ms: u64,
+    }
+    impl Offer { pub const MOVE_TYPE: &'static str = "subscription::Offer"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PlanChanged {
+        pub account_id: [u8; 32],
+        pub offer_id: [u8; 32],
+        pub tier: u64,
+        pub fee: u64,
+        pub periods: u64,
+    }
+    impl PlanChanged { pub const MOVE_TYPE: &'static str = "subscription::PlanChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Refunded {
+        pub account_id: [u8; 32],
+        pub recipient: [u8; 32],
+        pub amount: u64,
+    }
+    impl Refunded { pub const MOVE_TYPE: &'static str = "subscription::Refunded"; }
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {

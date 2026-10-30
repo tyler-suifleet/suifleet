@@ -6,11 +6,11 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
-import { BUDGET_TYPES, CATALOG_TYPES, GROUP_BATCH_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
+import { BUDGET_TYPES, CATALOG_TYPES, SUBSCRIPTION_TYPES, GROUP_BATCH_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
 export { BUDGET_TYPES, CATALOG_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
 function manifestTypes(m: DeploymentManifest): string[] {
   const types: string[] = [...REQUIRED_TYPES];
-  for (const [label, group] of [["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES], ["fleet settings", SETTINGS_TYPES], ["rollout health", ROLLOUT_HEALTH_TYPES], ["fleet inbox", INBOX_TYPES], ["customer", CUSTOMER_TYPES], ["receipt shards", SHARD_TYPES]] as const) {
+  for (const [label, group] of [["subscription", SUBSCRIPTION_TYPES], ["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES], ["fleet settings", SETTINGS_TYPES], ["rollout health", ROLLOUT_HEALTH_TYPES], ["fleet inbox", INBOX_TYPES], ["customer", CUSTOMER_TYPES], ["receipt shards", SHARD_TYPES]] as const) {
     const present = group.filter(name => name in m.type_origins);
     if (present.length && present.length !== group.length) fail(`partial ${label} type origins`);
     types.push(...present);
@@ -20,6 +20,7 @@ function manifestTypes(m: DeploymentManifest): string[] {
 export interface DeploymentManifest {
   // Optional for legacy nonpayment deployments; payments require a pinned payee.
   treasury_payee?: string;
+  subscription_coins?: { USDC: { coin_type: string; decimals: number }; SUI?: { coin_type: string; decimals: number } };
   schema_version: number;
   protocol_version: number;
   network: "localnet" | "devnet" | "testnet" | "mainnet";
@@ -63,6 +64,25 @@ export function treasuryPayee(expectedPayee?: string): string {
     fail("treasury payee mismatch: payment recipient differs from manifest; payment blocked");
   return payee;
 }
+function validateSubscriptionCoins(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("invalid subscription coins");
+  const coins = value as Record<string, { coin_type?: unknown; decimals?: unknown }>;
+  if (!("USDC" in coins) || Object.keys(coins).some(key => !["USDC", "SUI"].includes(key))) fail("subscription coins require USDC and optionally SUI");
+  for (const [symbol, coin] of Object.entries(coins)) {
+    if (!coin || typeof coin !== "object" || Object.keys(coin).sort().join(",") !== "coin_type,decimals" ||
+      typeof coin.coin_type !== "string" || !/^0x[0-9a-f]{64}::[a-zA-Z_][a-zA-Z_0-9]*::[a-zA-Z_][a-zA-Z_0-9]*$/.test(coin.coin_type) ||
+      BigInt(coin.coin_type.split("::")[0]) === BigInt(0) || coin.decimals !== (symbol === "USDC" ? 6 : 9)) fail("invalid subscription coin descriptor");
+    if (symbol === "SUI" && coin.coin_type !== "0x0000000000000000000000000000000000000000000000000000000000000002::sui::SUI") fail("invalid SUI subscription coin type");
+  }
+}
+export function subscriptionCoin(symbol: "USDC" | "SUI", expectedType: string, expectedPayee: string): string {
+  const manifest = requireManifest();
+  treasuryPayee(expectedPayee);
+  validateSubscriptionCoins(manifest.subscription_coins);
+  const coin = manifest.subscription_coins?.[symbol];
+  if (!coin || coin.coin_type !== expectedType) fail("subscription coin mismatch; payment blocked");
+  return coin.coin_type;
+}
 export function parseManifest(raw: string): DeploymentManifest {
   const m: DeploymentManifest = JSON.parse(raw);
   if (m.schema_version !== MANIFEST_SCHEMA_VERSION || m.protocol_version !== PROTOCOL_VERSION) fail("unsupported schema/protocol");
@@ -71,6 +91,11 @@ export function parseManifest(raw: string): DeploymentManifest {
   if (!/^[0-9a-f]{8}$/.test(m.chain_identifier)) fail("invalid chain identifier");
   if (typeof m.package_version !== "string" || !/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
   if ("treasury_payee" in m) validateTreasuryPayee(m.treasury_payee);
+  if ("subscription_coins" in m) {
+    validateSubscriptionCoins(m.subscription_coins); validateTreasuryPayee(m.treasury_payee);
+    const usdc = { testnet: "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC", mainnet: "0xdba34672e30cb065b1f93e3ab55318768fd6fef66c15942c9f7cb846e2f900e7::usdc::USDC" };
+    if ((m.network === "testnet" || m.network === "mainnet") && m.subscription_coins?.USDC.coin_type !== usdc[m.network]) fail("subscription USDC differs from Circle type origin");
+  }
   normalizeId(m.call_package_id);
   normalizeId(m.upgrade_cap_id);
   normalizeId(m.shared_objects.registry.id);
@@ -88,7 +113,7 @@ export const MANIFEST = process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST
 export function requireManifest(): DeploymentManifest {
   return MANIFEST ?? fail("not configured; generate frontend.env from a verified manifest");
 }
-export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number] | typeof GROUP_BATCH_TYPES[number]): string {
+export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number] | typeof GROUP_BATCH_TYPES[number] | typeof SUBSCRIPTION_TYPES[number]): string {
   const m = requireManifest();
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }

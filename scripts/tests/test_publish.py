@@ -211,6 +211,14 @@ class PublishTests(unittest.TestCase):
             self.run_publish("--treasury-payee", "suifleet.sui")
         self.assertEqual(self.transactions(), [])
 
+    def test_subscription_coins_survive_upgrade(self):
+        payee = "0x" + "ab" * 32
+        coins = {"USDC": {"coin_type": "0x" + "cd" * 32 + "::usdc::USDC", "decimals": 6}}
+        self.run_publish("--treasury-payee", payee, "--subscription-coins", json.dumps(coins))
+        self.assertEqual(self.manifest()["subscription_coins"], coins)
+        self.run_publish()
+        self.assertEqual(self.manifest()["subscription_coins"], coins)
+
     def test_treasury_payee_survives_upgrade(self):
         payee = "0x" + "ab" * 32
         self.run_publish("--treasury-payee", payee)

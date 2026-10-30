@@ -26,6 +26,7 @@ export const customer_GroupBatchAppliedBcs = bcs.struct("GroupBatchApplied", { f
 export const customer_GroupCountKeyBcs = bcs.struct("GroupCountKey", { device_id: bcs.Address });
 export const customer_MembershipBcs = bcs.struct("Membership", { id: bcs.Address, customer_id: bcs.Address });
 export const customer_PolicyKeyBcs = bcs.struct("PolicyKey", { policy_id: bcs.Address });
+export const customer_SubscriptionKeyBcs = bcs.struct("SubscriptionKey", { dummy_field: bcs.bool() });
 export const deployment_manager_ControlBcs = bcs.struct("Control", { revision: bcs.u64(), state: bcs.u8(), not_before_ms: bcs.u64(), expires_ms: bcs.u64(), window_start_ms: bcs.u64(), window_end_ms: bcs.u64(), notice_ms: bcs.u64() });
 export const deployment_manager_ControlKeyBcs = bcs.struct("ControlKey", { dummy_field: bcs.bool() });
 export const deployment_manager_CustomerFleetKeyBcs = bcs.struct("CustomerFleetKey", { dummy_field: bcs.bool() });
@@ -130,6 +131,12 @@ export const seal_policy_AccessPolicyBcs = bcs.struct("AccessPolicy", { id: bcs.
 export const seal_policy_KeyEpochRotatedBcs = bcs.struct("KeyEpochRotated", { policy_id: bcs.Address, key_epoch: bcs.u64() });
 export const seal_policy_PolicyCreatedBcs = bcs.struct("PolicyCreated", { policy_id: bcs.Address, cap_id: bcs.Address, name: bcs.string(), creator: bcs.Address });
 export const seal_policy_PolicyMigratedBcs = bcs.struct("PolicyMigrated", { policy_id: bcs.Address, version: bcs.u64() });
+export const subscription_AccountBcs = bcs.struct("Account", { id: bcs.Address, customer_id: bcs.Address, registry_id: bcs.Address, treasury: bcs.Address, balance: bcs.struct("Balance", { value: bcs.u64() }), tier: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), fee: bcs.u64(), remaining: bcs.u64(), period_ms: bcs.u64(), next_due_ms: bcs.u64(), term_end_ms: bcs.u64(), cancelled: bcs.bool() });
+export const subscription_CollectedBcs = bcs.struct("Collected", { account_id: bcs.Address, amount: bcs.u64(), through_ms: bcs.u64() });
+export const subscription_DepositedBcs = bcs.struct("Deposited", { account_id: bcs.Address, amount: bcs.u64() });
+export const subscription_OfferBcs = bcs.struct("Offer", { id: bcs.Address, registry_id: bcs.Address, treasury: bcs.Address, tier: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), fee: bcs.u64(), periods: bcs.u64(), period_ms: bcs.u64(), published_at_ms: bcs.u64(), expires_at_ms: bcs.u64() });
+export const subscription_PlanChangedBcs = bcs.struct("PlanChanged", { account_id: bcs.Address, offer_id: bcs.Address, tier: bcs.u64(), fee: bcs.u64(), periods: bcs.u64() });
+export const subscription_RefundedBcs = bcs.struct("Refunded", { account_id: bcs.Address, recipient: bcs.Address, amount: bcs.u64() });
 export const calls = {
   component_catalog_begin_sharded_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::begin_sharded_receipts`, arguments: [tx.object(a0)] }),
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
@@ -464,6 +471,7 @@ export const TYPES = {
   customer_GroupCountKey: "customer::GroupCountKey",
   customer_Membership: "customer::Membership",
   customer_PolicyKey: "customer::PolicyKey",
+  customer_SubscriptionKey: "customer::SubscriptionKey",
   deployment_manager_Control: "deployment_manager::Control",
   deployment_manager_ControlKey: "deployment_manager::ControlKey",
   deployment_manager_CustomerFleetKey: "deployment_manager::CustomerFleetKey",
@@ -568,4 +576,10 @@ export const TYPES = {
   seal_policy_KeyEpochRotated: "seal_policy::KeyEpochRotated",
   seal_policy_PolicyCreated: "seal_policy::PolicyCreated",
   seal_policy_PolicyMigrated: "seal_policy::PolicyMigrated",
+  subscription_Account: "subscription::Account",
+  subscription_Collected: "subscription::Collected",
+  subscription_Deposited: "subscription::Deposited",
+  subscription_Offer: "subscription::Offer",
+  subscription_PlanChanged: "subscription::PlanChanged",
+  subscription_Refunded: "subscription::Refunded",
 } as const;
