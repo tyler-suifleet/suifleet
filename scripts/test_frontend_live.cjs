@@ -204,7 +204,26 @@ let stage = "startup";
       assert.equal(catalogDeployments.length,1); assert.equal(catalogDeployments[0].recipeBlobId,"");
       await execute(sui.buildDeleteDeploymentTx(catalogDeployments[0].deploymentId,catalogDeployments[0].schemaVersion));
       assert.deepEqual(await sui.fetchDeploymentEvents(client,operator.toSuiAddress()),[]);
-      console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets and schema2 cleanup");
+      for (const v of versions.slice(0,2)) {
+        stage = "catalog desired revision";
+        await execute(catalog.buildCatalogDeploymentTx(v.objectId,[group],[],false,undefined,true));
+        const state = (await desired.fetchDesiredStates(client,[group]))[group];
+        const record = state.components.app;
+        assert.ok(record);
+        const entries = await sui.fetchDeploymentEvents(client,operator.toSuiAddress());
+        assert.equal(entries.find(d=>d.deploymentId===record).version,v.version);
+      }
+      stage = "catalog desired removal";
+      await execute(desired.buildDesiredRevisionTx([group],undefined,["app"]));
+      for (const d of await sui.fetchDeploymentEvents(client,operator.toSuiAddress())) {
+        // Managed records require the desired-state retirement proof.
+        const cleanup = new Transaction();
+        const [retirement] = cleanup.moveCall({target:`${packageId}::desired_state::begin_retirement`,arguments:[cleanup.object(d.deploymentId)]});
+        cleanup.moveCall({target:`${packageId}::desired_state::confirm_not_desired`,arguments:[retirement,cleanup.object(group)]});
+        cleanup.moveCall({target:`${packageId}::desired_state::retire`,arguments:[retirement,cleanup.object(d.deploymentId)]});
+        await execute(cleanup);
+      }
+      console.log("PASS: generated SDK catalog registration, immutable/type-authenticated discovery and SemVer sorting, both platform selectors, mixed targets, catalog desired supersession/removal and proof-based cleanup");
     }
     stage = "rollout dashboard";
     await require("./test_rollout_dashboard_live.cjs")({ client, execute, operator, deviceSigner, device: devices[0].objectId, cap: caps.objects[0].objectId, registryId, packageId });
