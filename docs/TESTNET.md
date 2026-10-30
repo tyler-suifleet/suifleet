@@ -47,7 +47,7 @@ sui client faucet --address 0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d8
 
 **Older CLIs don't work.** The pinned 1.81.1 CLI only redirects to the web faucet, and `POST /v2/gas` answers "CI compatibility is disabled".
 
-**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.82.1 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
+**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.83.0 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
 
 **The web faucet** is the alternative: `https://faucet.sui.io/?address=ADDRESS`.
 
@@ -58,11 +58,13 @@ Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py
 | Role | Pin | Supports protocol | Used for |
 |---|---|---|---|
 | Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
-| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.82.1` (`1.82.1-987123842623`); archive sha256 `112bf204…2858c`, binary sha256 `de1d7eff…a0d6b` | up to 139 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.83.0` (`1.83.0-16d2dc1e05ed`); archive sha256 `e5116805…d7d8`, binary sha256 `29e1beb9…48fa` | up to 140 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
 
 The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
+
+On 2026-10-30 testnet advanced to protocol 140. [Run 41133167458](https://github.com/tyler-suifleet/suifleet/actions/runs/41133167458) stopped at read-only preflight because 1.82.1 supports only 139; no transaction was submitted. The transaction pin now uses [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0), whose [protocol configuration](https://github.com/MystenLabs/sui/blob/16d2dc1e05edcf600320a82e17b9392edb0983a5/crates/sui-protocol-config/src/lib.rs) declares maximum 140. The release compiler, framework and fixture cache keys stay unchanged. Exact-head automatic testnet execution remains required; the pin update alone does not establish successful live execution or post-retention audit acceptance.
 
 **What each run checks:**
 - **Pinned identities, before anything else.** The release compiler's exact version, and the transaction CLI's exact version and binary SHA-256. A different `sui` on PATH, or an unpinned transaction binary, stops the run.
