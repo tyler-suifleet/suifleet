@@ -237,6 +237,20 @@ Checks on the merged tree:
   The 17 scripts above passed, plus the incoming `test_fleet_budget`.
 - `python3 -m unittest scripts.tests.test_testnet`: 45 tests passed.
 
+### After merging main 48dad86a
+
+This merge brings in PR #396 (SF-197 recovery watchdog and testnet queue
+admission). It merged cleanly and touches no SF-170 frontend file.
+
+Checks on the merged tree:
+
+- `git diff --check` passed; main `48dad86a` is an ancestor of the head.
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed,
+  and the same 18 frontend/browser scripts passed.
+- `python3 -m unittest scripts.tests.test_testnet scripts.tests.test_testnet_queue
+  scripts.tests.test_testnet_prepared`: 59 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
