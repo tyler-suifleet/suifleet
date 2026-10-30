@@ -1,0 +1,53 @@
+// Real rollout builder and mapping in Chromium; inventory/catalog and signing are fixtures.
+const fs = require('node:fs/promises'), path = require('node:path'), os = require('node:os'), http = require('node:http');
+const assert = require('node:assert/strict');
+const {appRequire} = require('./frontend_test_utils.cjs');
+const {build} = appRequire('esbuild'), {chromium} = appRequire('playwright');
+(async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'sf163-browser-'));let server,browser;
+ try {
+ const manifest=await fs.readFile('manifests/fixture.localnet.json','utf8');
+ const fixture=`import React from 'react'; import {createRoot} from 'react-dom/client'; import {QueryClient,QueryClientProvider} from '@tanstack/react-query'; import {RolloutBuilder} from '@/components/RolloutBuilder';
+ export const useCurrentAccount=()=>({address:'0xad'}), useCurrentClient=()=>({});
+ export const useDevices=()=>({data:[{objectId:'0x1',name:'Canary'},{objectId:'0x2',name:'Production'}]}),useGroups=()=>({data:[{objectId:'0x3',name:'Pilot group',deviceIds:['0x1']}]});
+ export const fetchCatalogs=async()=>[{objectId:'catalog'}], discoverVersions=async()=>[{objectId:'version',name:'motor',version:'2.1.0',manifests:[{os:'linux',arch:'aarch64',recipeBlobId:'published-recipe',artifactSha256:'a'.repeat(64),recipeSha256:'b'.repeat(64)}]}];
+ window.created=[];createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient()}><RolloutBuilder busy={false} create={async input=>{window.created.push(input);}}/></QueryClientProvider>);`;
+ await build({stdin:{contents:fixture,resolveDir:path.resolve('dapp'),sourcefile:'rollout-fixture.tsx',loader:'tsx'},outfile:path.join(dir,'app.js'),bundle:true,platform:'browser',jsx:'automatic',alias:{'@':path.resolve('dapp/src')},nodePaths:[path.resolve('dapp/node_modules')],plugins:[{name:'fixture-hooks',setup(b){b.onResolve({filter:/^(@mysten\/dapp-kit-react|@\/hooks\/(useDevices|useGroups)|@\/lib\/catalog)$/},()=>({path:'fixture',namespace:'test'}));b.onLoad({filter:/.*/,namespace:'test'},()=>({contents:fixture.slice(0,fixture.indexOf('window.created=')),loader:'tsx',resolveDir:path.resolve('dapp')}));}}],define:{'process.env':'{}','process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST':JSON.stringify(manifest),'process.env.NODE_ENV':'"test"'},logLevel:'warning'});
+ server=http.createServer(async(req,res)=>{res.setHeader('Content-Type',req.url==='/app.js'?'text/javascript':'text/html');res.end(req.url==='/app.js'?await fs.readFile(path.join(dir,'app.js')):'<div id="root"></div><script src="/app.js"></script>');});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE || "/opt/google/chrome/chrome",headless:true,args:['--no-sandbox']});
+ const page=await browser.newPage();page.setDefaultTimeout(10000);page.on('pageerror',e=>console.error(e.message));await page.goto(`http://127.0.0.1:${server.address().port}`);
+ await page.getByText('Create a gradual rollout',{exact:true}).click();
+ await page.getByLabel('Published library version and platform').selectOption('version/0');
+ await page.getByRole('button',{name:'Add group Pilot group (1)',exact:true}).click();
+ await page.getByRole('button',{name:'Add cohort',exact:true}).click();
+ await page.getByLabel('Search named devices and groups').fill('Production');
+ await page.getByRole('checkbox').check();
+ await page.getByRole('button',{name:'Move earlier',exact:true}).click();
+ await page.getByLabel('Abort failure threshold (%)').fill('12.34');
+ await page.getByRole('button',{name:'Review rollout',exact:true}).click();
+ await page.getByRole('heading',{name:'Review exact rollout before signing'}).waitFor();
+ assert.equal(await page.evaluate(()=>window.created.length),0,'review must not sign');
+ await page.getByRole('button',{name:'Confirm creation in wallet',exact:true}).click();
+ await page.getByText('Rollout created.',{exact:false}).waitFor();
+ const inputs=await page.evaluate(()=>window.created);
+ assert.equal(inputs.length,1);assert.deepEqual(inputs[0].cohorts,[['0x2'],['0x1']]);
+ assert.equal(inputs[0].recipe,'published-recipe');assert.equal(inputs[0].failureBps,1234);assert.equal(inputs[0].bakeMs,300000);
+ assert.equal(await page.getByRole('button',{name:'Confirm creation in wallet',exact:true}).count(),0);
+ await page.reload();
+ await page.getByText('Create a gradual rollout',{exact:true}).click();
+ await page.getByText('Advanced: direct upload recipe or manual entry',{exact:true}).click();
+ for (const [label,value] of [['component','manual'],['version','1.0.0'],['recipe','direct-recipe'],['artifactSha256','invalid'],['recipeSha256','b'.repeat(64)]]) await page.getByLabel(label,{exact:true}).fill(value);
+ await page.getByRole('button',{name:'Add group Pilot group (1)',exact:true}).click();
+ await page.getByRole('button',{name:'Review rollout',exact:true}).click();
+ await page.getByRole('alert').filter({hasText:'SHA-256'}).waitFor();
+ assert.equal(await page.evaluate(()=>window.created.length),0);
+ await page.getByLabel('artifactSha256',{exact:true}).fill('a'.repeat(64));
+ await page.getByRole('button',{name:'Review rollout',exact:true}).click();
+ await page.getByRole('heading',{name:'Review exact rollout before signing'}).waitFor();
+ await page.getByRole('button',{name:'Confirm creation in wallet',exact:true}).click();
+ await page.getByText('Rollout created.',{exact:false}).waitFor();
+ assert.equal((await page.evaluate(()=>window.created))[0].recipe,'direct-recipe');
+ console.log('PASS Chromium rollout builder: library recipe, named group/device search and selection, reorder, review without signing, exact mapping and confirmed-success view');
+ } finally {await browser?.close();await new Promise(r=>server?server.close(r):r());await fs.rm(dir,{recursive:true,force:true});}
+})().catch(e=>{console.error(e);process.exitCode=1;});
