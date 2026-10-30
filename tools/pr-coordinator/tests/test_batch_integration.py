@@ -326,7 +326,8 @@ class BatchTests(unittest.TestCase):
         members=json.loads(row['members']);members[0]['title']='tampered'
         f.db.execute('update integration_batches set members=? where project=? and id=?',
                      (canonical(members),'test',row['id']))
-        f.tick();self.assertEqual(f.row()['status'],'invalidated')
+        f.tick();self.assertNotEqual(f.row()['status'],'done')
+        self.assertIn('manifest digest mismatch', f.row()['error'])
         self.assertEqual(f.git('rev-parse','main',cwd=f.remote),f.base)
 
     def test_pr_creation_uncertainty_with_no_server_object_is_fenced(self):
@@ -339,14 +340,131 @@ class BatchTests(unittest.TestCase):
         f.tick();self.assertEqual(len(posts),1);self.assertEqual(f.row()['status'],'pr_creating')
         self.assertIn('ambiguous',f.row()['error'])
 
-    def test_interrupted_build_is_fenced_not_replayed(self):
+    def test_unpublished_build_failure_retries_safely(self):
         f=self.fixture();original=f.controller.git
         def fail(project,*args,**kwargs):
             if args[:2]==('worktree','add'):raise RuntimeError('unexpected local failure')
             return original(project,*args,**kwargs)
         with patch.object(f.controller,'git',side_effect=fail):f.tick()
         self.assertEqual(f.row()['status'],'build_uncertain')
-        f.tick();self.assertEqual(len(f.controller.rows(f.project)),1);self.assertFalse(f.candidate_prs)
+        f.tick();self.assertEqual(len(f.controller.rows(f.project)),1)
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+
+    def change_commit(self, f, message, foreign=False):
+        f.git('checkout', '-q', 'work/1')
+        args = ['commit', '--amend', '-qm', message]
+        if foreign:
+            args += ['--author', 'Other User <other@example.com>']
+        f.git(*args)
+        head = f.git('rev-parse', 'HEAD')
+        f.git('push', '-q', '--force', 'origin', 'work/1')
+        f.git('checkout', '-q', 'main')
+        f.heads[0] = head
+        f.source_prs[1]['headRefOid'] = head
+        f.receipts[1].update(head=head, source_feedback=coordinator_module.source_feedback(f.source_prs[1]))
+
+    def test_authorship_rejections_route_repair_without_churn(self):
+        for foreign in (False, True):
+            with self.subTest(foreign=foreign):
+                f=self.fixture()
+                self.change_commit(f, 'feature\n\nCo-Authored-By: Model' if not foreign else 'feature', foreign)
+                # Leave only the rejected member to reproduce repeated empty builds.
+                del f.source_prs[2]
+                f.tick()
+                self.assertEqual(f.row()['status'], 'failed')
+                self.assertFalse(Path(f.row()['directory']).exists())
+                context=f.controller.repair_context(f.project, f.pr(f.project,1))
+                self.assertIn('authorship' if not foreign else 'author/committer', context['_batch_conflict']['reason'])
+                for _ in range(4):
+                    self.assertEqual(f.tick(), set())
+                self.assertEqual(len(f.controller.rows(f.project)), 1)
+                self.assertEqual(f.git('rev-parse','main',cwd=f.remote), f.base)
+                self.assertEqual(f.git('worktree','list','--porcelain').count('worktree '), 1)
+                self.assertFalse(f.candidate_prs)
+
+    def test_rejected_member_does_not_prevent_valid_member_publication(self):
+        f=self.fixture();self.change_commit(f, 'feature\n\nCo-Authored-By: Model')
+        f.tick();self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[2])
+        f.green();f.tick();f.approve();f.tick()
+        self.assertEqual(f.row()['status'],'done')
+        self.assertEqual(f.reconciled,[2])
+        self.assertNotIn('co-authored-by:', f.git('log','--format=%B',f.base+'..'+f.row()['head']).lower())
+        self.assertEqual(subprocess.run(['git','merge-base','--is-ancestor',f.heads[0],f.row()['head']],cwd=f.repo).returncode,1)
+
+    def test_terminal_worktrees_are_removed(self):
+        for outcome in ('done', 'failed', 'invalidated'):
+            with self.subTest(outcome=outcome):
+                f=self.fixture();f.tick();directory=Path(f.row()['directory'])
+                self.assertTrue(directory.exists())
+                if outcome=='done':
+                    f.green();f.tick();f.approve()
+                elif outcome=='failed':
+                    f.candidate_prs[f.row()['pr']]['statusCheckRollup']=[dict(__typename='CheckRun',name='check',workflowName='CI',status='COMPLETED',conclusion='FAILURE',detailsUrl='https://github.com/owner/repo/actions/runs/10/job/20')]
+                else:
+                    f.owners[0]['token']='changed'
+                f.tick()
+                self.assertEqual(f.row()['status'], outcome)
+                self.assertFalse(directory.exists())
+                self.assertEqual(f.git('worktree','list','--porcelain').count('worktree '),1)
+
+    def test_transient_member_read_and_launch_errors_keep_completed_candidate(self):
+        for target in ('pr', 'launch'):
+            with self.subTest(target=target):
+                f=self.fixture();f.tick();f.green();before=f.row()
+                with patch.object(f, target, side_effect=subprocess.CalledProcessError(1, ['gh'])):
+                    if target=='pr':
+                        # Snapshot collection is outside tick's state transition.
+                        prs=list(f.source_prs.values())
+                        f.controller.tick(f.project,prs,f.owners,True)
+                    else:
+                        f.tick()
+                after=f.row()
+                self.assertEqual(after['pr'],before['pr'])
+                self.assertEqual(after['head'],before['head'])
+                self.assertIn(after['status'], ('awaiting_ci','awaiting_review'))
+                self.assertEqual(f.candidate_prs[before['pr']]['state'],'OPEN')
+                self.assertIn('CalledProcessError', after['error'])
+                f.tick();f.approve();f.tick()
+                self.assertEqual(f.row()['status'],'done')
+                self.assertEqual(len(f.candidate_prs),1)
+
+    def test_interrupted_build_with_existing_worktree_recovers_without_new_epoch(self):
+        f=self.fixture();original=f.controller.git
+        def interrupt(project,*args,**kwargs):
+            value=original(project,*args,**kwargs)
+            if args[:2]==('worktree','add'):
+                raise KeyboardInterrupt()
+            return value
+        with patch.object(f.controller,'git',side_effect=interrupt):
+            with self.assertRaises(KeyboardInterrupt):f.tick()
+        self.assertEqual(f.row()['status'],'building')
+        self.assertTrue(Path(f.row()['directory']).exists())
+        f.controller=BatchController(f);f.tick()
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+        self.assertEqual(len(f.controller.rows(f.project)),1)
+
+    def test_unexpected_published_branch_fences_build_recovery(self):
+        f=self.fixture();original=f.controller.git
+        with patch.object(f.controller,'build',side_effect=RuntimeError('interrupted')):
+            f.tick()
+        f.git('push','origin',f.base+':refs/heads/'+f.row()['branch'])
+        f.tick()
+        self.assertEqual(f.row()['status'],'building')
+        self.assertIn('publication evidence',f.row()['error'])
+        self.assertFalse(f.candidate_prs)
+
+    def test_batches_split_by_owner_family_and_reviewer_is_independent(self):
+        f=self.fixture();f.owners[0]['agent']='Claude';f.receipts[1]['family']='Codex'
+        f.tick();row=f.row()
+        self.assertEqual([m['pr'] for m in json.loads(row['members'])],[1])
+        self.assertEqual(f.controller.synthetic_owner(row)['agent'],'Claude')
+        f.green();f.tick();f.approve()
+        # A same-family approval cannot publish the Claude-owned source.
+        f.tick();self.assertEqual(f.git('rev-parse','main',cwd=f.remote),f.base)
+        f.approvals[row['pr']]['family']='Codex'
+        f.tick();self.assertEqual(f.row()['status'],'done')
+        f.tick();self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[2])
+        self.assertEqual(f.controller.synthetic_owner(f.row())['agent'],'Codex')
 
     def add_request(self, f, author='human', known=False):
         review=dict(id='original-request',state='CHANGES_REQUESTED',body='Please fix the source',

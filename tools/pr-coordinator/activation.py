@@ -235,6 +235,8 @@ class Activator:
                 raise RuntimeError('batch commit contains additional authorship attribution')
             review = self.batch_review(db, project, number, head, review_id)
             result, snapshot, family = review
+            if any(m['owner']['agent'] == family for m in members):
+                raise RuntimeError('combined batch review is not independent of every member')
             if result.get('verdict') != 'approve' or result.get('acceptance_complete') is not True:
                 raise RuntimeError('batch integration approval is incomplete')
             proof = snapshot.get('_integration_batch') or {}

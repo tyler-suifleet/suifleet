@@ -170,6 +170,7 @@ class BatchController:
     def validate_members(self, project, batch):
         from coordinator import source_feedback
         self.verify_manifest(project, batch)
+        self.synthetic_owner(batch)
         for member in json.loads(batch['members']):
             pr = self.c.pr(project, member['pr'])
             owner = self.owner(project, member)
@@ -186,7 +187,10 @@ class BatchController:
 
     def synthetic_owner(self, batch):
         members = json.loads(batch['members'])
-        return dict(key='integration:'+batch['id'], agent='Codex', model='integration-controller',
+        families = {m['owner']['agent'] for m in members}
+        if len(families) != 1 or not families <= {'Codex', 'Claude'}:
+            raise BatchInvalidated('integration members must have one author family')
+        return dict(key='integration:'+batch['id'], agent=families.pop(), model='integration-controller',
                     status='review', publish_pending=False,
                     spec=dict(priority='P0', acceptance=[criterion for m in members for criterion in m['acceptance']],
                               depends_on=[], batch_members=[m['pr'] for m in members]),
@@ -214,6 +218,36 @@ class BatchController:
                                     '--method', 'PATCH', '-f', 'state=closed'])
         self.update(batch, status='invalidated', error=str(error))
 
+    def cleanup(self, project, batch):
+        # Only the coordinator-owned disposable worktree is removed. Receipts and
+        # Git objects remain available for review, activation and reconciliation.
+        directory = Path(batch['directory'])
+        expected = self.c.state/project['id']/'batches'/batch['id']
+        if directory != expected:
+            raise RuntimeError('unexpected integration worktree path')
+        paths = self.git(project, 'worktree', 'list', '--porcelain').splitlines()
+        if 'worktree '+str(directory) in paths:
+            self.git(project, 'worktree', 'remove', '--force', str(directory))
+        elif directory.exists():
+            raise RuntimeError('unregistered candidate directory requires inspection')
+
+    def reject_member(self, project, batch, member, reason):
+        context = dict(candidate_base=batch['base'], batch_id=batch['id'],
+                       other_members=[], reason=reason)
+        self.db.execute('INSERT OR REPLACE INTO integration_batch_conflicts VALUES(?,?,?,?,?,?)',
+            (project['id'],member['pr'],member['head'],batch['base'],batch['id'],canonical(context)))
+
+    def recover_build(self, project, batch):
+        # These states precede every remote publication intent. Require an absent
+        # remote ref too, so an unexpected external write can never be overwritten.
+        if (batch.get('head') or batch.get('pr') or batch.get('publish_intent')
+                or self.git(project, 'ls-remote', 'origin', 'refs/heads/'+batch['branch'])):
+            raise RuntimeError('build has publication evidence; manual inspection required')
+        self.validate_members(project, batch)
+        self.cleanup(project, batch)
+        self.update(batch, status='building', error=None)
+        self.build(project, batch)
+
     def build(self, project, batch):
         members = json.loads(batch['members'])
         accepted, previous = [], batch['base']
@@ -237,6 +271,10 @@ class BatchController:
                     continue
                 metadata = self.git(project, 'log', '--format=%an <%ae>|%cn <%ce>', batch['base']+'..'+member['head'])
                 if not metadata or any(line != IDENTITY+'|'+IDENTITY for line in metadata.splitlines()):
+                    self.reject_member(project, batch, member, 'commit author/committer must be Tyler Bush')
+                    continue
+                if 'co-authored-by:' in self.git(project, 'log', '--format=%B', batch['base']+'..'+member['head']).lower():
+                    self.reject_member(project, batch, member, 'commit contains additional authorship attribution')
                     continue
                 try:
                     self.git(project, 'merge', '--no-ff', '--no-edit', member['head'], '-m',
@@ -476,6 +514,11 @@ class BatchController:
                 continue
             failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
         pool = [m for m in candidates if ((m['pr'],m['head']),) not in failed]
+        # One acceptance reviewer must be independent of every member author.
+        # Split mixed-family pools instead of attributing a fictitious author.
+        if pool:
+            family = pool[0]['owner']['agent']
+            pool = [m for m in pool if m['owner']['agent'] == family]
         selected = pool[:maximum]
         # A failed combination is never submitted again. Split deterministically;
         # singleton failures become explicit owner repair contexts instead.
@@ -493,6 +536,10 @@ class BatchController:
         maximum, delay = self.settings(project)
         if not re.fullmatch(r'[A-Za-z0-9_.-]+', project['id']):
             raise ValueError('invalid batch project namespace')
+        if execute:
+            for terminal in self.rows(project):
+                if terminal['status'] in TERMINAL:
+                    self.cleanup(project, terminal)
         candidates = []
         def priority(pr):
             owner = self.c.owner(project, pr, owners) or {}
@@ -554,9 +601,10 @@ class BatchController:
                     self.update(batch, status='building')
                     self.build(project, batch)
                     status = batch['status']
-                if status == 'building':
-                    self.update(batch, error='interrupted candidate build; manual inspection required')
-                elif status in ('branch_publishing', 'pr_creating'):
+                if status in ('building', 'build_uncertain'):
+                    self.recover_build(project, batch)
+                    status = batch['status']
+                if status in ('branch_publishing', 'pr_creating'):
                     self.publish_candidate(project, batch)
                 elif status in ('awaiting_ci','awaiting_review','ready','approving_members'):
                     self.adopt_approvals(project, batch)
@@ -586,8 +634,11 @@ class BatchController:
             # Publication/reconciliation uncertainty retains all reservations.
             if isinstance(error, BatchInvalidated):
                 self.invalidate(project, batch, error)
-            elif batch['status'] in ('building','build_uncertain','branch_publishing','pr_creating','approving_members','publish_pending','published','reconciling','failed'):
-                self.update(batch, error=type(error).__name__+': '+str(error)[:300])
             else:
-                self.invalidate(project, batch, error)
+                # Transport/launch/local failures say nothing about candidate
+                # validity. Preserve completed CI and testnet for the next tick.
+                self.update(batch, error=type(error).__name__+': '+str(error)[:300])
+        finally:
+            if batch['status'] in TERMINAL:
+                self.cleanup(project, batch)
         return held

@@ -63,7 +63,7 @@ class BatchActivation(unittest.TestCase):
         self.batch_id = 'batch-fixture'
         self.members = []
         previous = self.base
-        for index, (head, step, owner) in enumerate(zip(self.heads, self.steps, ('Codex', 'Claude')), 1):
+        for index, (head, step, owner) in enumerate(zip(self.heads, self.steps, ('Codex', 'Codex')), 1):
             family = 'Claude' if owner == 'Codex' else 'Codex'
             source = self.snapshot(head, self.base, dict(key=f'SF-{index:03}', agent=owner))
             result = dict(verdict='blocked', acceptance_complete=False, source_complete=True,
@@ -147,11 +147,24 @@ class BatchActivation(unittest.TestCase):
         self.db.commit()
         self.engine.verify(self.base, target or self.head)
 
-    def test_complete_mixed_family_batch_is_verified_once(self):
+    def test_complete_same_author_family_batch_is_verified_once(self):
         self.verify()
         self.engine.gh.assert_called_with('repos/owner/repo/pulls/99')
         self.assertEqual(self.engine.gh.call_count, 3)
         self.assertEqual(self.git('rev-list', '--first-parent', self.base+'..'+self.head).splitlines(), list(reversed(self.steps)))
+
+    def test_mixed_authors_cannot_use_a_single_family_acceptance_review(self):
+        self.members[1]['owner']['agent'] = 'Claude'
+        # Keep a valid independent source proof for the Claude-owned member.
+        path = self.state/'job-2/snapshot.json'
+        snapshot = json.loads(path.read_text())
+        snapshot['ticket']['agent'] = 'Claude'
+        result = json.loads(self.db.execute('SELECT result FROM jobs WHERE id=2').fetchone()[0])
+        self.job(2, 2, self.heads[1], 'Codex', snapshot, result)
+        self.members[1]['source_receipt']['family'] = 'Codex'
+        self.rewrite_manifest()
+        with self.assertRaisesRegex(RuntimeError, 'independent of every member'):
+            self.verify()
 
     def test_missing_receipt_and_unpublished_batch_fail_closed(self):
         self.db.execute('DELETE FROM batch_activation_commits WHERE commit_id=?', (self.steps[0],))
