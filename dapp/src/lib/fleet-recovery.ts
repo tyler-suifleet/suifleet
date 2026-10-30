@@ -1,3 +1,4 @@
+import { aggregatorFetch } from "./walrus";
 // SF-091 recovery assessment over the SF-082 verified readers. It classifies
 // what a restored operator can read and why; it never builds or submits a
 // transaction, never falls back to an indexer and never treats a dependency
@@ -110,7 +111,7 @@ class CiphertextVerified extends Error {}
  */
 export async function assessArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>, config: FleetDataConfig,
   deviceId: string, index: number, aggregator: string, decrypt?: (encrypted: Uint8Array) => Promise<Uint8Array>,
-  fetcher: typeof fetch = fetch): Promise<ArchiveAssessment> {
+  fetcher: typeof fetch = aggregatorFetch): Promise<ArchiveAssessment> {
   const rpc: unknown[] = [];
   let walrusError: unknown, aggregatorError: unknown, keyError: unknown;
   const reads = observed(client, rpc);
