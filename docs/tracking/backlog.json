@@ -4559,6 +4559,28 @@
         "Offline regressions exercise actual process stop checks, repeated fences and unchanged ownership; document exact evidence requirements. Submit through normal review and CI; do not install unreviewed source or claim SF207 recovered."
       ],
       "validation": "Focused recovery tests and full coordinator tests; tracking tests/dry run and diff checks. Merged-only installation and SF207 origin-proof verification remain next actions."
+    },
+    {
+      "key": "SF-209",
+      "title": "Validate Review claims without heartbeats during batch integration",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests/test_batch_integration.py"
+      ],
+      "resources": [],
+      "description": "Batch source-candidate scanning and manifest validation heartbeat non-expiring Review claims. The installed ticket CLI rejects this, aborting the entire project scan and preventing unrelated reviews and batch validation.",
+      "evidence": "Recovery run 48a0b885: services active, no verified workers, repeated suifleet scan failures on SF-166. Direct heartbeat returns Only implementation/blocked leases need heartbeats. Runtime batch_integration.py lines 184 and 555 heartbeat source owners which must be Review.",
+      "acceptance": [
+        "Use the existing read-only Review ownership validator instead of heartbeats in candidate scanning and manifest validation; reject stale or changed ownership and preserve all exact-head/base/source/CI/security/testnet/final-review gates.",
+        "Regression tests reject Review heartbeats, validate retained Review claims in both batch paths and exercise changed/unpublished ownership without blocking unrelated eligible work.",
+        "Submit through independent normal PR review; install only after verified merge through existing activation path."
+      ],
+      "validation": "Focused batch-integration tests, full coordinator suite, diff checks. No fabricated approvals or live wallet mutations."
     }
   ]
 }
