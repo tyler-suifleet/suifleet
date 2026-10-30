@@ -80,11 +80,25 @@ def run(binary,shim_binary,stream_retention=False):
                 sim.uploads_paused=False;process=start();fleet.wait(lambda:bool(sim.registered));time.sleep(2);stop()
                 assert json.loads(queue.read_text())['entries'] and not sim.anchors,'certification outage must retain queue'
                 for name,bytes_ in original.items():assert (pending.parent/name).read_bytes()==bytes_
-                sim.certify_outage=False;process=start();fleet.wait(lambda:len(sim.anchors)==1);fleet.wait(lambda:not pending.exists());stop()
+                # A restart can enter tick before the durable retry deadline.
+                # That idle tick uses the archive scheduler's 60-second interval,
+                # so recovery must not rely on a chain-watch wake within 20s.
+                # Keep a future deadline to exercise this ordering deterministically.
+                retry=json.loads(pending.read_text())
+                retry['retry_at_ms']=int(time.time()*1000)+5000
+                pending.write_text(json.dumps(retry))
+                def recovered(predicate,stage):
+                    try:fleet.wait(predicate,seconds=75)
+                    except AssertionError as error:
+                        status=json.loads(pending.read_text()) if pending.exists() else {}
+                        raise AssertionError(f'{stage}: daemon={process.poll()}, anchors={len(sim.anchors)}, '
+                            f'attempts={status.get("attempts")}, retry_at_ms={status.get("retry_at_ms")}, '
+                            f'simulator_errors={sim.errors}') from error
+                sim.certify_outage=False;process=start();recovered(lambda:len(sim.anchors)==1,'anchor recovery');recovered(lambda:not pending.exists(),'verified retirement');stop()
                 assert len(sim.registered)==1,'restart reuses purchase'
                 # A second batch may contain items enqueued after first formation.
                 while json.loads(queue.read_text())['entries']:
-                    count=len(sim.anchors);sim.clock+=86400000;process=start();fleet.wait(lambda:len(sim.anchors)==count+1);fleet.wait(lambda:not pending.exists());stop()
+                    count=len(sim.anchors);sim.clock+=86400000;process=start();recovered(lambda:len(sim.anchors)==count+1,'next batch anchor');recovered(lambda:not pending.exists(),'next batch retirement');stop()
                 fixture=root/'opaque.json';fixture.write_text(json.dumps({'manifest':manifest,'config':dict(schema=1,chainIdentifier=sim.chain,registryId=fleet.object_id(ota.REGISTRY),packageId=fleet.object_id(fleet.PACKAGE),typeOrigin=fleet.object_id(fleet.PACKAGE),fleetId=fleet.object_id(fleet.FLEET),budgetId=fleet.object_id(budget.BUDGET),storageId=fleet.object_id(fleet.STORAGE)),
                     'device':fleet.object_id(ota.DEVICE),'anchors':sim.anchors,'index':{f'{seq}/{n}':b.hex() for (seq,n),b in sim.opaque_items.items()},'patches':{a['blob_object_id']:json.loads((sim.upload_dir/(a['blob_object_id']+'-items.json')).read_text()) for a in sim.anchors},'expected':{'sensor':base64.b64encode(binary_data).decode(),'text':base64.b64encode(text).decode(),'durable':base64.b64encode(stream_expected).decode()}}))
                 subprocess.run(['node','scripts/verify_opaque_native.cjs',str(fixture)],check=True)
