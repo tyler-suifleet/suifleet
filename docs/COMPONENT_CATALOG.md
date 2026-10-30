@@ -81,6 +81,37 @@ disabled or that deletion implements cancellation.
 Recipe schema 1.1 dependencies, resolution and install ordering for catalog
 deployments are documented in [COMPONENT_DEPENDENCIES.md](COMPONENT_DEPENDENCIES.md).
 
+## Library desired state (SF-168)
+
+The library's **Deploy this version** route defaults to group desired state,
+with the same convergence behavior as direct uploads. Untick the option for a
+one-shot deployment or individual-device targets. Every device resolves the
+immutable version and selects its own platform manifest. Superseded versions
+are skipped, late joiners receive the current version, and removed members stop
+following it. Cross-group conflicts retain the existing fail-closed behavior.
+
+`component_catalog::new_deployment` returns a transaction-local schema-2 record.
+The frontend creates one record, sets it in each selected group's revision and
+shares it in a single transaction. Named fleets use the existing customer
+constructor and revision authority, including receipt sharding. Paused admission
+can be configured in the same transaction. `desired_state::set_component` accepts
+the typed catalog binding as an authenticated recipe source, including its
+sharded location; legacy unauthenticated records remain rejected. No existing
+function signature, object layout, type origin or manifest schema changes.
+Deploying this feature requires upgrading the call package and regenerating its
+manifest; old package versions remain callable. The daemon already resolves
+catalog records on its reconciliation path and needs no new wire format.
+
+The SF-168 regressions cover both frontend authority paths, contract revisions
+and sharded bindings, actual-daemon platform selection/supersession/membership,
+and a disposable local-chain compatible upgrade. The automatic testnet security
+suite also commits successive catalog desired revisions and retires their
+records through proofs after clearing the component. Hosted CI/testnet evidence
+must be recorded for the pushed head; local fixtures do not establish physical,
+Mainnet, production-provider or manual-wallet acceptance, retained in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
 ## Validation
 
 `make check` includes contract tests, shared TypeScript/Rust selector cases in
