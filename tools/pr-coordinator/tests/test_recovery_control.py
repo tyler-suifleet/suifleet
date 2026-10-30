@@ -150,7 +150,6 @@ class RetainedRecoveryTests(unittest.TestCase):
 class StoppedRepairTests(unittest.TestCase):
     resume = RetainedRecoveryTests.resume
     test_crash_after_intent_is_retained_and_never_replayed = RetainedRecoveryTests.test_crash_after_intent_is_retained_and_never_replayed
-    test_new_helper_after_resume_prevents_spawn = RetainedRecoveryTests.test_new_helper_after_resume_prevents_spawn
     test_pending_retry_or_dependency_resume_cannot_be_stolen = RetainedRecoveryTests.test_pending_retry_or_dependency_resume_cannot_be_stolen
     test_changed_owner_external_dependency_and_git_operation_are_fenced = RetainedRecoveryTests.test_changed_owner_external_dependency_and_git_operation_are_fenced
 
@@ -158,12 +157,13 @@ class StoppedRepairTests(unittest.TestCase):
         RetainedRecoveryTests.setUp(self)
         self.claim['status'] = 'in_progress'
         self.d.db.execute("UPDATE runs SET status='finished'")
-        self.jobs = sqlite3.connect(self.path/'reviews.sqlite3', isolation_level=None)
+        from coordinator import Store
+        self.store = Store(self.path/'reviews.sqlite3')
+        self.jobs = self.store.db
         self.addCleanup(self.jobs.close)
-        self.jobs.execute("CREATE TABLE jobs(id INTEGER PRIMARY KEY,project TEXT,pr INTEGER,kind TEXT,family TEXT,status TEXT,repair_claim TEXT,launch_intent TEXT,result TEXT,retry_after REAL,directory TEXT,pid INTEGER,started TEXT)")
         import hashlib
         proof = dict(claim=hashlib.sha256(b'private').hexdigest(), key='SF-1', branch=self.claim['branch'],worktree=self.claim['worktree'])
-        self.jobs.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (7,'project',9,'fix','Claude','orphaned',json.dumps(proof),None,None,None,str(self.path),123,'100'))
+        self.jobs.execute('INSERT INTO jobs(id,project,pr,kind,family,status,repair_claim,launch_intent,result,retry_after,directory,pid,started) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (7,'project',9,'fix','Claude','orphaned',json.dumps(proof),None,None,None,str(self.path),123,'100'))
         (self.path/'process.json').write_text(json.dumps(dict(pid=123,started='100')))
         (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
         (self.path/'snapshot.json').write_text(json.dumps(dict(ticket=self.claim)))
@@ -171,10 +171,83 @@ class StoppedRepairTests(unittest.TestCase):
     def test_stopped_repair_with_finished_implementation_resumes_once(self):
         result = self.resume()
         self.assertEqual(result['family'], 'Claude')
-        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'orphaned')
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'superseded')
+        audit = json.loads(self.jobs.execute('SELECT replacement FROM recovered_repairs').fetchone()[0])
+        self.assertEqual(audit['session'], result['session'])
+        self.assertEqual(audit['directory'], result['directory'])
         self.assertEqual(self.d.db.execute("SELECT count(*) FROM retired_runs WHERE session='coordinator-repair-7'").fetchone()[0],1)
         with self.assertRaises(RuntimeError): self.resume()
         self.assertEqual(self.child.call_count,1)
+
+    def test_new_helper_after_resume_prevents_spawn(self):
+        self.d.capacity_helpers.side_effect = [[], [], [dict(pid=9)]]
+        with self.assertRaises(RuntimeError): self.resume()
+        self.child.assert_not_called()
+        self.d.update.assert_called_once()
+
+    def review_reservation(self):
+        pr = dict(number=9, headRefOid='new-head', baseRefOid='base', comments=[],
+                  reviews=[], threads=[], statusCheckRollup=[])
+        return self.store.reserve('project', pr, 'Codex', 'review', self.path/'review')
+
+    def quarantine(self):
+        # Exercise the coordinator's actual orphan -> quarantine lifecycle.
+        from coordinator import Coordinator
+        coordinator = Coordinator.__new__(Coordinator)
+        coordinator.store = self.store
+        coordinator.children = {}
+        coordinator.publish_results = Mock()
+        with patch('coordinator.worker_stopped', return_value=True):
+            coordinator.collect(self.project, [])
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'quarantined')
+        self.jobs.execute('UPDATE quarantine_backoff SET retry_after=0')
+
+    def test_real_quarantine_lifecycle_releases_review_only_after_launch(self):
+        self.quarantine()
+        self.assertIsNone(self.review_reservation())
+        self.resume()
+        self.assertIsNotNone(self.review_reservation())
+
+    def test_uncertain_quarantine_launch_keeps_review_excluded(self):
+        self.quarantine()
+        self.child.side_effect = OSError('uncertain launch')
+        with self.assertRaises(OSError): self.resume()
+        self.assertIsNone(self.review_reservation())
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'quarantined')
+
+    def test_manual_quarantine_and_pending_quota_stay_reserved(self):
+        self.jobs.execute("UPDATE jobs SET status='quarantined',error='quota recovery cancelled: ownership/status changed'")
+        with self.assertRaisesRegex(RuntimeError, 'verified stopped'): self.resume()
+        self.jobs.execute("UPDATE jobs SET status='orphaned'")
+        self.jobs.execute("INSERT INTO quota_recoveries(job,attempt,state) VALUES(7,1,'waiting')")
+        with self.assertRaisesRegex(RuntimeError, 'quota recovery'): self.resume()
+        self.child.assert_not_called()
+
+    def test_missing_launch_identity_keeps_source_reserved(self):
+        self.identity.stop()
+        with patch('coordinator.process_identity', return_value=None):
+            with self.assertRaisesRegex(RuntimeError, 'identity uncertain'): self.resume()
+        self.assertIsNone(self.review_reservation())
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'orphaned')
+
+    def test_changed_source_rolls_back_retirement(self):
+        from coordinator import Store
+        source = dict(self.jobs.execute('SELECT * FROM jobs').fetchone())
+        self.jobs.execute("UPDATE jobs SET error='changed' WHERE id=7")
+        with self.assertRaisesRegex(RuntimeError, 'source changed'):
+            Store.retire_recovered_repairs(self.jobs, [source], dict(pid=999, started='200',
+                session='replacement', directory=str(self.path/'replacement')))
+        self.assertEqual(self.jobs.execute('SELECT count(*) FROM recovered_repairs').fetchone()[0], 0)
+        self.assertIsNone(self.review_reservation())
+
+    def test_older_verified_quarantine_is_proved_and_retired_too(self):
+        self.quarantine()
+        self.jobs.execute("INSERT INTO jobs(id,project,pr,kind,family,status,repair_claim,directory,pid,started,error) "
+                          "SELECT 6,project,pr,kind,family,status,repair_claim,directory,pid,started,error FROM jobs WHERE id=7")
+        self.resume()
+        self.assertEqual([r[0] for r in self.jobs.execute('SELECT status FROM jobs')], ['superseded']*2)
+        self.assertEqual(self.jobs.execute('SELECT count(*) FROM recovered_repairs').fetchone()[0], 2)
+        self.assertIsNotNone(self.review_reservation())
 
     def test_real_repair_process_must_exit_before_recovery(self):
         from dispatcher import Dispatcher
@@ -201,8 +274,7 @@ class StoppedRepairTests(unittest.TestCase):
         (self.path/'worker.log').write_text('ERROR: Selected model is at capacity. Please try a different model.\n')
         with self.assertRaisesRegex(RuntimeError, 'capacity cooldown'): self.resume()
         (self.path/'worker.log').unlink()
-        self.jobs.execute('CREATE TABLE quarantine_backoff(family TEXT,kind TEXT,retry_after REAL)')
-        self.jobs.execute("INSERT INTO quarantine_backoff VALUES('Claude','fix',99999999999)")
+        self.jobs.execute("INSERT INTO quarantine_backoff VALUES('Claude','fix',1,99999999999)")
         with self.assertRaisesRegex(RuntimeError, 'backoff'): self.resume()
         self.child.assert_not_called()
 

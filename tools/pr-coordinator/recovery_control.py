@@ -55,11 +55,16 @@ def fence(dispatcher, project, row, claim, reserved_session=None):
     return owner
 
 
-def stopped_repair(dispatcher, project, owner, reserved=False):
-    """Read coordinator evidence; reserve recovery only in the dispatcher ledger.
+def recoverable_repair(job):
+    return job['status'] == 'orphaned' or (job['status'] == 'quarantined' and
+        job['error'] == 'Verified stopped; ticket/PR remains reserved for explicit recovery')
 
-    Both service authority locks are held by the caller. Never alter a job or
-    replay its launch: a new implementation receipt supervises the retained claim.
+
+def stopped_repair(dispatcher, project, owner, reserved=False, before=None):
+    """Validate coordinator evidence; reserve recovery in the dispatcher ledger.
+
+    Both service authority locks are held by the caller. A new implementation
+    receipt supervises the claim; the Store API retires sources after launch.
     """
     originals = [r for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status='finished'", (project['id'],))
                  if r['claim'] and all(json.loads(r['claim']).get(k) == owner.get(k) for k in FIELDS)]
@@ -72,14 +77,16 @@ def stopped_repair(dispatcher, project, owner, reserved=False):
         jobs = db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL ORDER BY id DESC", (project['id'],)).fetchall()
         matching = [j for j in jobs if json.loads(j['repair_claim']).get('claim') == digest]
         require(bool(matching), 'no retained stopped repair receipt')
+        if before is not None:
+            matching = [j for j in matching if j["id"] < before and j["status"] not in ("done", "failed", "superseded")]
+            if not matching:
+                return []
         job = matching[0]
         proof = json.loads(job['repair_claim'])
         require(all(proof.get(k) == v for k,v in expected.items()), 'repair claim identity changed')
-        require(job['family'] == owner['agent'] and job['status'] == 'orphaned', 'repair is not explicitly orphaned')
+        require(job['family'] == owner['agent'] and recoverable_repair(job), 'repair is not a verified stopped orphan/quarantine')
         require(not job['retry_after'] or job['retry_after'] <= time.time(), 'repair retry backoff remains')
         require(not job['launch_intent'] and not job['result'], 'repair has pending intent or structured result')
-        for other in matching[1:]:
-            require(other['status'] in ('done','failed','superseded'), 'another same-claim repair remains unresolved')
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quota_recoveries'").fetchone():
             require(not db.execute("SELECT 1 FROM quota_recoveries WHERE job=? AND state IN ('waiting','launch_intent')", (job['id'],)).fetchone(), 'provider quota recovery owns repair')
         for table, where, params in [
@@ -101,10 +108,18 @@ def stopped_repair(dispatcher, project, owner, reserved=False):
     require(not capacity_failure(source) or (source/'exit.json').stat().st_mtime + 900 <= time.time(), 'provider capacity cooldown remains')
     snapshot = json.loads((source/'snapshot.json').read_text())['ticket']
     require(all(snapshot.get(k) == owner.get(k) for k in ('key','agent','model')), 'original repair family/model changed')
+    require(json.loads((source/'command.json').read_text()) == dispatcher.config['workers'][owner['agent']], 'original repair command changed')
+    source_row = dict(directory=str(source), pid=job['pid'], started=job['started'], claim=json.dumps(owner))
+    require(dispatcher.stopped_identity(source_row) is not None, 'repair worker/session/helpers live or uncertain')
+    require(not dispatcher.capacity_helpers(owner, job['started']), 'repair helper alive or uninspectable')
     session = 'coordinator-repair-' + str(job['id'])
     if not reserved:
         require(not dispatcher.db.execute('SELECT 1 FROM retired_runs WHERE session=?', (session,)).fetchone(), 'repair recovery already reserved')
-    return dict(session=session, project=project['id'], family=job['family'], status='orphaned', pr=job['pr'],
+    older = stopped_repair(dispatcher, project, owner, reserved=reserved, before=job['id'])
+    sources = [dict(job)] + older
+    if before is not None:
+        return sources
+    return dict(sources=sources, session=session, project=project['id'], family=job['family'], status='orphaned', pr=job['pr'],
                 directory=str(source), claim=json.dumps(owner), pid=job['pid'], started=job['started'], message='stopped coordinator repair')
 
 
@@ -179,7 +194,13 @@ def resume(dispatcher, project, slot, key, reason, worker_path):
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         dispatcher.children[session] = child
         started = process_identity(child.pid)
+        require(started is not None, 'replacement process identity uncertain')
         dispatcher.db.execute("UPDATE runs SET status='running',pid=?,started=? WHERE session=?", (child.pid, started, session))
+        if repair:
+            from coordinator import Store
+            with closing(Store(dispatcher.state/'reviews.sqlite3').db) as coordinator_db:
+                Store.retire_recovered_repairs(coordinator_db, row['sources'], dict(
+                    session=session, directory=str(directory), pid=child.pid, started=started))
         return dict(project=project['id'], ticket=key, family=slot['family'], session=session, pid=child.pid, started=started, directory=str(directory))
     except Exception:
         dispatcher.update(session, 'orphaned', 'Explicit recovery launch uncertain; inspect receipt before retry')
