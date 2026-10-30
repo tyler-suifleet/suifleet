@@ -53,6 +53,8 @@ assert.equal(load('lib/telemetry.ts').TELEMETRY_URL, '', 'a legacy URL must not 
 (async () => {
   const result = await load('lib/telemetry.ts').fetchFleetHealth({}, [id('0xd1')], owner, undefined, '', () => { throw Error('HTTP must not be used'); });
   assert.equal(result[id('0xd1')].status, 'unavailable');
-  assert.match(result[id('0xd1')].reasons[0], /not set up.*configure fleet data/);
+  assert.equal(result[id('0xd1')].reasons[0],
+    'Device health reporting is not set up for this fleet. Ask your administrator to finish the setup.');
+  assert.doesNotMatch(result[id('0xd1')].reasons[0], /NEXT_PUBLIC_|FLEET_DATA/);
   console.log('PASS: serverless default ignores legacy URL; locally planned bulk custody/return, membership, inbox listing/announcement, authority, digest and active-identity checks');
 })().catch(error => { console.error(error); process.exitCode = 1; });
