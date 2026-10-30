@@ -134,6 +134,15 @@ function audit() {
     await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
     await page.evaluate(() => window.acceptance.reset());
 
+    // A budget depleted while approval is open gets an actionable message.
+    await page.evaluate(() => window.acceptance.budgetRace());
+    await register.click();
+    const budgetError = page.getByRole("alert").filter({ hasText: "no longer has enough SUI" });
+    await budgetError.waitFor();
+    assert.doesNotMatch(await budgetError.innerText(), /MoveAbort|abort code/);
+    assert.match(await budgetError.innerText(), /Fund the fleet budget/);
+    await page.evaluate(() => window.acceptance.reset());
+
     // Duplicate submission: a double activation while the wallet is open signs once.
     const beforeSuccess = await page.evaluate(() => window.acceptance.signCalls());
     await page.evaluate(() => { window.acceptance.hold(); window.acceptance.registerAs("First Pi"); });
@@ -195,7 +204,7 @@ function audit() {
     await progress.getByText("Not connected", { exact: true }).waitFor();
     assert.deepEqual(externalSlushRequests, [], "No external Slush metadata requests");
     assert.deepEqual(errors, []);
-    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
+    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard, insufficient-budget race message, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));
