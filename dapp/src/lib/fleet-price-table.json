@@ -1,0 +1,128 @@
+{
+  "data": {
+    "includedBytesPerDeviceMonth": 10000000,
+    "includedRetentionDays": 42,
+    "writeUsdPerGB": 0.1,
+    "storageUsdPerGBMonth": 0.05
+  },
+  "source": "docs/BUSINESS_PLAN.md pricing proposal, 2026-10-23 (not yet approved)",
+  "currency": "USD",
+  "base": {
+    "tiers": [
+      {
+        "upToDevices": 10000,
+        "usdPerDeviceMonth": 0.08
+      },
+      {
+        "upToDevices": 100000,
+        "usdPerDeviceMonth": 0.05
+      },
+      {
+        "upToDevices": 1000000,
+        "usdPerDeviceMonth": 0.04
+      }
+    ],
+    "customFromUsdPerDeviceMonth": 0.03,
+    "monthlyMinimumUsd": 49,
+    "activationUsdPerDevice": 0.1,
+    "annualPrepayDiscountPercent": 10
+  },
+  "settings": {
+    "checkIntervalMs": [
+      {
+        "label": "Every 5 minutes",
+        "value": 300000,
+        "usdPerDeviceMonth": 0.05
+      },
+      {
+        "label": "Every 15 minutes",
+        "value": 900000,
+        "usdPerDeviceMonth": 0.01
+      },
+      {
+        "label": "Every 30 minutes",
+        "value": 1800000,
+        "usdPerDeviceMonth": 0,
+        "default": true
+      },
+      {
+        "label": "Hourly",
+        "value": 3600000,
+        "usdPerDeviceMonth": 0
+      }
+    ],
+    "rolloutCheckIntervalMs": [
+      {
+        "label": "Every 60 seconds during rollouts",
+        "value": 60000,
+        "usdPerDeviceMonth": 0,
+        "default": true
+      },
+      {
+        "label": "Every 5 minutes during rollouts",
+        "value": 300000,
+        "usdPerDeviceMonth": 0
+      },
+      {
+        "label": "Off (normal checks only)",
+        "value": 0,
+        "usdPerDeviceMonth": 0
+      }
+    ],
+    "healthIntervalMs": [
+      {
+        "label": "Hourly",
+        "value": 3600000,
+        "usdPerDeviceMonth": 0.12
+      },
+      {
+        "label": "Every 6 hours",
+        "value": 21600000,
+        "usdPerDeviceMonth": 0.03
+      },
+      {
+        "label": "Daily",
+        "value": 86400000,
+        "usdPerDeviceMonth": 0,
+        "default": true
+      }
+    ],
+    "archiveIntervalMs": [
+      {
+        "label": "Daily",
+        "value": 86400000,
+        "usdPerDeviceMonth": 0.08
+      },
+      {
+        "label": "Weekly",
+        "value": 604800000,
+        "usdPerDeviceMonth": 0,
+        "default": true
+      }
+    ],
+    "archiveRetentionDays": [
+      {
+        "label": "6 weeks",
+        "value": 42,
+        "usdPerDeviceMonth": 0,
+        "default": true
+      },
+      {
+        "label": "6 months",
+        "value": 182,
+        "usdPerDeviceMonth": 0.02
+      },
+      {
+        "label": "1 year",
+        "value": 365,
+        "usdPerDeviceMonth": 0.04
+      }
+    ]
+  },
+  "addOns": {
+    "encryptedDelivery": {
+      "label": "Encrypted delivery (Seal)",
+      "usdPerDeviceMonth": 0.02
+    }
+  }
+}

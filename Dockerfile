@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     python3 \
+    python3-yaml \
     libssl-dev \
     ca-certificates \
     xz-utils \
