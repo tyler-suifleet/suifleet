@@ -76,7 +76,9 @@ const field = revision => ({ $kind: 'DynamicField', name: { type: type('Decision
   const Audit = load('components/DecisionAudit.tsx').DecisionAudit;
   const auditHtml = renderToStaticMarkup(React.createElement(Audit, { history: { ...result, complete: false, missing: ['2–4'], pruned: true }, revision: 4n }));
   for (const expected of ['#3', '1970-01-01T00:00:01.234Z', 'Active', 'cohort 1', 'operator approved', id('0x1'), '2–4', 'pruned legacy events']) assert.ok(auditHtml.includes(expected), expected);
-  const completeHtml = renderToStaticMarkup(React.createElement(Audit, { history: result, revision: 3n }));
+  const completeHtml = renderToStaticMarkup(React.createElement(Audit, { history: result, revision: 3n, names: new Map([[id('0x1'), 'Pilot device']]) }));
+  assert.match(completeHtml, /Pilot device/);
+  assert.match(completeHtml, /Object ID/);
   assert.match(completeHtml, /Decision history complete: revisions 1–3/);
   console.log('PASS: stored audit pagination without event reads, precise legacy gaps, pruning recovery, binding/failure checks and deduplicated status rendering');
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -446,7 +446,16 @@ def daemon_progress(journal, log):
             if not isinstance(outcome, dict):
                 continue
             status = outcome.get('status')
-            public[id] = dict(status=status if type(status) is int and status in (0, 1, 2) else None,
+            # Export only fixed labels: error text may contain private material.
+            error = outcome.get('error')
+            markers = ('unsupported DeploymentRecord schema version',
+                       'deployment identity mismatch',
+                       'deployment has no authenticated recipe digest',
+                       'RPC request timeout', 'RPC identity timeout',
+                       '429', 'SHA-256 mismatch')
+            categories = [marker for marker in markers
+                          if isinstance(error, str) and marker in error]
+            public[id] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
                               reported=outcome.get('reported') is True, has_error=bool(outcome.get('error')))
     try:
         with log.open('rb') as stream:
@@ -455,7 +464,7 @@ def daemon_progress(journal, log):
             text = stream.read(65536).decode('utf8', errors='replace')
     except OSError:
         text = ''
-    categories = ('Sync failed', 'Deployment finished', 'Apply admitted',
+    categories = ('Sync failed', 'Deployment schema rejected', 'Deployment finished', 'Apply admitted',
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
                   'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
