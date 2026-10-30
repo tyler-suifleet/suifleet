@@ -6,9 +6,10 @@ const {pathToFileURL} = require('node:url');
 const assert = require('node:assert/strict');
 
 function transportFailure(error) {
-  // Connect/gRPC: deadline exceeded, resource exhausted, unavailable. Never
+  // The pinned grpc-web transport uses status names; also accept numeric gRPC codes. Never
   // retry failed effects, missing receipts, malformed responses or assertions.
-  return [4, 8, 14].includes(error.code) ||
+  return [4, 8, 14, 'DEADLINE_EXCEEDED', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE'].includes(error.code) ||
+    (error.code === 'INTERNAL' && error.message === 'fetch failed') ||
     (error instanceof TypeError && error.message === 'fetch failed');
 }
 async function read(operation, {sleep = ms => new Promise(resolve => setTimeout(resolve, ms))} = {}) {
