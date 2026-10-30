@@ -851,3 +851,35 @@ automatic Testnet are pending for the new pushed head; not watched or polled.
 Next: coordinator exact-head/current-base checks and fresh independent review.
 Manual real-wallet/production-provider, physical and actual-mainnet acceptance
 remains explicitly unrun in #32/#159. No deployment or hardware operations.
+
+## Generated pricing base integration (2026-10-30)
+
+The supplied review has no unresolved source/security findings or open threads.
+Integrated snapshot/current main `bd9e5abfd7369834f6ee150b46c78a65b535c87f`
+cleanly in `8a12b290`. This includes generated console/public pricing and upstream
+proof-tool/workflow repairs. Main's generated pricing files are unchanged by the
+merge. No contract/interface migration or additional functional patch was needed.
+
+After integration, network-none `suifleet-sf165:ci-repair`, UID:GID,
+identical checkout/pnpm-store mounts, HOME=/tmp and INSIDE_DEV_CONTAINER=1:
+`make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+&& node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs
+&& node scripts/test_fleet_budget.cjs && node scripts/test_rollout_form.cjs &&
+python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`:
+PASS, including offline prerequisites, TypeScript, production static export and
+three signer-policy tests. Log: `/tmp/sf165-basebd9e5-checks.log`.
+Existing non-fatal Tailwind module-type warning and prerequisite skips remain
+explicit. Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s
+scripts/tests` with `-p test_subscription_pricing.py`: 27 PASS; with
+`-p test_build_move_prover.py`: 5 PASS. Host Chrome Components, upload and wallet
+browser scripts: PASS using fixture chain/wallet/storage. Standalone host
+`node scripts/test_release_storage.cjs`: PASS. `git diff --check`: PASS.
+
+No new Move/full OTA/public-network transaction ran; no wallet or mutation lock
+was used. Historical publish/extension receipts remain historical evidence.
+The documented stale-pool fail-closed residual remains: a finite-lived certified
+blob can remain, but no version registers and no prepaid boundary moves.
+Hosted ordinary/security CI and automatic Testnet are pending for the pushed
+head; not watched or polled. Next: coordinator enforces exact-head/current-base
+checks and fresh independent review. Manual real-wallet/production-provider,
+physical and actual-mainnet acceptance remains explicitly unrun in #32/#159.
