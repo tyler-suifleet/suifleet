@@ -883,3 +883,48 @@ Hosted ordinary/security CI and automatic Testnet are pending for the pushed
 head; not watched or polled. Next: coordinator enforces exact-head/current-base
 checks and fresh independent review. Manual real-wallet/production-provider,
 physical and actual-mainnet acceptance remains explicitly unrun in #32/#159.
+
+## 2026-10-30 current-base feedback integration (d01358eb)
+
+The supplied independent review of `95a2d1c7` reports no unresolved source or
+security findings and no open review threads. The snapshot's ordinary CI passed,
+but automatic Testnet run 41022697961 failed its pre-spend recheck with
+`superseded head/base: no testnet mutation submitted` (failed-job log inspected
+once; no hosted checks watched or polled). That result is not Testnet success.
+
+Merged snapshot/current main `d01358ebaed25373c5dff0f9708ab40755030d0b`
+(SF-168 catalog desired-state deployments) cleanly. Reviewed the combined
+`firmware/page.tsx` and `catalog.ts`: chosen-period upload/review and expiry
+controls coexist with catalog desired-state selection. No additional functional
+patch, contract migration or weakening of CI gates was required.
+
+Post-integration verification uses network-none `suifleet-sf165:ci-repair`,
+UID:GID, identical host checkout/pnpm-store mounts, `HOME=/tmp`,
+`INSIDE_DEV_CONTAINER=1` and `PYTHONDONTWRITEBYTECODE=1`. Commands and results
+are: `make dapp-typecheck && make dapp-build && node
+scripts/test_release_storage.cjs && node scripts/test_component_catalog.cjs &&
+node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs &&
+node scripts/test_fleet_budget.cjs && node scripts/test_rollout_form.cjs &&
+python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py`:
+PASS, exit 0, including offline prerequisites, static export and three signer
+policy tests. Existing non-fatal Tailwind module-type warning and input-based
+prerequisite skips remain explicit. Full log:
+`/tmp/sf165-based01358-checks.log`. Main Move suite:
+`sui move test --path contracts`, with the host Move cache mounted and network
+disabled: 309/309 PASS (`/tmp/sf165-based01358-move.log`). Host
+`python3 -m unittest discover -s scripts/tests -p test_live_common.py`:
+62 PASS, including expected cleanup-failure diagnostics. Chrome
+`test_components_browser.cjs`, `test_upload_browser.cjs` and
+`test_wallet_browser.cjs`: all PASS with fixture chain/wallet/storage.
+
+No new full OTA simulator or public-network transactions ran; no shared wallet
+or mutation lock was used. Historical chosen-period publication/extension effects
+and costs in `sf165-testnet.json` remain historical, not new-head evidence.
+The documented stale-pool residual remains fail-closed: an uploaded finite-lived
+blob can remain, but no version registers and no prepaid boundary moves.
+
+Hosted ordinary/security CI and automatic Testnet are pending after push, not
+approval. The coordinator must enforce exact-head/current-base checks and obtain
+fresh independent review. Manual real-wallet/production-provider, physical and
+actual-mainnet acceptance remains explicitly unrun in #32 and #159. No merge,
+deployment, physical programming or production credentials were used.
