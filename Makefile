@@ -133,6 +133,7 @@ dapp-typecheck:
 
 # Compare full reviewed ABI/layouts and generated clients with compiled contracts.
 check-interfaces:
+	$(RUN) node scripts/test_subscription_manifest.cjs
 	$(RUN) python3 scripts/check_contract_interfaces.py
 	$(RUN) python3 scripts/generate_interfaces.py --check
 	$(RUN) python3 scripts/test_generated_interfaces.py
@@ -845,3 +846,8 @@ test-hydration:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
 	$(RUN) bash -c 'set -a; source profiles/seal-testnet/frontend.env; set +a; cd dapp && pnpm build'
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
+
+# SF-181: existing-object compatible upgrade on an isolated disposable chain.
+.PHONY: test-subscription-localnet
+test-subscription-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --subscription-upgrade
