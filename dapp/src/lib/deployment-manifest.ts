@@ -18,6 +18,8 @@ function manifestTypes(m: DeploymentManifest): string[] {
   return [...types, ...[...HANDOVER_TYPES, ...GROUP_BATCH_TYPES].filter(name => name in m.type_origins)];
 }
 export interface DeploymentManifest {
+  // Optional for legacy nonpayment deployments; payments require a pinned payee.
+  treasury_payee?: string;
   schema_version: number;
   protocol_version: number;
   network: "localnet" | "devnet" | "testnet" | "mainnet";
@@ -48,6 +50,19 @@ function endpoint(value: string) {
   const url = new URL(value);
   if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password || url.hash) fail("invalid public endpoint");
 }
+function validateTreasuryPayee(value: unknown): string {
+  if (typeof value !== "string" || !/^0x[0-9a-f]{64}$/.test(value) || BigInt(value) === BigInt(0))
+    fail("treasury payee mismatch: missing or malformed pinned address; payment blocked");
+  return value;
+}
+// Payment and card-checkout callers must use this guard before signing/redirecting.
+// A SuiNS lookup, wallet account or provider response never supplies the payee.
+export function treasuryPayee(expectedPayee?: string): string {
+  const payee = validateTreasuryPayee(requireManifest().treasury_payee);
+  if (expectedPayee !== undefined && expectedPayee !== payee)
+    fail("treasury payee mismatch: payment recipient differs from manifest; payment blocked");
+  return payee;
+}
 export function parseManifest(raw: string): DeploymentManifest {
   const m: DeploymentManifest = JSON.parse(raw);
   if (m.schema_version !== MANIFEST_SCHEMA_VERSION || m.protocol_version !== PROTOCOL_VERSION) fail("unsupported schema/protocol");
@@ -55,6 +70,7 @@ export function parseManifest(raw: string): DeploymentManifest {
   if ((m.network === "mainnet" && m.chain_identifier !== "35834a8a") || (m.network === "testnet" && m.chain_identifier !== "4c78adac")) fail("network label/chain mismatch");
   if (!/^[0-9a-f]{8}$/.test(m.chain_identifier)) fail("invalid chain identifier");
   if (typeof m.package_version !== "string" || !/^[1-9][0-9]*$/.test(m.package_version)) fail("invalid package version");
+  if ("treasury_payee" in m) validateTreasuryPayee(m.treasury_payee);
   normalizeId(m.call_package_id);
   normalizeId(m.upgrade_cap_id);
   normalizeId(m.shared_objects.registry.id);
