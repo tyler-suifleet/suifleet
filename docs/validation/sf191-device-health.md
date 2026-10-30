@@ -571,3 +571,31 @@ historical. Physical/mainnet/provider/manual-wallet acceptance remains unrun in
 SF-031/#32 and SF-087/#159. Hosted CI/automatic testnet for the new head and fresh
 independent review remain required; no hosted CI polling was performed. No
 migration; frontend rebuild needed for delivery. Coordinator alone merges.
+
+## SF-206 base integration (2026-10-29)
+
+Independent review of `61b6c5530b9a` reported no actionable source/security
+defects or open review threads. Integrated snapshot/fetched main
+`00b1076c5115f8b59d167da249d2afc30d3a3c66` with a clean automatic merge
+`4f1ab62a25235ed8b8ec21ca94c5e62a4a201cbb`. Upstream changes are coordinator
+review-retry behavior, its tests and tracking/documentation; the device-health
+implementation and prior feedback repairs remain intact.
+
+Checks on the integrated tree (all passed):
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`: complete target passed, including all three rendered health states.
+
+- Frontend `npx --yes pnpm@11.0.8 typecheck` and `npx --yes pnpm@11.0.8 build`: exit 0, 17 static pages.
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py scripts/tests/test_testnet_queue.py`: 15 tests OK.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`: exit 0.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`: exit 0, every exported route logged out and reconnected with the fixture wallet.
+- `git diff --check origin/main...HEAD`: clean; snapshot/current fetched base is an ancestor.
+
+Logs: `/tmp/sf191-current-{manifest,build,prepared,browser,hydration}.log`.
+This is a repair/integration handoff, not approval. New-head hosted CI and
+automatic testnet are pending/uncollected; no hosted CI polling. Fresh independent
+review and successful exact-head/current-base checks remain coordinator gates.
+No new live walkthrough, wallet mutation, deployment, physical test, full
+cross-layer suite or local CodeQL is claimed. Historical read-only Testnet evidence
+remains above. Deferred physical/mainnet/provider/manual-wallet acceptance remains
+unrun in SF-031/#32 and SF-087/#159. No migration; delivery needs a frontend rebuild.
