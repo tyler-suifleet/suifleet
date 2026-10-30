@@ -599,3 +599,31 @@ No new live walkthrough, wallet mutation, deployment, physical test, full
 cross-layer suite or local CodeQL is claimed. Historical read-only Testnet evidence
 remains above. Deferred physical/mainnet/provider/manual-wallet acceptance remains
 unrun in SF-031/#32 and SF-087/#159. No migration; delivery needs a frontend rebuild.
+
+
+## SF-178 current-base integration (2026-10-29)
+
+The supplied independent review of `29a0c9fcb63a` found no actionable source or
+security defects and no open threads; its blocker was hosted CI readiness.
+Merged snapshot/fetched main `bd9e5abfd7369834f6ee150b46c78a65b535c87f`
+cleanly in `f6afed2e971fec2f843dd5bca9449e0fa6c49a4a`. This brings in
+canonical pricing generation and upstream proof-download/fixture reliability
+repairs. Device-health behavior and prior feedback repairs remain intact.
+
+Checks after integration, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest` (complete target, including rendered three-state health coverage).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build` (17 static pages).
+- `python3 -m unittest scripts/tests/test_subscription_pricing.py scripts/tests/test_build_move_prover.py scripts/tests/test_testnet_prepared.py scripts/tests/test_testnet_queue.py` (47 tests OK).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs` (all exported routes logged out and fixture-wallet reconnected).
+- `git diff --check origin/main...HEAD` and snapshot-base ancestry.
+
+Logs: `/tmp/sf191-pricing-{manifest,build,python,browser,hydration}.log`.
+Repair/integration handoff only: pushed-head hosted CI and automatic testnet are
+pending/uncollected, and fresh independent review remains required. No hosted CI
+polling, new live walkthrough, wallet mutation, deployment, hardware test, full
+cross-layer suite or local CodeQL claimed. Historical read-only Testnet repro
+remains above. Deferred physical/mainnet/provider/manual-wallet acceptance stays
+unrun in SF-031/#32 and SF-087/#159. No migration; frontend rebuild needed for
+delivery. Coordinator alone merges after exact-head/current-base gates pass.
