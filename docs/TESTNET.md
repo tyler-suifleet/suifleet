@@ -425,3 +425,24 @@ The runtime derives the address from the selected secret and rejects any mismatc
 Preparation uses a repository-linked GHCR package named `suifleet-testnet-prepared`. Only the isolated `publish` job and the separate main-sourced image-retention job receive `packages: write`; validation has `packages: read`. Fixture deletion remains isolated in the main-only `actions: write` job and uses the same lane lock as restore/upload. Image retention preserves at least ten recent versions and all versions younger than 48 hours, verifies producer workflows are completed before deletion, touches only this package's workflow run tags and deletes at most 50 versions per pass. Queued/running validation inputs are retained regardless of age.
 
 Set pool size to `1` to return to the primary lane for future runs; let existing lane jobs drain before removing any secret or ciphertext history. Setting the variable to `3` has no effect on older main workflows; protected main rollout is required. The first hosted run must establish GHCR package access, provenance/pull success and overlapping different-lane validation. Local image, signer and offline graph tests do not establish that hosted result or a measured throughput improvement.
+
+**SF-166 CI funding repair (2026-10-30, run 41002459265).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41002459265)
+used CI lane 2 (`0xea997324…c6b4`). Its `package-upgrade.json` records no
+submitted transactions, zero allowance used, no held reservations, and a
+3,250,000,000 MIST whole-suite funding requirement. Its one successful faucet
+request credited 1,000,000,000 MIST, raising the balance from 2,193,388,189 to
+3,193,388,189 MIST: still 56,611,811 MIST short. This is an insufficient initial
+balance, rather than an application failure or an uncertain transaction.
+
+A subsequent read-only repair check verified chain `4c78adac` and the pinned
+transaction CLI SHA-256 `de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`.
+The CLI balance query for that lane returned 4,141,409,672 MIST (4,063,050,782
+address balance plus 78,358,890 coin balance), exceeding the unchanged suite
+requirement and single-pool gas minimum. Funding had already recovered; this
+worker made no faucet request or signed transaction and does not attribute the
+intervening balance change to a verified receipt. No shared-wallet mutation lock
+was needed. No fixture state, reservation, spending ceiling or retry bound was
+changed. The evidence update permits a fresh normal automatic run; it does not
+establish successful exact-head/current-base CI or testnet acceptance. Those
+checks and fresh independent review remain required before merge.
