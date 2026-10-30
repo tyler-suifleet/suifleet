@@ -661,6 +661,12 @@ export function buildTransferTx(recipients: string[], mist: bigint): Transaction
   return tx;
 }
 
+/** The policy a confirmed create-policy transaction made, from the events it returned. */
+export function policyFromEvents(events: readonly { eventType: string; bcs: Uint8Array }[]): string | undefined {
+  const event = events.find((e) => normalizeStructTag(e.eventType) === normalizeStructTag(policyCreatedType()));
+  return event && enrollment_PolicyCreatedBcs.parse(event.bcs).policy_id;
+}
+
 /** The policy a create-policy transaction made, from its own events. */
 export async function createdPolicy(client: SuiGrpcClient, digest: string): Promise<string> {
   const result = await client.getTransaction({ digest, include: { events: true } });

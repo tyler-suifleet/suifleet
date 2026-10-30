@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { buildPublishVersionTx, type ComponentVersion } from "@/lib/catalog";
 import { validateComponent } from "@/lib/component-selector";
 import { uploadArtifact, uploadRecipe, storageWarnings, type StorageInfo, type UploadProgress as Progress } from "@/lib/walrus";
-import { DEFAULT_DELIVERY, releaseProtection } from "@/lib/delivery";
+import { DEFAULT_DELIVERY, checkDelivery, releaseProtection } from "@/lib/delivery";
 import { useAccessPolicies } from "@/hooks/useAccessPolicies";
 import { useReleasePeriod } from '@/hooks/useReleasePeriod';
 import { ReleaseStorageStatus } from './ReleaseStorageStatus';
@@ -59,7 +59,13 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     setError("");
     try {
       validateIdentity();
-      if (next === 3 && rows.some(r => !r.file)) throw new Error("Choose an artifact for every platform.");
+      if (next === 3) {
+        if (rows.some(r => !r.file)) throw new Error("Choose an artifact for every platform.");
+        // Reject the delivery choice here, not after review starts uploading.
+        if (delivery.mode === "confidential" && policies.isLoading) throw new Error("Access policies are still loading. Try again in a moment.");
+        checkDelivery(delivery, policies.data ?? []);
+        if (fleetPaid && !fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason ?? "unknown reason"}`);
+      }
       setStep(next);
     } catch (e) { setError(String(e)); }
   }
@@ -117,7 +123,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
         {step === 2 && <>
           <p className="text-sm">Add your first platform artifact, then any additional platforms. Devices use the first compatible platform in this order; put wildcard fallbacks last.</p>
           {rows.map((r, i) => <fieldset key={r.id} className="rounded border p-3 space-y-3 min-w-0"><legend className="px-1 text-sm font-semibold">Platform {i + 1}</legend><div className="grid gap-3 sm:grid-cols-2"><label className="text-sm">Operating system<select className={input} value={r.os} onChange={e => change(r.id, { os: e.target.value })}>{["linux", "macos", "*"].map(os => <option key={os} value={os}>{os === "*" ? "Any OS (*)" : os}</option>)}</select></label><label className="text-sm">Architecture<select className={input} value={r.arch} onChange={e => change(r.id, { arch: e.target.value })}>{["x86_64", "aarch64", "arm", "x86", "*"].map(a => <option key={a} value={a}>{a === "*" ? "Any architecture (*)" : a}</option>)}</select></label></div>
-            <label className="block text-sm">Artifact<input type="file" className={input} onChange={e => change(r.id, { file: e.target.files?.[0] })} /></label>
+            <StagedFile file={r.file} onChange={file => change(r.id, { file })} />
             <details><summary className="cursor-pointer text-sm">Optional installer command</summary><label className="block text-sm mt-2">Install command<input className={input} value={r.install} onChange={e => change(r.id, { install: e.target.value })} /></label><p className="text-xs text-gray-500">Use an explicitly configured platform tool. Your platform owns OS installation, reboot and firmware recovery; SuiFleet assumes no service manager or image format.</p></details>
             <div className="flex flex-wrap gap-2">{rows.length > 1 && <button className={button} onClick={() => setRows(rs => rs.filter(row => row.id !== r.id))}>Remove platform {i + 1}</button>}{i > 0 && <button className={button} onClick={() => setRows(rs => { const index = rs.findIndex(row => row.id === r.id); if (index < 1) return rs; const copy = [...rs]; [copy[index - 1], copy[index]] = [copy[index], copy[index - 1]]; return copy; })}>Move platform {i + 1} earlier</button>}</div>
           </fieldset>)}
@@ -134,4 +140,17 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       {busy && <div className="space-y-2"><p role="status" className="text-sm">{phase}</p>{progress && <UploadProgress progress={progress} label={phase} />}</div>}
     </>}
   </section>;
+}
+
+/** File picker that still shows its staged file after the wizard returns to this step. */
+function StagedFile({ file, onChange }: { file?: File; onChange: (file?: File) => void }) {
+  // A remounted file input is empty; put the staged file back where the browser allows it.
+  const restore = useCallback((node: HTMLInputElement | null) => {
+    if (!node || !file || node.files?.[0] === file) return;
+    try { const transfer = new DataTransfer(); transfer.items.add(file); node.files = transfer.files; } catch { /* The line below still names the staged file. */ }
+  }, [file]);
+  return <div className="text-sm">
+    <label className="block">Artifact<input ref={restore} type="file" className={input} onChange={e => onChange(e.target.files?.[0])} /></label>
+    <p className="mt-1 text-xs text-gray-600" aria-live="polite">{file ? `Selected: ${file.name} (${file.size.toLocaleString("en-US")} bytes)` : "No file selected yet."}</p>
+  </div>;
 }
