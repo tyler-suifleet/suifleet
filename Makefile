@@ -541,6 +541,7 @@ test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+	$(RUN) node scripts/test_testnet_receipt_effects.cjs
 
 .PHONY: test-deployment-control-localnet
 test-deployment-control-localnet:

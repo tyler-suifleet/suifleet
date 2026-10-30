@@ -84,7 +84,8 @@ PACKAGE_GAS = live_common.PACKAGE_GAS  # Base publish budget: the largest fixed 
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
-                     "chain facts unavailable", "transport error", "error trying to connect")
+                     "chain facts unavailable", "transport error", "error trying to connect",
+                     "receipt-effects: transport unavailable after 3 read attempts")
 
 
 # User-authorized (2026-10-24) one-time abandonment of ONE poisoned disposable CI
@@ -169,6 +170,20 @@ def failure_class(error):
     if any(marker in text for marker in TRANSIENT_MARKERS):
         return "infrastructure"
     return "source"
+
+
+def receipt_effects(manifest, deployments):
+    """Read-only proof; retain a bounded, sanitized failure instead of losing stderr."""
+    proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
+                            str(manifest), *deployments],
+                           capture_output=True, text=True, timeout=120)
+    if proof.returncode:
+        # The child emits only these fixed diagnostics. Never publish arbitrary
+        # subprocess/provider output or turn failed assertions into transport retries.
+        if proof.stderr.strip() == 'receipt-effects: transport unavailable after 3 read attempts':
+            raise RuntimeError('receipt-effects: transport unavailable after 3 read attempts')
+        raise RuntimeError('receipt-effects: verification failed')
+    return json.loads(proof.stdout)
 
 
 def contracts_digest(path, *, compiled=None, build_tool="sui"):
@@ -972,10 +987,8 @@ def run(args):
                       "group report authorized by the member index")
             evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
             if args.network == 'testnet':
-                proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
-                                        str(root / 'release/deployment.json'), direct, via_group, via_old, failed],
-                                       capture_output=True, text=True, timeout=120, check=True)
-                evidence['report_transactions'] = json.loads(proof.stdout)
+                evidence['report_transactions'] = receipt_effects(
+                    root / 'release/deployment.json', (direct, via_group, via_old, failed))
                 assert len(evidence['report_transactions']) == 4
                 check('independent gRPC reader confirmed all four receipt-writing transaction effects')
             process.send_signal(signal.SIGINT)
