@@ -1,5 +1,7 @@
 # Unattended reciprocal PR coordination
 
+The [automatic recovery watchdog](RECOVERY_WATCHDOG.md) adds a five-minute offline progress check and a singleton, bounded recovery-agent session when the pipeline stalls. It complements the dispatcher and PR coordinator while preserving their ownership, review, CI and deployment gates.
+
 SF-040 adds a local WSL service in `tools/pr-coordinator`. Codex reviews Claude's PRs; Claude reviews Codex's. The service polls GitHub, records jobs and review receipts in `~/.local/state/pr-coordinator/reviews.sqlite3`, launches the existing installed CLIs and serially integrates approved changes. GitHub login is not model identity: implementation families and branches come from atomic `ticket` ownership, and reviewer families come from independently launched worker jobs.
 
 The committed engine, installer, tests and systemd unit can be used in another registered repository. Local configuration selects each project ID, canonical root, repository and GitHub account. Git uses that checkout's existing SSH alias. Tokens are read from `gh auth token --user ACCOUNT` into the individual command environment; they are never stored in configuration or printed. The example enables SuiFleet only; add a second project entry for Vortech with repository `therealtime/vortech`, project `vortech`, its registered root and GitHub account `therealtime`.

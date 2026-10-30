@@ -72,6 +72,20 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_privileged_jobs_reject_fork_origins_before_checkout(self):
+        import yaml
+        workflow = Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        jobs = yaml.safe_load(workflow.read_text())['jobs']
+        guard = "(github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)"
+        for name in ('queue-plan', 'plan', 'prepare', 'publish', 'validate'):
+            with self.subTest(job=name):
+                # Guard the whole job, including build actions with package-write
+                # authority; a later Python verifier alone is not a job boundary.
+                self.assertIn(guard, jobs[name]['if'])
+                self.assertIn("github.ref == 'refs/heads/main'", jobs[name]['if'])
+        self.assertIn("needs.queue-plan.outputs.run == 'true'", jobs['plan']['if'])
+        self.assertIn("needs.prepare.outputs.run == 'true'", jobs['validate']['if'])
+
     def test_preparation_has_only_workflow_run_cache_scope(self):
         import yaml
         workflows = Path(__file__).resolve().parents[2]/'.github/workflows'
@@ -188,6 +202,23 @@ class PreparedTests(unittest.TestCase):
         import yaml
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs'];prep=jobs['prepare'];live=jobs['validate'];prune=jobs['prune-fixture-history']
+        # Candidate clones must immediately compare HEAD with the authenticated SHA
+        # while leaving the trusted controller checkout unchanged.
+        for job in (prep, live):
+            source = 'needs.plan' if job is prep else 'steps.plan'
+            steps = job['steps']
+            index = next(i for i, step in enumerate(steps)
+                         if step.get('name') == 'Checkout authenticated test revision')
+            checkout, verify = steps[index:index+2]
+            self.assertEqual(checkout['run'],
+                             'python3 "$RUNNER_TEMP/testnet_ci.py" --checkout-candidate candidate')
+            self.assertEqual(checkout['env']['TEST_HEAD'], '${{ ' + source + '.outputs.head }}')
+            self.assertEqual(checkout['env']['BASE_REF'], '${{ ' + source + '.outputs.base }}')
+            self.assertEqual(verify['working-directory'], 'candidate')
+            self.assertEqual(verify['if'], checkout['if'])
+            self.assertEqual(verify['env']['TEST_HEAD'], '${{ ' + source + '.outputs.head }}')
+            self.assertEqual(verify['run'],
+                             'python3 "$RUNNER_TEMP/testnet_ci.py" --verify-checkout')
         self.assertEqual(prep['needs'], 'plan')
         self.assertEqual(prep['permissions'], {'contents':'read', 'actions':'read', 'pull-requests':'read'})
         for name in ('plan', 'preparation-status'):
