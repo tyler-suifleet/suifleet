@@ -61,10 +61,10 @@ export function useFleetBlobStore() {
     refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });
   const retention = policy.data?.policy ? { target: renewalTarget, maxFee, setTarget: setRenewalTarget, setMaxFee } : undefined;
-  if (!target) return { reason, retention };
-  if (policy.error) return { reason: formatStorageQueryError(policy.error, "Storage retention"), retention };
+  if (!target) return { reason, retention, configured: false };
+  if (policy.error) return { reason: formatStorageQueryError(policy.error, "Storage retention"), retention, configured: true };
   const store: BlobStore = (body, progress) => uploadToFleetStorage(client, { ...target,
     retention: retention ? { target: renewalTarget, maxFee: parseToken(maxFee) } : undefined }, body,
     (transaction) => mutation.mutateAsync({ transaction }), progress);
-  return { store, storage, retention };
+  return { store, storage, retention, configured: true };
 }
