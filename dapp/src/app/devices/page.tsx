@@ -5,6 +5,7 @@ import { Fragment, useEffect, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
+import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { buildIndexGroupTx, existingInboxes, inboxSupported, LISTING_BATCH, unlistedMembers } from "@/lib/fleet-inbox";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useDevices } from "@/hooks/useDevices";
@@ -12,6 +13,10 @@ import { useGroups } from "@/hooks/useGroups";
 import { useDeployments } from "@/hooks/useDeployments";
 import { useDesiredStates } from "@/hooks/useDesiredStates";
 import { useFleetHealth } from "@/hooks/useFleetHealth";
+import { usePendingRows } from "@/hooks/usePendingRows";
+import { eventIds } from "@/lib/pending-rows";
+import { moveType } from "@/lib/deployment-manifest";
+import { GroupCreatedBcs } from "@/lib/move-bcs";
 import { lastSeenLabel } from "@/lib/telemetry";
 import { buildDesiredRevisionTx, desiredConflicts } from "@/lib/desired-state";
 import {
@@ -61,8 +66,14 @@ function DevicesTab() {
   const { fleet } = useFleetSelection();
   const dataConfig = useFleetDataConfig();
   const account = useCurrentAccount();
-  const { data: devices = [], isLoading, refetch } = useDevices();
+  const { data: devices = [], isLoading, isSuccess, refetch } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
+  // Keyed by device address: registration knows it before the object ID exists.
+  const pending = usePendingRows("devices", isSuccess ? devices.map((d) => d.deviceAddress) : undefined, refetch);
+  const adding = pending.waiting.filter((row) => row.kind === "create");
+  // A registration not listed yet blocks another: the contract does not reject a second device for the same address.
+  const registering = isPending || adding.length > 0;
+  const removing = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => normalizeSuiAddress(row.id)));
   const [showModal, setShowModal] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [technical, setTechnical] = useState(false);
@@ -92,16 +103,20 @@ function DevicesTab() {
   function handleRegister(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const name = fd.get("name") as string, deviceAddress = fd.get("deviceAddress") as string;
+    if (registering) return;
+    const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === normalizeSuiAddress(deviceAddress));
+    if (unlisted) { alert(`“${unlisted.label}” is already registered with this address but is not listed yet. Refresh the page in a minute before registering it again.`); return; }
     const tx = buildRegisterDeviceTx(
-      fd.get("name") as string,
-      fd.get("deviceAddress") as string,
+      name,
+      deviceAddress,
       fd.get("arch") as string,
       account!.address, fleet,
     );
     signAndExecute(
       { transaction: tx },
       {
-        onSuccess: () => { setShowModal(false); setTimeout(() => refetch(), 3000); },
+        onSuccess: () => { setShowModal(false); pending.add([{ id: deviceAddress, label: name, kind: "create" }]); },
         onError: (err) => alert(`Registration failed: ${registrationFailure(err.message)}`),
       }
     );
@@ -117,7 +132,7 @@ function DevicesTab() {
           <label className="flex items-center gap-1 text-xs text-gray-500">
             <input type="checkbox" checked={technical} onChange={(e) => setTechnical(e.target.checked)} /> Technical details
           </label>
-          <button onClick={() => setShowModal(true)} className="text-xs text-gray-500 hover:underline">Register by address</button>
+          <button onClick={() => setShowModal(true)} disabled={registering} className="text-xs text-gray-500 hover:underline disabled:opacity-50">Register by address</button>
           <Link href="/enrollment" className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">Add devices</Link>
         </div>
       </div>
@@ -154,10 +169,16 @@ function DevicesTab() {
         </form>
       )}
       {linkedDevice && !isLoading && !devices.some(device => device.objectId === linkedDevice) && <p role="alert">This device is unavailable in your fleet. Its history may still be visible on Deployments.</p>}
+      {pending.stale.map((row) => (
+        <p key={row.id} role="status" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-2">
+          {row.kind === "create" ? `“${row.label}” was registered but is not listed yet.` : `“${row.label}” was removed but is still listed.`} Refresh the page in a minute before repeating this action.{" "}
+          <button className="underline" onClick={() => pending.dismiss(row.id)}>Dismiss</button>
+        </p>
+      ))}
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
-        ) : devices.length === 0 ? (
+        ) : devices.length === 0 && adding.length === 0 ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No core devices registered.</p>
             <Link href="/enrollment" className="mt-2 inline-block text-xs text-[#4DA2FF] hover:underline">Enroll your first devices</Link>
@@ -175,10 +196,17 @@ function DevicesTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {shown.length === 0 && <tr><td colSpan={technical ? 9 : 7} className="p-6 text-center text-sm text-gray-400">No devices match the filter.</td></tr>}
+              {adding.map((row) => (
+                <tr key={row.id} className="bg-blue-50/50" aria-busy="true">
+                  <td className="py-3 pl-4" />
+                  <td className="py-3 px-4 text-xs text-gray-600" role="status">Registered · adding to the list…</td>
+                  <td colSpan={technical ? 7 : 5} className="py-3 pr-4 font-medium">{row.label}</td>
+                </tr>
+              ))}
+              {devices.length > 0 && shown.length === 0 && <tr><td colSpan={technical ? 9 : 7} className="p-6 text-center text-sm text-gray-400">No devices match the filter.</td></tr>}
               {shown.map((d) => (
                 <Fragment key={d.objectId}>
-                <tr className="hover:bg-gray-50">
+                <tr className="hover:bg-gray-50" aria-busy={removing.has(normalizeSuiAddress(d.deviceAddress)) || undefined}>
                   <td className="py-3 pl-4"><input type="checkbox" aria-label={`Select ${d.name}`} checked={selected.has(d.objectId)}
                     onChange={(e) => toggle([d.objectId], e.target.checked)} /></td>
                   <td className="py-3 px-4">
@@ -211,6 +239,7 @@ function DevicesTab() {
                     <td className="py-3 pr-4 font-mono text-xs text-gray-400">{d.objectId.slice(0, 14)}…</td>
                   </>}
                   <td className="py-3 flex items-center gap-3">
+                    {removing.has(normalizeSuiAddress(d.deviceAddress)) ? <span role="status" className="text-xs text-gray-600">Removed · updating the list…</span> : <>
                     {!d.ownerCapId && !d.managed && (
                       <button
                         disabled={isPending}
@@ -235,7 +264,7 @@ function DevicesTab() {
                         signAndExecute(
                           { transaction: fleet ? await buildDeregisterManagedDeviceTx(client, fleet, d.objectId) : buildDeregisterDeviceTx(d) },
                           {
-                            onSuccess: () => setTimeout(() => refetch(), 3000),
+                            onSuccess: () => pending.add([{ id: d.deviceAddress, label: d.name, kind: "delete" }]),
                             onError: (err) => alert(`Failed: ${err.message}`),
                           }
                         );
@@ -244,6 +273,7 @@ function DevicesTab() {
                     >
                       Remove
                     </button>
+                    </>}
                   </td>
                 </tr>
                 {expanded === d.objectId && (
@@ -291,7 +321,7 @@ function DevicesTab() {
                 <option value="riscv64">riscv64</option>
               </select>
             </div>
-            <ModalButtons isPending={isPending || !!fleet && fleet.activeDevices >= fleet.deviceLimit} label="Register" onCancel={() => setShowModal(false)} />
+            <ModalButtons isPending={registering || !!fleet && fleet.activeDevices >= fleet.deviceLimit} label="Register" onCancel={() => setShowModal(false)} />
           </form>
         </Modal>
       )}
@@ -305,9 +335,12 @@ function GroupsTab() {
   const { fleet } = useFleetSelection();
   const account = useCurrentAccount();
   const client = useCurrentClient();
-  const { data: groups = [], isLoading, refetch } = useGroups();
+  const { data: groups = [], isLoading, isSuccess, refetch } = useGroups();
   const { data: devices = [] } = useDevices();
   const { mutate: signAndExecute, isPending } = useFleetTransaction();
+  const pending = usePendingRows("groups", isSuccess ? groups.map((g) => g.objectId) : undefined, refetch);
+  const deleting = new Set(pending.waiting.filter((row) => row.kind === "delete").map((row) => row.id));
+  const creating = pending.waiting.some((row) => row.kind === "create");
   const [showCreate, setShowCreate] = useState(false);
   const [managingGroup, setManagingGroup] = useState<string | null>(null);
   const { data: desired = {}, refetch: refetchDesired } = useDesiredStates(groups.map((g) => g.objectId));
@@ -342,10 +375,16 @@ function GroupsTab() {
   function handleCreateGroup(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const name = fd.get("name") as string;
     signAndExecute(
-      { transaction: buildCreateGroupTx(fd.get("name") as string, fd.get("description") as string, fleet) },
+      { transaction: buildCreateGroupTx(name, fd.get("description") as string, fleet) },
       {
-        onSuccess: () => { setShowCreate(false); setTimeout(() => refetch(), 3000); },
+        onSuccess: (result) => {
+          setShowCreate(false);
+          const ids = eventIds(result.events, moveType("device_group::GroupCreated"), (bytes) => GroupCreatedBcs.parse(bytes).group_id);
+          if (ids.length) pending.add(ids.map((id) => ({ id, label: name, kind: "create" as const })));
+          else void refetch();
+        },
         onError: (err) => alert(`Failed: ${err.message}`),
       }
     );
@@ -403,10 +442,16 @@ function GroupsTab() {
   return (
     <>
       <div className="flex justify-end">
-        <button onClick={() => setShowCreate(true)} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded">
-          Create group
+        <button onClick={() => setShowCreate(true)} disabled={isPending || creating} className="bg-[#4DA2FF] hover:bg-[#2e8ed4] text-white text-sm px-4 py-2 rounded disabled:opacity-50">
+          {creating ? "Adding group…" : "Create group"}
         </button>
       </div>
+      {pending.stale.map((row) => (
+        <p key={row.id} role="status" className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-2">
+          {row.kind === "create" ? `Group “${row.label}” was created but is not listed yet.` : `Group “${row.label}” was deleted but is still listed.`} Refresh the page in a minute before repeating this action.{" "}
+          <button className="underline" onClick={() => pending.dismiss(row.id)}>Dismiss</button>
+        </p>
+      ))}
 
       {conflicts.length > 0 && (
         <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-4 py-3 space-y-1">
@@ -424,7 +469,7 @@ function GroupsTab() {
       <div className="bg-white border border-gray-200 rounded">
         {isLoading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
-        ) : groups.length === 0 ? (
+        ) : groups.length === 0 && !creating ? (
           <div className="p-12 text-center">
             <p className="text-sm text-gray-500">No device groups yet.</p>
             <button onClick={() => setShowCreate(true)} className="mt-2 text-xs text-[#4DA2FF] hover:underline">Create your first group</button>
@@ -439,8 +484,14 @@ function GroupsTab() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
+              {pending.waiting.filter((row) => row.kind === "create").map((row) => (
+                <tr key={row.id} className="bg-blue-50/50" aria-busy="true">
+                  <td className="py-3 px-4 font-medium">{row.label}</td>
+                  <td colSpan={5} className="py-3 pr-4 text-xs text-gray-600" role="status">Created · adding to the list…</td>
+                </tr>
+              ))}
               {groups.map((g) => (
-                <tr key={g.objectId} className="hover:bg-gray-50">
+                <tr key={g.objectId} className="hover:bg-gray-50" aria-busy={deleting.has(g.objectId) || undefined}>
                   <td className="py-3 px-4 font-medium">{g.name}</td>
                   <td className="py-3 pr-4 text-gray-500 text-xs">{g.description || "—"}</td>
                   <td className="py-3 pr-4 text-gray-500">{g.deviceIds.length}</td>
@@ -451,6 +502,7 @@ function GroupsTab() {
                   </td>
                   <td className="py-3 pr-4 font-mono text-xs text-gray-400">{g.objectId.slice(0, 14)}…</td>
                   <td className="py-3 flex items-center gap-3">
+                    {deleting.has(g.objectId) ? <span role="status" className="text-xs text-gray-600">Deleted · removing from the list…</span> : <>
                     <button onClick={() => setManagingGroup(g.objectId)} className="text-xs text-[#4DA2FF] hover:underline">
                       Manage
                     </button>
@@ -461,7 +513,7 @@ function GroupsTab() {
                         signAndExecute(
                           { transaction: buildDeleteGroupTx(g.objectId, fleet) },
                           {
-                            onSuccess: () => setTimeout(() => refetch(), 3000),
+                            onSuccess: () => pending.add([{ id: g.objectId, label: g.name, kind: "delete" }]),
                             onError: (err) => alert(`Failed: ${err.message}`),
                           }
                         );
@@ -470,6 +522,7 @@ function GroupsTab() {
                     >
                       Delete
                     </button>
+                    </>}
                   </td>
                 </tr>
               ))}
