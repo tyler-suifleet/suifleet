@@ -127,11 +127,12 @@ def validate(manifest):
             raise ValueError("unsupported " + client + " version")
     for name in ("publisher_url", "aggregator_url"):
         endpoint(manifest["walrus"][name])
-    mirrors = manifest["walrus"].get("aggregator_urls", [])
-    if not isinstance(mirrors, list):
-        raise ValueError("aggregator_urls must be a list")
-    for url in mirrors:
-        endpoint(url)
+    for name in ("aggregator_urls", "publisher_urls"):
+        mirrors = manifest["walrus"].get(name, [])
+        if not isinstance(mirrors, list) or (name in manifest["walrus"] and not mirrors):
+            raise ValueError(name + " must be a nonempty list")
+        for url in mirrors:
+            endpoint(url)
     return manifest
 
 
@@ -237,6 +238,10 @@ def resolve(args, read=chain_facts):
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.1" if all(n in table for n in SHARD_TYPES) else "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.2" if all(n in table for n in SHARD_TYPES) else "0.2.1", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
+    if getattr(args, "publisher_urls", None):
+        manifest["walrus"]["publisher_urls"] = args.publisher_urls
+    elif getattr(args, "publisher_mirror", None):
+        manifest["walrus"]["publisher_urls"] = [args.publisher, *args.publisher_mirror]
     if getattr(args, "treasury_payee", None) is not None:
         manifest["treasury_payee"] = args.treasury_payee
     if getattr(args, "aggregator_mirror", None):
@@ -291,6 +296,7 @@ def main():
     resolve_parser = sub.add_parser("resolve")
     for name in ("rpc", "chain-identifier", "package", "upgrade-cap", "registry", "publisher", "aggregator", "network"):
         resolve_parser.add_argument("--" + name, required=True)
+    resolve_parser.add_argument("--publisher-mirror", action="append", help="additional publisher, in failover order")
     resolve_parser.add_argument("--aggregator-mirror", action="append", help="ordered device mirror, repeat for each URL; replaces legacy device endpoint")
     resolve_parser.add_argument("--treasury-payee", help="reviewed canonical treasury multisig address; omitted disables payments")
     resolve_parser.add_argument("--output", type=Path, required=True)
