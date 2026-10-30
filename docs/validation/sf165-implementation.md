@@ -816,3 +816,38 @@ Hosted ordinary/security CI and automatic Testnet are pending for the new pushed
 head; not watched or polled. Next: coordinator exact-head/current-base checks and
 fresh independent review before serial integration. Manual real-wallet/provider,
 physical and actual-mainnet acceptance remains explicitly unrun in #32/#159.
+
+## SF-206 base integration (2026-10-29)
+
+The supplied independent review reports no new actionable source/security
+findings and no open review threads. Integrated snapshot/current main
+`00b1076c5115f8b59d167da249d2afc30d3a3c66` cleanly in `3ee5959a`.
+Only upstream review reservation recovery and tracking/documentation changed;
+release-storage behavior, contracts and interfaces are unchanged. No migration.
+
+After integration, network-none `suifleet-sf165:ci-repair` with UID:GID,
+identical checkout/pnpm-store mounts, HOME=/tmp and INSIDE_DEV_CONTAINER=1:
+`make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+&& node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs
+&& node scripts/test_fleet_budget.cjs && node scripts/test_rollout_form.cjs &&
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+-p test_live_release_storage.py`: PASS (including offline prerequisites,
+TypeScript, static production export and three signer-policy tests).
+Log: `/tmp/sf165-base00b107-checks.log`. Existing non-fatal Tailwind module-type
+warning and prerequisite skips remain explicit.
+
+Host `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover
+-s tools/pr-coordinator/tests -p test_coordinator.py`: 58 tests PASS
+(`/tmp/sf165-base00b107-coordinator.log`). Host
+`CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+`test_onboarding_browser.cjs`, `test_components_browser.cjs`,
+`test_upload_browser.cjs` and `test_wallet_browser.cjs` under scripts/:
+all PASS with fixture chain/wallet/storage. `git diff --check`: PASS.
+
+No new Move/full OTA/public-network transaction ran; no wallet or mutation lock
+was used. Existing publish/extend receipts remain historical evidence. The
+stale-pool fail-closed residual is unchanged. Hosted ordinary/security CI and
+automatic Testnet are pending for the new pushed head; not watched or polled.
+Next: coordinator exact-head/current-base checks and fresh independent review.
+Manual real-wallet/production-provider, physical and actual-mainnet acceptance
+remains explicitly unrun in #32/#159. No deployment or hardware operations.
