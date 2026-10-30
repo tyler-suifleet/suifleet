@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
@@ -235,8 +236,8 @@ function SettingsForm({ table }: { table: PriceTable }) {
 
     <p className="text-xs text-gray-600">Estimated costs can change. Your account approval app shows the actual network fee before you confirm.</p>
     <details className="text-xs text-gray-700 border rounded p-2" data-testid="quote"><summary>Technical cost assumptions and exchange rates</summary>
-      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: controlled update-result and test-network health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
-      <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${walrusError})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
+      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${formatStorageQueryError(gasError, "Gas price")})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: controlled update-result and test-network health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
+      <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${formatStorageQueryError(walrusError, "Walrus price")})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
       <p>USD: SUI ${quote.usd.SUI}, WAL ${quote.usd.WAL}, {quote.usdSource}, {quoteDate(quote.usdObservedAt)}.{" "}
         <button type="button" className="underline" disabled={usdLoading} onClick={() => void refreshUsd()}>Fetch live USD prices from CoinGecko</button>
         {usdError && <span role="alert"> {usdError}</span>}</p>
@@ -257,7 +258,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
-      {saved.error && <p role="alert">Saved settings unavailable: {saved.error.message}</p>}
+      {saved.error && <p role="alert">{formatStorageQueryError(saved.error, "Saved fleet settings")}</p>}
       {saved.data === null && <p data-testid="saved">No settings saved yet: devices keep their local configuration until you save.</p>}
       {saved.data && <details data-testid="saved"><summary>Current saved reporting and storage settings</summary><p>Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p></details>}
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
