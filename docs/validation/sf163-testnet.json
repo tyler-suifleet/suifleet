@@ -1,0 +1,129 @@
+{
+  "model": "gpt-6.1-sol",
+  "limit_mist": 100000000,
+  "transactions": [
+    {
+      "label": "create library rollout",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "EL9ceYsYWMC6pNwNPJAYZBoBW3nrJGaozoAPaa4295gW",
+      "gas_mist": 17005600,
+      "allowance_used_mist": 17005600,
+      "gas_used": {
+        "computationCost": "1000000",
+        "storageCost": "16005600",
+        "storageRebate": "0",
+        "nonRefundableStorageFee": "0"
+      },
+      "signed_net_mist": 17005600,
+      "checkpoint": "399839381",
+      "effects_verified_independently": true
+    },
+    {
+      "label": "delete transient rollout",
+      "gas_budget_mist": 30000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "5XxUcNXMDPP2JevKvsJ9CdhpRQPaMwGSYvM5b4vVfr6m",
+      "gas_mist": 0,
+      "allowance_used_mist": 17005600,
+      "gas_used": {
+        "computationCost": "1000000",
+        "storageCost": "0",
+        "storageRebate": "16003999",
+        "nonRefundableStorageFee": "1601"
+      },
+      "signed_net_mist": -15003999,
+      "checkpoint": "399839435",
+      "effects_verified_independently": true
+    }
+  ],
+  "library": {
+    "chain": "4c78adac",
+    "package": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+    "upgradeCap": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
+    "versionObject": "0x5fc4aea749d6e82c1c8163997ab0d3b44c45f67f6ef7f88130d725a205aa12c1",
+    "deviceName": "lab-gateway-01",
+    "input": {
+      "component": "com.acme.GatewayAgent",
+      "version": "1.4.2",
+      "recipe": "uBzVZ0UOCKvnmP984KA60QVc5vSb1DpdZRmbBVfvxMg",
+      "artifactSha256": "c7ba9681235bb5041c19961d265515359495cd3d01247e85ea7344b14f1cf7d4",
+      "recipeSha256": "3182cd9d81b45ce45fcc8c458196872f34c33c5044a3632993a8070683e66380",
+      "cohorts": [
+        [
+          "0x913cdd67e83b79f79e709b676be331bbe93720de693d5bc667005954315c5898"
+        ]
+      ],
+      "concurrency": 1,
+      "rateCount": 1,
+      "minimumSamples": 1,
+      "failureBps": 1000,
+      "rateWindowMs": 60000,
+      "bakeMs": 300000,
+      "offlineTimeoutMs": 3600000
+    }
+  },
+  "starting_balance_mist": 503616388,
+  "pending_digest": null,
+  "rollout": "0x80aae1a49a1b05f4a1306fae2e7475a6eb6d6335469e2577dbbcf82892bf1ade",
+  "readback": {
+    "verified": true,
+    "revision": "1",
+    "members": [
+      "0x913cdd67e83b79f79e709b676be331bbe93720de693d5bc667005954315c5898"
+    ],
+    "policy": {
+      "concurrency": "1",
+      "rate_count": "1",
+      "rate_window_ms": "60000",
+      "bake_ms": "300000",
+      "minimum_samples": "1",
+      "failure_bps": "1000",
+      "offline_timeout_ms": "3600000"
+    },
+    "zero_admissions": true
+  },
+  "cleanup": "deleted",
+  "allowance_used_mist": 17005600,
+  "signed_net_mist": 2001601,
+  "creation_event_matches_library_recipe_and_targets": true,
+  "checks": [
+    "Fresh chain 4c78adac and dedicated agent account verified before writes",
+    "Package BCS, every manifest type origin, registry and UpgradeCap version/ownership verified",
+    "Fresh epoch protocol supported by checksum-pinned transaction CLI",
+    "Current immutable catalog version verified; real libraryRecipe/policyInput/buildRolloutTx used",
+    "Unsigned transaction sender, gas owner, budget and exact call sequence verified before signing",
+    "Global wallet lease asserted before both mutations; released after cleanup",
+    "All policy values and initial zero admissions read back before cleanup",
+    "Both transaction effects independently read as success; creation event matches library recipe and targets"
+  ],
+  "limits": [
+    "No devices admitted or executed; existing app/device/catalog objects preserved",
+    "No library publication, artifact upload, package upgrade or faucet request",
+    "No physical, actual mainnet, manual real-wallet or production-provider acceptance; retain #32/#159",
+    "Pre-sign runner setup refusals submitted zero transactions; hosted CI and independent review pending"
+  ],
+  "toolchain": {
+    "node": "22.22.2 for make validation; 24.21.0 for host acceptance orchestration",
+    "pnpm": "11.0.8 for make validation",
+    "transaction_cli": "1.82.1-987123842623",
+    "transaction_cli_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+    "wallet_config": "dedicated agent client.yaml, public runtime copy for CLI metadata; original key mounted read-only"
+  },
+  "implementation_head": "3922ba60bab598e6cb36a5a758966b6d01e0bd87",
+  "verification": {
+    "make RUN= dapp-typecheck": "PASS; host mode with pinned Node 22.22.2 and pnpm 11.0.8; installed-container-only toolchain test skipped by its normal host condition",
+    "make RUN= dapp-build": "PASS; static production build",
+    "node scripts/test_rollout_form.cjs": "PASS",
+    "node scripts/test_rollout_builder_browser.cjs": "PASS; real Chromium with inventory/catalog/signing fixtures",
+    "node scripts/test_rollout.cjs": "PASS",
+    "node scripts/test_dashboard_views.cjs": "PASS",
+    "git diff --check": "PASS"
+  },
+  "setup_limitations": [
+    "An initial INSIDE_DEV_CONTAINER=1 host invocation failed its container-only installed Sui check; corrected to normal host test mode with make RUN= and completed the full target. No test failure was ignored.",
+    "Initial live pre-sign setup attempts failed on container-specific keystore paths, CLI config write requirements and an incorrect protocol-field lookup. All stopped before signing/submission; the final run used fresh verification, isolated public config metadata and a read-only keystore mount."
+  ]
+}
