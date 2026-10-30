@@ -453,3 +453,38 @@ reads().then(() => console.log("PASS: account reads follow the budget index and 
   }
   console.log('PASS: budget pause/resume and withdrawal survive failed, stale-error and loading account queries without misleading account UI');
 }
+
+// Both registration error handlers must survive integration with entitlement checks.
+const { registrationFailure } = load('lib/customer-entitlements.ts');
+assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in fleet_budget::pay, abort code: 11'))), /no longer has enough SUI/);
+assert.match(registrationFailure(budget.enrollmentError(Error('MoveAbort in customer::register_device, abort code: 2'))), /Device entitlements/);
+
+// Get started renders an honest enrollment preview even for a newly empty budget.
+const React = appRequire('react');
+const { renderToStaticMarkup } = appRequire('react-dom/server');
+const { BudgetEnrollment } = load('components/BudgetEnrollment.tsx');
+for (const [balance, available] of [[0n, false], [59_999_999n, false], [60_000_000n, true], [560_000_000n, true]]) {
+  const view = { balance, defaultLimits: budget.DEFAULT_LIMITS };
+  const html = renderToStaticMarkup(React.createElement(BudgetEnrollment, { budget: view, selected: true, onChange() {} }));
+  assert.equal(html.includes('checked=""'), available, `preselection for ${balance}`);
+  assert.equal(html.includes('disabled=""'), !available, `disabled for ${balance}`);
+  assert.equal(html.includes('href="/budget"'), !available, 'insufficient preview links to funding');
+  assert.equal(html.includes('needs at least 0.06 SUI'), !available);
+  assert.equal(budget.canFundEnrollment(view), available);
+}
+const deselected = renderToStaticMarkup(React.createElement(BudgetEnrollment, {
+  budget: { balance: 560_000_000n, defaultLimits: budget.DEFAULT_LIMITS }, selected: false, onChange() {},
+}));
+assert.ok(!deselected.includes('checked=""'), 'respect opting out of funding');
+for (const message of [
+  'MoveAbort(MoveLocation { module: ModuleId { name: Identifier("fleet_budget") }, function_name: Some("pay") }, 11)',
+  'fleet_budget::pay abort code 11',
+  'MoveAbort in fleet_budget::allocate, abort code: 11',
+]) {
+  assert.match(budget.enrollmentError(Error(message)), /no longer has enough SUI/);
+  assert.doesNotMatch(budget.enrollmentError(Error(message)), /MoveAbort|abort code/);
+}
+for (const message of ['User rejected signing', 'fleet_budget::pay abort code 1', 'other_module abort code 11']) {
+  assert.equal(budget.enrollmentError(Error(message)), message);
+}
+console.log('PASS: enrollment component empty/insufficient/exact/sufficient balance, opt-out, funding link and balance-race errors');
