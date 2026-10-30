@@ -1,4 +1,4 @@
-import { NETWORK, WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER } from "./constants";
+import { NETWORK, WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRUS_PUBLISHER, WALRUS_PUBLISHERS, WALRUS_AGGREGATORS } from "./constants";
 
 /**
  * Who can renew the stored blob: only the owner of its Sui `Blob` object can
@@ -8,6 +8,7 @@ import { NETWORK, WALRUS_AGGREGATOR, WALRUS_EPOCHS, WALRUS_MAX_COST_FROST, WALRU
 export type StorageOwner = "you" | "fleet" | "publisher" | "unknown";
 
 export interface StorageInfo {
+  publisherUrl?: string;
   blobId: string;
   /** Sui object ID of the Walrus `Blob`; needed to extend its storage period. */
   blobObjectId?: string;
@@ -127,9 +128,47 @@ export async function protect(plaintext: Uint8Array, kind: BlobKind, sha256: str
 }
 
 class TransientPublisherError extends Error {}
+class PublisherHttpError extends Error {
+  constructor(public status: number, body: string) { super(`Walrus upload failed: HTTP ${status} ${body}`); }
+}
+class UploadCancelledError extends Error {}
+export class PublisherError extends Error {
+  constructor(public endpoint: string, public details: string, reason = "publisher response or connection error") {
+    super(`Upload to ${endpoint} failed (${reason}). Try again or add another publisher in Storage endpoints.`);
+  }
+}
+let sessionPublishers: string[] = [];
+const sessionKey = `suifleet:publishers:${NETWORK}:${WALRUS_PUBLISHER}`;
+export function sessionEndpoints(): string[] {
+  if (typeof sessionStorage === "undefined") return sessionPublishers;
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(sessionKey) ?? "[]");
+    if (Array.isArray(saved) && saved.length <= 16) return saved.map(validatePublisher);
+  } catch { /* Invalid saved overrides are ignored. */ }
+  return sessionPublishers;
+}
+export function validatePublisher(value: string): string {
+  const url = new URL(value.trim());
+  if ((url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))) || url.username || url.password || url.search || url.hash) throw new Error("Use an HTTPS publisher URL without credentials, query or fragment (HTTP is allowed on loopback).");
+  return url.href.replace(/\/$/, "");
+}
+export function addSessionPublisher(value: string): string {
+  const url = validatePublisher(value);
+  const next = [...new Set([url, ...sessionEndpoints()])].slice(0, 16);
+  if (typeof sessionStorage !== "undefined") sessionStorage.setItem(sessionKey, JSON.stringify(next));
+  sessionPublishers = next;
+  return url;
+}
 
-// Only the default public Testnet service gets alternate public publishers.
-// Custom endpoints and paid fleet storage keep their explicitly chosen route.
+export function removeSessionPublisher(value: string): void {
+  const next = sessionEndpoints().filter(url => url !== value);
+  if (typeof sessionStorage !== "undefined") sessionStorage.setItem(sessionKey, JSON.stringify(next));
+  sessionPublishers = next;
+}
+
+
+// Preserve the existing default Testnet failover for legacy single-URL manifests.
+// Explicit ordered lists and session overrides select their own routes.
 const TESTNET_PUBLISHERS = [
   "https://publisher.walrus-testnet.walrus.space",
   "https://publisher.walrus-testnet.h2o-nodes.com",
@@ -137,18 +176,29 @@ const TESTNET_PUBLISHERS = [
 ];
 
 async function uploadBlob(body: Uint8Array, contentType: string, owner: string | null, progress?: UploadObserver): Promise<StorageInfo> {
-  const publishers = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
+  const defaults = NETWORK === "testnet" && WALRUS_PUBLISHER === TESTNET_PUBLISHERS[0]
     ? TESTNET_PUBLISHERS : [WALRUS_PUBLISHER];
+  const overrides = sessionEndpoints();
+  const publishers = [...new Set([...overrides, ...(WALRUS_PUBLISHERS ?? defaults)])];
+  const failures: string[] = [];
   // Bound fallback attempts, allowing transfer time at 128 KiB/s plus two
   // minutes for certification. Explicit custom/mainnet routes retain no deadline.
   const timeoutMs = publishers.length > 1 ? 120_000 + Math.ceil(body.byteLength / 131_072) * 1_000 : undefined;
   for (const [index, publisher] of publishers.entries()) {
     try {
-      return await uploadToPublisher(publisher, body, contentType, owner, progress, timeoutMs);
+      const storage = await uploadToPublisher(publisher, body, contentType, owner, progress, timeoutMs);
+      return { ...storage, publisherUrl: publisher };
     } catch (error) {
       // Content-addressed bytes are unchanged, and public publishers pay for
-      // storage. Never replay a wallet transaction or retry malformed success.
-      if (!(error instanceof TransientPublisherError) || index === publishers.length - 1) throw error;
+      // storage. Never replay a wallet transaction; only session overrides may
+      // fall through after a rejected request or malformed response.
+      if (error instanceof UploadCancelledError) throw error;
+      failures.push(`${publisher}: ${error instanceof Error ? error.message : String(error)}`);
+      if ((!(error instanceof TransientPublisherError) && !overrides.includes(publisher)) || index === publishers.length - 1) {
+        const reason = error instanceof PublisherHttpError ? `HTTP ${error.status}`
+          : error instanceof TransientPublisherError ? "publisher unavailable or network failure" : "invalid publisher response";
+        throw new PublisherError(publisher, failures.join("\n"), reason);
+      }
     }
   }
   throw new Error("No Walrus publisher configured");
@@ -169,11 +219,11 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
       }));
       request.upload.addEventListener("load", () => progress({ phase: "processing", loaded: body.byteLength }));
       request.onerror = () => reject(new TransientPublisherError("Walrus upload failed: network error"));
-      request.onabort = () => reject(new Error("Walrus upload cancelled"));
+      request.onabort = () => reject(new UploadCancelledError("Walrus upload cancelled"));
       request.ontimeout = () => reject(new TransientPublisherError("Walrus upload timed out"));
       request.onload = () => {
         try {
-          if (request.status < 200 || request.status >= 300) throw new (request.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${request.status} ${request.responseText}`);
+          if (request.status < 200 || request.status >= 300) throw request.status >= 500 ? new TransientPublisherError(`Walrus upload failed: HTTP ${request.status} ${request.responseText}`) : new PublisherHttpError(request.status, request.responseText);
           const storage = parseStorage(JSON.parse(request.responseText), owner);
           progress({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
           resolve(storage);
@@ -200,7 +250,8 @@ async function uploadToPublisher(publisher: string, body: Uint8Array, contentTyp
   }
 
   if (!res.ok) {
-    throw new (res.status >= 500 ? TransientPublisherError : Error)(`Walrus upload failed: ${res.status} ${await res.text()}`);
+    const body = await res.text();
+    throw res.status >= 500 ? new TransientPublisherError(`Walrus upload failed: HTTP ${res.status} ${body}`) : new PublisherHttpError(res.status, body);
   }
   const storage = parseStorage(await res.json(), owner);
   progress?.({ phase: "complete", loaded: body.byteLength, total: body.byteLength });
@@ -233,7 +284,43 @@ export async function uploadRecipe(recipe: ComponentRecipe, owner: string | null
 }
 
 export function blobDownloadUrl(blobId: string): string {
-  return `${WALRUS_AGGREGATOR}/v1/blobs/${blobId}`;
+  return `${blobReadEndpoints.get(blobId) ?? WALRUS_AGGREGATORS?.[0] ?? WALRUS_AGGREGATOR}/v1/blobs/${encodeURIComponent(blobId)}`;
+}
+
+// Used by the archive readers too; explicit injected/custom transports keep
+// their own behavior and every decrypted archive still passes its digest checks.
+export const aggregatorFetch: typeof fetch = async (input, init) => {
+  const url = String(input);
+  for (const endpoint of new Set([WALRUS_AGGREGATOR, ...(WALRUS_AGGREGATORS ?? [])])) {
+    if (!endpoint) continue;
+    const prefix = `${endpoint.replace(/\/+$/, "")}/v1/blobs/`;
+    if (url.startsWith(prefix) && !url.slice(prefix.length).includes("/")) return fetchBlob(decodeURIComponent(url.slice(prefix.length)), init);
+  }
+  return fetch(input, init);
+};
+
+export const blobReadEndpoints = new Map<string, string>();
+export async function fetchBlob(blobId: string, init?: RequestInit): Promise<Response> {
+  let last: Response | undefined;
+  let uncertain = false;
+  for (const endpoint of new Set([...(WALRUS_AGGREGATORS ?? []), WALRUS_AGGREGATOR].filter(Boolean))) {
+    init?.signal?.throwIfAborted();
+    try {
+      // Respect the caller's whole-transfer budget, including body reads.
+      const signal = init?.signal ?? AbortSignal.timeout(30_000);
+      const response = await fetch(`${endpoint}/v1/blobs/${encodeURIComponent(blobId)}`, { ...init, signal });
+      if (response.ok) {
+        if (blobReadEndpoints.size >= 256) blobReadEndpoints.delete(blobReadEndpoints.keys().next().value!);
+        blobReadEndpoints.set(blobId, endpoint); return response;
+      }
+      if (response.status !== 404 && response.status !== 410) uncertain = true;
+      last = response;
+      await response.body?.cancel();
+    } catch { init?.signal?.throwIfAborted(); uncertain = true; }
+  }
+  if (uncertain) throw new Error("Walrus availability could not be determined; an aggregator failed");
+  if (last) return last;
+  throw new Error("No Walrus aggregator could read this blob");
 }
 
 export type Availability = "available" | "unavailable" | "unknown";
@@ -241,7 +328,7 @@ export type Availability = "available" | "unavailable" | "unknown";
 /** Probe one byte of a blob: 404/410 means expired or never stored. */
 export async function probeBlob(blobId: string): Promise<Availability> {
   try {
-    const res = await fetch(blobDownloadUrl(blobId), { headers: { Range: "bytes=0-0" } });
+    const res = await fetchBlob(blobId, { headers: { Range: "bytes=0-0" } });
     await res.body?.cancel();
     if (res.ok) return "available";
     return res.status === 404 || res.status === 410 ? "unavailable" : "unknown";
@@ -260,7 +347,7 @@ export interface DeploymentStorage {
 /** Whether devices can still fetch a deployment's recipe and the artifact it names. */
 export async function probeDeploymentStorage(recipeBlobId: string): Promise<DeploymentStorage> {
   try {
-    const res = await fetch(blobDownloadUrl(recipeBlobId));
+    const res = await fetchBlob(recipeBlobId);
     if (res.status === 404 || res.status === 410) return { recipe: "unavailable", artifact: "unknown" };
     if (!res.ok) return { recipe: "unknown", artifact: "unknown" };
     const bytes = new Uint8Array(await res.arrayBuffer());

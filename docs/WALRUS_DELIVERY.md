@@ -18,7 +18,8 @@ having devices trust an automatically downloaded operator catalog.
 These mainnet URLs are read examples, not a deployed SuiFleet mainnet release.
 Use endpoints for the blob's Walrus network. `aggregator_urls`, when nonempty,
 replaces the single device endpoint. Missing/empty lists use `aggregator_url`,
-which remains required for older clients and the frontend. Schema version stays
+which remains required for older clients. The browser tries the ordered list
+then the legacy `aggregator_url`; browser endpoints need HTTPS and CORS access. Schema version stays
 1; old clients ignore the optional list. The daemon validates every URL and
 rejects a nonempty device-config list that differs from the manifest.
 

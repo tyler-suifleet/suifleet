@@ -29,7 +29,7 @@ const Choice = load('components/FleetStorageChoice.tsx').FleetStorageChoice;
 function choice() {
   const fleet = hook();
   return renderToStaticMarkup(createElement(Choice, { available: !!fleet.target, storage: fleet.storage,
-    reason: fleet.reason, checked: true, onChange() {} }));
+    reason: fleet.reason, checked: !!fleet.target, onChange() {} }));
 }
 (async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -56,6 +56,26 @@ function choice() {
     assert.match(choice(), /Fleet storage could not be loaded/);
     assert.doesNotMatch(choice(), /href=/);
     assert.doesNotMatch(choice(), /undefined|fleet-storage|0x1843/);
+    // Configured storage must retain the selected route on retention failure,
+    // while the visible error hides query internals and allows explicit opt-out.
+    const failedRetention = loader({
+      'react': { ...appRequire('react'), useState: value => [value, () => {}] },
+      '@mysten/dapp-kit-react': { useCurrentClient: () => ({}) },
+      '@tanstack/react-query': { useQuery: options => options.queryKey[0] === 'fleet-budgets'
+        ? { data: [budget] } : options.queryKey[0] === 'fleet-storage'
+        ? { data: { id: '0xs' } } : { error: raw } },
+      '@/hooks/useCurrentAccount': { useCurrentAccount: () => ({ address: '0xa' }) },
+      './useFleetSelection': { useFleetSelection: () => ({ supported: false }) },
+      './useFleetTransaction': { useFleetTransaction: () => ({}) },
+      '@/lib/fleet-budget': { storageConfig: () => ({ config }), budgetSupported: () => true },
+    })('hooks/useFleetStorage.ts').useFleetBlobStore();
+    assert.equal(failedRetention.configured, true);
+    assert.equal(failedRetention.store, undefined);
+    html = renderToStaticMarkup(createElement(Choice, { available: false, checked: true,
+      reason: failedRetention.reason, onChange() {} }));
+    assert.match(html, /Storage retention could not be loaded/);
+    assert.match(html, /checked=""/);
+    assert.doesNotMatch(html, /disabled=|undefined|fleet-storage|0x1843/);
     storageError = undefined; budgetError = raw;
     assert.match(choice(), /Fleet budget could not be loaded/);
     budgetError = undefined;

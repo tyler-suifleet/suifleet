@@ -11,7 +11,7 @@ import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand,type Protect
 import { DEFAULT_DELIVERY,type Delivery } from '@/lib/delivery';
 import type { AccessPolicy } from '@/lib/access-policy';
 import { DeliveryFields } from '@/components/DeliveryFields';
-import { FleetStorageChoice } from '@/components/FleetStorageChoice';
+import { FleetStorageChoice, fleetStorageSelected } from '@/components/FleetStorageChoice';
 import { useFleetBlobStore } from '@/hooks/useFleetStorage';
 import { buildPublishVersionTx, type ComponentVersion } from '@/lib/catalog';
 import { assertVersionAvailable } from '@/lib/component-library';
@@ -39,7 +39,8 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
   const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
-  const fleet=useFleetBlobStore(),[fleetPaid,setFleetPaid]=useState(false);
+  const fleet=useFleetBlobStore(),[paidChoice,setFleetPaid]=useState<boolean>();
+  const fleetPaid=fleetStorageSelected(paidChoice, fleet);
   const parsed=text.trim()?parseGreengrassRecipe(text):null;
   const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
   // Placeholder blob IDs mark which uploads the translated manifests use.
