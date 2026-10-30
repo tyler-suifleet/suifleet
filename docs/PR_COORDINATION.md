@@ -1048,3 +1048,84 @@ exact-head/current-base hosted validation remain unresolved until the operator
 records real evidence. This implementation neither backfills receipts nor posts
 success, reruns transactions, resets budgets or waives CI, testnet, security or
 independent review. There is no Testnet spend for offline routing validation.
+
+
+## Reviewed integration batches
+
+SF-207 adds an opt-in integration path per configured project. Enable it only in
+the reviewed, merged and installed runtime; the default remains the existing
+single-PR path. A typical project setting is:
+
+```json
+"integration_batch": {"enabled": true, "max_members": 4, "collection_seconds": 120}
+```
+
+The coordinator collects up to four source-ready PRs against one pinned `main`
+revision. Other implementations may continue, but the coordinator freezes its
+own main publication while that integration epoch is active. Source branches are
+not rebased merely because another PR merged. A short collection deadline allows
+a smaller batch when fewer PRs are ready. Each project has an independent epoch.
+
+A source review is not merge approval. Review workers report explicit
+`source_complete` and `acceptance_ready` booleans: code/security findings must be
+resolved, and remaining acceptance must be automated candidate validation or an
+explicit trusted deferral. Historical `blocked` prose is never upgraded into a
+source receipt. The published receipt binds the exact source head, reviewed
+scope, non-receipt feedback, threads, policy and reviewer family. CI and advancing
+main do not change that source identity. Changed code, scope or feedback requires
+a fresh source review; a source receipt alone never authorizes publication.
+
+The service creates a separate `integration/batch/…` branch and integration PR,
+using Tyler's author and committer identity for each conflict-free merge step.
+The source heads remain in the Git ancestry. The actual combined candidate runs
+ordinary/security CI and the existing main-sourced protected testnet workflow.
+After those checks succeed, an independent integration reviewer checks the
+combined changes, all member acceptance evidence and the immutable manifest.
+No individual source-head status is forged from the candidate's result.
+After combined validation and approval, the service publishes formal member
+approvals through the configured independent GitHub review account. Those records
+cite the original source proof and actual combined candidate evidence; they do
+not claim another model run. Only known coordinator-generated change requests
+can be superseded this way. Human, edited or foreign-account requests remain
+blocking. Batch mode requires that independent review account to be configured.
+
+Before one nonforce publication, the service rechecks the candidate, pinned base,
+source heads, feedback, source receipts, claims and dependencies. Changed inputs
+invalidate that candidate without resetting unrelated source branches. Conflicts
+are excluded and routed to the owning worker. Failed groups are split in bounded
+smaller combinations; a failing singleton is held for a real owner repair using
+its combined-candidate failure evidence. A failed combination is not blindly
+submitted forever. Ambiguous builds, PR creation and main pushes retain durable
+receipts for inspection rather than spawning duplicate work or replaying writes.
+
+After GitHub confirms the integration PR and original source PRs as merged, the
+existing reconciliation closes each implementation issue and marks its atomic
+claim/Project item Done. Runtime activation verifies the entire recorded merge
+chain, typed independent source proofs, exact combined approval and actual merged
+candidate. A partial or tampered batch cannot authorize installation.
+
+`fleet-status` retains GitHub/atomic totals and adds a derived PR pipeline section:
+source review, ordinary CI, acceptance, evidence review, queued batch, conflict,
+active work and ready. Integration candidates are shown separately from source
+PRs; neither worker counts nor batch membership are added to issue totals.
+Missing or stale data is displayed as unavailable.
+
+### First installation and rollback
+
+The older supervisor intentionally pins its own protocol and cannot silently gain
+batch-proof support. After SF-207 passes normal review/CI and merges, use a clean
+checkout of the fetched main revision:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet
+```
+
+This explicit path verifies committed main, existing reviewed merge evidence,
+source bytes and offline tests before switching both supervisor and runtime under
+activation/parent authority locks. It preserves private configuration and running
+model workers and rolls back the generation/supervisor together on failure. Then
+enable `integration_batch` in the private project configuration and restart only
+the coordinator parent through the existing serialized operation. Do not install
+this PR's unmerged files or disable live-wallet, CI or independent-review gates.
+An actual hosted batch, post-merge issue reconciliation and installed activation
+remain rollout acceptance until observed; offline fixtures do not establish them.
