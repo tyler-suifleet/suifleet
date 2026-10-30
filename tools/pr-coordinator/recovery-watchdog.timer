@@ -1,0 +1,12 @@
+[Unit]
+Description=Check fleet progress every five minutes
+
+[Timer]
+OnBootSec=30s
+OnCalendar=*-*-* *:00/5:00
+Persistent=true
+AccuracySec=10s
+Unit=recovery-watchdog.service
+
+[Install]
+WantedBy=timers.target
