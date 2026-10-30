@@ -11,15 +11,17 @@ const client = new Proxy({}, { get: (_target, key) => { throw Error(`Unexpected 
 export const useCurrentClient = () => client;
 export const useCurrentNetwork = () => 'testnet';
 export const POLICIES_ENABLED = ACCESS_ENABLED;
+export function useFleetSelection() { return { fleet: undefined }; }
+const managedFleet = administrator => ({ id: id(70), customerId: id(71), administrator, devices: [id(33)], policies: [] });
 export function useAccessPolicies() {
   const f = useFixture();
   return { isPending: f.state === "loading", isFetching: false, error: f.state === "error" ? new Error("fixture RPC unavailable") : null,
     refetch: async () => { if (f.state === "error") window.updateAccess({ state: "empty" }); },
-    data: f.state === "policy" ? [{ objectId: id(20), capId: id(21), name: "Production sensors", version: "1", keyEpoch: "0", devices: [id(31)], groups: [], accounts: [] }] : [] };
+    data: f.state === "policy" ? [{ fleet: f.managed ? managedFleet(f.managed === "admin") : undefined, objectId: id(20), capId: id(21), name: "Production sensors", version: "1", keyEpoch: "0", devices: [id(31)], groups: [], accounts: [] }] : [] };
 }
 export function useDevices() {
   const f = useFixture();
-  return { data: f.recipients === "empty" ? [] : [{ objectId: id(30), ownerCapId: id(40), name: "Factory sensor" }, { objectId: id(31), ownerCapId: id(41), name: "Granted sensor" }, { objectId: id(32), name: "Legacy unactivated" }],
+  return { data: f.recipients === "empty" ? [] : [{ objectId: id(30), ownerCapId: id(40), name: "Factory sensor" }, { objectId: id(31), ownerCapId: id(41), name: "Granted sensor" }, { objectId: id(32), name: "Legacy unactivated" }, ...(f.managed ? [{ objectId: id(33), managed: true, name: "Customer sensor" }] : [])],
     isPending: f.recipients === "loading", error: f.recipients === "error" ? new Error("device read failed") : null, refetch: async () => window.updateAccess({ recipients: "ready" }) };
 }
 export function useGroups() {
