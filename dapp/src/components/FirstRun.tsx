@@ -7,6 +7,7 @@ import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient, useCurrentWallet, useDAppKit } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
+import { normalizeSuiAddress } from "@mysten/sui/utils";
 import { BudgetEnrollment } from "./BudgetEnrollment";
 import { NETWORK } from "@/lib/constants";
 import { verifyDeployment } from "@/lib/deployment-manifest";
@@ -18,6 +19,7 @@ import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
 import { DeviceClientHelp } from "@/components/DeviceClientHelp";
+import { usePendingRows } from "@/hooks/usePendingRows";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700";
 const PRIMARY = `inline-flex items-center justify-center rounded-md bg-blue-700 px-4 py-2 font-medium text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-600 ${FOCUS}`;
@@ -41,6 +43,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const account = useCurrentAccount(), client = useCurrentClient(), cache = useQueryClient();
   const wallet = useDAppKit(), currentWallet = useCurrentWallet();
   const devices = useDevices(), mutation = useFleetTransaction();
+  const pending = usePendingRows("devices", devices.isSuccess ? devices.data.map((d) => d.deviceAddress) : undefined, devices.refetch);
   const [message, setMessage] = useState<{ address: string; text: string } | null>(null);
   const [error, setError] = useState<{ address: string; text: string } | null>(null);
   const [phase, setPhase] = useState<TransactionPhase | null>(null);
@@ -70,7 +73,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
   const next = steps.find((step) => step.state === "current" || step.state === "blocked");
   const accountName = account?.label || currentWallet?.name;
 
-  async function submit(transaction: Transaction) {
+  async function submit(transaction: Transaction, device: { name: string; deviceAddress: string }) {
     if (!account || inFlight.current) return;
     inFlight.current = true;
     const address = account.address;
@@ -80,8 +83,9 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
       transaction.setSender(address);
       const result = await mutation.mutateAsync({ transaction, onProgress: setPhase });
       form.current?.reset();
+      pending.add([{ id: device.deviceAddress, label: device.name, kind: "create" }]);
       setMessage({ address, text: `Confirmed transaction ${result.digest}. The device is registered to your account; it is not online until its daemon starts and reports in.` });
-      await Promise.all([cache.invalidateQueries({ queryKey: ["devices"] }), cache.invalidateQueries({ queryKey: ["first-run-account"] })]);
+      await cache.invalidateQueries({ queryKey: ["first-run-account"] });
     } catch (cause) {
       setError({ address, text: `${registrationFailure(enrollmentError(cause))}. If submission may have reached the network, refresh inventory and check the wallet transaction history before retrying. Rejecting approval creates no registration. A request that reaches the network and fails may still incur a network fee.` });
     } finally {
@@ -144,7 +148,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           ? <p className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-amber-950">Fund this address before registering. Send SUI on <strong>{NETWORK}</strong> to <span className="break-all font-mono">{account.address}</span>.</p>
           : <p className="text-gray-700">Adding a device costs a small network fee. Your approval app shows the amount before you confirm. This account balance is separate from your fleet budget.</p>)}
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" disabled={state.isFetching} onClick={() => { void state.refetch(); void devices.refetch(); }} className={SECONDARY}>Refresh account and inventory</button>
+          <button type="button" disabled={state.isFetching} onClick={async () => {
+            const [balance, inventory] = await Promise.all([state.refetch(), devices.refetch()]);
+            // A successful refresh is the inventory to trust; an earlier failure message is stale.
+            if (balance.isSuccess && inventory.isSuccess) setError(null);
+          }} className={SECONDARY}>Refresh account and inventory</button>
           {state.isFetching && !state.isPending && <span className="text-gray-600">Refreshing…</span>}
         </div>
         <Disclosure summary="How to fund this address">
@@ -177,8 +185,10 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
         {fleet && <p role="status">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link className={LINK} href="/entitlements">Device entitlements</Link></p>}
         {devices.error && <p role="alert" className="text-red-800">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
         {devices.isLoading && <p role="status">Loading inventory…</p>}
+        {pending.waiting.map((row) => <p key={row.id} role="status" className="text-gray-700">{row.label}: registered · adding to your inventory…</p>)}
+        {pending.stale.map((row) => <p key={row.id} role="status" className="text-amber-800">{row.label} was registered but is not listed yet. Refresh in a minute before registering it again.</p>)}
         {devices.isSuccess && (devices.data.length === 0
-          ? <p className="text-gray-700">No devices registered to this account yet.</p>
+          ? pending.waiting.length === 0 && <p className="text-gray-700">No devices registered to this account yet.</p>
           : <div>
             <p>{devices.data.length} device(s) registered to this account:</p>
             <ul className="mt-1 flex flex-wrap gap-2">
@@ -193,9 +203,12 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           const data = new FormData(event.currentTarget);
           try {
             const input = registrationInput(String(data.get("name")), String(data.get("deviceAddress")), String(data.get("arch")));
+            // A confirmed registration that is still unlisted, even past the pending timeout, must not be signed again.
+            const unlisted = [...pending.waiting, ...pending.stale].find((row) => row.kind === "create" && normalizeSuiAddress(row.id) === input.deviceAddress);
+            if (unlisted) throw new Error(`“${unlisted.label}” is already registered with this address but is not listed yet. Refresh in a minute before registering it again.`);
             const funding = budget && budgetCanFund && fromBudget ? { budgetId: budget.id, capId: budget.capId, floatMist: budget.defaultLimits.floatCap,
               reserveMist: defaultReserve(budget.defaultLimits, budget.balance, budget.defaultLimits.floatCap) } : undefined;
-            void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding, fleet));
+            void submit(buildRegisterAndEnrollTx(input.name, input.deviceAddress, input.arch, account.address, funding, fleet), input);
           } catch (cause) { setError({ address: account.address, text: (cause as Error).message }); }
         }}>
           <label className="block font-medium">Device name
@@ -211,7 +224,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           {budget && <BudgetEnrollment budget={budget} selected={fromBudget} onChange={setFromBudget} />}
           <div className="space-y-2 sm:col-span-2">
             <p className="text-gray-700">You will sign as <span className="break-all font-mono text-gray-900">{account.address}</span> on <strong>{NETWORK}</strong>.</p>
-            <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
+            <button className={PRIMARY} disabled={!ready || !devices.isSuccess || mutation.isPending || pending.waiting.length > 0 || !!fleet && fleet.activeDevices >= fleet.deviceLimit}>{mutation.isPending ? "Registering…" : "Register device"}</button>
             {!ready && state.isSuccess && <p className="text-gray-600">Add funds to this account to enable registration.</p>}
           </div>
         </form>

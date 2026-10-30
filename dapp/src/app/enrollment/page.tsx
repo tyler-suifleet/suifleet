@@ -3,7 +3,7 @@
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { PageHeader, ConnectionRequired } from "@/components/ui";
@@ -15,7 +15,7 @@ import { NETWORK } from "@/lib/constants";
 import { requireManifest } from "@/lib/deployment-manifest";
 import {
   BROWSER_CREDENTIAL_LIMIT, LIMITS, buildClosePolicyTx, buildCreatePolicyTx, buildRevokeClaimsTx, buildSetLimitsTx, buildTransferTx,
-  checkReservations, chunk, createdPolicy, credentialArchive, entryStatuses, fetchPolicies, generateCredentials, loadJob, newJob,
+  checkReservations, chunk, createdPolicy, policyFromEvents, credentialArchive, entryStatuses, fetchPolicies, generateCredentials, loadJob, newJob,
   observeRegistrations, recoverInterruptedRegistrations, parseJob, parseRoster, plan, policyAccepting, saveJob, snapshot, storedReservations,
   type EnrollmentJob, type EntryStatus, type EntryView, type PolicyState, type ReservationCheck,
 } from "@/lib/enrollment";
@@ -48,11 +48,14 @@ export default function EnrollmentPage() {
   const client = useCurrentClient();
   const { mutateAsync } = useFleetTransaction();
   const [selected, setSelected] = useState<string>("");
+  // Policies this page created: read directly, before their creation events are indexed.
+  const [created, setCreated] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selection.identity, selected], queryFn: () => fetchPolicies(client, fleet?.id ?? account!.address, selected ? [selected] : [], fleet),
-    enabled: !!account?.address, refetchInterval: 60_000 });
+  const policies = useQuery({ queryKey: ["enrollment-policies", NETWORK, account?.address, selection.identity, created], queryFn: () => fetchPolicies(client, fleet?.id ?? account!.address, created, fleet),
+    enabled: !!account?.address, refetchInterval: 60_000, placeholderData: keepPreviousData });
   const policy = policies.data?.find((p) => p.id === selected);
+  const loadingSelected = !!selected && !policy && policies.isFetching;
 
   async function run(transaction: Transaction) {
     setBusy(true); setError("");
@@ -67,8 +70,11 @@ export default function EnrollmentPage() {
     const days = Number(fd.get("days"));
     const result = await run(buildCreatePolicyTx(BigInt(fd.get("quota") as string), days > 0 ? BigInt(Date.now() + days * 86_400_000) : BigInt(0), fleet));
     if (!result) return;
-    setSelected(await createdPolicy(client, result.digest));
-    await policies.refetch();
+    let id;
+    try { id = policyFromEvents(result.events) ?? await createdPolicy(client, result.digest); }
+    catch (e) { setError(`The policy was created, but could not be read yet: ${(e as Error).message}. Refresh the page instead of creating another.`); return; }
+    setCreated((c) => c.includes(id) ? c : [...c, id]);
+    setSelected(id);
   }
 
   if (!account) return <ConnectionRequired title="Enrollment" description="Prepare device batches and securely enroll devices with single-use credentials." />;
@@ -85,12 +91,14 @@ export default function EnrollmentPage() {
           <select id="policy" className={input} value={selected} onChange={(e) => setSelected(e.target.value)}>
             <option value="">Select a policy…</option>
             {policies.data?.map((p) => <option key={p.id} value={p.id}>{policyLabel(p)}</option>)}
+            {loadingSelected && <option value={selected}>New policy · loading…</option>}
           </select>
+          {loadingSelected && <span role="status" className="text-gray-500">Loading the new policy…</span>}
         </div>
         <form onSubmit={create} className="flex flex-wrap gap-2 items-end">
           <label>Quota <input name="quota" type="number" min={1} defaultValue={100} required className={`${input} w-28 ml-1`} /></label>
           <label>Valid for days (0 = no expiry) <input name="days" type="number" min={0} defaultValue={14} required className={`${input} w-20 ml-1`} /></label>
-          <button type="submit" disabled={busy} className={primary}>Create policy</button>
+          <button type="submit" disabled={busy || loadingSelected} className={primary}>Create policy</button>
         </form>
         {policy && <PolicyControls policy={policy} busy={busy} run={async (tx) => { if (await run(tx)) await policies.refetch(); }} />}
       </section>
@@ -129,8 +137,12 @@ type AddMode = "csv" | "pair" | "roster";
 
 function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator: string; onError: (message: string) => void }) {
   const client = useCurrentClient();
-  const { data: devices = [] } = useDevices();
-  const { data: groups = [] } = useGroups();
+  const devicesQuery = useDevices(), groupsQuery = useGroups();
+  const devices = useMemo(() => devicesQuery.data ?? [], [devicesQuery.data]), groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data]);
+  // Checking rows against a partly loaded inventory would reject real groups and miss duplicates.
+  const inventoryError = devicesQuery.error ?? groupsQuery.error;
+  const inventory: Inventory = inventoryError ? { ready: false, error: `Your devices and groups could not be loaded: ${(inventoryError as Error).message}`, retry: () => { void devicesQuery.refetch(); void groupsQuery.refetch(); } }
+    : { ready: devicesQuery.isSuccess && groupsQuery.isSuccess };
   const { mutateAsync } = useFleetTransaction();
   const [job, setJobState] = useState<EnrollmentJob>(() => {
     try { return loadJob(localStorage, operator, policy.id) ?? newJob(operator, policy.id); }
@@ -245,6 +257,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
     chain.refetch();
   }
   function importJob(text: string) {
+    if (!inventory.ready) return onError("Wait for your devices and groups to load, then import again.");
     try {
       const imported = parseJob(text, { operator, policyId: policy.id });
       const known = new Set(job.entries.map((e) => e.claim));
@@ -260,7 +273,7 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
 
   return (
     <>
-      <AddReservations job={job} policy={policy} devices={devices} groups={groups} onAdd={(entries, fund) =>
+      <AddReservations job={job} policy={policy} devices={devices} groups={groups} inventory={inventory} onAdd={(entries, fund) =>
         setJob({ ...job, claimFundMist: fund, entries: [...job.entries, ...entries] })} onImport={importJob} />
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
         <h2 className="font-semibold">3. Register claims, then devices enroll themselves</h2>
@@ -301,8 +314,10 @@ function JobPanel({ policy, operator, onError }: { policy: PolicyState; operator
   );
 }
 
-function AddReservations({ job, policy, devices, groups, onAdd, onImport }: {
-  job: EnrollmentJob; policy: PolicyState; devices: DeviceObject[]; groups: DeviceGroup[];
+type Inventory = { ready: boolean; error?: string; retry?: () => void };
+
+function AddReservations({ job, policy, devices, groups, inventory, onAdd, onImport }: {
+  job: EnrollmentJob; policy: PolicyState; devices: DeviceObject[]; groups: DeviceGroup[]; inventory: Inventory;
   onAdd: (entries: EnrollmentJob["entries"], claimFundMist: string) => void; onImport: (text: string) => void;
 }) {
   const [mode, setMode] = useState<AddMode>("csv");
@@ -317,6 +332,7 @@ function AddReservations({ job, policy, devices, groups, onAdd, onImport }: {
   useEffect(() => setCheck(null), [mode, csv, template, start, alias, serial, groupId]);
 
   function validate() {
+    if (!inventory.ready) return;
     const parsed = mode === "pair" ? { rows: [{ line: 1, serial: serial.trim(), alias: alias.trim() }], issues: [] } : parseRoster(csv, template, start);
     const result = checkReservations(parsed.rows, { devices, groups, defaultGroupId: groupId || undefined,
       reserved: [...storedReservations(localStorage), ...job.entries] });
@@ -345,7 +361,7 @@ function AddReservations({ job, policy, devices, groups, onAdd, onImport }: {
       {mode === "roster" ? (
         <div className="space-y-2">
           <p className="text-gray-500">For large batches, generate claim keys offline with <code>scripts/claims.py generate --roster devices.csv</code> and import its public <code>roster.json</code>, or re-import an exported job. Files containing keys are refused.</p>
-          <input type="file" accept=".json,application/json" aria-label="Roster or job file" onChange={async (e) => { const f = e.target.files?.[0]; if (f) onImport(await f.text()); e.target.value = ""; }} />
+          <input type="file" accept=".json,application/json" aria-label="Roster or job file" disabled={!inventory.ready} onChange={async (e) => { const f = e.target.files?.[0]; if (f) onImport(await f.text()); e.target.value = ""; }} />
         </div>
       ) : (
         <div className="space-y-2">
@@ -370,11 +386,12 @@ function AddReservations({ job, policy, devices, groups, onAdd, onImport }: {
               </select>
             </label>
             <label>Enrollment gas per claim (SUI) <input aria-label="Enrollment gas per claim" value={fund} onChange={(e) => setFund(e.target.value)} className={`${input} w-20 ml-1`} /></label>
-            <button className={button} onClick={validate}>Check</button>
+            <button className={button} disabled={!inventory.ready} onClick={validate}>{inventory.ready || inventory.error ? "Check" : "Loading devices and groups…"}</button>
             <button className={primary} disabled={!check?.accepted.length} onClick={generate}>
               {check ? `Download credentials for ${check.accepted.length} device${check.accepted.length === 1 ? "" : "s"}` : "Download credentials"}
             </button>
           </div>
+          {inventory.error && <p role="alert" className="text-red-700">{inventory.error} <button className="underline" onClick={inventory.retry}>Retry</button></p>}
           {check && <div data-testid="reservation-check" className="space-y-1">
             <p>{check.accepted.length} ready{check.issues.length ? `, ${check.issues.length} rejected` : ""}.{check.accepted.length > BROWSER_CREDENTIAL_LIMIT && ` The browser generates at most ${BROWSER_CREDENTIAL_LIMIT}; use scripts/claims.py.`}</p>
             {check.issues.slice(0, 50).map((i) => <p key={`${i.line}-${i.message}`} className="text-red-700 text-xs">Line {i.line}{i.serial ? ` (${i.serial})` : ""}: {i.message}</p>)}

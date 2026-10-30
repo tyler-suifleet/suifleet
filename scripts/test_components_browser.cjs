@@ -157,15 +157,26 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await page.getByLabel("Operating system").first().inputValue(), "macos");
     await page.getByText("Optional installer command", { exact: true }).first().click();
     await page.getByLabel("Install command", { exact: true }).first().fill("{artifact} --install");
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
-    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
-    await publish.click();
-    await page.getByRole("alert").filter({ hasText: "Confidential delivery needs Seal" }).waitFor();
-    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
-    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    // Delivery is validated on the artifacts step, before review or any upload.
+    const review = page.getByRole("button", { name: "Review version", exact: true });
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "not configured; nothing was uploaded" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfigured confidential delivery must not reach review");
     await page.getByRole("radio").nth(1).check();
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "Confirm that this content may be stored publicly" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfirmed public delivery must not reach review");
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
     await page.getByRole("checkbox").first().check();
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    await review.click();
+    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
+    await publish.waitFor();
+    // Returning to the artifacts step keeps the staged files visible in their pickers.
+    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByText("Selected: macos.bin", { exact: false }).waitFor();
+    await page.getByText("Selected: linux.bin", { exact: false }).waitFor();
+    assert.deepEqual(await page.getByLabel("Artifact", { exact: true }).evaluateAll(inputs => inputs.map(i => i.files[0]?.name)), ["macos.bin", "linux.bin"]);
+    await review.click();
     await publish.evaluate(b => { b.click(); b.click(); b.click(); });
     await page.waitForFunction(() => window.componentsAcceptance.count() === 1);
     assert.equal(await page.getByRole("button", { name: "Publishing…", exact: true }).isDisabled(), true);
