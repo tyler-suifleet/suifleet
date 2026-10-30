@@ -19,7 +19,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     for (const mode of ["unsupported", "missing", "ready"]) {
       await build({ entryPoints: [path.join(__dirname, "browser/access-acceptance.jsx")], outfile: path.join(dir, `${mode}.js`), bundle: true, platform: "browser", jsx: "automatic",
         nodePaths: [path.join(root, "dapp/node_modules")], banner: { js: "var process = { env: {} };" },
-        alias: { "@": src, "@mysten/dapp-kit-react": fixture, "@/hooks/useAccessPolicies": fixture, "@/hooks/useDevices": fixture, "@/hooks/useGroups": fixture, "@/hooks/useFleetTransaction": fixture },
+        alias: { "@": src, "@mysten/dapp-kit-react": fixture, "@/hooks/useFleetSelection": fixture, "@/hooks/useAccessPolicies": fixture, "@/hooks/useDevices": fixture, "@/hooks/useGroups": fixture, "@/hooks/useFleetTransaction": fixture },
         define: { ACCESS_ENABLED: String(mode !== "unsupported"), "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(JSON.stringify(m)),
           "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": mode === "ready" ? JSON.stringify('[{"objectId":"0x1","weight":1}]') : "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": '"1"' }, logLevel: "warning" });
     }
@@ -55,14 +55,14 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await visit("ready"); await update({ connected: true, state: "policy" });
     const card = page.getByRole("region", { name: "Policy Production sensors" });
     await card.waitFor();
-    assert.equal(await card.getByRole("option", { name: /Legacy unactivated/ }).count(), 0);
-    await card.getByLabel("Activated device").selectOption({ label: "Granted sensor (0x000000…)" });
+    assert.equal(await card.getByRole("option", { name: /Legacy unactivated.*must be activated/ }).evaluate(option => option.disabled), true);
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Granted sensor (0x000000…)" });
     assert.equal(await card.getByRole("button", { name: "Grant decryption" }).isDisabled(), true);
     await card.getByText("This recipient already has a grant.").waitFor();
-    await card.getByLabel("Activated device").selectOption({ label: "Factory sensor (0x000000…)" });
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Factory sensor (0x000000…)" });
     await update({ fail: true }); await card.getByRole("button", { name: "Grant decryption" }).click();
     await page.getByText("Wallet rejected the transaction", { exact: true }).waitFor();
-    assert.notEqual(await card.getByLabel("Activated device").inputValue(), "");
+    assert.notEqual(await card.getByLabel("Device", { exact: true }).inputValue(), "");
     await update({ fail: false }); await card.getByRole("button", { name: "Grant decryption" }).click();
     await page.waitForFunction(() => window.accessCalls.length === 2);
     await card.getByLabel("Recipient type").selectOption("group");
@@ -82,7 +82,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await card.getByLabel("Recipient type").selectOption("device");
     await update({ recipients: "loading" }); await card.getByText("Loading device choices…").waitFor();
     await update({ recipients: "error" }); await card.getByRole("button", { name: "Retry recipients" }).click();
-    await update({ recipients: "empty" }); await card.getByText("No activated devices available.", { exact: false }).waitFor();
+    await update({ recipients: "empty" }); await card.getByText("No devices available.", { exact: false }).waitFor();
     await card.getByLabel("Recipient type").selectOption("group"); await card.getByText("No administered groups available.", { exact: false }).waitFor();
     await update({ recipients: "ready", pending: true });
     assert.equal(await card.getByRole("button", { name: "Replace encryption key" }).isDisabled(), true);
@@ -91,8 +91,18 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
       await page.setViewportSize({ width, height: 900 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `overflow at ${width}`);
     }
+    await update({ managed: "admin", recipients: "ready" });
+    await card.getByLabel("Recipient type").selectOption("device");
+    await card.getByLabel("Device", { exact: true }).selectOption({ label: "Customer sensor (0x000000…)" });
+    await card.getByRole("button", { name: "Grant decryption" }).click();
+    assert.equal(await page.evaluate(() => window.accessCalls.at(-1).commands[0].MoveCall.function), "policy_device");
+    await update({ managed: "reader" });
+    assert.equal(await card.getByRole("option", { name: /Customer sensor.*administrator credential/ }).evaluate(option => option.disabled), true);
+    assert.equal(await card.getByRole("button", { name: "Grant decryption" }).isDisabled(), true);
+    await update({ managed: "admin" });
+    assert.equal(await card.getByRole("option", { name: /Factory sensor.*not registered in this fleet/ }).evaluate(option => option.disabled), true);
     assert.deepEqual(errors, []);
-    console.log(`PASS Chrome ${browser.version()}: availability, loading/error/retry/empty, named create/device/group/account grants, validation, failed input preservation, revoke, rotation confirmation, pending, 375/1280px; fixture hooks only`);
+    console.log(`PASS Chrome ${browser.version()}: availability, loading/error/retry/empty, named create/device/group/account grants, validation, failed input preservation, revoke, rotation confirmation, pending, 375/1280px, managed-fleet grant and unauthorized/cross-fleet disabled reasons; fixture hooks only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise(resolve => server.close(resolve));
