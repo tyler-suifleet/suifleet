@@ -78,11 +78,14 @@ class PreparedTests(unittest.TestCase):
         workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
         jobs=yaml.safe_load(workflow.read_text())['jobs']
         # Evaluate the actual Actions conditions for trusted, fork and manual events.
-        for job in ('plan', 'validate'):
+        for job in ('queue-plan', 'plan', 'validate'):
             condition=jobs[job]['if']
             for event, repository, conclusion, expected in (
                 ('workflow_run', 'owner/repo', 'success', True),
                 ('workflow_run', 'fork/repo', 'success', False),
+                # Only admission owns the originating CI conclusion guard.
+                ('workflow_run', 'owner/repo', 'failure', job != 'queue-plan'),
+                ('workflow_run', 'owner/repo', 'cancelled', job != 'queue-plan'),
                 ('workflow_dispatch', None, None, True),
                 ('schedule', None, None, True),
             ):
