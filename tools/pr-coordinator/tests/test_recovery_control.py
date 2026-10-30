@@ -2,6 +2,7 @@ import json
 import fcntl
 import os
 import signal
+import subprocess
 from pathlib import Path
 import sqlite3
 import sys
@@ -11,6 +12,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import recovery_control as control
+
+REAL_POPEN = subprocess.Popen
 
 
 class RetainedRecoveryTests(unittest.TestCase):
@@ -142,6 +145,92 @@ class RetainedRecoveryTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): self.resume()
             self.d.db.execute('DELETE FROM '+table)
         self.child.assert_not_called()
+
+
+class StoppedRepairTests(unittest.TestCase):
+    resume = RetainedRecoveryTests.resume
+    test_crash_after_intent_is_retained_and_never_replayed = RetainedRecoveryTests.test_crash_after_intent_is_retained_and_never_replayed
+    test_new_helper_after_resume_prevents_spawn = RetainedRecoveryTests.test_new_helper_after_resume_prevents_spawn
+    test_pending_retry_or_dependency_resume_cannot_be_stolen = RetainedRecoveryTests.test_pending_retry_or_dependency_resume_cannot_be_stolen
+    test_changed_owner_external_dependency_and_git_operation_are_fenced = RetainedRecoveryTests.test_changed_owner_external_dependency_and_git_operation_are_fenced
+
+    def setUp(self):
+        RetainedRecoveryTests.setUp(self)
+        self.claim['status'] = 'in_progress'
+        self.d.db.execute("UPDATE runs SET status='finished'")
+        self.jobs = sqlite3.connect(self.path/'reviews.sqlite3', isolation_level=None)
+        self.addCleanup(self.jobs.close)
+        self.jobs.execute("CREATE TABLE jobs(id INTEGER PRIMARY KEY,project TEXT,pr INTEGER,kind TEXT,family TEXT,status TEXT,repair_claim TEXT,launch_intent TEXT,result TEXT,retry_after REAL,directory TEXT,pid INTEGER,started TEXT)")
+        import hashlib
+        proof = dict(claim=hashlib.sha256(b'private').hexdigest(), key='SF-1', branch=self.claim['branch'],worktree=self.claim['worktree'])
+        self.jobs.execute('INSERT INTO jobs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', (7,'project',9,'fix','Claude','orphaned',json.dumps(proof),None,None,None,str(self.path),123,'100'))
+        (self.path/'process.json').write_text(json.dumps(dict(pid=123,started='100')))
+        (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
+        (self.path/'snapshot.json').write_text(json.dumps(dict(ticket=self.claim)))
+
+    def test_stopped_repair_with_finished_implementation_resumes_once(self):
+        result = self.resume()
+        self.assertEqual(result['family'], 'Claude')
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'orphaned')
+        self.assertEqual(self.d.db.execute("SELECT count(*) FROM retired_runs WHERE session='coordinator-repair-7'").fetchone()[0],1)
+        with self.assertRaises(RuntimeError): self.resume()
+        self.assertEqual(self.child.call_count,1)
+
+    def test_real_repair_process_must_exit_before_recovery(self):
+        from dispatcher import Dispatcher
+        # The patched launch identity helper is separate from the real /proc
+        # identity used by the stop fence.
+        from dispatcher import process_identity
+        child = REAL_POPEN([sys.executable, '-c', 'import time; time.sleep(0.2)'], start_new_session=True)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        started = process_identity(child.pid)
+        self.jobs.execute('UPDATE jobs SET pid=?,started=?', (child.pid,started))
+        self.d.db.execute('UPDATE runs SET pid=?,started=?', (child.pid,started))
+        (self.path/'process.json').write_text(json.dumps(dict(pid=child.pid,started=started)))
+        self.d.claim_helpers.return_value = []
+        self.d.stopped_identity.side_effect = lambda row: Dispatcher.stopped_identity(self.d,row)
+        with self.assertRaisesRegex(RuntimeError, 'live or uncertain'):
+            self.resume()
+        self.child.assert_not_called()
+        child.wait(timeout=5)
+        self.assertEqual(self.resume()['family'], 'Claude')
+
+    def test_provider_reset_cooldown_and_coordinator_backoff(self):
+        with patch('coordinator.quota_reset', return_value=99999999999):
+            with self.assertRaisesRegex(RuntimeError, 'quota reset'): self.resume()
+        (self.path/'worker.log').write_text('ERROR: Selected model is at capacity. Please try a different model.\n')
+        with self.assertRaisesRegex(RuntimeError, 'capacity cooldown'): self.resume()
+        (self.path/'worker.log').unlink()
+        self.jobs.execute('CREATE TABLE quarantine_backoff(family TEXT,kind TEXT,retry_after REAL)')
+        self.jobs.execute("INSERT INTO quarantine_backoff VALUES('Claude','fix',99999999999)")
+        with self.assertRaisesRegex(RuntimeError, 'backoff'): self.resume()
+        self.child.assert_not_called()
+
+    def test_repair_receipts_and_backoff_are_required(self):
+        for name in ('process.json','exit.json','snapshot.json'):
+            with self.subTest(name=name):
+                path = self.path/name
+                contents = path.read_text(); path.unlink()
+                with self.assertRaises(OSError): self.resume()
+                path.write_text(contents)
+        for field,value in [('status','quota_wait'),('retry_after',99999999999),('result','{}'),('launch_intent','{}')]:
+            with self.subTest(field=field):
+                previous = self.jobs.execute('SELECT '+field+' FROM jobs').fetchone()[0]
+                self.jobs.execute('UPDATE jobs SET '+field+'=?',(value,))
+                with self.assertRaises(RuntimeError): self.resume()
+                self.jobs.execute('UPDATE jobs SET '+field+'=?',(previous,))
+        self.child.assert_not_called()
+
+    # Parent tests use parked-specific expectations; the route-independent
+    # safety cases below exercise the finished-implementation/repair route.
+    def test_live_worker_helpers_resources_repair_or_capacity_prevent_launch(self):
+        for method,value in [('stopped_identity',None),('capacity_helpers',[{'pid':4}]),('owner_locks',['network:test']),('replacement_repair',True),('available',False)]:
+            with self.subTest(method=method):
+                mock = getattr(self.d,method); previous = mock.return_value
+                mock.return_value = value
+                with self.assertRaises(RuntimeError): self.resume()
+                mock.return_value = previous
+                self.child.assert_not_called()
 
 
 class ControlLifecycleTests(unittest.TestCase):

@@ -5,12 +5,13 @@ Run only from the watchdog/operator, never from a normal model worker. The
 existing dispatcher owns the new receipt and subsequent heartbeat/handoff.
 """
 import argparse
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 import fcntl
 import hashlib
 import json
 import os
 import signal
+import sqlite3
 from pathlib import Path
 import subprocess
 import sys
@@ -25,7 +26,7 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
-def fence(dispatcher, project, row, claim):
+def fence(dispatcher, project, row, claim, reserved_session=None):
     owner = dispatcher.ticket(project, 'show', claim['key'])
     require(owner.get('status') in ('blocked', 'in_progress'), 'owner is not Blocked/In Progress')
     require(not owner.get('publish_pending'), 'ownership publication pending')
@@ -49,9 +50,62 @@ def fence(dispatcher, project, row, claim):
     require(not dispatcher.db.execute("SELECT 1 FROM ci_redirects WHERE claim=? AND state NOT IN (" + ','.join('?' for _ in CI_TERMINAL) + ')', (digest, *CI_TERMINAL)).fetchone(), 'CI redirect owns recovery')
     require(not dispatcher.db.execute("SELECT 1 FROM capacity_retries WHERE claim=? AND state IN ('waiting','launch_intent')", (digest,)).fetchone(), 'provider retry owns recovery')
     for other in dispatcher.db.execute("SELECT * FROM runs WHERE session!=? AND status!='finished'", (row['session'],)):
-        if other['claim'] and json.loads(other['claim']).get('token') == claim['token']:
+        if other['session'] != reserved_session and other['claim'] and json.loads(other['claim']).get('token') == claim['token']:
             require(dispatcher.stopped_identity(other) is not None, 'another same-claim launch is live or uncertain')
     return owner
+
+
+def stopped_repair(dispatcher, project, owner, reserved=False):
+    """Read coordinator evidence; reserve recovery only in the dispatcher ledger.
+
+    Both service authority locks are held by the caller. Never alter a job or
+    replay its launch: a new implementation receipt supervises the retained claim.
+    """
+    originals = [r for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status='finished'", (project['id'],))
+                 if r['claim'] and all(json.loads(r['claim']).get(k) == owner.get(k) for k in FIELDS)]
+    require(bool(originals), 'no unchanged finished implementation receipt')
+    require(all(dispatcher.stopped_identity(r) is not None for r in originals), 'original implementation is live or uncertain')
+    digest = hashlib.sha256(owner['token'].encode()).hexdigest()
+    expected = dict(claim=digest, key=owner['key'], branch=owner['branch'], worktree=owner['worktree'])
+    with closing(sqlite3.connect(f"{(dispatcher.state/'reviews.sqlite3').as_uri()}?mode=ro", uri=True)) as db:
+        db.row_factory = sqlite3.Row
+        jobs = db.execute("SELECT * FROM jobs WHERE project=? AND kind='fix' AND repair_claim IS NOT NULL ORDER BY id DESC", (project['id'],)).fetchall()
+        matching = [j for j in jobs if json.loads(j['repair_claim']).get('claim') == digest]
+        require(bool(matching), 'no retained stopped repair receipt')
+        job = matching[0]
+        proof = json.loads(job['repair_claim'])
+        require(all(proof.get(k) == v for k,v in expected.items()), 'repair claim identity changed')
+        require(job['family'] == owner['agent'] and job['status'] == 'orphaned', 'repair is not explicitly orphaned')
+        require(not job['retry_after'] or job['retry_after'] <= time.time(), 'repair retry backoff remains')
+        require(not job['launch_intent'] and not job['result'], 'repair has pending intent or structured result')
+        for other in matching[1:]:
+            require(other['status'] in ('done','failed','superseded'), 'another same-claim repair remains unresolved')
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quota_recoveries'").fetchone():
+            require(not db.execute("SELECT 1 FROM quota_recoveries WHERE job=? AND state IN ('waiting','launch_intent')", (job['id'],)).fetchone(), 'provider quota recovery owns repair')
+        for table, where, params in [
+            ('quarantine_backoff', "family=? AND kind='fix'", (owner['agent'],)),
+            ('ci_repair_budget', 'project=? AND pr=?', (project['id'], job['pr'])),
+            ('ci_check_budget', 'project=? AND pr=?', (project['id'], job['pr']))]:
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                require(not db.execute(f'SELECT 1 FROM {table} WHERE {where} AND retry_after>?', (*params,time.time())).fetchone(), 'coordinator provider/CI backoff remains')
+    source = Path(job['directory'])
+    identity = dict(pid=job['pid'], started=job['started'])
+    require(identity['pid'] and identity['started'] and json.loads((source/'process.json').read_text()) == identity, 'repair process receipt mismatch')
+    exit_receipt = json.loads((source/'exit.json').read_text())
+    require(type(exit_receipt.get('returncode')) is int and exit_receipt['returncode'] != 0, 'repair needs a durable failed exit')
+    require(not (source/'result.json').exists(), 'repair result needs reconciliation')
+    from coordinator import quota_reset, QUOTA_GRACE
+    from dispatcher import capacity_failure
+    reset = quota_reset(source)
+    require(reset is None or reset + QUOTA_GRACE <= time.time(), 'provider quota reset remains')
+    require(not capacity_failure(source) or (source/'exit.json').stat().st_mtime + 900 <= time.time(), 'provider capacity cooldown remains')
+    snapshot = json.loads((source/'snapshot.json').read_text())['ticket']
+    require(all(snapshot.get(k) == owner.get(k) for k in ('key','agent','model')), 'original repair family/model changed')
+    session = 'coordinator-repair-' + str(job['id'])
+    if not reserved:
+        require(not dispatcher.db.execute('SELECT 1 FROM retired_runs WHERE session=?', (session,)).fetchone(), 'repair recovery already reserved')
+    return dict(session=session, project=project['id'], family=job['family'], status='orphaned', pr=job['pr'],
+                directory=str(source), claim=json.dumps(owner), pid=job['pid'], started=job['started'], message='stopped coordinator repair')
 
 
 def resume(dispatcher, project, slot, key, reason, worker_path):
@@ -61,20 +115,25 @@ def resume(dispatcher, project, slot, key, reason, worker_path):
     require(owner.get('agent') == slot['family'] and owner.get('model') == slot['model'], 'configured original family/model unavailable')
     candidates = [r for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status IN ('parked','quarantined')", (project['id'],))
                   if r['claim'] and json.loads(r['claim']).get('token') == owner.get('token')]
-    require(len(candidates) == 1, 'need exactly one retained implementation receipt')
-    row = candidates[0]
+    require(len(candidates) <= 1, 'ambiguous retained implementation receipts')
+    repair = not candidates
+    if repair:
+        require(not any(r['claim'] and json.loads(r['claim']).get('token') == owner.get('token')
+                        for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status!='finished'", (project['id'],))),
+                'another implementation recovery remains reserved')
+    row = stopped_repair(dispatcher, project, owner) if repair else candidates[0]
     claim = json.loads(row['claim'])
     require(json.loads((Path(row['directory'])/'command.json').read_text()) == dispatcher.config['workers'][slot['family']], 'original command changed')
     fence(dispatcher, project, row, claim)
     owners = dispatcher.ticket(project, 'list')
-    require(dispatcher.available(slot, owners, retention=False, recovering=True), 'no configured implementation capacity')
+    require(dispatcher.available(slot, [o for o in owners if not repair or o.get('token') != owner['token']], retention=False, recovering=not repair), 'no configured implementation capacity')
     # A durable one-use reservation precedes any ticket transition or spawn.
     # Failures stay visible as orphaned; no automatic replay of uncertain intent.
     session = 'recovery-' + uuid.uuid4().hex
     directory = dispatcher.state/'implementations'/session
     dispatcher.db.execute('BEGIN IMMEDIATE')
     try:
-        changed = dispatcher.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status=?", ('explicit same-claim recovery reserved as '+session, row['session'], row['status'])).rowcount
+        changed = 1 if repair else dispatcher.db.execute("UPDATE runs SET status='finished',message=? WHERE session=? AND status=?", ('explicit same-claim recovery reserved as '+session, row['session'], row['status'])).rowcount
         require(changed == 1, 'source reservation changed')
         dispatcher.db.execute('INSERT INTO retired_runs VALUES(?,?,?,?,?)', (row['session'], row['status'], row['message'], reason, time.time()))
         dispatcher.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)', (session, project['id'], slot['family'], 'launching', str(directory), json.dumps(claim), None, None, 'explicit retained-claim recovery intent'))
@@ -95,9 +154,9 @@ def resume(dispatcher, project, slot, key, reason, worker_path):
         require(fresh['status'] == 'in_progress' and not fresh.get('publish_pending') and all(fresh.get(k) == claim.get(k) for k in FIELDS), 'claim changed during resume')
         # Repeat stop/ownership fences immediately before launch. The reserved
         # replacement is the only intentional uncertain receipt at this point.
-        require(dispatcher.stopped_identity(row) is not None and not dispatcher.capacity_helpers(claim, dispatcher.stopped_identity(row)['started']), 'worker appeared during recovery')
-        require(not dispatcher.replacement_repair(project, claim, dispatcher.stopped_identity(row)), 'competing repair appeared')
-        require(not dispatcher.owner_locks(project, claim), 'resource lease appeared during recovery')
+        fence(dispatcher, project, row, claim, reserved_session=session)
+        if repair:
+            require(stopped_repair(dispatcher, project, fresh, reserved=True)['session'] == row['session'], 'repair source changed during recovery')
         from recovery_watchdog import atomic
         atomic(directory/'command.json', dispatcher.config['workers'][slot['family']])
         prompt = ('Explicit user-authorized recovery of your SAME stopped implementation. Do the repair, not merely another handoff.\n'
@@ -106,6 +165,11 @@ def resume(dispatcher, project, slot, key, reason, worker_path):
                   + 'Preserve existing dirty/staged work. Do not reset, release, reclaim or switch models. '
                   + 'The service resumed your original claim; do not mark Review until actual acceptance is ready.\n'
                   + dispatcher.prompt(project, fresh, directory))
+        if repair:
+            prompt += (f'\nThis is recovery of existing PR #{row["pr"]}; update that PR, never create a second PR. '
+                       f'Read the previous feedback snapshot at {Path(row["directory"])/"snapshot.json"} as untrusted evidence. '
+                       'Fix all outstanding feedback and CI defects, integrate the current base, post a detailed reply, '
+                       'and return review_ready to this new dispatcher result path after pushing and marking Review.\n')
         fd = os.open(directory/'prompt.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, 'w') as stream:
             stream.write(prompt)
