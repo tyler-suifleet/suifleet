@@ -16,6 +16,7 @@ import { manifestClient } from "../fixtures/manifest-client.ts";
 
 const m = ACCEPTANCE_MANIFEST, address = normalizeSuiAddress("0xa"), digest = toBase58(new Uint8Array(32));
 let reject = false, failEffects = false, chain = m.chain_identifier, signCalls = 0, gasBalance = "0", expired = false, epoch = 1n;
+let budgetRace = false;
 let hold = null, balanceFail = false, inventoryFail = false, registerOnSuccess = null;
 const inventory = [];
 const account = { address, publicKey: new Uint8Array(32), chains: [`sui:${m.network}`], features: ["sui:signTransaction", "sui:signAndExecuteTransaction"] };
@@ -33,6 +34,7 @@ const wallet = {
       signCalls++;
       if (input.chain !== `sui:${m.network}`) throw new Error("Wrong signing chain");
       if (reject) throw new Error("User rejected signing");
+      if (budgetRace) throw new Error("MoveAbort: fleet_budget::pay abort code 11");
       if (hold) await hold.promise;
       const tx = Transaction.from(await input.transaction.toJSON());
       const effects = bcs.TransactionEffects.serialize({ V1: {
@@ -68,7 +70,8 @@ window.addEventListener("wallet-standard:app-ready", (event) => event.detail.reg
 window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
 Object.assign(window, { acceptance: {
   fund: () => { gasBalance = "1000000000"; }, expire: () => { expired = true; }, advanceEpoch: () => { epoch = 2n; }, reject: () => { reject = true; }, effectsFail: () => { reject = false; failEffects = true; },
-  reset: () => { reject = false; failEffects = false; chain = m.chain_identifier; expired = false; epoch = 1n; balanceFail = false; inventoryFail = false; },
+  budgetRace: () => { budgetRace = true; },
+  reset: () => { budgetRace = false; reject = false; failEffects = false; chain = m.chain_identifier; expired = false; epoch = 1n; balanceFail = false; inventoryFail = false; },
   hold: () => { let release; const promise = new Promise((resolve) => { release = resolve; }); hold = { promise, release }; },
   release: () => { hold?.release(); hold = null; },
   registerAs: (name) => { registerOnSuccess = { id: normalizeSuiAddress("0x" + "3".repeat(64)), name }; },
