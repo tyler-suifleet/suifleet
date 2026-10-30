@@ -654,3 +654,31 @@ Historical read-only Testnet repro above was not rerun. No wallet writes,
 deployment, hardware tests, full cross-layer suite or local CodeQL claimed.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun in
 SF-031/#32 and SF-087/#159. No migration; frontend rebuild required for delivery.
+
+
+## SF-191 storage-base integration (2026-10-30)
+
+The supplied independent review of `ed6463d503c0` found no actionable source
+or security defects and no open threads. Integrated snapshot/fetched main
+`64d4a05cdec574faf966b581398b9365a0efd021` in merge `c711ca8d7306`.
+Resolved the workflow-condition test conflict using main's complete version:
+it retains the queue-plan bracket lookup repair and additionally tests failed
+and cancelled originating CI. No health behavior changes were needed.
+
+Checks after integration, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest` (complete target, including all three rendered health states and upstream storage regressions).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build` (17 static pages).
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py scripts/tests/test_live_common.py` (73 tests OK; logged connection resets/cleanup failures are isolated failure fixtures).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs` (every exported route, logged out and reconnected fixture wallet).
+- `git diff --check origin/main...HEAD` and snapshot-base ancestry.
+
+Logs: `/tmp/sf191-storage-{manifest,build,python,browser,hydration}.log`.
+This is an integration handoff, not approval. New-head hosted CI and automatic
+testnet remain pending/uncollected; no hosted CI polling. Coordinator must collect
+successful exact-head/current-base checks and fresh independent review before
+merge. Historical read-only Testnet repro above was not rerun. No wallet writes,
+deployment, physical testing, full cross-layer suite or local CodeQL claimed.
+Physical/mainnet/provider/manual-wallet acceptance remains deferred and unrun in
+SF-031/#32 and SF-087/#159. No migration; delivery requires a frontend rebuild.
