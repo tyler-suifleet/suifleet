@@ -1,0 +1,70 @@
+{
+  "run_url": "https://github.com/tyler-suifleet/suifleet/actions/runs/41020274202",
+  "failed_head": "40f0f7d5578f67602e9293d076794d4007427ea3",
+  "base": "bd9e5abfd7369834f6ee150b46c78a65b535c87f",
+  "failed_run_evidence": {
+    "started": "2026-10-30T07:54:43Z",
+    "network": "testnet",
+    "transactions": [],
+    "checks": [],
+    "toolchain": {
+      "build": {
+        "role": "build",
+        "release": "testnet-v1.81.1",
+        "version": "sui 1.81.1-e04cf9aa915c",
+        "max_protocol": 138,
+        "path": "/usr/local/bin/sui"
+      },
+      "network": {
+        "role": "network",
+        "release": "testnet-v1.82.1",
+        "version": "sui 1.82.1-987123842623",
+        "max_protocol": 139,
+        "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+        "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+        "path": "/opt/sui-network/sui",
+        "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+      },
+      "compatibility": {
+        "chain": "4c78adac",
+        "epoch": 1268,
+        "protocol_version": 139,
+        "network_cli_max_protocol": 139,
+        "build_cli_max_protocol": 138,
+        "build_cli_offline": true
+      }
+    },
+    "funding": {
+      "required_mist": 3650000000,
+      "held_mist": 400000000,
+      "address_mist": 2466203442,
+      "coin_mist": 78358890
+    },
+    "faucet": {
+      "attempts": 1,
+      "cli_returncode": 0,
+      "balance_before_mist": 2544562332,
+      "balance_change_mist": 1000000000,
+      "balance_after_mist": 3544562332,
+      "success": false
+    },
+    "success": false,
+    "allowance_used_mist": 0,
+    "max_spend_mist": 1600000000,
+    "error": "dedicated testnet faucet did not supply the required balance (one bounded attempt): holds 3544562332 MIST; the selected suites may spend up to 3650000000",
+    "failure_class": "funding"
+  },
+  "repair_observation": {
+    "observed_at": "2026-10-30T08:00:10.652907+00:00",
+    "chain": "4c78adac",
+    "operator": "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac",
+    "network_cli_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+    "address_mist": 4462197812,
+    "coin_mist": 78358890,
+    "total_mist": 4540556702,
+    "required_mist": 3650000000,
+    "funding_shortfall": null,
+    "writes_performed": false
+  },
+  "limitations": "Read-only balance observation; intervening funding provenance is not inferred. Shared CI balance can change. No faucet, signing, transaction replay, reservation removal or allowance changes. Actual new-head/base CI, post-pruning complete rollout audit and fresh independent review remain required. External acceptance remains #32/#159."
+}
