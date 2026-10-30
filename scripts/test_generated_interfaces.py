@@ -59,6 +59,14 @@ def main():
             assert "unsupported transaction parameter" in str(error)
         else:
             raise AssertionError(f"generator silently accepted {unsupported}")
+    changed = deepcopy(catalog)
+    changed["modules"]["subscription"]["structs"]["Account"]["type_parameters"][0]["phantom"] = False
+    try:
+        generator.generate(changed, recipe)
+    except ValueError as error:
+        assert "nonphantom generic" in str(error)
+    else:
+        raise AssertionError("generator silently erased a nonphantom type parameter")
     with tempfile.TemporaryDirectory(prefix="generated-drift-") as directory:
         with patch.object(generator, "ROOT", Path(directory)):
             outputs = generator.generate(catalog, recipe)

@@ -128,6 +128,27 @@ module sui_edge::customer {
         customer.allowance = allowance;
     }
 
+    /// Subscription custody is additive; this marker never leaves Customer.
+    public struct SubscriptionKey has copy, drop, store {}
+    public(package) fun bind_subscription(customer: &mut Customer, registry: &DeviceRegistry, account: ID) {
+        assert!((customer.version == 1 || customer.version == 2) && customer.registry_id == object::id(registry), EBinding);
+        assert!(!df::exists(&customer.id, SubscriptionKey {}), EBinding);
+        df::add(&mut customer.id, SubscriptionKey {}, account);
+        // Old package entry points require version 1 and cannot administer this
+        // paid customer after explicit subscription opt-in. Layout stays stable.
+        customer.version = 2;
+    }
+    public(package) fun subscription_entitlement(customer: &mut Customer, account: ID,
+        device_limit: u64, allowance: u64, period: u64) {
+        assert!(*df::borrow<SubscriptionKey, ID>(&customer.id, SubscriptionKey {}) == account, EBinding);
+        assert!(period > customer.period, EPeriod);
+        assert!(device_limit >= customer.active_devices, ELimit);
+        customer.period = period;
+        customer.used = 0;
+        customer.device_limit = device_limit;
+        customer.allowance = allowance;
+    }
+
     /// Fleet creation has no entitlement side effects. Catalogs may be shared;
     /// every fleet receives a distinct budget and custody namespace.
     public fun create_fleet(customer: &mut Customer, registry: &DeviceRegistry, name: String, ctx: &mut TxContext) {
@@ -702,7 +723,7 @@ module sui_edge::customer {
     /// A non-store, non-publicly-constructible witness then keeps devices from
     /// exhausting the customer ledger by calling its charge function directly.
     public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &mut TxContext) {
-        assert!(customer.version == 1 && object::id(registry) == customer.registry_id, EBinding);
+        assert!((customer.version == 1 || customer.version == 2) && object::id(registry) == customer.registry_id, EBinding);
         device_registry::assert_admin(registry, ctx);
         let name = std::type_name::with_original_ids<W>().into_string().into_bytes();
         assert!(customer.charge_type.is_empty() || customer.charge_type == name, EBinding);
@@ -710,14 +731,14 @@ module sui_edge::customer {
     }
 
     public fun assert_member(customer: &Customer, ctx: &mut TxContext) {
-        assert!(customer.version == 1 && customer.credentials.contains(&ctx.sender()), EAccess);
+        assert!((customer.version == 1 || customer.version == 2) && customer.credentials.contains(&ctx.sender()), EAccess);
     }
     public fun assert_admin(customer: &Customer, ctx: &mut TxContext) {
         assert_member(customer, ctx);
         assert!(*customer.credentials.get(&ctx.sender()), EAccess);
     }
     public fun assert_fleet(customer: &Customer, fleet: &Fleet) {
-        assert!(customer.version == 1 && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
+        assert!((customer.version == 1 || customer.version == 2) && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
     }
     fun assert_name(name: &String) { assert!(name.length() > 0 && name.length() <= 80, EName); }
     public fun devices(fleet: &Fleet): &vector<ID> { &fleet.devices }

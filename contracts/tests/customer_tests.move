@@ -299,7 +299,7 @@ module sui_edge::customer_tests {
     fun future_customer_authority_is_not_writable_through_current_credential_api() {
         let mut s = setup(); let fid = fleet(&mut s);
         let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
-        customer::set_authority_version_for_testing(&mut c, &mut f, 2);
+        customer::set_authority_version_for_testing(&mut c, &mut f, 3);
         customer::set_credential(&mut c, OTHER, true, true, s.ctx());
         ts::return_shared(c); ts::return_shared(f); s.end();
     }

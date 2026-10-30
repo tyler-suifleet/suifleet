@@ -1682,6 +1682,20 @@ export const MOVE_ABI = {
             "sui::object::ID"
           ]
         ]
+      },
+      "SubscriptionKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
       }
     }
   },
@@ -7026,6 +7040,338 @@ export const MOVE_ABI = {
           ],
           [
             "version",
+            "u64"
+          ]
+        ]
+      }
+    }
+  },
+  "subscription": {
+    "functions": {
+      "cancel": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::subscription::Account<T>",
+          "&sui_edge::customer::Customer",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui::coin::Coin<T>"
+        ]
+      },
+      "collect": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::subscription::Account<T>",
+          "&mut sui_edge::customer::Customer",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "deposit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::subscription::Account<T>",
+          "sui::coin::Coin<T>"
+        ],
+        "returns": []
+      },
+      "offer": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&sui_edge::device_registry::DeviceRegistry",
+          "address",
+          "u64",
+          "u64",
+          "u64",
+          "u64",
+          "bool",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "open": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "&sui_edge::subscription::Offer<T>",
+          "sui::coin::Coin<T>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "renew": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [
+          {
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "parameters": [
+          "&mut sui_edge::subscription::Account<T>",
+          "&sui_edge::customer::Customer",
+          "&sui_edge::subscription::Offer<T>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "Account": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [
+          {
+            "phantom": true,
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "customer_id",
+            "sui::object::ID"
+          ],
+          [
+            "registry_id",
+            "sui::object::ID"
+          ],
+          [
+            "treasury",
+            "address"
+          ],
+          [
+            "balance",
+            "sui::balance::Balance<T>"
+          ],
+          [
+            "tier",
+            "u64"
+          ],
+          [
+            "device_limit",
+            "u64"
+          ],
+          [
+            "allowance",
+            "u64"
+          ],
+          [
+            "fee",
+            "u64"
+          ],
+          [
+            "remaining",
+            "u64"
+          ],
+          [
+            "period_ms",
+            "u64"
+          ],
+          [
+            "next_due_ms",
+            "u64"
+          ],
+          [
+            "term_end_ms",
+            "u64"
+          ],
+          [
+            "cancelled",
+            "bool"
+          ]
+        ]
+      },
+      "Collected": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "account_id",
+            "sui::object::ID"
+          ],
+          [
+            "amount",
+            "u64"
+          ],
+          [
+            "through_ms",
+            "u64"
+          ]
+        ]
+      },
+      "Deposited": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "account_id",
+            "sui::object::ID"
+          ],
+          [
+            "amount",
+            "u64"
+          ]
+        ]
+      },
+      "Offer": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [
+          {
+            "phantom": true,
+            "name": "T",
+            "constraints": []
+          }
+        ],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "registry_id",
+            "sui::object::ID"
+          ],
+          [
+            "treasury",
+            "address"
+          ],
+          [
+            "tier",
+            "u64"
+          ],
+          [
+            "device_limit",
+            "u64"
+          ],
+          [
+            "allowance",
+            "u64"
+          ],
+          [
+            "fee",
+            "u64"
+          ],
+          [
+            "periods",
+            "u64"
+          ],
+          [
+            "period_ms",
+            "u64"
+          ],
+          [
+            "published_at_ms",
+            "u64"
+          ],
+          [
+            "expires_at_ms",
+            "u64"
+          ]
+        ]
+      },
+      "PlanChanged": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "account_id",
+            "sui::object::ID"
+          ],
+          [
+            "offer_id",
+            "sui::object::ID"
+          ],
+          [
+            "tier",
+            "u64"
+          ],
+          [
+            "fee",
+            "u64"
+          ],
+          [
+            "periods",
+            "u64"
+          ]
+        ]
+      },
+      "Refunded": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "account_id",
+            "sui::object::ID"
+          ],
+          [
+            "recipient",
+            "address"
+          ],
+          [
+            "amount",
             "u64"
           ]
         ]
