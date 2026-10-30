@@ -76,11 +76,13 @@ def manual_origin(dispatcher, owner, path, repair_created):
     pid, started = proof.get('pid'), proof.get('started')
     require(type(pid) is int and pid > 0 and isinstance(started, str) and started.isdigit() and int(started) > 0,
             'manual origin process identity missing')
+    require(type(proof.get('sid')) is int and proof['sid'] == pid,
+            'manual origin must record a session leader')
     from coordinator import process_identity, worker_stopped
     require(process_identity(pid) is None and worker_stopped(pid, started), 'manual origin worker/session live or uncertain')
     require(not dispatcher.claim_helpers(owner) and not dispatcher.capacity_helpers(owner, started),
             'manual origin helper live or uninspectable')
-    return hashlib.sha256(raw).hexdigest()
+    return raw
 
 
 def recoverable_repair(job):
@@ -122,7 +124,7 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
             ('ci_check_budget', 'project=? AND pr=?', (project['id'], job['pr']))]:
             if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
                 require(not db.execute(f'SELECT 1 FROM {table} WHERE {where} AND retry_after>?', (*params,time.time())).fetchone(), 'coordinator provider/CI backoff remains')
-    origin_digest = manual_origin(dispatcher, owner, origin, job['created']) if not originals else None
+    origin_bytes = manual_origin(dispatcher, owner, origin, job['created']) if not originals else None
     source = Path(job['directory'])
     identity = dict(pid=job['pid'], started=job['started'])
     require(identity['pid'] and identity['started'] and json.loads((source/'process.json').read_text()) == identity, 'repair process receipt mismatch')
@@ -147,7 +149,7 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
     sources = [dict(job)] + older
     if before is not None:
         return sources
-    return dict(sources=sources, manual_origin=origin_digest, session=session, project=project['id'], family=job['family'], status='orphaned', pr=job['pr'],
+    return dict(sources=sources, manual_origin=origin_bytes, session=session, project=project['id'], family=job['family'], status='orphaned', pr=job['pr'],
                 directory=str(source), claim=json.dumps(owner), pid=job['pid'], started=job['started'], message='stopped coordinator repair')
 
 
@@ -203,7 +205,7 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None):
             require(rechecked['session'] == row['session'] and rechecked['manual_origin'] == row['manual_origin'],
                     'repair source or manual origin changed during recovery')
             if row['manual_origin']:
-                (directory/'manual-origin.json').write_bytes(Path(origin).read_bytes())
+                (directory/'manual-origin.json').write_bytes(rechecked['manual_origin'])
         from recovery_watchdog import atomic
         atomic(directory/'command.json', dispatcher.config['workers'][slot['family']])
         prompt = ('Explicit user-authorized recovery of your SAME stopped implementation. Do the repair, not merely another handoff.\n'

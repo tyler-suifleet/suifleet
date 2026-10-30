@@ -175,7 +175,7 @@ class StoppedRepairTests(unittest.TestCase):
         self.d.db.execute('DELETE FROM runs')
         self.jobs.execute('UPDATE jobs SET created=?', (time.time()+60,))
         proof = {k: self.claim[k] for k in control.FIELDS if k != 'token'}
-        proof.update(claim=hashlib.sha256(b'private').hexdigest(), pid=321, started='50', recorded_at=time.time()-60)
+        proof.update(claim=hashlib.sha256(b'private').hexdigest(), pid=321, sid=321, started='50', recorded_at=time.time()-60)
         path = self.path/'origin.json'
         path.write_text(json.dumps(proof))
         path.chmod(0o600)
@@ -193,10 +193,25 @@ class StoppedRepairTests(unittest.TestCase):
         self.assertEqual(json.loads((Path(result['directory'])/'manual-origin.json').read_text()), proof)
         self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'superseded')
 
+    def test_manual_origin_audit_uses_verified_bytes_without_rereading(self):
+        path, proof = self.manual_receipt()
+        raw = path.read_bytes()
+        original = control.stopped_repair
+        def recheck(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get('reserved'):
+                path.write_text('{"changed": true}')
+            return result
+        with patch('coordinator.process_identity', side_effect=lambda pid: None if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True), \
+             patch.object(control, 'stopped_repair', side_effect=recheck):
+            result = self.manual_resume(path)
+        self.assertEqual((Path(result['directory'])/'manual-origin.json').read_bytes(), raw)
+
     def test_manual_origin_missing_live_tampered_or_new_receipt_never_launches(self):
         path, proof = self.manual_receipt()
         with self.assertRaisesRegex(RuntimeError, 'manual-origin'): self.resume()
-        for change in [dict(claim='different'),dict(session='other'),dict(recorded_at=99999999999),dict(pid=None),dict(started='bad')]:
+        for change in [dict(claim='different'),dict(session='other'),dict(recorded_at=99999999999),dict(pid=None),dict(started='bad'),dict(sid=None),dict(sid=999),dict(sid=True)]:
             path.write_text(json.dumps({**proof, **change}))
             with self.assertRaises(RuntimeError): self.manual_resume(path)
         path.write_text(json.dumps(proof))
@@ -214,7 +229,7 @@ class StoppedRepairTests(unittest.TestCase):
         path, proof = self.manual_receipt()
         child = REAL_POPEN([sys.executable, '-c', 'import time; time.sleep(0.2)'], start_new_session=True)
         self.addCleanup(lambda: child.poll() is None and child.kill())
-        proof.update(pid=child.pid, started=process_identity(child.pid))
+        proof.update(pid=child.pid, sid=os.getsid(child.pid), started=process_identity(child.pid))
         path.write_text(json.dumps(proof))
         with patch('coordinator.process_identity', side_effect=lambda pid: process_identity(pid) if pid == child.pid else '200'):
             with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
