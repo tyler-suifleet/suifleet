@@ -118,6 +118,7 @@ jobs:
 
       - name: Configured secure tunnel destination with actual proxy and systemd
         run: |
+          python3 -m unittest scripts.tests.test_tunneling -v
           PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_processes.py -v
           make package-tunneling
           python3 scripts/test_tunneling.py --package /tmp/suifleet-tunnel.tar.gz
