@@ -1,0 +1,24 @@
+{
+  "network": "testnet",
+  "chain_identifier": "4c78adac",
+  "treasury_payee": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+  "threshold": 2,
+  "public_keys": [
+    {
+      "scheme": "ED25519",
+      "public_key": "ACBJflOEA/+Fa5DRhrAwUYGWA0v81vG1XyHA7la8D6IK",
+      "weight": 1
+    },
+    {
+      "scheme": "ED25519",
+      "public_key": "AAcOxGa+9sZeYOX/o1c+QmUxY4j3LlW04/msXvD2bZSt",
+      "weight": 1
+    },
+    {
+      "scheme": "ED25519",
+      "public_key": "AN++kCHuKGpzXe1v0MQwgXaquNgyRcoBQQRmF/QZV+wA",
+      "weight": 1
+    }
+  ],
+  "purpose": "Disposable software-key payment test fixture; never company funds or mainnet"
+}

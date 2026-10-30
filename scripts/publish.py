@@ -533,7 +533,8 @@ def finish(pending, args, read):
     resolve = SimpleNamespace(rpc=pending["rpc"], chain_identifier=pending["chain"], package=pending["package"],
                               upgrade_cap=pending["cap"], registry=pending["registry"], network=pending["network"],
                               publisher=pending["walrus"][0], aggregator=pending["walrus"][1],
-                              aggregator_mirror=pending.get("aggregator_urls", []))
+                              aggregator_mirror=pending.get("aggregator_urls", []),
+                              treasury_payee=pending.get("treasury_payee"))
     for attempt in range(10):
         try:
             manifest = dm.resolve(resolve, read)
@@ -599,6 +600,11 @@ def run(args, cli=None, read=dm.chain_facts, inspect=toolchain.decode):
         walrus = tuple(given or default for given, default in zip(walrus, defaults))
     for url in walrus:
         dm.endpoint(url)
+    treasury = getattr(args, "treasury_payee", None)
+    if treasury is None:
+        treasury = (step.previous or {}).get("treasury_payee")
+    if treasury is not None:
+        dm.treasury_payee(treasury)
     mirrors = getattr(args, "aggregator_mirror", None)
     if mirrors is None:
         mirrors = (step.previous or {}).get("walrus", {}).get("aggregator_urls", [])
@@ -627,7 +633,7 @@ def run(args, cli=None, read=dm.chain_facts, inspect=toolchain.decode):
     pending_path = args.records / step.env / f"pending-{digest}.json"
     pending = dict(env=step.env, network=step.network, chain=step.chain, rpc=step.rpc, address=step.address,
                    digest=digest, package_path=str(args.package.resolve()), walrus=list(walrus),
-                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors, plan=admitted,
+                   object_changes=output.get("objectChanges"), aggregator_urls=mirrors, treasury_payee=treasury, plan=admitted,
                    effects={k: output["effects"].get(k) for k in ("status", "gasUsed")}, verified=verified)
     if verified:
         pending.update(original=step.published["original"] if step.published else None,
@@ -658,6 +664,7 @@ def parser():
     p.add_argument("--expect-address", help="account that must be active (required unless --recover)")
     p.add_argument("--network", choices=("devnet", "localnet"), help="label for a chain that is neither testnet nor mainnet")
     p.add_argument("--dry-run", action="store_true", help="simulate the transaction; write nothing")
+    p.add_argument("--treasury-payee", help="reviewed canonical treasury multisig address (default: preserve previous release)")
     p.add_argument("--publisher", help="Walrus publisher URL (default: previous release, or testnet's public one)")
     p.add_argument("--aggregator-mirror", action="append", help="ordered device mirrors; repeat for each URL (default: preserve previous release)")
     p.add_argument("--aggregator", help="Walrus aggregator URL (default: previous release, or testnet's public one)")
