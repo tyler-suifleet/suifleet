@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
@@ -268,8 +269,8 @@ export function BudgetManager() {
       </div>}
       {batchError && <p role="alert">{batchError}</p>}
     </div>
-    {accounts.error ? <p role="alert">Budget accounts unavailable: {accounts.error.message}</p>
-      : devices.error ? <p role="alert">Budget devices unavailable: {devices.error.message}</p>
+    {accounts.error ? <p role="alert">{formatStorageQueryError(accounts.error, "Budget accounts")}</p>
+      : devices.error ? <p role="alert">{formatStorageQueryError(devices.error, "Budget devices")}</p>
       : !accountsReady ? <p>Loading budget accounts…</p> : <table className="w-full border">
       <thead><tr className="text-left"><th className="p-1">Device</th><th className="p-1">Reserve</th><th className="p-1">This period</th><th className="p-1">Draws</th><th className="p-1">Total paid</th><th className="p-1">Actions</th></tr></thead>
       <tbody>{activated.map((device, index) => {
@@ -403,7 +404,7 @@ export function StoragePanel({ suggestedWalFrost }: { suggestedWalFrost?: bigint
         </div>
       </fieldset>
     </>}
-    {walrusState.error && <p role="alert">Storage information unavailable: {walrusState.error.message}</p>}
+    {walrusState.error && <p role="alert">{formatStorageQueryError(walrusState.error, "Storage information")}</p>}
     {message && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}
   </div>;
@@ -426,7 +427,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
   const view = useQuery({ queryKey: ['retention', NETWORK, storage, origin], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, storage, origin!, config.storageOrigin ?? config.packageId) });
   const deviceView = useQuery({ queryKey: ['device-retention', NETWORK, storage, config.packageId], enabled: !!origin && version === BigInt(3), refetchInterval: 60_000,
-    queryFn: () => fetchDeviceRetention(client, config, storage) });
+    queryFn: async () => (await fetchDeviceRetention(client, config, storage)) ?? null });
   if (!origin) return <p>Protected retention is not configured for this build. No renewal or out-of-browser alerts are guaranteed.</p>;
   const policy = view.data?.policy, blobs = view.data?.blobs ?? [];
   return <fieldset disabled={pending} className="border rounded p-2 space-y-2">
@@ -457,7 +458,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
       <p>{deviceView.data ? `New archive target: epoch ${deviceView.data.target}; maximum WAL per renewal ${wal(BigInt(deviceView.data.max_fee))}.` : 'No device archive approval is verified.'}</p>
       <button type="button" disabled={!policy || !deviceView.isSuccess} onClick={() => void submit(() => buildConfigureDeviceRetentionTx(config, storage, budget, cap, target, parseToken(maxFee)))}>Approve new archives to this finite target</button>
       <button type="button" disabled={!deviceView.data} onClick={() => void submit(() => buildClearDeviceRetentionTx(config, storage, budget, cap))}>Pause new archive admission</button>
-      {deviceView.error && <p role="alert">Archive policy API unavailable in the configured storage package.</p>}
+      {deviceView.error && <p role="alert">{formatStorageQueryError(deviceView.error, "Archive policy")}</p>}
       <div><label>Reserve WAL <input className="border w-20" value={walFunds} onChange={(e) => setWalFunds(e.target.value)} /></label>
         <label>Reserve SUI <input className="border w-20" value={gasFunds} onChange={(e) => setGasFunds(e.target.value)} /></label>
         <button type="button" disabled={!policy} onClick={() => void submit(() => buildFundRetentionTx(config, storage, parseToken(walFunds), parseToken(gasFunds)))}>Deposit protected reserves</button>
@@ -465,7 +466,7 @@ function RetentionPanel({ config, storage, version, budget, cap, epoch, schedule
         <button type="button" disabled={!withdrawConfirmed || !account || !policy} onClick={() => void submit(() => buildWithdrawRetentionTx(config, storage, budget, cap, parseToken(walFunds), parseToken(gasFunds), account!.address))}>Withdraw reserves with expiry risk</button>
       </div>
     </>}
-    {view.error && <p role="alert">Retention state unavailable: {view.error.message}</p>}
+    {view.error && <p role="alert">{formatStorageQueryError(view.error, "Storage retention")}</p>}
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
   </fieldset>;
 }

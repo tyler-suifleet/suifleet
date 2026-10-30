@@ -73,6 +73,30 @@ class PreparedTests(unittest.TestCase):
             self.assertEqual(delete.call_count,1)
             self.assertTrue(delete.call_args.args[0][-1].endswith('/11'))
 
+    def test_workflow_rejects_fork_runs_before_preparation_or_wallet_access(self):
+        import yaml
+        workflow=Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
+        jobs=yaml.safe_load(workflow.read_text())['jobs']
+        # Evaluate the actual Actions conditions for trusted, fork and manual events.
+        for job in ('queue-plan', 'plan', 'validate'):
+            condition=jobs[job]['if']
+            for event, repository, conclusion, expected in (
+                ('workflow_run', 'owner/repo', 'success', True),
+                ('workflow_run', 'fork/repo', 'success', False),
+                # Only admission owns the originating CI conclusion guard.
+                ('workflow_run', 'owner/repo', 'failure', job != 'queue-plan'),
+                ('workflow_run', 'owner/repo', 'cancelled', job != 'queue-plan'),
+                ('workflow_dispatch', None, None, True),
+                ('schedule', None, None, True),
+            ):
+                context={'github': {'ref': 'refs/heads/main', 'event_name': event,
+                    'repository': 'owner/repo', 'event': {'workflow_run': {
+                        'head_repository': {'full_name': repository}, 'conclusion': conclusion}}},
+                    'needs': {'queue-plan': {'outputs': {'run': 'true'}}, 'prepare': {'outputs': {'run': 'true'}}}}
+                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition.replace('needs.queue-plan', "needs['queue-plan']")+'));'
+                result=subprocess.check_output(['node', '-e', script, json.dumps(context)], text=True).strip()
+                self.assertEqual(result, str(expected).lower(), (job, event, repository))
+
     def test_privileged_jobs_reject_fork_origins_before_checkout(self):
         import yaml
         workflow = Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml'
