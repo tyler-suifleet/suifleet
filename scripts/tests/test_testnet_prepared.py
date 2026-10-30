@@ -79,10 +79,13 @@ class PreparedTests(unittest.TestCase):
         jobs=yaml.safe_load(workflow.read_text())['jobs']
         # Evaluate the actual Actions conditions for trusted, fork and manual events.
         for job in ('queue-plan', 'plan', 'validate'):
-            condition=jobs[job]['if'].replace('needs.queue-plan', 'needs["queue-plan"]')
+            condition=jobs[job]['if']
             for event, repository, conclusion, expected in (
                 ('workflow_run', 'owner/repo', 'success', True),
                 ('workflow_run', 'fork/repo', 'success', False),
+                # Only admission owns the originating CI conclusion guard.
+                ('workflow_run', 'owner/repo', 'failure', job != 'queue-plan'),
+                ('workflow_run', 'owner/repo', 'cancelled', job != 'queue-plan'),
                 ('workflow_dispatch', None, None, True),
                 ('schedule', None, None, True),
             ):
@@ -90,7 +93,7 @@ class PreparedTests(unittest.TestCase):
                     'repository': 'owner/repo', 'event': {'workflow_run': {
                         'head_repository': {'full_name': repository}, 'conclusion': conclusion}}},
                     'needs': {'queue-plan': {'outputs': {'run': 'true'}}, 'prepare': {'outputs': {'run': 'true'}}}}
-                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition+'));'
+                script='const {github, needs}=JSON.parse(process.argv[1]); console.log(Boolean('+condition.replace('needs.queue-plan', "needs['queue-plan']")+'));'
                 result=subprocess.check_output(['node', '-e', script, json.dumps(context)], text=True).strip()
                 self.assertEqual(result, str(expected).lower(), (job, event, repository))
 

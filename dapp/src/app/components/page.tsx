@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useRef, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
@@ -91,5 +92,5 @@ export default function ComponentsPage() {
 function PlatformAvailability({ manifest, index }: { manifest: PlatformManifest; index: number }) {
   const { data, isLoading, error } = useDeploymentStorage(manifest.recipeBlobId);
   const confidentiality = data?.confidential ? "Confidential · Seal-encrypted recipe" : data?.confidential === false ? "Public · unencrypted recipe" : "Confidentiality unknown";
-  return <div className="rounded bg-gray-50 p-3 text-sm space-y-1"><p className="font-medium">{index + 1}. {manifest.os}/{manifest.arch}</p><p>{isLoading ? "Checking confidentiality and storage…" : error ? "Storage and confidentiality unknown" : confidentiality}</p>{!isLoading && <p className="text-xs text-gray-600">Recipe storage: {data?.recipe ?? "unknown"} · Artifact storage: {data?.confidential ? "private · requires authorized decryption to check" : data?.artifact ?? "unknown"}</p>}</div>;
+  return <div className="rounded bg-gray-50 p-3 text-sm space-y-1"><p className="font-medium">{index + 1}. {manifest.os}/{manifest.arch}</p><p>{isLoading ? "Checking confidentiality and storage…" : error ? formatStorageQueryError(error, "Storage and confidentiality") : confidentiality}</p>{!isLoading && <p className="text-xs text-gray-600">Recipe storage: {data?.recipe ?? "unknown"} · Artifact storage: {data?.confidential ? "private · requires authorized decryption to check" : data?.artifact ?? "unknown"}</p>}</div>;
 }
