@@ -168,6 +168,94 @@ class StoppedRepairTests(unittest.TestCase):
         (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
         (self.path/'snapshot.json').write_text(json.dumps(dict(ticket=self.claim)))
 
+    def manual_receipt(self):
+        import hashlib
+        import time
+        self.d.claim_helpers.return_value = []
+        self.d.db.execute('DELETE FROM runs')
+        self.jobs.execute('UPDATE jobs SET created=?', (time.time()+60,))
+        proof = {k: self.claim[k] for k in control.FIELDS if k != 'token'}
+        proof.update(claim=hashlib.sha256(b'private').hexdigest(), pid=321, sid=321, started='50', recorded_at=time.time()-60)
+        path = self.path/'origin.json'
+        path.write_text(json.dumps(proof))
+        path.chmod(0o600)
+        return path, proof
+
+    def manual_resume(self, path):
+        return control.resume(self.d,self.project,self.slot,'SF-1','Repair the confirmed filesystem race and verify acceptance.',self.path/'worker.py',origin=path)
+
+    def test_manual_origin_requires_existing_bound_stopped_process_proof(self):
+        path, proof = self.manual_receipt()
+        with patch('coordinator.process_identity', side_effect=lambda pid: None if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True):
+            result = self.manual_resume(path)
+        self.assertEqual(result['family'], 'Claude')
+        self.assertEqual(json.loads((Path(result['directory'])/'manual-origin.json').read_text()), proof)
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'superseded')
+
+    def test_manual_origin_audit_uses_verified_bytes_without_rereading(self):
+        path, proof = self.manual_receipt()
+        raw = path.read_bytes()
+        original = control.stopped_repair
+        def recheck(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get('reserved'):
+                path.write_text('{"changed": true}')
+            return result
+        with patch('coordinator.process_identity', side_effect=lambda pid: None if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True), \
+             patch.object(control, 'stopped_repair', side_effect=recheck):
+            result = self.manual_resume(path)
+        self.assertEqual((Path(result['directory'])/'manual-origin.json').read_bytes(), raw)
+
+    def test_manual_origin_missing_live_tampered_or_new_receipt_never_launches(self):
+        path, proof = self.manual_receipt()
+        with self.assertRaisesRegex(RuntimeError, 'manual-origin'): self.resume()
+        for change in [dict(claim='different'),dict(session='other'),dict(recorded_at=99999999999),dict(pid=None),dict(started='bad'),dict(sid=None),dict(sid=999),dict(sid=True)]:
+            path.write_text(json.dumps({**proof, **change}))
+            with self.assertRaises(RuntimeError): self.manual_resume(path)
+        path.write_text(json.dumps(proof))
+        with patch('coordinator.process_identity', return_value='50'):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        with patch('coordinator.process_identity', return_value=None), patch('coordinator.worker_stopped', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        path.chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError, 'private receipt'): self.manual_resume(path)
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
+
+    def test_manual_origin_real_process_must_stop(self):
+        from dispatcher import process_identity
+        path, proof = self.manual_receipt()
+        child = REAL_POPEN([sys.executable, '-c', 'import time; time.sleep(0.2)'], start_new_session=True)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        proof.update(pid=child.pid, sid=os.getsid(child.pid), started=process_identity(child.pid))
+        path.write_text(json.dumps(proof))
+        with patch('coordinator.process_identity', side_effect=lambda pid: process_identity(pid) if pid == child.pid else '200'):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+            self.child.assert_not_called()
+            child.wait(timeout=5)
+            self.assertEqual(self.manual_resume(path)['family'], 'Claude')
+
+    def test_manual_origin_helper_or_late_file_stays_reserved(self):
+        path, proof = self.manual_receipt()
+        with patch('coordinator.process_identity', return_value=None), patch('coordinator.worker_stopped', return_value=True):
+            self.d.capacity_helpers.return_value = [dict(pid=9, uninspectable=True)]
+            with self.assertRaisesRegex(RuntimeError, 'helper live or uninspectable'): self.manual_resume(path)
+            self.d.capacity_helpers.return_value = []
+            self.jobs.execute('UPDATE jobs SET created=1')
+            with self.assertRaisesRegex(RuntimeError, 'predate'): self.manual_resume(path)
+        self.child.assert_not_called()
+
+    def test_manual_origin_rechecked_before_launch(self):
+        path, proof = self.manual_receipt()
+        identities = iter([None, '50'])
+        with patch('coordinator.process_identity', side_effect=lambda pid: next(identities) if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        self.child.assert_not_called()
+        self.d.update.assert_called_once()
+
     def test_stopped_repair_with_finished_implementation_resumes_once(self):
         result = self.resume()
         self.assertEqual(result['family'], 'Claude')
