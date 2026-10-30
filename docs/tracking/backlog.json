@@ -4536,6 +4536,29 @@
         "Regression tests prove batch correctness, changed-head/base/feedback rejection, conflicts, failed checks, source evidence reuse limits, restart/recovery and issue reconciliation. Document operation, rollout and remaining live limitations."
       ],
       "validation": "Meaningful coordinator/planner and CI trust-boundary tests plus offline real-Git batch integration scenarios, status regressions and recorded actual activation evidence; no weakened wallet/mainnet/hardware/secret protections."
+    },
+    {
+      "key": "SF-208",
+      "title": "Recover stopped coordinator repairs from manual implementation origins",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/recovery_control.py",
+        "tools/pr-coordinator/tests/test_recovery_control.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Recovery of SF-207 PR412 fails because its manual implementation has no finished dispatcher run. Add a bounded operator route accepting an existing durable manual-origin process receipt, preserving original claim and proving original worker/session/helpers stopped. Never infer stopped identity from a prose handoff or fabricate a dispatcher origin.",
+      "evidence": "Recovery run 9d889f76: merged recovery_control.stopped_repair rejects PR412 with no unchanged finished implementation receipt; stopped repair job2627 has failed exit and unchanged claim. SF192 recovery successfully launched separately.",
+      "acceptance": [
+        "Accept an explicit existing manual-origin receipt bound to all claim identity fields, with recorded PID/start and timestamp preceding the coordinator repair; verify original process/session/helpers stopped before reservation and again before spawn.",
+        "Missing/tampered/stale/live/uninspectable origin proof, active same-claim workers, provider waits and competing reservations fail closed without changing tracker state. Preserve existing dispatcher-origin behavior.",
+        "Offline regressions exercise actual process stop checks, repeated fences and unchanged ownership; document exact evidence requirements. Submit through normal review and CI; do not install unreviewed source or claim SF207 recovered."
+      ],
+      "validation": "Focused recovery tests and full coordinator tests; tracking tests/dry run and diff checks. Merged-only installation and SF207 origin-proof verification remain next actions."
     }
   ]
 }
