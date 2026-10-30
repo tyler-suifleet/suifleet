@@ -14,7 +14,7 @@ import { useReleasePeriod } from '@/hooks/useReleasePeriod';
 import { ReleaseStorageStatus } from './ReleaseStorageStatus';
 import { ReleasePeriod } from './ReleasePeriod';
 import { DeliveryFields } from '@/components/DeliveryFields';
-import { FleetStorageChoice } from '@/components/FleetStorageChoice';
+import { FleetStorageChoice, fleetStorageSelected } from '@/components/FleetStorageChoice';
 import { buildPublishVersionTx, type ComponentVersion } from '@/lib/catalog';
 import { assertVersionAvailable } from '@/lib/component-library';
 import { ExistingLibraryEntry } from '@/components/ExistingLibraryEntry';
@@ -43,7 +43,8 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [stored,setStored]=useState<StorageInfo[]>([]);
   const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
-  const fleet=period.prepaid,[fleetPaid,setFleetPaid]=useState(false);
+  const fleet=period.prepaid,[paidChoice,setFleetPaid]=useState<boolean>();
+  const fleetPaid=fleetStorageSelected(paidChoice, fleet);
   const parsed=text.trim()?parseGreengrassRecipe(text):null;
   const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
   // Placeholder blob IDs mark which uploads the translated manifests use.

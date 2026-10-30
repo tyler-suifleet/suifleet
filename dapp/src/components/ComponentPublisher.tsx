@@ -1,4 +1,6 @@
 "use client";
+import { PublisherFailure } from "./PublisherFailure";
+import { PublisherError } from "@/lib/walrus";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
@@ -13,7 +15,7 @@ import { useReleasePeriod } from '@/hooks/useReleasePeriod';
 import { ReleaseStorageStatus } from './ReleaseStorageStatus';
 import { ReleasePeriod } from './ReleasePeriod';
 import { DeliveryFields } from "./DeliveryFields";
-import { FleetStorageChoice } from "./FleetStorageChoice";
+import { FleetStorageChoice, fleetStorageSelected } from "./FleetStorageChoice";
 import { ConfigurationFields } from "./ConfigurationFields";
 import { UploadProgress } from "./UploadProgress";
 import { EMPTY_CONFIGURATION, recipeConfiguration } from "@/lib/recipe-configuration";
@@ -42,7 +44,9 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   const [configuration, setConfiguration] = useState(EMPTY_CONFIGURATION);
   const [delivery, setDelivery] = useState(DEFAULT_DELIVERY);
   const fleet = period.prepaid;
-  const [fleetPaid, setFleetPaid] = useState(false);
+  const [paidChoice, setFleetPaid] = useState<boolean>();
+  const fleetPaid = fleetStorageSelected(paidChoice, fleet);
+  const [publisherFailure, setPublisherFailure] = useState<PublisherError>();
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const [phase, setPhase] = useState(""), [progress, setProgress] = useState<Progress | null>(null);
   const [receipt, setReceipt] = useState<{ digest: string; warnings: string[]; blobs: StorageInfo[] } | null>(null);
@@ -56,7 +60,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     assertVersionAvailable(versions, catalog, name, version);
   }
   function continueTo(next: number) {
-    setError("");
+    setError(""); setPublisherFailure(undefined);
     try {
       validateIdentity();
       if (next === 3) {
@@ -71,7 +75,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
   }
   async function publish() {
     if (inFlight.current || receipt) return;
-    inFlight.current = true; setBusy(true); setError("");
+    inFlight.current = true; setBusy(true); setError(""); setPublisherFailure(undefined);
     const owner = account?.address;
     try {
       if (!owner || !catalog) throw new Error("Connect your publishing wallet and choose a catalog.");
@@ -98,6 +102,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
         for (const [label, storage] of [["Artifact", artifact.storage], ["Recipe", recipe.storage]] as const) {
           blobs.push(storage);
           warnings.push(`${row.os}/${row.arch} ${label}: storage expires at epoch ${storage.endEpoch ?? "unknown"}`, ...storageWarnings(storage));
+          if (storage.publisherUrl) warnings.push(`${label} ${storage.blobId} served by ${storage.publisherUrl}`);
         }
         manifests.push({ os: row.os, arch: row.arch, recipeBlobId: recipe.blobId, recipeSha256: recipe.sha256, artifactSha256: artifact.sha256 });
       }
@@ -107,6 +112,7 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
       const result = await execute({ transaction: buildPublishVersionTx(catalog, name, version, manifests), onProgress: p => setPhase(phases[p]) });
       setReceipt({ digest: result.digest, warnings, blobs }); setPhase(""); onPublished();
     } catch (e) {
+      setPublisherFailure(e instanceof PublisherError ? e : undefined);
       setError(`${String(e)} Publication was not confirmed. Any completed uploads remain on Walrus; check the library before retrying registration.`);
     } finally { inFlight.current = false; setBusy(false); setProgress(null); setPhase(""); }
   }
@@ -114,7 +120,8 @@ export function ComponentPublisher({ catalog, versions, onPublished, onClose }: 
     <div className="flex flex-wrap items-center justify-between gap-2"><h2 id="publish-heading" className="text-lg font-semibold">Publish version</h2><button className={button} disabled={busy} onClick={onClose}>Back to library</button></div>
     <p className="text-sm text-gray-600">Publishing adds a reusable, immutable release to your library. It does not deploy, install or start software on any device.</p>
     <ol aria-label="Publishing steps" className="flex flex-wrap gap-3 text-sm">{["Name & version", "Platform artifacts", "Review & publish"].map((s, i) => <li key={s} aria-current={step === i + 1 ? "step" : undefined} className={step === i + 1 ? "font-semibold text-blue-700" : "text-gray-500"}>{i + 1}. {s}</li>)}</ol>
-    {error && <p role="alert" className="text-sm text-red-700 break-words">{error}</p>}
+    {error && !publisherFailure && <p role="alert" className="text-sm text-red-700 break-words">{error}</p>}
+    {publisherFailure && <PublisherFailure error={publisherFailure} />}
     {!receipt && <ExistingLibraryEntry versions={versions} catalog={catalog} name={name} version={version} />}
     {receipt ? <div role="status" className="space-y-2 break-words"><h3 ref={stepHeading} tabIndex={-1} className="font-semibold">Version published</h3><p>{name} {version} is in the library. Choose “Deploy this version” there to select targets and review a deployment.</p><p className="text-xs">Confirmed transaction: {receipt.digest}</p><details><summary>Storage expiry and renewal</summary><pre className="whitespace-pre-wrap text-xs">{receipt.warnings.join("\n")}</pre></details>{receipt.blobs.map((b, i) => <ReleaseStorageStatus key={i} blobId={b.blobId} blobObjectId={b.blobObjectId} />)}</div> : <>
       <h3 ref={stepHeading} tabIndex={-1} className="font-semibold">{["Name & version", "Platform artifacts", "Review & publish"][step - 1]}</h3>
