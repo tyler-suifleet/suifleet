@@ -35,6 +35,7 @@ const reclaimLib = {
 };
 const dependencies = {
   react,
+  '@/lib/storage-errors': loader()('lib/storage-errors.ts'),
   "@/hooks/useCurrentAccount":{useCurrentAccount:() => env.account},
   '@mysten/dapp-kit-react': { useCurrentAccount: () => env.account, useCurrentClient: () => env.client },
   '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: async () => {} }) },
