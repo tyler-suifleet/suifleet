@@ -19,18 +19,37 @@ export function buildPublishVersionTx(catalog:string,name:string,version:string,
   calls.component_catalog_publish_version(tx,catalogPackage(),catalog,name,version,manifests.map(m=>m.os),manifests.map(m=>m.arch),manifests.map(m=>m.recipeBlobId),manifests.map(m=>m.recipeSha256),manifests.map(m=>m.artifactSha256),'0x6');
   return tx;
 }
-export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[], initiallyPaused = false, fleet?: NamedFleet) {
+export function buildCatalogDeploymentTx(version:string,groups:string[],devices:string[], initiallyPaused = false, fleet?: NamedFleet, desired = false) {
+  if (desired && (groups.length === 0 || devices.length > 0)) throw new Error("Desired state targets groups only");
   const tx=new Transaction();
   if (fleet) {
     const [record] = tx.moveCall({ target: `${catalogPackage()}::customer::new_catalog_deployment`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(version), tx.pure.vector("id", groups), tx.pure.vector("id", devices), tx.object("0x6")] });
     if (initiallyPaused) tx.moveCall({ target: `${catalogPackage()}::customer::set_control`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record, tx.pure.u8(1), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0), tx.pure.u64(0)] });
     if (requireManifest().type_origins["deployment_manager::ReceiptShardKey"]) tx.moveCall({ target: `${catalogPackage()}::customer::begin_sharded_receipts`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), record] });
+    if (desired) setCatalogDesired(tx, record, groups, fleet);
+    calls.deployment_manager_share_deployment(tx, catalogPackage(), record);
+    return tx;
+  }
+  if (desired) {
+    const [record] = calls.component_catalog_new_deployment(tx, catalogPackage(), version, groups, [], "0x6");
+    if (initiallyPaused) calls.deployment_manager_set_control(tx, catalogPackage(), record, 1, 0, 0, 0, 0, 0);
+    setCatalogDesired(tx, record, groups);
     calls.deployment_manager_share_deployment(tx, catalogPackage(), record);
     return tx;
   }
   if (initiallyPaused) calls.component_catalog_create_deployment_paused(tx,catalogPackage(),version,groups,devices,'0x6');
   else calls.component_catalog_create_deployment(tx,catalogPackage(),version,groups,devices,'0x6');
   return tx;
+}
+function setCatalogDesired(tx: Transaction, record: Parameters<Transaction["object"]>[0], groups: string[], fleet?: NamedFleet) {
+  for (const group of groups) {
+    const [plan] = fleet
+      ? tx.moveCall({ target: `${catalogPackage()}::customer::begin_revision`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), tx.object(group)] })
+      : calls.desired_state_begin(tx, catalogPackage(), group);
+    calls.desired_state_set_component(tx, catalogPackage(), plan, record);
+    if (fleet) tx.moveCall({ target: `${catalogPackage()}::customer::commit_revision`, arguments: [tx.object(fleet.customerId), tx.object(fleet.id), plan, tx.object(group), tx.object("0x6")] });
+    else calls.desired_state_commit(tx, catalogPackage(), plan, group, "0x6");
+  }
 }
 export async function fetchVersion(client:SuiGrpcClient,id:string):Promise<ComponentVersion> {
   catalogPackage(); await verifyDeployment(client);
