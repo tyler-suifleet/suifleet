@@ -750,3 +750,33 @@ finite-lived uploaded blob may remain, but no version registers or prepaid
 boundary moves. Manual real-wallet/production-provider, physical and actual
 mainnet acceptance remains explicitly unrun in #32 and #159. Next: coordinator
 enforces actual exact-head/current-base CI/Testnet and fresh independent review.
+
+## Enrollment-budget base integration (2026-10-29)
+
+The supplied independent review approves the previous head with no actionable
+source/security findings or open threads. Its successful hosted checks and
+Testnet status apply to base `6e45938a`, rather than the new snapshot base.
+Merge `e27a6a8f` integrates current main
+`1bebb3451d92e6b56b2fb305eb4680ae4d11e09c` cleanly, including the enrollment
+budget checks. Release storage behavior is unchanged; no migration is needed.
+
+Network-none `suifleet-sf165:ci-repair`, UID:GID, identical host checkout and
+pnpm-store mounts, `HOME=/tmp`, `INSIDE_DEV_CONTAINER=1`:
+`make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+&& node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs
+&& node scripts/test_fleet_budget.cjs && node scripts/test_rollout_form.cjs &&
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+-p test_live_release_storage.py`: PASS, including offline prerequisites,
+TypeScript, production static export and three release-storage signer tests.
+Log: `/tmp/sf165-base1bebb-checks.log`. Existing Tailwind module-type warning
+remains non-fatal. Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+`test_onboarding_browser.cjs`, `test_components_browser.cjs`,
+`test_upload_browser.cjs` and `test_wallet_browser.cjs` under `scripts/`: all
+PASS, using chain/wallet/storage fixtures. `git diff --check`: PASS.
+
+Hosted CI/automatic Testnet remain pending for the new pushed head and are not
+watched or polled. No new Move/full OTA/public-network transaction ran; original
+publication/extension effects and costs remain historical receipts. No mutation
+lock was needed. Manual real-wallet/provider, physical and actual-mainnet
+acceptance remains unrun in #32/#159. Next: coordinator exact-head/current-base
+CI/Testnet gates and fresh independent review before serial integration.
