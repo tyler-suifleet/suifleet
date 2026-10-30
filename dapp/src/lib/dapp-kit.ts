@@ -22,7 +22,9 @@ export const dAppKit = createDAppKit({
     baseUrl: RPC_URL ?? (network === "localnet" ? "http://127.0.0.1:9000" : `https://fullnode.${network}.sui.io:443`),
   }),
   autoConnect: true,
-  slushWalletConfig: typeof window === "undefined" ? null : { appName: "SuiFleet" },
+  // Static, same-origin SDK fallback metadata avoids the remote metadata CORS failure.
+  // Review this snapshot with Slush SDK upgrades (docs/FRONTEND_CLIENT.md).
+  slushWalletConfig: typeof window === "undefined" ? null : { appName: "SuiFleet", metadataApiUrl: new URL("/wallet/slush.json", window.location.origin).href },
   walletInitializers: typeof window !== "undefined" && onboarding.enabled ? [enokiWalletsInitializer({
     apiKey: apiKey!,
     providers: { google: { clientId: googleClientId!, redirectUrl: typeof window === "undefined" ? undefined : new URL("/get-started", window.location.origin).href } },
