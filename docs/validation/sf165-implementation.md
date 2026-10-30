@@ -780,3 +780,39 @@ publication/extension effects and costs remain historical receipts. No mutation
 lock was needed. Manual real-wallet/provider, physical and actual-mainnet
 acceptance remains unrun in #32/#159. Next: coordinator exact-head/current-base
 CI/Testnet gates and fresh independent review before serial integration.
+
+## Recovery/CI base integration (2026-10-29)
+
+The supplied independent source review reports no actionable defects or open
+threads. The snapshot records successful ordinary CI and automatic Testnet for
+`dbf43b35` against the previous base `1bebb345`; these are not results for the new
+base. Merge `c74803c1` integrates snapshot/current main
+`48dad86ab6bf3df01bd5aaa17f632fa3303531da`. The sole conflict in CI keeps main's
+replacement `python3 -m unittest scripts.tests.test_tunneling -v` command,
+replacing the obsolete process-scan test. The resulting CI workflow is identical
+to main. Release-storage behavior and interfaces are unchanged.
+
+Local checks after integration, in network-none `suifleet-sf165:ci-repair` with
+UID:GID, identical checkout/pnpm-store mounts, HOME=/tmp and
+INSIDE_DEV_CONTAINER=1: `make dapp-typecheck && make dapp-build && node
+scripts/test_release_storage.cjs && node scripts/test_seal_frontend.cjs && node
+scripts/test_walrus_publishers.cjs && node scripts/test_fleet_budget.cjs && node
+scripts/test_rollout_form.cjs && PYTHONDONTWRITEBYTECODE=1 python3 -m unittest
+discover -s scripts/tests -p test_live_release_storage.py`: PASS. This includes
+the offline prerequisites, TypeScript, production static export and three signer
+policy tests. Log: `/tmp/sf165-base48dad-checks.log`. Existing non-fatal Tailwind
+module-type warning and input-based test skips remain explicit. Host
+`PYTHONDONTWRITEBYTECODE=1 python3 -m unittest scripts.tests.test_tunneling -v`:
+3 PASS. Host `CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+`test_onboarding_browser.cjs`, `test_components_browser.cjs`,
+`test_upload_browser.cjs` and `test_wallet_browser.cjs` under scripts/: all PASS
+with fixture chain/wallet/storage. `git diff --check`: PASS.
+
+No new Move/full OTA/public-network transaction ran. Historical publish/extend
+effects and costs remain in sf165-testnet.json. No wallet or mutation lock was
+used. The documented stale-pool failure remains fail-closed: a finite-lived blob
+can remain uploaded, but no version registers and no prepaid boundary moves.
+Hosted ordinary/security CI and automatic Testnet are pending for the new pushed
+head; not watched or polled. Next: coordinator exact-head/current-base checks and
+fresh independent review before serial integration. Manual real-wallet/provider,
+physical and actual-mainnet acceptance remains explicitly unrun in #32/#159.
