@@ -134,7 +134,7 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 
 **Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
 
-**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.83.0), which must support the network's protocol version (138 and 140 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 

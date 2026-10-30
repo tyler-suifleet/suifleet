@@ -42,11 +42,11 @@ BUILD = {
 }
 NETWORK = {
     'role': 'network',
-    'release': 'testnet-v1.82.1',
-    'version': 'sui 1.82.1-987123842623',
-    'max_protocol': 139,
-    'archive_sha256': '112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c',
-    'binary_sha256': 'de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b',
+    'release': 'testnet-v1.83.0',
+    'version': 'sui 1.83.0-16d2dc1e05ed',
+    'max_protocol': 140,
+    'archive_sha256': 'e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8',
+    'binary_sha256': '29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa',
 }
 NETWORK_DEFAULT = '/opt/sui-network/sui'
 PACKAGE_MODULE = '0x0000000000000000000000000000000000000000000000000000000000000002::package'
