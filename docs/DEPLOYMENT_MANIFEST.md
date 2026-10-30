@@ -19,6 +19,7 @@ Each client checks the manifest against the chain at startup and refuses a stale
 | `type_origins` | For each type the clients use, the package that **introduced** it. Types keep their introduction package across upgrades, so newer types such as `RecipeDigestKey` and `DeviceAddressKey` have later origins than `DeviceRegistry`. |
 | `shared_objects.registry` | The shared `DeviceRegistry` ID and its initial shared version. |
 | `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
+| `treasury_payee` | Optional canonical nonzero 32-byte lowercase Sui treasury address. Required by payment callers; absent or mismatched payees block payment. See [treasury custody](TREASURY.md). |
 | `walrus` | Publisher and legacy aggregator URL, plus optional ordered device `aggregator_urls`; see [public delivery](WALRUS_DELIVERY.md). |
 
 Optional type-origin groups are all-or-none: the component catalog, the Seal policy,
@@ -118,6 +119,8 @@ root, receipt/index keys and relocated group/catalog keys retain their own
 introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
+
+Treasury payment configuration and user-only multisig/SuiNS operations are documented in [TREASURY.md](TREASURY.md). `resolve --treasury-payee ADDRESS` and publication `--treasury-payee ADDRESS` pin a reviewed address; publication preserves the previous payee when omitted, including recovery. Missing payees preserve legacy nonpayment use, while the frontend payment guard fails closed.
 
 The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
 tells clients the package has the bounded batch membership entry points. Like
