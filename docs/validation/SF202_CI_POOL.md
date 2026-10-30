@@ -40,7 +40,7 @@ at the preparation checkout and a nonblocking `actions/excessive-secrets-exposur
 at dynamic secret selection. Both revision checkouts now consume only the
 main-sourced planner's independently authenticated immutable SHA, followed by the
 existing checkout verification. Signing secret selection explicitly names only
-the three dedicated pool keys. No scanner suppression or authority check was removed.
+the three dedicated pool keys. The Python `checkout_authenticated` helper preserves the authority checks but moves checkout outside CodeQL's modeled action. It does not eliminate privileged test-code execution and functions as a scanner blind spot; a passing gate must not be described as a clean security result. The later report contained five critical checkout results (one `actions/untrusted-checkout/critical`, four `actions/untrusted-checkout-toctou/critical`). See the [specific accepted-risk rationale proposed for independent review](../SECURITY_CI.md#findings-and-limits) for the authorized-writer trust assumption, exact compensating controls and prohibition on reusing the helper to bypass findings elsewhere. No SARIF filtering or authority-check removal is authorized. The main-sourced controller takes effect after reviewed merge, so this change cannot fix this PR's own controller run before integration.
 
 The feedback branch includes current main `120b5cb76e44a81cbaa09cdc2731c71907d0cee3`.
 Validation: testnet regressions 157 tests (one historical skip), live-common 60,
@@ -52,3 +52,5 @@ Hosted CodeQL and other exact-head CI, automatic testnet and independent review
 remain pending; this repair does not claim those checks passed. No live writes
 or hardware operations were performed during feedback repair. Deferred physical,
 mainnet and final provider/wallet acceptance remain in #32 and #159.
+
+Current-main integration for SF-188 supersedes the in-place `checkout_authenticated` helper with `checkout_candidate`: a separate immutable head/base clone is mounted into test containers while the trusted controller checkout remains intact. The Python checkout analysis limitation and authorized-writer risk above still apply; this integration does not establish a clean current-head scanner or live testnet result.
