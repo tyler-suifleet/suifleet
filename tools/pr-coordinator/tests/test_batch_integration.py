@@ -61,7 +61,7 @@ class Fixture:
         self.approval_posts = []
         self.candidate_prs = {}
         self.approvals = {}
-        self.launched, self.reconciled, self.events, self.heartbeats = [], [], [], []
+        self.launched, self.reconciled, self.events, self.review_assertions = [], [], [], []
         self.controller = BatchController(self)
 
     def git(self, *args, cwd=None):
@@ -80,13 +80,11 @@ class Fixture:
         owner = next(o for o in self.owners if o['key']==key)
         if command == 'show':return json.dumps(owner)
         if command == 'heartbeat':
-            assert args == ('--token',owner['token'])
-            assert not owner['expired']
-            self.heartbeats.append(key)
-            return '{}'
+            raise RuntimeError('Only implementation/blocked leases need heartbeats')
         raise AssertionError(command)
 
     def assert_review_owner(self, project, owner):
+        self.review_assertions.append(owner['key'])
         if owner['status']!='review' or owner['expired'] or owner['publish_pending']:
             raise RuntimeError('bad ownership')
 
@@ -202,8 +200,49 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(f.db.execute('select count(*) from batch_activation_commits').fetchone()[0],2)
         self.assertEqual(f.db.execute('select count(*) from integrations where reconciled=1').fetchone()[0],3)
         self.assertEqual(f.db.execute("select count(*) from batch_member_approvals where status='applied'").fetchone()[0],2)
-        self.assertTrue(f.heartbeats)
+        self.assertTrue(f.review_assertions)
         self.assertEqual([f.git('rev-parse',f'work/{n}') for n in (1,2)],f.heads)
+
+    def test_review_claim_validation_replaces_heartbeat_in_both_paths(self):
+        f=self.fixture()
+        # Match ticket's actual contract: Review has no renewable lease.
+        with self.assertRaisesRegex(RuntimeError, 'Only implementation/blocked'):
+            f.ticket(f.project, 'heartbeat', 'T-1', '--token', 'private-1')
+        self.assertEqual(f.tick(), {1,2})
+        self.assertEqual(f.row()['status'], 'awaiting_ci')
+        f.review_assertions.clear()
+        f.controller.validate_members(f.project, f.row())
+        self.assertEqual(f.review_assertions, ['T-1','T-2'])
+        self.assertFalse(f.reconciled)
+
+    def test_invalid_review_owner_does_not_block_other_candidates(self):
+        for field, value in [('status','in_progress'), ('expired',True), ('publish_pending',True)]:
+            with self.subTest(field=field):
+                f=self.fixture()
+                original=f.assert_review_owner
+                def validate(project, owner):
+                    if owner['key']=='T-1':
+                        changed=copy.deepcopy(owner);changed[field]=value
+                        return original(project, changed)
+                    return original(project, owner)
+                with patch.object(f, 'assert_review_owner', side_effect=validate):
+                    self.assertEqual(f.tick(), {2})
+                self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])], [2])
+                self.assertEqual(f.row()['status'], 'awaiting_ci')
+                self.assertFalse(f.reconciled)
+
+    def test_manifest_revalidates_review_ownership_before_publication(self):
+        f=self.fixture();f.tick();f.green();f.tick();f.approve()
+        original=f.assert_review_owner
+        def validate(project, owner):
+            if owner['key']=='T-1':raise RuntimeError('review ownership changed or is unpublished')
+            return original(project, owner)
+        with patch.object(f, 'assert_review_owner', side_effect=validate):
+            f.tick()
+        self.assertEqual(f.row()['status'], 'invalidated')
+        self.assertFalse(f.reconciled)
+        self.assertFalse(f.approval_posts)
+        self.assertEqual(f.git('rev-parse','main',cwd=f.remote),f.base)
 
     def test_combined_only_failure_splits_without_source_mutation(self):
         f=self.fixture();f.tick();row=f.row()
