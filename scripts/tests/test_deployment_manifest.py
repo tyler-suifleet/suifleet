@@ -37,6 +37,20 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_subscription_coins_are_explicit_and_require_payee(self):
+        manifest = fixture()
+        manifest["subscription_coins"] = {"USDC": {"coin_type": "0x" + "ab" * 32 + "::usdc::USDC", "decimals": 6}}
+        with self.assertRaises(ValueError):
+            dm.validate(manifest)
+        manifest["treasury_payee"] = "0x" + "cd" * 32
+        dm.validate(manifest)
+        for invalid in [None, {}, {"SUI": {"coin_type": "0x2::sui::SUI", "decimals": 9}},
+                        {"USDC": {"coin_type": "0x1::fake::USDC", "decimals": 6}},
+                        {"USDC": {"coin_type": "0x" + "ab" * 32 + "::usdc::USDC", "decimals": True}}]:
+            manifest["subscription_coins"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
     def test_treasury_payee_is_canonical_nonzero_and_optional_for_legacy(self):
         manifest = fixture()
         dm.validate(manifest)
