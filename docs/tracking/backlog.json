@@ -4466,6 +4466,29 @@
       "validation": "Focused offline workflow/security/controller/cache regressions, meaningful parallelism/isolation tests, locked preparation build, dedicated testnet smoke under shared-wallet leases/budgets; normal exact-head independent review and CI."
     },
     {
+      "key": "SF-206",
+      "title": "Retry provably never-started read-only review reservations once",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "extended",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "description": "Store.reserve permanently suppresses the same exact-head/feedback review after collect turns an interrupted pre-launch reservation into failed: INSERT OR IGNORE collides with the existing unique row. Provide a narrowly bounded normal-coordinator retry only for demonstrably never-started read-only reviews, preserving all uncertainty and existing repair ownership gates.",
+      "evidence": "Recovery 2026-10-29: SuiFleet PR365 job2315 is failed with launch interrupted before worker started, pid/start/launch_intent null, attempts0, empty receipt directory. No active SuiFleet model workers. Same head 90d70840 and review fingerprint remain blocked by its unique row. Separate shared testnet preparation ERROR across 22 PRs remains unresolved SF204/205; this ticket must not waive those gates.",
+      "acceptance": [
+        "Normal coordinator can reserve one replacement for the same never-started read-only review after validating its original empty directory, absent PID/start/launch intent and exact interruption reason; preserve the original row and bound retry to once.",
+        "Never auto-retry repairs or any launch with process/command/snapshot/result/exit evidence, nonempty or unavailable directories, changed family, or ambiguous state. Preserve capacity, per-PR exclusion, provider reset and independent exact-head/base approval gates.",
+        "Offline regression demonstrates the current poisoned unique reservation and successful bounded retry after service restart; unsafe variants and competing reservations remain rejected.",
+        "Submit through normal independent review and CI; do not install unreviewed changes or claim shared testnet/production acceptance."
+      ],
+      "validation": "Scoped offline coordinator reservation regressions, complete coordinator suite, tracking dry run and diff checks. Merged-only installation and actual PR365 dispatch are post-review next steps; no external testnet result is fabricated."
+    },
+    {
       "key": "SF-203",
       "title": "Reduce CI critical path with bounded isolated OTA simulator concurrency",
       "priority": "P0",
