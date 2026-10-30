@@ -45,6 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head>
         <title>SuiFleet</title>
+        <link rel="icon" href="/favicon.ico" sizes="32x32" />
         <meta name="description" content="Decentralized edge fleet management on Sui" />
       </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
