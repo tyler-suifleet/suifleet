@@ -37,6 +37,15 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_ordered_publishers(self):
+        manifest = fixture()
+        manifest["walrus"]["publisher_urls"] = ["https://one.example", "https://two.example"]
+        self.assertEqual(dm.validate(manifest)["walrus"]["publisher_urls"], ["https://one.example", "https://two.example"])
+        for invalid in [[], "https://one.example", ["file:///tmp/blob"]]:
+            manifest["walrus"]["publisher_urls"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
     def test_treasury_payee_is_canonical_nonzero_and_optional_for_legacy(self):
         manifest = fixture()
         dm.validate(manifest)
