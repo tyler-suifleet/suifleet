@@ -472,12 +472,30 @@ module sui_edge::desired_state_tests {
         ts::return_shared(catalog);
         ts::next_tx(scenario, ADMIN);
         let version = ts::take_immutable<sui_edge::component_catalog::ComponentVersion>(scenario);
-        sui_edge::component_catalog::create_deployment(&version, vector[group], vector[], &clock, ts::ctx(scenario));
+        let record = sui_edge::component_catalog::new_deployment(&version, vector[group], vector[], &clock, ts::ctx(scenario));
+        deployment_manager::share_deployment(record);
         ts::return_immutable(version);
         let effects = ts::next_tx(scenario, ADMIN);
         let bound = *effects.shared().find_index!(|id| *id != rollout_id && *id != group).map!(|i| effects.shared()[i]).borrow();
         clock::destroy_for_testing(clock);
         (rollout_id, bound)
+    }
+
+    #[test]
+    fun catalog_desired_supersession_and_sharded_binding() {
+        let mut scenario = ts::begin(ADMIN);
+        let group = new_group(&mut scenario, ADMIN);
+        let (_, catalog) = rollout_and_catalog(&mut scenario, group);
+        revise(&mut scenario, ADMIN, group, vector[catalog], vector[]);
+        assert!(desired(&mut scenario, group, b"app") == option::some(catalog), 0);
+        // Receipt sharding moves the binding, but must preserve eligibility.
+        shard_and_drain(&mut scenario, catalog, true, false);
+        revise(&mut scenario, ADMIN, group, vector[catalog], vector[]);
+        let next = deploy(&mut scenario, ADMIN, b"app", b"2.0.0", vector[group]);
+        revise(&mut scenario, ADMIN, group, vector[next], vector[]);
+        assert!(desired(&mut scenario, group, b"app") == option::some(next), 1);
+        assert!(revision(&mut scenario, group) == 3, 2);
+        ts::end(scenario);
     }
 
     // SF-127 sharding rewrites the inline schema; retire follows the

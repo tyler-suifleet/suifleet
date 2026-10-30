@@ -56,6 +56,7 @@ pub mod component_catalog {
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISHER: &str = "publisher";
     pub const VALIDATE_HASH: &str = "validate_hash";

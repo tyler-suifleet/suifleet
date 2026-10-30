@@ -966,6 +966,11 @@ module sui_edge::deployment_manager {
     public fun recipe_blob_id(d: &DeploymentRecord): &String { &d.recipe_blob_id }
     public fun creator(d: &DeploymentRecord): address { d.creator }
     public fun component_name(d: &DeploymentRecord): &String { &d.component_name }
+    /// Inspect a module-owned binding without exposing the record UID.
+    public(package) fun has_binding<K: copy + drop + store, V: store>(d: &DeploymentRecord, key: K): bool {
+        df::exists_with_type<K, V>(&d.id, key)
+    }
+
     public fun has_recipe_digest(d: &DeploymentRecord): bool { df::exists(&d.id, RecipeDigestKey {}) }
     public fun is_managed(d: &DeploymentRecord): bool { df::exists(&d.id, ManagedKey {}) }
 
