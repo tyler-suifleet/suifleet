@@ -517,3 +517,29 @@ No new live walkthrough, wallet write, deployment, hardware test, local CodeQL o
 full cross-layer suite is claimed. Earlier read-only Testnet repro is historical.
 Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun in
 SF-031/#32 and SF-087/#159. No migration; delivery requires a frontend rebuild.
+
+### Current-base feedback integration (2026-10-29)
+
+The supplied independent review of `aedf05d51353` reported no actionable
+source/security defects and no open threads. Integrated snapshot/current fetched
+main `1bebb3451d92e6b56b2fb305eb4680ae4d11e09c` in `438081a66de0`.
+The clean merge includes the reviewed SF-188 budget-enrollment changes; the
+three health states and earlier dashboard test repairs remain intact.
+
+Checks after integration, all exit 0:
+
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest`
+  (complete target, including the three rendered health states).
+- In `dapp`: `npx --yes pnpm@11.0.8 typecheck` and
+  `npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py` (10 tests OK).
+- `git diff --check origin/main...HEAD`; snapshot/current-base ancestry verified.
+
+This is integration evidence, not approval. New-head hosted CI and automatic
+testnet remain pending/uncollected; no hosted CI polling. The coordinator must
+collect successful exact-head/current-base checks and fresh independent review.
+No new live walkthrough, wallet writes, deployments, physical tests, local CodeQL
+or full cross-layer suite is claimed. Historical read-only Testnet repro remains
+above. Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun
+in SF-031/#32 and SF-087/#159. No migration; delivery requires a frontend rebuild.
