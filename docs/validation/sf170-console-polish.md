@@ -216,6 +216,27 @@ auto-merged and keeps both sides' test steps. No SF-170 file changed.
   rollouts screen.
 - `python3 -m unittest scripts.tests.test_testnet`: 45 tests passed.
 
+### Merge of main `1bebb345` (2026-10-29)
+
+This merge brings in PR #386 (SF-188), which stops enrollment from an
+underfunded fleet budget. Three files conflicted and keep both sides:
+
+- `FirstRun.tsx`: the unlisted-registration refusal and pending rows stay,
+  and budget funding is offered only when `canFundEnrollment` holds. The
+  checkbox is now main's `BudgetEnrollment`.
+- `onboarding-acceptance.jsx`: the lagging-inventory fixture plus main's
+  `budgetRace` signing failure.
+- `test_onboarding_browser.cjs`: both the refresh-clears-error check and
+  the insufficient-budget race check run.
+
+Checks on the merged tree:
+
+- `git diff --check` passed.
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed.
+  The 17 scripts above passed, plus the incoming `test_fleet_budget`.
+- `python3 -m unittest scripts.tests.test_testnet`: 45 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
