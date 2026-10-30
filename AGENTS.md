@@ -219,3 +219,16 @@ network-mismatch and failure-path checks remain implementation gates. This grant
 no production credential provisioning, service purchases or mainnet writes. Maintain the existing periodic local status report with feature
 progress, verified active workers and honest blockers. Services continue while WSL
 is running; a stopped host is not evidence that unattended work is still executing.
+
+
+### Batch integration mode
+
+When the reviewed coordinator's per-project `integration_batch` setting is enabled,
+source reviewers issue typed source-complete/acceptance-ready receipts without
+claiming final merge approval. Keep source branches stable while the combined
+candidate runs CI/testnet; do not merge advancing main merely for freshness.
+Actual source findings and conflicts still require owner repair. The sole
+orchestrator validates and independently reviews the exact combined candidate,
+rechecks every member and pinned base, then publishes once and reconciles all
+verified merged tickets. Source receipts alone never satisfy merge gates; see
+[batch integration](docs/PR_COORDINATION.md#reviewed-integration-batches).
