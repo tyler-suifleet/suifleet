@@ -1,0 +1,34 @@
+{
+  "chain": "4c78adac",
+  "epoch": "1265",
+  "suiSpendMist": 0,
+  "mode": "sponsored publisher; no wallet signing",
+  "blobId": "h0k--dZOv5GroQl5_NXuczCBYIMQw6TFNpUBX8wQ-7k",
+  "sha256": "8bc33fa8a389f8715658859a26b3e83189b9b9cd7acdbd57a065e09dc8ffd83f",
+  "storage": {
+    "blobId": "h0k--dZOv5GroQl5_NXuczCBYIMQw6TFNpUBX8wQ-7k",
+    "blobObjectId": "0x2474df29f3b512cd56fefd1e92c862ca2775fde90496cf6c679189ba21ae95cc",
+    "endEpoch": 564,
+    "costFrost": "563787",
+    "owner": "you",
+    "alreadyCertified": false,
+    "publisherUrl": "https://walrus-publisher-testnet.n1stake.com"
+  },
+  "confidential": false,
+  "object": {
+    "id": "0x2474df29f3b512cd56fefd1e92c862ca2775fde90496cf6c679189ba21ae95cc",
+    "version": "1068991121",
+    "digest": "J2bXZhg9G7ih2i5NB4EP6aWBqADoi6BkWaUMALdP4dNc",
+    "type": "0xd84704c17fc870b8764832c535aa6b11f21a95cd6f5bb38a9b07d2cf42220c66::blob::Blob",
+    "owner": {
+      "AddressOwner": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+      "$kind": "AddressOwner"
+    }
+  },
+  "readback": {
+    "endpoint": "https://aggregator.walrus-testnet.walrus.space",
+    "sha256": "8bc33fa8a389f8715658859a26b3e83189b9b9cd7acdbd57a065e09dc8ffd83f"
+  },
+  "transactionDigest": "9uQiD1paER24iuNUU63vkpFokhiBkBqFp9rhVo4MVbwS",
+  "effectsSuccess": true
+}
