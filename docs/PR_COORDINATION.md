@@ -180,6 +180,15 @@ This change must pass independent review before installation with the normal
 installer. Offline tests and read-only live failure inspection do not install or
 restart the running coordinator.
 
+A read-only review interrupted before any launch files were written can be
+reserved once more by the normal coordinator, using its original row and receipt
+directory. This requires the exact pre-launch interruption reason, no recorded
+PID/start, launch intent, result or publication, and an existing empty directory.
+Missing, linked, nonempty or unreadable directories retain uncertainty. Repairs
+are excluded. Capacity and provider backoff still apply, and the retry must obtain
+fresh exact-head/base review evidence; it grants no approval or CI exemption.
+After the one retry, another interruption requires explicit operator inspection.
+
 ## Merge closes the implementation issue
 
 Under the user's merge-closes-issue policy, the service adds `Closes #N` to each owned PR using the ticket's verified same-repository issue URL. `Refs #N` alone does not close an issue. After verifying a default-branch merge and its commit ancestry, reconciliation marks the atomic ticket and Project Done, explicitly closes and verifies the GitHub issue, and retries partial failures. Periodic discovery also imports merges performed outside the service, so missed notifications and older merged PRs are reconciled. Unknown ownership, other repositories and unmerged/closed-without-merge PRs never trigger closure. Active implementation claims require their owner handoff before coordinator completion.
