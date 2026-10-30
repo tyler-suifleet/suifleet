@@ -64,7 +64,7 @@ module sui_edge::subscription {
             tier: offer.tier, device_limit: offer.device_limit, allowance: offer.allowance,
             fee: offer.fee, remaining: offer.periods, period_ms: offer.period_ms, next_due_ms: now,
             term_end_ms: now + offer.period_ms * offer.periods, cancelled: false };
-        customer::bind_subscription(customer, registry, object::id(&account));
+        customer::bind_subscription(customer, registry, object::id(&account), now + offer.period_ms);
         deposit(&mut account, payment);
         assert!(account.balance.value() >= account.fee * account.remaining, EFunds);
         emit_plan(&account, offer);

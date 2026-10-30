@@ -180,6 +180,14 @@ module sui_edge::subscription_tests {
         subscription::renew(&mut a, &c, &offer, &clock, s.ctx());
         ts::return_shared(a); ts::return_shared(c); ts::return_shared(clock); ts::return_immutable(offer); ts::return_immutable(old_offer); s.end();
     }
+    #[test, expected_failure(abort_code = 6, location = sui_edge::customer)]
+    fun incompatible_legacy_period_is_rejected_before_custody() {
+        let mut s = setup(false);
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 100, 1000, 18446744073709551615, s.ctx());
+        ts::return_shared(c); ts::return_shared(r); s.next_tx(OWNER);
+        open(&mut s, 100); s.end();
+    }
     use sui::coin::Coin as CoinType;
     // A local alias is intentionally avoided in the public contract ABI.
 }

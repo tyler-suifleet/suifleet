@@ -130,9 +130,11 @@ module sui_edge::customer {
 
     /// Subscription custody is additive; this marker never leaves Customer.
     public struct SubscriptionKey has copy, drop, store {}
-    public(package) fun bind_subscription(customer: &mut Customer, registry: &DeviceRegistry, account: ID) {
+    public(package) fun bind_subscription(customer: &mut Customer, registry: &DeviceRegistry, account: ID, first_period: u64) {
         assert!((customer.version == 1 || customer.version == 2) && customer.registry_id == object::id(registry), EBinding);
         assert!(!df::exists(&customer.id, SubscriptionKey {}), EBinding);
+        // Reject an incompatible legacy grant before taking prepaid custody.
+        assert!(first_period > customer.period, EPeriod);
         df::add(&mut customer.id, SubscriptionKey {}, account);
         // Old package entry points require version 1 and cannot administer this
         // paid customer after explicit subscription opt-in. Layout stays stable.
