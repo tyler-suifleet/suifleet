@@ -707,3 +707,46 @@ Historical chosen-period publication/extension receipts are not new-head CI
 results. Manual real-wallet/production-provider, physical and actual-mainnet
 acceptance remains explicitly unrun in #32 and #159. Next: coordinator enforces
 actual exact-head/current-base CI/Testnet and fresh independent review.
+
+## Rollout-builder base integration (2026-10-29)
+
+The independent review of `64713bd1` reports no actionable source/security
+findings or open threads. The supplied snapshot records ordinary CI success,
+but automatic Testnet is pending against the previous base. Merge `d245bba3`
+cleanly integrates snapshot/current main
+`6e45938a8cefcc5cd95f5c96b0dffff7f2b4c649`, including the rollout builder and
+testnet harness changes. SF-165 storage controls and renewal guards are unchanged.
+No contract/API/dependency migration is needed.
+
+Browser verification on the merged branch: host
+`CHROME_EXECUTABLE=/usr/bin/google-chrome node` with
+`scripts/test_rollout_builder_browser.cjs`, `scripts/test_components_browser.cjs`,
+`scripts/test_upload_browser.cjs` and `scripts/test_wallet_browser.cjs`: all PASS.
+Chain/wallet/storage/signing use fixtures.
+
+An initial network-none container run passed the offline prerequisites, then
+pnpm refused the relocated `/workspace` dependency mount before typechecking
+(`ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`). The retry mounts the checkout
+and pnpm store at their identical host paths. This is a validation environment
+correction, with no source/dependency change.
+
+Post-integration retry: network-none `suifleet-sf165:ci-repair`, UID:GID,
+identical host checkout/pnpm-store mounts and `INSIDE_DEV_CONTAINER=1`:
+`make dapp-typecheck && make dapp-build && node scripts/test_release_storage.cjs
+&& node scripts/test_seal_frontend.cjs && node scripts/test_walrus_publishers.cjs
+&& node scripts/test_rollout_form.cjs && PYTHONDONTWRITEBYTECODE=1 python3 -m
+unittest discover -s scripts/tests -p test_live_release_storage.py &&
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests
+-p test_testnet.py`: PASS, including offline prerequisites, TypeScript,
+production static export, three release-storage and 45 testnet-harness tests.
+Input-based prerequisite skips remain explicit. Log:
+`/tmp/sf165-base6e459-checks-retry.log`. `git diff --check`: PASS.
+
+Hosted ordinary/security CI and automatic Testnet remain pending on the new head;
+not watched or polled. No new Move/full OTA or public-network transaction ran.
+Historical chosen-period publication/extension receipts remain historical, not
+new-head CI evidence. The retained stale-pool path remains fail-closed: a
+finite-lived uploaded blob may remain, but no version registers or prepaid
+boundary moves. Manual real-wallet/production-provider, physical and actual
+mainnet acceptance remains explicitly unrun in #32 and #159. Next: coordinator
+enforces actual exact-head/current-base CI/Testnet and fresh independent review.
