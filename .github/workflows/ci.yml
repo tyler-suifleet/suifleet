@@ -85,6 +85,14 @@ jobs:
             -v "$PWD/.ci-cache/move:/home/dev/.move" \
             suifleet-dev:ci make ci
 
+      # make ci ends with a Seal-profile export whose fleet-access prompt hides
+      # page titles while logged out. Restore the default export for this gate.
+      - name: Exported frontend routes have no console errors
+        run: |
+          docker run --rm --network none -v "$PWD:/workspace" -w /workspace \
+            -e CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell \
+            suifleet-dev:ci bash -c 'cd dapp && pnpm build && cd .. && node scripts/test_dapp_presentation_browser.cjs'
+
       - name: OCI supervised containers with a local engine and registry rejection fixture
         run: |
           oci_image=docker.io/library/alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
