@@ -105,3 +105,11 @@ SF-138 adds the all-or-none optional `rollout_health` origin group for
 and their recovery receipts remain valid without it. The new staged-rollout gate
 requires an upgraded package and regenerated manifest containing the group; it
 never falls back to HTTP or the legacy creator-attested gate.
+
+SF-181 adds the all-or-none `subscription` origin group and immutable offer/account
+layouts. Phantom coin parameters are preserved in the reviewed ABI; their BCS
+layouts omit those parameters because they have no representation, including
+`Balance<T>`'s single u64. Nonphantom generic structs still fail generation.
+Generic calls remain in the ABI and must be built with explicit type arguments.
+See [subscription accounts](SUBSCRIPTIONS.md) for version-2 customer opt-in and
+old-package rejection.
