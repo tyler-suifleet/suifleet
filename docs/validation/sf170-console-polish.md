@@ -201,6 +201,21 @@ merged without conflicts and changes nothing under `dapp/`.
 - `python3 -m unittest discover -s tools/pr-coordinator/tests -p
   test_preparation_failures.py`: 17 tests passed.
 
+### Merge of main `6e45938a` (2026-10-29)
+
+This merge brings in PR #348 (SF-163), the staged rollout builder: the
+rollouts page, `RolloutBuilder`, `lib/rollout-form.ts`, their tests and
+docs. It merged without conflicts; the only shared file, `Makefile`,
+auto-merged and keeps both sides' test steps. No SF-170 file changed.
+
+- `git diff --check origin/main...HEAD` passed.
+- In `suifleet-dev:sf010-chrome` (isolated tmpfs copy,
+  `pnpm install --frozen-lockfile`): `tsc --noEmit` and `next build` passed.
+  The same 15 scripts passed, plus the incoming `rollout_form` and
+  `rollout_builder_browser`. The presentation copy scan covers the new
+  rollouts screen.
+- `python3 -m unittest scripts.tests.test_testnet`: 45 tests passed.
+
 ## Limits
 
 No manual pass with a real wallet against public testnet was made; the
