@@ -37,6 +37,17 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_treasury_payee_is_canonical_nonzero_and_optional_for_legacy(self):
+        manifest = fixture()
+        dm.validate(manifest)
+        manifest["treasury_payee"] = "0x" + "ab" * 32
+        dm.validate(manifest)
+        for invalid in [None, "", "suifleet.sui", "0x1", "0x" + "00" * 32,
+                        "0x" + "AB" * 32, 12, {}]:
+            manifest["treasury_payee"] = invalid
+            with self.assertRaisesRegex(ValueError, "treasury payee mismatch"):
+                dm.validate(manifest)
+
     def test_optional_ordered_aggregator_mirrors(self):
         manifest = fixture()
         mirrors = ["https://one.example", "https://two.example"]
