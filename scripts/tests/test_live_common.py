@@ -627,6 +627,38 @@ class WalrusUploadTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "not readable"):
                 walrus.working_publisher()
 
+    def test_local_blob_readback_preserves_the_simulator_path(self):
+        walrus = live_common.Walrus("local")
+        try:
+            blob = walrus.put("artifact", b"body")
+            self.assertTrue(walrus.readable(blob, b"body"))
+            self.assertFalse(walrus.readable(blob, b"wrong"))
+        finally:
+            walrus.close()
+
+    def test_readiness_probes_escape_negative_cache_without_accepting_wrong_bytes(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        requests = []
+
+        def cached_read(request, timeout):
+            requests.append(request)
+            self.assertEqual(timeout, 30)
+            self.assertEqual(request.get_header("Cache-control"), "no-cache")
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(request.full_url, 404, "not yet certified", {}, None)
+            if "strict_consistency_check=true" not in request.full_url:
+                raise urllib.error.HTTPError(request.full_url, 404, "cached missing", {}, None)
+            return nullcontext(io.BytesIO(b"body" if len(requests) == 2 else b"wrong"))
+
+        with patch.object(live_common.urllib.request, "urlopen", cached_read):
+            self.assertFalse(walrus.readable("blob1", b"body"))
+            self.assertTrue(walrus.readable("blob1", b"body"))
+            self.assertFalse(walrus.readable("blob1", b"body"))
+        self.assertEqual([r.full_url for r in requests], [
+            f"{walrus.aggregator}/v1/blobs/blob1?strict_consistency_check=true" for _ in range(3)])
+
     def test_a_publisher_blob_id_is_only_used_after_aggregator_read_back(self):
         import io
         walrus, reads = live_common.Walrus("testnet"), []
@@ -643,7 +675,8 @@ class WalrusUploadTests(unittest.TestCase):
                 patch.object(live_common, "wait_for", wait_for), patch.object(live_common.urllib.request, "urlopen", urlopen):
             with self.assertRaisesRegex(AssertionError, "forged not readable"):
                 walrus.put("recipe", b"body")
-        self.assertEqual(reads, [f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged"])
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0], f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged?strict_consistency_check=true")
 
 
 class WalletFixtureTests(unittest.TestCase):
