@@ -543,3 +543,31 @@ No new live walkthrough, wallet writes, deployments, physical tests, local CodeQ
 or full cross-layer suite is claimed. Historical read-only Testnet repro remains
 above. Deferred physical/mainnet/provider/manual-wallet acceptance remains unrun
 in SF-031/#32 and SF-087/#159. No migration; delivery requires a frontend rebuild.
+
+## Current-base conflict repair (2026-10-29)
+
+Integrated snapshot/fetched main `48dad86ab6bf3df01bd5aaa17f632fa3303531da`
+in merge `8abd1dff`. Independent feedback reported no source defects or open
+threads; the outstanding repair was base integration. Workflow conflicts retain
+main's keyless queue admission and all privileged-job fork guards. Both the
+upstream guard assertions and the existing behavioral condition test are retained;
+the latter now supplies queue-plan outputs and translates its hyphenated Actions
+property to JavaScript bracket notation. The first test attempt exposed that
+translation requirement; after repair all 15 prepared/queue tests passed.
+
+Checks after integration (all exit 0):
+
+- `python3 -m unittest scripts/tests/test_testnet_prepared.py scripts/tests/test_testnet_queue.py` (15 tests).
+- `INSIDE_DEV_CONTAINER=1 CHROME_EXECUTABLE=/usr/bin/google-chrome make test-manifest` (complete target).
+- `cd dapp && npx --yes pnpm@11.0.8 typecheck && npx --yes pnpm@11.0.8 build` (17 static pages).
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_dashboard_browser.cjs`.
+- `CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_hydration.cjs`.
+- `git diff --cached --check` and base ancestry verification.
+
+Logs: `/tmp/sf191-queue-repair.log` and `/tmp/sf191-merge-{manifest,build,browser,hydration}.log`.
+No new live walkthrough, writes, deployment, hardware test, full cross-layer suite
+or local CodeQL run is claimed. Earlier read-only Testnet evidence remains
+historical. Physical/mainnet/provider/manual-wallet acceptance remains unrun in
+SF-031/#32 and SF-087/#159. Hosted CI/automatic testnet for the new head and fresh
+independent review remain required; no hosted CI polling was performed. No
+migration; frontend rebuild needed for delivery. Coordinator alone merges.
