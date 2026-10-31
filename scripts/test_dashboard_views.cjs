@@ -193,7 +193,7 @@ const view = async (w, options) => views.deviceServicesView(await read(w, option
   const events = { async listEvents(args) { calls.push(args); const i = calls.length - 1;
     return { events: pages[i], hasNextPage: i < pages.length - 1, endCursor: `c${i}` }; } };
   const all = await progress.fetchRolloutDecisions(events, rollout, BigInt(5));
-  assert.equal(all.complete, true); assert.equal(all.decisions.length, 3);
+  assert.equal(all.complete, false); assert.deepEqual(all.missing, ["1–2"]); assert.equal(all.decisions.length, 3);
   assert.equal(calls[0].filter.eventType, `${manifest.type_origins['deployment_manager::RolloutDecision']}::deployment_manager::RolloutDecision`);
   calls.length = 0;
   const partial = await progress.fetchRolloutDecisions(events, rollout, BigInt(5), 2);

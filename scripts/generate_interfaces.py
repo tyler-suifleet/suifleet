@@ -328,6 +328,7 @@ def generate(catalog, recipe):
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const CUSTOMER_TYPES = {json.dumps(catalog["optional_type_origins"]["customer"])} as const;',
           f'export const INBOX_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_inbox"])} as const;',
+          f'export const AUDIT_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_audit"])} as const;',
           f'export const ROLLOUT_HEALTH_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_health"])} as const;',
           f'export const SETTINGS_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_settings"])} as const;',
           f'export const SHARD_TYPES = {json.dumps(catalog["optional_type_origins"]["receipt_shards"])} as const;',

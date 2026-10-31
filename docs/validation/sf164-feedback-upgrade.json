@@ -1,0 +1,16 @@
+{
+  "check": "SF164 compatible existing-rollout upgrade, old-package gaps, stored reads with events pruned, cleanup",
+  "base": "0ca16547",
+  "old": "0x68368e2b4244a8ea6177886100b3fcbe3536c59d74bb8bd413e09d9428995595",
+  "head": "0x620e9d1c37b2469141dff5d6e37a9e8fd5a5bbbf46a67b8e5a647724cb15abb0",
+  "digests": [
+    "7e61MGZXkFQFUcp9uU4QRjqR74LHKfDNFq1psmdTbNH1",
+    "3gcrN7EVBrCUkRrY2rxBLTrDFoWGXUccdhzFhoACwJFN",
+    "8yLX7DiJ4KLPdPL9G9zBccaRey2Ev4xFX9uCKHt5KKXp",
+    "23xNn6nCgJCtFreVB3K9K6vt7cASrrKxNRdN2sDYFob4",
+    "rMQ7rHRZQktUaWqxqo1qGk3HDMMV7JHatuzTik6r2d2",
+    "B1dAEZP1AVubgbBsdF4MvaFoNsMDZpCSNy61moMwg359",
+    "DXB87mQrNN6wLNaVJWUGs1gNDocWtbEQvgo46qgSnN8E",
+    "5YFTJJYoe7ev9g3tbx1ZBtH34AL6HgHAk5KgbkdqJL2Q"
+  ]
+}

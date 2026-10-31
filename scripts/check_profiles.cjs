@@ -16,15 +16,35 @@ function readProfile(dir) {
   return manifest;
 }
 
-async function checkProfile(dir, clientFactory) {
+// Retry only fetch transport failures, never a failed chain/manifest assertion.
+function transportFailure(error) {
+  return error instanceof TypeError && error.message === 'fetch failed';
+}
+
+async function checkProfile(dir, clientFactory, {
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  warn = message => console.error(message),
+} = {}) {
   try {
     const m = readProfile(dir);
     const client = clientFactory(m);
-    await dm.verifyDeployment(client, m);
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await dm.verifyDeployment(client, m);
+        break;
+      } catch (error) {
+        if (!transportFailure(error) || attempt >= 3) throw error;
+        warn(`${path.basename(dir)}: transport read failed (attempt ${attempt}/3); retrying full verification`);
+        await sleep(attempt * 1000);
+      }
+    }
     return { profile: path.basename(dir), chain: m.chain_identifier, package: m.call_package_id, version: m.package_version,
       registry: m.shared_objects.registry.id, upgrade_cap: m.upgrade_cap_id };
   } catch (error) {
-    throw new Error(`${dir}: ${error.message}. After a shared package upgrade, regenerate and commit deployment.json and frontend.env together before rebuilding the console.`);
+    const guidance = transportFailure(error)
+      ? 'Read-only gRPC transport unavailable after 3 attempts; no profile mismatch established.'
+      : 'After a shared package upgrade, regenerate and commit deployment.json and frontend.env together before rebuilding the console.';
+    throw new Error(`${dir}: ${error.message}. ${guidance}`);
   }
 }
 

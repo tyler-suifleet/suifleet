@@ -597,6 +597,11 @@ module sui_edge::customer {
         deployment_manager::bind_customer(record, object::id(fleet));
         fleet.deployments.push_back(object::id(record));
     }
+    public fun clear_decision_audit(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, limit: u64, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::clear_decision_audit_as(record, limit, object::id(fleet).to_address());
+    }
     public fun delete_deployment(customer: &Customer, fleet: &mut Fleet, mut record: DeploymentRecord, ctx: &mut TxContext) {
         assert_admin(customer, ctx); assert_fleet(customer, fleet);
         let (found, index) = fleet.deployments.index_of(&object::id(&record)); assert!(found, EBinding);
