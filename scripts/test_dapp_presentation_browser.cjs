@@ -85,6 +85,19 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${route}: no page overflow at ${width}`);
         const current=page.locator('nav[aria-label="Main"]:visible [aria-current="page"]');
         assert.equal(await current.count(),1,`${route}: current navigation announced`);
+        // Signed out, every fleet page names itself and asks for sign-in rather
+        // than implying an account or configuration problem.
+        if (route !== '/get-started/') {
+          const main = page.locator('main');
+          await main.getByRole('heading',{name:'Sign in to continue',exact:true}).waitFor();
+          assert.equal((await page.locator('h1').textContent()).trim(),(await current.textContent()).trim(),`${route}: prompt titled for the page`);
+          assert.ok((await main.locator('header p').textContent()).trim().length>20,`${route}: one-line page description`);
+          assert.doesNotMatch(await main.textContent(),/this account|this wallet|fleet configuration|unavailable|not loaded|Connect a wallet|Select or create a fleet/i,`${route}: no account or configuration wording while signed out`);
+        } else {
+          // Get started is the sign-in flow itself, even when fleets need a selection.
+          await page.locator('main').getByRole('heading',{name:'Sign in or connect'}).waitFor();
+          assert.doesNotMatch(await page.locator('main').textContent(),/Select or create a fleet/,`${route}: sign-in step is not hidden behind fleet selection`);
+        }
       }
       await page.goto(base+'/fixture/',{waitUntil:'networkidle'});
       await page.getByRole('heading',{name:'Console states'}).waitFor();
@@ -131,7 +144,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
     }
     assert.deepEqual(errors,[]);
     assert.deepEqual(externalRequests,[],'no external metadata or other startup requests');
-    console.log(`PASS: ${routes.length} exported routes at desktop/mobile; navigation, page titles and overflow; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No console errors, external network or wallet; testnet quote reads use an unavailable-price fixture.`);
+    console.log(`PASS: ${routes.length} exported routes at desktop/mobile; navigation, page titles and overflow; signed-out sign-in prompt with page description and no account/configuration wording on every fleet route, and the Get started sign-in step; populated/loading/error states; four populated Greengrass rejection guidance cases without internal paths; keyboard history disclosures and empty diagnostics. No console errors, external network or wallet; testnet quote reads use an unavailable-price fixture.`);
   } finally {
     if(browser) await browser.close();
     if(server) await new Promise(resolve=>server.close(resolve));
