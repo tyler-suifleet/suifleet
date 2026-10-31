@@ -140,6 +140,7 @@ pub mod customer {
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const BIND_DEVICE_METADATA: &str = "bind_device_metadata";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const COMMIT_REVISION: &str = "commit_revision";
     pub const CONFIGURE_CHARGING: &str = "configure_charging";
     pub const CONFIGURE_ENROLLMENT: &str = "configure_enrollment";
@@ -321,6 +322,7 @@ pub mod deployment_manager {
     pub const BEGIN_RECEIPT_CLEANUP: &str = "begin_receipt_cleanup";
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const CLEANUP_RECEIPT_CHUNK: &str = "cleanup_receipt_chunk";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
@@ -393,6 +395,27 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl CustomerFleetKey { pub const MOVE_TYPE: &'static str = "deployment_manager::CustomerFleetKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionCleanupKey {
+        pub dummy_field: bool,
+    }
+    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionKey {
+        pub revision: u64,
+    }
+    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionRecord {
+        pub deployment_id: [u8; 32],
+        pub revision: u64,
+        pub cohort: u64,
+        pub state: u8,
+        pub reason: String,
+        pub at_ms: u64,
+        pub admitted: Vec<[u8; 32]>,
+    }
+    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DelegateKey {
         pub dummy_field: bool,

@@ -573,3 +573,65 @@ package-callability and explicit rollout boundaries remain in force. See
 [per-stream retention and activation](RETENTION_RENEWAL.md) and
 [isolated-chain evidence](validation/sf141-localnet.json); no public epoch-563
 prune/rebate or external provider/wallet/hardware acceptance is implied.
+
+## Durable rollout decision audits (SF-164)
+
+New core-package calls retain each decision as a `DecisionRecord` dynamic field
+on the deployment under `DecisionKey { revision }`. Revision, chain time, state,
+cohort, reason and admitted IDs are the same as the existing `RolloutDecision`
+event. Existing `Rollout`, deployment and event layouts/abilities are unchanged.
+Each entry is bounded to 256 UTF-8 reason bytes and 512 admitted IDs. Entries
+are immutable and never evicted during normal rollout operation; the number of
+fields grows with decisions, with a Sui storage deposit for each. The hot rollout
+record stays fixed-size. This needs no archival connection, Walrus purchase or
+SuiFleet server.
+
+Regenerate the deployment manifest after upgrading: `DecisionKey`,
+`DecisionRecord` and `DecisionCleanupKey` have their own introduction-package
+origins in the optional `rollout_audit` group. Never substitute the earlier
+`Rollout` origin. No initializer, migration or backfill is required. A legacy
+rollout starts storing at its next call through the new package. Older packages
+remain callable and can create further gaps; the reader never assumes they are
+disabled. It enumerates current decision fields with pagination, validates key,
+value type and deployment/revision bindings, and only queries events to recover
+missing revisions. Exhausting an event page budget is incomplete, never proof of
+complete history. Missing revisions are displayed as exact ranges, even when the
+connection prunes or never retained their events. Complete histories display all
+entries and admitted IDs. Data status deduplicates refresh warnings and links to
+`/settings/#connection-history`; event discovery of other objects still has its
+own retention limits.
+
+Explicit rollout deletion also deletes its audit. `clear_decision_audit` processes
+at most 64 revisions per transaction; beginning cleanup prevents further decisions
+through the new package. Managed fleets use the customer-admin wrapper. The dApp's
+bounded deletion planner handles both ordinary and sharded rollouts and preserves
+customer authority. The final `delete_rollout` removes at most the remaining 64
+entries; larger logs require preparation calls. Direct callers must use the same
+sequence. The cursor counts every revision, including legacy and old-package gaps
+without a stored record. A rollout at revision R therefore requires
+`max(0, ceil(R / 64) - 1)` preparation calls before its final deletion, even if
+all its revisions predate this upgrade. Direct CLI/automation calls to
+`delete_rollout` or `customer::delete_deployment` abort with `ERolloutState` (13)
+until enough preparation calls have completed. Old-package deletion cannot be
+retroactively changed by an upgrade.
+
+Each decision-producing tick creates another persistent dynamic field and pays
+its storage deposit. Entry size is bounded (256 reason bytes and 512 admitted
+IDs), but total history grows with the number of decisions; there is no automatic
+retention limit. Budget gas/storage and wallet-signed cleanup transactions for
+frequently ticked rollouts. Explicit deletion removes the fields and receives the
+chain's applicable storage rebate; it also permanently removes their audit.
+
+Validation commands: `make test-contracts`, `node scripts/test_rollout_audit.cjs`,
+`node scripts/test_dashboard_views.cjs`, `make dapp-typecheck`, `make dapp-build`,
+and `make test-rollout-audit-localnet`. The latter performs an actual compatible
+upgrade from pre-change main `0ca16547`, reads an existing rollout with events
+unavailable, exercises a still-callable old package and checks exact gaps/new
+records/deletion. The protected automatic Testnet package-upgrade gate reuses its
+verified package fixture and gas ledger, creates/admit/deletes a small rollout,
+and requires an object-state read after the public connection's reported lowest
+checkpoint passes the last decision checkpoint. Its bounded five-minute read-only
+wait fails honestly if pruning is not observed; no result is fabricated. Hosted
+execution/effects/cost evidence is pending until that gate actually runs. Manual
+real-wallet/physical acceptance stays in #32 and final production/mainnet/provider
+acceptance in #159; none is claimed here.

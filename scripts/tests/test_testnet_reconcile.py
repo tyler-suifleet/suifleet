@@ -345,6 +345,24 @@ class Funding(unittest.TestCase):
                          'infrastructure')
         self.assertEqual(live.failure_class(AssertionError('receipt never became 1')), 'source')
 
+    def test_receipt_effects_failure_diagnostics(self):
+        for stderr, category in (
+            ('receipt-effects: transport unavailable after 3 read attempts\n', 'infrastructure'),
+            ('receipt-effects: verification failed\n', 'source'),
+            ('provider secret; 429; receipt-effects: transport unavailable after 3 read attempts', 'source'),
+        ):
+            with patch.object(live.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                    ['node'], 1, stdout='private stdout', stderr=stderr)) as run:
+                with self.assertRaises(RuntimeError) as error:
+                    live.receipt_effects(Path('/manifest.json'), ['deployment'])
+                self.assertEqual(live.failure_class(error.exception), category)
+                self.assertNotIn('secret', str(error.exception))
+                self.assertNotIn('private', str(error.exception))
+                self.assertEqual(run.call_count, 1)  # never replay the suite/mutations
+        with patch.object(live.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                ['node'], 0, stdout='[{"digest":"proof"}]', stderr='')):
+            self.assertEqual(live.receipt_effects(Path('/manifest.json'), ['deployment']), [{'digest': 'proof'}])
+
     def test_ci_controller_requires_every_selected_suite_up_front(self):
         from ci_testnet_wallet import execute
         for relevant, required in ((True, '3250000000'), (False, '1600000000')):

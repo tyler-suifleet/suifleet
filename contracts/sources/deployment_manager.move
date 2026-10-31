@@ -520,6 +520,7 @@ module sui_edge::deployment_manager {
         assert!(authority == deployment.creator, ENotCreator);
         finish_receipt_cleanup(&mut deployment);
         if (deployment.schema_version == 3) {
+            finish_decision_audit(&mut deployment, authority);
             let _: Rollout = df::remove(&mut deployment.id, RolloutKey {});
             if (df::exists(&deployment.id, RolloutHealthKey {})) {
                 let _: RolloutHealth = df::remove(&mut deployment.id, RolloutHealthKey {});
@@ -1031,6 +1032,14 @@ module sui_edge::deployment_manager {
         };
     }
 
+    /// One bounded immutable entry per revision; history grows in separate fields,
+    /// never in the hot Rollout value. Missing revisions identify legacy calls.
+    public struct DecisionKey has copy, drop, store { revision: u64 }
+    public struct DecisionRecord has copy, drop, store {
+        deployment_id: ID, revision: u64, cohort: u64, state: u8,
+        reason: String, at_ms: u64, admitted: vector<ID>,
+    }
+
     public struct RolloutDecision has copy, drop {
         deployment_id: ID, revision: u64, cohort: u64, state: u8,
         reason: String, at_ms: u64, admitted: vector<ID>,
@@ -1251,17 +1260,70 @@ module sui_edge::deployment_manager {
     }
 
     fun audit_rollout(d: &mut DeploymentRecord, reason: String, admitted: vector<ID>, clock: &Clock) {
+        assert!(!df::exists(&d.id, DecisionCleanupKey {}), ERolloutState);
         let id = object::id(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         r.revision = r.revision + 1;
-        event::emit(RolloutDecision { deployment_id: id, revision: r.revision,
-            cohort: r.cohort, state: r.state, reason, at_ms: clock.timestamp_ms(), admitted });
+        let revision = r.revision;
+        let cohort = r.cohort;
+        let state = r.state;
+        // Every caller bounds reasons to 256 bytes and grants to 512 members.
+        assert!(reason.length() <= 256 && admitted.length() <= 512, ERolloutPolicy);
+        df::add(&mut d.id, DecisionKey { revision }, DecisionRecord {
+            deployment_id: id, revision, cohort, state, reason, at_ms: clock.timestamp_ms(), admitted,
+        });
+        event::emit(RolloutDecision { deployment_id: id, revision,
+            cohort, state, reason, at_ms: clock.timestamp_ms(), admitted });
+    }
+
+    public struct DecisionCleanupKey has copy, drop, store {}
+
+    /// Explicit deletion preparation, at most 64 revisions per call. Starting
+    /// cleanup freezes further decisions through this package version.
+    public fun clear_decision_audit(d: &mut DeploymentRecord, limit: u64, ctx: &mut TxContext) {
+        clear_decision_audit_as(d, limit, ctx.sender());
+    }
+    public(package) fun clear_decision_audit_as(d: &mut DeploymentRecord, limit: u64, authority: address) {
+        assert!(authority == d.creator, ENotCreator);
+        assert!(limit > 0 && limit <= 64, ERolloutPolicy);
+        if (!df::exists(&d.id, DecisionCleanupKey {})) {
+            let revision = rollout(d).revision;
+            df::add(&mut d.id, DecisionCleanupKey {}, revision);
+        };
+        let mut revision = *df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {});
+        let mut count = 0;
+        while (revision > 0 && count < limit) {
+            let key = DecisionKey { revision };
+            if (df::exists(&d.id, key)) {
+                let _: DecisionRecord = df::remove(&mut d.id, key);
+            };
+            revision = revision - 1;
+            count = count + 1;
+        };
+        *df::borrow_mut<DecisionCleanupKey, u64>(&mut d.id, DecisionCleanupKey {}) = revision;
+    }
+
+    fun finish_decision_audit(d: &mut DeploymentRecord, authority: address) {
+        clear_decision_audit_as(d, 64, authority);
+        assert!(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == 0, ERolloutState);
+        let _: u64 = df::remove(&mut d.id, DecisionCleanupKey {});
+    }
+
+    #[test_only]
+    public fun decision_for_testing(d: &DeploymentRecord, revision: u64): (u64, u64, u8, String, vector<ID>) {
+        let entry: &DecisionRecord = df::borrow(&d.id, DecisionKey { revision });
+        (entry.revision, entry.at_ms, entry.state, entry.reason, entry.admitted)
+    }
+    #[test_only]
+    public fun has_decision_for_testing(d: &DeploymentRecord, revision: u64): bool {
+        df::exists(&d.id, DecisionKey { revision })
     }
 
     public fun delete_rollout(mut d: DeploymentRecord, ctx: &TxContext) {
         assert!(ctx.sender() == d.creator, ENotCreator);
         assert!(receipt_schema(&d) == 3, ERolloutState);
         finish_receipt_cleanup(&mut d);
+        finish_decision_audit(&mut d, ctx.sender());
         let _: Rollout = df::remove(&mut d.id, RolloutKey {});
         if (df::exists(&d.id, RolloutHealthKey {})) {
             let _: RolloutHealth = df::remove(&mut d.id, RolloutHealthKey {});
