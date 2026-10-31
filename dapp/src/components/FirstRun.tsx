@@ -18,6 +18,7 @@ import { CardFunding, DepositForm, EstimatePanel, useFleetBudget } from "@/compo
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useDevices } from "@/hooks/useDevices";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
+import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import { usePendingRows } from "@/hooks/usePendingRows";
 
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700";
@@ -184,7 +185,8 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
 
     <StepCard id="register" index={3} title="Register your first device" state={steps[2].state}>
       {!account ? <p className="text-gray-700">Connect your account and add funds first.</p> : <>
-        <p className="text-gray-700">Start the SuiFleet client on the device and copy the device address it displays. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
+        <p className="text-gray-700">Install and start the SuiFleet client on the device, then copy the device address it prints. Registration adds the device to your account and authorizes it to connect. It does not install software or confirm that the device is online.</p>
+        <DeviceClientHelp variant="address" />
         {fleet && <p role="status">{fleet.activeDevices.toString()} active devices / {fleet.deviceLimit.toString()} allowed across this customer’s fleets. {fleet.activeDevices >= fleet.deviceLimit && deviceCapacityMessage(fleet.activeDevices, fleet.deviceLimit)} <Link className={LINK} href="/entitlements">Device entitlements</Link></p>}
         {devices.error && <p role="alert" className="text-red-800">Inventory unavailable: {devices.error.message}. Refresh before retrying a registration.</p>}
         {devices.isLoading && <p role="status">Loading inventory…</p>}
@@ -222,7 +224,7 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
           </label>
           <label className="block font-medium sm:col-span-2">Device public address
             <input className={`mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono font-normal ${FOCUS}`} name="deviceAddress" required placeholder="0x…" autoComplete="off" spellCheck={false} />
-            <span className="mt-1 block font-normal text-gray-600">The device’s own address from the daemon—not your wallet address.</span>
+            <span className="mt-1 block font-normal text-gray-600">The address after “SuiFleet device address:” on the device—not your wallet address.</span>
           </label>
           {budget && <BudgetEnrollment budget={budget} selected={fromBudget} onChange={setFromBudget} />}
           <div className="space-y-2 sm:col-span-2">

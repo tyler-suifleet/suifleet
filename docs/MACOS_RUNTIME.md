@@ -19,6 +19,9 @@ A Linux result does not establish macOS support, and this macOS result does not
 establish any physical Mac, Intel or other release. Physical target acceptance
 stays in [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32).
 
+For a first device, start with [Install the device client](INSTALL_DEVICE_CLIENT.md#macos-package),
+which covers the address, network manifest and configuration on every platform.
+
 ## Install and service lifecycle
 
 ```bash
