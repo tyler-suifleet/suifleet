@@ -109,7 +109,9 @@ jobs:
       - name: Scoped AWS credentials with unmodified SDKs and local mTLS
         run: make test-aws-credentials SUIFLEET_DEV_IMAGE=suifleet-dev:ci
       - name: Durable AWS stream exporter protocols
-        run: make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_minio_fixture_build.py -v
+          make test-stream-export SUIFLEET_DEV_IMAGE=suifleet-dev:ci
 
       - name: CloudWatch metrics adapter with local emulator
         run: make test-cloudwatch-metrics SUIFLEET_DEV_IMAGE=suifleet-dev:ci

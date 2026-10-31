@@ -11,7 +11,7 @@ import { DeviceUpdateHistory } from "@/components/DeviceUpdateHistory";
 import { DeploymentReclaimPanel } from "@/components/StorageReclaim";
 import type { DeviceObject, DeviceGroup } from "@/lib/sui";
 import { useDeployments } from "@/hooks/useDeployments";
-import { useDeploymentStorage } from "@/hooks/useDeploymentStorage";
+import { ReleaseRecipeStorage, CatalogDeploymentStorage } from '@/components/ReleaseStorageStatus';
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
@@ -179,31 +179,13 @@ function DeploymentRow({
               </span>
             )}
             {d.recipeBlobId && <span>Recipe: <span className="font-mono text-gray-500">{d.recipeBlobId}</span></span>}
-            {d.schemaVersion === "2" ? <span>Catalog deployment · each device selects its platform recipe</span> : d.recipeBlobId ? <StorageBadge recipeBlobId={d.recipeBlobId} /> : <span>No recipe blob</span>}
+            {d.schemaVersion === "2" ? <CatalogDeploymentStorage deploymentId={d.deploymentId} /> : d.recipeBlobId ? <ReleaseRecipeStorage recipeBlobId={d.recipeBlobId} deploymentId={d.deploymentId} /> : <span>No recipe blob</span>}
             {d.artifactSha256 && <span>SHA256: <span className="font-mono text-gray-500">{d.artifactSha256.slice(0, 16)}…</span></span>}
           </div>
           <details className="mt-2 text-xs text-gray-500"><summary className="cursor-pointer text-blue-700">Technical details</summary><p>Update ID: <span className="font-mono break-all">{d.deploymentId}</span></p></details>
         </td>
       </tr>
     </>
-  );
-}
-
-/** Flag deployments whose blobs devices can no longer fetch (storage period ended). */
-function StorageBadge({ recipeBlobId }: { recipeBlobId: string }) {
-  const { data } = useDeploymentStorage(recipeBlobId);
-  if (!data) return null;
-  const missing = [data.recipe === "unavailable" && "recipe", data.artifact === "unavailable" && "artifact"].filter(Boolean);
-  if (missing.length === 0) {
-    if (data.confidential) return <span className="inline-flex px-2 py-1 rounded bg-blue-50 text-blue-700" title="Seal-encrypted; only granted devices and accounts can decrypt">Confidential recipe stored</span>;
-    return data.recipe === "available" && data.artifact === "available"
-      ? <span className="inline-flex px-2 py-1 rounded bg-green-50 text-green-700">Storage available · public</span>
-      : null;
-  }
-  return (
-    <span className="inline-flex px-2 py-1 rounded bg-red-100 text-red-800" title="Re-upload and redeploy; devices that have not applied it will report Failed">
-      {missing.join(" and ")} expired or unavailable on Walrus
-    </span>
   );
 }
 

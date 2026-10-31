@@ -537,7 +537,14 @@ class Walrus:
 
     def readable(self, blob, body):
         try:
-            request = urllib.request.Request(f"{self.aggregator}/v1/blobs/{blob}", headers=AGENT)
+            # Public aggregators sit behind caches. A pre-certification 404 can
+            # outlive the bounded readiness check; request a strict
+            # consistency check and cache revalidation rather than that negative hit.
+            # Keep the blob path and exact byte comparison unchanged.
+            url = f"{self.aggregator}/v1/blobs/{blob}"
+            if self.mode == "testnet":
+                url += "?strict_consistency_check=true"
+            request = urllib.request.Request(url, headers={**AGENT, "Cache-Control": "no-cache"})
             with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read() == body
         except OSError:

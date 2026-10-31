@@ -377,6 +377,8 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_walrus_publishers.cjs
+	$(RUN) node scripts/test_release_storage.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_group_batch.cjs
@@ -714,6 +716,7 @@ package-tunneling:
 	python3 scripts/package_tunneling.py --output "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}"
 
 test-tunneling:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_process_scan.py
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(MAKE) package-tunneling
 	python3 scripts/test_tunneling.py --package "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}" $(TUNNEL_EVIDENCE)

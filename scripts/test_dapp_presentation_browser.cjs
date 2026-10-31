@@ -24,7 +24,15 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
     await fs.access(path.join(output, 'index.html'));
     const fixture = path.join(temporary, 'fixture.js');
     const storageFixture = path.join(temporary, 'storage.js');
-    await fs.writeFile(storageFixture, 'export const useFleetBlobStore = () => ({store:null});');
+    // Presentation-only fixture: translation runs locally; storage never becomes ready to upload.
+    await fs.writeFile(storageFixture, `
+      export const useFleetBlobStore = () => ({store:null});
+      export const useFleetStorage = () => ({target:null});
+      export const useReleasePeriod = () => ({days:5, setDays:()=>{}, epochs:0,
+        loading:true, prepaid:{store:null}, fleet:{},
+        publisherStore:()=>{throw Error("No uploads in presentation fixture");},
+        fleetStore:()=>{throw Error("No uploads in presentation fixture");}});
+    `);
     await build({ stdin: { contents: `import React from 'react'; import {createRoot} from 'react-dom/client';
       import {GreengrassImport} from '@/components/GreengrassImport'; import {HistoryStatusView} from '@/components/HistoryStatus'; import {Section, HealthBadge} from '@/components/ui'; import {ControlEditor} from '@/components/DeploymentControlEditor';
       function App() { const [message, setMessage] = React.useState('History unavailable before checkpoint 123; use an archival endpoint.');
@@ -32,7 +40,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
           <Section title="Devices"><table><thead><tr><th>Device</th><th>Health</th></tr></thead><tbody><tr><td>Factory sensor</td><td><HealthBadge health={{status:'healthy',codes:[],reasons:['Signed report verified'],components:[]}} /></td></tr></tbody></table></Section>
           <Section title="Loading"><p role="status">Loading device reports…</p></Section><Section title="Error"><p role="alert">Could not refresh devices. Retry the connection.</p><button disabled>Unavailable action</button></Section>
           <GreengrassImport catalog="" owner="" execute={()=>{throw Error("No signing in presentation fixture");}} onPublished={()=>{}} disabled={true} policies={[]} protect={()=>{throw Error("No uploads in presentation fixture");}}/><HistoryStatusView message={message}/>
-          <Section title="Schedule"><ControlEditor control={{revision:'1',state:0,not_before_ms:'1793318400000',expires_ms:'0',window_start_ms:'0',window_end_ms:'0',notice_ms:'0'}} canEdit={true} pending={false} onSave={()=>{}}/></Section></main>; } createRoot(document.getElementById('root')).render(<App/>);`, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'browser', outfile: fixture, jsx: 'automatic', nodePaths: [path.join(root, 'dapp/node_modules')], alias: { '@': path.join(root, 'dapp/src'), '@/hooks/useFleetStorage': storageFixture }, define: { 'process.env': '{}', 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning' });
+          <Section title="Schedule"><ControlEditor control={{revision:'1',state:0,not_before_ms:'1793318400000',expires_ms:'0',window_start_ms:'0',window_end_ms:'0',notice_ms:'0'}} canEdit={true} pending={false} onSave={()=>{}}/></Section></main>; } createRoot(document.getElementById('root')).render(<App/>);`, resolveDir: root, loader: 'tsx' }, bundle: true, platform: 'browser', outfile: fixture, jsx: 'automatic', nodePaths: [path.join(root, 'dapp/node_modules')], alias: { '@': path.join(root, 'dapp/src'), '@/hooks/useFleetStorage': storageFixture, '@/hooks/useReleasePeriod': storageFixture }, define: { 'process.env': '{}', 'process.env.NODE_ENV': '"production"' }, logLevel: 'warning' });
     const css = (await fs.readdir(path.join(output, '_next/static/chunks'))).filter(p=>p.endsWith('.css'));
     server = http.createServer(async (request, response) => {
       try {
