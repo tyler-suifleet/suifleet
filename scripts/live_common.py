@@ -540,15 +540,17 @@ class Walrus:
 
     def readable(self, blob, body):
         url = f"{self.aggregator}/v1/blobs/{blob}"
+        if self.mode == "testnet":
+            url += "?strict_consistency_check=true"
         # A freshly certified blob can initially return a cacheable 404/5xx.
         # Repeating that exact URL can keep reading the cached failure even
         # after storage is available. Revalidate once per poll, without another
         # upload or a longer polling deadline. Bytes must still match exactly.
         for revalidate in (False, True):
-            headers = dict(AGENT)
+            headers = {**AGENT, "Cache-Control": "no-cache"}
             target = url
             if revalidate:
-                target += f"?suifleet_readback={os.urandom(8).hex()}"
+                target += f"{'&' if '?' in target else '?'}suifleet_readback={os.urandom(8).hex()}"
                 headers["Cache-Control"] = "no-cache"
             try:
                 request = urllib.request.Request(target, headers=headers)

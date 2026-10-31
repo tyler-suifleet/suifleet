@@ -24,6 +24,13 @@ const response = () => Response.json({ alreadyCertified: { blobId: 'stored' } })
   assert.deepEqual(deadlines, [121000, 121000, 121000]);
   assert.equal(new Set(calls.map(c => new URL(c.url).origin)).size, 3);
   for (const c of calls) { assert.deepEqual(c.body, encrypted); assert.match(c.url, /epochs=1&send_object_to=0xa/); }
+  // A chosen release period survives endpoint failover, including provenance.
+  calls = [];
+  global.fetch = async url => { calls.push(url); return calls.length === 1 ? new Response('unavailable', { status: 503 }) : response(); };
+  const chosen = await load().uploadBlob(bytes, 'application/octet-stream', '0xa', undefined, 12);
+  assert.equal(calls.length, 2);
+  for (const url of calls) assert.equal(new URL(url).searchParams.get('epochs'), '12');
+  assert.equal(chosen.publisherUrl, new URL(calls[1]).origin);
   for (const status of [400, 403, 429, 500, 503]) {
     calls = [];
     global.fetch = async url => { calls.push(url); return new Response('failure', { status }); };

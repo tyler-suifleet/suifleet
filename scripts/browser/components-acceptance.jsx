@@ -6,20 +6,30 @@ import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ComponentsPage from "../../dapp/src/app/components/page";
 import FirmwarePage from "../../dapp/src/app/firmware/page";
-export { buildCreateCatalogTx, buildPublishVersionTx, buildCatalogDeploymentTx } from "../../dapp/src/lib/catalog";
+export { fetchDeploymentVersion, buildCreateCatalogTx, buildPublishVersionTx, buildCatalogDeploymentTx } from "../../dapp/src/lib/catalog";
 
 const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-const client = {};
+
+const storageClient = {
+  $extend: () => ({ walrus: {
+    systemState: async () => ({ committee: { epoch: 35 }, future_accounting: { length: 54 } }),
+    stakingState: async () => ({ epoch_duration: '86400000', first_epoch_start: String(Date.now() - 35 * 86400000) }),
+    storageCost: async (size, epochs) => ({ totalCost: BigInt(size * epochs), storageCost: BigInt(size * epochs), writeCost: 0n }),
+    getVerifiedBlobStatus: async () => ({ type: 'permanent', endEpoch: 42 }),
+    getBlobType: () => '0x2::blob::Blob',
+  } }),
+  listOwnedObjects: async () => ({ objects: [], hasNextPage: false }),
+};
+const client = storageClient;
 const accountListeners = new Set();
 let address = location.search.includes("disconnected") ? null : "0xa";
 export const useCurrentAccount = () => {
   const current = React.useSyncExternalStore(callback => { accountListeners.add(callback); return () => accountListeners.delete(callback); }, () => address);
   return current ? { address: current } : null;
 };
+export const useDAppKit = () => ({});
+export const useCurrentNetwork = () => 'testnet';
 export const useCurrentClient = () => client;
-// Fleet selection and the fleet-storage hook import these; no fixture path signs through them.
-export const useCurrentNetwork = () => "localnet";
-export const useDAppKit = () => ({ stores: {} });
 export const useAccessPolicies = () => ({ data: [] });
 export const useDevices = () => ({ data: [{ objectId: "0x123", name: "Acceptance device", arch: "x86_64" }] });
 export const useGroups = () => ({ data: [] });
@@ -49,7 +59,7 @@ export const useFleetTransaction = () => ({ isPending: false, mutateAsync: ({ tr
 } });
 class Request {
   upload = new EventTarget();
-  open() {}
+  open(method, url) { this.url = url; }
   setRequestHeader() {}
   send(body) { this.body = body; state.requests.push(this); }
 }
@@ -57,11 +67,12 @@ window.XMLHttpRequest = Request;
 const fetchOriginal = window.fetch.bind(window);
 window.fetch = (url, options) => {
   if (!String(url).startsWith(`${WALRUS_PUBLISHER}/v1/blobs?`)) return fetchOriginal(url, options);
-  return new Promise(resolve => state.requests.push({ body: new Blob([options.body]), finish: resolve }));
+  return new Promise(resolve => state.requests.push({ url: String(url), body: new Blob([options.body]), finish: resolve }));
 };
 window.componentsAcceptance = {
   account(value) { address = value; for (const callback of accountListeners) callback(); },
   count: () => state.requests.length,
+  periods: () => state.requests.map(r => Number(new URL(r.url).searchParams.get("epochs"))),
   calls: () => state.calls,
   progress(index, loaded, total) {
     const e = new Event("progress"); Object.assign(e, { loaded, total: total ?? 0, lengthComputable: total !== null });
@@ -69,7 +80,7 @@ window.componentsAcceptance = {
   },
   finish(index, status = 200) {
     const r = state.requests[index]; r.status = status;
-    r.responseText = JSON.stringify({ newlyCreated: { blobObject: { blobId: `blob-${index}`, storage: { endEpoch: 42 } } } });
+    r.responseText = JSON.stringify({ newlyCreated: { blobObject: { blobId: `blob-${index}`, storage: { endEpoch: 35 + Number(new URL(r.url).searchParams.get("epochs")) } } } });
     if (r.finish) r.finish(new Response(r.responseText, { status })); else r.onload();
   },
   phase: p => state.onProgress(p),

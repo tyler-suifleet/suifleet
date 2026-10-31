@@ -7,12 +7,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { artifactUris,parseGreengrassRecipe,translateGreengrassRecipe,GUIDANCE,ipcAclToml,type ArtifactBinding,type Translation } from '@/lib/greengrass-recipe';
 import { assertComponentRecipe } from '@/lib/recipe-schema';
-import { uploadArtifact,uploadRecipe,storageWarnings,renewalCommand,type Protection } from '@/lib/walrus';
+import { uploadArtifact,uploadRecipe,storageWarnings,type StorageInfo,type Protection } from '@/lib/walrus';
 import { DEFAULT_DELIVERY,type Delivery } from '@/lib/delivery';
 import type { AccessPolicy } from '@/lib/access-policy';
+import { useReleasePeriod } from '@/hooks/useReleasePeriod';
+import { ReleaseStorageStatus } from './ReleaseStorageStatus';
+import { ReleasePeriod } from './ReleasePeriod';
 import { DeliveryFields } from '@/components/DeliveryFields';
 import { FleetStorageChoice, fleetStorageSelected } from '@/components/FleetStorageChoice';
-import { useFleetBlobStore } from '@/hooks/useFleetStorage';
 import { buildPublishVersionTx, type ComponentVersion } from '@/lib/catalog';
 import { assertVersionAvailable } from '@/lib/component-library';
 import { ExistingLibraryEntry } from '@/components/ExistingLibraryEntry';
@@ -36,10 +38,12 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
   const inFlight=useRef(false),active=useRef(true);
   useEffect(()=>{active.current=true;return ()=>{active.current=false;};},[]);
   const [text,setText]=useState(''),[files,setFiles]=useState<Record<string,File>>({});
+  const period=useReleasePeriod(Object.values(files).map(f=>f.size));
   const [result,setResult]=useState<Translation|null>(null),[acknowledged,setAcknowledged]=useState(false);
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [stored,setStored]=useState<StorageInfo[]>([]);
   const [delivery,setDelivery]=useState(DEFAULT_DELIVERY);
-  const fleet=useFleetBlobStore(),[paidChoice,setFleetPaid]=useState<boolean>();
+  const fleet=period.prepaid,[paidChoice,setFleetPaid]=useState<boolean>();
   const fleetPaid=fleetStorageSelected(paidChoice, fleet);
   const parsed=text.trim()?parseGreengrassRecipe(text):null;
   const uris=parsed&&'recipe' in parsed?artifactUris(parsed.recipe):[];
@@ -68,12 +72,15 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
       const protection=protect(delivery);
       // Fleet-paid storage is never silently replaced by the publisher.
       if(fleetPaid&&!fleet.store) throw new Error(`Fleet storage is unavailable: ${fleet.reason??'unknown reason'}`);
-      const store=fleetPaid?fleet.store:undefined;
+      if(period.error||!period.epochs||period.loading||period.price===undefined) throw Error(period.error??"Wait for the storage period and price");
+      const store=fleetPaid?period.fleetStore:period.publisherStore;
       const used=new Set(preview.manifests.map(m=>m.recipe.artifactBlobId));
+      const blobs:StorageInfo[]=[];
       const uploaded:Record<string,{blobId:string;sha256:string}>={},warnings:string[]=[];
       for(const [i,uri] of uris.entries()){
         if(!used.has(`pending-${i}`)) continue;
         const artifact=await uploadArtifact(files[uri],owner,protection,undefined,store);
+        blobs.push(artifact.storage);setStored([...blobs]);
         uploaded[uri]=artifact;warnings.push(`Artifact ${uri}: storage expires at epoch ${artifact.storage.endEpoch??'unknown'}`,...storageWarnings(artifact.storage));
       }
       // Translate again with the real uploads; the digests were already checked locally.
@@ -83,8 +90,8 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
       const manifests=[];
       for(const m of final.manifests){
         const recipe=await uploadRecipe(m.recipe,owner,protection,undefined,store);
+        blobs.push(recipe.storage);setStored([...blobs]);
         warnings.push(`Recipe ${m.os}/${m.arch}: storage expires at epoch ${recipe.storage.endEpoch??'unknown'}`,...storageWarnings(recipe.storage));
-        const renew=renewalCommand(recipe.storage);if(renew) warnings.push(renew);
         manifests.push({os:m.os,arch:m.arch,recipeBlobId:recipe.blobId,recipeSha256:recipe.sha256,artifactSha256:m.recipe.artifactSha256});
       }
       const {componentName,componentVersion}=final.manifests[0].recipe;
@@ -113,8 +120,10 @@ export function GreengrassImport({catalog,versions,owner,execute,onPublished,dis
     </div>}
     {identity&&<ExistingLibraryEntry versions={versions} catalog={catalog} name={identity.componentName} version={identity.componentVersion}/>}
     <DeliveryFields value={delivery} onChange={setDelivery} policies={policies} disabled={busy}/>
+    <ReleasePeriod period={period} disabled={busy} fleetPaid={fleetPaid}/>
     <FleetStorageChoice checked={fleetPaid} onChange={setFleetPaid} available={!!fleet.store} storage={fleet.storage} reason={fleet.reason} retention={fleet.retention} disabled={busy}/>
     <button disabled={disabled||busy||result?.outcome!=='translate'||(differences.length>0&&!acknowledged)} onClick={publish}>{busy?'Uploading…':'Upload and register translated version'}</button>
+    {stored.map((b,i)=><ReleaseStorageStatus key={i} blobId={b.blobId} blobObjectId={b.blobObjectId}/>)}
     {message&&<p className="whitespace-pre-wrap" role="status">{message}</p>}
   </div>;
 }

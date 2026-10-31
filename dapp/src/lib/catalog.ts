@@ -87,3 +87,17 @@ export async function discoverVersions(client:SuiGrpcClient,catalogId:string) {
   }));
   return versions.sort((a,b)=>a.name.localeCompare(b.name)||-compareVersions(a.version,b.version)||a.objectId.localeCompare(b.objectId));
 }
+
+/** Resolve a deployment's immutable version, including bindings moved into receipt shards. */
+export async function fetchDeploymentVersion(client: SuiGrpcClient, deploymentId: string): Promise<ComponentVersion> {
+  await verifyDeployment(client);
+  const { readReceiptDirectory } = await import('./receipt-shards');
+  const directory = await readReceiptDirectory(client, deploymentId);
+  const { component_catalog_CatalogBindingKeyBcs, component_catalog_ShardedCatalogBindingKeyBcs, component_catalog_CatalogBindingBcs } = await import('./fleet-protocol');
+  const sharded = !!directory;
+  const name = sharded ? 'component_catalog::ShardedCatalogBindingKey' : 'component_catalog::CatalogBindingKey';
+  const key = sharded ? component_catalog_ShardedCatalogBindingKeyBcs : component_catalog_CatalogBindingKeyBcs;
+  const result = await client.getDynamicField({ parentId: deploymentId, name: { type: moveType(name), bcs: key.serialize({ dummy_field: false }).toBytes() } });
+  if (normalizeStructTag(result.dynamicField.value.type) !== normalizeStructTag(moveType('component_catalog::CatalogBinding'))) throw Error('Invalid deployment catalog binding');
+  return fetchVersion(client, component_catalog_CatalogBindingBcs.parse(result.dynamicField.value.bcs).version_id);
+}
