@@ -97,6 +97,11 @@ export function FirstRun({ connect }: { connect: ReactNode }) {
     <header className="space-y-1">
       <h1 className="text-2xl font-semibold tracking-tight">Get started with SuiFleet</h1>
       <p className="text-gray-700">Connect your account, add funds for network fees, register a device and send your first update.</p>
+      <p className="flex flex-wrap gap-x-4 gap-y-1">
+        <a className={LINK} href="https://docs.suifleet.io/install/">Install the device client</a>
+        <a className={LINK} href="https://docs.suifleet.io/enrollment/">Enrollment guide</a>
+        <a className={LINK} href="https://docs.suifleet.io/components/">Publish and deploy components</a>
+      </p>
     </header>
 
     <nav aria-label="Onboarding progress">

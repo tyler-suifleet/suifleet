@@ -1,0 +1,14 @@
+.docs { display: grid; grid-template-columns: 16rem minmax(0, 1fr); gap: 2rem; padding-top: 2rem; padding-bottom: 3rem; }
+.docs article { min-width: 0; max-width: 52rem; overflow-wrap: anywhere; }
+.docs aside ul { list-style: none; padding-left: .75rem; }
+.docs aside a[aria-current] { font-weight: 700; }
+.docs aside h2 { font-size: 1rem; }
+pre { overflow-x: auto; background: var(--soft); padding: 1rem; border: 1px solid var(--line); border-radius: 8px; }
+table { display: block; overflow-x: auto; }
+input[type=search] { padding: .7rem; border: 1px solid var(--line); border-radius: 6px; width: 100%; font: inherit; }
+:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+h2, h3, h4 { scroll-margin-top: 1rem; }
+@media(max-width: 800px) { .docs { grid-template-columns: 1fr; } .docs aside nav { columns: 2; } }
+.docs aside, .docs main { min-width: 0; }
+.docs aside { overflow-wrap: anywhere; }
+@media(max-width: 800px) { .docs { grid-template-columns: minmax(0, 1fr); } }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs inside the pinned Go container. Keep its verified module cache across
-# bounded retries; never retry compilation errors or checksum mismatches.
+# Run inside the checksum-pinned Go container. Never retry compilation/checksum
+# failures or replay daemon/AWS/chain operations: this only prepares public code.
 set -euo pipefail
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
@@ -12,10 +12,12 @@ for attempt in 1 2 3; do
     status=$?
   fi
   cat "$log" >&2
-  if (( attempt == 3 )) || ! grep -Eq 'verifying module: .*reading https://sum\.golang\.org/[^ ]+: unexpected EOF$' "$log" \
-      || grep -Eq 'SECURITY ERROR|checksum mismatch' "$log"; then
+  # A checksum mismatch or compiler failure must not be classified as a fetch
+  # outage even if another download also failed in the same invocation.
+  if (( attempt == 3 )) || grep -Eq 'SECURITY ERROR|checksum mismatch|^# ' "$log" ||
+     ! grep -Eq 'https://[^ ]+.*(unexpected EOF|i/o timeout|TLS handshake timeout|connection reset by peer|502 Bad Gateway|503 Service Unavailable)' "$log"; then
     exit "$status"
   fi
-  echo "Checksum-service truncated response; retrying verified fixture build ($attempt/3)" >&2
-  sleep "$((attempt * 2))"
+  echo "Transient Go dependency fetch failure; retry $attempt/2" >&2
+  sleep "$((attempt * 5))"
 done

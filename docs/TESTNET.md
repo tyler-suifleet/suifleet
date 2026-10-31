@@ -141,6 +141,31 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 - The device keeps its unused report gas, about 0.03 SUI per run.
 - **No JSON-RPC.** Public testnet fullnodes no longer serve JSON-RPC (gRPC and GraphQL only). Live tooling must read over gRPC (`chain_facts`, the daemon, the frontend SDK) or through the Sui CLI. The localnet tests' JSON-RPC helper does not work there.
 
+**SF-177 CI funding repair (2026-10-30, run 41087697612).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41087697612)
+submitted no transactions and used zero allowance. Its single successful faucet
+request raised the primary CI wallet from 2,543,615,950 to 3,543,615,950 MIST,
+short of the unchanged 3,650,000,000 MIST preflight requirement (including a
+preserved 400,000,000 MIST historical reservation). The package suite's
+1,600,000,000 MIST ceiling, aggregate suite requirement and reservations remain
+unchanged.
+
+A separate bounded maintenance operation acquired `network:suifleet-testnet`,
+verified chain `4c78adac`, the dedicated agent config/account and transaction CLI
+SHA-256 `de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`,
+then made one faucet request for the dedicated primary CI address
+`0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`.
+Transaction `ETRdUhMudfF6qeQgevwEma5RyUWrnTZZwqGAF7ebEYC8` was independently
+read back with successful effects at checkpoint `400952831`: exactly
+1,000,000,000 MIST credited to that address and 1,000,000 MIST net gas paid
+by the faucet. A subsequent balance read returned 5,474,131,734 MIST, above
+the preflight requirement; that balance includes other wallet activity and is
+not attributed entirely to this credit. No operator transaction was signed,
+fixture replayed or reservation cleared. The lock was released promptly.
+This repairs funding only: fresh exact-head/current-base automatic checks and
+independent review remain required. SF-177 also retains its outstanding manual
+install-guide usability review; funding maintenance does not satisfy it.
+
 ## Upgrade-security suite (SF-010)
 
 ```bash
