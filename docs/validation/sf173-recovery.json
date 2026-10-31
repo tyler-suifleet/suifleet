@@ -1,0 +1,133 @@
+{
+  "ticket": "SF-173",
+  "model": "gpt-6.1-sol",
+  "session": "dispatch-e719fe3a6be34a60bbe5579d47e8eca1",
+  "recovery_scope": "Verify and repair the reported stale main profile without new chain mutations or hosted publication.",
+  "main": {
+    "verified_head": "5e707935b697c79ceb4fbefdab601764f47d0bac",
+    "correction_commit": "ccc24c8036e27f83178b6dc9b909e48e9fd452d5",
+    "correction_pr": "https://github.com/tyler-suifleet/suifleet/pull/385",
+    "merged_at": "2026-10-28T03:24:33Z",
+    "finding": "The requested contained v2 profile repair already merged before this recovery. Current main deployment.json matches the retained PR deployment byte-for-byte; main frontend.env embeds that same manifest. No duplicate split PR or ownership was introduced. The retained draft adds storage/data bindings beyond the already merged package-authority correction."
+  },
+  "live_current_main_profile": {
+    "checked_at": "2026-10-31T00:07:14.573Z",
+    "network": "testnet",
+    "chain": "4c78adac",
+    "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+    "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+    "upgrade_cap": "0xe1ee49b7171c4d552b4b712048e2f26e7dbf15a40e8a18c99831b40e330dbf5f",
+    "namespace": "0x81050b5c754c021a1584ee94ec0f472f17324428fa2b579649a956df1ae9b139",
+    "threshold": 2,
+    "key_servers": [
+      "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
+      "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8"
+    ],
+    "checks": [
+      "current frontend schema/client range",
+      "fresh chain identity",
+      "package version and per-type origins",
+      "latest UpgradeCap and expected owner",
+      "registry type and shared version",
+      "Seal key server types and HTTPS proof of possession",
+      "frontend environment matches profile"
+    ],
+    "limits": [
+      "Read-only verification; no encrypted delivery or wallet acceptance",
+      "Allow/deny/revoke delivery remains #32; final provider acceptance remains #159",
+      "Testnet providers have no durability/SLA promise; reverify before use"
+    ]
+  },
+  "live_retained_full_profile": {
+    "checked_at": "2026-10-31T00:06:30.498Z",
+    "network": "testnet",
+    "chain": "4c78adac",
+    "package": "0x4e9db2200f3ba74eef578261163480651c09dffae4d95b11ff10c5427ada600a",
+    "package_version": "2",
+    "registry": "0x5f99cc8476585dda5f9bba7e5e6516cf29faeeb313d3f20fd2de89566acb855d",
+    "fleet_storage_package": "0x4253e785d19d8835733c744f8e99b2c80730d0c6e854c83d07f5af38e043d374",
+    "fleet_data_package": "0x259fe6c9375e99d8868b9d1c573fa8afbea1e28430d8f0dd95aa95c6487c2f54",
+    "budget": {
+      "id": "0xe9e4182a6279d1e736b258d3062d21d94ed860fdbb65e09bb1c6e0de3d753904",
+      "balance_mist": "100000000",
+      "devices": "0",
+      "paused": false
+    },
+    "settings": {
+      "checkIntervalMs": "1800000",
+      "rolloutCheckIntervalMs": "60000",
+      "healthIntervalMs": "600000",
+      "archiveIntervalMs": "604800000",
+      "archiveRetentionEpochs": "3"
+    },
+    "storage": {
+      "id": "0x8895b0871c7aa5c1d60ee6f7295387731f123659054fda155f5b9fe2eb72fd13",
+      "wal_frost": "20000000",
+      "pool_bytes": "0",
+      "end_epoch": null
+    },
+    "fleet_data": {
+      "id": "0x5d8f24b069b87c9fcf8450688dc586ef3642703b2c66e8d531bc530033516c40",
+      "devices": "0",
+      "health_interval_ms": "600000",
+      "batch_interval_ms": "86400000",
+      "emergency_interval_ms": "300000"
+    },
+    "checks": [
+      "frontend.env selects deployment.json, fleet-storage.json and fleet-data.json",
+      "budgetSupported/settingsSupported/storageConfig/DATA_CONFIG/settingsSaver all enabled in the dApp's own modules",
+      "fresh chain identity, package version, per-type origins and UpgradeCap",
+      "operator-owned budget and cap, saved settings, fleet storage and FleetData bindings read through the dApp's readers"
+    ],
+    "limits": [
+      "Read-only; no browser/wallet session",
+      "Health appears only after an enrolled device daemon reports (physical/target acceptance stays in #32)"
+    ]
+  },
+  "recorded_testnet_status": {
+    "url": "https://github.com/tyler-suifleet/suifleet/actions/runs/40895695125",
+    "head": "e297e16bf755a14932930dbdc9ac24b757baaef6",
+    "base": "b3994cf9522502365df1e4fa7021bb030639f0ea",
+    "conclusion": "cancelled",
+    "status_context": "testnet/package-upgrade",
+    "status_state": "error",
+    "prepare_job": "https://github.com/tyler-suifleet/suifleet/actions/runs/40895695125/job/123524171791",
+    "evidence": "Secretless Build testnet dependencies without signing credentials was cancelled at 2026-10-29T14:55:39Z while compiling dependencies. The log terminates with The operation was canceled. No compiler/source diagnostic precedes cancellation. Validate job had no steps; preparation-status published a terminal error.",
+    "diagnosis": "Cancelled preparation, not evidence of a reproducible source defect or successful testnet acceptance. Cancellation initiator is not established by these logs. No speculative source repair or workflow rerun performed."
+  },
+  "verification": [
+    "git fetch origin main; inspect ccc24c80 and its merged PR #385; compare main deployment.json and frontend embedded manifest to retained v2 profile",
+    "node scripts/verify_seal_profile.cjs /tmp/sf173-current-main-profile: PASS, files extracted from verified main with git show",
+    "node scripts/verify_seal_profile.cjs: PASS for retained profile",
+    "node scripts/verify_evaluation_fleet.cjs: PASS for retained full profile, read-only",
+    "node scripts/test_deployment_manifest.cjs: PASS",
+    "node scripts/test_wallet_manifest.cjs: PASS",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py': 19 tests PASS",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py': 157 tests, OK (skipped=1)",
+    "Docker network-none pnpm typecheck && pnpm build with all retained frontend.env values: PASS, 16 static pages",
+    "Docker network-none pnpm typecheck && pnpm build with extracted current-main frontend.env values: PASS, 16 static pages; same pinned image/toolchain"
+  ],
+  "toolchain": {
+    "image": "suifleet-dev:latest",
+    "image_id": "sha256:c8b9afa8c874d5c49b65570ffff44596f2501dc7a22fbc0532d612e6a34f4c0d",
+    "node": "22.22.2",
+    "pnpm": "11.0.8",
+    "initial_host_attempt": "Host pnpm unavailable (exit 127); typecheck/build rerun successfully in pinned development image."
+  },
+  "preservation": {
+    "new_chain_transactions": 0,
+    "new_faucet_requests": 0,
+    "original_allowance_mist": 1200000000,
+    "original_allowance_used_mist": 964091608,
+    "allowance_reset": false,
+    "claim": "same reserved claim; no release/reclaim",
+    "source": "Original commits and checkpoints retained. Initially clean worktree; only recovery evidence added."
+  },
+  "limits": [
+    "Original hosted acceptance remains Blocked and PR #363 draft. No hosted update, route/wizard acceptance or device health report claimed.",
+    "Existing hosted publisher is outside authorized agent/CI wallets. No other-wallet, hosted, production/DNS/credential operations or new chain mutations performed.",
+    "No CI polling, reruns, workers or merge. Recorded cancelled status is not waived. Existing coordinator retains CI and independent review gates.",
+    "Manual wallet/provider/physical/mainnet acceptance remains #32/#159. No extra issue or claim created."
+  ],
+  "next_step": "Coordinator/operator retains SF-173 Blocked/draft for original hosted acceptance. Reported main authority regression is already repaired by merged PR #385 and freshly verified here; no further source fix is supported by the inspected cancelled run."
+}
