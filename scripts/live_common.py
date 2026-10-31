@@ -489,10 +489,7 @@ class Walrus:
         blob = stored.get("newlyCreated", {}).get("blobObject", {}).get("blobId") or stored.get("alreadyCertified", {}).get("blobId")
         assert blob, f"Walrus publisher returned no blob ID: {stored}"
         # Read it back through the aggregator before relying on it.
-        try:
-            wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
-        except AssertionError as error:
-            raise AssertionError(f"{error}; last read: {getattr(self, 'read_error', 'unknown')}") from error
+        wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
         return blob
 
     def store(self, body):
@@ -539,31 +536,19 @@ class Walrus:
         return self.stored_by
 
     def readable(self, blob, body):
-        url = f"{self.aggregator}/v1/blobs/{blob}"
-        # A freshly certified blob can initially return a cacheable 404/5xx.
-        # Repeating that exact URL can keep reading the cached failure even
-        # after storage is available. Revalidate once per poll, without another
-        # upload or a longer polling deadline. Bytes must still match exactly.
-        for revalidate in (False, True):
-            headers = dict(AGENT)
-            target = url
-            if revalidate:
-                target += f"?suifleet_readback={os.urandom(8).hex()}"
-                headers["Cache-Control"] = "no-cache"
-            try:
-                request = urllib.request.Request(target, headers=headers)
-                with urllib.request.urlopen(request, timeout=15) as response:
-                    matches = response.read() == body
-                self.read_error = None if matches else "aggregator bytes differ from uploaded bytes"
-                return matches
-            except urllib.error.HTTPError as error:
-                self.read_error = f"HTTP {error.code}"
-                if error.code != 404 and error.code < 500:
-                    return False
-            except OSError as error:
-                self.read_error = type(error).__name__
-                return False
-        return False
+        try:
+            # Public aggregators sit behind caches. A pre-certification 404 can
+            # outlive the bounded readiness check; request a strict
+            # consistency check and cache revalidation rather than that negative hit.
+            # Keep the blob path and exact byte comparison unchanged.
+            url = f"{self.aggregator}/v1/blobs/{blob}"
+            if self.mode == "testnet":
+                url += "?strict_consistency_check=true"
+            request = urllib.request.Request(url, headers={**AGENT, "Cache-Control": "no-cache"})
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read() == body
+        except OSError:
+            return False
 
     def close(self):
         if self.mode != "testnet":

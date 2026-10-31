@@ -12,12 +12,14 @@ python3 -m pip install --disable-pip-version-check --require-hashes --upgrade \
 # No MinIO server or data is installed on the host; the binary runs network-none.
 # The checksum service can reset multiplexed HTTP/2 streams during this large
 # dependency fetch. Use HTTP/1.1 for this build only; retain TLS and Go checksum
-# verification, the immutable source revision, and fail-fast build behavior.
+# verification and the immutable source revision. Retry only truncated checksum
+# responses, at most twice, in the same container with its verified module cache.
 mkdir -p .ci-cache/minio-bin
 docker run --rm --user 0:0 -e GOBIN=/out -e GOMAXPROCS=2 -e GODEBUG=http2client=0 \
   -v "$PWD/.ci-cache/minio-bin:/out" \
+  -v "$PWD/scripts/build_minio_fixture.sh:/build-minio-fixture.sh:ro" \
   golang@sha256:cd78d88e00afadbedd272f977d375a6247455f3a4b1178f8ae8bbcb201743a8a \
-  go install github.com/minio/minio@9e49d5e7a648f00e26f2246f4dc28e6b07f8c84a
+  bash /build-minio-fixture.sh
 docker run --rm --user 0:0 -v "$PWD:/workspace" -w /workspace "$SUIFLEET_DEV_IMAGE" \
   cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples -j 2
 docker run --rm --network none --user 0:0 -e PYTHONDONTWRITEBYTECODE=1 \

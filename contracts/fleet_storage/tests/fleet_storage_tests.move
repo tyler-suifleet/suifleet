@@ -836,6 +836,32 @@ module fleet_storage::fleet_storage_tests {
     }
 
     #[test]
+    fun release_extension_guard_allows_unretained_blob() {
+        let (mut scenario, mut system) = setup(quota(POOL, 10));
+        let id = upload(&mut scenario, &mut system, BLOB, 10);
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::certify_for_testing(&mut fs, &system, id);
+        fleet_storage::renewal(&fs, id).destroy_none();
+        fleet_storage::extend_blob(&mut fs, &budget, &cap, &mut system, id, 1, ts::ctx(&mut scenario));
+        assert!(fleet_storage::blob(&fs, id).end_epoch() == 6);
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    // Same atomic guard emitted by the release extension PTB. A retained blob
+    // must abort before any WAL payment or mutation of its prepaid boundary.
+    #[test]
+    #[expected_failure(abort_code = 262144, location = std::option)]
+    fun release_extension_guard_preserves_prepaid_renewal() {
+        let (mut scenario, mut system, id) = renewal_fixture();
+        let (mut fs, budget, cap) = owner(&mut scenario);
+        fleet_storage::renewal(&fs, id).destroy_none();
+        fleet_storage::extend_blob(&mut fs, &budget, &cap, &mut system, id, 1, ts::ctx(&mut scenario));
+        owner_end(fs, budget, cap);
+        finish(scenario, system);
+    }
+
+    #[test]
     fun restricted_executor_extends_and_accounts_real_walrus_cost() {
         let (mut scenario, mut system, id) = renewal_fixture();
         ts::next_tx(&mut scenario, DEVICE_2);
