@@ -1078,6 +1078,8 @@ class Coordinator:
             sys.path.insert(0, module_directory)
         from batch_integration import BatchController
         self.batches = BatchController(self)
+        from batch_integration import LocalInfrastructure
+        self.local_infrastructure = LocalInfrastructure(self)
 
     def gh(self, project, args):
         account = project['github_account']
@@ -1877,6 +1879,8 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 or failed_checks(pr)):
             return False
         owner = self.owner(project, pr, owners)
+        if getattr(self, 'local_infrastructure', None) and self.local_infrastructure.eligible(project, pr, owner):
+            return False
         if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
                 or owner.get('expired') or owner.get('branch') != pr.get('headRefName')):
             return False
@@ -1919,9 +1923,23 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
             owner = self.owner(project,pr,owners)
             return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
         batching = self.batches.enabled(project)
-        held = self.batches.tick(project, prs, owners, execute) if batching else set()
+        local_held = set()
+        for candidate in prs:
+            owner = self.owner(project, candidate, owners)
+            if getattr(self, 'local_infrastructure', None) and self.local_infrastructure.eligible(project, candidate, owner):
+                local_held.add(candidate['number'])
+                if execute:
+                    try:
+                        self.ensure_closing_reference(project, candidate, owner)
+                        candidate = self.pr(project, candidate['number'])
+                        self.local_infrastructure.tick(project, candidate, owner)
+                    except Exception as error:
+                        print(f"{project['id']} local infrastructure held: {type(error).__name__}", flush=True)
+        held = self.batches.tick(project, [p for p in prs if p['number'] not in local_held], owners, execute) if batching else set()
         pushed = False
         for pr in sorted(prs,key=priority):
+            if pr['number'] in local_held:
+                continue
             try:
                 if not batching and self.batches.pause_status(project, pr):
                     print(json.dumps({'project':project['id'], 'pr':pr['number'],

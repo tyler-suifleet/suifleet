@@ -1404,3 +1404,69 @@ required before claiming automatic routing is deployed.
 ## Local-test infrastructure integration — user direction, 2026-11-01
 
 Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.
+
+### Automatic local infrastructure lane (SF-215)
+
+A project may opt in with `"local_infrastructure": {"enabled": true}` in the
+private coordinator configuration. The default is disabled. The installed sole
+coordinator selects published Review claims with `area: infra`, a same-repository
+PR to main, resolved threads and no outstanding change requests. It fetches and
+checks the complete Git diff, including deletions and rename endpoints. The
+allowlist is `tools/pr-coordinator/` plus `docs/PR_COORDINATION.md`,
+`docs/ATOMIC_TICKETING.md` and `docs/RECOVERY_WATCHDOG.md`. Labels, implementation
+check claims and hosted success do not authorize this lane. Mixed paths, workflow
+wallet changes, application code and release scripts retain normal gates. Extend
+this trusted allowlist only with a deliberate policy change and appropriate tests.
+
+Eligible sources bypass model reviews and hosted/batch gates. A detached merge
+against exact current remote main preserves Tyler's identity and source ancestry.
+The trusted installed runner executes these fixed commands in Bubblewrap with
+private PID/network namespaces, no host home/configuration/runtime database,
+a cleared environment and a disposable filesystem:
+
+```bash
+python3 -m unittest discover -s tools/pr-coordinator/tests
+python3 -m unittest discover -s scripts/tests -p test_tracking.py
+python3 scripts/bootstrap_tracking.py
+```
+
+Bubblewrap and working unprivileged namespaces are required; sandbox startup
+failure is a real failure. Logs remain private under the coordinator state.
+The `local_integrations` table records the exact base/head/merge/tree, commands,
+exit codes, log hashes, authorization and publication state. The runner checks
+claim/dependency ownership, actual stopped implementation identities/helpers,
+clean worktrees, source feedback and current main again before a nonforce push.
+It never publishes a model approval or hosted-success status. Existing verified
+merge reconciliation closes the issue and marks the claim and Project Done.
+
+A failed exact head/base is held once with its diagnostic and logs, for concrete
+owner repair or operator investigation; it is not endlessly retried. Changed code
+may be tested as a new input. A `publish_pending` outcome fences further attempts,
+including changed inputs, until fetched ancestry proves publication; existing
+merge reconciliation then finishes idempotently. Do not delete these rows or
+replay a push to clear uncertainty. A candidate cannot take a member from an
+active batch or integrate while its worker identity is live or unknown.
+
+Activation independently checks the local receipt against actual merge parents,
+Git scope/tree, user identity, fixed successful commands and retained log hashes,
+then verifies GitHub's real same-repository merged source. Normal independent
+review verification remains in force for every other runtime commit.
+
+The old pinned supervisor cannot understand this new receipt. After the sole
+operator integrates the exact locally tested SF-215 candidate under the explicit
+2026-11-01 user policy, bootstrap from a clean fetched main checkout with:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet --local-infrastructure-policy
+```
+
+This explicit operator option authenticates committed source first, retains the
+old verifier for every normally authorized step and permits only exact successful
+local receipts for steps the old verifier rejects. It runs full offline validation
+before switching the pinned supervisor and generation with the existing locks,
+worker preservation and rollback protocol. It cannot install an unmerged checkout.
+Then enable the private opt-in under operator authority and restart only the
+parent. Verify installed revision/readiness and preserved worker identities.
+Implementation workers hand off their PR/head/tests to the sole orchestrator;
+they do not merge main or install their source. Merged-only rollout and actual
+future automatic integration remain unrun until that operator records them.
