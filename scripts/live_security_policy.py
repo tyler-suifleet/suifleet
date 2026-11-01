@@ -38,8 +38,8 @@ def run(args):
         state["pending"]["verified_transaction"] = identity
         save()
 
-    def transaction(label, *ptb):
-        return live.transaction(label, *ptb, budget=min(20_000_000, live.ledger.remaining))
+    def transaction(label, *ptb, funding=0):
+        return live.transaction(label, *ptb, budget=min(20_000_000, live.ledger.remaining - funding), funding=funding)
 
     live.evidence["success"] = False
     try:
@@ -142,7 +142,7 @@ def run(args):
         transaction("fund isolated activity budget", "--split-coins", "gas", "[1000000]", "--assign", "funds",
                     "--move-call", f"{head}::customer::borrow_budget_cap", f"@{c}", f"@{f}", "--assign", "loan",
                     "--move-call", f"{head}::fleet_budget::deposit", f"@{fixture['budget']}", "loan.0", "funds.0",
-                    "--move-call", f"{head}::customer::return_budget_cap", f"@{f}", "loan.0", "loan.1")
+                    "--move-call", f"{head}::customer::return_budget_cap", f"@{f}", "loan.0", "loan.1", funding=1_000_000)
         transaction("scoped activity withdrawal", "--move-call", f"{head}::customer::withdraw_budget", f"@{c}", f"@{f}", f"@{fixture['budget']}", "1000000", f"@{live.operator}")
         live.check("existing-object migration, three old-customer routes, publisher exclusion and current publication effects")
         live.evidence["fixture"] = fixture
