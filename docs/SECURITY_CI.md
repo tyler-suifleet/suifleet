@@ -72,3 +72,30 @@ and finite tests do not establish complete security; the proofs depend on the
 explicit [native/VM model boundary](MOVE_NATIVE_MODEL.md). Unsupported modeling
 shapes fail closed and are not counted as successful proofs. Current-head ordinary
 CI, automatic testnet and independent review remain separate required gates.
+
+## Organization policy framework regressions
+
+SF-196 adds policy/kernel tests to the core Move suite and exact-argument storage
+withdrawal tests to fleet_storage. Existing strict lint baselines and failing
+mutation tests remain enforced. The framework advertises no working factor until
+its child verifier/enrollment implementation is present; test-only attestations
+must never become production entry points.
+
+`python3 scripts/test_security_policy_localnet.py --base EXPORTED_BASE/contracts
+--evidence FILE` runs existing-object/direct-upgrade acceptance only in a
+disposable Docker container with `--network none`. It creates and destroys its own
+node/wallet, and checks signed effects for old-package authority rejection,
+custody sealing, publisher exclusion and current operations. The normal customer
+upgrade harness additionally runs the real daemon against managed custody.
+
+`scripts/live_security_policy.py` uses the shared verified-byte submitter and
+non-replenishing ledger. Machine testnet runs require the global wallet lock,
+explicit wallet and chain preflight. Cached package ownership/latest version/type
+origins are reverified; publication identities are persisted before signing.
+Uncertain publication markers refuse blind retry. An explicit latest-fixture
+repair records the entire original-base lineage and preserves introduction
+origins; it is never presented as a fresh direct base-to-head run. Expected and
+unexpected aborts are charged, and independent read-backs verify effects/net gas.
+The [evidence](validation/sf196-framework-recovery.md) retains the unsuccessful
+first run as well as the successful repair. Exact-head/base hosted CI and
+independent review remain merge gates.

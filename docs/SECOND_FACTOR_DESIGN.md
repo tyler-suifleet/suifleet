@@ -10,7 +10,7 @@ acceptance must complete before Review; approval does not establish enforcement.
 
 SF-196 owns the protected-action taxonomy, authoritative on-chain organization
 policy, enforcement boundary, policy-change rules and Security settings page.
-The following tickets implement mechanisms against that framework against the framework below; their independent implementation ownership remains unchanged.
+The following tickets implement mechanisms against that framework below; their independent implementation ownership remains unchanged.
 
 | Mechanism | Ticket and required behavior |
 |---|---|
@@ -201,95 +201,132 @@ each mechanism ticket retains its own tests and acceptance:
   remain unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
   and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 
-## Recovery implementation snapshot (2026-10-31)
+## Implemented framework and child API (2026-10-31 recovery)
 
-The recovery adds a **partial framework**, not completed second-factor protection.
-The deployed mechanism availability mask is zero. Every nonzero policy update
-fails on chain until its actual child verifier is implemented. The settings page
-shows those mechanisms as unavailable; it never presents a checkbox as protection.
-SF-196 remains implementation work, not Review or Done.
+The shared framework is independently useful: it establishes policy authority,
+source/custody boundaries, canonical single-use actions and the settings view.
+It does **not** implement the four mechanisms. The deployed availability mask is
+zero; nonzero activation fails on chain until a child supplies its actual verifier,
+authenticated enrollment, UI and acceptance. Unavailable options are visibly
+disabled. Test-only attestations are not production evidence.
 
-New customers now receive a present seven-class all-off policy. Existing customer
-objects opt in with `customer::initialize_security`; their authority version
-changes atomically from 1 to 196. Existing layouts and public signatures are
-unchanged. Legacy objects without policy remain explicitly legacy in the UI.
-Old bytecode's version-1 guard is the proposed exclusion boundary, but a real
-old-package/existing-object upgrade test remains required before accepting it.
-No migration completion badge or live migration is claimed.
+Authority version **197** excludes both legacy version 1 and the already-published
+intermediate framework version 196. `initialize_security` migrates either under
+its current administrator authority (and existing requirements for 196); it
+preserves existing policy state and invalidates pending actions. Old 196 bytecode
+must not remain authoritative after later factors activate. Existing layouts and
+public signatures remain compatible. Never infer migration from a missing field.
+Coordinate the core/client/producer upgrade before migration; stale producer
+bytecode is deliberately excluded, not automatically migrated. The daemon accepts
+legacy 1/current 197 custody; the console also discovers 196
+so it can identify the required migration, without presenting it as current policy.
 
-`security_policy::PolicyKey`, `Policy`, `Action`, `PolicyChanged` and
-`ActionCreated` form a new optional introduction-origin group. Never substitute
-the original customer package for those origins. The reviewed ABI and generated
-TypeScript/Rust layouts include the additive functions and these types.
+Every fleet needs a custody seal before nonzero activation. New empty fleets are
+sealed automatically. Existing fleets use `seal_security_fleet` only after
+`pending_devices == 0`; adoption/retirement seals a reconciled fleet when its last
+pending capability is resolved. Adopting a populated unreconciled budget into an
+already protected customer fails closed, including inside a wrapper grant.
+Standalone wallet-owned objects remain outside managed organization custody.
 
-### Concrete child API handoff
+### Canonical action contract
 
-SF-198, SF-199, SF-200 and SF-201 must continue to wait for the **reviewed, merged**
-framework. These draft interfaces are recorded for coordination, not permission
-to guess or begin against an unmerged API:
+- Bits: multisig=1, passkey=2, distinct-person=4, delay=8. The seven entries are
+  publish, deploy/advance, access, withdrawals, credentials/policy, handover and
+  other administration. Enabled bits combine with AND.
+- `prepare_security_action(customer, intent, expires_ms, clock, ctx)` requires a
+  current administrator. `Action` binds customer, policy generation, proposer,
+  immutable 32-byte intent and expiry (strictly future, at most seven days).
+  Its unique shared object ID is the nonce. It has no store/public-transfer
+  ability. Execution or current-administrator cancellation consumes it.
+- Canonical arguments are BCS `vector<vector<u8>>`: BCS operation-name String,
+  followed by BCS of every explicit argument in declaration order, excluding
+  Action, Clock and TxContext. References use the complete current object BCS;
+  owned values use their complete BCS. This binds both IDs and current contents.
+  Group operations append BCS desired-state revision; deployment-reference
+  operations append `deployment_manager::security_snapshot` (BCS vector of
+  control, target groups/devices and optional rollout state); enrollment edits
+  append their security revision. Storage wrappers bind customer/fleet/storage/
+  budget contents, exact amounts and recipient. `remove_device_secured` includes
+  the ultimate recipient; source enrollment includes the original witness type.
+- `security_policy::action_intent(customer_id, arguments_bcs)` computes
+  Blake2b-256 of BCS `vector<vector<u8>>` containing BCS original `TypeName<Action>`,
+  BCS customer ID and those argument bytes. The introduction-package identity
+  and globally unique chain-created customer ID form the deployment/customer
+  domain. Clients must also verify the manifest chain and per-type origins;
+  a caller-supplied network label has no authority.
+- An execution wrapper consumes Action, recomputes this intent, checks current
+  generation/proposer/expiry and enabled requirements, executes one operation,
+  then clears its transaction-local grant before returning. Complete object BCS
+  and dynamic revisions reject stale state even if a direct all-off write did
+  not increment the policy generation. Credential/policy/source changes and
+  completed secured operations invalidate outstanding actions.
+- Ordinary operations enforce their own class. Raw recipe deployments, rollouts
+  and imported deployments also require publication protection; foreign catalog
+  versions require it at import. Group adoption/membership changes require deploy
+  and access protection as well as administration. Custody release requires
+  handover protection. Policy changes, administrator changes, source changes and
+  whole-organization handover conservatively require the current union of classes.
+- `pause_deployment_secured` changes only paused state and control revision. It
+  preserves schedule/targets and skips only delay; other factors remain required.
+  Resume uses the full deployment requirements. Cancellation requires a current
+  administrator but no execution factors. Neither operation grants arbitrary
+  lifecycle-command, reboot or recovery authority.
 
-- Bits are multisig=1, passkey=2, distinct-person=4 and delay=8. The seven
-  requirement entries are publish, deploy/advance, access, withdrawals,
-  credentials/policy, handover and other administration, in that order.
-- `customer::prepare_security_action(customer, intent, expires_ms, clock, ctx)`
-  checks current administrator authority and creates shared `security_policy::Action`.
-  Its immutable fields bind customer ID, policy generation, proposer, intent and
-  expiry (strictly future; at most seven days from the chain Clock).
-- The intent is Blake2b-256 of BCS `vector<vector<u8>>`: BCS operation-name
-  String followed by BCS of every explicit argument in declaration order,
-  excluding TxContext and Clock. Key-object arguments use BCS ID, other arguments
-  use their complete BCS value. Customer ID is included. Network/deployment binding
-  still needs an explicit domain field before cryptographic child implementation;
-  a caller-supplied label alone must never establish that binding.
-- Child modules authenticate enrollment/current credentials and exact immutable
-  intent, generation and expiry, then call package-only
-  `security_policy::attest(&mut Action, factor)`. There is **no public attest or
-  generic caller-provided witness**. `customer::assert_security_administrator`
-  is a package-only current-credential helper; it deliberately does not require
-  action factors merely to propose/approve/cancel.
-- Forty-six additive `customer::*_secured` wrappers consume Action by value,
-  recompute their exact arguments, verify every currently required bit, perform
-  one operation, then invalidate the internal grant before returning to the PTB.
-  Ordinary direct calls still check their class, and policy weakening checks the
-  union of current requirements. Successful secured actions advance generation.
-  A child must not expose the package-only begin/finish helpers publicly.
-- `customer::cancel_security_action` permits any current administrator to cancel
-  without execution factors. Action has no store ability/public transfer; deletion
-  makes execution/replay impossible. Child proposal rejection and delay-specific
-  pause exceptions still need their own implementation and automated tests.
-- The current kernel conservatively requires the union of every action class for
-  a secured wrapper. Class-specific factors, immediate pause behavior and enrolled
-  recovery configuration must be finalized before any mechanism becomes available.
+### Trusted mechanism and external-source boundary
 
-### Outstanding software acceptance (retained in SF-196)
+Children SF-198/#397, SF-199/#398, SF-200/#399 and SF-201/#400 require this reviewed,
+merged prerequisite. Their exact in-package hooks are:
 
-The partial implementation does not yet satisfy the whole ticket:
+- `assert_security_administrator`, `begin_security_action` and
+  `finish_security_action` in customer are package-only. Child wrappers compute
+  their own canonical arguments and retain the existing authority checks.
+- `security_policy::attest` is package-only and accepts one factor bit. A child
+  authenticates the configured source, exact Action ID/intent, generation,
+  credentials and expiry before attesting. No public generic factor witness exists.
+- `configure_security_factor` / `configure_factor` are package-only. Replacement
+  requires every currently effective class, a bounded nonempty public binding,
+  and invalidates queued proofs. `security_factor_configuration` is read-only.
+  A child must define/verify its binding schema and prove newly enrolled factors
+  work; storing arbitrary bytes never establishes a working factor.
+- Generic `borrow_budget_cap` cannot inherit a secured grant: any nonzero class
+  disables that loan. This prevents a caller approving one loan and substituting
+  an unrelated withdrawal, data mutation or custody change before returning it.
+- Storage withdrawals have real operation-specific wrappers in fleet_storage:
+  `withdraw_managed_wal_secured`, `withdraw_managed_storage_secured` and
+  `withdraw_managed_retention_secured`. Only that enrolled producer can construct
+  its non-store `CustomerCharge` witness. The base `begin_storage_action` fixes
+  class 3, checks the exact witness identity/current administrator/action, and
+  binds the cap to the customer fleet. The storage wrapper performs the exact
+  withdrawal, restores the cap and clears the grant before returning. The witness,
+  cap and loan are never returned by the external wrapper.
+- Storage source enrollment keeps registry authority and adds current customer
+  requirements; `configure_customer_charging_secured` binds the original source
+  type and exact customer/registry. It cannot replace an existing source with a
+  different type. A storage package upgrader remains an explicitly trusted code
+  authority. Other generic external data/storage administration stays unavailable
+  under protection until a reviewed exact-operation adapter exists; no public
+  arbitrary-class/witness or raw-cap escape is provided. Device-scoped bounded
+  reporting, gas and storage writes retain their existing authority.
+- Enrollment grants are tied to the policy generation under which current
+  administrators authorized their claims. Stale grants cannot enroll after a
+  policy/credential/source change; current-factor `add_claims` can reauthorize the
+  policy. Managed policies remain closed to old standalone enrollment routes.
 
-1. Complete catalog/publisher custody, source/recipient handover and withdrawals.
-   A wallet-owned catalog cannot gain organization protection from a new UI alone.
-2. Bind external budget/storage/data operations to exact arguments. The legacy
-   `borrow_budget_cap` hot potato prevents cap retention but does not constrain
-   what a caller does with the cap before returning it. Protected lending is
-   deliberately unavailable without an internal grant; adding a public lending
-   wrapper would create a bypass. Design and test a trusted, scoped adapter or
-   equivalent exclusive custody boundary before enabling factors.
-3. Complete domain/revision binding, factor configuration/enrollment validation,
-   per-class execution and delay-exempt pause semantics. Missing mechanisms stay
-   fail closed; enabling nonzero requirements in test-only fixtures is not proof
-   that production factors work.
-4. Complete Security enrollment/editing workflows and the actual SDK action-intent
-   builder, with browser/account/network/error and stale-policy regressions.
-5. Run isolated-chain existing-object upgrade and actual old-package attacks,
-   expanded security checks and public-testnet feature transactions with effects.
-   Preserve current device reporting and external-package compatibility.
+Catalog adoption changes publisher custody to the customer object address, so
+old wallet-publisher entry points cannot publish. Current publication checks the
+publish class and exact arguments. Whole-organization handover consumes a separately
+signed, expiring recipient consent bound to customer/generation, revokes all source
+credentials and retains fleets, deployments, budgets, adopted publishers and
+external storage authority in the same object namespaces. It does not advertise
+partial asset extraction as whole-fleet protection.
 
-The read-only public-testnet preflight during this recovery reports protocol 140,
-above the checksum-pinned transaction CLI 1.82.1 maximum 139. It refuses before
-signing, funding or spending. Toolchain compatibility must be restored through
-reviewed changes; do not disable that gate. No feature digest or on-chain effect
-was produced by this preflight. Manual human/wallet, physical, production-provider
-and actual-mainnet acceptance remain deferred in #32/#159 as described above.
+New types are a reviewed optional introduction-origin group (including policy,
+actions, configurations, custody keys and handover consent/events). Each keeps
+its actual introduction package; a repair upgrade does not rewrite those origins.
+See the generated interfaces and the actual local/testnet receipts in
+[the recovery evidence](validation/sf196-framework-recovery.md).
 
-See [the recovery evidence](validation/sf196-framework-recovery.md) for exact tests
-and the unresolved software gates. The next implementation step is closing the
-scoped external-authority boundary, not obtaining another human design approval.
+Final human/extension-wallet, provider, physical and mainnet acceptance remains
+unrun in #32/#159. The child mechanisms and their activation/enrollment UI are
+still their respective tickets; this framework must not be advertised as four
+completed second-factor mechanisms.
