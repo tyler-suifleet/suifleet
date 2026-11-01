@@ -527,6 +527,8 @@ class BatchController:
                 or review.get('feedback') != feedback(candidate)
                 or review.get('publication_done') != 1 or review.get('publication_pending')
                 or review.get('status') != 'done' or review['result'].get('verdict') != 'changes_requested'
+                or review.get('family') not in ('Codex', 'Claude')
+                or review.get('family') == self.synthetic_owner(batch)['agent']
                 or batch.get('publish_intent')):
             return False
         # Persist the rejected group and actual review before remote closure.

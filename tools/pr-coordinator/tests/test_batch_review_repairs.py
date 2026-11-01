@@ -47,7 +47,7 @@ class BatchReviewRepairs(unittest.TestCase):
 
     def test_stale_unpublished_incomplete_or_already_publishing_review_never_routes(self):
         for change in [dict(head='f'*40),dict(feedback='stale'),dict(publication_done=0),
-                       dict(publication_pending=True),dict(status='running'),
+                       dict(publication_pending=True),dict(status='running'),dict(family='Codex'),dict(family='Other'),
                        dict(result=dict(verdict='blocked',acceptance_complete=False,evidence='wait'))]:
             with self.subTest(change=change):
                 f,candidate,review=self.fixture();batch=f.row()
