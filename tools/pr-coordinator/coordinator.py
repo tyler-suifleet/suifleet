@@ -1185,7 +1185,11 @@ class Coordinator:
                     pr.update(repair_context(project, pr))
                 if pr.get('mergeable') == 'CONFLICTING':
                     pr['_batch_conflict'] = dict(candidate_base=pr['baseRefOid'], other_members=[], reason='conflict with current main')
-        if batches and batches.enabled(project):
+        if batches:
+            paused = batches.pause_status(project, pr)
+            if paused:
+                pr['_batch_pause'] = paused
+            # Keep status evidence fresh during recovery and legacy mode too.
             self.observe_pr(project, pr)
         return pr
 
@@ -1193,7 +1197,7 @@ class Coordinator:
         """Persist only public decision metadata for offline status, no extra polling."""
         if not re.fullmatch(r'[A-Za-z0-9_.-]+', project['id']):
             raise ValueError('invalid observer project namespace')
-        view = {key: pr.get(key) for key in ('number','headRefOid','baseRefOid','headRefName','state','isDraft','mergeable','_testnet_required')}
+        view = {key: pr.get(key) for key in ('number','headRefOid','baseRefOid','headRefName','state','isDraft','mergeable','_testnet_required','_batch_pause')}
         view['statusCheckRollup'] = [{key: value.get(key) for key in
             ('__typename','name','context','status','conclusion','state')} for value in pr['statusCheckRollup']]
         status = pr.get('_testnet_status') or {}
@@ -1915,6 +1919,10 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         pushed = False
         for pr in sorted(prs,key=priority):
             try:
+                if not batching and self.batches.pause_status(project, pr):
+                    print(json.dumps({'project':project['id'], 'pr':pr['number'],
+                                      'merge_blocker':'batch recovery paused; preserve source and candidate heads'}), flush=True)
+                    continue
                 if batching and pr.get('_integration_batch'):
                     continue
                 owner = self.owner(project,pr,owners)

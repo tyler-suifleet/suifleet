@@ -4583,6 +4583,32 @@
       "validation": "Focused batch-integration tests, full coordinator suite, diff checks. No fabricated approvals or live wallet mutations."
     },
     {
+      "key": "SF-213",
+      "title": "Make temporary batch recovery self-resuming and prevent fallback rebase churn",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/recovery_watchdog.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requested investigation and permanent repair after batching was disabled again. Recovery disabled batching to bootstrap SF-212/#429, which is now merged and installed as c1514e3f, but nothing restored mode afterward. Fallback scheduling edited source heads in an active batch and restarted base-refresh repair loops. Implement a declarative temporary suspension tied to the exact repair commit becoming part of the installed reviewed runtime, protect sources during suspension, and document/test the supported recovery route. Never automatically override an explicit permanent disable.",
+      "evidence": "Recovery run-c7bd88d20815486e83c6f695b14c4429 intentionally disabled integration_batch.enabled, pending PR429 install. At 2026-11-01 07:15 installed.json reports c1514e3f (verified merge429), configuration remained false, batch427 remained awaiting_ci and fallback launched source base-update repairs. Operator verified fix installed and restored true under sole authority, preserving workers.",
+      "acceptance": [
+        "Temporary recovery keeps requested batching enabled and records an exact repair head/commit plus reason; it resumes effective batching only when the reviewed installed runtime verifiably contains that exact commit. No unconditional timer or prose parsing authorizes restoration.",
+        "Source PRs and active combined candidates are protected from normal single-PR freshness repairs during suspension. Explicit permanent disable is respected, with in-flight batch members fenced rather than silently rewritten.",
+        "Malformed/unavailable installation or commit evidence fails closed without bypassing CI/review/claim gates; no keys/config contents are logged. Existing mode remains unchanged without an explicit suspension record.",
+        "Recovery instructions require this bounded reversible route rather than a bare global disable. Tests cover pending/install ancestry, unrelated and changed evidence, explicit disable, active candidate protection and normal operation. Document merged-only activation and record real restored queue state."
+      ],
+      "validation": "Focused offline mode/ancestry/fallback-fence tests; full coordinator suite; compile/diff and offline tracking checks. Normal independent review and actual CI/testnet before merge and merged-only installation."
+    },
+    {
       "key": "SF-210",
       "title": "Start independent source reviews before slow queue scans and record low-latency PR workflow",
       "priority": "P1",

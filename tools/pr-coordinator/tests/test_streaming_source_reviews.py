@@ -81,6 +81,24 @@ class StreamingSourceReviews(unittest.TestCase):
                     dict(id='p',integration_batch={'enabled':True}),pr,[owner]))
                 engine.launch.assert_called_once()
 
+    def test_recovery_pause_prevents_streaming_and_fallback_reviews(self):
+        with tempfile.TemporaryDirectory() as directory:
+            engine=self.engine(directory);pr,owner=fixture()
+            project=dict(id='p',repository='a/b',integration_batch=dict(
+                enabled=True,suspend_until_installed='c'*40,
+                suspension_reason='bootstrap repair'))
+            engine.batches.installed=Path(directory)/'missing-installed.json'
+            engine.owners=Mock(return_value=[owner]);engine.collect=Mock()
+            engine.gh=Mock(return_value=json.dumps([[{'number':1}]]))
+            engine.pr=Mock(return_value=pr);engine.discover_merged=Mock()
+            engine.batches.tick=Mock(return_value=set())
+            engine.tick_project(project,True)
+            engine.launch.assert_not_called()
+            engine.batches.tick.assert_not_called()
+            # The new early entry point must also independently fail closed.
+            self.assertFalse(engine.start_source_review(project,pr,[owner]))
+            engine.launch.assert_not_called()
+
     def test_callback_failure_retains_snapshot_and_continues(self):
         with tempfile.TemporaryDirectory() as directory:
             engine=self.engine(directory);a,_=fixture(1);b,_=fixture(2)
