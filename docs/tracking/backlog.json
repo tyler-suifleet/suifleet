@@ -4606,6 +4606,31 @@
       ],
       "validation": "Focused scheduler ordering/failure/dry-run/eligibility regressions; complete offline coordinator suite; compile/diff checks. Existing GitHub CI and independent review before merge/installed runtime activation.",
       "evidence": "2026-10-31 measured last-week queue/review history and inspected installed coordinator: discovery and full snapshot collection precede all source launches. User explicitly requests substantial PR open-to-close improvement."
+    },
+    {
+      "key": "SF-214",
+      "title": "Route combined-review source findings to owners and release unrelated batches",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requires continuous progress. A published changes_requested integration review on batch433 found a reproducible enrollment bug in sole member421, but BatchController only attempted to relaunch the same completed review and never produced a source repair context. The stale failed CI-launch job was unrelated. Route exact fresh published combined source findings to original owners without inventing CI failures or editing SQLite externally; fail/split the rejected candidate so independent source-ready PRs proceed.",
+      "evidence": "2026-11-01 review job3084 on candidate433 changes_requested reproduces enrollment-claim invalidation; batch remains awaiting_review, source421 latest source review remains complete and failed CI job3079 reports evidence changed before launch. Operator is routing this genuine finding through installed controller methods immediately; permanent routing is absent.",
+      "acceptance": [
+        "Exact-head/base/feedback published changes_requested integration reviews retire the rejected candidate and persist a durable source finding before uncertain remote closure. Stale/unpublished/mismatched reviews never route repairs.",
+        "A single-member rejected candidate unambiguously routes its original source head and claim to normal feedback repair with the actual review evidence; no fake CI status, guessed blame or blanket fresh-base merges. Source-context identity survives unrelated main advances but expires on source-head changes.",
+        "For unattributed multi-member findings, record the rejected group and split boundedly rather than blocking the entire queue or blaming every member. Existing source-ready independent PRs can form the next batch.",
+        "Cleanup/closure retries and changed CI evidence do not abort unrelated scheduling or clear uncertain worker/claim reservations. Final source/combined CI, testnet and independent approval remain gates."
+      ],
+      "validation": "Offline real controller/state tests for singleton routing, stale review rejection, multi-member splitting, durable closure uncertainty, head changes and independent queue progress; full coordinator suite, compile/diff and tracking tests. Normal independent review/CI before merged-only runtime installation."
     }
   ]
 }
