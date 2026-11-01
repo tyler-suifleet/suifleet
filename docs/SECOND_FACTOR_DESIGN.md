@@ -1,19 +1,16 @@
 # Optional organization security framework (SF-196)
 
-Status: revised design for user review; not approved or implemented. This replaces
-the earlier multisig-only recommendation. The [scope decision recorded at
-2026-10-28T01:06:32Z](https://github.com/tyler-suifleet/suifleet/issues/384#issuecomment-6457892237)
-selects **all four optional mechanisms**, independently chosen per organization.
-The remaining decision is review of this shared design, not choosing one mechanism.
-[SF-196/#384](https://github.com/tyler-suifleet/suifleet/issues/384) remains Blocked
-pending that review. This recovery changes documentation only.
+Status: user approved this shared design on 2026-10-31 in
+[#384](https://github.com/tyler-suifleet/suifleet/issues/384#issuecomment-6552386259).
+The earlier human design-review hold is obsolete. All four protections remain
+optional, independently chosen per organization. Implementation and automated
+acceptance must complete before Review; approval does not establish enforcement.
 
 ## Ownership and defaults
 
 SF-196 owns the protected-action taxonomy, authoritative on-chain organization
 policy, enforcement boundary, policy-change rules and Security settings page.
-The following tickets implement mechanisms against that framework after design
-review; this note defines behavioral contracts, not guessed Move signatures.
+The following tickets implement mechanisms against that framework against the framework below; their independent implementation ownership remains unchanged.
 
 | Mechanism | Ticket and required behavior |
 |---|---|
@@ -182,7 +179,7 @@ network, organization, targets, amounts and exact bytes independently; effects,
 not a returned digest, establish success. Ambiguous submissions require chain
 reconciliation before retrying.
 
-After user review, SF-196 must implement and verify its framework before Review;
+SF-196 must implement and verify its framework before Review;
 each mechanism ticket retains its own tests and acceptance:
 
 - Enumerate protected functions and legacy routes; Move tests for all-off defaults,
@@ -204,7 +201,95 @@ each mechanism ticket retains its own tests and acceptance:
   remain unrun in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
   and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 
-This design repair runs document consistency checks only. No mechanism, framework,
-Security page, migration, functional test or chain transaction is implemented by
-this note. Next step: user review of the revised shared design; retain Blocked
-until that review, then resume this existing claim within the authorized scope.
+## Recovery implementation snapshot (2026-10-31)
+
+The recovery adds a **partial framework**, not completed second-factor protection.
+The deployed mechanism availability mask is zero. Every nonzero policy update
+fails on chain until its actual child verifier is implemented. The settings page
+shows those mechanisms as unavailable; it never presents a checkbox as protection.
+SF-196 remains implementation work, not Review or Done.
+
+New customers now receive a present seven-class all-off policy. Existing customer
+objects opt in with `customer::initialize_security`; their authority version
+changes atomically from 1 to 196. Existing layouts and public signatures are
+unchanged. Legacy objects without policy remain explicitly legacy in the UI.
+Old bytecode's version-1 guard is the proposed exclusion boundary, but a real
+old-package/existing-object upgrade test remains required before accepting it.
+No migration completion badge or live migration is claimed.
+
+`security_policy::PolicyKey`, `Policy`, `Action`, `PolicyChanged` and
+`ActionCreated` form a new optional introduction-origin group. Never substitute
+the original customer package for those origins. The reviewed ABI and generated
+TypeScript/Rust layouts include the additive functions and these types.
+
+### Concrete child API handoff
+
+SF-198, SF-199, SF-200 and SF-201 must continue to wait for the **reviewed, merged**
+framework. These draft interfaces are recorded for coordination, not permission
+to guess or begin against an unmerged API:
+
+- Bits are multisig=1, passkey=2, distinct-person=4 and delay=8. The seven
+  requirement entries are publish, deploy/advance, access, withdrawals,
+  credentials/policy, handover and other administration, in that order.
+- `customer::prepare_security_action(customer, intent, expires_ms, clock, ctx)`
+  checks current administrator authority and creates shared `security_policy::Action`.
+  Its immutable fields bind customer ID, policy generation, proposer, intent and
+  expiry (strictly future; at most seven days from the chain Clock).
+- The intent is Blake2b-256 of BCS `vector<vector<u8>>`: BCS operation-name
+  String followed by BCS of every explicit argument in declaration order,
+  excluding TxContext and Clock. Key-object arguments use BCS ID, other arguments
+  use their complete BCS value. Customer ID is included. Network/deployment binding
+  still needs an explicit domain field before cryptographic child implementation;
+  a caller-supplied label alone must never establish that binding.
+- Child modules authenticate enrollment/current credentials and exact immutable
+  intent, generation and expiry, then call package-only
+  `security_policy::attest(&mut Action, factor)`. There is **no public attest or
+  generic caller-provided witness**. `customer::assert_security_administrator`
+  is a package-only current-credential helper; it deliberately does not require
+  action factors merely to propose/approve/cancel.
+- Forty-six additive `customer::*_secured` wrappers consume Action by value,
+  recompute their exact arguments, verify every currently required bit, perform
+  one operation, then invalidate the internal grant before returning to the PTB.
+  Ordinary direct calls still check their class, and policy weakening checks the
+  union of current requirements. Successful secured actions advance generation.
+  A child must not expose the package-only begin/finish helpers publicly.
+- `customer::cancel_security_action` permits any current administrator to cancel
+  without execution factors. Action has no store ability/public transfer; deletion
+  makes execution/replay impossible. Child proposal rejection and delay-specific
+  pause exceptions still need their own implementation and automated tests.
+- The current kernel conservatively requires the union of every action class for
+  a secured wrapper. Class-specific factors, immediate pause behavior and enrolled
+  recovery configuration must be finalized before any mechanism becomes available.
+
+### Outstanding software acceptance (retained in SF-196)
+
+The partial implementation does not yet satisfy the whole ticket:
+
+1. Complete catalog/publisher custody, source/recipient handover and withdrawals.
+   A wallet-owned catalog cannot gain organization protection from a new UI alone.
+2. Bind external budget/storage/data operations to exact arguments. The legacy
+   `borrow_budget_cap` hot potato prevents cap retention but does not constrain
+   what a caller does with the cap before returning it. Protected lending is
+   deliberately unavailable without an internal grant; adding a public lending
+   wrapper would create a bypass. Design and test a trusted, scoped adapter or
+   equivalent exclusive custody boundary before enabling factors.
+3. Complete domain/revision binding, factor configuration/enrollment validation,
+   per-class execution and delay-exempt pause semantics. Missing mechanisms stay
+   fail closed; enabling nonzero requirements in test-only fixtures is not proof
+   that production factors work.
+4. Complete Security enrollment/editing workflows and the actual SDK action-intent
+   builder, with browser/account/network/error and stale-policy regressions.
+5. Run isolated-chain existing-object upgrade and actual old-package attacks,
+   expanded security checks and public-testnet feature transactions with effects.
+   Preserve current device reporting and external-package compatibility.
+
+The read-only public-testnet preflight during this recovery reports protocol 140,
+above the checksum-pinned transaction CLI 1.82.1 maximum 139. It refuses before
+signing, funding or spending. Toolchain compatibility must be restored through
+reviewed changes; do not disable that gate. No feature digest or on-chain effect
+was produced by this preflight. Manual human/wallet, physical, production-provider
+and actual-mainnet acceptance remain deferred in #32/#159 as described above.
+
+See [the recovery evidence](validation/sf196-framework-recovery.md) for exact tests
+and the unresolved software gates. The next implementation step is closing the
+scoped external-authority boundary, not obtaining another human design approval.
