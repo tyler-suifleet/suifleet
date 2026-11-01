@@ -581,6 +581,8 @@ def source_feedback(pr):
     payload = [pr['headRefOid'], pr.get('body', ''), comments, reviews, pr['threads'], pr.get('_acceptance_policy', {})]
     if pr.get('_batch_failure') or pr.get('_batch_conflict'):
         payload.append([pr.get('_batch_failure'), pr.get('_batch_conflict')])
+    if pr.get('_batch_review_failure'):
+        payload.append(pr['_batch_review_failure'])
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -1217,7 +1219,7 @@ class Coordinator:
 
     def source_receipt(self, project, pr, owner):
         """Return typed published source proof, never infer approval from prose."""
-        if not owner or owner.get('agent') not in FAMILIES or pr.get('_batch_failure') or pr.get('_batch_conflict'):
+        if not owner or owner.get('agent') not in FAMILIES or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure'):
             return None
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='review' AND head=? AND status='done' AND publication_done=1 ORDER BY id DESC",
                                      (project['id'], pr['number'], pr['headRefOid'])).fetchall()
@@ -1454,6 +1456,8 @@ Do not edit the coordinator database or forge another model's review. Only this 
                 common += '\nSOURCE REVIEW WHILE CI IS UNREADY: inspect source and run scoped local checks now. Do not wait for CI. Report actionable defects as changes_requested; otherwise return blocked with acceptance_complete=false and completed source-review evidence. This is not merge approval. A fresh evidence review is required once all checks succeed.\n'
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
+        if pr.get('_batch_review_failure'):
+            common += '\nCOMBINED REVIEW SOURCE REPAIR: an independently published integration review found a real source defect. Repair the owning source branch and add the requested regression checks. This is not a fabricated CI failure or a request to rebase for freshness. Preserve security and acceptance gates; inspect the actual candidate review if needed. Context: ' + json.dumps(pr['_batch_review_failure']) + '\n'
         if pr.get('_batch_failure') or pr.get('_batch_conflict'):
             common += '\nBATCH INTEGRATION REPAIR: the failure/conflict belongs to the combined candidate, not a fabricated failure of the original source head. Diagnose the pinned candidate/base and actual failed checks or conflicting members from this context, fix the owning source branch as needed, and record exact evidence. Resolve an actual conflict against the pinned candidate base if needed; do not rebase merely for freshness. Context: ' + json.dumps({k:pr[k] for k in ('_batch_failure','_batch_conflict') if k in pr}) + '\n'
         if pr.get('_ci_repair'):
@@ -1865,7 +1869,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 or pr.get('_integration_batch') or pr.get('state') != 'OPEN'
                 or pr['number'] in self.batches.reserved_members(project)
                 or pr.get('isDraft') or pr.get('isCrossRepository')
-                or pr.get('_batch_failure') or pr.get('_batch_conflict')
+                or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure')
                 or failed_checks(pr)):
             return False
         owner = self.owner(project, pr, owners)
@@ -1979,7 +1983,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # invalidate the batch before normal repair on a later tick;
                     # publication/reconciliation uncertainty never permits repair.
                     continue
-                if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
+                if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
                 elif repair:
                     if not repair_blocker and not owner.get('expired') and owner.get('model'):
