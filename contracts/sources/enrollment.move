@@ -52,6 +52,34 @@ module sui_edge::enrollment {
         enrolled: u64,
     }
 
+    public struct SecurityRevisionKey has copy, drop, store {}
+    public struct SecurityGenerationKey has copy, drop, store {}
+    // Existing key, distinct parent UIDs: Customer stores the authority epoch;
+    // EnrollmentPolicy stores the epoch at which its claims were authorized.
+    public(package) fun authority_generation(customer: &UID): u64 {
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) else 0
+    }
+    public(package) fun invalidate_authority(customer: &mut UID) {
+        let next = authority_generation(customer) + 1;
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow_mut<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) = next
+        else df::add(customer, SecurityGenerationKey {}, next);
+    }
+    public(package) fun security_revision(policy: &EnrollmentPolicy): u64 {
+        if (df::exists(&policy.id, SecurityRevisionKey {})) *df::borrow<SecurityRevisionKey, u64>(&policy.id, SecurityRevisionKey {}) else 0
+    }
+    fun changed(policy: &mut EnrollmentPolicy) {
+        if (!df::exists(&policy.id, SecurityRevisionKey {})) df::add(&mut policy.id, SecurityRevisionKey {}, 0u64);
+        let revision = df::borrow_mut<SecurityRevisionKey, u64>(&mut policy.id, SecurityRevisionKey {});
+        *revision = *revision + 1;
+    }
+    public(package) fun bind_security_generation(policy: &mut EnrollmentPolicy, generation: u64) {
+        if (df::exists(&policy.id, SecurityGenerationKey {})) {
+            *df::borrow_mut<SecurityGenerationKey, u64>(&mut policy.id, SecurityGenerationKey {}) = generation;
+        } else df::add(&mut policy.id, SecurityGenerationKey {}, generation);
+    }
+    public(package) fun security_generation(policy: &EnrollmentPolicy): u64 {
+        if (df::exists(&policy.id, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(&policy.id, SecurityGenerationKey {}) else 0
+    }
     public struct ManagedKey has copy, drop, store {}
     public struct PolicyCreated has copy, drop {
         policy_id: ID,
@@ -97,6 +125,7 @@ module sui_edge::enrollment {
     }
     public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
         assert!(policy.operator == authority, ENotOperator);
+        changed(policy);
         let mut i = 0;
         while (i < claims.length()) {
             if (!policy.claims.contains(claims[i])) policy.claims.add(claims[i], true);
@@ -105,10 +134,12 @@ module sui_edge::enrollment {
     }
     public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
         assert!(policy.operator == authority, ENotOperator);
+        changed(policy);
         policy.claims.remove(claim);
     }
     public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
         assert!(policy.operator == authority, ENotOperator);
+        changed(policy);
         assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
         policy.remaining = quota; policy.expires_at_ms = expires_at_ms;
         if (close) *df::borrow_mut<ManagedKey, bool>(&mut policy.id, ManagedKey {}) = false;

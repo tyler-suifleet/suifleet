@@ -23,6 +23,8 @@
 ///
 /// Read interface version 1 (SF-092): the getters at the end and the events.
 module fleet_storage::fleet_storage {
+    use std::bcs;
+    use sui_edge::security_policy::Action;
     use sui::balance::{Self, Balance};
     use sui::clock::Clock;
     use sui::coin::{Self, Coin};
@@ -597,6 +599,45 @@ module fleet_storage::fleet_storage {
         deposit_wal(fs, budget, cap, coin);
     }
 
+    /// The source witness never leaves this exact-argument wrapper.
+    public fun withdraw_managed_wal_secured(customer: &mut Customer, fleet: &mut Fleet,
+        fs: &mut FleetStorage, budget: &FleetBudget, amount: u64, recipient: address,
+        action: Action, clock: &Clock, ctx: &mut TxContext) {
+        assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_wal")),
+            bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&amount), bcs::to_bytes(&recipient)];
+        let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
+        let coin = withdraw_wal(fs, budget, &cap, amount, ctx);
+        customer::finish_storage_action(customer, fleet, cap, loan);
+        transfer::public_transfer(coin, recipient);
+    }
+
+    /// The source witness never leaves this exact-argument wrapper.
+    public fun withdraw_managed_storage_secured(customer: &mut Customer, fleet: &mut Fleet,
+        fs: &mut FleetStorage, budget: &FleetBudget, size: u64, recipient: address,
+        action: Action, clock: &Clock, ctx: &mut TxContext) {
+        assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_storage")),
+            bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&size), bcs::to_bytes(&recipient)];
+        let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
+        let storage = withdraw_storage(fs, budget, &cap, size, ctx);
+        customer::finish_storage_action(customer, fleet, cap, loan);
+        transfer::public_transfer(storage, recipient);
+    }
+
+    /// The source witness never leaves this exact-argument wrapper.
+    public fun withdraw_managed_retention_secured(customer: &mut Customer, fleet: &mut Fleet,
+        fs: &mut FleetStorage, budget: &FleetBudget, wal: u64, gas: u64, recipient: address,
+        action: Action, clock: &Clock, ctx: &mut TxContext) {
+        assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_retention")),
+            bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&wal), bcs::to_bytes(&gas), bcs::to_bytes(&recipient)];
+        let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
+        let (wal_coin, gas_coin) = withdraw_retention(fs, budget, &cap, wal, gas, ctx);
+        customer::finish_storage_action(customer, fleet, cap, loan);
+        transfer::public_transfer(wal_coin, recipient); transfer::public_transfer(gas_coin, recipient);
+    }
+
     public fun withdraw_wal(fs: &mut FleetStorage, budget: &FleetBudget, cap: &BudgetOwnerCap, amount: u64, ctx: &mut TxContext): Coin<WAL> {
         assert_owner(fs, budget, cap);
         assert!(amount > 0, EZeroAmount);
@@ -721,6 +762,10 @@ module fleet_storage::fleet_storage {
 
     /// Issuer configuration, idempotent for this producer type origin. The
     /// witness is never returned or publicly constructible by a device.
+    public fun configure_customer_charging_secured(customer: &mut Customer, registry: &DeviceRegistry,
+        action: Action, clock: &Clock, ctx: &mut TxContext) {
+        customer::configure_charging_secured(customer, registry, CustomerCharge {}, action, clock, ctx);
+    }
     public fun configure_customer_charging(customer: &mut Customer, registry: &DeviceRegistry, ctx: &mut TxContext) {
         customer::configure_charging(customer, registry, CustomerCharge {}, ctx);
     }

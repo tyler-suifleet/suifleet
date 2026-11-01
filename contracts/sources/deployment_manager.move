@@ -92,6 +92,23 @@ module sui_edge::deployment_manager {
     ) {
         set_control_as(deployment, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx.sender());
     }
+    /// Dynamic state must be reviewed as well as the stable object layout.
+    public(package) fun security_snapshot(d: &DeploymentRecord): vector<u8> {
+        let mut parts = vector[std::bcs::to_bytes(&control(d)),
+            std::bcs::to_bytes(target_groups(d)), std::bcs::to_bytes(target_devices(d))];
+        if (df::exists(&d.id, RolloutKey {})) parts.push_back(std::bcs::to_bytes(&rollout(d)));
+        std::bcs::to_bytes(&parts)
+    }
+    public(package) fun pause_as(deployment: &mut DeploymentRecord, authority: address) {
+        assert!(deployment.creator == authority, ENotCreator);
+        let mut c = control(deployment);
+        assert!(c.state != 2, ECancelled);
+        c.state = 1;
+        c.revision = c.revision + 1;
+        if (df::exists(&deployment.id, ControlKey {})) {
+            *df::borrow_mut<ControlKey, Control>(&mut deployment.id, ControlKey {}) = c;
+        } else df::add(&mut deployment.id, ControlKey {}, c);
+    }
     public(package) fun set_control_as(deployment: &mut DeploymentRecord, state: u8,
         not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, authority: address) {
         assert!(authority == deployment.creator, ENotCreator);

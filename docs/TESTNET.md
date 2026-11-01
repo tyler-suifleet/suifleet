@@ -58,12 +58,28 @@ Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py
 | Role | Pin | Supports protocol | Used for |
 |---|---|---|---|
 | Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
-| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.83.0` (`1.83.0-16d2dc1e05ed`); archive sha256 `e5116805…d7d8`, binary sha256 `29e1beb9…48fa` | up to 140 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.83.0` (`1.83.0-16d2dc1e05ed`); archive sha256 `e5116805…1d7d8`, binary sha256 `29e1beb9…48fa` | up to 140 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
 
 The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
 
+**SF-196 protocol-140 repair (2026-10-31).** The former 1.82.1 pin supports only
+139 and correctly refused current testnet before signing. The replacement is
+[testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0).
+Its [protocol source](https://github.com/MystenLabs/sui/blob/testnet-v1.83.0/crates/sui-protocol-config/src/lib.rs)
+sets `MAX_PROTOCOL_VERSION = 140`. The downloaded Linux x86_64 archive matched
+GitHub's published SHA-256
+`e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8`;
+the extracted `sui` is
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+Only the transaction CLI changes: the release compiler, locked framework,
+verify-before-sign, wallet checks, resource locks and non-replenishing allowance
+remain enforced. Regression tests explicitly reject protocol140 with a 139 CLI,
+accept it with this verified pin and reject 141. Local/testnet receipts below
+record actual effects separately from this identity check. Package build failures
+now preserve bounded stdout diagnostics as well as stderr; the CLI can report
+compatibility errors on stdout. A diagnostic change cannot authorize signing.
 On 2026-10-30 testnet advanced to protocol 140. [Run 41133167458](https://github.com/tyler-suifleet/suifleet/actions/runs/41133167458) stopped at read-only preflight because 1.82.1 supports only 139; no transaction was submitted. The transaction pin now uses [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0), whose [protocol configuration](https://github.com/MystenLabs/sui/blob/16d2dc1e05edcf600320a82e17b9392edb0983a5/crates/sui-protocol-config/src/lib.rs) declares maximum 140. The release compiler, framework and fixture cache keys stay unchanged. Exact-head automatic testnet execution remains required; the pin update alone does not establish successful live execution or post-retention audit acceptance.
 
 **What each run checks:**
@@ -87,7 +103,7 @@ On 2026-10-30 testnet advanced to protocol 140. [Run 41133167458](https://github
 
 Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). These runs used the dedicated agent wallet, not the CI wallet. The automatic CI run on the PR head records its own evidence.
 
-**Updating the transaction CLI.** When testnet moves past protocol 139, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
+**Updating the transaction CLI.** When testnet moves past protocol 140, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
 ## SF-083 fleet budget run
 
@@ -510,6 +526,29 @@ repairs funding only: exact-head/current-base hosted CI, automatic testnet and
 fresh independent review remain required, pending coordinator collection.
 Production-provider/manual-wallet/physical/mainnet acceptance remains unrun in
 SF-031/#32 and SF-087/#159.
+
+**SF-196 PTB reservation repair (run 41276436449).** Lane 2 verified chain
+`4c78adac` and held 3,879,392,297 MIST after its one successful faucet request.
+The effects artifact records base publication
+`4YYNaZ81QZR8BqaNDwefaMVAC4D3DemzfeQXbkLdYBTv` (613,441,200 MIST) and
+head upgrade `2hx47R8364RT29wpSkmjXpjyQWC4NgSkXSaepHXJCvxi`
+(767,170,563 MIST), both successful. Six transactions plus device funding
+consumed 1,430,017,981 MIST of the unchanged 1.6-SUI allowance. The inbox
+setup was refused before signing because its 200M reservation exceeded the
+169,982,019-MIST remainder. This is allowance reservation pressure, not a
+wallet funding shortfall; another faucet request cannot repair it.
+
+CI now explicitly selects the existing `--transaction-gas-budget` option at
+60M for ordinary package-gate PTBs. The historical three-deployment batch
+measured 42,002,565 MIST net (run 40246935467); the offline projection uses
+50M, plus 10M inbox and 20M base-deployment costs, and retains a full unknown
+60M cleanup reservation. These are projections, not new live results or a
+guarantee of gross gas requirements. Exact-head automatic testnet must still
+validate the selected budget and all effects. Publication budgets, suite/run
+ceilings, full-reservation refusal, failed/unknown accounting, fixture reuse,
+quarantine reservations and faucet limits are unchanged. Preserve the saved
+fixture and re-verify it on chain; never republish identical bytecode or clear
+an uncertain reservation. This repair made no public-wallet writes.
 
 **SF-169 CI lane 2 funding repair (2026-10-30, run 41121707186).** The
 [failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41121707186)

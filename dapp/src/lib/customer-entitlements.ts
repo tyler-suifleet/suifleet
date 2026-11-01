@@ -13,7 +13,9 @@ export async function readCustomerEntitlement(client: SuiGrpcClient, customerId:
   const { object } = await client.getObject({ objectId: normalizeId(customerId), include: { content: true } });
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Customer"))) throw Error("Choose a customer account object");
   const c = customer_CustomerBcs.parse(object.content);
-  if (normalizeId(c.id) !== normalizeId(customerId) || normalizeId(c.registry_id) !== normalizeId(REGISTRY_ID) || BigInt(c.version) !== BigInt(1)) throw Error("Customer does not belong to this deployment or requires a newer console");
+  if (normalizeId(c.id) !== normalizeId(customerId) || normalizeId(c.registry_id) !== normalizeId(REGISTRY_ID)) throw Error("Customer does not belong to this deployment or requires a newer console");
+  if (BigInt(c.version) === BigInt(196)) throw Error("Customer security migration required; initialize organization security before managing device entitlements");
+  if (![BigInt(1), BigInt(197)].includes(BigInt(c.version))) throw Error("Customer authority version requires a newer console");
   return c;
 }
 export async function registryAdministrator(client: SuiGrpcClient) {
