@@ -7,6 +7,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { PageHeader, ConnectionRequired } from "@/components/ui";
+import { DeviceClientHelp } from "@/components/DeviceClientHelp";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
 import { useFleetTransaction, type TransactionPhase } from "@/hooks/useFleetTransaction";
@@ -80,6 +81,7 @@ export default function EnrollmentPage() {
   return (
     <div className="space-y-4 max-w-5xl text-sm">
       <PageHeader title="Enrollment" subtitle="Reserve device names and serial numbers; devices enroll themselves with single-use credentials" />
+      <DeviceClientHelp variant="enroll" />
       {error && <p role="alert" className="text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>}
       <section className="bg-white border border-gray-200 rounded p-4 space-y-3">
         <h2 className="font-semibold">1. Enrollment batch policy</h2>
