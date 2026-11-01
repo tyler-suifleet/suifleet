@@ -2,6 +2,8 @@
 /// credentials. Legacy budgets opt in explicitly; adoption never moves devices.
 module sui_edge::customer {
     use std::string::String;
+    use sui_edge::security_policy::{Self, Policy, Action};
+    use std::bcs;
     use sui::clock::Clock;
     use sui::coin;
     use sui::dynamic_field as df;
@@ -82,6 +84,8 @@ module sui_edge::customer {
             credentials, administrators: 1, fleets: vector[], default_fleet: option::none(),
             active_devices: 0, device_limit: 0, allowance: 0, used: 0, period: 0, charge_type: vector[] };
         create_fleet(&mut customer, registry, std::string::utf8(b"Default fleet"), ctx);
+        security_policy::initialize(&mut customer.id);
+        customer.version = 196;
         let customer_id = object::id(&customer);
         df::add(device_registry::uid_mut(registry), key, customer_id);
         transfer::transfer(Membership { id: object::new(ctx), customer_id }, ctx.sender());
@@ -90,7 +94,7 @@ module sui_edge::customer {
     }
 
     public fun set_credential(customer: &mut Customer, wallet: address, active: bool, administrator: bool, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 4, ctx);
         assert!(wallet != @0x0, EAccess);
         if (customer.credentials.contains(&wallet)) {
             let (_, was_admin) = customer.credentials.remove(&wallet);
@@ -102,6 +106,7 @@ module sui_edge::customer {
             transfer::transfer(Membership { id: object::new(ctx), customer_id: object::id(customer) }, wallet);
         };
         assert!(customer.administrators > 0, ELastAdmin);
+        if (customer.version == 196) security_policy::invalidate(&mut customer.id);
         event::emit(CredentialChanged { customer_id: object::id(customer), wallet, active, administrator });
     }
 
@@ -109,7 +114,7 @@ module sui_edge::customer {
     /// Periods advance monotonically; changing credentials/fleets cannot reset usage.
     public fun set_entitlement(customer: &mut Customer, registry: &DeviceRegistry,
         device_limit: u64, allowance: u64, period: u64, ctx: &mut TxContext) {
-        assert!(customer.version == 1 && customer.registry_id == object::id(registry), EBinding);
+        assert!((customer.version == 1 || customer.version == 196) && customer.registry_id == object::id(registry), EBinding);
         device_registry::assert_admin(registry, ctx);
         assert!(period >= customer.period, EPeriod);
         assert!(device_limit >= customer.active_devices, ELimit);
@@ -122,7 +127,7 @@ module sui_edge::customer {
     /// Fleet creation has no entitlement side effects. Catalogs may be shared;
     /// every fleet receives a distinct budget and custody namespace.
     public fun create_fleet(customer: &mut Customer, registry: &DeviceRegistry, name: String, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert!(customer.registry_id == object::id(registry), EBinding);
         let (mut budget, cap) = fleet_budget::new_budget(registry, coin::zero(ctx),
             fleet_budget::new_limits(60_000_000, 86_400_000, 250_000_000, 6, 600_000), 0, ctx);
@@ -136,7 +141,7 @@ module sui_edge::customer {
     /// cap cannot duplicate it; callers recover from FleetCreated/customer inventory.
     public fun adopt_budget(customer: &mut Customer, budget: &mut FleetBudget,
         cap: BudgetOwnerCap, name: String, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_name(&name);
         assert!(fleet_budget::registry_id(budget) == customer.registry_id, EBinding);
         let count = fleet_budget::device_count(budget);
@@ -173,7 +178,7 @@ module sui_edge::customer {
     public fun register_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
         registry: &mut DeviceRegistry, name: String, device_address: address, arch: String,
         clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         let device = device_registry::register_device(registry, name, device_address, arch, clock, ctx);
         device_cap::issue_cap(&device, ctx);
@@ -184,17 +189,17 @@ module sui_edge::customer {
     public fun register_funded_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
         registry: &mut DeviceRegistry, name: String, device_address: address, arch: String,
         float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         let device = device_registry::register_device(registry, name, device_address, arch, clock, ctx);
         device_cap::issue_cap(&device, ctx);
         let cap = device_registry::activate_device(registry, device, ctx);
         enroll(customer, fleet, budget, registry, cap, float, reserve, clock, ctx);
     }
     public fun rename_fleet(customer: &Customer, fleet: &mut Fleet, name: String, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_name(&name); fleet.name = name;
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet); assert_name(&name); fleet.name = name;
     }
     public fun set_default_fleet(customer: &mut Customer, fleet: &Fleet, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); customer.default_fleet = option::some(object::id(fleet));
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet); customer.default_fleet = option::some(object::id(fleet));
     }
     /// Explicit atomic reassignment: retire the old gas account, keep identity
     /// and historical records, and enroll in the selected destination budget.
@@ -209,7 +214,7 @@ module sui_edge::customer {
     public fun enroll(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
         registry: &mut DeviceRegistry, cap: DeviceOwnerCap, float: u64, reserve: u64,
         clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         let cap = device_registry::rebind_owner(registry, cap, ctx);
         enroll_checked(customer, fleet, budget, registry, cap, float, reserve, clock, ctx);
     }
@@ -232,21 +237,21 @@ module sui_edge::customer {
     }
 
     public fun create_enrollment_policy(customer: &Customer, fleet: &mut Fleet, registry: &DeviceRegistry, quota: u64, expires_at_ms: u64, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id, EBinding);
         let policy_id = enrollment::create_managed(registry, object::id(fleet).to_address(), quota, expires_at_ms, ctx);
         fleet.enrollment_policies.push_back(policy_id);
     }
     public fun add_claims(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &mut TxContext) {
-        assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
+        assert_enrollment(customer, fleet, policy); assert_action(customer, 2, ctx);
         enrollment::add_claims_as(policy, claims, object::id(fleet).to_address());
     }
     public fun revoke_claim(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, ctx: &mut TxContext) {
-        assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
+        assert_enrollment(customer, fleet, policy); assert_action(customer, 2, ctx);
         enrollment::revoke_claim_as(policy, claim, object::id(fleet).to_address());
     }
     public fun configure_enrollment(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, ctx: &mut TxContext) {
-        assert_enrollment(customer, fleet, policy); assert_admin(customer, ctx);
+        assert_enrollment(customer, fleet, policy); assert_action(customer, 2, ctx);
         enrollment::configure_managed(policy, quota, expires_at_ms, close, object::id(fleet).to_address());
     }
     public fun enroll_claim(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget, policy: &mut EnrollmentPolicy,
@@ -260,7 +265,7 @@ module sui_edge::customer {
         assert!(fleet.enrollment_policies.contains(&object::id(policy)) && enrollment::operator(policy) == object::id(fleet).to_address(), EBinding);
     }
     public fun bind_device_metadata(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, alias: String, serial: String, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, DeviceKey { device_id });
         let (mut device, loan) = device_registry::borrow_device(registry, cap);
@@ -269,13 +274,13 @@ module sui_edge::customer {
         device_registry::return_device(registry, device, loan);
     }
     public fun set_device_revoked(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, revoked: bool, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, DeviceKey { device_id });
         if (revoked) device_registry::revoke_device(registry, cap) else device_registry::reinstate_device(registry, cap);
     }
     public fun rotate_device_key(customer: &Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, signer: address, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, DeviceKey { device_id });
         device_registry::rotate_device_key(registry, cap, signer);
@@ -288,7 +293,7 @@ module sui_edge::customer {
     /// reserved at budget adoption, so retries cannot double-count or release it.
     public fun adopt_device(customer: &mut Customer, fleet: &mut Fleet, budget: &FleetBudget,
         account: &mut GasAccount, registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(object::id(budget) == fleet.budget_id && object::id(registry) == customer.registry_id, EBinding);
         assert!(fleet.pending_devices > 0, EBinding);
@@ -313,7 +318,7 @@ module sui_edge::customer {
     /// unadopted account. Identity and assignments in other fleets are untouched.
     public fun retire_pending_device(customer: &mut Customer, fleet: &mut Fleet,
         budget: &mut FleetBudget, account: &mut GasAccount, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(object::id(budget) == fleet.budget_id && fleet.pending_devices > 0, EBinding);
         let device_id = fleet_budget::account_device_id(account);
@@ -329,7 +334,7 @@ module sui_edge::customer {
     /// Adopt a legacy group only after every member is assigned to this fleet.
     /// Updating its stored admin defeats old package mutation entry points too.
     public fun adopt_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0, EBinding);
         let ids = *device_group::device_ids(group);
@@ -340,7 +345,7 @@ module sui_edge::customer {
     /// Count, uniqueness and on-chain membership prevent hidden foreign members.
     public fun adopt_indexed_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
         members: vector<ID>, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(fleet.pending_devices == 0, EBinding);
         adopt_group_members(fleet, group, members, ctx);
@@ -383,7 +388,7 @@ module sui_edge::customer {
 
     fun release_device(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
         account: &mut GasAccount, device_id: ID, ctx: &mut TxContext): DeviceOwnerCap {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(object::id(budget) == fleet.budget_id && fleet_budget::account_device_id(account) == device_id, EBinding);
         assert!(*df::borrow<GroupCountKey, u64>(&fleet.id, GroupCountKey { device_id }) == 0, EBinding);
@@ -403,7 +408,7 @@ module sui_edge::customer {
 
     public fun create_group(customer: &Customer, fleet: &mut Fleet, name: String,
         description: String, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert_name(&name);
         let group = device_group::new_managed(name, description, object::id(fleet).to_address(), clock, ctx);
@@ -413,7 +418,7 @@ module sui_edge::customer {
 
     public fun add_to_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
         device_id: ID, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, group);
         assert!(fleet.devices.contains(&device_id), EBinding);
@@ -424,7 +429,7 @@ module sui_edge::customer {
 
     public fun remove_from_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
         device_id: ID, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, group);
         device_group::remove_managed(group, device_id);
@@ -433,7 +438,7 @@ module sui_edge::customer {
     }
 
     public fun delete_group(customer: &Customer, fleet: &mut Fleet, group: DeviceGroup, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert_group(fleet, &group);
         assert!(device_group::member_count(&group) == 0, EBinding);
@@ -454,7 +459,7 @@ module sui_edge::customer {
         component_name: String, version: String, recipe_blob_id: String,
         artifact_sha256: String, recipe_sha256: String,
         groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        assert_admin(customer, ctx);
+        assert_action(customer, 1, ctx);
         assert_fleet(customer, fleet);
         let mut i = 0;
         while (i < groups.length()) { assert!(fleet.groups.contains(&groups[i]), EBinding); i = i + 1; };
@@ -468,14 +473,14 @@ module sui_edge::customer {
     }
 
     public fun create_policy(customer: &Customer, fleet: &mut Fleet, name: String, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         let cap = seal_policy::create_policy(name, ctx);
         let policy_id = seal_policy::cap_policy(&cap);
         fleet.policies.insert(policy_id, object::id(&cap));
         dof::add(&mut fleet.id, PolicyKey { policy_id }, cap);
     }
     public fun adopt_policy(customer: &Customer, fleet: &mut Fleet, policy: &AccessPolicy, cap: AccessAdminCap, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         let policy_id = object::id(policy);
         assert!(seal_policy::cap_policy(&cap) == policy_id, EBinding);
         assert_targets(fleet, seal_policy::policy_groups(policy), seal_policy::policy_devices(policy));
@@ -488,12 +493,12 @@ module sui_edge::customer {
         dof::add(&mut fleet.id, PolicyKey { policy_id }, cap);
     }
     public fun policy_account(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, account: address, grant: bool, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         if (grant) seal_policy::grant_account(policy, cap, account) else seal_policy::revoke_account(policy, cap, account);
     }
     public fun policy_device(customer: &Customer, fleet: &mut Fleet, policy: &mut AccessPolicy, registry: &DeviceRegistry, device_id: ID, grant: bool, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         if (grant) seal_policy::grant_device(policy, cap, registry, device_id) else seal_policy::revoke_device(policy, cap, device_id);
@@ -501,19 +506,19 @@ module sui_edge::customer {
         if (grant) *count = *count + 1 else *count = *count - 1;
     }
     public fun policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group: &DeviceGroup, grant: bool, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         if (grant) seal_policy::grant_managed_group(policy, cap, group) else seal_policy::revoke_group(policy, cap, object::id(group));
     }
     public fun rotate_policy(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         seal_policy::rotate_key_epoch(policy, cap);
     }
 
     public fun new_catalog_deployment(customer: &Customer, fleet: &mut Fleet, value: &ComponentVersion,
         groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert_targets(fleet, &groups, &devices);
         let mut record = component_catalog::new_for_customer(value, object::id(fleet).to_address(), groups, devices, clock, ctx);
         deployment_manager::bind_customer(&mut record, object::id(fleet));
@@ -523,7 +528,7 @@ module sui_edge::customer {
     public fun new_rollout(customer: &Customer, fleet: &mut Fleet, component_name: String, version: String,
         recipe_blob_id: String, artifact_sha256: String, recipe_sha256: String, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_targets(fleet, &vector[], &members);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet); assert_targets(fleet, &vector[], &members);
         let mut record = deployment_manager::new_rollout_as(object::id(fleet).to_address(), component_name, version,
             recipe_blob_id, artifact_sha256, recipe_sha256, vector[], members, cohorts, policy, clock, ctx);
         deployment_manager::bind_customer(&mut record, object::id(fleet));
@@ -531,31 +536,31 @@ module sui_edge::customer {
     }
     public fun advance_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, online: vector<ID>,
         healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::advance_rollout_as(record, online, healthy, unhealthy, clock, object::id(fleet).to_address());
     }
     public fun advance_rollout_onchain(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord,
         registry: &DeviceRegistry, candidates: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::advance_rollout_onchain_as(record, registry, candidates, clock, object::id(fleet).to_address());
     }
     public fun control_rollout(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::control_rollout_as(record, state, skip, reason, clock, object::id(fleet).to_address());
     }
 
     public fun adopt_deployment(customer: &Customer, fleet: &mut Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert_targets(fleet, deployment_manager::target_groups(record), deployment_manager::target_devices(record));
         deployment_manager::handover(record, object::id(fleet).to_address(), ctx);
         deployment_manager::bind_customer(record, object::id(fleet));
         fleet.deployments.push_back(object::id(record));
     }
     public fun delete_deployment(customer: &Customer, fleet: &mut Fleet, mut record: DeploymentRecord, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         let (found, index) = fleet.deployments.index_of(&object::id(&record)); assert!(found, EBinding);
         fleet.deployments.swap_remove(index);
         if (deployment_manager::receipt_schema(&record) == 2) component_catalog::remove_for_customer(&mut record, object::id(fleet).to_address());
@@ -573,14 +578,14 @@ module sui_edge::customer {
     }
     /// Managed shard operations keep customer/fleet membership checks at every report.
     public fun begin_sharded_receipts(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         let authority = object::id(fleet).to_address();
         if (deployment_manager::receipt_schema(record) == 2) component_catalog::begin_customer_receipts(record, authority, ctx)
         else deployment_manager::begin_sharded_receipts_as(record, authority, ctx);
     }
     public fun begin_receipt_cleanup(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 6, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::begin_receipt_cleanup_as(record, object::id(fleet).to_address());
     }
@@ -603,23 +608,23 @@ module sui_edge::customer {
         device_cap::assert_active(cap, registry, ctx);
     }
     public fun revoke_policy_group(customer: &Customer, fleet: &Fleet, policy: &mut AccessPolicy, group_id: ID, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 2, ctx); assert_fleet(customer, fleet);
         let cap = dof::borrow(&fleet.id, PolicyKey { policy_id: object::id(policy) });
         seal_policy::revoke_group(policy, cap, group_id);
     }
 
     public fun set_control(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8,
         not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::set_control_as(record, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, object::id(fleet).to_address());
     }
     public fun begin_revision(customer: &Customer, fleet: &Fleet, group: &DeviceGroup, ctx: &mut TxContext): RevisionPlan {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         desired_state::begin_as(group, object::id(fleet).to_address())
     }
     public fun commit_revision(customer: &Customer, fleet: &Fleet, plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         desired_state::commit_as(plan, group, clock, object::id(fleet).to_address(), ctx);
     }
     fun assert_targets(fleet: &Fleet, groups: &vector<ID>, devices: &vector<ID>) {
@@ -636,7 +641,7 @@ module sui_edge::customer {
     /// Reserve customer allowance before fleet diagnostics/log work. The receipt
     /// is an on-chain counter, never a reset per credential.
     public fun reserve_allowance(customer: &mut Customer, fleet: &Fleet, amount: u64, ctx: &mut TxContext) {
-        assert_admin(customer, ctx);
+        assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
         assert!(amount <= customer.allowance - customer.used, ELimit);
         customer.used = customer.used + amount;
@@ -659,22 +664,59 @@ module sui_edge::customer {
     /// A non-store, non-publicly-constructible witness then keeps devices from
     /// exhausting the customer ledger by calling its charge function directly.
     public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &mut TxContext) {
-        assert!(customer.version == 1 && object::id(registry) == customer.registry_id, EBinding);
+        assert!((customer.version == 1 || customer.version == 196) && object::id(registry) == customer.registry_id, EBinding);
         device_registry::assert_admin(registry, ctx);
         let name = std::type_name::with_original_ids<W>().into_string().into_bytes();
         assert!(customer.charge_type.is_empty() || customer.charge_type == name, EBinding);
         customer.charge_type = name;
     }
 
+    /// Opt in atomically. All-off defaults preserve ordinary current-client use;
+    /// old packages can no longer authorize this customer after the version seal.
+    public fun initialize_security(customer: &mut Customer, ctx: &mut TxContext) {
+        assert_admin(customer, ctx);
+        if (customer.version == 196) return;
+        assert!(customer.version == 1, EBinding);
+        security_policy::initialize(&mut customer.id);
+        customer.version = 196;
+    }
+    public fun security(customer: &Customer): Policy {
+        assert!(customer.version == 196, EBinding);
+        security_policy::read(&customer.id)
+    }
+    public fun set_security(customer: &mut Customer, requirements: vector<u8>, ctx: &mut TxContext) {
+        assert!(customer.version == 196, EBinding);
+        assert_admin(customer, ctx);
+        security_policy::update(&mut customer.id, requirements, ctx);
+    }
+    public fun prepare_security_action(customer: &Customer, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        security_policy::prepare(&customer.id, intent, expires_ms, clock, ctx);
+    }
+    /// Any current administrator may cancel without execution factors.
+    public fun cancel_security_action(customer: &Customer, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        security_policy::cancel(&customer.id, action);
+    }
+    public(package) fun assert_security_administrator(customer: &Customer, ctx: &mut TxContext) {
+        assert_member(customer, ctx);
+        assert!(customer.version == 196 && *customer.credentials.get(&ctx.sender()), EAccess);
+    }
+    fun assert_action(customer: &Customer, action: u64, ctx: &mut TxContext) {
+        assert_member(customer, ctx);
+        assert!(*customer.credentials.get(&ctx.sender()), EAccess);
+        if (customer.version == 196) security_policy::check(&customer.id, action, ctx);
+    }
     public fun assert_member(customer: &Customer, ctx: &mut TxContext) {
-        assert!(customer.version == 1 && customer.credentials.contains(&ctx.sender()), EAccess);
+        assert!((customer.version == 1 || customer.version == 196) && customer.credentials.contains(&ctx.sender()), EAccess);
     }
     public fun assert_admin(customer: &Customer, ctx: &mut TxContext) {
         assert_member(customer, ctx);
         assert!(*customer.credentials.get(&ctx.sender()), EAccess);
+        if (customer.version == 196) security_policy::check_all(&customer.id, ctx);
     }
     public fun assert_fleet(customer: &Customer, fleet: &Fleet) {
-        assert!(customer.version == 1 && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
+        assert!((customer.version == 1 || customer.version == 196) && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
     }
     fun assert_name(name: &String) { assert!(name.length() > 0 && name.length() <= 80, EName); }
     public fun devices(fleet: &Fleet): &vector<ID> { &fleet.devices }
@@ -688,4 +730,400 @@ module sui_edge::customer {
         customer.version = version; fleet.version = version;
     }
 
+
+    // Additive intent-bound entry points; see SECOND_FACTOR_DESIGN.md.
+    public fun set_credential_secured(customer: &mut Customer, wallet: address, active: bool, administrator: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_credential")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&wallet), bcs::to_bytes(&active), bcs::to_bytes(&administrator)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        set_credential(customer, wallet, active, administrator, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun create_fleet_secured(customer: &mut Customer, registry: &DeviceRegistry, name: String, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"create_fleet")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&name)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        create_fleet(customer, registry, name, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_budget_secured(customer: &mut Customer, budget: &mut FleetBudget,
+        cap: BudgetOwnerCap, name: String, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_budget")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(&cap)), bcs::to_bytes(&name)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_budget(customer, budget, cap, name, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun register_device_secured(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
+        registry: &mut DeviceRegistry, name: String, device_address: address, arch: String,
+        clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"register_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&name), bcs::to_bytes(&device_address), bcs::to_bytes(&arch)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        register_device(customer, fleet, budget, registry, name, device_address, arch, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun register_funded_device_secured(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
+        registry: &mut DeviceRegistry, name: String, device_address: address, arch: String,
+        float: u64, reserve: u64, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"register_funded_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&name), bcs::to_bytes(&device_address), bcs::to_bytes(&arch), bcs::to_bytes(&float), bcs::to_bytes(&reserve)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        register_funded_device(customer, fleet, budget, registry, name, device_address, arch, float, reserve, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun rename_fleet_secured(customer: &mut Customer, fleet: &mut Fleet, name: String, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"rename_fleet")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&name)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        rename_fleet(customer, fleet, name, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun set_default_fleet_secured(customer: &mut Customer, fleet: &Fleet, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_default_fleet")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        set_default_fleet(customer, fleet, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun enroll_secured(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
+        registry: &mut DeviceRegistry, cap: DeviceOwnerCap, float: u64, reserve: u64,
+        clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"enroll")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&object::id(&cap)), bcs::to_bytes(&float), bcs::to_bytes(&reserve)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        enroll(customer, fleet, budget, registry, cap, float, reserve, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun create_enrollment_policy_secured(customer: &mut Customer, fleet: &mut Fleet, registry: &DeviceRegistry, quota: u64, expires_at_ms: u64, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"create_enrollment_policy")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&quota), bcs::to_bytes(&expires_at_ms)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        create_enrollment_policy(customer, fleet, registry, quota, expires_at_ms, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun add_claims_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"add_claims")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&claims)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        add_claims(customer, fleet, policy, claims, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun revoke_claim_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"revoke_claim")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&claim)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        revoke_claim(customer, fleet, policy, claim, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun configure_enrollment_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"configure_enrollment")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&quota), bcs::to_bytes(&expires_at_ms), bcs::to_bytes(&close)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        configure_enrollment(customer, fleet, policy, quota, expires_at_ms, close, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun bind_device_metadata_secured(customer: &mut Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, alias: String, serial: String, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"bind_device_metadata")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&device_id), bcs::to_bytes(&alias), bcs::to_bytes(&serial)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        bind_device_metadata(customer, fleet, registry, device_id, alias, serial, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun set_device_revoked_secured(customer: &mut Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, revoked: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_device_revoked")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&device_id), bcs::to_bytes(&revoked)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        set_device_revoked(customer, fleet, registry, device_id, revoked, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun rotate_device_key_secured(customer: &mut Customer, fleet: &Fleet, registry: &mut DeviceRegistry, device_id: ID, signer: address, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"rotate_device_key")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&device_id), bcs::to_bytes(&signer)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        rotate_device_key(customer, fleet, registry, device_id, signer, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_device_secured(customer: &mut Customer, fleet: &mut Fleet, budget: &FleetBudget,
+        account: &mut GasAccount, registry: &mut DeviceRegistry, cap: DeviceOwnerCap, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(account)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&object::id(&cap))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_device(customer, fleet, budget, account, registry, cap, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun retire_pending_device_secured(customer: &mut Customer, fleet: &mut Fleet,
+        budget: &mut FleetBudget, account: &mut GasAccount, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"retire_pending_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(account))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        retire_pending_device(customer, fleet, budget, account, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_group_secured(customer: &mut Customer, fleet: &mut Fleet, group: &mut DeviceGroup, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(group))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_group(customer, fleet, group, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_indexed_group_secured(customer: &mut Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        members: vector<ID>, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_indexed_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(group)), bcs::to_bytes(&members)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_indexed_group(customer, fleet, group, members, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun deregister_device_secured(customer: &mut Customer, fleet: &mut Fleet, budget: &mut FleetBudget,
+        account: &mut GasAccount, registry: &mut DeviceRegistry, device_id: ID, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"deregister_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&object::id(account)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&device_id)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        deregister_device(customer, fleet, budget, account, registry, device_id, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun create_group_secured(customer: &mut Customer, fleet: &mut Fleet, name: String,
+        description: String, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"create_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&name), bcs::to_bytes(&description)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        create_group(customer, fleet, name, description, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun add_to_group_secured(customer: &mut Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        device_id: ID, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"add_to_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(group)), bcs::to_bytes(&device_id)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        add_to_group(customer, fleet, group, device_id, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun remove_from_group_secured(customer: &mut Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        device_id: ID, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"remove_from_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(group)), bcs::to_bytes(&device_id)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        remove_from_group(customer, fleet, group, device_id, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun delete_group_secured(customer: &mut Customer, fleet: &mut Fleet, group: DeviceGroup, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"delete_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(&group))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        delete_group(customer, fleet, group, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun new_deployment_secured(customer: &mut Customer, fleet: &mut Fleet,
+        component_name: String, version: String, recipe_blob_id: String,
+        artifact_sha256: String, recipe_sha256: String,
+        groups: vector<ID>, devices: vector<ID>, clock: &Clock, action: Action, ctx: &mut TxContext): DeploymentRecord {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"new_deployment")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&component_name), bcs::to_bytes(&version), bcs::to_bytes(&recipe_blob_id), bcs::to_bytes(&artifact_sha256), bcs::to_bytes(&recipe_sha256), bcs::to_bytes(&groups), bcs::to_bytes(&devices)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        let result = new_deployment(customer, fleet, component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256, groups, devices, clock, ctx);
+        security_policy::finish(&mut customer.id);
+        result
+    }
+
+    public fun create_policy_secured(customer: &mut Customer, fleet: &mut Fleet, name: String, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"create_policy")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&name)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        create_policy(customer, fleet, name, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_policy_secured(customer: &mut Customer, fleet: &mut Fleet, policy: &AccessPolicy, cap: AccessAdminCap, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_policy")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&object::id(&cap))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_policy(customer, fleet, policy, cap, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun policy_account_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut AccessPolicy, account: address, grant: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"policy_account")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&account), bcs::to_bytes(&grant)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        policy_account(customer, fleet, policy, account, grant, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun policy_device_secured(customer: &mut Customer, fleet: &mut Fleet, policy: &mut AccessPolicy, registry: &DeviceRegistry, device_id: ID, grant: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"policy_device")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&device_id), bcs::to_bytes(&grant)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        policy_device(customer, fleet, policy, registry, device_id, grant, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun policy_group_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut AccessPolicy, group: &DeviceGroup, grant: bool, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"policy_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&object::id(group)), bcs::to_bytes(&grant)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        policy_group(customer, fleet, policy, group, grant, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun rotate_policy_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut AccessPolicy, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"rotate_policy")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        rotate_policy(customer, fleet, policy, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun new_catalog_deployment_secured(customer: &mut Customer, fleet: &mut Fleet, value: &ComponentVersion,
+        groups: vector<ID>, devices: vector<ID>, clock: &Clock, action: Action, ctx: &mut TxContext): DeploymentRecord {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"new_catalog_deployment")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(value)), bcs::to_bytes(&groups), bcs::to_bytes(&devices)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        let result = new_catalog_deployment(customer, fleet, value, groups, devices, clock, ctx);
+        security_policy::finish(&mut customer.id);
+        result
+    }
+
+    public fun new_rollout_secured(customer: &mut Customer, fleet: &mut Fleet, component_name: String, version: String,
+        recipe_blob_id: String, artifact_sha256: String, recipe_sha256: String, members: vector<ID>, cohorts: vector<u64>,
+        policy: RolloutPolicy, clock: &Clock, action: Action, ctx: &mut TxContext): DeploymentRecord {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"new_rollout")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&component_name), bcs::to_bytes(&version), bcs::to_bytes(&recipe_blob_id), bcs::to_bytes(&artifact_sha256), bcs::to_bytes(&recipe_sha256), bcs::to_bytes(&members), bcs::to_bytes(&cohorts), bcs::to_bytes(&policy)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        let result = new_rollout(customer, fleet, component_name, version, recipe_blob_id, artifact_sha256, recipe_sha256, members, cohorts, policy, clock, ctx);
+        security_policy::finish(&mut customer.id);
+        result
+    }
+
+    public fun advance_rollout_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, online: vector<ID>,
+        healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"advance_rollout")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record)), bcs::to_bytes(&online), bcs::to_bytes(&healthy), bcs::to_bytes(&unhealthy)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        advance_rollout(customer, fleet, record, online, healthy, unhealthy, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun advance_rollout_onchain_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord,
+        registry: &DeviceRegistry, candidates: vector<ID>, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"advance_rollout_onchain")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record)), bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&candidates)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        advance_rollout_onchain(customer, fleet, record, registry, candidates, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun control_rollout_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"control_rollout")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record)), bcs::to_bytes(&state), bcs::to_bytes(&skip), bcs::to_bytes(&reason)];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        control_rollout(customer, fleet, record, state, skip, reason, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun adopt_deployment_secured(customer: &mut Customer, fleet: &mut Fleet, record: &mut DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"adopt_deployment")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        adopt_deployment(customer, fleet, record, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun delete_deployment_secured(customer: &mut Customer, fleet: &mut Fleet, mut record: DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"delete_deployment")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(&record))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        delete_deployment(customer, fleet, record, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun begin_sharded_receipts_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"begin_sharded_receipts")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        begin_sharded_receipts(customer, fleet, record, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun begin_receipt_cleanup_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"begin_receipt_cleanup")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        begin_receipt_cleanup(customer, fleet, record, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun revoke_policy_group_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut AccessPolicy, group_id: ID, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"revoke_policy_group")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(policy)), bcs::to_bytes(&group_id)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        revoke_policy_group(customer, fleet, policy, group_id, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun set_control_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, state: u8,
+        not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_control")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(record)), bcs::to_bytes(&state), bcs::to_bytes(&not_before_ms), bcs::to_bytes(&expires_ms), bcs::to_bytes(&window_start_ms), bcs::to_bytes(&window_end_ms), bcs::to_bytes(&notice_ms)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        set_control(customer, fleet, record, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun begin_revision_secured(customer: &mut Customer, fleet: &Fleet, group: &DeviceGroup, action: Action, security_clock: &Clock, ctx: &mut TxContext): RevisionPlan {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"begin_revision")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(group))];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        let result = begin_revision(customer, fleet, group, ctx);
+        security_policy::finish(&mut customer.id);
+        result
+    }
+
+    public fun commit_revision_secured(customer: &mut Customer, fleet: &Fleet, plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"commit_revision")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&plan), bcs::to_bytes(&object::id(group))];
+        security_policy::begin(&mut customer.id, action, arguments, clock, ctx);
+        commit_revision(customer, fleet, plan, group, clock, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun reserve_allowance_secured(customer: &mut Customer, fleet: &Fleet, amount: u64, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"reserve_allowance")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&amount)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        reserve_allowance(customer, fleet, amount, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun set_security_secured(customer: &mut Customer, requirements: vector<u8>, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_security")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&requirements)];
+        security_policy::begin(&mut customer.id, action, arguments, security_clock, ctx);
+        set_security(customer, requirements, ctx);
+        security_policy::finish(&mut customer.id);
+    }
 }

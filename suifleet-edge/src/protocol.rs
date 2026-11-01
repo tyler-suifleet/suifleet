@@ -9,6 +9,7 @@ pub const SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS: &[u64] = &[1, 2, 3, 4];
 pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "component_catalog::ComponentVersion", "component_catalog::CatalogCreated", "component_catalog::VersionPublished", "component_catalog::CatalogBindingKey", "component_catalog::CatalogBinding"];
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
+pub const SECURITY_TYPES: &[&str] = &["security_policy::PolicyKey", "security_policy::Policy", "security_policy::Action", "security_policy::PolicyChanged", "security_policy::ActionCreated"];
 pub const CUSTOMER_TYPES: &[&str] = &["customer::Customer", "customer::Fleet", "customer::Membership", "customer::CustomerKey", "customer::BudgetKey", "customer::DeviceKey", "customer::AssignmentKey", "customer::GroupCountKey", "customer::CustomerCreated", "customer::FleetCreated", "customer::CredentialChanged", "customer::DeviceAssigned", "customer::DeviceReleased", "enrollment::ManagedKey", "customer::PolicyKey", "deployment_manager::CustomerFleetKey"];
 pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::InboxKey", "fleet_inbox::HeadKey", "fleet_inbox::Head", "fleet_inbox::InboxCreated", "fleet_inbox::Announced", "device_group::MemberKey", "device_group::IndexKey", "device_group::GroupIndex", "device_group::GroupIndexed"];
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
@@ -121,72 +122,123 @@ pub mod customer {
     pub const MODULE: &str = "customer";
     pub const ACTIVE_DEVICES: &str = "active_devices";
     pub const ADD_CLAIMS: &str = "add_claims";
+    pub const ADD_CLAIMS_SECURED: &str = "add_claims_secured";
     pub const ADD_TO_GROUP: &str = "add_to_group";
+    pub const ADD_TO_GROUP_SECURED: &str = "add_to_group_secured";
     pub const ADOPT_BUDGET: &str = "adopt_budget";
+    pub const ADOPT_BUDGET_SECURED: &str = "adopt_budget_secured";
     pub const ADOPT_DEPLOYMENT: &str = "adopt_deployment";
+    pub const ADOPT_DEPLOYMENT_SECURED: &str = "adopt_deployment_secured";
     pub const ADOPT_DEVICE: &str = "adopt_device";
+    pub const ADOPT_DEVICE_SECURED: &str = "adopt_device_secured";
     pub const ADOPT_GROUP: &str = "adopt_group";
+    pub const ADOPT_GROUP_SECURED: &str = "adopt_group_secured";
     pub const ADOPT_INDEXED_GROUP: &str = "adopt_indexed_group";
+    pub const ADOPT_INDEXED_GROUP_SECURED: &str = "adopt_indexed_group_secured";
     pub const ADOPT_POLICY: &str = "adopt_policy";
+    pub const ADOPT_POLICY_SECURED: &str = "adopt_policy_secured";
     pub const ADVANCE_ROLLOUT: &str = "advance_rollout";
     pub const ADVANCE_ROLLOUT_ONCHAIN: &str = "advance_rollout_onchain";
+    pub const ADVANCE_ROLLOUT_ONCHAIN_SECURED: &str = "advance_rollout_onchain_secured";
+    pub const ADVANCE_ROLLOUT_SECURED: &str = "advance_rollout_secured";
     pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const ASSERT_FLEET: &str = "assert_fleet";
     pub const ASSERT_MEMBER: &str = "assert_member";
     pub const BEGIN_RECEIPT_CLEANUP: &str = "begin_receipt_cleanup";
+    pub const BEGIN_RECEIPT_CLEANUP_SECURED: &str = "begin_receipt_cleanup_secured";
     pub const BEGIN_REVISION: &str = "begin_revision";
+    pub const BEGIN_REVISION_SECURED: &str = "begin_revision_secured";
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
+    pub const BEGIN_SHARDED_RECEIPTS_SECURED: &str = "begin_sharded_receipts_secured";
     pub const BIND_DEVICE_METADATA: &str = "bind_device_metadata";
+    pub const BIND_DEVICE_METADATA_SECURED: &str = "bind_device_metadata_secured";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
+    pub const CANCEL_SECURITY_ACTION: &str = "cancel_security_action";
     pub const COMMIT_REVISION: &str = "commit_revision";
+    pub const COMMIT_REVISION_SECURED: &str = "commit_revision_secured";
     pub const CONFIGURE_CHARGING: &str = "configure_charging";
     pub const CONFIGURE_ENROLLMENT: &str = "configure_enrollment";
+    pub const CONFIGURE_ENROLLMENT_SECURED: &str = "configure_enrollment_secured";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
+    pub const CONTROL_ROLLOUT_SECURED: &str = "control_rollout_secured";
     pub const CREATE: &str = "create";
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_ENROLLMENT_POLICY: &str = "create_enrollment_policy";
+    pub const CREATE_ENROLLMENT_POLICY_SECURED: &str = "create_enrollment_policy_secured";
     pub const CREATE_FLEET: &str = "create_fleet";
+    pub const CREATE_FLEET_SECURED: &str = "create_fleet_secured";
     pub const CREATE_GROUP: &str = "create_group";
+    pub const CREATE_GROUP_SECURED: &str = "create_group_secured";
     pub const CREATE_POLICY: &str = "create_policy";
+    pub const CREATE_POLICY_SECURED: &str = "create_policy_secured";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const DELETE_DEPLOYMENT_SECURED: &str = "delete_deployment_secured";
     pub const DELETE_GROUP: &str = "delete_group";
+    pub const DELETE_GROUP_SECURED: &str = "delete_group_secured";
     pub const DEREGISTER_DEVICE: &str = "deregister_device";
+    pub const DEREGISTER_DEVICE_SECURED: &str = "deregister_device_secured";
     pub const DEVICES: &str = "devices";
     pub const ENROLL: &str = "enroll";
     pub const ENROLL_CLAIM: &str = "enroll_claim";
+    pub const ENROLL_SECURED: &str = "enroll_secured";
     pub const FLEET_BUDGET: &str = "fleet_budget";
     pub const FLEET_CUSTOMER: &str = "fleet_customer";
     pub const FLEETS: &str = "fleets";
+    pub const INITIALIZE_SECURITY: &str = "initialize_security";
     pub const NEW_CATALOG_DEPLOYMENT: &str = "new_catalog_deployment";
+    pub const NEW_CATALOG_DEPLOYMENT_SECURED: &str = "new_catalog_deployment_secured";
     pub const NEW_DEPLOYMENT: &str = "new_deployment";
+    pub const NEW_DEPLOYMENT_SECURED: &str = "new_deployment_secured";
     pub const NEW_ROLLOUT: &str = "new_rollout";
+    pub const NEW_ROLLOUT_SECURED: &str = "new_rollout_secured";
     pub const PENDING_DEVICES: &str = "pending_devices";
     pub const POLICY_ACCOUNT: &str = "policy_account";
+    pub const POLICY_ACCOUNT_SECURED: &str = "policy_account_secured";
     pub const POLICY_DEVICE: &str = "policy_device";
+    pub const POLICY_DEVICE_SECURED: &str = "policy_device_secured";
     pub const POLICY_GROUP: &str = "policy_group";
+    pub const POLICY_GROUP_SECURED: &str = "policy_group_secured";
+    pub const PREPARE_SECURITY_ACTION: &str = "prepare_security_action";
     pub const REASSIGN_DEVICE: &str = "reassign_device";
     pub const REGISTER_DEVICE: &str = "register_device";
+    pub const REGISTER_DEVICE_SECURED: &str = "register_device_secured";
     pub const REGISTER_FUNDED_DEVICE: &str = "register_funded_device";
+    pub const REGISTER_FUNDED_DEVICE_SECURED: &str = "register_funded_device_secured";
     pub const REMOVE_DEVICE: &str = "remove_device";
     pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
+    pub const REMOVE_FROM_GROUP_SECURED: &str = "remove_from_group_secured";
     pub const RENAME_FLEET: &str = "rename_fleet";
+    pub const RENAME_FLEET_SECURED: &str = "rename_fleet_secured";
     pub const REPORT_GROUP_STATUS: &str = "report_group_status";
     pub const REPORT_GROUP_STATUS_V4: &str = "report_group_status_v4";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_V4: &str = "report_status_v4";
     pub const RESERVE_ALLOWANCE: &str = "reserve_allowance";
+    pub const RESERVE_ALLOWANCE_SECURED: &str = "reserve_allowance_secured";
     pub const RESERVE_DEVICE_ALLOWANCE: &str = "reserve_device_allowance";
     pub const RETIRE_PENDING_DEVICE: &str = "retire_pending_device";
+    pub const RETIRE_PENDING_DEVICE_SECURED: &str = "retire_pending_device_secured";
     pub const RETURN_BUDGET_CAP: &str = "return_budget_cap";
     pub const REVOKE_CLAIM: &str = "revoke_claim";
+    pub const REVOKE_CLAIM_SECURED: &str = "revoke_claim_secured";
     pub const REVOKE_POLICY_GROUP: &str = "revoke_policy_group";
+    pub const REVOKE_POLICY_GROUP_SECURED: &str = "revoke_policy_group_secured";
     pub const ROTATE_DEVICE_KEY: &str = "rotate_device_key";
+    pub const ROTATE_DEVICE_KEY_SECURED: &str = "rotate_device_key_secured";
     pub const ROTATE_POLICY: &str = "rotate_policy";
+    pub const ROTATE_POLICY_SECURED: &str = "rotate_policy_secured";
+    pub const SECURITY: &str = "security";
     pub const SET_CONTROL: &str = "set_control";
+    pub const SET_CONTROL_SECURED: &str = "set_control_secured";
     pub const SET_CREDENTIAL: &str = "set_credential";
+    pub const SET_CREDENTIAL_SECURED: &str = "set_credential_secured";
     pub const SET_DEFAULT_FLEET: &str = "set_default_fleet";
+    pub const SET_DEFAULT_FLEET_SECURED: &str = "set_default_fleet_secured";
     pub const SET_DEVICE_REVOKED: &str = "set_device_revoked";
+    pub const SET_DEVICE_REVOKED_SECURED: &str = "set_device_revoked_secured";
     pub const SET_ENTITLEMENT: &str = "set_entitlement";
+    pub const SET_SECURITY: &str = "set_security";
+    pub const SET_SECURITY_SECURED: &str = "set_security_secured";
     pub const USED: &str = "used";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
@@ -1368,6 +1420,61 @@ pub mod seal_policy {
         pub version: u64,
     }
     impl PolicyMigrated { pub const MOVE_TYPE: &'static str = "seal_policy::PolicyMigrated"; }
+}
+pub mod security_policy {
+    use super::*;
+    pub const MODULE: &str = "security_policy";
+    pub const ACTION_COUNT: &str = "action_count";
+    pub const ACTION_GENERATION: &str = "action_generation";
+    pub const AVAILABLE: &str = "available";
+    pub const CUSTOMER_ID: &str = "customer_id";
+    pub const EXPIRES_MS: &str = "expires_ms";
+    pub const GENERATION: &str = "generation";
+    pub const INTENT: &str = "intent";
+    pub const PROPOSER: &str = "proposer";
+    pub const REQUIREMENTS: &str = "requirements";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Action {
+        pub id: [u8; 32],
+        pub customer_id: [u8; 32],
+        pub generation: u64,
+        pub proposer: [u8; 32],
+        pub intent: Vec<u8>,
+        pub expires_ms: u64,
+        pub attested: u8,
+    }
+    impl Action { pub const MOVE_TYPE: &'static str = "security_policy::Action"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ActionCreated {
+        pub action_id: [u8; 32],
+        pub customer_id: [u8; 32],
+        pub generation: u64,
+        pub proposer: [u8; 32],
+        pub intent: Vec<u8>,
+        pub expires_ms: u64,
+    }
+    impl ActionCreated { pub const MOVE_TYPE: &'static str = "security_policy::ActionCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Policy {
+        pub schema: u64,
+        pub generation: u64,
+        pub requirements: Vec<u8>,
+        pub transaction: Vec<u8>,
+        pub attested: u8,
+    }
+    impl Policy { pub const MOVE_TYPE: &'static str = "security_policy::Policy"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyChanged {
+        pub customer_id: [u8; 32],
+        pub generation: u64,
+        pub requirements: Vec<u8>,
+    }
+    impl PolicyChanged { pub const MOVE_TYPE: &'static str = "security_policy::PolicyChanged"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct PolicyKey {
+        pub dummy_field: bool,
+    }
+    impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {
