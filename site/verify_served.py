@@ -17,7 +17,8 @@ import urllib.request
 HEADERS = {
     "content-security-policy": "frame-ancestors 'none'",
     "x-content-type-options": "nosniff",
-    "strict-transport-security": "max-age=",
+    "strict-transport-security": "max-age=31536000",
+    "referrer-policy": "strict-origin-when-cross-origin",
 }
 
 
