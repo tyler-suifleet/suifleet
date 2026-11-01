@@ -11,7 +11,7 @@ export function onboardingConfig(network: string, apiKey?: string, googleClientI
 
 export function registrationInput(name: string, deviceAddress: string, arch: string) {
   if (!name.trim()) throw new Error("Enter a device name.");
-  if (!isValidSuiAddress(deviceAddress)) throw new Error("Enter the full device address from the daemon, not your owner wallet address.");
+  if (!isValidSuiAddress(deviceAddress)) throw new Error("Enter the full device address the client printed (0x and 64 hex characters), not your owner wallet address.");
   if (!["aarch64", "armv7", "x86_64"].includes(arch)) throw new Error("Choose a supported architecture.");
   return { name: name.trim(), deviceAddress: normalizeSuiAddress(deviceAddress), arch };
 }
