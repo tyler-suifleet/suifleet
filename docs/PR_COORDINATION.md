@@ -1307,3 +1307,59 @@ integration review, and durable observations/normal bounded repair routing for
 still-current source failures (including the reported PR #421 funding failure).
 Offline tests and read-only classification do not establish installed acceptance,
 successful funding, hosted CI, testnet transactions or production publication.
+
+
+### Temporary batch recovery must resume itself
+
+Do not temporarily flip `integration_batch.enabled` to false to bootstrap a
+runtime repair. That setting expresses the requested steady-state mode; a bare
+false leaves no reliable restoration condition and can restart source-rebase
+loops after the repair has already merged.
+
+Once the installed coordinator supports this protocol, keep enabled true and
+record the exact repair PR head (40 lowercase hex characters), for example:
+
+```json
+{
+  "enabled": true,
+  "max_members": 4,
+  "collection_seconds": 120,
+  "suspend_until_installed": "0123456789abcdef0123456789abcdef01234567",
+  "suspension_reason": "Bootstrap the reviewed batch scheduler repair"
+}
+```
+
+The example hash is a placeholder; use the actual exact repair head. Make the
+scoped private configuration change under the existing operator authority lock
+and restart only the parent with `KillMode=process`, preserving workers. The
+coordinator pauses combined integration and holds all unrelated source and
+candidate heads. Only the source with that exact repair head may use normal
+single-PR integration gates. If its head changes, inspect and explicitly update
+the intent; do not silently adopt a new head or weaken review/CI requirements.
+
+Effective batching resumes automatically when the loaded, reviewed installed
+generation's metadata and real Git ancestry prove it contains that exact repair
+commit. Merely merging, having the repair in a checkout, changing a branch tip or
+waiting for a timer is insufficient. Missing or malformed installation evidence
+keeps the suspension in place. Keep the suspension fields as an audit trail or
+remove them explicitly after verification; `enabled: false` always remains an
+intentional permanent disable and is never automatically overridden.
+
+If batching is explicitly disabled while an active batch exists, its members and
+candidate remain fenced from fallback freshness repairs. Resolve/drain that
+batch through the sole orchestrator before moving its members to another
+integration mode; never clear its SQLite rows directly. Reports show `batch
+recovery paused` rather than treating this intentional hold as missing evidence.
+Fresh coordinator observations continue in both modes. The pipeline discards an
+old PR projection only when a newer, fresh, complete GitHub open-PR inventory
+confirms its absence; newer local observations and unavailable/stale inventories
+are preserved. No extra GitHub polling is introduced.
+
+For SF-213, normal reviewed merged-only runtime activation installs the coordinator,
+batch and dashboard changes. After that merge is verified, install the matching
+watchdog instructions from a clean fetched main with
+`python3 tools/pr-coordinator/install_watchdog.py --project suifleet --enable`
+(preserve the complete configured project list if more recovery projects are
+enabled). Verify parent readiness, preserved worker identities, the installed
+revision, actual batch transitions and the refreshed CLI report. Local tests do
+not establish those operational results or hosted acceptance in advance.

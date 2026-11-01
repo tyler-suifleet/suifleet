@@ -28,6 +28,7 @@ BATCH_TERMINAL = ('done', 'invalidated', 'failed')
 BATCH_ACTIVE = ('collecting', 'building', 'branch_publishing', 'pr_creating', 'awaiting_ci',
                 'awaiting_review', 'ready', 'approving_members', 'build_uncertain', 'publish_pending', 'published', 'reconciling')
 PIPELINE_LABELS = {
+    'batch-recovery-paused': 'batch recovery paused',
     'actively-working': 'actively working', 'queued-in-batch': 'queued in batch',
     'changes-requested': 'changes requested', 'conflict': 'merge conflict',
     'ci-failed': 'CI failed', 'needs-source-review': 'needs source review',
@@ -262,6 +263,7 @@ def project_snapshot(data, mtime):
                 source_fingerprint=source_fingerprint(data), unresolved_threads=unresolved,
                 mergeable=data.get('mergeable') if data.get('mergeable') in ('MERGEABLE', 'CONFLICTING', 'UNKNOWN') else None,
                 ticket=short_key(ticket.get('key')), ticket_title=safe_text(spec.get('title'), 120) or None,
+                batch_pause=data.get('_batch_pause') if data.get('_batch_pause') in ('waiting-installed-repair', 'disabled-with-active-batch') else None,
                 checks=outcome, testnet=(safe_text(state, 30) or 'missing') if data.get('_testnet_required') else None,
                 mtime=mtime)
 
@@ -523,6 +525,30 @@ def cached_ci(paths, config, now, project):
     return result
 
 
+def visible_pipeline_snapshots(snapshots, paths, config, now, project):
+    """Exclude historical closed PRs only with newer, fresh complete inventory."""
+    result = dict(snapshots)
+    for settings in config.get('projects', []):
+        name = settings.get('id')
+        if project is not None and name != project:
+            continue
+        try:
+            raw = read_json(inventory_path(paths['inventory'], name))
+            if (not isinstance(raw, dict) or raw.get('schema') != 1 or raw.get('project') != name
+                    or raw.get('repository') != settings.get('repository')):
+                continue
+            stamp = raw['fetched_at']
+            if type(stamp) not in (int, float) or not 0 < stamp <= now+300 or now-stamp > CI_MAX_AGE:
+                continue
+            opened = {row['number'] for row in inventory_items(raw['prs'])}
+            for key, snapshot in list(result.items()):
+                if key[0] == name and key[1] not in opened and snapshot.get('mtime', 0) <= stamp:
+                    result.pop(key)
+        except (OSError, KeyError, ValueError, TypeError, AttributeError):
+            continue
+    return result
+
+
 def observed_prs(paths, config, now, project):
     """Fresh coordinator decision projections; never request GitHub here."""
     result = {}
@@ -593,6 +619,8 @@ def pipeline_stage(snapshot, review, *, active=False, batch=None, candidate=Fals
         return 'unavailable', 'current PR snapshot unavailable or revisions disagree'
     if now is not None and now - snapshot.get('mtime', 0) > CI_MAX_AGE:
         return 'unavailable', 'PR evidence is stale; refresh GitHub for current checks'
+    if snapshot.get('batch_pause') in ('waiting-installed-repair', 'disabled-with-active-batch'):
+        return 'batch-recovery-paused', 'preserving source heads until the reviewed runtime repair is installed or the active batch is resolved'
     if batch is not None:
         if batch.get('status') == 'build_uncertain':
             return 'unavailable', 'interrupted candidate build is retained for verified recovery'
@@ -1176,7 +1204,8 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
-    model['pipeline'] = derive_pipeline(pr_snapshot, jobs, by_ticket, model['workers'], batches, cache, now,
+    pipeline_snapshots = visible_pipeline_snapshots(pr_snapshot, paths, config, now, project)
+    model['pipeline'] = derive_pipeline(pipeline_snapshots, jobs, by_ticket, model['workers'], batches, cache, now,
         batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True})
     if model['sources'].get('reviews', {}).get('state') != 'ok':
         model['pipeline']['unavailable'] = 'review store unavailable'
