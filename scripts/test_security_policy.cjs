@@ -1,0 +1,33 @@
+// Exercise real policy wire parsing and SDK transaction construction offline.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { loader, manifestClient } = require('./frontend_test_utils.cjs');
+const catalog = JSON.parse(fs.readFileSync('interfaces/fleet-v1.json'));
+const m = JSON.parse(fs.readFileSync('manifests/fixture.localnet.json'));
+for (const name of [...catalog.optional_type_origins.customer, ...catalog.optional_type_origins.security_policy]) m.type_origins[name] = m.call_package_id;
+process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(m);
+const load = loader(), security = load('lib/security-policy.ts'), wire = load('lib/fleet-protocol.ts');
+const C = '0x' + 'c'.padStart(64, '0');
+assert.equal(security.securitySupported(), true);
+assert.deepEqual(security.validateSecurityRequirements([0,0,0,0,0,0,0]), [0,0,0,0,0,0,0]);
+for (let mask=1; mask<16; mask++) assert.throws(() => security.validateSecurityRequirements([mask,0,0,0,0,0,0]), /unavailable/);
+for (let mask=0; mask<16; mask++) assert.deepEqual(security.validateSecurityRequirements(Array(7).fill(mask),15),Array(7).fill(mask));
+for (const v of [[], Array(8).fill(0), [16,0,0,0,0,0,0], [-1,0,0,0,0,0,0], [0.1,0,0,0,0,0,0]]) assert.throws(()=>security.validateSecurityRequirements(v,15));
+const tx = security.buildSecurityPolicyTx(C,[0,0,0,0,0,0,0]).getData();
+assert.equal(tx.commands[0].MoveCall.function,'set_security');
+assert.equal(tx.commands[0].MoveCall.arguments.length,2);
+(async()=>{
+ const client = manifestClient(m), original = client.getObject;
+ let version = '197', badSchema=false, badType=false;
+ client.getObject = async request => request.objectId !== C ? original(request) : {object: { type:`${m.call_package_id}::customer::Customer`, content: wire.customer_CustomerBcs.serialize({id:C,version,registry_id:m.shared_objects.registry.id,name:'Org',credentials:{contents:[]},administrators:'1',fleets:[],default_fleet:null,active_devices:'0',device_limit:'0',allowance:'0',used:'0',period:'0',charge_type:[]}).toBytes() }};
+ client.getDynamicField=async()=>({dynamicField:{value:{type:`${m.call_package_id}::security_policy::${badType?'Action':'Policy'}`,bcs:wire.security_policy_PolicyBcs.serialize({schema:badSchema?'2':'1',generation:'8',requirements:[0,0,0,0,0,0,0],transaction:[],attested:0}).toBytes()}}});
+ assert.deepEqual(await security.fetchOrganizationSecurity(client,C),{generation:8n,requirements:[0,0,0,0,0,0,0]});
+ version='1';assert.equal(await security.fetchOrganizationSecurity(client,C),undefined);
+ version='196';assert.equal(await security.fetchOrganizationSecurity(client,C),undefined);
+ version='2';await assert.rejects(security.fetchOrganizationSecurity(client,C),/authority version/);
+ version='197';badType=true;await assert.rejects(security.fetchOrganizationSecurity(client,C),/policy type/);
+ badType=false;badSchema=true;await assert.rejects(security.fetchOrganizationSecurity(client,C),/Unsupported organization policy/);
+ client.ledgerService.getServiceInfo=async()=>({response:{chainId:'11111111111111111111111111111111'}});
+ await assert.rejects(security.fetchOrganizationSecurity(client,C),/chain identifier mismatch/);
+ console.log('PASS security policy: defaults, 16 masks, unavailable/invalid settings, SDK calls, legacy/version/type/schema/network rejection');
+})().catch(e=>{console.error(e);process.exitCode=1;});
