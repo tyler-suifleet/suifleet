@@ -1204,3 +1204,38 @@ the coordinator parent through the existing serialized operation. Do not install
 this PR's unmerged files or disable live-wallet, CI or independent-review gates.
 An actual hosted batch, post-merge issue reconciliation and installed activation
 remain rollout acceptance until observed; offline fixtures do not establish them.
+
+### Batch CI observation and optional deployment applicability (SF-212)
+
+A held source receipt suppresses duplicate source review, not CI observation or
+bounded owner repair. Every owned source PR still records concrete exact-head
+ordinary/security/testnet failures while another batch owns integration. The
+existing transactional per-PR worker reservation, published Review ownership,
+lease checks, fresh head/base/run verification, repair budgets and backoff remain
+in force. Concrete source failures are excluded from new batch collection; an
+active member developing such a failure invalidates its candidate through normal
+member revalidation. Pending source checks may still run on the combined candidate.
+No shared incident owner is replaced and no funded transaction is blindly replayed.
+
+Skipped checks remain blocking except for three narrowly authenticated jobs in
+`.github/workflows/static-site.yml`: `preview`, `production-preflight` and
+`production`. The trusted runtime pins the complete workflow Git blob
+`a5a5c9aea5d6a6addb7e13187d27ad705c5e395b`. Its conditions make preview applicable
+only to a main push and production applicable only to a manual main dispatch.
+A fresh PR snapshot must prove the exact candidate contains that blob and bind
+the skipped GitHub Actions check to the same repository, PR, head, current base,
+workflow path, completed successful run, latest attempt and job. The run's build
+must succeed, and the source must contain the current base so the merge workflow
+tree matches the pinned head. The original `SKIPPED` conclusion is retained. Unknown skips,
+changed workflow bytes, missing/truncated/unavailable metadata, foreign checks,
+reruns, push/manual runs and required build/security/live skips remain blockers.
+Changing the workflow requires reviewing and updating this trusted pin before
+new skips can qualify; names alone never grant applicability. This policy grants
+no preview/production publication authority and changes no protected environment.
+
+After reviewed merged-only activation, the sole orchestrator/operator must verify
+actual runtime PID/start identities, the batch's transition to independent
+integration review, and durable observations/normal bounded repair routing for
+still-current source failures (including the reported PR #421 funding failure).
+Offline tests and read-only classification do not establish installed acceptance,
+successful funding, hosted CI, testnet transactions or production publication.
