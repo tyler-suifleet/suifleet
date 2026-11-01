@@ -48,6 +48,39 @@ class StreamingSourceReviews(unittest.TestCase):
             self.assertEqual(events,['snapshot1','review','snapshot2','discovery'])
             engine.launch.assert_called_once_with(project,pr,owner,'review')
 
+    def test_active_batch_members_cannot_stream_review_after_receipt_changes(self):
+        for status in ['collecting', 'testing', 'publish_pending', 'published', 'reconciling']:
+            for change in ['head', 'feedback']:
+                with self.subTest(status=status, change=change), tempfile.TemporaryDirectory() as directory:
+                    engine=self.engine(directory);pr,owner=fixture()
+                    project=dict(id='p',repository='a/b',integration_batch={'enabled':True})
+                    engine.store.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                        ('p','batch',status,'b'*40,'d'*40,'integration/batch/batch',99,
+                         json.dumps([dict(pr=1,head=pr['headRefOid'])]),directory,None,0,0,None,0,None))
+                    if change=='head':
+                        pr['headRefOid']='c'*40
+                    else:
+                        pr['comments']=[dict(id='new',body='New source feedback')]
+                    engine.owners=Mock(return_value=[owner]);engine.collect=Mock()
+                    engine.gh=Mock(return_value=json.dumps([[{'number':1}]]))
+                    engine.pr=Mock(return_value=pr);engine.discover_merged=Mock()
+                    # The main loop already honors this reservation. The streaming
+                    # callback must independently honor the persisted epoch too.
+                    engine.batches.tick=Mock(return_value={1})
+                    engine.tick_project(project,True)
+                    engine.launch.assert_not_called()
+
+    def test_terminal_and_other_project_batches_do_not_reserve_source(self):
+        for project_id,status in [('p','done'),('p','invalidated'),('p','failed'),('other','testing')]:
+            with self.subTest(project=project_id,status=status), tempfile.TemporaryDirectory() as directory:
+                engine=self.engine(directory);pr,owner=fixture()
+                engine.store.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (project_id,'batch',status,'b'*40,'d'*40,'integration/batch/batch',99,
+                     json.dumps([dict(pr=1)]),directory,None,0,0,None,0,None))
+                self.assertTrue(engine.start_source_review(
+                    dict(id='p',integration_batch={'enabled':True}),pr,[owner]))
+                engine.launch.assert_called_once()
+
     def test_callback_failure_retains_snapshot_and_continues(self):
         with tempfile.TemporaryDirectory() as directory:
             engine=self.engine(directory);a,_=fixture(1);b,_=fixture(2)

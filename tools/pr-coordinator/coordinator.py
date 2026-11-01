@@ -1863,6 +1863,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         """
         if (not self.batches.enabled(project) or pr.get('_review_mode') != 'source'
                 or pr.get('_integration_batch') or pr.get('state') != 'OPEN'
+                or pr['number'] in self.batches.reserved_members(project)
                 or pr.get('isDraft') or pr.get('isCrossRepository')
                 or pr.get('_batch_failure') or pr.get('_batch_conflict')
                 or failed_checks(pr)):
