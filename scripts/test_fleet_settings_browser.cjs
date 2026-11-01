@@ -12,7 +12,9 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 
 const src = path.resolve(__dirname, "../dapp/src"), fakes = path.resolve(__dirname, "browser/fleet-settings-fakes.js");
-const importers = new Set([path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
+const importers = new Set([path.join(src, "components/OrganizationSecurity.tsx"), path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
+// The full settings page includes organization security; its wallet hooks use
+// the same controlled boundary as the reporting/storage panels.
 // Account reads now enter through the hydration-safe application hook. Keep
 // this component fixture on its controlled wallet boundary, like the SDK reads.
 const faked = new Set(["@/hooks/useCurrentAccount", "@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);
@@ -64,7 +66,9 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const text = (id) => page.getByTestId(id).textContent();
       const cells = async (id) => (await page.getByTestId(id).locator("td").allTextContents()).map((t) => t.trim());
       const depositSui = async () => Number(/for \d+ month\(s\) of these settings([\d.]+) SUI/.exec(await text("deposit"))[1]);
-      await page.getByTestId("cost-planning").waitFor();
+      await page.getByTestId("cost-planning").waitFor().catch(async (error) => {
+        throw new Error(`${error.message}; page errors: ${JSON.stringify(errors)}; page shows: ${await body()}`);
+      });
       assert.equal(await page.getByTestId("cost-planning").getAttribute("open"), null, "cost planning stays optional");
       await page.getByText("Saving settings does not buy a subscription or add money to your budget.", { exact: true }).waitFor();
       await page.getByTestId("cost-planning").locator("summary").first().click();
