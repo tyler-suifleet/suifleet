@@ -1204,3 +1204,16 @@ the coordinator parent through the existing serialized operation. Do not install
 this PR's unmerged files or disable live-wallet, CI or independent-review gates.
 An actual hosted batch, post-merge issue reconciliation and installed activation
 remain rollout acceptance until observed; offline fixtures do not establish them.
+
+### Fleet refresh dependency cost (SF-211)
+
+[The portable terminal-discovery change](https://github.com/therealtime/atomic-ticketing/pull/4)
+reduces dependency reads for verified closed/Done entries while retaining full
+issue/Project ownership discovery and all nonterminal dependency checks. See
+[call-count evidence and rollout limits](ATOMIC_TICKETING.md#terminal-dependency-discovery-sf-211).
+The coordinator continues using the installed engine; this documentation does
+not install source or change claim, review, CI, acceptance or merge gates.
+Independent review and real source CI must cover the portable PR as well as this
+companion. Only after reviewed merge may the operator perform the merged-only
+tool rollout and measure actual refresh latency. This is separate from SF-210
+scheduler streaming; neither change supplies approval for the other.
