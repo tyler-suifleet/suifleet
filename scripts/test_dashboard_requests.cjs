@@ -82,6 +82,13 @@ for (const [n, device] of devices.entries()) {
   objects.set(firstWriter.objectId,{...firstWriter,content:data.DeviceDataBcs.serialize({...writerValue,device_id:id('0x999')}).toBytes()});
   assert.equal((await data.fetchChainHealth(client,config,[devices[0]]))[devices[0]].status,'unavailable','cross-device writer cannot become health');
   objects.set(firstWriter.objectId,firstWriter);
+  assert.deepEqual((await data.fetchChainHealth(client,config,[devices[0]]))[devices[0]].reasons,['No health report yet for this device.']);
+  const indexKey = bcs.struct('Key',{device_id:bcs.Address}).serialize({device_id:devices[0]}).toBytes();
+  const indexId = deriveDynamicFieldID(config.fleetId,TypeTagSerializer.parseFromStr(`${config.typeOrigin}::fleet_data::DeviceKey`),indexKey);
+  const indexObject = objects.get(indexId);
+  objects.delete(indexId);
+  assert.deepEqual((await data.fetchChainHealth(client,config,[devices[0]]))[devices[0]].reasons,['This device is not in the configured data fleet.']);
+  objects.set(indexId,indexObject);
   const { budgetedFetch } = load('lib/rpc-budget.ts');
   let clock = 0; const starts = [];
   const fetcher = budgetedFetch(async () => { starts.push(clock); return new Response('ok'); }, () => clock, async ms => {clock+=ms;});

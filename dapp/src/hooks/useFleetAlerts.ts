@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetSelection } from "./useFleetSelection";
 import { useFleetDataConfig } from "./useFleetDataConfig";
 import { NETWORK } from "@/lib/constants";

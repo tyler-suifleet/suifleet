@@ -15,13 +15,15 @@ REQUIRED_TYPES = tuple(_PROTOCOL["required_type_origins"])
 CATALOG_TYPES = tuple(_PROTOCOL["optional_type_origins"]["component_catalog"])
 SEAL_POLICY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["seal_policy"])
 HANDOVER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_handover"])
+GROUP_BATCH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["group_batch"])
 BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
 INBOX_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_inbox"])
 ROLLOUT_HEALTH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_health"])
 CUSTOMER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["customer"])
 SETTINGS_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_settings"])
 SHARD_TYPES = tuple(_PROTOCOL["optional_type_origins"]["receipt_shards"])
-OPTIONAL_GROUPS = {"catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES, "fleet inbox": INBOX_TYPES, "customer": CUSTOMER_TYPES, "receipt shards": SHARD_TYPES}
+AUDIT_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_audit"])
+OPTIONAL_GROUPS = {"rollout audit": AUDIT_TYPES, "catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES, "fleet inbox": INBOX_TYPES, "customer": CUSTOMER_TYPES, "receipt shards": SHARD_TYPES}
 
 def manifest_types(manifest):
     types = REQUIRED_TYPES
@@ -30,7 +32,7 @@ def manifest_types(manifest):
         if present and len(present) != len(group):
             raise ValueError(f"partial {label} type origins")
         types += tuple(present)
-    return types + tuple(n for n in HANDOVER_TYPES if n in manifest["type_origins"])
+    return types + tuple(n for n in HANDOVER_TYPES + GROUP_BATCH_TYPES if n in manifest["type_origins"])
 
 CLIENT_VERSIONS = {"dapp": "0.1.1", "edge": "0.2.2"}
 
@@ -85,7 +87,15 @@ def endpoint(value):
     return value
 
 
+def treasury_payee(payee):
+    if not isinstance(payee, str) or not re.fullmatch(r"0x[0-9a-f]{64}", payee) or int(payee, 16) == 0:
+        raise ValueError("treasury payee mismatch: malformed pinned address; payment blocked")
+    return payee
+
+
 def validate(manifest):
+    if "treasury_payee" in manifest:
+        treasury_payee(manifest["treasury_payee"])
     if type(manifest["schema_version"]) is not int or type(manifest["protocol_version"]) is not int or manifest["schema_version"] != _PROTOCOL["manifest_schema_version"] or manifest["protocol_version"] != _PROTOCOL["protocol_version"]:
         raise ValueError("unsupported manifest schema/protocol")
     if manifest["network"] not in ("localnet", "devnet", "testnet", "mainnet"):
@@ -117,11 +127,12 @@ def validate(manifest):
             raise ValueError("unsupported " + client + " version")
     for name in ("publisher_url", "aggregator_url"):
         endpoint(manifest["walrus"][name])
-    mirrors = manifest["walrus"].get("aggregator_urls", [])
-    if not isinstance(mirrors, list):
-        raise ValueError("aggregator_urls must be a list")
-    for url in mirrors:
-        endpoint(url)
+    for name in ("aggregator_urls", "publisher_urls"):
+        mirrors = manifest["walrus"].get(name, [])
+        if not isinstance(mirrors, list) or (name in manifest["walrus"] and not mirrors):
+            raise ValueError(name + " must be a nonempty list")
+        for url in mirrors:
+            endpoint(url)
     return manifest
 
 
@@ -222,11 +233,17 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES + AUDIT_TYPES + GROUP_BATCH_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.1" if all(n in table for n in SHARD_TYPES) else "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.2" if all(n in table for n in SHARD_TYPES) else "0.2.1", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
+    if getattr(args, "publisher_urls", None):
+        manifest["walrus"]["publisher_urls"] = args.publisher_urls
+    elif getattr(args, "publisher_mirror", None):
+        manifest["walrus"]["publisher_urls"] = [args.publisher, *args.publisher_mirror]
+    if getattr(args, "treasury_payee", None) is not None:
+        manifest["treasury_payee"] = args.treasury_payee
     if getattr(args, "aggregator_mirror", None):
         manifest["walrus"]["aggregator_urls"] = args.aggregator_mirror
     return verify(manifest, read)
@@ -279,7 +296,9 @@ def main():
     resolve_parser = sub.add_parser("resolve")
     for name in ("rpc", "chain-identifier", "package", "upgrade-cap", "registry", "publisher", "aggregator", "network"):
         resolve_parser.add_argument("--" + name, required=True)
+    resolve_parser.add_argument("--publisher-mirror", action="append", help="additional publisher, in failover order")
     resolve_parser.add_argument("--aggregator-mirror", action="append", help="ordered device mirror, repeat for each URL; replaces legacy device endpoint")
+    resolve_parser.add_argument("--treasury-payee", help="reviewed canonical treasury multisig address; omitted disables payments")
     resolve_parser.add_argument("--output", type=Path, required=True)
     for name in ("verify", "generate"):
         command = sub.add_parser(name)

@@ -57,6 +57,21 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "new_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
       "publish_version": {
         "visibility": "Public",
         "entry": false,
@@ -317,6 +332,21 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "add_many_to_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "vector<sui::object::ID>",
+          "std::option::Option<std::string::String>",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "add_to_group": {
         "visibility": "Public",
         "entry": false,
@@ -535,6 +565,19 @@ export const MOVE_ABI = {
           "sui_edge::fleet_budget::BudgetOwnerCap",
           "sui_edge::customer::BudgetLoan"
         ]
+      },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
       },
       "commit_revision": {
         "visibility": "Public",
@@ -799,6 +842,15 @@ export const MOVE_ABI = {
           "&vector<sui::object::ID>"
         ]
       },
+      "max_group_batch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [],
+        "returns": [
+          "u64"
+        ]
+      },
       "new_catalog_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -992,6 +1044,19 @@ export const MOVE_ABI = {
           "&mut sui_edge::customer::Fleet",
           "&mut sui_edge::device_group::DeviceGroup",
           "sui::object::ID",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove_many_from_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "vector<sui::object::ID>",
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
@@ -1562,6 +1627,31 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "GroupBatchApplied": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "fleet_id",
+            "sui::object::ID"
+          ],
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "added",
+            "bool"
+          ],
+          [
+            "count",
+            "u64"
+          ]
+        ]
+      },
       "GroupCountKey": {
         "abilities": [
           "Copy",
@@ -1676,6 +1766,17 @@ export const MOVE_ABI = {
           "&sui_edge::deployment_manager::DeploymentRecord",
           "&mut sui_edge::deployment_manager::ReceiptShard",
           "u64"
+        ],
+        "returns": []
+      },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -2363,6 +2464,72 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "DecisionCleanupKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DecisionKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "DecisionRecord": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
           ]
         ]
       },
@@ -3636,6 +3803,17 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "sui_edge::device_registry::DeviceOwnerCap"
+        ]
+      },
+      "arch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Device"
+        ],
+        "returns": [
+          "std::string::String"
         ]
       },
       "assert_admin": {

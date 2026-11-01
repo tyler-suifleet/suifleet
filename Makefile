@@ -62,38 +62,12 @@ test-native-seal:
 
 # The daemon speaks gRPC; the simulator is served through the test-only shim
 # example (suifleet-edge/examples/grpc_sim_shim.rs).
+OTA_TEST_JOBS ?= 3
 test-ota:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins --examples
 	$(RUN) node scripts/test_quilt_fixture_signer.cjs suifleet-edge/target/debug/examples/sign_quilt_fixture
-	$(RUN) python3 scripts/test_ota.py
-	$(RUN) python3 scripts/test_ota.py --poll-reads
-	$(RUN) python3 scripts/test_ota.py --platform-installer
-	$(RUN) python3 scripts/test_catalog_ota.py
-	$(RUN) python3 scripts/test_dependency_ota.py
-	$(RUN) python3 scripts/test_ota.py --firmware-helper
-	$(RUN) python3 scripts/test_firmware_restart.py
-	$(RUN) python3 scripts/test_supervisor.py
-	$(RUN) python3 scripts/test_configuration.py
-	$(RUN) python3 scripts/test_greengrass_runtime.py
-	$(RUN) python3 scripts/test_daemon_update.py
-	$(RUN) python3 scripts/test_desired_state.py
-	$(RUN) python3 scripts/test_inbox_ota.py
-	$(RUN) python3 scripts/test_handover_ota.py
-	$(RUN) python3 scripts/test_deployment_control.py
-	$(RUN) python3 scripts/test_telemetry.py
-	$(RUN) python3 scripts/test_logs.py
-	$(RUN) python3 scripts/test_cloudwatch_logs.py
-	$(RUN) python3 scripts/test_console.py
-	$(RUN) python3 scripts/test_rollout.py
-	$(RUN) python3 scripts/test_cadence_ota.py
-	$(RUN) python3 scripts/test_budget_ota.py
-	$(RUN) python3 scripts/test_fleet_settings_ota.py
-	$(RUN) python3 scripts/test_recovery_ota.py
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --idle-reads
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt
-	$(RUN) python3 scripts/test_fleet_data_ota.py --binary suifleet-edge/target/debug/suifleet --shim suifleet-edge/target/debug/examples/grpc_sim_shim --compact-history --quilt --stream-retention
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_ota_suites.py
+	$(RUN) python3 scripts/run_ota_suites.py --jobs $(OTA_TEST_JOBS)
 
 .PHONY: test-opaque
 test-opaque:
@@ -272,7 +246,7 @@ toolchain-versions:
 # CI entry point (run inside the dev image): each step's output is kept under
 # ci-logs/ for failure diagnostics. No step publishes, spends gas or uses secrets.
 ci: SHELL := /bin/bash
-CI_STEPS := test-data-metering test-retention test-fleet-settings test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build
+CI_STEPS := test-guide-recording test-data-metering test-retention test-fleet-settings test-deploy-component-browser test-customer-fleets test-prospects indexer-test test-testnet test-publish test-contracts test-interfaces check-interfaces test-compat test-ml test-industrial edge-test test-ota test-component test-yocto-packaging test-edge-acceptance dapp-typecheck dapp-build test-hydration
 ci:
 	@mkdir -p ci-logs
 	@$(MAKE) --no-print-directory toolchain-versions | tee ci-logs/toolchain-versions.txt
@@ -373,6 +347,10 @@ site-check: site-build
 test-site:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s site/tests -v
 
+.PHONY: test-guide-recording
+test-guide-recording:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node site/tests/recording_browser.cjs
+
 # Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
 .PHONY: test-disk-cleanup
 test-disk-cleanup:
@@ -382,6 +360,7 @@ test-disk-cleanup:
 test-manifest:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_deployment_manifest.py'
 	$(RUN) node scripts/test_deployment_manifest.cjs
+	$(RUN) node scripts/test_treasury.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
@@ -398,8 +377,11 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_walrus_publishers.cjs
+	$(RUN) node scripts/test_release_storage.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
+	$(RUN) node scripts/test_group_batch.cjs
 	$(RUN) node scripts/test_fleet_data.cjs
 	$(RUN) node scripts/test_fleet_bulk.cjs
 	$(RUN) node scripts/test_data_browser.cjs
@@ -411,6 +393,8 @@ test-manifest:
 	$(RUN) node scripts/test_fleet_recovery.cjs
 	$(RUN) node scripts/test_storage_reclaim.cjs
 	$(RUN) node scripts/test_storage_reclaim_panel.cjs
+	$(RUN) node scripts/test_storage_errors.cjs
+	$(RUN) node scripts/test_storage_receipt.cjs
 	$(RUN) node scripts/test_stream_retention.cjs
 	$(RUN) node scripts/test_stream_retention_panel.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_fleet_reclaim.py'
@@ -419,12 +403,17 @@ test-manifest:
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
 	$(RUN) node scripts/test_dashboard_views.cjs
+	$(RUN) node scripts/test_rollout_audit.cjs
+	$(RUN) node scripts/test_rollout_form.cjs
+	$(RUN) node scripts/test_rollout_builder_browser.cjs
+	$(RUN) node scripts/test_dashboard_stats.cjs
 	$(RUN) node scripts/test_shadow_documents.cjs
 	$(RUN) node scripts/test_fleet_relay.cjs
 	$(RUN) node scripts/test_walrus_node_writes.cjs
 	$(RUN) node scripts/test_walrus_site_protocol.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_walrus_site.py'
 	$(RUN) node scripts/test_enrollment_frontend.cjs
+	$(RUN) node scripts/test_pending_rows.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
 
 test-manifest-live:
@@ -552,9 +541,11 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+	$(RUN) node scripts/test_testnet_receipt_effects.cjs
 
 .PHONY: test-deployment-control-localnet
 test-deployment-control-localnet:
@@ -728,6 +719,7 @@ package-tunneling:
 	python3 scripts/package_tunneling.py --output "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}"
 
 test-tunneling:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_process_scan.py
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(MAKE) package-tunneling
 	python3 scripts/test_tunneling.py --package "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}" $(TUNNEL_EVIDENCE)
@@ -786,6 +778,12 @@ test-fleet-settings:
 	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_settings_browser.cjs
 
+# Deploy component page in a real browser: upload progress/retry, duplicate clicks
+# and same-file re-selection after validation alerts (SF-194).
+.PHONY: test-deploy-component-browser
+test-deploy-component-browser:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_upload_browser.cjs
+
 # Run inside a disposable network-none dev container with Git history and warm Move cache.
 .PHONY: test-retention-upgrade
 test-retention-upgrade:
@@ -830,6 +828,8 @@ test-budget-enrollment-localnet:
 # SF136: offline discovery/transaction checks and actual React/Chromium isolation.
 .PHONY: test-customer-fleets test-customer-upgrade-localnet
 test-customer-fleets:
+	$(RUN) node scripts/test_customer_entitlements.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_fleets_browser.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/live_wallet_browser.cjs --smoke
@@ -838,6 +838,22 @@ test-customer-fleets:
 test-customer-upgrade-localnet:
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml
 	$(RUN) python3 scripts/test_protocol_localnet.py --customer-upgrade
+# SF-171: run in a disposable network-none container with Git history and warm Move cache.
+.PHONY: test-group-batch-localnet
+test-group-batch-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --group-batch
 .PHONY: test-data-metering
 test-data-metering:
 	$(RUN) node scripts/test_data_metering.cjs
+
+# SF164 populated-rollout compatible upgrade; disposable loopback chain only.
+.PHONY: test-rollout-audit-localnet
+test-rollout-audit-localnet:
+	$(RUN) python3 -c 'import sys; sys.path.insert(0,"scripts"); from test_protocol_localnet import main; main("scripts/test_rollout_audit_upgrade.cjs")'
+
+# Validate the actual export with a fixture wallet and blocked external I/O.
+.PHONY: test-hydration
+test-hydration:
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
+	$(RUN) bash -c 'set -a; source profiles/seal-testnet/frontend.env; set +a; cd dapp && pnpm build'
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs

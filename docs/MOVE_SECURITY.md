@@ -44,6 +44,9 @@ arbitrary supplied binary. Primary tool source:
 Each positive includes Check, Assume and SpecNoAbortCheck. Negatives must fail
 their specified solver phase/diagnostic with the other expected phases passing;
 timeouts, parser errors, unsupported projections and empty runs fail the gate.
+The core gate gives the quantified `receipts-customer-version` negative control
+one bounded 120-second attempt; other core cases retain the 30-second limit.
+This accommodates slower CI runners without accepting a timeout as a counterexample.
 The retained-owner control intentionally fails both real ownership obligations
 (Check and Assume); the specification well-definedness phase still passes.
 Compiler/linter negatives and native-VM executions are separate evidence.

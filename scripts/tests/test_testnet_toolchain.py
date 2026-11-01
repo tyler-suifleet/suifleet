@@ -66,7 +66,7 @@ def transaction(**spec):
     return tc.decode(built.stdout)
 
 
-def tools(network='sui 1.82.1-987123842623', build='sui 1.81.1-e04cf9aa915c'):
+def tools(network=tc.NETWORK['version'], build='sui 1.81.1-e04cf9aa915c'):
     versions = {'/b/sui': build, '/n/sui': network}
     run = Mock(side_effect=lambda cmd, **_: SimpleNamespace(returncode=0, stdout=versions[cmd[0]] + '\n'))
     return run
@@ -80,11 +80,11 @@ class ToolIdentity(unittest.TestCase):
     def test_exact_pins_accepted_with_provenance(self):
         found = self.check(tools())
         self.assertEqual(found['build']['max_protocol'], 138)
-        self.assertEqual(found['network']['max_protocol'], 139)
+        self.assertEqual(found['network']['max_protocol'], 140)
         self.assertEqual(found['network']['sha256'], tc.NETWORK['binary_sha256'])
 
     def test_path_substitution_is_refused(self):
-        for run in (tools(build='sui 1.82.1-987123842623'), tools(network='sui 1.81.1-e04cf9aa915c'),
+        for run in (tools(build='sui 1.82.1-987123842623'), tools(network='sui 1.81.1-e04cf9aa915c'), tools(network='sui 1.82.1-987123842623'),
                     tools(network='sui 1.83.0-000000000000')):
             with self.assertRaises(tc.Incompatible):
                 self.check(run)
@@ -98,14 +98,21 @@ class ProtocolPreflight(unittest.TestCase):
     TOOLS = {'build': dict(tc.BUILD), 'network': dict(tc.NETWORK)}
 
     def test_supported_protocol(self):
-        result = tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'epoch': 1254, 'protocol_version': 139},
+        result = tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'epoch': 1269, 'protocol_version': 140},
                               '4c78adac')
-        self.assertEqual(result['protocol_version'], 139)
+        self.assertEqual(result['protocol_version'], 140)
         self.assertTrue(result['build_cli_offline'])
 
     def test_newer_protocol_refused_before_writes(self):
+        with self.assertRaisesRegex(tc.Incompatible, '141 exceeds'):
+            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 141}, '4c78adac')
+
+    def test_protocol_140_refuses_previous_transaction_cli(self):
+        # Reproduce run 41133167458: stop before any wallet mutation.
+        old = dict(tc.NETWORK, version='sui 1.82.1-987123842623', max_protocol=139)
         with self.assertRaisesRegex(tc.Incompatible, '140 exceeds'):
-            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 140}, '4c78adac')
+            tc.preflight({'build': dict(tc.BUILD), 'network': old},
+                         {'chain_identifier': '4c78adac', 'protocol_version': 140}, '4c78adac')
 
     def test_pinned_build_cli_alone_would_be_refused(self):
         # The SF-050 failure: protocol 139 against a 138 transaction CLI.
@@ -129,6 +136,8 @@ class Pins(unittest.TestCase):
         self.assertEqual(arg('SUI_NETWORK_SHA256'), tc.NETWORK['archive_sha256'])
         self.assertEqual(arg('SUI_NETWORK_BINARY_SHA256'), tc.NETWORK['binary_sha256'])
         self.assertIn(tc.NETWORK_DEFAULT, text)
+        # The 1.83.0 archive ships sui mode 0700; dev/CI users need execute access.
+        self.assertIn('chmod 0755 /opt/sui-network/sui', text)
 
     def test_versions_match_releases(self):
         for pin in (tc.BUILD, tc.NETWORK):

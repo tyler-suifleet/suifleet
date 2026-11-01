@@ -80,6 +80,18 @@ module sui_edge::component_catalog {
         transfer::freeze_object(value);
     }
 
+    /// Transaction-local catalog record, composable with desired-state revisions.
+    public fun new_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
+        deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
+            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
+    }
+
+    /// Bindings can only be installed by this module from a frozen version.
+    public(package) fun has_authenticated_version(record: &DeploymentRecord): bool {
+        deployment_manager::has_binding<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}) ||
+            deployment_manager::has_binding<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {})
+    }
+
     public fun create_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
         deployment_manager::create_catalog_deployment(value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);

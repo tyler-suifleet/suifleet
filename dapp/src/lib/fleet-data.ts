@@ -177,7 +177,8 @@ export async function fetchChainHealth(client: Reads, config: FleetDataConfig, d
       const identity = identities ? identities[index] : await readIdentity(client, deviceId);
       if (!identity || identity.revoked) return [deviceId, { ...assess(!!identity?.revoked, undefined, now), components: [] }];
       const writer = writers ? writers[index] : await readDeviceData(client, config, deviceId);
-      if (!writer || writer.health_seq === "0") return [deviceId, { ...assess(false, undefined, now), components: [] }];
+      if (!writer) return [deviceId, { status: "unreported", codes: ["not-in-data-fleet"], reasons: ["This device is not in the configured data fleet."], components: [] }];
+      if (writer.health_seq === "0") return [deviceId, { status: "unreported", codes: ["no-telemetry"], reasons: ["No health report yet for this device."], components: [] }];
       if (writer.message.length > 16_384) throw new Error("Health snapshot exceeds its chain bound");
       const snapshot = await verifyReport({ message: toBase64(new Uint8Array(writer.message)), signature: toBase64(new Uint8Array(writer.signature)) }, deviceId, identity.signer);
       if (typeof snapshot === "string") throw new Error(snapshot);

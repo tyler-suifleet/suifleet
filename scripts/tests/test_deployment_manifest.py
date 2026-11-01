@@ -37,6 +37,26 @@ def chain(manifest, cap_owner="0xa11ce"):
 
 
 class ManifestTests(unittest.TestCase):
+    def test_ordered_publishers(self):
+        manifest = fixture()
+        manifest["walrus"]["publisher_urls"] = ["https://one.example", "https://two.example"]
+        self.assertEqual(dm.validate(manifest)["walrus"]["publisher_urls"], ["https://one.example", "https://two.example"])
+        for invalid in [[], "https://one.example", ["file:///tmp/blob"]]:
+            manifest["walrus"]["publisher_urls"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
+    def test_treasury_payee_is_canonical_nonzero_and_optional_for_legacy(self):
+        manifest = fixture()
+        dm.validate(manifest)
+        manifest["treasury_payee"] = "0x" + "ab" * 32
+        dm.validate(manifest)
+        for invalid in [None, "", "suifleet.sui", "0x1", "0x" + "00" * 32,
+                        "0x" + "AB" * 32, 12, {}]:
+            manifest["treasury_payee"] = invalid
+            with self.assertRaisesRegex(ValueError, "treasury payee mismatch"):
+                dm.validate(manifest)
+
     def test_optional_ordered_aggregator_mirrors(self):
         manifest = fixture()
         mirrors = ["https://one.example", "https://two.example"]
@@ -93,6 +113,15 @@ class ManifestTests(unittest.TestCase):
         forged["type_origins"][dm.BUDGET_TYPES[-1]] = dm.object_id("0x3")
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
+
+    def test_optional_rollout_audit_origin_group(self):
+        m = fixture()
+        for name in dm.AUDIT_TYPES:
+            m['type_origins'][name] = dm.object_id('0xa164')
+        self.assertTrue(all(name in dm.manifest_types(m) for name in dm.AUDIT_TYPES))
+        del m['type_origins'][dm.AUDIT_TYPES[-1]]
+        with self.assertRaisesRegex(ValueError, 'partial rollout audit'):
+            dm.manifest_types(m)
 
     def test_optional_rollout_health_origin_group(self):
         manifest = fixture()

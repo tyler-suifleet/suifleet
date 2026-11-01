@@ -58,7 +58,7 @@ const writers = Object.fromEntries(f.devices.map((d) => [id(d.writer), d]));
 // #far-future: u64 grant and decision times beyond the Date range are shown raw.
 const farFuture = location.hash === "#far-future", u64max = "18446744073709551615";
 const rollout = farFuture ? { ...f.rollout, record: { ...f.rollout.record, admitted_at: [u64max, ...f.rollout.record.admitted_at.slice(1)] },
-  decisions: f.rollout.decisions.map((d) => d.revision === "3" ? { ...d, at_ms: u64max } : d) } : location.hash === "#onchain" ? { ...f.rollout, record: { ...f.rollout.record, state: 0 } } : f.rollout;
+  decisions: f.rollout.decisions.map((d) => d.revision === "3" ? { ...d, at_ms: u64max } : d) } : location.hash === "#onchain" ? { ...f.rollout, record: { ...f.rollout.record, state: 0, cohort: "1" } } : f.rollout;
 const deployment = { id: rollout.id, creator: f.operator, component_name: "app", version: "2.0.0", recipe_blob_id: "blob", artifact_sha256: "a".repeat(64), created_at: "1", schema_version: "3" };
 
 const client = new SuiGrpcClient({ network: m.network, baseUrl: "http://127.0.0.1:1" });

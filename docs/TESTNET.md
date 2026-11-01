@@ -9,6 +9,15 @@ controls and must not be reported as consumed fees.
 
 ## Accounts
 
+For the landing guide's scripted console recordings, use
+[`site/guide/RECORDING.md`](../site/guide/RECORDING.md). Its `--check` mode only
+reads the matching cached package fixture, chain, type origins and UpgradeCap.
+An actual run requires the shared-wallet lease, journals signing digests before
+submission, charges retained demo gas and new funding to a non-replenishing
+allowance, and records independent effects and fees. Raw frames and persistent
+demo signing state stay private outside the checkout. A partial recording is
+not nine-step video acceptance or manual real-wallet acceptance.
+
 The user created two dedicated **testnet-only** accounts on 2026-10-14 and authorized agents to spend their testnet SUI on acceptance runs: publishing and upgrading test packages, and the transactions those runs need.
 
 | Account | Address | Key lives in | Used by |
@@ -38,7 +47,7 @@ sui client faucet --address 0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d8
 
 **Older CLIs don't work.** The pinned 1.81.1 CLI only redirects to the web faucet, and `POST /v2/gas` answers "CI compatibility is disabled".
 
-**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.82.1 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
+**Funding uses the pinned transaction CLI.** The dev image installs the checksum-verified 1.83.0 release binary at `/opt/sui-network/sui` (see [Toolchain](#toolchain-release-compiler-and-transaction-cli)), and live runs request funds only through that verified binary. The faucet credits the *address balance*, which both CLIs can spend as gas.
 
 **The web faucet** is the alternative: `https://faucet.sui.io/?address=ADDRESS`.
 
@@ -49,11 +58,13 @@ Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py
 | Role | Pin | Supports protocol | Used for |
 |---|---|---|---|
 | Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
-| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.82.1` (`1.82.1-987123842623`); archive sha256 `112bf204…2858c`, binary sha256 `de1d7eff…a0d6b` | up to 139 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.83.0` (`1.83.0-16d2dc1e05ed`); archive sha256 `e5116805…d7d8`, binary sha256 `29e1beb9…48fa` | up to 140 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
 
 The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
+
+On 2026-10-30 testnet advanced to protocol 140. [Run 41133167458](https://github.com/tyler-suifleet/suifleet/actions/runs/41133167458) stopped at read-only preflight because 1.82.1 supports only 139; no transaction was submitted. The transaction pin now uses [testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0), whose [protocol configuration](https://github.com/MystenLabs/sui/blob/16d2dc1e05edcf600320a82e17b9392edb0983a5/crates/sui-protocol-config/src/lib.rs) declares maximum 140. The release compiler, framework and fixture cache keys stay unchanged. Exact-head automatic testnet execution remains required; the pin update alone does not establish successful live execution or post-retention audit acceptance.
 
 **What each run checks:**
 - **Pinned identities, before anything else.** The release compiler's exact version, and the transaction CLI's exact version and binary SHA-256. A different `sui` on PATH, or an unpinned transaction binary, stops the run.
@@ -103,7 +114,7 @@ make live-gate-package-upgrade SUIFLEET_WALLET=$HOME/.config/suifleet/testnet/ag
 
 **Automatic CI.** `.github/workflows/testnet.yml` is sourced from main and runs after successful `CI` completion, daily at 08:23 UTC, and through main-only dispatch. The controller re-fetches originating workflow facts, verifies CI identity/success, checks PR author and run actor write authority, rejects forks, and binds the exact current PR SHA and current main base. Superseded runs are skipped before spending. Main push/periodic checks compare main with its first parent. Public fork CI remains unprivileged/offline. No arbitrary dispatch ref receives secrets.
 
-`live-package-upgrade` is configured main-only, with no required reviewers and `can_admins_bypass=false`; this is the user's explicit standing testnet authorization. The planner verifies these settings; the runtime derives the address from the protected secret and requires the dedicated CI address. All automatic/manual testnet paths share concurrency `suifleet-testnet-ci-wallet`, `cancel-in-progress=false`, `queue: max` (up to 100 pending runs; queue overflow fails closed through missing required status). The old manual package gate delegates to this controller; wallet/hardware approvals remain unchanged.
+`live-package-upgrade` is configured main-only, with no required reviewers and `can_admins_bypass=false`; this is the user's explicit standing testnet authorization. The planner verifies these settings; the runtime derives the address from the protected secret and requires the dedicated CI address. A keyless, read-only, main-sourced `queue-plan` authenticates current-head eligibility before secretless preparation or any wallet queue position; it has no protected environment, signing secret or PR-code execution. Protected validation independently repeats full authentication and environment verification before signing. Automatic CI now supports three dedicated wallet lanes (SF-202, user authorized 2026-10-28). `SUIFLEET_TESTNET_POOL_SIZE` is a repository variable, bounded to 1–3 with default 1. One lane is selected deterministically by workflow run ID (stable on rerun); no matrix duplicates acceptance. The primary lane retains `suifleet-testnet-ci-wallet`, so existing manual primary-wallet paths and older controllers remain serialized with it. Lanes 1 and 2 use their own concurrency groups with `cancel-in-progress=false`, `queue: max`. Each lane exclusively restores, mutates, uploads and prunes its own encrypted fixture history. A different lane can validate concurrently; shared wallet/gas objects are never reused across lanes. The old manual package gate delegates to this controller; wallet/hardware approvals remain unchanged.
 
 The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exact base SHA>` in its description. A failure remains a failing job and status; its description adds a scheduling class, `base:<SHA> class:source|infrastructure|funding|uncertain` (see [SF-146](#sf-146-uncertain-publications-suite-funding-and-repair-scheduling)). A cancelled run reports `error`, never `failure`. The sole orchestrator requires this success for the current head/base once `testnet.yml` exists on main; the first reviewed workflow merge bootstraps before activation. Install the reviewed coordinator after merge. Missing status blocks later integration even before GitHub queues the privileged run. This testnet gate does not reinstate unrelated deferred integration blockers.
 
@@ -129,6 +140,31 @@ The controller sets `testnet/package-upgrade` on the tested SHA, with `base:<exa
 - There is no hardware: that is the `hardware` gate (SF-031).
 - The device keeps its unused report gas, about 0.03 SUI per run.
 - **No JSON-RPC.** Public testnet fullnodes no longer serve JSON-RPC (gRPC and GraphQL only). Live tooling must read over gRPC (`chain_facts`, the daemon, the frontend SDK) or through the Sui CLI. The localnet tests' JSON-RPC helper does not work there.
+
+**SF-177 CI funding repair (2026-10-30, run 41087697612).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41087697612)
+submitted no transactions and used zero allowance. Its single successful faucet
+request raised the primary CI wallet from 2,543,615,950 to 3,543,615,950 MIST,
+short of the unchanged 3,650,000,000 MIST preflight requirement (including a
+preserved 400,000,000 MIST historical reservation). The package suite's
+1,600,000,000 MIST ceiling, aggregate suite requirement and reservations remain
+unchanged.
+
+A separate bounded maintenance operation acquired `network:suifleet-testnet`,
+verified chain `4c78adac`, the dedicated agent config/account and transaction CLI
+SHA-256 `de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`,
+then made one faucet request for the dedicated primary CI address
+`0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac`.
+Transaction `ETRdUhMudfF6qeQgevwEma5RyUWrnTZZwqGAF7ebEYC8` was independently
+read back with successful effects at checkpoint `400952831`: exactly
+1,000,000,000 MIST credited to that address and 1,000,000 MIST net gas paid
+by the faucet. A subsequent balance read returned 5,474,131,734 MIST, above
+the preflight requirement; that balance includes other wallet activity and is
+not attributed entirely to this credit. No operator transaction was signed,
+fixture replayed or reservation cleared. The lock was released promptly.
+This repairs funding only: fresh exact-head/current-base automatic checks and
+independent review remain required. SF-177 also retains its outstanding manual
+install-guide usability review; funding maintenance does not satisfy it.
 
 ## Upgrade-security suite (SF-010)
 
@@ -331,7 +367,7 @@ The ordinary same-repository CI adds a **keyless** metadata probe with the actua
 
 
 
-The same follow-up also repairs [run 38692509474](https://github.com/tyler-suifleet/suifleet/actions/runs/38692509474): its workflow-run runtime token advertised only `refs/heads/main: read`, so Buildx cache export failed before tests with `failed to reserve cache`. The testnet workflow now imports the ordinary CI image cache but does not attempt cache export. Fixture persistence uses the single `encrypted-testnet-fixture` artifact containing only `fixture.bin`, still authenticated AES-GCM ciphertext, never plaintext device state or the CI key. Restoration verifies producer workflow, main ref, repository and event, rejects unexpected/symlink files, and sets local directory/file modes to 0700/0600. Artifact-name discovery is independent of skipped-run volume; unknown excessive history and API/download failures fail closed rather than republishing blindly. Upload errors are not ignored, and all actual test failures remain failing jobs/statuses.
+The same follow-up also repairs [run 38692509474](https://github.com/tyler-suifleet/suifleet/actions/runs/38692509474): its workflow-run runtime token advertised only `refs/heads/main: read`, so Buildx cache export failed before tests with `failed to reserve cache`. The testnet workflow now uses plain Docker builds with disposable runner-local layers and neither imports nor exports shared Actions caches, including implicit Buildx action caches. Fixture persistence uses the single `encrypted-testnet-fixture` artifact containing only `fixture.bin`, still authenticated AES-GCM ciphertext, never plaintext device state or the CI key. Restoration verifies producer workflow, main ref, repository and event, rejects unexpected/symlink files, and sets local directory/file modes to 0700/0600. Artifact-name discovery is independent of skipped-run volume; unknown excessive history and API/download failures fail closed rather than republishing blindly. Upload errors are not ignored, and all actual test failures remain failing jobs/statuses.
 
 **Fixture history growth (SF-115).** Every executed run uploads a new fixture artifact, so [run 39859678522](https://github.com/tyler-suifleet/suifleet/actions/runs/39859678522) stopped before tests once 501 accumulated beyond the old five-page scan. Restore now reads the complete name-filtered history up to 10,000 artifacts (more than 90 days of routine uploads without pruning) and selects the newest trusted snapshot by creation time. It fails closed when `total_count` changes, IDs repeat, pages come back short, the response is malformed or a lookup/download fails; a shifted listing is rescanned once. None of these failures falls back to publication. A separate `prune-fixture-history` job runs after a successful executed `validate` in the same serialized concurrency group. It checks out only main (`github.workflow_sha`), has no environment, secret or test revision, and is the only job holding `actions: write`. It keeps the 10 newest trusted snapshots and the current run's artifact, then deletes older `encrypted-testnet-fixture` artifacts from this repository's main testnet workflow, oldest first and at most 50 per run. Untrusted, expired and differently named artifacts are left alone, and a deletion failure fails the job. Ciphertext is never decrypted or rewritten.
 
@@ -371,3 +407,106 @@ evidence into a durable local journal. The SF-082 fixture smoke creates no objec
 or transactions and needs no shared-wallet mutation lock. It never funds, signs,
 submits, uploads or purchases. Testnet costs remain Testnet observations; final
 Mainnet bill and production acceptance stay in SF-135/#267 and SF-087/#159.
+
+**SF-162 CI funding repair (2026-10-27, run 40553437410).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/40553437410)
+stopped in funding preflight with no submitted transactions and zero allowance
+used. Its single successful faucet request raised the CI wallet balance from
+2,522,518,519 to 3,522,518,519 MIST, below the selected suites' 3,250,000,000
+MIST plus the preserved 400,000,000 MIST historical reservation. This was a
+wallet-balance shortfall; no spend ceiling, retry limit or reservation was changed.
+
+A separate bounded maintenance operation took `network:suifleet-testnet`, verified
+chain `4c78adac` and the pinned network CLI checksum, and requested the faucet
+once for the dedicated CI address `0x99894c1a…dcac`. Transaction
+`7Ho1bmXbiuRyPB6ESXqm2DG3roKLeR4etrDNJh41ZAKv` was independently read back:
+successful effects at checkpoint 399872387, a 1,000,000,000 MIST credit to that
+address, and 1,000,000 MIST net gas paid by the faucet. The resulting balance
+was 4,522,518,519 MIST, exceeding the unchanged 3,650,000,000 MIST preflight.
+The network lock was released promptly. No package publication, object mutation,
+fixture replay or reservation clearing occurred. This repairs funding only;
+the next exact-head/current-base automatic CI/testnet run and independent review
+remain required and are not claimed passed by this maintenance evidence.
+
+## Parallel CI preparation and dedicated wallet pool (SF-202)
+
+Scheduled and manual requests now use `testnet-request.yml`, a main-only dispatcher with no checkout or signing credentials that requests ordinary main CI. Only successful CI completion triggers `testnet.yml` via `workflow_run`. This keeps preparation in the read-only default-branch Actions cache scope: scheduled/manual jobs receive cache-write capability even with a read-only GitHub token, so they must never execute a test revision directly. Preparation uses plain Docker builds with disposable runner-local layers and neither imports nor exports shared Actions caches, including implicit Buildx action caches.
+
+The main-sourced `plan` job authenticates successful originating CI, same-repository write authority and exact head/base and publishes the pending status. The separate `prepare` job consumes that authenticated selection, verifies the immutable checkout before executing a revision, and has only read permissions: no status or registry writes, protected environment or signing secret. It builds the pinned Docker environment, installs locked frontend dependencies and builds the Rust daemon/gRPC facts tool outside every wallet concurrency group. Only public dependency files and the two binaries enter a prepared image; debug symbols are stripped. The image carries head, base, workflow controller SHA, run ID and attempt labels. Preparation has no registry-write permission. It transfers a compressed Docker image archive through a one-day, same-run/attempt artifact to a separate `publish` job. That job checks out only the trusted workflow controller, loads/tags/pushes image data without running it, and publishes registry failures as terminal errors.
+
+The protected `validate` job needs successful preparation and registry publication, takes exactly one wallet lane, independently authenticates again, requires the same selected head/base, pulls the immutable SHA-256 image digest produced by that same workflow run’s publisher and checks all provenance labels before exposing a wallet key. It checks the immutable checkout and rechecks head/base immediately before spending. No image tag is used for execution. All original package-upgrade, security/wallet suites, toolchain checks and non-replenishing spending ceilings remain in force. A separate `preparation-status` job checks out only the trusted controller and publishes a terminal error on preparation failure or cancellation, using the planner outputs even if preparation produced none.
+
+The controller checkout stays at the trusted workflow SHA throughout preparation and validation. A main-sourced helper validates the selected head/base as immutable SHAs, fetches them, creates a separate clone at `candidate/`, checks out the exact head without hooks and verifies it. Only this candidate directory is mounted into the build/test containers; controller scripts and their Git checkout remain outside that mount. The candidate has its own Git metadata and complete history for compatibility checks. Ciphertext restore and evidence upload use candidate-relative paths, while the final trusted status publisher remains available even if candidate creation fails. The dev image includes `python3-yaml` for the offline workflow-structure regressions.
+
+
+Public lane identities and protected environment secret names are pinned by `scripts/testnet_pool.py`:
+
+| Lane | Address | Secret in `live-package-upgrade` |
+|---|---|---|
+| 0 | `0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac` | `SUIFLEET_TESTNET_KEY` |
+| 1 | `0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec` | `SUIFLEET_TESTNET_KEY_1` |
+| 2 | `0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4` | `SUIFLEET_TESTNET_KEY_2` |
+
+The runtime derives the address from the selected secret and rejects any mismatched or unknown lane/address. Lane 0 keeps the legacy encrypted artifact name; the other histories have lane suffixes. Each ciphertext is authenticated with a key derived from that lane's own secret, so a cross-lane substitution also fails cryptographically. Primary fixtures and unswept device keys are preserved. Each new wallet requires its own initial package fixtures and funding; concurrency does not reduce per-test allowances or make fresh publication free.
+
+Preparation uses a repository-linked GHCR package named `suifleet-testnet-prepared`. Only the isolated `publish` job and the separate main-sourced image-retention job receive `packages: write`; validation has `packages: read`. Fixture deletion remains isolated in the main-only `actions: write` job and uses the same lane lock as restore/upload. Image retention preserves at least ten recent versions and all versions younger than 48 hours, verifies producer workflows are completed before deletion, touches only this package's workflow run tags and deletes at most 50 versions per pass. Queued/running validation inputs are retained regardless of age.
+
+Set pool size to `1` to return to the primary lane for future runs; let existing lane jobs drain before removing any secret or ciphertext history. Setting the variable to `3` has no effect on older main workflows; protected main rollout is required. The first hosted run must establish GHCR package access, provenance/pull success and overlapping different-lane validation. Local image, signer and offline graph tests do not establish that hosted result or a measured throughput improvement.
+
+**SF-166 CI funding repair (2026-10-30, run 41002459265).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41002459265)
+used CI lane 2 (`0xea997324…c6b4`). Its `package-upgrade.json` records no
+submitted transactions, zero allowance used, no held reservations, and a
+3,250,000,000 MIST whole-suite funding requirement. Its one successful faucet
+request credited 1,000,000,000 MIST, raising the balance from 2,193,388,189 to
+3,193,388,189 MIST: still 56,611,811 MIST short. This is an insufficient initial
+balance, rather than an application failure or an uncertain transaction.
+
+A subsequent read-only repair check verified chain `4c78adac` and the pinned
+transaction CLI SHA-256 `de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`.
+The CLI balance query for that lane returned 4,141,409,672 MIST (4,063,050,782
+address balance plus 78,358,890 coin balance), exceeding the unchanged suite
+requirement and single-pool gas minimum. Funding had already recovered; this
+worker made no faucet request or signed transaction and does not attribute the
+intervening balance change to a verified receipt. No shared-wallet mutation lock
+was needed. No fixture state, reservation, spending ceiling or retry bound was
+changed. The evidence update permits a fresh normal automatic run; it does not
+establish successful exact-head/current-base CI or testnet acceptance. Those
+checks and fresh independent review remain required before merge.
+
+
+**SF-166 CI lane 0 funding repair (2026-10-30, run 41040224517).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41040224517)
+submitted no transactions and used zero allowance. Its single successful faucet
+request credited 1,000,000,000 MIST, bringing the balance from 1,690,294,821 to
+2,690,294,821 MIST, below the unchanged 3,650,000,000 MIST requirement
+(3,250,000,000 for selected suites plus a preserved 400,000,000 historical
+reservation). This is a funding shortfall, not an application failure. The
+historical reservation remains unresolved and must not be discarded.
+
+A separate bounded faucet-only maintenance operation coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6520714270)
+verified chain `4c78adac`, the dedicated CI address `0x99894c1a…dcac`, and the
+pinned network CLI SHA-256
+`de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b`.
+The read-only balance before maintenance was 3,636,309,729 MIST, still below
+preflight; intervening balance changes are not attributed to this worker.
+With `network:suifleet-testnet` held and asserted, one faucet request succeeded:
+`oFSkpFiGurZ8pshjgAtCTqPw2xLNa7mX1xgDucVV4ab`. Independent transaction
+readback confirmed successful effects at checkpoint `400867643`, a
+1,000,000,000 MIST credit to the CI address, and 1,000,000 MIST net gas paid
+by the faucet. The subsequent balance read returned 4,621,472,959 MIST entirely
+in address balance, above the unchanged requirement; other wallet activity means
+this balance is not represented as a simple before/after faucet delta. The lock
+was released immediately after verification. No CI signing secret was accessed,
+package/object transaction submitted, fixture replayed, reservation cleared,
+spending ceiling increased or retry policy changed.
+
+`PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile test_testnet_budget test_testnet`
+passed all 101 tests, including the successful-but-insufficient faucet credit
+regression and non-replenishing budget checks. Main `64d4a05cdec574faf966b581398b9365a0efd021`
+was already included (`git merge origin/main`: already up to date). This evidence
+repairs funding only: exact-head/current-base hosted CI, automatic testnet and
+fresh independent review remain required, pending coordinator collection.
+Production-provider/manual-wallet/physical/mainnet acceptance remains unrun in
+SF-031/#32 and SF-087/#159.

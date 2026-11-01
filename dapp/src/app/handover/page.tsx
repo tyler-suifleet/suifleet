@@ -3,7 +3,8 @@
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { CustomerAccess } from "@/components/CustomerAccess";
 import { useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { buildHandoverActionTx, buildHandoverStepsTx, buildProposeHandoverTx, readHandover, type HandoverItem } from "@/lib/fleet-handover";

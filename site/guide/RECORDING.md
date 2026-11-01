@@ -1,33 +1,85 @@
-# Guide media follow-up (SF-175)
+# Testnet guide recording (SF-175)
 
-SF-172 ships the written guide and an offline console screenshot. No testnet
-video has been recorded or approved here. SF-175 owns scripted per-step testnet
-screencasts and must satisfy its spending, credential isolation and review gates.
-The earlier unvalidated recorder prototype and its unfinished fixes remain on
-`work/suifleet/sf-172-ac70d597` at d5306c76 and in the preserved operator patch;
-they are not a tested release tool. Review before reuse; never replay unknown
-transactions or sweep an unverified key.
+The recorder drives the actual console static export with a scripted Wallet
+Standard wallet, standing in for an extension wallet. It does not establish
+manual Slush, Google, extension, production-provider, physical-device or mainnet
+acceptance (SF-031/#32 and SF-087/#159).
 
-The optional `site/media/guide/videos.json` interface is retained: schema_version,
-network=testnet, chain=4c78adac, console_commit, recorded, and videos (step, file,
-file_sha256, optional poster/poster_sha256, width, height, caption). Add all seven
-steps and enable `--require-videos` for the recording acceptance check.
+Use the pinned development toolchain and locked frontend dependencies. Build the
+chain_facts example and debug daemon as described in TESTNET.md. A matching,
+activated package-upgrade fixture must already exist in the dedicated wallet's
+live-state.json; this tool never publishes packages. It rechecks chain identity,
+UpgradeCap ownership, registry and type origins before using the fixture.
 
-Before publishing media: verify current console labels against steps.json; capture
-only disposable testnet identities; inspect every frame and caption for keys,
-claim credentials, tokens and personal data; record console revision, chain,
-transaction effects and costs; then run the build/check and review every video.
-Manual real-wallet acceptance remains separately tracked, not established by a
-scripted wallet recording.
+Read-only preflight (no lease or spending; also checks wallet readiness):
 
-## Reproduce the offline screenshot
+```sh
+python3 site/guide/record_guide.py --check \
+  --wallet /home/tyler/.config/suifleet/testnet/agent/client.yaml \
+  --runtime-dir /private/guide-check
+```
 
-Build the console at the recorded revision with its verified testnet manifest,
-using the pinned toolchain and locked dependencies described in OPERATIONS.md.
-Run `node site/guide/capture_console.cjs /absolute/path/to/dapp/out`. Requires the
-console's Playwright dependency; `SUIFLEET_PLAYWRIGHT_MODULE` can name an existing
-installation and `CHROME_EXECUTABLE` a local Chromium. The script serves on an
-ephemeral loopback port, blocks external requests and captures the signed-out
-Get started page. It never connects a wallet, handles keys or sends transactions.
-The committed screenshot uses the preserved d5306c76 console export (console
-source unchanged at recovery). Font/network fallback can differ across hosts.
+For an actual recording, acquire `network:suifleet-testnet` with the atomic ticket
+CLI, coordinate in SF-010/#11, and export its token as
+`SUIFLEET_TESTNET_LOCK_TOKEN` without printing it. Assert before mutations, renew
+the resource and claim every five minutes, and unlock after the run. The script
+asserts the lease before operator mutations and every browser signature.
+
+```sh
+python3 site/guide/record_guide.py --fresh-device \
+  --wallet /home/tyler/.config/suifleet/testnet/agent/client.yaml \
+  --runtime-dir /private/guide-release \
+  --max-spend-mist 250000000 --evidence /private/guide-release/evidence.json
+# The command above also encodes and checks the site.
+# Use --capture-only to retain frames without encoding during diagnosis.
+```
+
+Choose the console build by checking out its commit in the recorder worktree;
+the runner rebuilds the console with the resolved manifest. `console_commit` is
+recorded in evidence and every video's caption. The host must supply Node,
+Playwright/Chromium (`CHROME_EXECUTABLE` if needed), and Docker for the pinned
+network-none ffmpeg encoder. No DNS or production publication occurs.
+
+The operator allowance is conservative and non-replenishing. It includes the
+entire 0.22-SUI browser grant, its deposits and claim sponsorship; rebates and
+retained funds do not replenish it. Existing demo gas is charged to the next
+run allowance before any top-up. Browser funds are isolated from the operator key.
+Only the generated demo account and device public address enter the page. The
+signer stays in Node; claim credentials are downloaded and deleted unread.
+Transaction digests are journaled before browser signing, then independently
+read back with effects and net gas. Unknown outcomes retain their key, digest and reservation and stop replay. Never replay a failed run blindly. Reconcile every
+recorded digest, including failed effects, before explicitly recovering its
+pending key; runtime directories must be empty for a fresh run.
+
+After resolving every signed digest, `--resume` retains completed clips and the
+original manifest, console source, start balance, allowance usage and ceiling.
+It never requests a second faucet or automatically replenishes demo funds.
+If simulation establishes a need for extra gas, an explicit
+`--resume-top-up-mist N` reserves that funding and its transaction gas against
+the SAME remaining allowance. Unknown outcomes stop replay; a resume never
+raises the ceiling. Each resumed phase keeps its own immutable evidence file.
+The current catalog deployment simulated at 51,730,401 MIST net on 2026-10-27;
+its 100M gas reservation replaces the prototype's inadequate 20M/40M caps.
+Gas reservations are capped below the demo's available coin balance.
+
+The runner retains a private demo identity and reuses its fleet, registered
+publisher catalog, group and access policy. `--fresh-device` records a real new
+registration with a private run-owned device key; omit it to reuse the existing
+demo device when a registration clip is not being regenerated. A new recording directory
+names a new demo component version. Enrollment claims and rollouts are run-owned
+examples. A retained key without matching, reconciled evidence stops the run;
+never recover a key or repeat an uncertain transaction blindly.
+
+Each WebM and MP4 must be at most 15,000,000 bytes; nine steps therefore have a
+270-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
+faststart, WebM is VP9; both are silent with burned-in captions. Encoding shortens
+long confirmation waits, without claiming instant network confirmation. Written
+instructions appear in each step's transcript disclosure. The offline site checker
+verifies media hashes and links; `--require-videos` additionally requires every
+step, poster and fallback. Never publish placeholder or mock videos as acceptance.
+
+Before committing media, review every video from start to finish for accuracy,
+caption readability, keys, credentials, tokens and non-demo addresses. Keep raw
+frames, browser state, keys and failed captures private outside the checkout.
+Record review evidence and exact console commit with the transaction/cost receipt.
+Do not mark SF-175 Review until the genuine nine-step run and review pass.

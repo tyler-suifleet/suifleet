@@ -8,14 +8,14 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "suifleet-components-browser-"));
   let server, browser;
   try {
-    const manifest = JSON.parse(await fs.readFile(path.join(__dirname, "../manifests/fixture.localnet.json"), "utf8"));
+    const manifest = JSON.parse(JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(__dirname, "../manifests/fixture.localnet.json"), "utf8")), network: "testnet", chain_identifier: "4c78adac" }));
     for (const type of loader()("lib/protocol-version.ts").CATALOG_TYPES) manifest.type_origins[type] = manifest.call_package_id;
     const fixture = JSON.stringify(manifest);
     const entry = path.join(__dirname, "browser/components-acceptance.jsx");
     await build({ entryPoints: [entry], outfile: path.join(directory, "app.js"), bundle: true, platform: "browser", jsx: "automatic",
       alias: { "@": path.resolve(__dirname, "../dapp/src") }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")],
       plugins: [{ name: "acceptance-hooks", setup(builder) {
-        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies|useDeploymentStorage)|@\/lib\/catalog)$/ }, () => ({ path: entry }));
+        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies|useDeploymentStorage)|\.\/useFleetTransaction|@\/lib\/catalog)$/ }, () => ({ path: entry }));
       } }],
       define: { "process.env": "{}", "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(fixture), "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"5"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined" }, logLevel: "warning" });
     // Use compiled application Tailwind styles, so mobile overflow checks cover
@@ -80,6 +80,50 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await imported.evaluate(() => window.componentsAcceptance.reject());
     await imported.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
     await imported.close();
+    // Cross-catalog duplicates: the selected catalog (0xc) lacks 1.4.2, but another catalog has it.
+    const crossCatalog = await browser.newPage();
+    await crossCatalog.goto(`${origin}/?twoCatalogs`);
+    await crossCatalog.getByRole("heading", { name: "com.acme.GatewayAgent", exact: true }).waitFor();
+    await crossCatalog.getByRole("heading", { name: "Version 1.4.2", exact: true }).waitFor();
+    for (const id of ["c", "d"]) await crossCatalog.getByRole("heading", { name: `Version 1.4.1 · Catalog 0x0000…000${id}`, exact: true }).waitFor();
+    assert.equal(await crossCatalog.getByText("also published from another of your publisher catalogs", { exact: false }).count(), 2);
+    await crossCatalog.getByRole("button", { name: "Publish version", exact: true }).click();
+    await crossCatalog.getByLabel("Component name", { exact: true }).fill("com.acme.GatewayAgent");
+    await crossCatalog.getByLabel("Semantic version").fill("1.4.2");
+    const existingEntry = crossCatalog.getByRole("region", { name: "Existing library entry" });
+    await existingEntry.getByText("Catalog 0x0000…000d · another of your publisher catalogs · linux/aarch64", { exact: true }).waitFor();
+    assert.equal(await existingEntry.getByRole("link", { name: "Deploy the existing version" }).getAttribute("href"), "/firmware?componentVersion=0x201");
+    await crossCatalog.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    await crossCatalog.getByRole("alert").filter({ hasText: "com.acme.GatewayAgent 1.4.2 is already in your library, published from another of your publisher catalogs" }).waitFor();
+    assert.equal(await crossCatalog.getByLabel("Artifact", { exact: true }).count(), 0, "cross-catalog duplicate must not reach artifact upload");
+    await crossCatalog.getByLabel("Semantic version").fill("1.4.1");
+    assert.equal(await existingEntry.getByRole("link", { name: "Deploy the existing version" }).count(), 2);
+    await crossCatalog.getByLabel("Semantic version").fill("1.4.3");
+    assert.equal(await existingEntry.count(), 0);
+    await crossCatalog.getByRole("button", { name: "Continue to platform artifacts" }).click();
+    await crossCatalog.getByLabel("Artifact", { exact: true }).waitFor();
+    await crossCatalog.getByRole("button", { name: "Back to library" }).click();
+    await crossCatalog.getByText("Advanced publishing tools", { exact: true }).click();
+    await crossCatalog.getByRole("button", { name: "Import Greengrass recipe", exact: true }).click();
+    await crossCatalog.getByLabel("Recipe (JSON or YAML)", { exact: true }).fill(JSON.stringify(example.recipe));
+    await crossCatalog.locator("input[type=file]").setInputFiles({ name: "hello.tar", mimeType: "application/octet-stream", buffer: Buffer.from("fixture import") });
+    await crossCatalog.getByRole("button", { name: "Check translation", exact: true }).click();
+    await crossCatalog.getByText("Translates to 1 native manifest(s)", { exact: true }).waitFor();
+    // The import view shows the matching entry (catalog, platforms, deploy link) before any upload.
+    const importEntry = crossCatalog.getByRole("region", { name: "Existing library entry" });
+    await importEntry.getByText(`${example.recipe.ComponentName} ${example.recipe.ComponentVersion} is already in your library`, { exact: true }).waitFor();
+    await importEntry.getByText("Catalog 0x0000…000d · another of your publisher catalogs · linux/x86_64", { exact: true }).waitFor();
+    assert.equal(await importEntry.getByRole("link", { name: "Deploy the existing version" }).getAttribute("href"), "/firmware?componentVersion=0x204");
+    const acknowledgeImport = crossCatalog.getByRole("checkbox", { name: "I reviewed these differences" });
+    if (await acknowledgeImport.count()) await acknowledgeImport.check();
+    await crossCatalog.getByRole("radio").nth(1).check();
+    await crossCatalog.getByRole("checkbox", { name: /I confirm this artifact/ }).check();
+    await crossCatalog.getByRole("button", { name: "Upload and register translated version", exact: true }).click();
+    await crossCatalog.getByRole("status").filter({ hasText: `${example.recipe.ComponentName} ${example.recipe.ComponentVersion} is already in your library, published from another` }).waitFor();
+    assert.equal(await crossCatalog.evaluate(() => window.componentsAcceptance.count()), 0, "duplicate import must not upload");
+    assert.equal(await crossCatalog.evaluate(() => window.componentsAcceptance.calls().length), 0, "duplicate import must not register");
+    assert.equal(await importEntry.getByRole("link", { name: "Deploy the existing version" }).count(), 1, "existing entry stays visible after the blocked import");
+    await crossCatalog.close();
     const disconnected = await browser.newPage();
     await disconnected.goto(`${origin}/?disconnected`);
     await disconnected.getByRole("status").filter({ hasText: "Connect your wallet" }).waitFor();
@@ -113,15 +157,27 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await page.getByLabel("Operating system").first().inputValue(), "macos");
     await page.getByText("Optional installer command", { exact: true }).first().click();
     await page.getByLabel("Install command", { exact: true }).first().fill("{artifact} --install");
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
-    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
-    await publish.click();
-    await page.getByRole("alert").filter({ hasText: "Confidential delivery needs Seal" }).waitFor();
-    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
-    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByLabel("Storage period (days)", { exact: true }).fill("12");
+    // Delivery is validated on the artifacts step, before review or any upload.
+    const review = page.getByRole("button", { name: "Review version", exact: true });
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "not configured; nothing was uploaded" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfigured confidential delivery must not reach review");
     await page.getByRole("radio").nth(1).check();
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "Confirm that this content may be stored publicly" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfirmed public delivery must not reach review");
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
     await page.getByRole("checkbox").first().check();
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    await review.click();
+    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
+    await publish.waitFor();
+    // Returning to the artifacts step keeps the staged files visible in their pickers.
+    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByText("Selected: macos.bin", { exact: false }).waitFor();
+    await page.getByText("Selected: linux.bin", { exact: false }).waitFor();
+    assert.deepEqual(await page.getByLabel("Artifact", { exact: true }).evaluateAll(inputs => inputs.map(i => i.files[0]?.name)), ["macos.bin", "linux.bin"]);
+    await review.click();
     await publish.evaluate(b => { b.click(); b.click(); b.click(); });
     await page.waitForFunction(() => window.componentsAcceptance.count() === 1);
     assert.equal(await page.getByRole("button", { name: "Publishing…", exact: true }).isDisabled(), true);
@@ -136,6 +192,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     }
     await publish.click();
     for (let i = 1; i <= 4; i++) await finishUpload(i);
+    assert.deepEqual(await page.evaluate(() => window.componentsAcceptance.periods()), [12, 12, 12, 12, 12]);
     await page.getByRole("status").filter({ hasText: "Verifying fleet network" }).waitFor();
     await page.evaluate(() => window.componentsAcceptance.phase("wallet"));
     await page.getByRole("status").filter({ hasText: "Confirm version publication in your wallet" }).waitFor();
@@ -175,7 +232,8 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await page.getByLabel("Component name", { exact: true }).fill(componentName);
     await page.getByLabel("Semantic version").fill(componentVersion);
     await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
-    await page.getByRole("alert").filter({ hasText: "already exists" }).waitFor();
+    await page.getByRole("alert").filter({ hasText: "is already in your library. Published versions" }).waitFor();
+    await page.getByRole("region", { name: "Existing library entry" }).getByText(/selected publisher catalog/).waitFor();
     await page.getByLabel("Semantic version").fill("1.3.0");
     await page.getByRole("button", { name: "Continue to platform artifacts" }).click();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile publisher overflow");
@@ -207,7 +265,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "mobile deployment review overflow");
     assert.equal(await page.evaluate(() => window.componentsAcceptance.calls().length), 0, "navigation must not deploy");
     assert.deepEqual(errors, []);
-    console.log("PASS: Chrome library/search/errors, guided ordered multi-platform publishing, real upload progress, confidential fail-closed, duplicate suppression, upload/wallet rejection retry, confirmed success, immutable duplicate prevention, accessible form names, mobile layout and deploy-to-target navigation. Chain/wallet/storage are fixtures.");
+    console.log("PASS: Chrome library/search/errors, guided ordered multi-platform publishing, real upload progress, confidential fail-closed, duplicate suppression, upload/wallet rejection retry, confirmed success, same- and cross-catalog duplicate prevention (publisher and Greengrass import) with the existing entry shown, catalog-labelled repeated library entries, accessible form names, mobile layout and deploy-to-target navigation. Chain/wallet/storage are fixtures.");
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise(r => server.close(r));

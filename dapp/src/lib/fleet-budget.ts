@@ -53,6 +53,21 @@ export function defaultReserve(limits: Limits, available: bigint, floatMist: big
   return wanted < rest ? wanted : rest;
 }
 
+/** Registration may preselect funding only when its entire initial float fits. */
+export function canFundEnrollment(budget: Pick<BudgetView, "balance" | "defaultLimits">): boolean {
+  return budget.balance >= budget.defaultLimits.floatCap;
+}
+
+/** Keep balance changes during approval understandable, including failed effects. */
+export function enrollmentError(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : "Wallet request failed";
+  if (/fleet_budget/.test(message) && /MoveAbort|abort/i.test(message) &&
+      /(?:abort code[:\s]*11\b|[,)]\s*11\s*\)|\bcode[":\s]+11\b)/i.test(message)) {
+    return "The fleet budget no longer has enough SUI for this device’s starting balance and reserve. Fund the fleet budget, refresh, and try again, or turn off budget enrollment.";
+  }
+  return message;
+}
+
 export function validateLimits(limits: Limits): Limits {
   if (limits.periodMs <= BigInt(0)) throw new Error("The period must be positive");
   if (limits.maxDrawsPerPeriod <= BigInt(0)) throw new Error("Allow at least one draw per period");

@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 import { useCurrentClient } from '@mysten/dapp-kit-react';
 import { useQuery } from '@tanstack/react-query';
 import { useFleetStorage } from '@/hooks/useFleetStorage';
@@ -31,7 +32,7 @@ export function DataUsage() {
   return <section className="border rounded p-3 my-3 text-xs space-y-2">
     <h2 className="font-semibold">Fleet device-data usage</h2>
     <p>Usage refreshes every minute. Device uploads are grouped by device; software releases and installation instructions are listed separately.</p>
-    {(usage.error || schedule.error) && <p role="alert">Usage unavailable: {(usage.error ?? schedule.error)?.message}</p>}
+    {(usage.error || schedule.error) && <p role="alert">{formatStorageQueryError(usage.error ?? schedule.error, "Storage usage")}</p>}
     {!result && !usage.error && <p>{(budget && storage && !matchesFleet ? 'The connected owner budget does not match the configured data fleet.' : reason) ?? (schedule.error ? 'Storage availability information is unavailable.' : 'Loading storage usage…')}</p>}
     {result && !usage.error && <>
       <p>Total uploaded bytes (including storage redundancy): {number(result.writtenEncodedBytes)} bytes; data within its registered storage period: {number(result.storedBytes)} bytes; retained records: {number(result.retainedBytes)} bytes, including expired uploads.</p>

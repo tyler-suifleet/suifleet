@@ -81,12 +81,19 @@ def run():
             config.write_text(f'[sui]\nmanifest_path="deployment.json"\n[device]\nkeypair_path={json.dumps(str(key))}\ndevice_object_id="{ota.DEVICE}"\ndevice_cap_id="{ota.CAP}"\n[apply]\ncommand={json.dumps("/bin/sh "+str(component.UPDATER)+" --root "+str(root/"components"))}\n[runtime]\nstate_dir={json.dumps(str(root/"state"))}\npoll_seconds=1\nevent_discovery_seconds=1\n')
             def state():
                 p=root/'state/state.json';return json.loads(p.read_text()) if p.exists() else {}
+            def wait_for(condition, message, process):
+                try:
+                    ota.wait_for(condition, message, process)
+                except AssertionError:
+                    print((root/'daemon.log').read_text()[-8000:])
+                    print('simulator errors:', sim.errors)
+                    raise
             with (root/'daemon.log').open('w') as log:
                 def start():return subprocess.Popen([str(DAEMON)],env={**os.environ,'EDGE_CONFIG':str(config)},stdout=log,stderr=log)
                 process=start();ota.wait_for(lambda:state().get('initialized'),'enrollment',process)
                 sim.allow_reports=False
                 for i,mode in enumerate(['unsupported','sibling','invalid_unselected','mutable','wrong_type','valid','valid']):sim.deploy(hex(0x301+i),f'{i+1}.0.0',mode)
-                ota.wait_for(lambda:len(state().get('deployments',{}))==7 and state().get('cursor')==ota.scanned(7),'selection/failure cursor',process)
+                wait_for(lambda:len(state().get('deployments',{}))==7 and state().get('cursor')==ota.scanned(7),'selection/failure cursor',process)
                 outcomes=state()['deployments'];assert [outcomes[hex(0x301+i)]['status'] for i in range(7)]==[2,2,2,2,2,1,1],outcomes
                 assert f'linux/{ARCH}' in outcomes['0x302'].get('error',''),outcomes['0x302']
                 assert not any('never-download' in p for p in sim.downloads)
@@ -99,23 +106,60 @@ def run():
                 assert [json.loads(l)['version'] for l in history.read_text().splitlines()]==['6.0.0','7.0.0']
                 process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
                 sim.allow_reports=True;process=start()
-                ota.wait_for(lambda:all(o['reported'] for o in state()['deployments'].values()),'restart receipts',process)
+                wait_for(lambda:all(o['reported'] for o in state()['deployments'].values()),'restart receipts',process)
                 assert len(history.read_text().splitlines())==2
                 process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
                 assert len(sim.reports)==7 and not sim.errors,sim.errors
+                # Catalog-backed desired state uses the same platform resolver.
+                # Both revisions arrive while offline; only the newest may run.
+                sim.memberships.append((ota.GROUP, ota.DEVICE))
+                for id, version in [('0x310', '10.0.0'), ('0x311', '11.0.0')]:
+                    sim.deploy(id, version)
+                    sim.events[-1]['parsedJson'].update(target_groups=[ota.GROUP], target_devices=[])
+                    sim.managed.add(id)
+                sim.desired[ota.GROUP] = (2, {component.DEFAULT_COMPONENT: '0x311'})
+                process=start()
+                wait_for(lambda:state().get('deployments',{}).get('0x311',{}).get('reported'), 'catalog desired convergence', process)
+                assert state()['deployments']['0x311']['status']==1
+                assert '0x310' not in state()['deployments'], state()['deployments']
+                assert len(history.read_text().splitlines())==3
+                assert json.loads(history.read_text().splitlines()[-1])['version']=='11.0.0'
+                assert not any('0x310' in path for path in sim.downloads)
+                process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
+                # Removed members stop following later library revisions.
+                sim.groups[ota.GROUP]['device_ids']=[]
+                sim.deploy('0x312', '12.0.0')
+                sim.events[-1]['parsedJson'].update(target_groups=[ota.GROUP], target_devices=[])
+                sim.managed.add('0x312')
+                sim.desired[ota.GROUP]=(3, {component.DEFAULT_COMPONENT:'0x312'})
+                process=start()
+                for _ in range(2):
+                    polls=ota.completed_polls(root/'daemon.log')
+                    wait_for(lambda:ota.completed_polls(root/'daemon.log')>polls, 'removed catalog member poll', process)
+                assert len(history.read_text().splitlines())==3
+                assert not any('0x312' in path for path in sim.downloads)
+                process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
+                # A late joiner obtains the already committed catalog version.
+                sim.groups[ota.GROUP]['device_ids']=[ota.DEVICE]
+                process=start()
+                wait_for(lambda:state().get('deployments',{}).get('0x312',{}).get('reported'), 'late catalog member convergence', process)
+                assert state()['deployments']['0x312']['status']==1
+                assert len(history.read_text().splitlines())==4
+                assert json.loads(history.read_text().splitlines()[-1])['version']=='12.0.0'
+                process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
                 # A complete legacy manifest remains valid, but cannot resolve schema2.
                 manifest['type_origins']={n:o for n,o in ota.TYPE_ORIGINS.items() if n not in CATALOG_TYPES}
                 (root/'deployment.json').write_text(json.dumps(manifest))
                 before=list(sim.downloads)
                 sim.deploy('0x308','8.0.0')
                 process=start()
-                ota.wait_for(lambda:state().get('deployments',{}).get('0x308',{}).get('reported'),'missing origin failure receipt',process)
+                wait_for(lambda:state().get('deployments',{}).get('0x308',{}).get('reported'),'missing origin failure receipt',process)
                 assert state()['deployments']['0x308']['status']==2
                 assert 'missing catalog type origin' in state()['deployments']['0x308']['error']
                 assert sim.downloads==before
                 process.send_signal(signal.SIGINT);process.wait(timeout=10);process=None
-                assert len(history.read_text().splitlines())==2
-            print(f'PASS: schema2 actual-daemon ({ARCH}) different manifests; unsupported, {SIBLING}-only, invalid unselected hash, mutable/wrong type rejected before downloads; cursor/restart/durable reports, no duplicate apply')
+                assert len(history.read_text().splitlines())==4
+            print(f'PASS: schema2 actual-daemon ({ARCH}) different manifests; unsupported, {SIBLING}-only, invalid unselected hash, mutable/wrong type rejected before downloads; cursor/restart/durable reports, no duplicate apply; catalog desired supersession, removal and late-join convergence')
     finally:
         if process and process.poll() is None:process.kill();process.wait()
         shim.kill();shim.wait();server.shutdown();server.server_close()

@@ -1,8 +1,11 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { addSessionPublisher, sessionEndpoints, removeSessionPublisher } from "@/lib/walrus";
 import { NETWORK } from "@/lib/constants";
 import { useDevices } from "@/hooks/useDevices";
 import { useCostQuote } from "@/hooks/useCostQuote";
@@ -43,8 +46,7 @@ function NumberField({ label, value, onChange, step }: { label: string; value: n
 /** The fleet's cost settings with each option's network cost and SuiFleet price, and the deposit they need. */
 export function FleetSettingsPanel() {
   const { table, error } = loadPriceTable();
-  if (!table) return <p role="alert" className="text-sm">Prices unavailable: {error}</p>;
-  return <SettingsForm table={table} />;
+  return <><StorageEndpoints />{!table ? <p role="alert" className="text-sm">Prices unavailable: {error}</p> : <SettingsForm table={table} />}</>;
 }
 
 /** Price-table option values for saved settings, when every saved value is one of the table's options. */
@@ -234,8 +236,8 @@ function SettingsForm({ table }: { table: PriceTable }) {
 
     <p className="text-xs text-gray-600">Estimated costs can change. Your account approval app shows the actual network fee before you confirm.</p>
     <details className="text-xs text-gray-700 border rounded p-2" data-testid="quote"><summary>Technical cost assumptions and exchange rates</summary>
-      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${gasError})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: controlled update-result and test-network health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
-      <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${walrusError})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
+      <p>Gas: {quote.referenceGasPrice.toString()} MIST per unit, {quote.gasSource}, {quoteDate(quote.gasObservedAt)}{gasError ? ` (live read failed: ${formatStorageQueryError(gasError, "Gas price")})` : ""}. A deployment receipt costs about {formatToken(fee.receiptNetMist)} SUI and a health report {formatToken(fee.recurringHealthNetMist)} SUI at this price: controlled update-result and test-network health measurements with computation rescaled from {MEASURED.referenceGasPrice.toString()} MIST.</p>
+      <p>Walrus: {quote.walrusStoragePrice.toString()} FROST per MiB-epoch and {quote.walrusWritePrice.toString()} per MiB written, {quote.walrusSource}, {quoteDate(quote.walrusObservedAt)}{walrusError ? ` (live read failed: ${formatStorageQueryError(walrusError, "Walrus price")})` : ""}. Epochs here last {epochDays(NETWORK)} day(s).</p>
       <p>USD: SUI ${quote.usd.SUI}, WAL ${quote.usd.WAL}, {quote.usdSource}, {quoteDate(quote.usdObservedAt)}.{" "}
         <button type="button" className="underline" disabled={usdLoading} onClick={() => void refreshUsd()}>Fetch live USD prices from CoinGecko</button>
         {usdError && <span role="alert"> {usdError}</span>}</p>
@@ -256,7 +258,7 @@ function SettingsForm({ table }: { table: PriceTable }) {
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
-      {saved.error && <p role="alert">Saved settings unavailable: {saved.error.message}</p>}
+      {saved.error && <p role="alert">{formatStorageQueryError(saved.error, "Saved fleet settings")}</p>}
       {saved.data === null && <p data-testid="saved">No settings saved yet: devices keep their local configuration until you save.</p>}
       {saved.data && <details data-testid="saved"><summary>Current saved reporting and storage settings</summary><p>Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p></details>}
       <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
@@ -274,4 +276,18 @@ function SettingsForm({ table }: { table: PriceTable }) {
     </div>
     </section>
   </div>;
+}
+
+function StorageEndpoints() {
+  const [publishers, setPublishers] = useState<string[]>([]);
+  useEffect(() => { setPublishers(sessionEndpoints()); }, []);
+  const [url, setUrl] = useState("");
+  const [message, setMessage] = useState("");
+  return <section className="border rounded p-4 space-y-2"><h2>Storage endpoints</h2>
+    <p>Publishers receive the bytes you upload. Only add a service you trust. This override lasts for this tab session; fleet-paid storage keeps its own route.</p>
+    <label>Publisher URL<input type="url" className="border p-2 block w-full" value={url} onChange={e => setUrl(e.target.value)} /></label>
+    <button type="button" onClick={() => { try { setMessage(`Added ${addSessionPublisher(url)} for this session; it will be tried first.`); setUrl(""); setPublishers(sessionEndpoints()); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } }}>Add publisher for session</button>
+    <ul>{publishers.map(endpoint => <li key={endpoint}>{endpoint} <button type="button" onClick={() => { try { removeSessionPublisher(endpoint); setPublishers(sessionEndpoints()); setMessage(`Removed ${endpoint}`); } catch (e) { setMessage(String(e)); } }}>Remove publisher</button></li>)}</ul>
+    {message && <p role="status">{message}</p>}
+  </section>;
 }

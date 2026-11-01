@@ -1,3 +1,4 @@
+import { aggregatorFetch } from "./walrus";
 // Fleet archives authenticate the encrypted bytes on chain and the exact
 // plaintext with the writer's personal-message signature. Never trust an
 // aggregator, an optional relay, or a successful decryption as authentication.
@@ -212,7 +213,7 @@ export async function verifyArchive(plaintext: Uint8Array, config: FleetDataConf
 }
 
 /** Bound streaming reads even when Content-Length is missing or dishonest. */
-export async function fetchArchiveBytes(url: string, fetcher: typeof fetch = fetch): Promise<Uint8Array> {
+export async function fetchArchiveBytes(url: string, fetcher: typeof fetch = aggregatorFetch): Promise<Uint8Array> {
   const response = await fetcher(url, { signal: AbortSignal.timeout(60_000), credentials: 'omit', referrerPolicy: 'no-referrer' });
   if (!response.ok || !response.body) throw Error('Archive unavailable');
   const reader = response.body.getReader(), chunks: Uint8Array[] = [];
@@ -327,7 +328,7 @@ export async function archiveDecryptor(client: SuiGrpcClient, config: FleetDataC
  * A relay can supply these bytes but never the identity, index or authority. */
 export async function fetchVerifiedArchive(client: SuiGrpcClient, walrus: Pick<WalrusClient, 'systemState'>,
   config: FleetDataConfig, deviceId: string, index: number, aggregator: string,
-  decrypt: (encryptedObject: Uint8Array) => Promise<Uint8Array>, fetcher: typeof fetch = fetch): Promise<Archive> {
+  decrypt: (encryptedObject: Uint8Array) => Promise<Uint8Array>, fetcher: typeof fetch = aggregatorFetch): Promise<Archive> {
   if (!Number.isSafeInteger(index) || index < 0) throw Error('Invalid archive index');
   const writer = await readDeviceData(client, config, deviceId);
   const head = writer && await readCompactHead(client, config, writer.id);

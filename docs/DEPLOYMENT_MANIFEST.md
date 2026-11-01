@@ -19,6 +19,7 @@ Each client checks the manifest against the chain at startup and refuses a stale
 | `type_origins` | For each type the clients use, the package that **introduced** it. Types keep their introduction package across upgrades, so newer types such as `RecipeDigestKey` and `DeviceAddressKey` have later origins than `DeviceRegistry`. |
 | `shared_objects.registry` | The shared `DeviceRegistry` ID and its initial shared version. |
 | `supported_clients` | Client version ranges, as `min` ≤ version < `max_exclusive`. |
+| `treasury_payee` | Optional canonical nonzero 32-byte lowercase Sui treasury address. Required by payment callers; absent or mismatched payees block payment. See [treasury custody](TREASURY.md). |
 | `walrus` | Publisher and legacy aggregator URL, plus optional ordered device `aggregator_urls`; see [public delivery](WALRUS_DELIVERY.md). |
 
 Optional type-origin groups are all-or-none: the component catalog, the Seal policy,
@@ -118,6 +119,44 @@ root, receipt/index keys and relocated group/catalog keys retain their own
 introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
+
+Treasury payment configuration and user-only multisig/SuiNS operations are documented in [TREASURY.md](TREASURY.md). `resolve --treasury-payee ADDRESS` and publication `--treasury-payee ADDRESS` pin a reviewed address; publication preserves the previous payee when omitted, including recovery. Missing payees preserve legacy nonpayment use, while the frontend payment guard fails closed.
+
+The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
+tells clients the package has the bounded batch membership entry points. Like
+`fleet_handover`, it is a single-type group recorded with its own introduction
+origin; manifests without it keep the single-device calls. See
+[bulk group membership](GROUP_BATCH.md).
+
+## Ordered browser storage endpoints (SF-166)
+
+`walrus.publisher_urls` and `walrus.aggregator_urls` optionally specify nonempty
+ordered URL lists. The browser uses the publisher list instead of the legacy
+`publisher_url`, and tries the aggregator list before the legacy `aggregator_url`.
+Retain the legacy fields for older clients.
+Publisher HTTP 5xx, network errors and timeouts try the next endpoint with the same
+protected bytes. Rejected requests and malformed success responses stop publication
+for configured publishers; session overrides fall through to the remaining endpoints.
+Cancellation always stops publication. Fleet-paid SDK uploads never fall back to
+public publishers.
+Successful uploads record `StorageInfo.publisherUrl`; browser reads record the
+serving aggregator in `blobReadEndpoints`. Read probes try all aggregators before
+reporting unavailable/unknown; download links use the last successful aggregator or the first configured one.
+Archive readers use the same failover while retaining their size, digest and
+authority checks.
+
+Release commands accept repeated `--publisher-mirror` options after `--publisher`.
+Upgrades and interrupted-release recovery preserve the ordered publisher list.
+Repeated `--aggregator-mirror` options continue to set the complete read list.
+Fleet settings → Storage endpoints lets an operator add an HTTPS publisher for the
+current tab session, including reloads, without rebuilding. Overrides are scoped
+by network and configured publisher, saved in session storage and tried first.
+HTTP is permitted only for loopback development. Public upload bytes are visible
+to that service; confidential bytes remain encrypted before retry. This setting
+changes this browser, not device configuration or other operators' consoles.
+Publisher errors give an action and endpoint; raw responses appear only under
+Technical details. When fleet storage is available, component publication selects
+it automatically; an explicit operator choice can still select public publishing.
 
 ## Committed public profiles
 

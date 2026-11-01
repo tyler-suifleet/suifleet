@@ -3,6 +3,7 @@
     python3 -m unittest discover -s site/tests -v
 """
 import hashlib
+import io
 import json
 from pathlib import Path
 import shutil
@@ -70,10 +71,20 @@ class SiteTest(unittest.TestCase):
         self.assertIn(">Launch app<", home)
         guide = (self.out / "guide" / "index.html").read_text()
         steps = json.loads((SITE / "guide" / "steps.json").read_text())["steps"]
-        self.assertEqual(len(steps), 7)
+        self.assertEqual(len(steps), 9)
         for step in steps:
             self.assertIn(f'id="{step["id"]}"', guide)
             self.assertIn(f'href="{config["app_url"]}{step["console_route"]}"', guide)
+
+    def test_logo_download_preserves_transparency(self):
+        for page in json.loads((SITE / "src" / "site.json").read_text())["pages"]:
+            html = build.output_path(self.out, page["path"]).read_text()
+            self.assertIn('href="/assets/suifleet-mark.png" download="SuiFleet-mark.png"', html)
+        png = (self.out / "assets" / "suifleet-mark.png").read_bytes()
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(png[12:16], b"IHDR")
+        self.assertEqual(png[25], 6, "Download must retain its RGBA alpha channel")
+        self.assertEqual(png, (SITE / "src" / "assets" / "suifleet-mark.png").read_bytes())
 
     def test_broken_internal_link(self):
         self.edit("index.html", 'href="/guide/"', 'href="/missing/"')
@@ -133,7 +144,7 @@ class SiteTest(unittest.TestCase):
         video = b"\x1aE\xdf\xa3 not really webm"
         (media / "guide" / "sign-in.webm").write_bytes(video)
         manifest = {"schema_version": 1, "network": "testnet", "chain": "4c78adac", "console_commit": "0" * 40,
-                    "recorded": "2026-10-27", "videos": [{"step": "sign-in", "file": "sign-in.webm",
+                    "recorded": "2026-10-27", "videos": [{"step": "sign-in", "file": "sign-in.webm", "console_commit": "1" * 40,
                                                           "file_sha256": hashlib.sha256(video).hexdigest(),
                                                           "width": 1280, "height": 800, "caption": "Signing in."}]}
         (media / "guide" / "videos.json").write_text(json.dumps(manifest))
@@ -144,8 +155,9 @@ class SiteTest(unittest.TestCase):
             self.assertEqual(self.errors(), [])
             guide = (self.out / "guide" / "index.html").read_text()
             self.assertIn('<source src="/media/guide/sign-in.webm" type="video/webm">', guide)
+            self.assertIn('<code>111111111111</code>', guide)
             missing = self.errors(require_videos=True)
-            self.assertEqual(len(missing), 6, missing)
+            self.assertEqual(len(missing), 10, missing)
             (self.out / "media" / "guide" / "sign-in.webm").write_bytes(b"swapped")
             rewrite_sums(self.out)
             self.assertTrue(any("does not match its recorded digest" in e for e in self.errors()))
@@ -157,6 +169,30 @@ class SiteTest(unittest.TestCase):
         self.assertEqual(verify_served.served_path("index.html"), "/")
         self.assertEqual(verify_served.served_path("guide/index.html"), "/guide/")
         self.assertEqual(verify_served.served_path("assets/style.css"), "/assets/style.css")
+
+    def test_served_header_fetch_failure_is_reported(self):
+        # All file reads succeed; only the final header request fails.
+        def fetch(url):
+            if fetch.remaining == 0:
+                raise OSError("connection closed")
+            fetch.remaining -= 1
+            name = url.removeprefix("https://suifleet.io/")
+            path = self.out / name
+            if path.is_dir():
+                path /= "index.html"
+            return path.read_bytes(), {}
+
+        fetch.remaining = sum(
+            line.split("  ", 1)[1] not in ("_headers", "404.html")
+            for line in (self.out / "SHA256SUMS").read_text().splitlines()
+        )
+        output = io.StringIO()
+        with mock.patch.object(sys, "argv", ["verify_served.py", str(self.out), "https://suifleet.io"]), \
+                mock.patch.object(verify_served, "fetch", side_effect=fetch), \
+                mock.patch.object(sys, "stdout", output):
+            with self.assertRaisesRegex(SystemExit, "1 problem\\(s\\)"):
+                verify_served.main()
+        self.assertIn("ERROR: home page headers: fetch failed: connection closed", output.getvalue())
 
 
 if __name__ == "__main__":

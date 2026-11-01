@@ -1,5 +1,7 @@
 # Unattended reciprocal PR coordination
 
+The [automatic recovery watchdog](RECOVERY_WATCHDOG.md) adds a five-minute offline progress check and a singleton, bounded recovery-agent session when the pipeline stalls. It complements the dispatcher and PR coordinator while preserving their ownership, review, CI and deployment gates.
+
 SF-040 adds a local WSL service in `tools/pr-coordinator`. Codex reviews Claude's PRs; Claude reviews Codex's. The service polls GitHub, records jobs and review receipts in `~/.local/state/pr-coordinator/reviews.sqlite3`, launches the existing installed CLIs and serially integrates approved changes. GitHub login is not model identity: implementation families and branches come from atomic `ticket` ownership, and reviewer families come from independently launched worker jobs.
 
 The committed engine, installer, tests and systemd unit can be used in another registered repository. Local configuration selects each project ID, canonical root, repository and GitHub account. Git uses that checkout's existing SSH alias. Tokens are read from `gh auth token --user ACCOUNT` into the individual command environment; they are never stored in configuration or printed. The example enables SuiFleet only; add a second project entry for Vortech with repository `therealtime/vortech`, project `vortech`, its registered root and GitHub account `therealtime`.
@@ -177,6 +179,15 @@ All exact-head/base CI, independent review and integration gates remain required
 This change must pass independent review before installation with the normal
 installer. Offline tests and read-only live failure inspection do not install or
 restart the running coordinator.
+
+A read-only review interrupted before any launch files were written can be
+reserved once more by the normal coordinator, using its original row and receipt
+directory. This requires the exact pre-launch interruption reason, no recorded
+PID/start, launch intent, result or publication, and an existing empty directory.
+Missing, linked, nonempty or unreadable directories retain uncertainty. Repairs
+are excluded. Capacity and provider backoff still apply, and the retry must obtain
+fresh exact-head/base review evidence; it grants no approval or CI exemption.
+After the one retry, another interruption requires explicit operator inspection.
 
 ## Merge closes the implementation issue
 
@@ -955,6 +966,45 @@ mark tickets Done, reset repair budgets or relax independent merge gates. The
 standalone helper is installed separately from the coordinator generation; record
 its exact commit/hash in the local installation receipt when updating it.
 
+
+### Ordinary CI runtime recovery (SF-179)
+
+The complete serial `CI / check` job has a 120-minute ceiling. Run 40542334953
+(job 122324581852) reached the former 60-minute limit on 2026-10-27; this scoped
+ceiling correction preserves every security, simulator, platform and integration
+step and the existing caches. It is headroom, not a measured completion time.
+All other job limits and merge gates remain unchanged.
+
+After this workflow correction merges, the orchestrator/operator must identify
+still-current affected PR heads and update their branches with the reviewed main
+revision through the normal integration path before rerunning CI. Rerunning an
+old workflow revision alone retains its old ceiling. Verify the open PR head and
+base, inspect `gh run view RUN --json headSha,workflowName,event,conclusion`, and
+only then use `gh run rerun RUN` for a run whose revision contains the corrected
+workflow. If integration already started a fresh CI run, use that run instead.
+Do not create empty commits, fabricate statuses or bypass checks. Hosted reruns
+and their results remain post-integration work; implementation workers hand off
+without watching CI.
+
+Cancelled Actions jobs qualify for bounded owner repair only when fresh read-only
+API evidence identifies the same repository, PR head, completed workflow attempt,
+job ID and GitHub Actions check run, with the exact failure annotation
+"The job has exceeded the maximum execution time of …". The coordinator and
+dispatcher share this classifier. Evidence records only IDs/revisions and the
+fixed classification `job_timeout`; annotation text and API errors are not saved
+or printed. The repair snapshot presents the conclusion as `TIMED_OUT`, while
+the underlying cancelled check remains a failed merge gate. Fleet-status therefore
+continues to show CI failure and the coordinator names the existing repair owner.
+
+The latest attempt must still be current after reading annotations. Superseded or
+ambiguously ordered rollups, queued reruns, changed head/base, manual/concurrency
+cancellation, foreign check apps and unavailable/malformed/truncated evidence do
+not start repair. Responses above 100 jobs or annotations conservatively remain
+unclassified. No elapsed-time heuristic or log-text scraping grants repair.
+Existing per-check attempt budgets, ownership, live-worker fences, exact-head/base
+CI and independent review still apply. Installation is only through the reviewed
+merged-runtime path; this change does not restart services from a worktree.
+
 ### Shared discovery snapshots
 
 The coordinator uses the installed atomic-ticketing engine's `ticket_snapshot.py`
@@ -974,3 +1024,183 @@ served as fallback. Existing exact-head/base and review gates remain in force.
 
 An older ticket engine keeps the previous live transport until upgraded. Updating
 source on main does not bypass the existing runtime activation/validation policy.
+
+### Authenticated preparation errors (SF-205)
+
+A terminal `ERROR` status can represent preparation failure or cancellation.
+Only preparation failure can enter owner repair, and only after fresh API
+evidence authenticates the main-branch `testnet.yml` workflow_run, completed
+attempt, successful plan and status publisher, and failed prepare job. The
+trusted status publisher emits a small `SUIFLEET_PREPARATION_V1` receipt in its
+job log binding the API-created status ID, candidate head, current base,
+controller revision, run and attempt. The coordinator and dispatcher read that
+specific authenticated job log; they retain only the parsed IDs/revisions.
+They recheck the latest attempt/status and current PR head/base after the read.
+A forged status URL alone cannot supply this receipt. Missing, expired,
+ambiguous or unavailable evidence, cancellation and historical runs without
+receipts remain unclassified blockers and never launch preparation repair.
+
+Verified failures in `Checkout authenticated test revision` in SuiFleet route
+to the existing **SF-204 / PR #406** incident owner while PR #406 is open and
+unmerged. After it closes, checkout failures use ordinary bounded owner repair;
+unavailable incident state fails closed. Each affected PR retains a
+durable observation naming that owner, while the coordinator excludes this shared
+failure from per-PR repair dispatch/budgets and the dispatcher does not interrupt
+product workers for it. Mixed observations still route their local failures and
+report both repair responsibilities. SF-204's existing implementation/review reservation is
+preserved; this route is an incident assignment, not proof the defect is fixed.
+Other verified preparation failures use the existing bounded owner-repair path.
+Source feedback and base integration still follow their ordinary review paths.
+
+Installation remains merged-only. Both the main-sourced receipt producer and
+reviewed coordinator must be active before new receipts can be recognized.
+SF-204 controller activation, the historical stalled runs and actual subsequent
+exact-head/current-base hosted validation remain unresolved until the operator
+records real evidence. This implementation neither backfills receipts nor posts
+success, reruns transactions, resets budgets or waives CI, testnet, security or
+independent review. There is no Testnet spend for offline routing validation.
+
+### Manual implementation origins in stopped-repair recovery
+
+A manually implemented ticket may have no dispatcher implementation receipt.
+For that case, the operator can pass `--manual-origin /private/origin.json` to
+`recovery_control.py`. This is existing process evidence, not a way to reconstruct
+a stopped identity from prose or choose an arbitrary absent PID. The private,
+operator-owned regular JSON file must already predate the stopped repair. It
+records `pid` (integer), `sid` (integer session ID, required to equal `pid`), `started` (Linux process start ticks as a string),
+`recorded_at` (Unix timestamp), `claim` (SHA-256 of the claim token), and the exact
+`session`, `branch`, `worktree`, `agent` and `model` from the original claim. Do
+not put a raw claim token in this receipt or publish it. The original worker must
+have been launched as a session leader (for example with `start_new_session=True`);
+a receipt without that recorded session identity is insufficient.
+
+The controller verifies the original PID is absent, its session has stopped, and
+no claim helper remains or denies inspection. It repeats those checks before
+spawn, rejects changed receipt bytes, and saves the exact verified bytes with the replacement
+audit without reading the source file again. Existing dispatcher-origin recovery keeps its original stop checks.
+Missing origin evidence retains the reservation; do not manufacture a historical
+receipt or mark the ticket Review to force dispatch. Install this route only
+after its source PR merges; CI, independent review and all resource/provider
+waits still apply.
+
+
+## Reviewed integration batches
+
+SF-207 adds an opt-in integration path per configured project. Enable it only in
+the reviewed, merged and installed runtime; the default remains the existing
+single-PR path. A typical project setting is:
+
+```json
+"integration_batch": {"enabled": true, "max_members": 4, "collection_seconds": 120}
+```
+
+The coordinator collects up to four source-ready PRs against one pinned `main`
+revision. Other implementations may continue, but the coordinator freezes its
+own main publication while that integration epoch is active. Source branches are
+not rebased merely because another PR merged. A short collection deadline allows
+a smaller batch when fewer PRs are ready. Each project has an independent epoch.
+Batches contain one implementation owner family; mixed queues are split so the
+combined reviewer is independent of every member, including Claude-owned PRs.
+Activation verifies that independence against each recorded member owner.
+
+A source review is not merge approval. Review workers report explicit
+`source_complete` and `acceptance_ready` booleans: code/security findings must be
+resolved, and remaining acceptance must be automated candidate validation or an
+explicit trusted deferral. Historical `blocked` prose is never upgraded into a
+source receipt. The published receipt binds the exact source head, reviewed
+scope, non-receipt feedback, threads, policy and reviewer family. CI and advancing
+main do not change that source identity. Changed code, scope or feedback requires
+a fresh source review; a source receipt alone never authorizes publication.
+
+The service creates a separate `integration/batch/…` branch and integration PR,
+using Tyler's author and committer identity for each conflict-free merge step.
+Before merging a member, it checks every source commit's author, committer and
+additional authorship attribution. Rejections become durable owner repair context
+for that exact head/base and are excluded from collection until repaired.
+The source heads remain in the Git ancestry. The actual combined candidate runs
+ordinary/security CI and the existing main-sourced protected testnet workflow.
+After those checks succeed, an independent integration reviewer checks the
+combined changes, all member acceptance evidence and the immutable manifest.
+No individual source-head status is forged from the candidate's result.
+After combined validation and approval, the service publishes formal member
+approvals through the configured independent GitHub review account. Those records
+cite the original source proof and actual combined candidate evidence; they do
+not claim another model run. Only known coordinator-generated change requests
+can be superseded this way. Human, edited or foreign-account requests remain
+blocking. Batch mode requires that independent review account to be configured.
+
+Before one nonforce publication, the service rechecks the candidate, pinned base,
+source heads, feedback, source receipts, claims and dependencies. Changed inputs
+invalidate that candidate without resetting unrelated source branches. Conflicts
+are excluded and routed to the owning worker. Failed groups are split in bounded
+smaller combinations; a failing singleton is held for a real owner repair using
+its combined-candidate failure evidence. A failed combination is not blindly
+submitted forever. Done, failed and invalidated candidates release their disposable
+Git worktrees; durable receipts and Git objects remain. Cleanup retries on later
+ticks if a local Git operation fails. Transient Git/GitHub/worker-launch errors
+retain the same candidate and completed checks; only positively identified input
+changes invalidate it.
+
+### Interrupted and uncertain batch operations
+
+An interrupted `building` or `build_uncertain` epoch retries automatically only
+when it has no head, PR or publication intent and `ls-remote` confirms its branch
+is absent. The coordinator revalidates the pinned inputs, removes only its own
+disposable worktree and rebuilds in the same epoch. An unavailable remote read
+retains the fence. Never reset member branches or delete durable receipts.
+
+For other uncertain writes, the sole integration operator must inspect the batch
+row and its recorded branch/head/base, then use the authenticated repository:
+
+- `pr_creating`: query open PRs by the exact recorded head branch. One PR with the
+  recorded head SHA and base `main` is adopted on the next tick without another
+  POST. If no PR exists, first establish that the original request is no longer
+  in flight, verify the remote branch SHA, then create exactly one PR from that
+  recorded branch to `main` using `gh pr create`; the next tick adopts it. Multiple
+  matches or mismatched revisions require investigation, never blind recreation.
+- `publish_pending`: fetch main and check `git merge-base --is-ancestor HEAD_SHA
+  origin/main` with the recorded candidate SHA. Success automatically reconciles
+  on the next tick. If absent, retain the fence: the sole orchestrator must recheck
+  every publication gate and resolve the original push outcome before any retry.
+  An operator must not directly push main merely to clear this state. A moved base
+  requires a new reviewed candidate; uncertain publication is never replayed.
+- A `building`/`build_uncertain` epoch with an unexpected remote branch remains
+  fenced. Inspect remote PRs and ref history first. If publication actually occurred,
+  preserve the receipts and escalate for explicit recovery; do not delete the ref
+  or rewrite the database to force a retry. If verified unrelated accidental ref
+  creation is reversed by the operator, the normal absent-ref guard permits retry.
+
+Do not edit the coordinator database to fabricate checks, review or publication.
+These fences preserve reservations while the operator resolves external outcomes.
+
+After GitHub confirms the integration PR and original source PRs as merged, the
+existing reconciliation closes each implementation issue and marks its atomic
+claim/Project item Done. Runtime activation verifies the entire recorded merge
+chain, typed independent source proofs, exact combined approval and actual merged
+candidate. A partial or tampered batch cannot authorize installation.
+
+`fleet-status` retains GitHub/atomic totals and adds a derived PR pipeline section:
+source review, ordinary CI, acceptance, evidence review, queued batch, conflict,
+active work and ready. Integration candidates are shown separately from source
+PRs; neither worker counts nor batch membership are added to issue totals.
+Missing or stale data is displayed as unavailable.
+
+### First installation and rollback
+
+The older supervisor intentionally pins its own protocol and cannot silently gain
+batch-proof support. After SF-207 passes normal review/CI and merges, use a clean
+checkout of the fetched main revision:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet
+```
+
+This explicit path verifies committed main, existing reviewed merge evidence,
+source bytes and offline tests before switching both supervisor and runtime under
+activation/parent authority locks. It preserves private configuration and running
+model workers and rolls back the generation/supervisor together on failure. Then
+enable `integration_batch` in the private project configuration and restart only
+the coordinator parent through the existing serialized operation. Do not install
+this PR's unmerged files or disable live-wallet, CI or independent-review gates.
+An actual hosted batch, post-merge issue reconciliation and installed activation
+remain rollout acceptance until observed; offline fixtures do not establish them.

@@ -25,7 +25,7 @@ const fleet = { id: config.fleetId, version: '1', budget_id: config.budgetId, st
 const writer = { id: writerId, version: '1', fleet_id: config.fleetId, device_id: deviceId, account_id: id('0xa1'),
  health_seq: String(snapshot.seq), health_at_ms: String(snapshot.observed_ms), message: bytes(envelope.message), signature: bytes(envelope.signature),
  batch_seq: '0', batch_at_ms: null, emergency_at_ms: null, anchor_count: '0' };
-function client({ f = fleet, w = writer, revoked = false, currentSigner = signer, origin = config.typeOrigin, indexType = '0x2::object::ID', fail = false, chainId = config.chainIdentifier, shared = true } = {}) {
+function client({ f = fleet, w = writer, revoked = false, currentSigner = signer, origin = config.typeOrigin, indexType = '0x2::object::ID', fail = false, missingIndex = false, chainId = config.chainIdentifier, shared = true } = {}) {
  return {
   ledgerService: { async getServiceInfo() { return { response: { chainId: toBase58(Buffer.from(chainId + '00'.repeat(28), 'hex')) } }; } },
   async getObject({ objectId }) {
@@ -35,6 +35,7 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
     content: (isFleet ? data.FleetDataBcs : data.DeviceDataBcs).serialize(isFleet ? f : w).toBytes() } };
   },
   async getDynamicField({ parentId }) {
+   if (parentId === config.fleetId && missingIndex) throw new (appRequire('@mysten/sui/client').ObjectError)(deviceId, 'missing', { reason: 'notFound' });
    return parentId === config.fleetId ? { dynamicField: { value: { type: indexType, bcs: bcs.Address.serialize(writerId).toBytes() } } }
     : { dynamicField: { value: { type: `${manifest.type_origins['device_registry::Identity']}::device_registry::Identity`,
      bcs: protocol.device_registry_IdentityBcs.serialize({ signer: currentSigner, revoked, owner_cap: id('0xc0') }).toBytes() } } };
@@ -55,6 +56,38 @@ function client({ f = fleet, w = writer, revoked = false, currentSigner = signer
  assert.notEqual((await data.fetchChainHealth(dailyClient,config,[deviceId],snapshot.observed_ms+day/2))[deviceId].status,'offline');
  assert.equal((await data.fetchChainHealth(dailyClient,config,[deviceId],snapshot.observed_ms+day*4))[deviceId].status,'offline');
  assert.throws(()=>data.validateHealthSnapshot({...daily,interval_seconds:86401},86400));
+ // Exercise the actual detail/header components with real reader results.
+ const React = appRequire('react'), { renderToStaticMarkup } = appRequire('react-dom/server');
+ const { HealthDetails, TelemetrySettings } = load('components/DeviceHealth.tsx');
+ const telemetry = load('lib/telemetry.ts');
+ const absentConfig = (await telemetry.fetchFleetHealth(client(), [deviceId], id('0xa'), '', '', fetch, {}))[deviceId];
+ const notMember = await result(client({ missingIndex: true }));
+ const noReport = await result(client({ w: { ...writer, health_seq: '0', message: [], signature: [] } }));
+ for (const [health, configured, expected] of [
+  [absentConfig, false, 'Device health reporting is not set up for this fleet.'],
+  [notMember, true, 'This device is not in the configured data fleet.'],
+  [noReport, true, 'No health report yet for this device.'],
+ ]) {
+  const detail = renderToStaticMarkup(React.createElement(HealthDetails, { health }));
+  const header = renderToStaticMarkup(React.createElement(TelemetrySettings, { configured }));
+  assert.ok(detail.includes(expected), detail);
+  assert.equal(header.includes('Health comes from verified device reports.'), configured);
+  assert.equal(header.includes('not set up'), !configured);
+  assert.doesNotMatch(detail + header, /NEXT_PUBLIC_/);
+ }
+ // A global locator must not make an unrelated selected fleet look configured.
+ let selection = { supported: true, fleet: { budgetId: id('0x999') } };
+ const scoped = loader({ '@/lib/fleet-data': { DATA_CONFIG: config, configuredDataFleets: () => [config] },
+  './useFleetSelection': { useFleetSelection: () => selection } })('hooks/useFleetDataConfig.ts');
+ assert.equal(scoped.useFleetDataConfig(), undefined);
+ selection = { supported: true, fleet: { budgetId: config.budgetId } };
+ assert.equal(scoped.useFleetDataConfig(), config);
+ selection = { supported: false };
+ assert.equal(scoped.useFleetDataConfig(), config);
+ assert.equal(absentConfig.status, 'unavailable');
+ assert.deepEqual(notMember.codes, ['not-in-data-fleet']);
+ assert.deepEqual(noReport.codes, ['no-telemetry']);
+ console.log('PASS: rendered health details/header distinguish missing config, missing data membership and no report yet');
  const valid = await result(client());
  assert.notEqual(valid.status, 'unavailable', JSON.stringify(valid));
  assert.equal(valid.observedMs, snapshot.observed_ms);

@@ -82,8 +82,7 @@ ABORT = _Abort()
 # Every mutation is charged to testnet_budget's strict, non-replenishing allowance.
 DIGEST = re.compile(r"transaction '([1-9A-HJ-NP-Za-km-z]{32,44})'")
 # The dedicated testnet wallets (agent, CI) of docs/TESTNET.md.
-TESTNET_WALLETS = {"0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
-                   "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac"}
+from testnet_pool import TESTNET_WALLETS
 
 
 def wait_for(condition, message, process=None, timeout=240):
@@ -490,7 +489,10 @@ class Walrus:
         blob = stored.get("newlyCreated", {}).get("blobObject", {}).get("blobId") or stored.get("alreadyCertified", {}).get("blobId")
         assert blob, f"Walrus publisher returned no blob ID: {stored}"
         # Read it back through the aggregator before relying on it.
-        wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
+        try:
+            wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
+        except AssertionError as error:
+            raise AssertionError(f"{error}; last read: {getattr(self, 'read_error', 'unknown')}") from error
         return blob
 
     def store(self, body):
@@ -537,12 +539,33 @@ class Walrus:
         return self.stored_by
 
     def readable(self, blob, body):
-        try:
-            request = urllib.request.Request(f"{self.aggregator}/v1/blobs/{blob}", headers=AGENT)
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return response.read() == body
-        except OSError:
-            return False
+        url = f"{self.aggregator}/v1/blobs/{blob}"
+        if self.mode == "testnet":
+            url += "?strict_consistency_check=true"
+        # A freshly certified blob can initially return a cacheable 404/5xx.
+        # Repeating that exact URL can keep reading the cached failure even
+        # after storage is available. Revalidate once per poll, without another
+        # upload or a longer polling deadline. Bytes must still match exactly.
+        for revalidate in (False, True):
+            headers = {**AGENT, "Cache-Control": "no-cache"}
+            target = url
+            if revalidate:
+                target += f"{'&' if '?' in target else '?'}suifleet_readback={os.urandom(8).hex()}"
+                headers["Cache-Control"] = "no-cache"
+            try:
+                request = urllib.request.Request(target, headers=headers)
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    matches = response.read() == body
+                self.read_error = None if matches else "aggregator bytes differ from uploaded bytes"
+                return matches
+            except urllib.error.HTTPError as error:
+                self.read_error = f"HTTP {error.code}"
+                if error.code != 404 and error.code < 500:
+                    return False
+            except OSError as error:
+                self.read_error = type(error).__name__
+                return False
+        return False
 
     def close(self):
         if self.mode != "testnet":

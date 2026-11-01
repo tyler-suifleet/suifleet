@@ -113,6 +113,11 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                     return bool(gas.get("gasCoins")) or int(gas.get("addressMistBalance") or 0) > 0
                 return bool(gas)
             wait_for(funded, "local faucet did not supply gas")
+            # Current package verification/storage can exceed the historical
+            # 500M budget on the pinned disposable chain. Reserve 1.5 SUI
+            # with a separately funded local-only fixture wallet.
+            for _ in range(2):
+                client("faucet", "--url", faucet_url, json_output=False)
             chain_id = dm.chain_facts(rpc_url)["chain_identifier"]
 
             def transaction(*ptb):
@@ -137,7 +142,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 for name in names:
                     (contracts / "sources" / name).write_bytes(subprocess.check_output(["git", "show", f"9c69582bd040cf82169940a6d14a1a288fd0bda4:contracts/sources/{name}"], cwd=ROOT))
             published = client("test-publish", contracts, "--build-env", "testnet", "--pubfile-path",
-                               root / "Pub.local.toml", "--gas-budget", "500000000", "--silence-warnings")
+                               root / "Pub.local.toml", "--gas-budget", "1500000000", "--silence-warnings")
             assert published["effects"]["status"]["status"] == "success", published["effects"]["status"]
             package = next(c["packageId"] for c in published["objectChanges"] if c["type"] == "published")
             registry = created(published, "::device_registry::DeviceRegistry")[0]
@@ -187,7 +192,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 shutil.copytree(ROOT / "contracts/sources", contracts / "sources", dirs_exist_ok=True)
                 upgraded = client("test-upgrade", contracts, "--build-env", "testnet", "--pubfile-path",
                                   root / "Pub.local.toml", "--upgrade-capability", upgrade_cap,
-                                  "--gas-budget", "500000000", "--silence-warnings")
+                                  "--gas-budget", "1500000000", "--silence-warnings")
                 assert upgraded["effects"]["status"]["status"] == "success", upgraded["effects"]["status"]
                 package = next(c["packageId"] for c in upgraded["objectChanges"] if c["type"] == "published")
                 manifest = dm.resolve(SimpleNamespace(chain_identifier=chain_id, rpc=rpc_url, package=package,
@@ -224,7 +229,7 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
 
             def deploy_catalog(version, *, devices=(), groups=(), unsupported=False,
                                name=component.DEFAULT_COMPONENT, dependencies=None, register_only=False,
-                               first=("linux", "aarch64")):
+                               first=("linux", "aarch64"), desired=False):
                 artifact = component.build(version, run_id, component=name)
                 tag = (version if name == component.DEFAULT_COMPONENT else f"{name}-{version}").replace(".", "-")
                 selected = "catalog-artifact-" + tag
@@ -248,7 +253,15 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                 if register_only:
                     return version_id
                 ids = lambda values: "vector[" + ",".join("@"+v for v in values) + "]"
-                result = transaction("--move-call", f"{package}::component_catalog::create_deployment", f"@{version_id}", ids(groups), ids(devices), CLOCK)
+                if desired:
+                    assert len(groups) == 1 and not devices
+                    result = transaction("--move-call", f"{package}::component_catalog::new_deployment", f"@{version_id}", ids(groups), ids(devices), CLOCK,
+                        "--assign", "record", "--move-call", f"{package}::desired_state::begin", f"@{groups[0]}", "--assign", "plan",
+                        "--move-call", f"{package}::desired_state::set_component", "plan", "record",
+                        "--move-call", f"{package}::desired_state::commit", "plan", f"@{groups[0]}", CLOCK,
+                        "--move-call", f"{package}::deployment_manager::share_deployment", "record")
+                else:
+                    result = transaction("--move-call", f"{package}::component_catalog::create_deployment", f"@{version_id}", ids(groups), ids(devices), CLOCK)
                 deployment = created(result,"::deployment_manager::DeploymentRecord")[0]
                 binding = dm.rpc(rpc_url,"suix_getDynamicFieldObject",[deployment,{"type":f"{package}::component_catalog::CatalogBindingKey","value":{"dummy_field":False}}])["data"]["content"]["fields"]["value"]["fields"]
                 assert dm.object_id(binding["version_id"]) == dm.object_id(version_id)
@@ -365,6 +378,18 @@ def run(rpc_url, faucet_url, catalog_upgrade=False, poll_cache=False, reset_node
                         assert not any(p.endswith("never-download") for p in downloads), downloads
                         print("PASS: upgraded catalog publishes a macos/x86_64 manifest; the linux/x86_64 daemon selected "
                               "its own manifest and never fetched the macOS recipe")
+
+                    if catalog_upgrade:
+                        stop(process); process = None
+                        stale = deploy_catalog("1.0.0", name="sf168-library-app", groups=[group], desired=True)
+                        latest = deploy_catalog("2.0.0", name="sf168-library-app", groups=[group], desired=True)
+                        process = start()
+                        wait_for(settled(latest, 1), "catalog desired latest revision did not converge", process)
+                        receipt_is(latest, 1)
+                        assert not outcome(stale), "superseded catalog desired record was executed"
+                        assert receipts(stale) == {}
+                        assert not any(p.endswith("catalog-artifact-sf168-library-app-1-0-0") for p in downloads)
+                        print("PASS: upgraded existing group converged on the latest multi-platform catalog desired version; superseded bytes never downloaded")
 
                     bad = deploy("3.0.0", devices=[device], fail="health")
                     elsewhere = deploy("3.1.0", devices=[other])

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { PageHeader, Section, InfoCard } from "@/components/ui";
 import { BudgetManager, CardFunding, DepositForm, EstimatePanel, StoragePanel } from "@/components/FleetBudget";
 import { formatToken, type Estimate } from "@/lib/network-costs";

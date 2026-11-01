@@ -3,7 +3,8 @@
 import { useFleetSelection } from "./useFleetSelection";
 import { NETWORK } from "@/lib/constants";
 import { useQuery } from "@tanstack/react-query";
-import { useCurrentClient, useCurrentAccount } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { fetchDevices, fetchFleetDevices, type DeviceObject } from "@/lib/sui";
 
 export function useDevices() {

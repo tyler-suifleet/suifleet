@@ -376,13 +376,24 @@ def table(result):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('model', type=Path)
+    parser.add_argument('model', type=Path, nargs='?')
+    parser.add_argument('--generate-site', action='store_true', help='regenerate the public pricing proposal')
+    parser.add_argument('--check-site', action='store_true', help='refuse stale generated pricing')
     parser.add_argument('--policy', type=Path, default=POLICY)
     parser.add_argument('--annual', action='store_true', help='price a prepaid 12-month term')
     parser.add_argument('--hedged', action='store_true',
                         help="assume the policy's fraction of the term's SUI spend is bought when the invoice is paid")
     parser.add_argument('--table', action='store_true', help='print the Markdown sensitivity table instead of JSON')
     args = parser.parse_args()
+    if args.generate_site or args.check_site:
+        from site_pricing import generate
+        try:
+            generate(check=args.check_site)
+        except (OSError, ValueError) as error:
+            parser.exit(2, f'Pricing refused: {error}\n')
+        return
+    if args.model is None:
+        parser.error('model is required unless generating/checking site pricing')
     try:
         result = calculate(json.loads(args.model.read_text()), json.loads(args.policy.read_text()),
                            annual=args.annual, hedged=args.hedged)

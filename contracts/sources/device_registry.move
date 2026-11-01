@@ -301,6 +301,7 @@ module sui_edge::device_registry {
 
     public fun device_id(device: &Device): ID { object::id(device) }
     public fun device_address(device: &Device): address { device.device_address }
+    public fun arch(device: &Device): String { device.arch }
     public fun device_count(registry: &DeviceRegistry): u64 { registry.device_count }
     public fun identity(registry: &DeviceRegistry, device_id: ID): Option<Identity> {
         if (!df::exists(&registry.id, IdentityKey { device_id })) return option::none();

@@ -1,9 +1,11 @@
-# Staged rollouts (SF-017, SF-138)
+# Staged rollouts (SF-017, SF-138, SF-163)
 
 The wallet's Deployments → Staged rollouts page creates schema-3 deployments
-from an authenticated recipe blob and both SHA-256 digests. Enter ordered cohorts
-(one line per cohort), concurrency, grants per rolling window, bake duration,
-minimum samples, inclusive failure threshold in basis points and stall timeout.
+from a published library platform recipe or a direct upload recipe and both
+SHA-256 digests. Build ordered cohorts from named devices and group snapshots;
+enter concurrency, grants per rolling window, human duration units, minimum
+samples, inclusive failure percentage and stall timeout. Review the exact
+milliseconds, basis points and ordered targets before signing.
 With the daemon's default 30-minute normal checks and 60-second checks for a
 known active rollout, set `offline_timeout_ms` above 1,800,000 ms **plus the
 worst-case download/apply/report time**, with additional outage/backoff margin.
@@ -16,8 +18,7 @@ including after completion and restart. Existing fast-poll test configurations r
 Cohorts are immutable, disjoint snapshots of at most 512 direct device targets.
 Each cohort must initially contain at least the minimum sample count.
 
-The deployment creator coordinates by signing **Verify on-chain health and
-advance** transactions. This is operator-driven coordination: no background
+The deployment creator coordinates by signing **Check device health and continue** transactions. This is operator-driven coordination: no background
 service or unattended wallet signer is installed. Closing/crashing the browser
 stops ticks; reopening and selecting the record resumes from on-chain state.
 Every grant, outcome, skip, cohort, bake timestamp, pause/abort and revision lives
@@ -26,7 +27,7 @@ reason, grants, state, cohort, time and revision. Manual pause/resume/abort and
 skips require an audit reason. The transaction inputs and updated snapshot retain
 which IDs were skipped. Only never-admitted members can be skipped.
 
-The browser requires explicit admission candidate IDs; blank evaluates health without
+The browser requires explicit named admission candidate selection; blank evaluates health without
 new grants. Select reachable members and omit offline members so they can still be
 skipped with an audit reason. The chain verifies membership and cohort eligibility;
 the candidate list is not a liveness attestation.
@@ -141,3 +142,87 @@ Failed post-apply health attempts remain durably queued but retry at the normal
 discovery cadence, including authorization aborts. Undelivered legacy receipts do
 not trigger fast health polling. Old daemons do not emit these samples: upgrade
 participating daemons before admitting them to an on-chain-health rollout.
+
+
+## Guided creation and confirmed decisions (SF-163)
+
+On **Rollouts**, select a published library version and one platform recipe.
+The builder copies its component, version, recipe blob ID and both digests from
+that verified immutable version. A rollout uses exactly one platform recipe;
+choose compatible targets. For a completed direct upload, open **Advanced** and
+enter its recipe and SHA-256 digests (64 lowercase hexadecimal characters).
+This does not upload software or publish another library version.
+
+Search named devices and groups. Add a group to the selected cohort to copy its
+current members; select individual devices, remove members, and reorder cohorts
+or members before review. A device can appear only once. These are immutable
+snapshots of device object IDs, not continuing group subscriptions. Names are
+current inventory aliases; object IDs remain available in details. Deleted or
+unreadable devices are labeled unavailable rather than assigned an invented name.
+
+Enter durations in seconds, minutes or hours and the failure threshold as a
+percentage. **Review rollout** validates the full input and shows the exact
+milliseconds, basis points, digests and ordered cohort membership before any
+wallet request. Confirming creates a rollout with no devices admitted. A confirmed
+result includes its digest and a link to its panel without reloading the page.
+A display-refresh failure after confirmation does not offer the same creation
+for resubmission. If signing/submission confirmation fails, inspect the wallet
+and transaction history before retrying; failure to confirm is not proof of
+non-execution.
+
+Return here to approve each step. Select waiting members of the current cohort
+and choose **Check device health and continue**. Empty selection only evaluates
+health, receipts, bake and policy limits; it does not grant permission to devices.
+The confirmed audit event supplies the admission count and reason. Messages show
+what to check or approve next, including empty candidate sets, rate/concurrency
+limits, bake, next cohort, pause, permanent abort and completion. A grant is
+permission to apply, not proof that a device is reachable or has started work.
+Health gates still require verified device reports. Platform tools own OS update,
+reboot, boot confirmation and rollback.
+
+Verification:
+
+```bash
+node scripts/test_rollout_form.cjs
+CHROME_EXECUTABLE=/usr/bin/google-chrome node scripts/test_rollout_builder_browser.cjs
+node scripts/test_rollout.cjs
+node scripts/test_dashboard_views.cjs
+make dapp-typecheck
+make dapp-build
+```
+
+The new form and Chromium tests also run under `make dapp-typecheck`. Browser
+catalog/inventory/signing are fixtures; mapping and transaction builders are real.
+The separately recorded dedicated-agent Testnet check creates a rollout from an
+existing library version, verifies its policy and zero admissions, then deletes
+only that new record. It does not prove real-wallet interaction, device execution,
+public storage availability, production-provider acceptance or physical behavior.
+Final physical/manual-wallet acceptance stays in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32),
+and production-provider/mainnet acceptance in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+Normal exact-head CI, automatic Testnet gates and independent review still apply.
+
+### SF-163 implementation validation (2026-10-27)
+
+[The Testnet receipt](validation/sf163-testnet.json) records the existing published
+`com.acme.GatewayAgent 1.4.2` version, its exact recipe/digests, expected policy,
+zero-admission readback and independently read successful transaction effects:
+
+- Create: `EL9ceYsYWMC6pNwNPJAYZBoBW3nrJGaozoAPaa4295gW`, checkpoint 399839381,
+  net 17,005,600 MIST.
+- Delete only the newly created rollout:
+  `5XxUcNXMDPP2JevKvsJ9CdhpRQPaMwGSYvM5b4vVfr6m`, checkpoint 399839435,
+  net −15,003,999 MIST (storage rebate).
+
+Signed net cost was 2,001,601 MIST (0.002001601 SUI). The conservative
+non-replenishing allowance consumed 17,005,600 MIST of the 100,000,000-MIST
+ceiling; cleanup rebates did not restore allowance. The shared-wallet lease was
+asserted before each mutation and released immediately after cleanup. No faucet,
+publication, upgrade or device admission occurred.
+
+Pinned Node 22.22.2/pnpm 11.0.8 host checks passed using `make RUN= dapp-typecheck`
+and `make RUN= dapp-build`; focused rollout/form/dashboard/Chromium tests also
+passed. The initial host invocation that incorrectly declared itself a dev
+container failed the installed-toolchain prerequisite; the corrected normal host
+invocation passed, retaining its normal container-only test skip. Pre-sign live
+runner setup refusals submitted no transactions. Hosted CI and independent
+review remain pending at implementation handoff.

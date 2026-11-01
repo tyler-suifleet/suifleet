@@ -404,3 +404,7 @@ Walrus documents [USD-targeted storage pricing](https://docs.wal.app/docs/system
 and [periodic operator price adjustments](https://docs.wal.app/docs/operator-guide/storage-nodes/storage-node-setup#pricing-currency-frost-and-nanousd),
 which supports the independent WAL multiple. Sui's [gas model](https://docs.sui.io/concepts/tokenomics/gas-in-sui)
 sets fees in MIST through the validator gas-price survey with no USD peg.
+
+Public pricing is generated from the console price table and this policy. See
+[public pricing regeneration](PUBLIC_PRICING.md) for the source files, regeneration
+commands and required freshness/build checks.

@@ -54,6 +54,23 @@ The daemon executable is `suifleet-edge/target/release/suifleet`; the Next stati
 
 The simulator is stdlib Python. It uses temporary keys, local HTTP servers and a harmless updater; it never spends gas or programs hardware. It validates recipe/artifact digests, direct/live-group targeting, bad hashes, unsupported lifecycle, untrusted operators, deleted objects, pagination, enrollment baseline, offline catch-up, restart deduplication and failed status retry. It also checks identity/signature against an independent Mysten SDK vector.
 
+`make test-ota` builds the daemon and shim once, verifies the quilt fixture signer,
+then runs all 29 independent simulator invocations through `scripts/run_ota_suites.py`.
+The default `OTA_TEST_JOBS=3` overlaps suites that each use private temporary state
+and dynamically allocated loopback listeners. Use `make test-ota OTA_TEST_JOBS=1`
+for sequential diagnosis or a memory-constrained machine (supported range: 1–8).
+Builds and other CI targets remain sequential; this does not parallelize wallet or
+hardware operations. Every suite still runs, and any failure or suite timeout fails
+the target. Interruptions stop launches and signal active suite process groups so
+Python cleanup can run before a bounded forced stop. Suites must continue cleaning
+up their own detached processes in `finally` blocks.
+
+Each invocation creates `ci-logs/ota/run-*/` with separate suite logs and a
+`summary.json` containing exit codes, timeouts and durations. CI's existing
+`ci-logs` artifact includes them. Progress reports show starts, completions and the
+active suites every 30 seconds; failed suites also print their log tail. A local
+simulator pass does not establish physical-device or public-network acceptance.
+
 `make test-component` (also run by `make check` and CI) covers the harmless versioned test component in [tests/components/suifleet-test-app](../tests/components/suifleet-test-app/README.md). Its fixture tests run the real shell scripts, under a busybox-only `PATH` too when busybox is installed. It then runs the real daemon against the same simulator with `suifleet-test-updater` as `apply.command`, for v1, v2, an injected install failure and an injected health failure. It checks statuses, reports and the device receipts' version, run ID and artifact SHA-256.
 
 The historical baseline has 13 passing Move tests and 10 Rust tests; counts can legitimately change. Verify results for the actual commit rather than asserting those numbers as a release requirement. Simulator mocks are not proof of network transaction building, wallet compatibility, package upgrades or post-reboot health.
@@ -756,3 +773,63 @@ Production requires main-only dispatch, the exact collection digest, Tyler's
 issue authorization and protected environment approval. Preview credentials stay
 in a separate account. Source builds and offline restore fixtures do not establish
 live provider, DNS, TLS, recorded-wallet or hosted rollback acceptance.
+## Company treasury
+
+Follow [TREASURY.md](TREASURY.md) for the proposed 2-of-3 hardware-key custody ceremony, recovery/rotation, manifest payment guard and bounded disposable testnet fixture. Production treasury keys, mainnet SuiNS target/default changes and the hardware signing ceremony are user-only final acceptance, not agent operations.
+
+## Customer device entitlements (SF-187)
+
+The chosen onboarding policy is an **operator grant in Administration → Device
+entitlements** (`/entitlements`). New customers start at zero; there is no automatic
+trial or subscription purchase. The customer copies the customer ID shown on that
+page and asks the registry administrator to grant a device limit. The registry
+administrator connects its wallet, enters that ID and the desired total limit,
+and approves `customer::set_entitlement`. The screen works without customer fleet
+membership, so the registry administrator can grant another customer’s limit.
+Only the registry’s on-chain administrator can grant; being a customer/fleet admin
+alone does not confer entitlement authority. Verify the customer ID and requested
+capacity before approval. A small initial grant such as 3 devices enables first
+registration on testnet. SF-181 subscriptions can later use the same entitlement.
+
+Limits count active devices across **all** customer fleets. At the boundary,
+registration is disabled with the count, limit and grant instructions; every
+managed registration transaction also re-reads capacity before wallet approval.
+Concurrent registrations can still race after that read; the contract remains
+authoritative and the console reports a refused registration without raw MoveAbort
+text. Refresh before retrying. Grants cannot lower the limit below active usage.
+This screen preserves the current allowance and period, does not reset usage,
+and does not deposit SUI/WAL or purchase a subscription. Coordinate entitlement
+writers: do not submit simultaneous device-limit and billing-allowance changes.
+
+Verification: `make test-customer-fleets` includes the entitlement helper and real
+Chromium component fixtures (fixture wallet/transport); `sui move test --path
+contracts customer_tests` covers zero-limit refusal, the limit boundary, registry
+grants and customer-admin refusal. These do not establish manual extension-wallet,
+production-provider or physical acceptance; those remain SF-031/#32 and SF-087/#159.
+
+An automated Testnet walkthrough can reuse a verified test fixture without
+publishing or touching existing customers:
+
+```bash
+# Hold/assert network:suifleet-testnet; pass its token only through the environment.
+# Use the pinned release/transaction CLIs and chain_facts helper from TESTNET.md.
+python3 scripts/live_customer_entitlements.py \
+  --wallet /home/tyler/.config/suifleet/testnet/agent/client.yaml \
+  --package TEST_FIXTURE_PACKAGE --registry TEST_FIXTURE_REGISTRY \
+  --upgrade-cap TEST_FIXTURE_UPGRADE_CAP --evidence /private/runtime/entitlements.json
+```
+
+The caller supplies `SUIFLEET_TESTNET_LOCK_TOKEN`; every mutation asserts it. The
+runner verifies chain/account, registry authority, UpgradeCap and type origins,
+uses an 80,000,000-MIST non-replenishing allowance including a 70,000,000-MIST
+run-owned customer gas grant, and does not publish. It checks the actual console
+capacity helper against Testnet before signing. It deletes its registered device
+and returns child gas; the empty customer/default fleet remain because no customer
+deletion API exists. Failed runs retain a private identity directory for explicit
+recovery under the original allowance. Do not replay or reset that allowance.
+Container-specific wallet paths may require a private `client.yaml` path adapter;
+keep its existing dedicated keystore binding and leave the shared config intact.
+
+The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
+including exploratory failures and limits; it is not proof of a manual extension
+wallet walkthrough or a live deployment of this frontend.

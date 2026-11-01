@@ -4,23 +4,37 @@ const path = require('node:path');
 const {createRequire} = require('node:module');
 const {pathToFileURL} = require('node:url');
 const assert = require('node:assert/strict');
-const req = createRequire(path.resolve('dapp/package.json'));
-(async () => {
-  const {SuiGrpcClient} = await import(pathToFileURL(req.resolve('@mysten/sui/grpc')));
-  const [manifestFile, ...deployments] = process.argv.slice(2);
-  const manifest = JSON.parse(fs.readFileSync(manifestFile));
+
+function transportFailure(error) {
+  // The pinned grpc-web transport uses status names; also accept numeric gRPC codes. Never
+  // retry failed effects, missing receipts, malformed responses or assertions.
+  return [4, 8, 14, 'DEADLINE_EXCEEDED', 'RESOURCE_EXHAUSTED', 'UNAVAILABLE'].includes(error.code) ||
+    (error.code === 'INTERNAL' && error.message === 'fetch failed') ||
+    (error instanceof TypeError && error.message === 'fetch failed');
+}
+async function read(operation, {sleep = ms => new Promise(resolve => setTimeout(resolve, ms))} = {}) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await operation(); }
+    catch (error) {
+      if (!transportFailure(error)) throw error;
+      if (attempt === 3) throw new Error('receipt-effects: transport unavailable after 3 read attempts');
+      await sleep(attempt * 1000);
+    }
+  }
+}
+async function verifyReceipts(client, manifest, deployments, options) {
   assert.equal(manifest.network, 'testnet');
   assert.equal(manifest.chain_identifier, '4c78adac');
-  const client = new SuiGrpcClient({network:'testnet',baseUrl:manifest.rpc_url});
+  assert.ok(deployments.length, 'no deployments selected');
   const results = [];
   for (const deployment of deployments) {
-    const {dynamicField} = await client.getDynamicField({parentId:deployment, name:{
+    const {dynamicField} = await read(() => client.getDynamicField({parentId:deployment, name:{
       type:manifest.type_origins['deployment_manager::ReceiptsKey']+'::deployment_manager::ReceiptsKey',
       bcs:new Uint8Array([0]),
-    }});
+    }}), options);
     const digest = dynamicField.previousTransaction;
     assert.ok(digest, 'receipt field has no previous transaction');
-    const result = await client.getTransaction({digest,include:{effects:true}});
+    const result = await read(() => client.getTransaction({digest,include:{effects:true}}), options);
     assert.equal(result.$kind,'Transaction');
     const tx = result.Transaction;
     assert.equal(tx.digest,digest);
@@ -28,5 +42,20 @@ const req = createRequire(path.resolve('dapp/package.json'));
     assert.ok(tx.effects, 'missing execution effects');
     results.push({deployment,digest,status:'success',checkpoint:tx.checkpoint,gas_used:tx.effects.gasUsed});
   }
-  process.stdout.write(JSON.stringify(results)+'\n');
-})().catch(error => { console.error(error.message); process.exitCode=1; });
+  return results;
+}
+async function main() {
+  const req = createRequire(path.resolve('dapp/package.json'));
+  const {SuiGrpcClient} = await import(pathToFileURL(req.resolve('@mysten/sui/grpc')));
+  const [manifestFile, ...deployments] = process.argv.slice(2);
+  const manifest = JSON.parse(fs.readFileSync(manifestFile));
+  const client = new SuiGrpcClient({network:'testnet',baseUrl:manifest.rpc_url});
+  process.stdout.write(JSON.stringify(await verifyReceipts(client, manifest, deployments))+'\n');
+}
+if (require.main === module) main().catch(error => {
+  // Do not copy provider response bodies/URLs or environment values to evidence.
+  console.error(error.message === 'receipt-effects: transport unavailable after 3 read attempts'
+    ? error.message : 'receipt-effects: verification failed');
+  process.exitCode=1;
+});
+module.exports = {verifyReceipts};

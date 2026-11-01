@@ -188,6 +188,7 @@ for (const [authority, fn, count] of [
  const selectionHook={useFleetSelection:()=>selection};
  const opaqueReal=guestLoad("lib/opaque-data.ts");
  const browserLoad=loader({
+  "@/hooks/useCurrentAccount":{useCurrentAccount:()=>({address:B})},
   "@mysten/dapp-kit-react":{useCurrentClient:()=>guestClient,useCurrentAccount:()=>({address:B}),useCurrentNetwork:()=>m.network,useDAppKit:()=>({stores:{$connection:{get:()=>({account:{address:B,chains:[`sui:${m.network}`]}})},$currentNetwork:{get:()=>m.network}},signPersonalMessage:async()=>({signature:"fixture"})})},
   "@mysten/seal":{SessionKey:{create:async()=>({isExpired:()=>false,getPersonalMessage:()=>new Uint8Array(),setPersonalMessageSignature:async()=>{}})}},
   "@/hooks/useDevices":{useDevices:()=>({data:[]})},"@/hooks/useGroups":{useGroups:()=>({data:[]})},

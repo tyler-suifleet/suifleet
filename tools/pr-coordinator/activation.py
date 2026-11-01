@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -13,7 +14,7 @@ import sys
 import tempfile
 import time
 
-FILES = ('coordinator.py', 'dispatcher.py', 'worker.py')
+FILES = ('coordinator.py', 'dispatcher.py', 'worker.py', 'batch_integration.py', 'dashboard.py')
 COMPATIBILITY = {'activation_protocol': 1, 'durable_store_compatibility': 1}
 PREFIX = 'tools/pr-coordinator/'
 SERVICES = ('pr-coordinator.service', 'ticket-dispatcher.service')
@@ -139,6 +140,7 @@ class Activator:
         self.git('merge-base', '--is-ancestor', old, target)
         changed = self.git('rev-list', '--first-parent', '--reverse', old + '..' + target).splitlines()
         with sqlite3.connect(f'file:{self.state / "reviews.sqlite3"}?mode=ro', uri=True) as db:
+            verified_batches = {}
             for commit in changed:
                 paths = self.git('diff-tree', '--no-commit-id', '--name-only', '-r', commit + '^1', commit).splitlines()
                 if not any(path.startswith(PREFIX) for path in paths):
@@ -146,7 +148,8 @@ class Activator:
                 row = db.execute('SELECT pr,head,base,review_id FROM activation_merges WHERE project=? AND commit_id=?',
                                  (self.settings['project'], commit)).fetchone()
                 if not row:
-                    raise RuntimeError('runtime change lacks reviewed integration receipt: ' + commit)
+                    self.verify_batch(db, commit, target, verified_batches)
+                    continue
                 pr, head, base, review_id = row
                 parents = self.git('show', '-s', '--format=%P', commit).split()
                 if parents != [base, head]:
@@ -163,6 +166,175 @@ class Activator:
                         or source['head']['sha'] != head
                         or (source['head'].get('repo') or {}).get('full_name') != self.settings['repository']):
                     raise RuntimeError('remote merged source does not match receipt')
+
+    def verify_batch(self, db, commit, target, verified):
+        """Verify the entire reviewed batch, never impersonate an individual merge.
+
+        Each first-parent step belongs to a pinned ordered manifest. Approval and
+        checks apply to the final combined tree, so even activation at an earlier
+        step is refused until that final tree is present in the verified target.
+        The caller opened this database read-only; this path never creates proofs.
+        """
+        project = self.settings['project']
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {'integration_batches', 'batch_activation_commits'} <= tables:
+            raise RuntimeError('runtime change lacks reviewed integration receipt: ' + commit)
+        link = db.execute('SELECT batch_id FROM batch_activation_commits WHERE project=? AND commit_id=?',
+                          (project, commit)).fetchone()
+        if not link:
+            raise RuntimeError('runtime change lacks reviewed integration receipt: ' + commit)
+        batch_id = link[0]
+        if batch_id in verified:
+            if commit not in verified[batch_id]:
+                raise RuntimeError('runtime change is not a member of the verified batch')
+            return
+        try:
+            row = db.execute('SELECT status,base,head,pr,members,review_id,publish_intent,manifest_digest '
+                             'FROM integration_batches WHERE project=? AND id=?', (project, batch_id)).fetchone()
+            if not row:
+                raise RuntimeError('batch integration receipt is missing')
+            status, base, head, number, raw_members, review_id, intent, digest = row
+            if status not in ('published', 'reconciling', 'done') or intent != 1:
+                raise RuntimeError('batch publication is not verified')
+            if (not all(isinstance(value, str) and re.fullmatch('[0-9a-f]{40}', value)
+                        for value in (base, head)) or type(number) is not int or number <= 0
+                    or type(review_id) is not int or review_id <= 0):
+                raise RuntimeError('invalid batch integration identity')
+            members = json.loads(raw_members)
+            if not isinstance(members, list) or not 1 <= len(members) <= 16:
+                raise RuntimeError('invalid batch member count')
+            payload = dict(project=project, id=batch_id, base=base, head=head, members=members)
+            if digest != self.batch_hash(payload):
+                raise RuntimeError('batch manifest digest does not match')
+            self.git('merge-base', '--is-ancestor', head, target)
+            previous, commits, pulls, heads = base, set(), set(), set()
+            for member in members:
+                step, source = member['commit'], member['head']
+                if (not all(isinstance(value, str) and re.fullmatch('[0-9a-f]{40}', value)
+                            for value in (step, source, member['reviewed_base']))
+                        or type(member['pr']) is not int or member['pr'] <= 0
+                        or step in commits or member['pr'] in pulls or source in heads):
+                    raise RuntimeError('invalid or duplicate batch member')
+                if member['step_base'] != previous or self.git('show', '-s', '--format=%P', step).split() != [previous, source]:
+                    raise RuntimeError('batch integration ancestry does not match manifest')
+                mapped = db.execute('SELECT batch_id FROM batch_activation_commits WHERE project=? AND commit_id=?',
+                                    (project, step)).fetchone()
+                if not mapped or mapped[0] != batch_id:
+                    raise RuntimeError('batch step lacks an activation receipt')
+                self.git('merge-base', '--is-ancestor', member['reviewed_base'], base)
+                self.verify_batch_source(db, project, member)
+                previous = step
+                commits.add(step); pulls.add(member['pr']); heads.add(source)
+            if previous != head or commit not in commits:
+                raise RuntimeError('batch final head does not match merge chain')
+            expected = 'Tyler Bush <tyler.jonathan.bush@gmail.com>'
+            metadata = self.git('log', '--format=%an <%ae>|%cn <%ce>', base + '..' + head).splitlines()
+            if not metadata or any(value != expected + '|' + expected for value in metadata):
+                raise RuntimeError('batch commit authorship violates configured user identity')
+            if 'co-authored-by:' in self.git('log', '--format=%B', base + '..' + head).lower():
+                raise RuntimeError('batch commit contains additional authorship attribution')
+            review = self.batch_review(db, project, number, head, review_id)
+            result, snapshot, family = review
+            if any(m['owner']['agent'] == family for m in members):
+                raise RuntimeError('combined batch review is not independent of every member')
+            if result.get('verdict') != 'approve' or result.get('acceptance_complete') is not True:
+                raise RuntimeError('batch integration approval is incomplete')
+            proof = snapshot.get('_integration_batch') or {}
+            if (snapshot.get('headRefOid') != head or snapshot.get('baseRefOid') != base
+                    or proof.get('id') != batch_id or proof.get('manifest_digest') != digest
+                    or proof.get('members') != members):
+                raise RuntimeError('batch integration approval does not bind the manifest')
+            from coordinator import checks_blocker, feedback
+            required = bool(self.git('ls-tree', '--name-only', base, '.github/workflows/testnet.yml'))
+            if snapshot.get('_testnet_required') is not required or checks_blocker(snapshot) is not None:
+                raise RuntimeError('batch combined checks are incomplete')
+            stored_feedback = db.execute('SELECT feedback FROM jobs WHERE id=?', (review_id,)).fetchone()[0]
+            if stored_feedback != feedback(snapshot):
+                raise RuntimeError('batch review feedback does not match inspected snapshot')
+            for member in members:
+                self.verify_batch_member_approval(db, project, batch_id, member, number, head, base,
+                                                  family, review_id, digest)
+            remote = self.gh(f'repos/{self.settings["repository"]}/pulls/{number}')
+            if (not remote.get('merged_at') or remote.get('merge_commit_sha') != head
+                    or remote['base']['ref'] != 'main'
+                    or remote['base']['repo']['full_name'] != self.settings['repository']
+                    or remote['head']['sha'] != head
+                    or (remote['head'].get('repo') or {}).get('full_name') != self.settings['repository']):
+                raise RuntimeError('remote merged batch does not match receipt')
+        except (KeyError, TypeError, ValueError, sqlite3.Error, OSError) as error:
+            raise RuntimeError('invalid batch integration receipt') from error
+        verified[batch_id] = commits
+
+    def verify_batch_member_approval(self, db, project, batch_id, member, number, head, base,
+                                     family, review_id, digest):
+        """Verify the formal publication of existing review/combined-test proof.
+
+        The account is attested by the coordinator's configured reviewer route.
+        Independently verify its actual same-repository GitHub review rather than
+        trusting a locally inserted status or copying combined checks onto H_i.
+        """
+        row = db.execute('SELECT head,account,body_hash,body,status,review_id,review_node '
+                         'FROM batch_member_approvals WHERE project=? AND batch_id=? AND pr=?',
+                         (project, batch_id, member['pr'])).fetchone()
+        if not row:
+            raise RuntimeError('batch member approval receipt is missing')
+        source_head, account, body_hash, body, status, remote_id, node = row
+        if (source_head != member['head'] or status != 'applied' or type(remote_id) is not int or remote_id <= 0
+                or not isinstance(account, str) or not account
+                or not isinstance(node, str) or not node or not isinstance(body, str)
+                or len(body) > 16384 or hashlib.sha256(body.encode()).hexdigest() != body_hash):
+            raise RuntimeError('batch member approval receipt is incomplete or changed')
+        proof = member['source_receipt']
+        expected_lines = (
+            f"Source: PR #{member['pr']} at `{member['head']}`, independently source-reviewed by "
+            f"{proof['family']} in job {proof['job']} (evidence `{proof['evidence_hash']}`).",
+            f"Combined candidate: PR #{number} `{head}` against `{base}`; "
+            'ordinary/security CI and any required protected testnet checks passed for that combined candidate.',
+            f'Independent combined acceptance review: {family} job {review_id}.',
+            f'Batch manifest: `{digest}`.',
+        )
+        if not set(expected_lines) <= set(body.splitlines()):
+            raise RuntimeError('batch member approval does not link source and combined evidence')
+        remote = self.gh(f'repos/{self.settings["repository"]}/pulls/{member["pr"]}/reviews/{remote_id}')
+        if (remote.get('state') != 'APPROVED' or remote.get('id') != remote_id
+                or remote.get('node_id') != node or remote.get('commit_id') != source_head
+                or (remote.get('user') or {}).get('login', '').casefold() != account.casefold()
+                or remote.get('body') != body):
+            raise RuntimeError('remote batch member approval does not match receipt')
+
+    @staticmethod
+    def batch_hash(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+    def batch_review(self, db, project, number, head, review_id):
+        row = db.execute('SELECT project,pr,head,family,kind,status,publication_done,result,directory '
+                         'FROM jobs WHERE id=?', (review_id,)).fetchone()
+        if not row or row[:3] != (project, number, head) or row[4:7] != ('review', 'done', 1):
+            raise RuntimeError('published batch review is unavailable')
+        result, snapshot, family = json.loads(row[7]), json.loads((Path(row[8])/'snapshot.json').read_text()), row[3]
+        author = snapshot['ticket']['agent']
+        if family not in ('Codex', 'Claude') or author not in ('Codex', 'Claude') or family == author:
+            raise RuntimeError('batch review is not independent')
+        return result, snapshot, family
+
+    def verify_batch_source(self, db, project, member):
+        proof = member['source_receipt']
+        if type(proof['job']) is not int or proof['job'] <= 0:
+            raise RuntimeError('invalid source review identity')
+        result, snapshot, family = self.batch_review(db, project, member['pr'], member['head'], proof['job'])
+        from coordinator import source_feedback, feedback
+        stored_feedback = db.execute('SELECT feedback FROM jobs WHERE id=?', (proof['job'],)).fetchone()[0]
+        if (stored_feedback != feedback(snapshot) or result.get('source_complete') is not True or result.get('acceptance_ready') is not True
+                or result.get('verdict') not in ('approve', 'blocked')
+                or proof['family'] != family or member['owner']['agent'] == family
+                or member['owner']['agent'] != snapshot['ticket']['agent']
+                or member['owner']['key'] != snapshot['ticket']['key']
+                or proof['head'] != member['head'] or proof['base'] != member['reviewed_base']
+                or snapshot['headRefOid'] != member['head'] or snapshot['baseRefOid'] != proof['base']
+                or proof['source_feedback'] != source_feedback(snapshot)
+                or member['source_feedback'] != proof['source_feedback']
+                or proof['evidence_hash'] != self.batch_hash(result)):
+            raise RuntimeError('batch source review proof is incomplete or changed')
 
     def verify_bootstrap(self, target):
         # Initial installation predates activation_merges. Use the existing
@@ -279,6 +451,9 @@ class Activator:
         self.state.mkdir(parents=True, exist_ok=True)
         with (self.state / 'activation.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            upgrade = self.state/'activation-supervisor-upgrade.json'
+            if upgrade.exists() and json.loads(upgrade.read_text()).get('phase') == 'pending':
+                raise RuntimeError('supervisor upgrade is pending; run explicit upgrade recovery first')
             if self.journal.exists():
                 receipt = json.loads(self.journal.read_text())
                 if receipt['phase'] == 'pending':

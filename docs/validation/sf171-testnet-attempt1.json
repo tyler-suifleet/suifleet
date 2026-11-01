@@ -1,0 +1,100 @@
+{
+  "started": "2026-10-27T23:16:40Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "publish head contracts",
+      "gas_budget_mist": 700000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "5pSxFqT1v5trawUpYC9xhwnpupWcwcVuM6XLQjBHpvGG",
+      "gas_mist": 602984800,
+      "allowance_used_mist": 602984800
+    },
+    {
+      "label": "create customer and default fleet",
+      "gas_budget_mist": 60000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Bh73XAtnTf1x3vnvNSyGrDYwBPAfzJeUXMnyvtbxx8D9",
+      "gas_mist": 19034978,
+      "allowance_used_mist": 622019778
+    },
+    {
+      "label": "entitle four devices",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "EmLifZroVq15nsqUFwsCSMpuMawqZUA8Vxuq46iPAtUM",
+      "gas_mist": 1000285,
+      "allowance_used_mist": 623020063
+    },
+    {
+      "label": "register four fleet devices",
+      "gas_budget_mist": 80000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "FWEARRTeSS6zJgs7BHYnV75Z13dmrgAAMFouWkCa696U",
+      "gas_mist": 1000939,
+      "allowance_used_mist": 624021002
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/usr/local/bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.82.1",
+      "version": "sui 1.82.1-987123842623",
+      "max_protocol": 139,
+      "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+      "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+      "path": "/opt/sui-network/sui",
+      "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1266,
+      "protocol_version": 139,
+      "network_cli_max_protocol": 139,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "faucet": {
+    "attempts": 1,
+    "cli_returncode": 0,
+    "balance_after_mist": 1131280914
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 1131280914,
+  "max_spend_mist": 800000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.82.1-987123842623"
+  },
+  "head": "435f73ba4d013419ff243d745720117a82bd089f",
+  "contracts_tree": "15172a857f0ec6a283eb0a64c4d7828dd1f740da",
+  "verified_package_transactions": {
+    "publish head contracts": {
+      "kind": "publish",
+      "modules": 14,
+      "digest": "92c31b61c20067c27e5ec8d673e05ed62f8977c95ec43d18611992ea25ab5411"
+    }
+  },
+  "package": "0x4f412412cfd8d2799fbd1a259e5e5c727001ac5c33a33c0b911f0d440ddeeedc",
+  "registry": "0xa3157b99254c47c39110ca8c5ec637ad0ae143da5529050d9e6e6e08e28f1795",
+  "group_batch_origin": "0x4f412412cfd8d2799fbd1a259e5e5c727001ac5c33a33c0b911f0d440ddeeedc",
+  "end_balance_mist": 507259912,
+  "spent_mist": 624021002,
+  "allowance_used_mist": 624021002,
+  "finished": "2026-10-27T23:17:13Z"
+}

@@ -13,6 +13,9 @@ import shutil
 import subprocess
 import tarfile
 import urllib.request
+import urllib.parse
+import urllib.error
+import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,12 +39,50 @@ def checkout(directory, repository, commit, sparse=None):
         raise RuntimeError("Unexpected tool source revision: " + str(directory))
 
 
+def retrieve_archive(url, path):
+    with urllib.request.urlopen(url, timeout=60) as response, path.open("wb") as output:
+        shutil.copyfileobj(response, output)
+        length = response.headers.get("Content-Length")
+        if length is not None and output.tell() != int(length):
+            raise urllib.error.ContentTooShortError("Incomplete tool archive", None)
+
+
+def verified_download(path, url, expected, algorithm):
+    """Publish only authenticated complete archives; retry transient transfers three times.
+
+    A fresh query on retries avoids replaying a truncated intermediary cache entry.
+    TLS and the pinned digest remain authoritative on every attempt.
+    """
+    if path.exists():
+        if hashlib.new(algorithm, path.read_bytes()).hexdigest() == expected:
+            return
+        path.unlink()  # Recover a partial archive left by the previous downloader.
+    for attempt in range(3):
+        fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+        os.close(fd)
+        temporary = Path(temporary)
+        try:
+            request_url = url
+            if attempt:
+                parts = urllib.parse.urlsplit(url)
+                query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+                query.append(("suifleet_download", temporary.name))
+                request_url = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+            retrieve_archive(request_url, temporary)
+            if hashlib.new(algorithm, temporary.read_bytes()).hexdigest() != expected:
+                raise RuntimeError("Tool archive checksum mismatch: " + path.name)
+            temporary.replace(path)
+            return
+        except (OSError, urllib.error.URLError, RuntimeError):
+            if attempt == 2:
+                raise
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def archive(tools, name, url, expected, algorithm, target, zipped=False):
     path = tools / name
-    if not path.exists():
-        urllib.request.urlretrieve(url, path)
-    if hashlib.new(algorithm, path.read_bytes()).hexdigest() != expected:
-        raise RuntimeError("Tool archive checksum mismatch: " + name)
+    verified_download(path, url, expected, algorithm)
     if not target.exists():
         target.mkdir()
         if zipped:

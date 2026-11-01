@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useCurrentAccount, useCurrentClient, useDAppKit, useCurrentNetwork } from '@mysten/dapp-kit-react';
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient, useDAppKit, useCurrentNetwork } from "@mysten/dapp-kit-react";
 import { SessionKey } from '@mysten/seal';
 import { Transaction } from '@mysten/sui/transactions';
 import { isValidSuiAddress, normalizeSuiAddress as id, toHex } from '@mysten/sui/utils';

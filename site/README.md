@@ -2,6 +2,9 @@
 
 Static product pages, a written console guide, an offline console screenshot,
 proposed pricing, documentation entry, security/custody and contact/privacy.
+The nine guide steps include testnet WebM/MP4 recordings, posters, transcripts
+and console-build provenance. Regeneration and spending controls are described
+in [guide/RECORDING.md](guide/RECORDING.md).
 Standard-library Python 3.10+; no install or network needed to build:
 
 ```sh
@@ -33,7 +36,9 @@ The user split issue #338 on 2026-10-27:
 - SF-177 owns the rendered docs site under site/docs. Until then, the Docs page
   links to repository documentation, including device installers.
 - SF-178 owns pricing generated from the canonical model. The present page is
-  explicitly proposed and mirrors docs/BUSINESS_PLAN.md, not a binding tariff.
+  generated from the shared console price table and subscription policy, including
+  Managed plan and entry offers. It mirrors the proposed terms in docs/BUSINESS_PLAN.md;
+  see docs/business/PUBLIC_PRICING.md for regeneration. It is not a binding tariff.
 
 Preserve build.py's standard-library renderer, src/layout.html token contract,
 src/site.json and src/pages/pricing.html for the parallel docs/pricing workers.
