@@ -4657,6 +4657,28 @@
         "Cleanup/closure retries and changed CI evidence do not abort unrelated scheduling or clear uncertain worker/claim reservations. Final source/combined CI, testnet and independent approval remain gates."
       ],
       "validation": "Offline real controller/state tests for singleton routing, stale review rejection, multi-member splitting, durable closure uncertainty, head changes and independent queue progress; full coordinator suite, compile/diff and tracking tests. Normal independent review/CI before merged-only runtime installation."
+    },
+    {
+      "key": "SF-216",
+      "title": "Install sandbox prerequisites before offline coordinator CI tests",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/ci.yml",
+        "tools/pr-coordinator/tests"
+      ],
+      "resources": [],
+      "description": "SF-215 introduced real LocalInfrastructure sandbox tests invoking bwrap. Hosted batch440 check job124954073449 failed seven tests with FileNotFoundError bwrap; source SF196 has no infrastructure delta. Repair CI prerequisite rather than repeatedly dispatching feature owners.",
+      "evidence": "PR440 run41342089768 job124954073449 and coordinator fix jobs3090/3091 retained receipts; PR441 check also failed in current snapshot.",
+      "acceptance": [
+        "Install and verify bubblewrap before offline PR coordinator tests on hosted Linux; preserve isolation and all feature/security/testnet gates.",
+        "Run focused real sandbox tests and full offline coordinator suite plus structural workflow checks; record exact results and limitations.",
+        "Use user-authored scoped commits and Closes issue PR; hand off to sole coordinator local infrastructure lane; installation merged-only."
+      ],
+      "validation": "Real bubblewrap local lane tests, complete offline coordinator suite, tracking tests/plan, diff check. User local-test infrastructure policy applies; no fabricated hosted success."
     }
   ]
 }
