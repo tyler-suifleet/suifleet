@@ -610,7 +610,8 @@ class BatchController:
                     error = json.loads(batch['error'] or '{}')
                 except (TypeError, ValueError):
                     continue
-                if error.get('kind') == 'candidate_checks_failed':
+                if (error.get('kind') == 'candidate_checks_failed'
+                        and batch['base'] == pr.get('baseRefOid')):
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
                                                    candidate_base=batch['base'], checks=error['checks'])
                     break

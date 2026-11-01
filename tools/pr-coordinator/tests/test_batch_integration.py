@@ -364,6 +364,27 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(f.controller.repair_context(f.project,changed),{})
         f.tick();self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[2])
 
+    def test_candidate_ci_failure_expires_on_new_base_without_losing_source(self):
+        f=self.fixture();f.project['integration_batch']['max_members']=1
+        f.source_prs.pop(2);f.tick();failed=f.row()
+        f.candidate_prs[failed['pr']]['statusCheckRollup']=[dict(__typename='CheckRun',name='check',
+            workflowName='CI',status='COMPLETED',conclusion='FAILURE',
+            detailsUrl='https://github.com/owner/repo/actions/runs/10/job/20')]
+        f.tick()
+        self.assertIn('_batch_failure',f.controller.repair_context(f.project,f.source_prs[1]))
+        f.git('checkout','-q','main')
+        (f.repo/'prerequisite').write_text('fixed runner prerequisite\n')
+        f.git('add','prerequisite');f.git('commit','-qm','fix prerequisite')
+        f.git('push','-q','origin','main');base=f.git('rev-parse','HEAD')
+        f.source_prs[1]['baseRefOid']=base
+        self.assertEqual(f.controller.repair_context(f.project,f.source_prs[1]),{})
+        members=json.loads(failed['members'])
+        self.assertEqual(f.controller.select(f.project,members,base,1),members)
+        self.assertEqual(f.controller.select(f.project,members,failed['base'],1),[])
+        # Durable failure evidence remains available for the original base.
+        original={**f.source_prs[1],'baseRefOid':failed['base']}
+        self.assertIn('_batch_failure',f.controller.repair_context(f.project,original))
+
     def test_candidate_checkout_disables_hooks_and_configured_filters(self):
         f=self.fixture();marker=f.root/'must-not-run'
         f.git('checkout','-q','work/1')
