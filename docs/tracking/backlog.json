@@ -4607,6 +4607,31 @@
         "Recovery instructions require this bounded reversible route rather than a bare global disable. Tests cover pending/install ancestry, unrelated and changed evidence, explicit disable, active candidate protection and normal operation. Document merged-only activation and record real restored queue state."
       ],
       "validation": "Focused offline mode/ancestry/fallback-fence tests; full coordinator suite; compile/diff and offline tracking checks. Normal independent review and actual CI/testnet before merge and merged-only installation."
+    },
+    {
+      "key": "SF-210",
+      "title": "Start independent source reviews before slow queue scans and record low-latency PR workflow",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "User requested significant reduction in PR open-to-close latency and evaluation of PR stacks. Last seven days recorded 1015 review and 884 repair jobs across 59 PRs; recent median PR lifetime increased from 5.4h to 23.3h. Source-review dispatch currently waits behind historical merged-PR discovery and collection of every open PR snapshot. Start independent batch source reviews as eligible snapshots arrive, preserving all ownership, review and final integration gates. Document small interface-first dependent PRs and explicit stack limits instead of unsafe blanket dependency removal.",
+      "acceptance": [
+        "In batch mode, the first eligible independent source review launches before remaining PR snapshots and historical merge reconciliation finish. Failed unrelated snapshots cannot prevent other eligible dispatch.",
+        "Only fresh published Review owners and source-mode same-repository open non-draft PRs are eligible; actionable repairs, active/uncertain workers, complete current source receipts and final integration candidates retain existing handling. Dry-run does not dispatch.",
+        "Review launches remain bounded by existing reservation/capacity/provider rules; final combined-candidate CI/testnet, exact head/base/feedback checks and serialized integration remain unchanged.",
+        "Document independent batching versus dependent stacks, small interface-first prerequisite PRs, stage-specific waits and testnet-first acceptance sequencing without claiming unsupported arbitrary stacked-base merges."
+      ],
+      "validation": "Focused scheduler ordering/failure/dry-run/eligibility regressions; complete offline coordinator suite; compile/diff checks. Existing GitHub CI and independent review before merge/installed runtime activation.",
+      "evidence": "2026-10-31 measured last-week queue/review history and inspected installed coordinator: discovery and full snapshot collection precede all source launches. User explicitly requests substantial PR open-to-close improvement."
     }
   ]
 }

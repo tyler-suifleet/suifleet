@@ -115,6 +115,11 @@ class BatchController:
         names = [item[0] for item in cursor.description]
         return [dict(zip(names, row)) for row in cursor.fetchall()]
 
+    def reserved_members(self, project):
+        """Keep source members reserved until their integration epoch ends."""
+        return {member['pr'] for row in self.rows(project) if row['status'] not in TERMINAL
+                for member in json.loads(row['members'])}
+
     def update(self, batch, **values):
         values['updated'] = self.clock()
         self.db.execute('UPDATE integration_batches SET ' + ','.join(key+'=?' for key in values)
@@ -611,8 +616,7 @@ class BatchController:
         if len(active) > 1:
             raise RuntimeError('multiple active integration epochs; inspect before proceeding')
         batch = active[0] if active else None
-        if batch:
-            held.update(m['pr'] for m in json.loads(batch['members']))
+        held.update(self.reserved_members(project))
         if not execute:
             return held
         if batch is None and candidates:
