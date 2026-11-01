@@ -35,6 +35,11 @@ rcgen = { version = "0.14", default-features = false, features = ["ring", "pem",
 pem = "4"
 x509-parser = "0.18"
 time = "0.3"
+# SF-174 recurring maintenance windows: IANA zones from a tz database pinned
+# into the binary (Yocto images may omit /usr/share/zoneinfo). jiff-tzdb is
+# pinned exactly, so a tzdb update is a deliberate daemon release.
+jiff = { version = "0.2.38", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff-tzdb = "=0.1.9"
 
 # Crypto — ed25519 signing for SUI transactions
 ed25519-dalek = { version = "2", features = ["rand_core"] }

@@ -1369,6 +1369,8 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
+ "jiff-tzdb",
+ "log",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
@@ -1395,6 +1397,12 @@ dependencies = [
  "quote",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "jiff-tzdb"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa8377070c6bae868759445e5a77f66d84f0b72f3a054bfb00e6d038b8282da7"
 
 [[package]]
 name = "jobserver"
@@ -2512,6 +2520,8 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac",
+ "jiff",
+ "jiff-tzdb",
  "libc",
  "p256",
  "pem",
