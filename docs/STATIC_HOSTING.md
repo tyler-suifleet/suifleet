@@ -39,8 +39,19 @@ docs build marker, adds docs HSTS, and supplies console discovery files and CSP
 hashes for the actual Next inline scripts. It validates the deployment manifest,
 rejects external script sources and removes Walrus routing metadata only from the
 conventional-host copy. The Walrus distribution is unchanged. The console policy
-is deliberately restricted to the testnet profile; new provider/wallet endpoints
-require reviewed policy and browser failure-path checks before enabling them.
+is derived from the exact `profiles/seal-testnet/deployment.json`, the Walrus
+fallback and CoinGecko URL constants in the dapp, and `seal.json`'s
+`keyServerUrls` map keyed by the configured Seal object IDs. No wildcard network
+grant is used. `node scripts/verify_seal_profile.cjs` checks those pinned URLs
+against read-only on-chain discovery; reverify before publication. Missing URL
+bindings or a different manifest fail preparation. Slush's SDK default
+`api.slush.app` metadata fetch is overridden by `dapp/src/lib/dapp-kit.ts` to
+same-origin `/wallet/slush.json`; its popup owns its own network policy. No
+external Slush connect grant is needed for that flow. New provider/wallet
+endpoints require reviewed policy and browser failure-path checks before enabling
+them. The offline browser fixture probes every explicit connect source with
+local intercepted responses and fails on script/connect policy violations; this
+checks browser enforcement, not real provider availability or wallet acceptance.
 
 No provider account/projects, credentials, registrar ownership, TLS certificates,
 real preview publication or hosted rollback has been verified. Under the user’s 2026-10-31 recovery direction, these external

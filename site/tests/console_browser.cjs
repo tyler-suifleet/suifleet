@@ -14,7 +14,7 @@ const path = require('node:path');
     const headers = Object.fromEntries(fs.readFileSync(path.join(root, '_headers'), 'utf8').split('\n').filter(l => l.startsWith('  ')).map(l => {const i=l.indexOf(':'); return [l.slice(0,i).trim(),l.slice(i+1).trim()]}));
     await page.route('**/*', async route => {
       const url = new URL(route.request().url());
-      if (url.origin !== 'https://app.suifleet.io') return route.abort();
+      if (url.origin !== 'https://app.suifleet.io') return route.fulfill({status:200, headers:{'Access-Control-Allow-Origin':'*'}, body:'{}'});
       let name = decodeURIComponent(url.pathname);
       if (name.endsWith('/')) name += 'index.html';
       const file = path.resolve(root, '.' + name);
@@ -24,9 +24,16 @@ const path = require('node:path');
     });
     await page.goto('https://app.suifleet.io/', {waitUntil:'networkidle'});
     await page.getByRole('link', {name:'Get started',exact:true}).first().waitFor();
+    // Probe every explicit connect source through the browser's actual CSP.
+    // Responses are offline fixtures; this establishes no provider availability.
+    const policy = headers['Content-Security-Policy'];
+    const connect = policy.split(';').find(p => p.trim().startsWith('connect-src ')).trim().split(/\s+/).slice(1).filter(p => p.startsWith('https://'));
+    await page.evaluate(async endpoints => {
+      await Promise.all(endpoints.map(url => fetch(url + '/csp-probe').catch(() => {})));
+    }, connect);
     const violations = await page.evaluate(() => window.policyViolations);
-    const scripts = violations.filter(([directive]) => directive.startsWith('script-src'));
+    const scripts = violations.filter(([directive]) => directive.startsWith('script-src') || directive.startsWith('connect-src'));
     if (scripts.length) throw new Error(JSON.stringify(scripts));
-    console.log('Offline console rendered with generated CSP; no script policy violations. No wallet/provider acceptance.');
+    console.log('Offline console rendered with generated CSP; no script/connect policy violations. No wallet/provider acceptance.');
   } finally {await browser.close();}
 })().catch(e => {console.error(e);process.exitCode=1;});
