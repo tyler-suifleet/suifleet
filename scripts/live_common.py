@@ -351,7 +351,7 @@ class Live:
     def published(result):
         return next(c["packageId"] for c in result["objectChanges"] if c["type"] == "published")
 
-    def publish(self, label, package_dir, pubfile, upgrade=None):
+    def publish(self, label, package_dir, pubfile, upgrade=None, *, persist=None):
         """Ephemeral publication of a contracts tree, or its upgrade
         (`upgrade` = {"cap": UpgradeCap, "package": current package}). The
         pinned compiler's bytecode is verified in the unsigned transaction
@@ -369,7 +369,7 @@ class Live:
         sign = toolchain.keystore_signer(self.network_sui, self.wallet, self.operator)
         result = self.execute(label, toolchain.package_submitter(
             client, self.build_sui, package_dir, common, sender=self.operator, sign=sign, upgrade=upgrade,
-            record=built.setdefault(label, {})),
+            record=built.setdefault(label, {}), persist=persist),
             # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
             # existing allowance; effects settle actual cost, never replenishing it.
             gas=self.ledger.remaining if upgrade is not None else PACKAGE_GAS)

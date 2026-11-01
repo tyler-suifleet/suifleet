@@ -321,6 +321,15 @@ class Pubfile(unittest.TestCase):
         self.assertIn('toolchain-version = "1.81.1"', text)
         self.assertIn('chain-id = "4c78adac"', text)
 
+    def test_latest_fixture_keeps_original_type_lineage(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "Pub.toml"
+            tc.write_pubfile(path, "4c78adac", Path(root) / "pkg", PACKAGE, CAP, version=2, original="0x1")
+            text = path.read_text()
+        self.assertIn(f'published-at = "{PACKAGE}"', text)
+        self.assertIn(f'original-id = "{tc.normal("0x1")}"', text)
+        self.assertIn("version = 2", text)
+
 
 if __name__ == '__main__':
     unittest.main()
