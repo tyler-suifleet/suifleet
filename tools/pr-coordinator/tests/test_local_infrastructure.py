@@ -164,6 +164,22 @@ class PolicyUpgrade(unittest.TestCase):
             self.assertEqual(old.verify.call_args_list[1].args, ('normal','local'))
             new.verify_local.assert_called_once()
 
+    def test_historical_verifier_uses_pinned_helpers(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from upgrade_activation import verify_policy_upgrade
+        import importlib
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory); sqlite3.connect(state/'reviews.sqlite3').close()
+            helpers = state/'installed'; helpers.mkdir()
+            (helpers/'coordinator.py').write_text('PINNED = True\n')
+            observed = []
+            old = SimpleNamespace(state=state, git=Mock(side_effect=['', 'normal']),
+                verify=lambda *args: observed.append(importlib.import_module('coordinator').PINNED))
+            new = SimpleNamespace(verify_local=Mock())
+            verify_policy_upgrade(old, new, 'base', 'target', old_helpers=helpers)
+            self.assertEqual(observed, [True]); new.verify_local.assert_not_called()
+
     def test_unproven_step_is_rejected(self):
         from types import SimpleNamespace
         from unittest.mock import Mock

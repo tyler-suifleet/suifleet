@@ -183,7 +183,7 @@ def rollback(module, engine, supervisor, receipt, journal):
     module.atomic(engine.journal, {**failed, 'action': 'Inspect supervisor upgrade before retrying this revision'})
 
 
-def verify_policy_upgrade(old_engine, new_engine, old_revision, target):
+def verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=None):
     """Explicit operator bootstrap: preserve old proof for every nonlocal step."""
     old_engine.git('merge-base', '--is-ancestor', old_revision, target)
     commits = old_engine.git('rev-list', '--first-parent', '--reverse', old_revision+'..'+target).splitlines()
@@ -191,7 +191,8 @@ def verify_policy_upgrade(old_engine, new_engine, old_revision, target):
     with sqlite3.connect(f'file:{old_engine.state / "reviews.sqlite3"}?mode=ro', uri=True) as db:
         for commit in commits:
             try:
-                old_engine.verify(previous, commit)
+                with helper_scope(old_helpers) if old_helpers else contextlib.nullcontext():
+                    old_engine.verify(previous, commit)
             except RuntimeError:
                 if not new_engine.verify_local(db, commit):
                     raise RuntimeError('policy bootstrap lacks exact local authorization evidence')
@@ -248,7 +249,7 @@ def upgrade(project_id, source, home, local_policy=False):
             new_engine = new_module.Activator(settings, library, state, services=old_engine.services)
             with helper_scope(verified_source):
                 if local_policy:
-                    verify_policy_upgrade(old_engine, new_engine, old_revision, target)
+                    verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=previous)
                 new_engine.verify(old_revision, target)
             new_engine.validate(target)
             generation = new_engine.stage(target)
