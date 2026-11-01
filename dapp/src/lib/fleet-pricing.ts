@@ -1,4 +1,5 @@
 import { dataPrice } from "./data-pricing";
+import defaultPriceTable from "./fleet-price-table.json";
 // SF-131: the SuiFleet price list, in one table. Every default and add-on price
 // the settings page shows comes from here; nothing else hard-codes a price.
 // Source: the 2026-10-23 pricing proposal in docs/BUSINESS_PLAN.md (merged in
@@ -39,48 +40,7 @@ export interface PriceTable {
   addOns: { encryptedDelivery: { label: string; usdPerDeviceMonth: number } };
 }
 
-const MINUTE = 60_000, HOUR = 60 * MINUTE, DAY = 24 * HOUR;
-
-export const DEFAULT_PRICE_TABLE: PriceTable = {
-  data: { includedBytesPerDeviceMonth: 10_000_000, includedRetentionDays: 42, writeUsdPerGB: 0.10, storageUsdPerGBMonth: 0.05 },
-  source: "docs/BUSINESS_PLAN.md pricing proposal, 2026-10-23 (not yet approved)",
-  currency: "USD",
-  base: {
-    tiers: [{ upToDevices: 10_000, usdPerDeviceMonth: 0.08 }, { upToDevices: 100_000, usdPerDeviceMonth: 0.05 }, { upToDevices: 1_000_000, usdPerDeviceMonth: 0.04 }],
-    customFromUsdPerDeviceMonth: 0.03,
-    monthlyMinimumUsd: 49,
-    activationUsdPerDevice: 0.10,
-    annualPrepayDiscountPercent: 10,
-  },
-  settings: {
-    checkIntervalMs: [
-      { label: "Every 5 minutes", value: 5 * MINUTE, usdPerDeviceMonth: 0.05 },
-      { label: "Every 15 minutes", value: 15 * MINUTE, usdPerDeviceMonth: 0.01 },
-      { label: "Every 30 minutes", value: 30 * MINUTE, usdPerDeviceMonth: 0, default: true },
-      { label: "Hourly", value: HOUR, usdPerDeviceMonth: 0 },
-    ],
-    rolloutCheckIntervalMs: [
-      { label: "Every 60 seconds during rollouts", value: MINUTE, usdPerDeviceMonth: 0, default: true },
-      { label: "Every 5 minutes during rollouts", value: 5 * MINUTE, usdPerDeviceMonth: 0 },
-      { label: "Off (normal checks only)", value: 0, usdPerDeviceMonth: 0 },
-    ],
-    healthIntervalMs: [
-      { label: "Hourly", value: HOUR, usdPerDeviceMonth: 0.12 },
-      { label: "Every 6 hours", value: 6 * HOUR, usdPerDeviceMonth: 0.03 },
-      { label: "Daily", value: DAY, usdPerDeviceMonth: 0, default: true },
-    ],
-    archiveIntervalMs: [
-      { label: "Daily", value: DAY, usdPerDeviceMonth: 0.08 },
-      { label: "Weekly", value: 7 * DAY, usdPerDeviceMonth: 0, default: true },
-    ],
-    archiveRetentionDays: [
-      { label: "6 weeks", value: 42, usdPerDeviceMonth: 0, default: true },
-      { label: "6 months", value: 182, usdPerDeviceMonth: 0.02 },
-      { label: "1 year", value: 365, usdPerDeviceMonth: 0.04 },
-    ],
-  },
-  addOns: { encryptedDelivery: { label: "Encrypted delivery (Seal)", usdPerDeviceMonth: 0.02 } },
-};
+// Default prices are shared with the generated landing-site pricing page.
 
 function fail(message: string): never { throw new Error(`Price table: ${message}`); }
 const price = (value: unknown, name: string) => {
@@ -91,6 +51,8 @@ const whole = (value: unknown, name: string, min: number) => {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < min) fail(`${name} must be a whole number of at least ${min}`);
   return value;
 };
+
+export const DEFAULT_PRICE_TABLE: PriceTable = validatePriceTable(defaultPriceTable);
 
 /** Check a table's shape and consistency: positive rising tiers, one default per setting, distinct values. */
 export function validatePriceTable(raw: unknown): PriceTable {

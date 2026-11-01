@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     python3 \
+    python3-yaml \
     libssl-dev \
     ca-certificates \
     xz-utils \
@@ -49,6 +50,7 @@ RUN curl -fL -o /tmp/sui-network.tgz \
     && echo "${SUI_NETWORK_SHA256}  /tmp/sui-network.tgz" | sha256sum -c - \
     && mkdir -p /opt/sui-network \
     && tar --no-same-owner -xzf /tmp/sui-network.tgz -C /opt/sui-network ./sui \
+    && chmod 0755 /opt/sui-network/sui \
     && rm /tmp/sui-network.tgz \
     && echo "${SUI_NETWORK_BINARY_SHA256}  /opt/sui-network/sui" | sha256sum -c - \
     && /opt/sui-network/sui --version
@@ -72,6 +74,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_MAJOR}.x | bash - \
     && npm install -g "pnpm@${PNPM_VERSION}" \
     && rm -rf /var/lib/apt/lists/* \
     && node --version && pnpm --version
+
+# Workflow-structure regressions use PyYAML. Keep this dependency after the
+# large pinned CLI/browser layers so adding it preserves their build cache.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-yaml \
+    && rm -rf /var/lib/apt/lists/*
 
 # ── Create non-root user matching host UID/GID ───────────────────────────────
 

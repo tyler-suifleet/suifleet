@@ -3785,9 +3785,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "scripts",
@@ -3795,7 +3793,7 @@
         ".github/workflows"
       ],
       "resources": [],
-      "description": "The landing-site guide (SF-172) needs a short video for each step: sign in, add funds, register a device, enroll a batch with claim credentials, publish a version, deploy to a group, create and advance a staged rollout, grant decryption through an access policy, fleet settings and budget. Hand-recorded videos go stale with every console release. Record them from a scripted browser walkthrough on testnet so they regenerate per release. The 2026-10-26 evaluation already drove the whole console headlessly with a Wallet-Standard wallet backed by the testnet agent key and a generated device key (14 transactions, about 0.12 SUI), so the same approach can produce consistent recordings.",
+      "description": "The landing-site guide (SF-172) needs a short video for each step: sign in, add funds, register a device, enroll a batch with claim credentials, publish a version, deploy to a group, create and advance a staged rollout, grant decryption through an access policy, fleet settings and budget. Hand-recorded videos go stale with every console release. Record them from a scripted browser walkthrough on testnet so they regenerate per release. The 2026-10-26 evaluation already drove the whole console headlessly with a Wallet-Standard wallet backed by the testnet agent key and a generated device key (14 transactions, about 0.12 SUI), so the same approach can produce consistent recordings.\n\nImplementation sequencing update under the user's instruction to keep work progressing: SF-172 / PR #362 has a committed static-site interface at 90279ace59fad70bfbd0bae27f11ceab70517588 on work/suifleet/sf-172-0a999e00. Independent source review found no actionable code defects; CI and final review remain merge gates.\n\nImplementation may start now using that exact committed site/guide interface in its own atomic worktree. Fetch and integrate the prerequisite branch as needed; do not edit SF-172's worktree or guess an uncommitted API. SF-172 remains a merge prerequisite (`merge_depends_on`), so this change does not approve or bypass its review/CI. Keep this ticket's actual acceptance criteria.\n\nFor hosting, the user selected conventional hosting with the console at app.suifleet.io. Prepare implementation and preview validation; production DNS, credentials and publication still follow the existing explicit authorization requirement. For recordings, preserve the testnet wallet lease, spend ceilings and secret-free video acceptance; no mock recording may be described as real testnet acceptance.",
       "evidence": "User request 2026-10-27 for a step-by-step guide with videos; SF-172 carries the written guide. The evaluation scaffolding and costs are described in the journal comment on SF-170/#336.",
       "acceptance": [
         "A repository script drives the console on testnet through each guide step and records one video per step (Playwright recordVideo or equivalent) with on-screen captions or a subtitle track explaining each action; no seed phrase, key, token or non-demo address appears.",
@@ -3803,7 +3801,10 @@
         "Videos ship with the site as static files or Walrus blobs within a documented size budget (for example at most 15 MB per video, WebM with an MP4 fallback) with poster images, embedded beside the matching guide step with transcript text for accessibility.",
         "Each guide step shows which console build its video was recorded against, and CI fails when the guide references a video that does not exist."
       ],
-      "validation": "One scripted recording run on testnet with recorded cost and digests; site build and link check in CI; manual review of every video for leaked secrets and accuracy."
+      "validation": "One scripted recording run on testnet with recorded cost and digests; site build and link check in CI; manual review of every video for leaked secrets and accuracy.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-176",
@@ -3812,9 +3813,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:infrastructure",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         ".github/workflows",
@@ -3823,7 +3822,7 @@
         "scripts/live_walrus_site.py"
       ],
       "resources": [],
-      "description": "SF-172 produces the site source and a hosting plan (site/README.md); this ticket makes the three hostnames live. User decision 2026-10-27: all three use conventional static hosting with no application server (SF-137): the marketing site at suifleet.io, the console at app.suifleet.io serving the Next static export of a recorded console release, and documentation at docs.suifleet.io. app.suifleet.io does not use a self-run Walrus portal or a redirect to wal.app; the Walrus Site build (SF-159) stays a separate, verifiable distribution. suifleet.io is registered at GoDaddy; select and verify the static host for each hostname here. The user will also register suifleet.sui on mainnet as the project's on-chain name; buying, renewing and configuring it are user actions. Implement DNS, TLS, security headers, sitemap, robots and Open Graph metadata, and a release pipeline that publishes to production only on explicit user authorization.",
+      "description": "SF-172 produces the site source and a hosting plan (site/README.md); this ticket makes the three hostnames live. User decision 2026-10-27: all three use conventional static hosting with no application server (SF-137): the marketing site at suifleet.io, the console at app.suifleet.io serving the Next static export of a recorded console release, and documentation at docs.suifleet.io. app.suifleet.io does not use a self-run Walrus portal or a redirect to wal.app; the Walrus Site build (SF-159) stays a separate, verifiable distribution. suifleet.io is registered at GoDaddy; select and verify the static host for each hostname here. The user will also register suifleet.sui on mainnet as the project's on-chain name; buying, renewing and configuring it are user actions. Implement DNS, TLS, security headers, sitemap, robots and Open Graph metadata, and a release pipeline that publishes to production only on explicit user authorization.\n\nImplementation sequencing update under the user's instruction to keep work progressing: SF-172 / PR #362 has a committed static-site interface at 90279ace59fad70bfbd0bae27f11ceab70517588 on work/suifleet/sf-172-0a999e00. Independent source review found no actionable code defects; CI and final review remain merge gates.\n\nImplementation may start now using that exact committed site/guide interface in its own atomic worktree. Fetch and integrate the prerequisite branch as needed; do not edit SF-172's worktree or guess an uncommitted API. SF-172 remains a merge prerequisite (`merge_depends_on`), so this change does not approve or bypass its review/CI. Keep this ticket's actual acceptance criteria.\n\nFor hosting, the user selected conventional hosting with the console at app.suifleet.io. Prepare implementation and preview validation; production DNS, credentials and publication still follow the existing explicit authorization requirement. For recordings, preserve the testnet wallet lease, spend ceilings and secret-free video acceptance; no mock recording may be described as real testnet acceptance.",
       "evidence": "SF-172 hosting plan in site/README.md (PR #362); SF-159 Walrus site publication and recovery on testnet; the static Walrus Site build section of docs/SERVERLESS_FLEET_DATA.md; release notes in docs/OPERATIONS.md. Hosting facts and the Slush connect-time warning on a quick-tunnel preview are in the #353 comments. SuiNS on 2026-10-27: suifleet.sui was unregistered; names of five or more characters cost about 10 USD to register and 5 USD a year to renew (on-chain price list); registrations last one year per purchase with a 30-day grace period after expiry (suins constants.move GRACE_PERIOD_MS).",
       "acceptance": [
         "Each hostname is served by conventional static hosting (user decision 2026-10-27). The runbook records the selected provider for each, its cost, how it applies the headers in site/src/_headers, and the DNS records at the GoDaddy registrar (or delegated DNS), CAA and TLS configuration, without secrets.",
@@ -3833,7 +3832,10 @@
         "The hostnames are prepared for wallet connect-time screening: stable owned domains with TLS and consistent metadata, stable preview hostnames (never quick tunnels) for real-wallet testing, and a documented review/allowlist request to the scanner provider before the mainnet release. The Slush connect check itself is recorded with the deferred real-wallet acceptance (SF-031/#32).",
         "The runbook documents suifleet.sui as the project's on-chain name: the SuinsRegistration NFT is held by the user's organization wallet, never an agent or CI wallet; its expiry, renewal procedure (renewable ahead up to the on-chain maximum, 30-day grace period after expiry) and the person responsible for renewal are recorded; the security and contact pages name it as the official on-chain identity once registered. Later uses (a target address for the mainnet publisher or treasury, an optional suifleet.wal.app mirror of a mainnet Walrus Site) need separate user authorization. Agents never buy, renew or reconfigure the name."
       ],
-      "validation": "Preview publication with recorded URLs and build hashes; production publication only after the user's explicit go-ahead, recorded in the issue; runbook review of the provider, DNS and suifleet.sui records."
+      "validation": "Preview publication with recorded URLs and build hashes; production publication only after the user's explicit go-ahead, recorded in the issue; runbook review of the provider, DNS and suifleet.sui records.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-177",
@@ -3842,9 +3844,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "docs",
@@ -3857,9 +3857,13 @@
       "acceptance": [
         "A documentation site builds from selected docs/ pages with navigation for operators, device integrators and administrators, using a pinned static generator reproducible in CI, with search and a link check; repository-internal pages (tracking, coordination, agent instructions) are excluded.",
         "Every page the console links to (SF-169) resolves on the docs site, the console's links are updated, and stable slugs or redirects keep links valid across reorganisation.",
-        "Visual design matches the SF-172 site and no tracking script loads without consent."
+        "Visual design matches the SF-172 site and no tracking script loads without consent.",
+        "Parallel development authorized by user 2026-10-27. Use the actual committed SF-172 interface at d5306c76179be15a09d5ae25740019f383a46a24: standard-library site/build.py --out DIR, site/src/layout.html, site/src/assets, site/src/site.json; implement docs in a separate site/docs subtree with explicit curated inputs and stable slugs. Inspect that commit read-only (git show); never edit the active SF-172 worktree or copy its dirty recording work. Coordinate any shared build/layout edits in #338. SF-172 must merge before this ticket integrates; no production DNS/credential publication is authorized by this dependency adjustment."
       ],
-      "validation": "Docs build and link check in CI; manual review of the install guide by someone without repository access."
+      "validation": "Docs build and link check in CI; manual review of the install guide by someone without repository access.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
     },
     {
       "key": "SF-178",
@@ -3868,9 +3872,7 @@
       "area": "infra",
       "phase": "fleet",
       "kind": "type:feature",
-      "depends_on": [
-        "SF-172"
-      ],
+      "depends_on": [],
       "paths": [
         "site",
         "scripts/subscription_pricing.py",
@@ -3883,9 +3885,43 @@
       "acceptance": [
         "The pricing page reads tiers, minimum, prepay discount and the configurable-cost explainer from the pricing table the console already uses or from a file generated by scripts/subscription_pricing.py, and a test fails when the page's numbers differ from the model.",
         "The page explains in plain language what the subscription includes, what customers pay directly in SUI and WAL, and the SUI-price repricing policy, and links to the console's fleet settings estimator.",
-        "Changing pricing in BUSINESS_PLAN.md requires regenerating the data file; the procedure is documented."
+        "Changing pricing in BUSINESS_PLAN.md requires regenerating the data file; the procedure is documented.",
+        "Parallel development authorized by user 2026-10-27. Use the actual committed SF-172 interface at d5306c76179be15a09d5ae25740019f383a46a24: site/build.py token expansion and site/src/pages/pricing.html, with canonical repository pricing data. Implement generated pricing data/rendering/tests against that pinned interface; do not guess an unpublished API or change the tariff. Inspect that commit read-only (git show); never edit the active SF-172 worktree. Coordinate shared build/layout edits in #338. SF-172 must merge before this ticket integrates; do not claim the landing site is deployed."
       ],
-      "validation": "Pricing data generation test; site build and link check; copy reviewed against BUSINESS_PLAN.md."
+      "validation": "Pricing data generation test; site build and link check; copy reviewed against BUSINESS_PLAN.md.",
+      "merge_depends_on": [
+        "SF-172"
+      ]
+    },
+    {
+      "key": "SF-180",
+      "title": "Give the public site a professional visual identity and SuiFleet logo",
+      "priority": "P1",
+      "area": "frontend",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "merge_depends_on": [
+        "SF-172"
+      ],
+      "paths": [
+        "site/src",
+        "site/build.py",
+        "site/check.py",
+        "site/tests",
+        "docs/brand"
+      ],
+      "resources": [],
+      "description": "User rejected the initial landing-page appearance and requested an extremely professional site plus a logo. Redesign the presentation with a cohesive enterprise identity, strong typography, purposeful layout and polished responsive behavior while retaining truthful product information and the functional static site/guide. Supply a usable transparent logo asset, accessible brand treatment and download. Do actual desktop/mobile browser review and publish a separate visual preview.",
+      "evidence": "Direct user feedback 2026-10-27: landing page looks shitty, want something extremely professional and make a logo. Existing SF172 build/layout interface is available on its committed branch; coordinate with its active worker, never edit its checkout. New generated logo concept exists privately in Codex generated_images; copy selected final asset into this issue worktree before referencing it.",
+      "acceptance": [
+        "A distinctive consistent brand appears in the navigation, hero, footer and favicon; logo is saved in repository with provenance and usable download, transparent background preserved.",
+        "Landing page uses clear operator/manufacturer language, confident typography, restrained color, deliberate spacing and a useful product visual; no invented customer logos, usage statistics, certifications or unmeasured cost claims.",
+        "All existing guide/pricing/security/contact links remain discoverable and work; keep script-free static-site policy, accessibility and strict security checks. No third-party tracking or fonts/scripts loaded at runtime.",
+        "Common layout and secondary-page styles share the same design; desktop and390px browser checks show no overflow, readable contrast, usable navigation and keyboard focus.",
+        "User receives a working draft preview of the redesigned site. SF172 remains a merge prerequisite. No mainnet publishing, credentials, DNS changes or real spending authorized by this visual task."
+      ],
+      "validation": "Run site build, site unit/negative/reproducibility/link checks and desktop/mobile rendered review with screenshots. Preserve meaningful existing checks and report exact commands; itemized small commits authored/committed by Tyler Bush."
     },
     {
       "key": "SF-181",
@@ -4253,7 +4289,7 @@
     },
     {
       "key": "SF-196",
-      "title": "Require a second factor for sensitive fleet actions",
+      "title": "Add optional second-factor protection for sensitive fleet actions",
       "priority": "P1",
       "area": "security",
       "phase": "fleet",
@@ -4267,15 +4303,284 @@
         "docs/SECURITY_CI.md"
       ],
       "resources": [],
-      "description": "User request 2026-10-27: 'I think we should have 2FA'. SuiFleet signs in with a wallet, so a single compromised wallet or Google-backed zkLogin session can today publish firmware, deploy to every device, change access policies, withdraw budgets and hand over fleets. A second factor should protect those actions. Candidate designs: Sui multisig administrator addresses (for example wallet plus passkey or hardware key, k-of-n), a passkey (WebAuthn) co-signer, an on-chain approval step where a second credential confirms pending sensitive actions, and time-delayed execution with a cancel window. The console must stay serverless (SF-137).",
-      "evidence": "User request 2026-10-27; customer.move credentials/administrators; docs/WALLET_ONBOARDING.md (Enoki/zkLogin); SF-185 treasury multisig.",
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. SuiFleet signs in with a wallet, so a single compromised wallet or zkLogin session can today publish firmware, deploy to every device, change access policies, withdraw budgets and hand over fleets. This ticket builds the shared framework: the list of protected actions, an on-chain per-organization security policy that says which mechanisms are required, enforcement that cannot be bypassed by calling contracts directly, and the console settings page. SF-201 and SF-198 to SF-200 implement the four mechanisms on top of it. The console stays serverless (SF-137).",
+      "evidence": "User requests 2026-10-27 ('I think we should have 2FA'; 'support all of these options as optional for security'); customer.move credentials/administrators; docs/WALLET_ONBOARDING.md; SF-185 treasury multisig.",
       "acceptance": [
-        "A design note lists the protected actions (at least publish, deploy and rollout advance to production groups, access-policy changes, budget and storage withdrawals, credential and administrator changes, fleet handover) and compares the candidate designs on security, usability, Slush and zkLogin compatibility, cost and recovery. It recommends one, and the user approves it before implementation.",
-        "The approved design is implemented end to end: an organization can require the second factor, sensitive actions without it fail on chain (not only in the UI), and the console guides setup, approval and recovery when a factor is lost.",
-        "Move tests cover bypass attempts through old package entry points and direct calls. A testnet run records digests for setup, an approved action, a rejected action and recovery.",
-        "Docs explain setup for operators."
+        "A design note defines the protected actions (at least publish, deploy and rollout advance, access-policy changes, budget and storage withdrawals, credential and administrator changes, fleet handover), how the four mechanisms combine (for example multisig plus delay), defaults (all off) and recovery when a factor is lost. The user reviews it before the mechanisms are built.",
+        "Each organization has an on-chain security policy. Protected actions check it on chain, so direct or old-package calls cannot skip a required factor. Turning protection off or weakening it requires the factors currently in force.",
+        "A Security settings page shows the policy, lets administrators enable each mechanism, and explains each in plain language.",
+        "Move tests cover policy changes, bypass attempts through old entry points and the weakening rule. A testnet run records the digests."
       ],
-      "validation": "Move tests and security check, frontend tests, testnet effects, real-wallet acceptance under SF-031/#32 policy."
+      "validation": "Move tests and security check, frontend tests, testnet effects."
+    },
+    {
+      "key": "SF-201",
+      "title": "Let organizations use a multisig administrator address",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. An organization's administrator credential can be a Sui multisig address (k-of-n over wallet, hardware-key or passkey members), so protected actions need several signatures.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Administrators can register a multisig address as a credential, see its members and threshold, and the console builds, collects and submits partial signatures without a server (for example by exporting and importing the unsigned transaction).",
+        "Slush, an extension wallet and a hardware wallet can each act as a member.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-198",
+      "title": "Let organizations require a passkey co-signature",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action also needs a signature from the administrator's passkey (WebAuthn, as supported by Sui's passkey signature scheme) in addition to the wallet.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Administrators can enrol and remove passkeys from the console; a protected action prompts for the passkey and fails on chain without it.",
+        "Browser and platform support and the lost-device recovery path are documented.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-199",
+      "title": "Let organizations require a second person to approve sensitive actions",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action is proposed on chain and runs only after a different authorised credential approves it.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "Proposals show what will happen, who proposed it and when it expires; another credential can approve or reject; the proposer cannot approve their own request; expired proposals cannot execute.",
+        "Pending approvals are visible on the dashboard.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-200",
+      "title": "Let organizations delay sensitive actions with a cancel window",
+      "priority": "P1",
+      "area": "security",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [
+        "SF-196"
+      ],
+      "paths": [
+        "contracts/sources",
+        "contracts/tests",
+        "dapp/src",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User decision 2026-10-27: support all four second-factor options (multisig administrators, passkey co-signer, second-person approval, time delay with cancel window), each optional and chosen per organization. A protected action is queued and can be executed only after a configured delay, during which any administrator can cancel it.",
+      "evidence": "SF-196 framework; user decision 2026-10-27.",
+      "acceptance": [
+        "The delay is configurable per action class within documented bounds; queued actions show a countdown and a cancel button; execution before the delay or after cancellation fails on chain.",
+        "Emergency actions that must stay fast (for example pausing a deployment) are excluded and listed in the design note.",
+        "The mechanism is optional, off by default and enabled per organization through the SF-196 policy, with Move tests, console tests and a testnet run recording setup, an allowed action, a refused action and recovery."
+      ],
+      "validation": "Move tests, frontend tests, testnet effects; real-wallet/hardware-key acceptance under SF-031/#32 policy."
+    },
+    {
+      "key": "SF-197",
+      "title": "Automatically dispatch a bounded recovery agent when fleet work stops progressing",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Add a recurring recovery-agent supervisor beyond the current service/status monitor. Start one bounded Codex recovery session from a concrete offline diagnostic snapshot when work stalls; install and enable for SuiFleet. Support explicitly configured projects without replacing coordinator or dispatcher.",
+      "evidence": "User explicitly asks for an automated agent prompted to get things moving, after repeated stalls despite active services. Existing five-minute check-progress.py only restarts stopped services and writes status.",
+      "acceptance": [
+        "Offline progress/stall detector and five-minute timer dispatch a real recovery agent; healthy active progress and empty/deferred-only work do not create idle agents.",
+        "One recovery agent globally with PID/start-time and descendant fencing, durable intent/exit receipts, bounded runtime, cooldown, restart adoption, maintenance guards and no recursive spawning.",
+        "Recovery prompt preserves ownership, stopped-worker proofs, CI/security/independent-review gates and deployment limits; no account rotation or fabricated success; legitimate CI/provider waits produce a concrete next-check time.",
+        "Private local reports record diagnosis/actions/verification/blockers/next check without credentials; no new periodic GitHub polling.",
+        "Focused offline tests cover stall/progress, duplicate/restarted ticks, uncertain launch, surviving descendants, timeout/nonzero/cooldown and config rejection. Additive install only, then verify actual timer and first launch."
+      ],
+      "validation": "Offline meaningful unit/integration tests, Python compile, additive installation check and actual timer/worker verification; small Tyler-authored commits, normal review. User explicitly authorizes watchdog activation."
+    },
+    {
+      "key": "SF-202",
+      "title": "Prepare testnet CI in parallel and validate through an isolated wallet pool",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/testnet.yml",
+        "scripts",
+        "docs/TESTNET.md"
+      ],
+      "resources": [],
+      "description": "User authorized moving secretless preparation outside wallet concurrency and a small pool of dedicated testnet CI wallets. Reduce queue time without weakening exact-head/base authentication, protected signing, spending limits, encrypted fixture handling or independent review.",
+      "evidence": "Measured run40704016195 waited46min then executed15min: Docker3m6s, dependencies2m2s, live acceptance9m38s. Whole-workflow single-wallet concurrency unnecessarily serializes preparation.",
+      "acceptance": [
+        "Authenticate revisions and prepare dependencies outside wallet concurrency without exposing signing credentials; protected signing rechecks exact head/base and prepared artifact provenance/integrity before execution.",
+        "Bounded configurable pool schedules one wallet per run, per-wallet serialized mutations and isolated authenticated encrypted fixture restore/upload/pruning; never duplicate acceptance through a fanout matrix.",
+        "Retain primary dedicated CI wallet, provision only explicitly authorized dedicated testnet pool identities securely, no printed/committed keys, preserve per-run non-replenishing budgets and testnet-only checks.",
+        "Tests cover parallel preparation, pool selection, same-wallet exclusion, distinct wallet/cache isolation, stale or tampered prepared artifacts and fixtures, one-wallet fallback and failures; record real hosted and live limitations honestly."
+      ],
+      "validation": "Focused offline workflow/security/controller/cache regressions, meaningful parallelism/isolation tests, locked preparation build, dedicated testnet smoke under shared-wallet leases/budgets; normal exact-head independent review and CI."
+    },
+    {
+      "key": "SF-206",
+      "title": "Retry provably never-started read-only review reservations once",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "extended",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "description": "Store.reserve permanently suppresses the same exact-head/feedback review after collect turns an interrupted pre-launch reservation into failed: INSERT OR IGNORE collides with the existing unique row. Provide a narrowly bounded normal-coordinator retry only for demonstrably never-started read-only reviews, preserving all uncertainty and existing repair ownership gates.",
+      "evidence": "Recovery 2026-10-29: SuiFleet PR365 job2315 is failed with launch interrupted before worker started, pid/start/launch_intent null, attempts0, empty receipt directory. No active SuiFleet model workers. Same head 90d70840 and review fingerprint remain blocked by its unique row. Separate shared testnet preparation ERROR across 22 PRs remains unresolved SF204/205; this ticket must not waive those gates.",
+      "acceptance": [
+        "Normal coordinator can reserve one replacement for the same never-started read-only review after validating its original empty directory, absent PID/start/launch intent and exact interruption reason; preserve the original row and bound retry to once.",
+        "Never auto-retry repairs or any launch with process/command/snapshot/result/exit evidence, nonempty or unavailable directories, changed family, or ambiguous state. Preserve capacity, per-PR exclusion, provider reset and independent exact-head/base approval gates.",
+        "Offline regression demonstrates the current poisoned unique reservation and successful bounded retry after service restart; unsafe variants and competing reservations remain rejected.",
+        "Submit through normal independent review and CI; do not install unreviewed changes or claim shared testnet/production acceptance."
+      ],
+      "validation": "Scoped offline coordinator reservation regressions, complete coordinator suite, tracking dry run and diff checks. Merged-only installation and actual PR365 dispatch are post-review next steps; no external testnet result is fabricated."
+    },
+    {
+      "key": "SF-203",
+      "title": "Reduce CI critical path with bounded isolated OTA simulator concurrency",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "Makefile",
+        "scripts",
+        "docs/OPERATIONS.md"
+      ],
+      "resources": [],
+      "description": "User requests fixing CI throughput. Preserve every existing test and security/live acceptance gate while reducing sequential simulator wall time.",
+      "evidence": "Main CI run40791684530 check took55m53s; test-ota consumed23m44s. Independent simulator invocations currently run sequentially.",
+      "acceptance": [
+        "Audit suite isolation before concurrency; prebuild shared binaries once and preserve all existing simulator invocations.",
+        "Bound concurrency with a sequential fallback; separate suite logs, propagate all failures, and clean up child processes on interruption.",
+        "Prove overlap and failure behavior with meaningful runner tests and run the full real OTA simulator suite; record timing without claiming hosted gains before measurement."
+      ],
+      "validation": "Runner concurrency/failure/interruption tests, full real OTA simulator suite, Makefile command coverage and relevant offline CI/security regressions."
+    },
+    {
+      "key": "SF-207",
+      "title": "Batch reviewed PR integration and separate source review from evidence waits",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        ".github/workflows",
+        "scripts/testnet_ci.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User explicitly requests batch integration instead of repeatedly rebasing, reviewing and running CI on every PR after each main merge. Implement a guarded integration candidate for a bounded group of reviewed PRs, retain source-review proof when unchanged, and expose actionable waiting states. Preserve independent source review, protected controller/wallet boundaries, actual combined-code CI/testnet acceptance and serial exact-revision main publication.",
+      "evidence": "Last24h observed125repair jobs and142reviews across23PRs:129blocked,9approve,4changes_requested. Current coordinator requires baseIncluded for each branch and resumes fixes even for tracking-only upstream changes, causing repeated branch/CI/review cycles.",
+      "acceptance": [
+        "Prepare a bounded batch from eligible independently source-reviewed PRs on one pinned base, isolate conflicts and ineligible/blocked PRs without resetting unrelated branches.",
+        "Validate the actual combined candidate through ordinary/security CI and normal authenticated testnet before integration; record immutable member heads, base and candidate provenance and recheck membership/feedback/authority before nonforce serial publication.",
+        "Preserve Tyler author/committer and verified merge issue/atomic/Project reconciliation for all members; partial failures retain recoverable durable receipts, never fake approval, checks or acceptance.",
+        "Separate source-complete/evidence-wait from actionable changes and avoid repeating source review for unchanged content; status reports distinguish review, CI, acceptance, conflict and active work.",
+        "Regression tests prove batch correctness, changed-head/base/feedback rejection, conflicts, failed checks, source evidence reuse limits, restart/recovery and issue reconciliation. Document operation, rollout and remaining live limitations."
+      ],
+      "validation": "Meaningful coordinator/planner and CI trust-boundary tests plus offline real-Git batch integration scenarios, status regressions and recorded actual activation evidence; no weakened wallet/mainnet/hardware/secret protections."
+    },
+    {
+      "key": "SF-208",
+      "title": "Recover stopped coordinator repairs from manual implementation origins",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/recovery_control.py",
+        "tools/pr-coordinator/tests/test_recovery_control.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Recovery of SF-207 PR412 fails because its manual implementation has no finished dispatcher run. Add a bounded operator route accepting an existing durable manual-origin process receipt, preserving original claim and proving original worker/session/helpers stopped. Never infer stopped identity from a prose handoff or fabricate a dispatcher origin.",
+      "evidence": "Recovery run 9d889f76: merged recovery_control.stopped_repair rejects PR412 with no unchanged finished implementation receipt; stopped repair job2627 has failed exit and unchanged claim. SF192 recovery successfully launched separately.",
+      "acceptance": [
+        "Accept an explicit existing manual-origin receipt bound to all claim identity fields, with recorded PID/start and timestamp preceding the coordinator repair; verify original process/session/helpers stopped before reservation and again before spawn.",
+        "Missing/tampered/stale/live/uninspectable origin proof, active same-claim workers, provider waits and competing reservations fail closed without changing tracker state. Preserve existing dispatcher-origin behavior.",
+        "Offline regressions exercise actual process stop checks, repeated fences and unchanged ownership; document exact evidence requirements. Submit through normal review and CI; do not install unreviewed source or claim SF207 recovered."
+      ],
+      "validation": "Focused recovery tests and full coordinator tests; tracking tests/dry run and diff checks. Merged-only installation and SF207 origin-proof verification remain next actions."
+    },
+    {
+      "key": "SF-209",
+      "title": "Validate Review claims without heartbeats during batch integration",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests/test_batch_integration.py"
+      ],
+      "resources": [],
+      "description": "Batch source-candidate scanning and manifest validation heartbeat non-expiring Review claims. The installed ticket CLI rejects this, aborting the entire project scan and preventing unrelated reviews and batch validation.",
+      "evidence": "Recovery run 48a0b885: services active, no verified workers, repeated suifleet scan failures on SF-166. Direct heartbeat returns Only implementation/blocked leases need heartbeats. Runtime batch_integration.py lines 184 and 555 heartbeat source owners which must be Review.",
+      "acceptance": [
+        "Use the existing read-only Review ownership validator instead of heartbeats in candidate scanning and manifest validation; reject stale or changed ownership and preserve all exact-head/base/source/CI/security/testnet/final-review gates.",
+        "Regression tests reject Review heartbeats, validate retained Review claims in both batch paths and exercise changed/unpublished ownership without blocking unrelated eligible work.",
+        "Submit through independent normal PR review; install only after verified merge through existing activation path."
+      ],
+      "validation": "Focused batch-integration tests, full coordinator suite, diff checks. No fabricated approvals or live wallet mutations."
     }
   ]
 }

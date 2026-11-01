@@ -28,6 +28,7 @@ export const customer_HandoverCompletedBcs = bcs.struct("HandoverCompleted", { c
 export const customer_HandoverConsentBcs = bcs.struct("HandoverConsent", { id: bcs.Address, customer_id: bcs.Address, generation: bcs.u64(), recipient: bcs.Address, expires_ms: bcs.u64() });
 export const customer_MembershipBcs = bcs.struct("Membership", { id: bcs.Address, customer_id: bcs.Address });
 export const customer_PolicyKeyBcs = bcs.struct("PolicyKey", { policy_id: bcs.Address });
+export const customer_GroupBatchAppliedBcs = bcs.struct("GroupBatchApplied", { fleet_id: bcs.Address, group_id: bcs.Address, added: bcs.bool(), count: bcs.u64() });
 export const deployment_manager_ControlBcs = bcs.struct("Control", { revision: bcs.u64(), state: bcs.u8(), not_before_ms: bcs.u64(), expires_ms: bcs.u64(), window_start_ms: bcs.u64(), window_end_ms: bcs.u64(), notice_ms: bcs.u64() });
 export const deployment_manager_ControlKeyBcs = bcs.struct("ControlKey", { dummy_field: bcs.bool() });
 export const deployment_manager_CustomerFleetKeyBcs = bcs.struct("CustomerFleetKey", { dummy_field: bcs.bool() });
@@ -58,6 +59,9 @@ export const deployment_manager_ShardedTargetGroupsKeyBcs = bcs.struct("ShardedT
 export const deployment_manager_StatusesKeyBcs = bcs.struct("StatusesKey", { dummy_field: bcs.bool() });
 export const deployment_manager_TargetDevicesKeyBcs = bcs.struct("TargetDevicesKey", { dummy_field: bcs.bool() });
 export const deployment_manager_TargetGroupsKeyBcs = bcs.struct("TargetGroupsKey", { dummy_field: bcs.bool() });
+export const deployment_manager_DecisionCleanupKeyBcs = bcs.struct("DecisionCleanupKey", { dummy_field: bcs.bool() });
+export const deployment_manager_DecisionKeyBcs = bcs.struct("DecisionKey", { revision: bcs.u64() });
+export const deployment_manager_DecisionRecordBcs = bcs.struct("DecisionRecord", { deployment_id: bcs.Address, revision: bcs.u64(), cohort: bcs.u64(), state: bcs.u8(), reason: bcs.string(), at_ms: bcs.u64(), admitted: bcs.vector(bcs.Address) });
 export const desired_state_DesiredKeyBcs = bcs.struct("DesiredKey", { dummy_field: bcs.bool() });
 export const desired_state_DesiredStateBcs = bcs.struct("DesiredState", { revision: bcs.u64(), components: bcs.struct("VecMap", { contents: bcs.vector(bcs.struct("Entry", { key: bcs.string(), value: bcs.Address })) }), updated_at: bcs.u64() });
 export const desired_state_DesiredStateChangedBcs = bcs.struct("DesiredStateChanged", { group_id: bcs.Address, revision: bcs.u64(), component_names: bcs.vector(bcs.string()), deployments: bcs.vector(bcs.Address) });
@@ -153,6 +157,7 @@ export const calls = {
   component_catalog_validate_name: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_name`, arguments: [tx.pure.string(a0)] }),
   component_catalog_validate_version: (tx: Transaction, packageId: string, a0: string) => tx.moveCall({ target: `${packageId}::component_catalog::validate_version`, arguments: [tx.pure.string(a0)] }),
   component_catalog_version_publisher: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::version_publisher`, arguments: [tx.object(a0)] }),
+  component_catalog_new_deployment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::new_deployment`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.object(a3)] }),
   customer_active_devices: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::active_devices`, arguments: [tx.object(a0)] }),
   customer_add_claims: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string[]) => tx.moveCall({ target: `${packageId}::customer::add_claims`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure(bcs.vector(bcs.Address).serialize(a3))] }),
   customer_add_claims_secured: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string[], a4: Parameters<Transaction["object"]>[0], a5: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::add_claims_secured`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure(bcs.vector(bcs.Address).serialize(a3)), tx.object(a4), tx.object(a5)] }),
@@ -284,6 +289,10 @@ export const calls = {
   customer_used: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::used`, arguments: [tx.object(a0)] }),
   customer_withdraw_budget: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number | bigint | string, a4: string) => tx.moveCall({ target: `${packageId}::customer::withdraw_budget`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u64(a3), tx.pure.address(a4)] }),
   customer_withdraw_budget_secured: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number | bigint | string, a4: string, a5: Parameters<Transaction["object"]>[0], a6: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::withdraw_budget_secured`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u64(a3), tx.pure.address(a4), tx.object(a5), tx.object(a6)] }),
+  customer_add_many_to_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0], a4: string[], a5: string | null) => tx.moveCall({ target: `${packageId}::customer::add_many_to_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.object(a3), tx.pure(bcs.vector(bcs.Address).serialize(a4)), tx.pure.option("string", a5)] }),
+  customer_clear_decision_audit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number | bigint | string) => tx.moveCall({ target: `${packageId}::customer::clear_decision_audit`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u64(a3)] }),
+  customer_max_group_batch: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::customer::max_group_batch`, arguments: [] }),
+  customer_remove_many_from_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string[]) => tx.moveCall({ target: `${packageId}::customer::remove_many_from_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure(bcs.vector(bcs.Address).serialize(a3))] }),
   deployment_manager_advance_rollout: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: string[], a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::advance_rollout`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.pure(bcs.vector(bcs.Address).serialize(a3)), tx.object(a4)] }),
   deployment_manager_advance_rollout_onchain: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string[], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::advance_rollout_onchain`, arguments: [tx.object(a0), tx.object(a1), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.object(a3)] }),
   deployment_manager_begin_receipt_cleanup: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::begin_receipt_cleanup`, arguments: [tx.object(a0)] }),
@@ -331,6 +340,7 @@ export const calls = {
   deployment_manager_status_applied: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_applied`, arguments: [] }),
   deployment_manager_status_failed: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::deployment_manager::status_failed`, arguments: [] }),
   deployment_manager_sync_rollout_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string[]) => tx.moveCall({ target: `${packageId}::deployment_manager::sync_rollout_receipts`, arguments: [tx.object(a0), tx.object(a1), tx.pure(bcs.vector(bcs.Address).serialize(a2))] }),
+  deployment_manager_clear_decision_audit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number | bigint | string) => tx.moveCall({ target: `${packageId}::deployment_manager::clear_decision_audit`, arguments: [tx.object(a0), tx.pure.u64(a1)] }),
   desired_state_begin: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::begin`, arguments: [tx.object(a0)] }),
   desired_state_begin_retirement: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::begin_retirement`, arguments: [tx.object(a0)] }),
   desired_state_commit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::desired_state::commit`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
@@ -377,6 +387,7 @@ export const calls = {
   device_registry_revoke_device: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::revoke_device`, arguments: [tx.object(a0), tx.object(a1)] }),
   device_registry_rotate_device_key: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::device_registry::rotate_device_key`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
   device_registry_set_meta: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::device_registry::set_meta`, arguments: [tx.object(a0), tx.pure.string(a1), tx.pure.string(a2)] }),
+  device_registry_arch: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::device_registry::arch`, arguments: [tx.object(a0)] }),
   enrollment_add_claims: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[]) => tx.moveCall({ target: `${packageId}::enrollment::add_claims`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1))] }),
   enrollment_close: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::enrollment::close`, arguments: [tx.object(a0)] }),
   enrollment_create_policy: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number | bigint | string, a2: number | bigint | string) => tx.moveCall({ target: `${packageId}::enrollment::create_policy`, arguments: [tx.object(a0), tx.pure.u64(a1), tx.pure.u64(a2)] }),
@@ -549,6 +560,7 @@ export const TYPES = {
   customer_HandoverConsent: "customer::HandoverConsent",
   customer_Membership: "customer::Membership",
   customer_PolicyKey: "customer::PolicyKey",
+  customer_GroupBatchApplied: "customer::GroupBatchApplied",
   deployment_manager_Control: "deployment_manager::Control",
   deployment_manager_ControlKey: "deployment_manager::ControlKey",
   deployment_manager_CustomerFleetKey: "deployment_manager::CustomerFleetKey",
@@ -579,6 +591,9 @@ export const TYPES = {
   deployment_manager_StatusesKey: "deployment_manager::StatusesKey",
   deployment_manager_TargetDevicesKey: "deployment_manager::TargetDevicesKey",
   deployment_manager_TargetGroupsKey: "deployment_manager::TargetGroupsKey",
+  deployment_manager_DecisionCleanupKey: "deployment_manager::DecisionCleanupKey",
+  deployment_manager_DecisionKey: "deployment_manager::DecisionKey",
+  deployment_manager_DecisionRecord: "deployment_manager::DecisionRecord",
   desired_state_DesiredKey: "desired_state::DesiredKey",
   desired_state_DesiredState: "desired_state::DesiredState",
   desired_state_DesiredStateChanged: "desired_state::DesiredStateChanged",

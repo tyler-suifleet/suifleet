@@ -96,11 +96,13 @@ module sui_edge::desired_state {
     }
 
     /// Make `deployment` the desired version of its component. The record must
-    /// be the admin's own, target this group and authenticate its recipe.
+    /// be the admin's own, target this group and authenticate its recipe
+    /// through a direct digest or an immutable catalog version binding.
     public fun set_component(plan: &mut RevisionPlan, deployment: &mut DeploymentRecord) {
         assert!(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
         assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
-        assert!(deployment_manager::has_recipe_digest(deployment), EUnverifiedRecipe);
+        assert!(deployment_manager::has_recipe_digest(deployment) ||
+            component_catalog::has_authenticated_version(deployment), EUnverifiedRecipe);
         deployment_manager::mark_managed(deployment);
         let name = *deployment_manager::component_name(deployment);
         let id = object::id(deployment);

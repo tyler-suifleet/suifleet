@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "pages": [
+    {
+      "source": "docs/INSTALL.md",
+      "slug": "install",
+      "title": "Install the device client",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/ENROLLMENT.md",
+      "slug": "enrollment",
+      "title": "Enrollment and provisioning media",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/COMPONENT_CATALOG.md",
+      "slug": "components",
+      "title": "Publish and deploy components",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/GREENGRASS_COMPATIBILITY.md",
+      "slug": "greengrass",
+      "title": "Greengrass compatibility and migration",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/PLATFORM_INSTALLERS.md",
+      "slug": "platform-installers",
+      "title": "Platform installers and recovery",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/WALLET_ONBOARDING.md",
+      "slug": "wallet",
+      "title": "Connect an account",
+      "group": "Operators"
+    },
+    {
+      "source": "docs/YOCTO_PACKAGING.md",
+      "slug": "yocto",
+      "title": "Yocto recipe and first boot",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/PI_IMAGE.md",
+      "slug": "pi-image",
+      "title": "Raspberry Pi image",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/MACOS_RUNTIME.md",
+      "slug": "macos",
+      "title": "macOS installer and service",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/RELEASES.md",
+      "slug": "releases",
+      "title": "Release bundles and verification",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/DEPLOYMENT_MANIFEST.md",
+      "slug": "deployment-manifest",
+      "title": "Deployment manifest",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/COMPONENT_IPC.md",
+      "slug": "component-ipc",
+      "title": "Component IPC",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/KEY_ISOLATION.md",
+      "slug": "key-isolation",
+      "title": "Device signing service",
+      "group": "Device integrators"
+    },
+    {
+      "source": "docs/ACCESS_AND_ENCRYPTION.md",
+      "slug": "access",
+      "title": "Authority and encryption",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/ACCESS_POLICIES.md",
+      "slug": "access-policies",
+      "title": "Access policies",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/CONFIDENTIAL_DELIVERY.md",
+      "slug": "seal",
+      "title": "Seal confidential delivery",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/FLEET_SETTINGS.md",
+      "slug": "fleet-settings",
+      "title": "Fleet settings",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/FLEET_BUDGET.md",
+      "slug": "budget",
+      "title": "Fleet network budget",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/PRICING_POLICY.md",
+      "slug": "pricing",
+      "title": "Pricing policy",
+      "group": "Administrators"
+    },
+    {
+      "source": "docs/FLEET_HANDOVER.md",
+      "slug": "handover",
+      "title": "Fleet handover",
+      "group": "Administrators"
+    }
+  ]
+}

@@ -202,7 +202,7 @@ def plan(event_name, event, repo, get=api):
     sha = run['head_sha']
     if not SHA.fullmatch(sha):
         return None
-    if run['event'] == 'push' and run['head_branch'] == 'main':
+    if run['event'] in ('push', 'workflow_dispatch', 'schedule') and run['head_branch'] == 'main':
         return {'head': sha, 'base': get(f'repos/{repo}/commits/{sha}')["parents"][0]["sha"], 'pr': ''} if sha == base else None
     if run['event'] != 'pull_request':
         return None
@@ -268,8 +268,16 @@ def description(base, state, failure=None):
 
 def status(repo, head, base, state, url, failure=None):
     assert SHA.fullmatch(head) and SHA.fullmatch(base)
-    api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
+    result = api(f'repos/{repo}/statuses/{head}', dict(state=state, context=CONTEXT,
         description=description(base, state, failure), target_url=url))
+    # Only the trusted preparation-status job sets this flag. Its authenticated
+    # job log binds the published status ID to this controller and attempt.
+    if state == 'error' and os.environ.get('PREPARATION_RESULT') == 'failure':
+        receipt = dict(status=result['id'], head=head, base=base,
+                       run=int(os.environ['GITHUB_RUN_ID']),
+                       attempt=int(os.environ['GITHUB_RUN_ATTEMPT']),
+                       controller=os.environ['GITHUB_SHA'])
+        print('SUIFLEET_PREPARATION_V1 ' + json.dumps(receipt, sort_keys=True))
 
 
 def verify_checkout(expected, run=subprocess.run):
@@ -282,17 +290,56 @@ def verify_checkout(expected, run=subprocess.run):
         raise RuntimeError('checkout does not match authenticated revision')
 
 
+def checkout_candidate(head, base, destination, run=subprocess.run):
+    """Keep the trusted controller intact; clone immutable test inputs separately.
+
+    No candidate hooks, filters or scripts run on the controller host. Candidate
+    execution remains confined to the explicit Docker mount after verification.
+    """
+    if not all(isinstance(ref, str) and SHA.fullmatch(ref) for ref in (head, base)):
+        raise RuntimeError('candidate requires immutable head and base')
+    destination = Path(destination)
+    if destination.exists() or destination.is_symlink():
+        raise RuntimeError('candidate destination already exists')
+    # Local clones of shallow repositories can omit fetched commits that are
+    # reachable only through FETCH_HEAD. Remove the shallow boundary before
+    # copying the object database, including both independently selected inputs.
+    shallow = run(['git', 'rev-parse', '--is-shallow-repository'],
+                  text=True, capture_output=True, check=True).stdout.strip()
+    if shallow not in ('true', 'false'):
+        raise RuntimeError('cannot determine controller history availability')
+    fetch = ['git', 'fetch', '--no-tags']
+    if shallow == 'true':
+        fetch.append('--unshallow')
+    run([*fetch, 'origin', head, base], check=True)
+    run(['git', 'clone', '--no-hardlinks', '--no-checkout', '.', str(destination)], check=True)
+    run(['git', '-C', str(destination), '-c', 'core.hooksPath=/dev/null',
+         'checkout', '--detach', head], check=True)
+    actual = run(['git', '-C', str(destination), 'rev-parse', '--verify', 'HEAD'],
+                 text=True, capture_output=True, check=True).stdout.strip()
+    if actual != head:
+        raise RuntimeError('candidate does not match authenticated revision')
+
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--probe-environment', action='store_true', help='keyless public-metadata preflight; never publishes a test status or spends gas')
+    parser.add_argument('--queue-plan', action='store_true', help='keyless eligibility only; the protected validate job must independently authenticate again')
     parser.add_argument('--recheck', action='store_true')
     parser.add_argument('--verify-checkout', action='store_true')
+    parser.add_argument('--checkout-candidate', type=Path)
     # `error` marks a cancelled run: never a source failure, never success.
     parser.add_argument('--status', choices=['pending', 'success', 'failure', 'error'])
     args = parser.parse_args()
+    if args.queue_plan and (args.verify_checkout or args.status or args.recheck or args.probe_environment):
+        parser.error('queue planning cannot perform protected validation or status operations')
     repo = os.environ['GITHUB_REPOSITORY']
-    if args.verify_checkout:
+    if args.checkout_candidate:
+        if args.status or args.recheck or args.probe_environment or args.verify_checkout:
+            parser.error('candidate checkout cannot perform other operations')
+        checkout_candidate(os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.checkout_candidate)
+    elif args.verify_checkout:
         if args.status or args.recheck or args.probe_environment:
             parser.error('checkout verification cannot perform other operations')
         verify_checkout(os.environ['TEST_HEAD'])
@@ -304,6 +351,7 @@ if __name__ == '__main__':
             sort_keys=True))
     elif args.status:
         failure = failure_class(os.environ.get('ACCEPTANCE_OUTCOME', ''),
+                                evidence_dir=os.environ.get('TEST_EVIDENCE_DIR', 'evidence'),
                                 dependencies=os.environ.get('DEPENDENCIES_OUTCOME', '')) if args.status == 'failure' else None
         status(repo, os.environ['TEST_HEAD'], os.environ['BASE_REF'], args.status,
                f'https://github.com/{repo}/actions/runs/{os.environ["GITHUB_RUN_ID"]}', failure)
@@ -313,7 +361,7 @@ if __name__ == '__main__':
         if args.recheck and (not selection or selection['head'] != os.environ['TEST_HEAD']
                              or selection['base'] != os.environ['BASE_REF']):
             raise RuntimeError('superseded head/base: no testnet mutation submitted')
-        if selection:
+        if selection and not args.queue_plan:
             saved = os.path.join(os.environ['RUNNER_TEMP'], ENVIRONMENT_RECORD) if os.environ.get('RUNNER_TEMP') else None
             if args.recheck:
                 verify_environment(repo, fallback=saved)

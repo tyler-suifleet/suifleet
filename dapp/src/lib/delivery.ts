@@ -16,6 +16,21 @@ export interface Delivery {
 export const DEFAULT_DELIVERY: Delivery = { mode: "confidential", policyId: "", publicAcknowledged: false };
 
 /**
+ * Check a delivery choice without uploading: the same conditions
+ * `releaseProtection` enforces, so a form can reject them before review.
+ */
+export function checkDelivery(delivery: Delivery, policies: AccessPolicy[], settings: SealSettings | null = SEAL_SETTINGS ?? null): AccessPolicy | undefined {
+  if (delivery.mode === "public") {
+    if (!delivery.publicAcknowledged) throw new Error("Confirm that this content may be stored publicly, or choose confidential delivery");
+    return undefined;
+  }
+  if (!settings) throw new Error("Private uploads are unavailable because the encryption service is not configured; nothing was uploaded. Ask your administrator to complete setup");
+  const policy = policies.find(p => p.objectId === delivery.policyId);
+  if (!policy) throw new Error("Choose an access policy you administer for confidential delivery");
+  return policy;
+}
+
+/**
  * One release's protection: a single fresh identity under the policy's
  * current key epoch, shared by its artifact and recipe so a device fetches
  * one key. Throws instead of degrading to public delivery.
@@ -26,12 +41,8 @@ export function releaseProtection(
   policies: AccessPolicy[],
   settings: SealSettings | null = SEAL_SETTINGS ?? null,
 ): Protection {
-  if (delivery.mode === "public") {
-    if (!delivery.publicAcknowledged) throw new Error("Confirm that this content may be stored publicly, or choose confidential delivery");
-    return { kind: "public" };
-  }
-  if (!settings) throw new Error("Confidential delivery needs Seal key servers (NEXT_PUBLIC_SEAL_KEY_SERVERS); nothing was uploaded");
-  const policy = policies.find(p => p.objectId === delivery.policyId);
-  if (!policy) throw new Error("Choose an access policy you administer for confidential delivery");
-  return { kind: "confidential", seal: sealer(client, settings, sealNamespace(), newIdentity(policy.objectId, policy.keyEpoch)) };
+  const policy = checkDelivery(delivery, policies, settings);
+  if (delivery.mode === "public") return { kind: "public" };
+  // checkDelivery returned a policy and required settings for confidential delivery.
+  return { kind: "confidential", seal: sealer(client, settings!, sealNamespace(), newIdentity(policy!.objectId, policy!.keyEpoch)) };
 }

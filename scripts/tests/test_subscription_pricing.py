@@ -401,5 +401,87 @@ class SubscriptionPricingTests(unittest.TestCase):
                 self.assertIn(f"${Decimal(result['monthly_subscription_usd']):,.2f}", document)
 
 
+
+class PublicPricingTests(unittest.TestCase):
+    def setUp(self):
+        import site_pricing
+        self.site = site_pricing
+        self.prices = load(site_pricing.PRICE_TABLE)
+        self.policy = load(site_pricing.POLICY)
+
+    def test_generated_page_is_current(self):
+        self.site.generate(check=True)
+
+    def test_console_uses_shared_table(self):
+        source = (ROOT / 'dapp/src/lib/fleet-pricing.ts').read_text()
+        self.assertIn('import defaultPriceTable from "./fleet-price-table.json"', source)
+        self.assertIn('validatePriceTable(defaultPriceTable)', source)
+
+    def test_tariff_matches_business_plan(self):
+        plan = self.site.PLAN.read_text()
+        tiers = self.prices['base']['tiers']
+        self.assertIn(f'| First {tiers[0]["upToDevices"]:,} | {self.site.usd(tiers[0]["usdPerDeviceMonth"])} |', plan)
+        self.assertIn(f'| {tiers[0]["upToDevices"] + 1:,} to {tiers[1]["upToDevices"]:,} | {self.site.usd(tiers[1]["usdPerDeviceMonth"])} |', plan)
+        self.assertIn(f'| Above {tiers[1]["upToDevices"]:,} | {self.site.usd(tiers[2]["usdPerDeviceMonth"])} |', plan)
+        self.assertIn(f'| Above {tiers[-1]["upToDevices"]:,} | Custom, from {self.site.usd(self.prices["base"]["customFromUsdPerDeviceMonth"])} |', plan)
+        self.assertIn(f'| Monthly minimum | ${self.prices["base"]["monthlyMinimumUsd"]} |', plan)
+        self.assertIn(f'| Annual prepay | {self.prices["base"]["annualPrepayDiscountPercent"]}% discount |', plan)
+
+    def test_public_offers_match_plan_and_render_from_policy(self):
+        from unittest.mock import patch
+        offers = self.policy['public_offers']
+        managed, at_cost, partners = (offers[key] for key in ('managed', 'at_cost', 'design_partners'))
+        plan = self.site.PLAN.read_text()
+        self.assertIn(f'Managed plan: the platform price plus {self.site.usd(managed["premium_usd_per_device_month"])} per device per month, with a ${managed["monthly_minimum_usd"]} monthly minimum.', plan)
+        self.assertIn(f'Up to {at_cost["max_devices"]:,} devices per organization', plan)
+        self.assertIn(f'about {self.site.usd(at_cost["estimated_usd_per_device_month"])} per device per month', plan)
+        self.assertIn(f'Up to {partners["max_devices"]:,} devices each at cost for {partners["term_months"]} months', plan)
+        page = self.site.generated()
+        for text in ('Managed plan', '$0.10 per device per month', '$199.00 monthly minimum',
+                     '100 devices per organization', '$0.01', '5,000 devices each at cost for 12 months',
+                     'community support only', 'Billed annually in advance', 'case study'):
+            self.assertIn(text, page)
+        # Each canonical offer field must affect the page and invalidate committed output.
+        for group, values in offers.items():
+            for key, value in values.items():
+                policy = copy.deepcopy(self.policy)
+                policy['public_offers'][group][key] = str(Decimal(str(value)) + 1) if isinstance(value, str) else value + 1
+                changed = self.site.render(self.prices, policy, 'digest')
+                self.assertNotEqual(self.site.render(self.prices, self.policy, 'digest'), changed)
+                with patch.object(self.site, 'generated', return_value=changed):
+                    with self.assertRaisesRegex(ValueError, 'stale'):
+                        self.site.generate(check=True)
+
+    def test_model_changes_invalidate_page(self):
+        from unittest.mock import patch
+        original = self.site.generated()
+        for key in ('monthlyMinimumUsd', 'activationUsdPerDevice', 'annualPrepayDiscountPercent', 'customFromUsdPerDeviceMonth'):
+            prices = copy.deepcopy(self.prices)
+            prices['base'][key] += 1
+            changed = self.site.render(prices, self.policy, 'changed')
+            self.assertNotEqual(original, changed)
+            with patch.object(self.site, 'generated', return_value=changed):
+                with self.assertRaisesRegex(ValueError, 'stale'):
+                    self.site.generate(check=True)
+        prices = copy.deepcopy(self.prices)
+        prices['base']['tiers'][0] = dict(upToDevices=12345, usdPerDeviceMonth=0.09)
+        prices['settings']['checkIntervalMs'][0]['usdPerDeviceMonth'] = 0.77
+        page = self.site.render(prices, self.policy, 'digest')
+        for text in ('First 12,345', '12,346 to 100,000', '$0.09', '$0.77'):
+            self.assertIn(text, page)
+        policy = copy.deepcopy(self.policy)
+        policy['renewal_repricing_trigger_multiple'] = '4'
+        policy['renewal_notice_days'] = 45
+        policy['hedge']['term_sui_purchased_fraction'] = '0.5'
+        page = self.site.render(prices, policy, 'digest')
+        for text in ('at least 4×', '45 days', '50% of the term'):
+            self.assertIn(text, page)
+
+    def test_policy_and_estimator_are_explicit(self):
+        page = self.site.generated()
+        for text in ('{{app:settings/}}', 'SUI pays', 'WAL pays', 'never change mid-term', 'at least 3×', '30 days', 'gas-price', 'not a binding tariff'):
+            self.assertIn(text, page)
+
+
 if __name__ == '__main__':
     unittest.main()

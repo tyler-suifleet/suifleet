@@ -27,6 +27,13 @@ module sui_edge::customer {
     const ELastAdmin: u64 = 4;
     const EAssigned: u64 = 5;
     const EPeriod: u64 = 6;
+    const EBatch: u64 = 7;
+    const EArch: u64 = 8;
+
+    /// Most members one batch call may change (SF-171). Each change touches a
+    /// few dynamic fields, so the bound keeps a call far below the per-transaction
+    /// dynamic-field limit; the dApp also caps the changes per transaction.
+    const MAX_GROUP_BATCH: u64 = 100;
 
     public struct Customer has key {
         id: UID,
@@ -72,6 +79,8 @@ module sui_edge::customer {
     public struct CredentialChanged has copy, drop { customer_id: ID, wallet: address, active: bool, administrator: bool }
     public struct DeviceReleased has copy, drop { customer_id: ID, fleet_id: ID, device_id: ID }
     public struct DeviceAssigned has copy, drop { customer_id: ID, fleet_id: ID, device_id: ID }
+    /// One batch membership change (SF-171); per-device events are emitted too.
+    public struct GroupBatchApplied has copy, drop { fleet_id: ID, group_id: ID, added: bool, count: u64 }
 
     /// Idempotent per initial credential and registry. A new customer has no
     /// paid entitlement; only registry authority can grant it. There is no billing backend.
@@ -535,6 +544,40 @@ module sui_edge::customer {
         *count = *count - 1;
     }
 
+    /// Add up to MAX_GROUP_BATCH fleet devices at once; all or none. A set
+    /// `arch` makes the chain re-check every device's registered architecture
+    /// against the one the operator reviewed.
+    public fun add_many_to_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        registry: &DeviceRegistry, device_ids: vector<ID>, arch: Option<String>, ctx: &mut TxContext) {
+        assert!(object::id(registry) == customer.registry_id, EBinding);
+        assert_batch(&device_ids);
+        let mut i = 0;
+        while (i < device_ids.length()) {
+            let device_id = device_ids[i];
+            if (arch.is_some()) {
+                assert!(device_registry::is_custodied(registry, device_id), EArch);
+                assert!(device_registry::arch(device_registry::custodied_device(registry, device_id)) == *arch.borrow(), EArch);
+            };
+            add_to_group(customer, fleet, group, device_id, ctx);
+            i = i + 1;
+        };
+        event::emit(GroupBatchApplied { fleet_id: object::id(fleet), group_id: object::id(group), added: true, count: device_ids.length() });
+    }
+
+    /// Remove up to MAX_GROUP_BATCH members at once; all or none.
+    public fun remove_many_from_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+        device_ids: vector<ID>, ctx: &mut TxContext) {
+        assert_batch(&device_ids);
+        let mut i = 0;
+        while (i < device_ids.length()) { remove_from_group(customer, fleet, group, device_ids[i], ctx); i = i + 1; };
+        event::emit(GroupBatchApplied { fleet_id: object::id(fleet), group_id: object::id(group), added: false, count: device_ids.length() });
+    }
+
+    fun assert_batch(device_ids: &vector<ID>) {
+        assert!(device_ids.length() > 0 && device_ids.length() <= MAX_GROUP_BATCH, EBatch);
+    }
+    public fun max_group_batch(): u64 { MAX_GROUP_BATCH }
+
     public fun delete_group(customer: &Customer, fleet: &mut Fleet, group: DeviceGroup, ctx: &mut TxContext) {
         assert_action(customer, 6, ctx);
         assert_fleet(customer, fleet);
@@ -663,6 +706,11 @@ module sui_edge::customer {
         deployment_manager::handover(record, object::id(fleet).to_address(), ctx);
         deployment_manager::bind_customer(record, object::id(fleet));
         fleet.deployments.push_back(object::id(record));
+    }
+    public fun clear_decision_audit(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, limit: u64, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::clear_decision_audit_as(record, limit, object::id(fleet).to_address());
     }
     public fun delete_deployment(customer: &Customer, fleet: &mut Fleet, mut record: DeploymentRecord, ctx: &mut TxContext) {
         assert_action(customer, 6, ctx); assert_fleet(customer, fleet);

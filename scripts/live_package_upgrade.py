@@ -84,7 +84,8 @@ PACKAGE_GAS = live_common.PACKAGE_GAS  # Base publish budget: the largest fixed 
 # Transport failures that say nothing about the tested revision.
 TRANSIENT_MARKERS = ("DeadlineExceeded", "Deadline expired", "Timeout expired", "timed out", "Connection refused",
                      "connection reset", "Connection reset", "Service Unavailable", "Unavailable", "chain read failed",
-                     "chain facts unavailable", "transport error", "error trying to connect")
+                     "chain facts unavailable", "transport error", "error trying to connect",
+                     "receipt-effects: transport unavailable after 3 read attempts")
 
 
 # User-authorized (2026-10-24) one-time abandonment of ONE poisoned disposable CI
@@ -158,6 +159,9 @@ def funding_shortfall(pools, required, largest_budget=PACKAGE_GAS):
 
 def failure_class(error):
     """Bounded scheduling hint: funding/uncertain/infrastructure need no source repair."""
+    from rollout_audit_acceptance import RetentionPending
+    if isinstance(error, RetentionPending):
+        return "infrastructure"  # Still unsuccessful; retry the SAME aged fixture.
     if isinstance(error, (Spent, FundingShortfall)):
         return "funding"
     if isinstance(error, reconciler.Uncertain):
@@ -166,6 +170,20 @@ def failure_class(error):
     if any(marker in text for marker in TRANSIENT_MARKERS):
         return "infrastructure"
     return "source"
+
+
+def receipt_effects(manifest, deployments):
+    """Read-only proof; retain a bounded, sanitized failure instead of losing stderr."""
+    proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
+                            str(manifest), *deployments],
+                           capture_output=True, text=True, timeout=120)
+    if proof.returncode:
+        # The child emits only these fixed diagnostics. Never publish arbitrary
+        # subprocess/provider output or turn failed assertions into transport retries.
+        if proof.stderr.strip() == 'receipt-effects: transport unavailable after 3 read attempts':
+            raise RuntimeError('receipt-effects: transport unavailable after 3 read attempts')
+        raise RuntimeError('receipt-effects: verification failed')
+    return json.loads(proof.stdout)
 
 
 def contracts_digest(path, *, compiled=None, build_tool="sui"):
@@ -210,6 +228,22 @@ def held_reservations(state, operator):
         else:
             outstanding = record["status"] == "unresolved"
         held += spec["reserved_mist"] if outstanding else 0
+    audit_markers = set()
+    for fixture in state.get('fixtures', {}).values():
+        audit = fixture.get('rollout_audit') or {}
+        pending = audit.get('pending_operation')
+        if not pending:
+            continue
+        if audit.get('binding', {}).get('operator') != operator:
+            raise RuntimeError('retained audit operation belongs to another operator')
+        tx = pending.get('tx') or {}
+        budget = int(tx.get('gas_budget', 20_000_000))
+        if not 0 < budget <= 20_000_000:
+            raise RuntimeError('invalid retained audit gas reservation')
+        identity = tx.get('digest') or json.dumps(pending, sort_keys=True)
+        if identity not in audit_markers:
+            held += budget
+            audit_markers.add(identity)
     return held
 
 
@@ -427,7 +461,16 @@ def daemon_progress(journal, log):
             if not isinstance(outcome, dict):
                 continue
             status = outcome.get('status')
-            public[id] = dict(status=status if type(status) is int and status in (0, 1, 2) else None,
+            # Export only fixed labels: error text may contain private material.
+            error = outcome.get('error')
+            markers = ('unsupported DeploymentRecord schema version',
+                       'deployment identity mismatch',
+                       'deployment has no authenticated recipe digest',
+                       'RPC request timeout', 'RPC identity timeout',
+                       '429', 'SHA-256 mismatch')
+            categories = [marker for marker in markers
+                          if isinstance(error, str) and marker in error]
+            public[id] = dict(error_categories=categories, status=status if type(status) is int and status in (0, 1, 2) else None,
                               reported=outcome.get('reported') is True, has_error=bool(outcome.get('error')))
     try:
         with log.open('rb') as stream:
@@ -436,7 +479,7 @@ def daemon_progress(journal, log):
             text = stream.read(65536).decode('utf8', errors='replace')
     except OSError:
         text = ''
-    categories = ('Sync failed', 'Deployment finished', 'Apply admitted',
+    categories = ('Sync failed', 'Deployment schema rejected', 'Deployment finished', 'Apply admitted',
                   'Status report remains queued', 'RPC request timeout', 'RPC identity timeout',
                   'chain identifier mismatch', 'event stream', 'not owned by device key',
                   'SHA-256 mismatch', 'Downloading blob', 'Downloaded')
@@ -533,10 +576,8 @@ def run(args):
     compatibility = toolchain.preflight(tools, facts, expected)
     evidence["toolchain"] = dict(tools, compatibility=compatibility)
     if args.network == 'testnet':
-        assert operator in {
-            '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965',
-            '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac',
-        }, 'wallet is outside dedicated testnet grant'
+        from testnet_pool import TESTNET_WALLETS
+        assert operator in TESTNET_WALLETS, 'wallet is outside dedicated testnet grant'
     state_path = Path(args.state) if args.state else wallet.parent / "live-state.json"
     state = load_state(state_path, chain, operator)
     # Fund the whole selected suite sequence up front, never one suite at a time,
@@ -946,10 +987,8 @@ def run(args):
                       "group report authorized by the member index")
             evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
             if args.network == 'testnet':
-                proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
-                                        str(root / 'release/deployment.json'), direct, via_group, via_old, failed],
-                                       capture_output=True, text=True, timeout=120, check=True)
-                evidence['report_transactions'] = json.loads(proof.stdout)
+                evidence['report_transactions'] = receipt_effects(
+                    root / 'release/deployment.json', (direct, via_group, via_old, failed))
                 assert len(evidence['report_transactions']) == 4
                 check('independent gRPC reader confirmed all four receipt-writing transaction effects')
             process.send_signal(signal.SIGINT)
@@ -963,6 +1002,21 @@ def run(args):
             transaction("delete 4 deployments", *deletes)
             cleanup.clear()
             check("deployments deleted (storage rebate)")
+            # Temporal audit acceptance must never prevent daemon, receipt or
+            # cleanup regressions from running. Pending is evidence, not a pass.
+            # Reuse the verified upgraded package and the same bounded ledger.
+            from rollout_audit_acceptance import run_scheduled as audit_acceptance, checkpointed_step
+            audit_fixture = fixture.setdefault('rollout_audit', {})
+            def audit_step(label, ptb, calls):
+                return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
+                    client=client, sign=sign, mutate=mutate, ledger=ledger,
+                    operator=operator, chain=reconciler.Chain(rpc_url),
+                    checkpoint=checkpoint_setup, record_other=other_execution)
+            audit_acceptance(audit_step, client, manifest, device, evidence, root,
+                fixture=audit_fixture, save=lambda: save_state(state_path, state),
+                operator=operator, fixture_key=key_name,
+                retire=getattr(args, 'retire_rollout_audit', False))
+
     finally:
         if process and process.poll() is None:
             process.kill()
@@ -1009,6 +1063,8 @@ if __name__ == "__main__":
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
     parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
+    parser.add_argument("--retire-rollout-audit", action="store_true",
+                        help="delete the retained audit only after real post-pruning proof; retires its automatic reuse")
     parser.add_argument("--walrus", default="local", choices=["local", "testnet"],
                         help="recipe/artifact storage: a local stand-in (default) or real Walrus testnet")
     args = parser.parse_args()

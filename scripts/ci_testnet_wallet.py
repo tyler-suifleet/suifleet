@@ -6,7 +6,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-ADDRESS = '0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac'
+from testnet_pool import configured_address
+ADDRESS = configured_address()
 # A fresh SF-125 inbox base->head fixture costs about 0.85 SUI (run 40092917058).
 # After SF-136 the base alone costs ~0.55 SUI (localnet 532,828,600 MIST) and an
 # unchanged head upgrade about as much: ~1.2 SUI with setup and full PTB budgets.
@@ -20,7 +21,8 @@ PACKAGE_UPGRADE_CEILING = 1_600_000_000
 SUITES = (('upgrade-security', 'scripts/live_upgrade_security.py', 1_500_000_000),
           ('wallet', 'scripts/live_wallet_gate.py', 150_000_000))
 SUITE_PATHS = ('contracts/', 'dapp/', 'interfaces/', 'suifleet-edge/', 'scripts/browser/', 'scripts/live_',
-               'scripts/ci_testnet', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
+               'scripts/ci_testnet', 'scripts/testnet_pool.py', 'scripts/testnet_prepared.py',
+               'scripts/testnet_fixture_cache.py', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
                'scripts/sui_toolchain.py', 'scripts/sui_tx_inspect.cjs', 'Dockerfile')
 # Funded test keys a suite keeps beside the wallet until their sweep succeeds.
 PENDING_KEYS = ('live-browser-key.hex', 'live-security-device.key')
@@ -87,7 +89,7 @@ envs:
   ws: null
   basic_auth: null
 active_env: testnet
-active_address: '{ADDRESS}'
+active_address: '{configured_address()}'
 ''')
         wallet.chmod(0o600)
         selected = SUITES if relevant(base) else ()

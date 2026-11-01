@@ -640,6 +640,39 @@ class WalrusUploadTests(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "not readable"):
                 walrus.working_publisher()
 
+    def test_local_blob_readback_preserves_the_simulator_path(self):
+        walrus = live_common.Walrus("local")
+        try:
+            blob = walrus.put("artifact", b"body")
+            self.assertTrue(walrus.readable(blob, b"body"))
+            self.assertFalse(walrus.readable(blob, b"wrong"))
+        finally:
+            walrus.close()
+
+    def test_readiness_probes_escape_negative_cache_without_accepting_wrong_bytes(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        requests = []
+
+        def cached_read(request, timeout):
+            requests.append(request)
+            self.assertEqual(timeout, 15)
+            self.assertEqual(request.get_header("Cache-control"), "no-cache")
+            if len(requests) == 1:
+                raise urllib.error.HTTPError(request.full_url, 404, "not yet certified", {}, None)
+            if "strict_consistency_check=true" not in request.full_url:
+                raise urllib.error.HTTPError(request.full_url, 404, "cached missing", {}, None)
+            return nullcontext(io.BytesIO(b"body" if len(requests) == 2 else b"wrong"))
+
+        with patch.object(live_common.urllib.request, "urlopen", cached_read):
+            self.assertTrue(walrus.readable("blob1", b"body"))
+            self.assertFalse(walrus.readable("blob1", b"body"))
+        base_url = f"{walrus.aggregator}/v1/blobs/blob1?strict_consistency_check=true"
+        self.assertEqual(requests[0].full_url, base_url)
+        self.assertTrue(requests[1].full_url.startswith(base_url + "&suifleet_readback="))
+        self.assertEqual(requests[2].full_url, base_url)
+
     def test_a_publisher_blob_id_is_only_used_after_aggregator_read_back(self):
         import io
         walrus, reads = live_common.Walrus("testnet"), []
@@ -656,7 +689,48 @@ class WalrusUploadTests(unittest.TestCase):
                 patch.object(live_common, "wait_for", wait_for), patch.object(live_common.urllib.request, "urlopen", urlopen):
             with self.assertRaisesRegex(AssertionError, "forged not readable"):
                 walrus.put("recipe", b"body")
-        self.assertEqual(reads, [f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged"])
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(reads[0], f"{live_common.WALRUS_TESTNET[1]}/v1/blobs/forged?strict_consistency_check=true")
+
+    def test_cached_not_found_is_revalidated_without_republishing(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        missing = urllib.error.HTTPError("u", 404, "not propagated", {}, None)
+        with patch.object(walrus, "store", return_value=json.loads(self.STORED)) as store, \
+                patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                    missing, nullcontext(io.BytesIO(b"body"))]) as reads:
+            self.assertEqual(walrus.put("recipe", b"body"), "blob1")
+        store.assert_called_once_with(b"body")
+        first, second = [call.args[0] for call in reads.call_args_list]
+        self.assertEqual(first.full_url, f"{walrus.aggregator}/v1/blobs/blob1?strict_consistency_check=true")
+        self.assertTrue(second.full_url.startswith(first.full_url + "&suifleet_readback="))
+        self.assertEqual(second.get_header("Cache-control"), "no-cache")
+        self.assertIsNone(walrus.read_error)
+
+    def test_revalidation_preserves_integrity_and_failure_diagnostics(self):
+        import io
+        import urllib.error
+        walrus = live_common.Walrus("testnet")
+        for status in (404, 503):
+            with self.subTest(status=status), patch.object(live_common.urllib.request, "urlopen", side_effect=[
+                    urllib.error.HTTPError("u", status, "unavailable", {}, None),
+                    nullcontext(io.BytesIO(b"wrong bytes"))]) as reads:
+                self.assertFalse(walrus.readable("blob1", b"body"))
+                self.assertEqual(reads.call_count, 2)
+                self.assertIn("bytes differ", walrus.read_error)
+        for failure in (urllib.error.HTTPError("u", 403, "forbidden", {}, None), TimeoutError()):
+            with patch.object(live_common.urllib.request, "urlopen", side_effect=failure) as reads:
+                self.assertFalse(walrus.readable("blob1", b"body"))
+                self.assertEqual(reads.call_count, 1)
+        with patch.object(walrus, "store", return_value=json.loads(self.STORED)), \
+                patch.object(live_common.urllib.request, "urlopen", side_effect=
+                    urllib.error.HTTPError("u", 503, "down", {}, None)) as reads, \
+                patch.object(live_common, "wait_for", side_effect=lambda check, message, **kw:
+                    check() or (_ for _ in ()).throw(AssertionError(message))):
+            with self.assertRaisesRegex(AssertionError, "last read: HTTP 503"):
+                walrus.put("recipe", b"body")
+            self.assertEqual(reads.call_count, 2)
 
 
 class WalletFixtureTests(unittest.TestCase):
@@ -922,6 +996,34 @@ class ShardedReceiptViewTests(unittest.TestCase):
         objects[roots[0]]['content']['deployment'] = '0xd'
         objects[roots[0]]['content']['count'] = 2
         with self.assertRaisesRegex(AssertionError, 'truncated'): run.receipts('0xd')
+
+
+class CatalogDesiredStateTests(unittest.TestCase):
+    def test_cli_read_selects_desired_field_and_unwraps_move_content(self):
+        run = Mock()
+        run.client.return_value = {"dynamicFields": [{"fieldId": "other"}, {"fieldId": "desired"}]}
+        expected = {"revision": "2", "components": {"contents": [{"key": "app", "value": "0x123"}]}}
+        run.object.side_effect = [
+            {"objType": "0x2::dynamic_field::Field<0xabc::device_group::MembersKey, vector<address>>"},
+            {"objType": "0x2::dynamic_field::Field<0xabc::desired_state::DesiredKey, 0xabc::desired_state::DesiredState>",
+             "content": {"fields": {"value": {"fields": expected}}}},
+        ]
+        with patch.object(live_upgrade_security.dm, "rpc", side_effect=AssertionError("legacy JSON-RPC used")):
+            self.assertEqual(live_upgrade_security.desired_state(run, "group"), expected)
+        run.client.assert_called_once_with("dynamic-field", "group")
+        self.assertEqual(run.object.call_args_list, [unittest.mock.call("other"), unittest.mock.call("desired")])
+
+    def test_missing_or_ambiguous_desired_field_fails_acceptance(self):
+        for count in (0, 2):
+            with self.subTest(count=count):
+                run = Mock()
+                run.client.return_value = {"dynamicFields": [{"fieldId": str(i)} for i in range(count)]}
+                run.object.return_value = {
+                    "objType": "0x2::dynamic_field::Field<0xabc::desired_state::DesiredKey, 0xabc::desired_state::DesiredState>",
+                    "content": {"value": {"revision": "2"}},
+                }
+                with self.assertRaisesRegex(AssertionError, "expected one DesiredKey"):
+                    live_upgrade_security.desired_state(run, "group")
 
 
 if __name__ == "__main__":

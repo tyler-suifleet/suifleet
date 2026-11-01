@@ -39,6 +39,7 @@ function audit() {
     const cssPath = path.resolve(__dirname, "../dapp/src/app/globals.css");
     const css = (await appRequire("postcss")([appRequire("@tailwindcss/postcss")({ base: path.resolve(__dirname, "../dapp") })]).process(await fs.readFile(cssPath, "utf8"), { from: cssPath })).css;
     server = http.createServer(async (req, res) => {
+      if (req.url === "/wallet/slush.json") { res.setHeader("Content-Type", "application/json"); return res.end(await fs.readFile(path.resolve(__dirname, "../dapp/public/wallet/slush.json"))); }
       const type = { "/app.js": "text/javascript", "/app.css": "text/css" }[req.url] ?? "text/html";
       res.setHeader("Content-Type", type);
       res.end(req.url === "/app.js" ? await fs.readFile(bundle) : req.url === "/app.css" ? css : '<!doctype html><html lang="en"><head><title>Wallet acceptance</title><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/app.css"></head><body class="bg-[#f0f2f5] p-4 md:p-8"><div id="root"></div><script src="/app.js"></script></body></html>');
@@ -46,7 +47,11 @@ function audit() {
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
-    await page.route("https://api.slush.app/api/wallet/metadata", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ enabled: true }) }));
+    const externalSlushRequests = [];
+    await page.route("https://api.slush.app/**", (route) => {
+      externalSlushRequests.push(route.request().url());
+      return route.abort();
+    });
     await page.route("https://api.enoki.mystenlabs.com/**", (route) => route.abort());
     const errors = []; page.on("pageerror", (error) => errors.push(error.message));
     const screenshots = process.env.SCREENSHOT_DIR;
@@ -61,6 +66,8 @@ function audit() {
       }
       await page.setViewportSize({ width: 1280, height: 900 });
     }
+    // Timers flow normally; the pending-timeout check below fast-forwards them.
+    await page.clock.install();
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.getByText("Get started with SuiFleet", { exact: true }).waitFor();
     const register = page.getByRole("button", { name: "Register device", exact: true });
@@ -81,7 +88,13 @@ function audit() {
     await page.getByText("You hold this fleet’s keys", { exact: true }).waitFor();
     await layout("disconnected");
 
-    // Keyboard: the first tab stop is the progress navigation with a visible focus indicator.
+    // Keyboard: public guides precede progress navigation; every link has visible focus.
+    for (const [name, slug] of [["Install the device client", "install"], ["Enrollment guide", "enrollment"], ["Publish and deploy components", "components"]]) {
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.textContent), name);
+      assert.equal(await page.evaluate(() => document.activeElement?.href), `https://docs.suifleet.io/${slug}/`);
+      assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
+    }
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Sign in");
     assert.notEqual(await page.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), "none");
@@ -128,10 +141,22 @@ function audit() {
     await register.click();
     await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor();
     await page.evaluate(() => window.acceptance.reset());
+    // A successful refresh replaces an earlier failure message with the current inventory.
+    await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+    await page.getByRole("alert").filter({ hasText: "User rejected signing" }).waitFor({ state: "detached" });
+
+    // A budget depleted while approval is open gets an actionable message.
+    await page.evaluate(() => window.acceptance.budgetRace());
+    await register.click();
+    const budgetError = page.getByRole("alert").filter({ hasText: "no longer has enough SUI" });
+    await budgetError.waitFor();
+    assert.doesNotMatch(await budgetError.innerText(), /MoveAbort|abort code/);
+    assert.match(await budgetError.innerText(), /Fund the fleet budget/);
+    await page.evaluate(() => window.acceptance.reset());
 
     // Duplicate submission: a double activation while the wallet is open signs once.
     const beforeSuccess = await page.evaluate(() => window.acceptance.signCalls());
-    await page.evaluate(() => { window.acceptance.hold(); window.acceptance.registerAs("First Pi"); });
+    await page.evaluate(() => { window.acceptance.hold(); window.acceptance.lag(); window.acceptance.registerAs("First Pi", "0x" + "2".repeat(64)); });
     await register.dblclick();
     await page.getByText("Approve the registration in your wallet…", { exact: true }).waitFor();
     await page.getByRole("button", { name: "Registering…", exact: true }).click({ force: true }).catch(() => {});
@@ -140,6 +165,25 @@ function audit() {
     assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1);
     const confirmed = await page.getByRole("status").filter({ hasText: "Device registered." }).innerText();
     assert.match(confirmed, /not online until its client/);
+    // Until the inventory lists it, the registration shows as pending and cannot be repeated.
+    await page.getByRole("status").filter({ hasText: "First Pi: registered · adding to your inventory…" }).waitFor();
+    assert.equal(await register.isDisabled(), true, "pending registration blocks a duplicate");
+    // Past the pending timeout the button re-enables, but the same unlisted address is still refused before signing.
+    await page.clock.fastForward(62_000);
+    await page.getByRole("status").filter({ hasText: "First Pi was registered but is not listed yet." }).waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent === "Register device" && !b.disabled));
+    await page.getByRole("textbox", { name: "Device name", exact: true }).fill("First Pi again");
+    await page.getByRole("textbox", { name: /^Device public address/ }).fill("0x" + "2".repeat(64));
+    await register.click();
+    await page.getByRole("alert").filter({ hasText: "“First Pi” is already registered with this address but is not listed yet." }).waitFor();
+    assert.equal(await page.evaluate(() => window.acceptance.signCalls()), beforeSuccess + 1, "stale unlisted registration is not signed twice");
+    await page.getByRole("textbox", { name: "Device name", exact: true }).fill("");
+    await page.getByRole("textbox", { name: /^Device public address/ }).fill("");
+    // Once indexing catches up, a refresh lists the device and clears the refusal.
+    await page.evaluate(() => window.acceptance.index());
+    await page.getByRole("button", { name: "Refresh account and inventory" }).click();
+    await page.getByRole("status").filter({ hasText: "was registered but is not listed yet" }).waitFor({ state: "detached" });
+    await page.getByRole("alert").filter({ hasText: "already registered with this address" }).waitFor({ state: "detached" });
     const confirmation = page.getByText("Confirmation details", { exact: true });
     await confirmation.click();
     await page.getByText("Confirmed transaction " + "1".repeat(32) + ".", { exact: false }).waitFor();
@@ -188,8 +232,9 @@ function audit() {
 
     await page.evaluate(() => window.acceptance.disconnect());
     await progress.getByText("Not connected", { exact: true }).waitFor();
+    assert.deepEqual(externalSlushRequests, [], "No external Slush metadata requests");
     assert.deepEqual(errors, []);
-    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
+    console.log(`PASS: browser onboarding ${manifest.network} progress/next action, connect, readable balance with exact details, zero-gas gate, disclosed recipient-confirmed handover, keyboard focus, registration and inventory, duplicate-submit guard (including past the pending timeout), insufficient-budget race message, rejection, wall-clock/epoch expiry, network mismatch, unavailable balance/inventory, 375/768/1280px layout and AA contrast, disconnect; fixture wallet/network only`);
   } finally {
     if (browser) await browser.close();
     if (server) await new Promise((resolve) => server.close(resolve));

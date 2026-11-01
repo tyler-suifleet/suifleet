@@ -1,0 +1,543 @@
+{
+  "purpose": "Dedicated CI pool provisioning and small signed identity smokes; not full hosted upgrade acceptance",
+  "lanes": {
+    "1": {
+      "started": "2026-10-28T15:46:34Z",
+      "network": "testnet",
+      "transactions": [
+        {
+          "label": "SF202 dedicated pool identity self-transfer",
+          "gas_budget_mist": 5000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "gNGxYFx8S2EumwzfqvVu65NC52WEtUDzMaLGP4wuxt5",
+          "gas_mist": 1988000,
+          "allowance_used_mist": 1988000
+        }
+      ],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "operator": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+      "start_balance_mist": 1000000000,
+      "max_spend_mist": 5000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.82.1-987123842623"
+      },
+      "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+      "lane": 1,
+      "success": true,
+      "independent_effects_readback": true,
+      "allowance_used_mist": 1988000
+    },
+    "2": {
+      "started": "2026-10-28T15:46:38Z",
+      "network": "testnet",
+      "transactions": [
+        {
+          "label": "SF202 dedicated pool identity self-transfer",
+          "gas_budget_mist": 5000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5dBk93UndX2sWyDHbPf8ukSuhWgnYMjsH3xaD2GXcpD4",
+          "gas_mist": 1988000,
+          "allowance_used_mist": 1988000
+        }
+      ],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 1000000000
+      },
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "operator": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+      "start_balance_mist": 1000000000,
+      "max_spend_mist": 5000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.82.1-987123842623"
+      },
+      "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+      "lane": 2,
+      "success": true,
+      "independent_effects_readback": true,
+      "allowance_used_mist": 1988000
+    }
+  },
+  "funding_preflights": [
+    {
+      "started": "2026-10-28T15:52:22Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 1998012000
+      },
+      "lane": 1,
+      "attempt": 1,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:52:26Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 2998012000
+      },
+      "lane": 1,
+      "attempt": 2,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:52:36Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 3998012000
+      },
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "operator": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+      "start_balance_mist": 3998012000,
+      "max_spend_mist": 3250000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.82.1-987123842623"
+      },
+      "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+      "success": true,
+      "lane": 1,
+      "attempt": 3,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:54:08Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "operator": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+      "start_balance_mist": 3697011901,
+      "max_spend_mist": 3250000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.82.1-987123842623"
+      },
+      "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+      "success": true,
+      "lane": 1,
+      "attempt": 4,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:52:50Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 1,
+        "balance_after_mist": 998012000
+      },
+      "lane": 2,
+      "attempt": 1,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:52:52Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 1998012000
+      },
+      "lane": 2,
+      "attempt": 2,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:52:58Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "faucet": {
+        "attempts": 1,
+        "cli_returncode": 0,
+        "balance_after_mist": 2998012000
+      },
+      "lane": 2,
+      "attempt": 3,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    },
+    {
+      "started": "2026-10-28T15:54:10Z",
+      "network": "testnet",
+      "transactions": [],
+      "checks": [],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.82.1",
+          "version": "sui 1.82.1-987123842623",
+          "max_protocol": 139,
+          "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+          "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+          "path": "/opt/sui-network/sui",
+          "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+        },
+        "compatibility": {
+          "chain": "4c78adac",
+          "epoch": 1266,
+          "protocol_version": 139,
+          "network_cli_max_protocol": 139,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "4c78adac",
+      "rpc": "https://fullnode.testnet.sui.io:443",
+      "operator": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+      "start_balance_mist": 3298012000,
+      "max_spend_mist": 3250000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.82.1-987123842623"
+      },
+      "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+      "success": true,
+      "lane": 2,
+      "attempt": 4,
+      "purpose": "dedicated CI pool initial readiness preflight",
+      "allowance_used_mist": 0
+    }
+  ],
+  "bootstrap": {
+    "started": "2026-10-28T15:54:05Z",
+    "network": "testnet",
+    "transactions": [
+      {
+        "label": "SF202 initial allowance seed to dedicated lane2",
+        "gas_budget_mist": 5000000,
+        "funding_mist": 300000000,
+        "status": "success",
+        "digest": "89dqKGJ12zcAmU7buX62JrGA9XT2cF1hmCo2b2mXQF8H",
+        "gas_mist": 1000099,
+        "allowance_used_mist": 301000099
+      }
+    ],
+    "checks": [],
+    "toolchain": {
+      "build": {
+        "role": "build",
+        "release": "testnet-v1.81.1",
+        "version": "sui 1.81.1-e04cf9aa915c",
+        "max_protocol": 138,
+        "path": "/usr/local/bin/sui"
+      },
+      "network": {
+        "role": "network",
+        "release": "testnet-v1.82.1",
+        "version": "sui 1.82.1-987123842623",
+        "max_protocol": 139,
+        "archive_sha256": "112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c",
+        "binary_sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b",
+        "path": "/opt/sui-network/sui",
+        "sha256": "de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b"
+      },
+      "compatibility": {
+        "chain": "4c78adac",
+        "epoch": 1266,
+        "protocol_version": 139,
+        "network_cli_max_protocol": 139,
+        "build_cli_max_protocol": 138,
+        "build_cli_offline": true
+      }
+    },
+    "chain": "4c78adac",
+    "rpc": "https://fullnode.testnet.sui.io:443",
+    "operator": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+    "start_balance_mist": 3998012000,
+    "max_spend_mist": 305000000,
+    "sui": {
+      "build": "sui 1.81.1-e04cf9aa915c",
+      "network": "sui 1.82.1-987123842623"
+    },
+    "head": "dc440a525b2a4b3c6b0961d75f8085b9aaee1728",
+    "success": true,
+    "independent_effects_readback": true,
+    "allowance_used_mist": 301000099
+  },
+  "net_transaction_gas_mist": 4976099,
+  "allowance_note": "Each readiness preflight has a separate strict3.25SUI allowance, executes no signed transaction and makes at most one faucet request. The seed transfer has its own305,000,000MIST ceiling, charging its300,000,000MIST transfer in full. Faucet credits do not replenish any allowance. Both final readiness preflights succeeded without a faucet."
+}

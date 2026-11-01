@@ -123,7 +123,7 @@ A release must verify the target chain/account, run relevant checks, prepare a c
 
 The user authorized agents to spend **testnet** SUI from two dedicated accounts on acceptance runs, such as publishing and upgrading test packages ([TESTNET.md](docs/TESTNET.md)).
 - **Machine sessions:** the `agent` wallet, `0x0e499424…6965`, at `~/.config/suifleet/testnet/agent/client.yaml`.
-- **CI:** the `ci` wallet, `0x99894c1a…dcac`, whose key exists only as a GitHub environment secret.
+- **CI:** the primary `ci` wallet, `0x99894c1a…dcac`, plus the two dedicated SF-202 CI pool identities pinned in `scripts/testnet_pool.py` and listed in [TESTNET.md](docs/TESTNET.md). The user authorized this bounded testnet-only pool on 2026-10-28; signing secrets are protected by the main-only GitHub environment.
 
 **Rules:**
 - Testnet only.
@@ -134,7 +134,7 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 
 **Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
 
-**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.83.0), which must support the network's protocol version (138 and 140 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
@@ -150,7 +150,7 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 - **Reuse funded test identities.** For example, keep the test device's key and gas, and top it up only when low.
 - **Record each transaction's net gas** in the run's evidence. A cached package-upgrade run costs about 0.0025 SUI; a fresh fixture whose base and head differ costs about 0.41 SUI.
 
-CI uses a main-sourced controller, successful originating CI and server-side write-authority/exact-head checks before executing trusted same-repository revisions; forks remain offline. Dedicated testnet environment protection is main-only without reviewers. Never weaken live-wallet, live-hardware or release protections. All CI testnet paths share one serialized wallet concurrency group. Cache device signing state only as authenticated ciphertext derived from the protected CI secret; plaintext belongs only in a private temporary runtime directory and never in public caches/artifacts. Evidence contains no keys.
+CI uses a main-sourced controller, successful originating CI and server-side write-authority/exact-head checks before executing trusted same-repository revisions; forks remain offline. Dedicated testnet environment protection is main-only without reviewers. Never weaken live-wallet, live-hardware or release protections. CI testnet mutations are serialized per dedicated wallet lane; independent lanes may run concurrently. Primary/manual paths retain the legacy primary-wallet group. Secretless preparation runs outside wallet locks; each prepared image must match the authenticated head/base/controller/run/attempt and immutable digest before signing. Cache device signing state only as authenticated ciphertext derived from the protected CI secret; plaintext belongs only in a private temporary runtime directory and never in public caches/artifacts. Evidence contains no keys.
 
 Machine sessions must acquire/assert/renew `network:suifleet-testnet` only during shared-wallet mutations, coordinate in #11/#63, and unlock promptly. Funding is automatic when needed, at most one faucet request per run through the checksum-pinned transaction CLI; faucet credits and storage refunds never replenish the run allowance. Testnet availability does not add external-acceptance blockers to unrelated implementation tickets.
 
@@ -175,6 +175,8 @@ Unattended reciprocal reviews and feedback repair are coordinated by [the PR ser
 User merge-completion policy: owned implementation PRs must include `Closes #ISSUE`, not only `Refs`. A verified merge closes the linked GitHub implementation issue and reconciles the atomic ticket and Project to Done, including external merges and retrying missed notifications. Preserve unfulfilled live/hardware validation in an acceptance ticket or follow-up; issue closure does not establish those test results. The PR service's automatic merge acceptance gates still apply.
 
 Automatic implementation dispatch is described in [PR coordination](docs/PR_COORDINATION.md). When enabled, `ticket-dispatcher.service` refreshes and atomically claims the next eligible ticket for an available configured model slot. Workers must finish their assigned implementation, provide evidence, hand off to Review and exit; they must not claim successors themselves. Failed or uncertain workers retain reservations. Verified stopped workers may be parked/quarantined to free execution capacity for unrelated tickets; their existing ticket/PR remains reserved for explicit recovery. Missing process identity or surviving worker subprocesses still consume capacity. Review/merge checks and deployment authorization still apply.
+
+The [recovery watchdog](docs/RECOVERY_WATCHDOG.md) checks progress every five minutes and starts one bounded Codex recovery session after a sustained stall in an explicitly enabled project. It complements the dispatcher and single merge coordinator. When `SUIFLEET_RECOVERY_ACTIVE=1`, inspect and recover authorized operations, verify the result and write the requested local report, then exit; never launch another recovery agent or recurring watcher. Recover expired ownership only after verifying the original worker and same-claim helpers stopped. Existing claim, independent review, CI, testnet spending and production/hardware authorization rules remain in force. Legitimate CI/provider waits require an explicit next-check time rather than idle polling. Reports and private launch receipts live under `~/.local/state/pr-coordinator/recovery-watchdog/`.
 
 User-authorized implementation/integration acceptance split: follow [IMPLEMENTATION_ACCEPTANCE.md](docs/IMPLEMENTATION_ACCEPTANCE.md) and its per-ticket tracked scope. Reviewed implementations may merge before the explicitly deferred Pi, real-wallet, public-network or production-release integration checks. Keep code findings, local compatibility/regression evidence and CI as merge gates; retain the linked acceptance tickets and never claim deferred tests ran.
 
@@ -217,3 +219,16 @@ network-mismatch and failure-path checks remain implementation gates. This grant
 no production credential provisioning, service purchases or mainnet writes. Maintain the existing periodic local status report with feature
 progress, verified active workers and honest blockers. Services continue while WSL
 is running; a stopped host is not evidence that unattended work is still executing.
+
+
+### Batch integration mode
+
+When the reviewed coordinator's per-project `integration_batch` setting is enabled,
+source reviewers issue typed source-complete/acceptance-ready receipts without
+claiming final merge approval. Keep source branches stable while the combined
+candidate runs CI/testnet; do not merge advancing main merely for freshness.
+Actual source findings and conflicts still require owner repair. The sole
+orchestrator validates and independently reviews the exact combined candidate,
+rechecks every member and pinned base, then publishes once and reconciles all
+verified merged tickets. Source receipts alone never satisfy merge gates; see
+[batch integration](docs/PR_COORDINATION.md#reviewed-integration-batches).

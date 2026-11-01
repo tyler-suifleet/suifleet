@@ -10,8 +10,10 @@ import re
 import random
 from pathlib import Path
 import sqlite3
+import sys
 import subprocess
 import time
+import tempfile
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -191,24 +193,218 @@ def testnet_failure(pr):
 
     Commit statuses are per head and the combined status keeps only the newest
     per context, so a queued/running rerun (pending), a cancelled run (error),
-    a stale base or a status without a durable Actions run never qualifies."""
+    a stale base or a status without a durable Actions run never qualifies.
+    ERROR qualifies only with a freshly authenticated preparation receipt."""
     status = pr.get('_testnet_status') or {}
-    if status.get('state') != 'failure':
+    preparation = pr.get('_preparation_failure') or {}
+    verified = (status.get('state') == 'error' and preparation.get('status') == status.get('id')
+                and preparation.get('head') == pr.get('headRefOid')
+                and preparation.get('base') == pr.get('baseRefOid')
+                and preparation.get('url') == status.get('target_url'))
+    if status.get('state') != 'failure' and not verified:
         return None
     match = TESTNET_DESCRIPTION.fullmatch(status.get('description') or '')
     url = status.get('target_url') or ''
     if not match or match.group(1) != pr.get('baseRefOid') or not RUN_URL.fullmatch(url):
         return None
-    return {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
+    result = {'name': TESTNET_CONTEXT, 'workflowName': 'Automatic testnet', 'conclusion': 'FAILURE',
             'detailsUrl': url, 'startedAt': status.get('created_at'), 'completedAt': status.get('updated_at'),
-            'classification': match.group(2) or 'source'}
+            'classification': 'preparation' if verified else match.group(2) or 'source'}
+    if verified and preparation.get('repair_owner'):
+        result['repair_owner'] = preparation['repair_owner']
+    return result
+
+
+def preparation_job_logs(api, path):
+    """Read Actions text with modern gh, retaining compatibility with old gh."""
+    try:
+        return api(['api', path, '--allow-escape-sequences'])
+    except subprocess.CalledProcessError as error:
+        # Only old CLI flag rejection permits a retry. Auth/network/log errors
+        # remain unavailable evidence; never mask them with another read path.
+        if 'unknown flag: --allow-escape-sequences' not in (error.stderr or ''):
+            raise
+        return api(['api', path])
+
+
+def annotate_preparation_failure(pr, repository, read, logs):
+    """A trusted main job's status-ID receipt authenticates ERROR, never its URL alone.
+
+    Historical runs without receipts remain unavailable. No logs or remote error
+    text are persisted. The newest status and attempt are re-read after evidence.
+    """
+    pr.pop('_preparation_failure', None)
+    status = pr.get('_testnet_status') or {}
+    if pr.get('baseRefName') != 'main' or status.get('state') != 'error' or status.get('description') != 'base:' + pr.get('baseRefOid', ''):
+        return pr
+    match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
+                         + r'/actions/runs/([0-9]+)', status.get('target_url') or '')
+    # Combined commit statuses omit creator. The trusted job's status-ID-bound
+    # receipt below authenticates the producer instead.
+    if not match:
+        return pr
+    prefix = f'repos/{repository}'
+    path = f'{prefix}/actions/runs/{match[1]}'
+    try:
+        run = read(path)
+        attempt = run['run_attempt']
+        if (run['id'] != int(match[1]) or type(attempt) is not int or attempt < 1
+                or run['event'] != 'workflow_run' or run['head_branch'] != 'main'
+                or run['path'] != '.github/workflows/testnet.yml'
+                or run['head_repository']['full_name'] != repository
+                or run['repository']['full_name'] != repository
+                or run['status'] != 'completed' or run['conclusion'] != 'failure'):
+            return pr
+        comparison = read(f"{prefix}/compare/{run['head_sha']}...{pr['baseRefOid']}")
+        if comparison['merge_base_commit']['sha'] != run['head_sha']:
+            return pr
+        jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
+        if jobs['total_count'] != len(jobs['jobs']) or not 0 < jobs['total_count'] <= 100:
+            return pr
+        def job(name, conclusion):
+            matches = [row for row in jobs['jobs'] if row['name'] == name]
+            if len(matches) != 1:
+                raise ValueError('ambiguous job')
+            row = matches[0]
+            if (row['run_id'] != run['id'] or row['head_sha'] != run['head_sha']
+                    or row['run_attempt'] != attempt or row['status'] != 'completed' or row['conclusion'] != conclusion):
+                raise ValueError('untrusted job')
+            return row
+        job('plan', 'success')
+        prepare = job('prepare', 'failure')
+        publisher = job('preparation-status', 'success')
+        text = logs(f"{prefix}/actions/jobs/{publisher['id']}/logs")
+        if len(text) > 1024 * 1024:
+            return pr
+        # Ignore ANSI SGR styling (including the run-script echo) before
+        # matching complete receipt lines; preserve all provenance checks.
+        text = re.sub(r'\x1b\[[0-9;]*m', '', text)
+        # GitHub prefixes each log line with an ISO timestamp.
+        receipts = re.findall(r'^(?:[0-9T:Z. -]+ )?SUIFLEET_PREPARATION_V1 (\{[^\n]+\})\s*$',
+                              text, re.MULTILINE)
+        expected = dict(status=status['id'], head=pr['headRefOid'], base=pr['baseRefOid'],
+                        run=run['id'], attempt=attempt, controller=run['head_sha'])
+        if len(receipts) != 1 or json.loads(receipts[0]) != expected:
+            return pr
+        fresh = read(path)
+        if any(fresh.get(key) != run.get(key) for key in
+               ('id', 'head_sha', 'run_attempt', 'status', 'conclusion')):
+            return pr
+        latest = read(f"{prefix}/commits/{pr['headRefOid']}/status")
+        latest = next(row for row in latest['statuses'] if row['context'] == TESTNET_CONTEXT)
+        if any(latest.get(key) != status.get(key) for key in
+               ('id', 'state', 'description', 'target_url')):
+            return pr
+        # Current PR/base may have moved while logs were downloaded.
+        current = read(f"{prefix}/pulls/{pr['number']}")
+        base = read(f"{prefix}/git/ref/heads/{quote(pr['baseRefName'], safe='/')}")
+        if current['head']['sha'] != pr['headRefOid'] or base['object']['sha'] != pr['baseRefOid']:
+            return pr
+        failed_steps = [row['name'] for row in prepare['steps'] if row['conclusion'] == 'failure']
+        if not failed_steps:
+            return pr
+        repair_owner = None
+        if (repository == 'tyler-suifleet/suifleet'
+                and failed_steps == ['Checkout authenticated test revision']):
+            # The incident owner applies only while its existing repair is open.
+            # Later checkout failures must use the ordinary bounded repair path.
+            repair = read(f'{prefix}/pulls/406')
+            if repair['state'] == 'open' and not repair['merged']:
+                repair_owner = 'SF-204'
+        pr['_preparation_failure'] = dict(**expected, url=status['target_url'],
+                                           repair_owner=repair_owner)
+    except Exception:
+        pass  # Missing, cancelled, unavailable and malformed evidence fail closed.
+    return pr
+
+
+# GitHub Actions reports job-limit expiry as CANCELLED, not always TIMED_OUT.
+TIMEOUT_ANNOTATION = re.compile(
+    r'The job has exceeded the maximum execution time of [0-9]+h[0-9]+m[0-9]+s\.?')
+
+
+def annotate_job_timeouts(pr, repository, read):
+    """Attach sanitized, revision-bound evidence; unavailable reads fail closed.
+
+    read is an authenticated JSON GET. Never cache mutable run attempts or print
+    exceptions: subprocess errors can carry credentials/argv. Large/truncated
+    responses conservatively remain ordinary cancellations.
+    """
+    for check in pr.get('statusCheckRollup', []):
+        check.pop('_job_timeout', None)
+        if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
+                or check.get('conclusion') != 'CANCELLED'):
+            continue
+        match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
+                             + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
+        if not match:
+            continue
+        run_id, job_id = map(int, match.groups())
+        prefix = f'repos/{repository}'
+        try:
+            run_path = f'{prefix}/actions/runs/{run_id}'
+            run = read(run_path)
+            attempt = run['run_attempt']
+            if (run['id'] != run_id or run['head_sha'] != pr.get('headRefOid')
+                    or run['status'] != 'completed'
+                    or run['conclusion'] not in ('cancelled', 'failure', 'timed_out')
+                    or run['head_repository']['full_name'] != repository
+                    or not isinstance(attempt, int) or attempt < 1):
+                continue
+            jobs = read(f'{run_path}/attempts/{attempt}/jobs?per_page=100')
+            if jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100:
+                continue
+            matches = [job for job in jobs['jobs'] if job['id'] == job_id]
+            if len(matches) != 1:
+                continue
+            job = matches[0]
+            if (job['run_id'] != run_id or job['head_sha'] != pr['headRefOid']
+                    or job['status'] != 'completed' or job['conclusion'] != 'cancelled'
+                    or job['name'] != check['name']
+                    or job['started_at'] != check.get('startedAt')
+                    or job['completed_at'] != check.get('completedAt')):
+                continue
+            verified = read(f'{prefix}/check-runs/{job_id}')
+            count = verified['output']['annotations_count']
+            if (verified['id'] != job_id or verified['head_sha'] != pr['headRefOid']
+                    or verified['app']['slug'] != 'github-actions'
+                    or verified['check_suite']['id'] != run['check_suite_id']
+                    or verified['name'] != check['name']
+                    or verified['status'] != 'completed' or verified['conclusion'] != 'cancelled'
+                    or verified['details_url'] != check['detailsUrl']
+                    or not isinstance(count, int) or not 0 < count <= 100):
+                continue
+            annotations = read(f'{prefix}/check-runs/{job_id}/annotations?per_page=100')
+            if len(annotations) != count or not any(
+                    row.get('annotation_level') == 'failure'
+                    and TIMEOUT_ANNOTATION.fullmatch(row.get('message') or '') for row in annotations):
+                continue
+            # A rerun may start while the annotations are read.
+            fresh = read(run_path)
+            if any(fresh.get(key) != run.get(key) for key in
+                   ('id', 'head_sha', 'run_attempt', 'status', 'conclusion', 'check_suite_id')):
+                continue
+            check['_job_timeout'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'],
+                                         url=check['detailsUrl'], run=run_id, job=job_id, attempt=attempt)
+        except Exception:
+            # Evidence failures never grant repair and never leak remote text.
+            continue
+    return pr
+
+
+def verified_job_timeout(pr, check):
+    proof = check.get('_job_timeout') or {}
+    return (bool(pr.get('headRefOid')) and bool(pr.get('baseRefOid'))
+            and proof.get('head') == pr['headRefOid'] and proof.get('base') == pr['baseRefOid']
+            and proof.get('url') == check.get('detailsUrl')
+            and all(isinstance(proof.get(key), int) and proof[key] > 0 for key in ('run', 'job', 'attempt')))
 
 
 def failed_checks(pr):
     """Only actionable completed runs with a durable evidence link can start repair.
 
     Every reported check is a merge requirement under this coordinator's policy.
-    Status errors, cancelled runs and unlinked failures stay blockers,
+    Status errors, unverified cancellations and unlinked failures stay blockers,
     but cannot safely identify a source repair. Rollups can contain old reruns:
     select the newest observation per workflow/name before considering failures.
     """
@@ -234,10 +430,14 @@ def failed_checks(pr):
     failures = []
     for check in latest:
         if (check.get('status') == 'COMPLETED'
-                and check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
+                and (check.get('conclusion') in ('FAILURE', 'TIMED_OUT')
+                     or (check.get('conclusion') == 'CANCELLED' and verified_job_timeout(pr, check)))
                 and check.get('detailsUrl')):
-            failures.append({key: check.get(key) for key in
-                             ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')})
+            failure = {key: check.get(key) for key in
+                       ('name', 'workflowName', 'conclusion', 'detailsUrl', 'startedAt', 'completedAt')}
+            if check.get('conclusion') == 'CANCELLED':
+                failure.update(conclusion='TIMED_OUT', classification='job_timeout')
+            failures.append(failure)
     testnet = testnet_failure(pr)
     if testnet:
         failures.append(testnet)
@@ -262,6 +462,13 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     """Name who actually repairs current-head failures, independent of readiness."""
     if not failures:
         return None
+    shared = sorted({row['repair_owner'] for row in failures if row.get('repair_owner')})
+    if shared and pr.get('state') == 'OPEN' and not pr.get('isCrossRepository'):
+        responsibility = 'shared controller repair owner ' + ', '.join(shared) + '; activation/exact-head validation pending'
+        local = [row for row in failures if not row.get('repair_owner')]
+        if local:
+            responsibility += '; local failures: ' + ci_responsibility(pr, owner, local, blocker)
+        return responsibility
     if pr.get('isCrossRepository') or pr.get('state') != 'OPEN':
         return 'no automatic repair: not an open same-repository PR'
     if not owner:
@@ -280,14 +487,34 @@ def ci_responsibility(pr, owner, failures, blocker=None):
     return f"{owner.get('agent')} owner is {owner['status']}: explicit recovery required"
 
 
+def source_feedback(pr):
+    """Source/acceptance discussion identity, independent of CI and advancing main.
+
+    The immutable source head still binds every reviewed byte. A later batch
+    must separately validate its actual combined tree against the pinned base.
+    """
+    comments = [(c['id'], c['body'], c.get('updatedAt', '')) for c in pr['comments']
+                if pr.get('_receipts', {}).get(c['id']) != publication_hash(c)]
+    reviews = [(r['id'], r['state'], r.get('body', ''), r.get('commit', {}).get('oid'))
+               for r in pr['reviews'] if pr.get('_receipts', {}).get(r['id']) != publication_hash(r)]
+    payload = [pr['headRefOid'], pr.get('body', ''), comments, reviews, pr['threads'], pr.get('_acceptance_policy', {})]
+    if pr.get('_batch_failure') or pr.get('_batch_conflict'):
+        payload.append([pr.get('_batch_failure'), pr.get('_batch_conflict')])
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
 def feedback(pr):
-    # Coordinator publications are receipts, not new requests for another review.
+    if pr.get('_review_mode') == 'source':
+        return hashlib.sha256(('batch-source-v1:' + source_feedback(pr)).encode()).hexdigest()
+    # Keep legacy fingerprints unchanged when batching is disabled.
     comments = [(c['id'], c['body'], c.get('updatedAt', '')) for c in pr['comments'] if pr.get('_receipts',{}).get(c['id']) != publication_hash(c)]
     reviews = [(r['id'], r['state'], r.get('body', ''), r.get('commit', {}).get('oid'))
                for r in pr['reviews'] if pr.get('_receipts',{}).get(r['id']) != publication_hash(r)]
-    threads = pr['threads']
-    return hashlib.sha256(json.dumps([pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, threads, pr.get('_acceptance_policy',{}),
-        check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']], sort_keys=True).encode()).hexdigest()
+    payload = [pr['headRefOid'], pr.get('baseRefOid'), comments, reviews, pr['threads'], pr.get('_acceptance_policy',{}),
+               check_evidence(pr) if checks_blocker(pr) is None else ['source-review-awaiting-checks']]
+    if pr.get('_integration_batch'):
+        payload.append([pr['_integration_batch']['manifest_digest'], pr.get('body', '')])
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def gate(pr, owner, review):
@@ -395,6 +622,33 @@ class Store:
         except BaseException:
             self.db.execute('ROLLBACK'); raise
 
+    @staticmethod
+    def retire_recovered_repairs(db, sources, replacement):
+        """Coordinator-owned, atomic one-use retirement after confirmed launch.
+
+        Caller holds daemon/dispatcher authority locks and has verified all stop,
+        claim and retry fences. Preserve original job receipts and audit the new
+        supervising dispatcher receipt. Any mismatch leaves sources reserved.
+        """
+        from recovery_control import recoverable_repair
+        if not replacement.get('pid') or not replacement.get('started'):
+            raise RuntimeError('replacement identity uncertain')
+        db.execute('CREATE TABLE IF NOT EXISTS recovered_repairs ('
+                   'job INTEGER PRIMARY KEY, replacement TEXT, created REAL)')
+        db.execute('BEGIN IMMEDIATE')
+        try:
+            for source in sources:
+                current = db.execute('SELECT * FROM jobs WHERE id=?', (source['id'],)).fetchone()
+                if current is None or dict(current) != source or not recoverable_repair(current):
+                    raise RuntimeError('repair source changed before retirement')
+                db.execute('INSERT INTO recovered_repairs VALUES(?,?,?)',
+                           (source['id'], json.dumps(replacement, sort_keys=True), time.time()))
+                db.execute("UPDATE jobs SET status='superseded' WHERE id=?", (source['id'],))
+            db.execute('COMMIT')
+        except BaseException:
+            db.execute('ROLLBACK')
+            raise
+
     def migrate_check_budgets(self):
         """Attribute legacy attempts only when durable snapshots verify their scope.
 
@@ -452,6 +706,27 @@ class Store:
                 return 'CI repair backoff until ' + str(budget['retry_after'])
         return None
 
+    @staticmethod
+    def never_started_review(row, family, directory):
+        """Only an empty pre-launch receipt proves no wrapper was invoked.
+
+        launch() writes snapshot/command/prompt before spawning. Missing or
+        nonempty directories are uncertain, and a retry is permitted only once.
+        """
+        if (row['kind'] != 'review' or row['family'] != family
+                or row['status'] != 'failed' or row['attempts'] != 0
+                or row['error'] != 'launch interrupted before worker started'
+                or row['directory'] != str(directory)
+                or any(row[name] is not None for name in
+                       ('pid', 'started', 'launch_intent', 'retry_after', 'result',
+                        'comment_id', 'review_id')) or row['publication_done']):
+            return False
+        path = Path(row['directory'])
+        try:
+            return not path.is_symlink() and path.is_dir() and next(path.iterdir(), None) is None
+        except OSError:
+            return False
+
     def reserve(self, project, pr, family, kind, directory):
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -467,6 +742,10 @@ class Store:
             if ci_repair and self.ci_repair_blocker(project, pr):
                 self.db.execute('COMMIT'); return None
             previous = self.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind=? AND head=? AND feedback=?",(project,pr['number'],kind,pr['headRefOid'],fingerprint)).fetchone()
+            if previous and self.never_started_review(previous, family, directory):
+                self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",
+                                (time.time(), previous['id']))
+                self.db.execute('COMMIT'); return previous['id']
             if previous and previous['status'] == 'retry' and previous['retry_after'] <= time.time():
                 self.db.execute("UPDATE jobs SET status='reserved',created=?,attempts=attempts+1 WHERE id=?",(time.time(),previous['id']))
                 self.db.execute('COMMIT');return previous['id']
@@ -504,6 +783,11 @@ def normalize_result(result):
         result = {**result,'evidence':'\n\n'.join(evidence)}
     if result.get('verdict') not in ('approve','changes_requested','fixed','blocked') or not isinstance(result.get('acceptance_complete'),bool) or not isinstance(result.get('model'),str) or not result['model'].strip() or not isinstance(result.get('evidence'),str) or not result['evidence'].strip():
         raise ValueError('invalid worker result')
+    for field in ('source_complete', 'acceptance_ready'):
+        if field in result and type(result[field]) is not bool:
+            raise ValueError('invalid typed source receipt')
+    if result.get('acceptance_ready') is True and (result.get('source_complete') is not True or result['verdict'] == 'changes_requested'):
+        raise ValueError('acceptance readiness requires complete defect-free source review')
     return result
 
 
@@ -706,6 +990,11 @@ class Coordinator:
         self.children = {}
         self.immutable_reads = {}
         self.open_numbers = {}
+        module_directory = str(Path(__file__).resolve().parent)
+        if module_directory not in sys.path:
+            sys.path.insert(0, module_directory)
+        from batch_integration import BatchController
+        self.batches = BatchController(self)
 
     def gh(self, project, args):
         account = project['github_account']
@@ -784,7 +1073,82 @@ class Coordinator:
         pr['_receipts'] = {r['node_id']:r['hash'] for r in self.store.db.execute('SELECT node_id,hash FROM publications WHERE project=? AND pr=?',(project['id'],number))}
         pr['threads'] = threads
         pr['_acceptance_policy'] = project.get('acceptance_policy', {})
+        annotate_preparation_failure(pr, project['repository'],
+                                     lambda path: json.loads(self.gh(project, ['api', path])),
+                                     lambda path: preparation_job_logs(lambda args: self.gh(project, args), path))
+        annotate_job_timeouts(pr, project['repository'],
+                              lambda path: json.loads(self.gh(project, ['api', path])))
+        batches = getattr(self, 'batches', None)
+        if batches and batches.enabled(project):
+            row = self.store.db.execute('SELECT id,manifest_digest,members FROM integration_batches WHERE project=? AND pr=?',
+                                        (project['id'], number)).fetchone()
+            if row:
+                pr['_integration_batch'] = dict(id=row['id'], manifest_digest=row['manifest_digest'],
+                                                members=json.loads(row['members']))
+            else:
+                pr['_review_mode'] = 'source'
+                repair_context = getattr(batches, 'repair_context', None)
+                if repair_context:
+                    pr.update(repair_context(project, pr))
+                if pr.get('mergeable') == 'CONFLICTING':
+                    pr['_batch_conflict'] = dict(candidate_base=pr['baseRefOid'], other_members=[], reason='conflict with current main')
+        if batches and batches.enabled(project):
+            self.observe_pr(project, pr)
         return pr
+
+    def observe_pr(self, project, pr):
+        """Persist only public decision metadata for offline status, no extra polling."""
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+', project['id']):
+            raise ValueError('invalid observer project namespace')
+        view = {key: pr.get(key) for key in ('number','headRefOid','baseRefOid','headRefName','state','isDraft','mergeable','_testnet_required')}
+        view['statusCheckRollup'] = [{key: value.get(key) for key in
+            ('__typename','name','context','status','conclusion','state')} for value in pr['statusCheckRollup']]
+        status = pr.get('_testnet_status') or {}
+        state = status.get('state')
+        if state == 'success' and status.get('description') != 'base:' + pr['baseRefOid']:
+            state = 'stale'
+        view['_testnet_status'] = dict(state=state)
+        view['threads'] = [dict(isResolved=t.get('isResolved') is True) for t in pr['threads']]
+        payload = dict(schema=1, project=project['id'], repository=project['repository'],
+                       source_fingerprint=source_feedback(pr), observed=time.time(), pr=view)
+        directory = self.state/project['id']/'pr-observations'
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor, temporary = tempfile.mkstemp(prefix='.pr-', dir=directory)
+        try:
+            with os.fdopen(descriptor, 'w') as stream:
+                json.dump(payload, stream, sort_keys=True)
+                stream.flush(); os.fsync(stream.fileno())
+            os.replace(temporary, directory/f"pr-{pr['number']}.json")
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+    def source_receipt(self, project, pr, owner):
+        """Return typed published source proof, never infer approval from prose."""
+        if not owner or owner.get('agent') not in FAMILIES or pr.get('_batch_failure') or pr.get('_batch_conflict'):
+            return None
+        rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='review' AND head=? AND status='done' AND publication_done=1 ORDER BY id DESC",
+                                     (project['id'], pr['number'], pr['headRefOid'])).fetchall()
+        for row in rows:
+            try:
+                result = normalize_result(json.loads(row['result']))
+                if (row['family'] == owner['agent'] or row['family'] not in FAMILIES
+                        or result.get('source_complete') is not True
+                        or result.get('acceptance_ready') is not True
+                        or result['verdict'] not in ('approve', 'blocked')):
+                    continue
+                snapshot = json.loads((Path(row['directory'])/'snapshot.json').read_text())
+                if (row['feedback'] != feedback(snapshot) or snapshot['headRefOid'] != row['head']
+                        or snapshot['ticket']['key'] != owner['key']
+                        or snapshot['ticket']['agent'] != owner['agent']
+                        or snapshot['ticket']['spec'] != owner.get('spec', {})
+                        or source_feedback(snapshot) != source_feedback(pr)):
+                    continue
+                digest = hashlib.sha256(json.dumps(result, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                return dict(job=row['id'], family=row['family'], head=row['head'], base=snapshot['baseRefOid'],
+                            source_feedback=source_feedback(pr), evidence_hash=digest)
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return None
 
     def owners(self, project):
         rows = json.loads(run(['ticket', '--project', project['id'], 'list']))
@@ -985,6 +1349,10 @@ USER-AUTHORIZED ACCEPTANCE SCOPE: {json.dumps(effective_policy(pr.get('_acceptan
 When the scope above names this ticket, the user explicitly permits implementation merge before the linked external integration acceptance. This latest user direction overrides older blanket live/hardware requirements in repository instructions and historical reviews ONLY for the listed deferred tests. Review all source and require local/isolated-chain compatibility, failure-path tests and current CI. Do not pretend deferred evidence exists. Record the linked acceptance issues and limitations in any approval. Code/security defects remain blocking; return changes_requested for any actionable code defect even if external acceptance also remains. This policy does not authorize public deployment, credential provisioning or hardware operations. When the scope does not name this ticket, retain its original acceptance requirements.
 Do not edit the coordinator database or forge another model's review. Only this worker result is collected.
 '''
+        if kind == 'review' and pr.get('_integration_batch'):
+            common += '\nINTEGRATION BATCH: this is a coordinator-owned integration PR, not an implementation claim. Do not create tickets or edit source branches. Validate the immutable batch manifest in the snapshot, every member source receipt, compatibility of the actual combined diff and all member acceptance requirements. Require current candidate/base CI, protected testnet and feature evidence before approval. Approval binds the batch manifest digest as well as this exact candidate commit.\n'
+        if kind == 'review' and pr.get('_review_mode') == 'source':
+            return common + '\nBATCH SOURCE REVIEW: independently review this immutable source head and all existing feedback now. Do not wait for CI or rebase the branch. Return typed booleans source_complete and acceptance_ready in result.json, plus the normal fields. source_complete=true only if all source/security/compatibility findings are resolved. acceptance_ready=true only if every remaining requirement is automated CI/testnet evidence that the combined candidate will verify, or is explicitly deferred by the trusted acceptance policy; unresolved manual/external/product requirements keep it false. This is NOT merge approval: return blocked, acceptance_complete=false when source-ready, or changes_requested for actionable defects. The integration reviewer will assess the actual combined code and final evidence. Never infer readiness from earlier review prose.\n'
         if kind == 'review':
             previous = self.store.review(project['id'], pr['number'])
             if previous and previous['head'] == pr['headRefOid']:
@@ -993,10 +1361,13 @@ Do not edit the coordinator database or forge another model's review. Only this 
                 common += '\nSOURCE REVIEW WHILE CI IS UNREADY: inspect source and run scoped local checks now. Do not wait for CI. Report actionable defects as changes_requested; otherwise return blocked with acceptance_complete=false and completed source-review evidence. This is not merge approval. A fresh evidence review is required once all checks succeed.\n'
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
+        if pr.get('_batch_failure') or pr.get('_batch_conflict'):
+            common += '\nBATCH INTEGRATION REPAIR: the failure/conflict belongs to the combined candidate, not a fabricated failure of the original source head. Diagnose the pinned candidate/base and actual failed checks or conflicting members from this context, fix the owning source branch as needed, and record exact evidence. Resolve an actual conflict against the pinned candidate base if needed; do not rebase merely for freshness. Context: ' + json.dumps({k:pr[k] for k in ('_batch_failure','_batch_conflict') if k in pr}) + '\n'
         if pr.get('_ci_repair'):
             common += '\nCI FAILURE REPAIR: inspect these exact failed runs, reproduce and fix the cause; do not rerun blindly or weaken checks: ' + json.dumps(pr['_ci_repair']) + '\nAll source feedback in the snapshot and prior independent review remains binding. This repair is not approval; fresh independent review and all exact-head/base checks remain required. Infrastructure, funding and uncertain-transaction classifications still have a repair owner: diagnose/reconcile them within the existing authorization and strict spend limits; do not erase uncertain state, blindly replay mutations, increase retries forever, fabricate success or park merely because the failure came from a service. Coordinate shared harness fixes in the existing PRs.\n'
+        base_instruction = ('In batch mode do not merge/rebase advancing main merely for freshness; preserve the reviewed source head and fix only actionable source/CI findings.' if getattr(self, 'batches', None) and self.batches.enabled(project) else 'Merge/rebase the snapshot current base into this branch even when upstream changes are tracking documents, and verify the pushed head contains it.')
         return common + f'''You inherit the existing {owner['agent']} claim for {owner['key']}; token is PR_COORDINATOR_CLAIM_TOKEN in the environment, never print/post it.
-The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all review feedback on the owner branch, merge/rebase the snapshot's current base into this branch even when the only upstream changes are tracking documents, ensure the pushed head contains that base, then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the current base and that the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
+The service renewed/resumed this reserved Review claim; assert before edits and commits and heartbeat every five minutes. Fix all actionable review feedback on the owner branch. {base_instruction} Then run required tests, commit and push contained Tyler-authored changes. Do not claim another ticket or resolve threads merely to hide findings. Post a detailed feedback reply on the existing PR. Mark ticket Review with exact evidence after push. Return fixed only after verifying the pushed head contains your fix and the required local tests pass. {CI_HANDOFF} If blocked retain the claim and report the next step. The coordinator will request a fresh independent review automatically.
 '''
 
     def record_quota(self, project, row, reset):
@@ -1235,7 +1606,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     result = normalize_result(json.loads(path.read_text()))
                     if row['kind'] == 'review':
                         snapshot = json.loads((Path(row['directory'])/'snapshot.json').read_text())
-                        if checks_blocker(snapshot) is not None:
+                        if checks_blocker(snapshot) is not None or snapshot.get('_review_mode') == 'source':
                             result = source_only_result(result)
                     self.store.db.execute("UPDATE jobs SET status='done',result=? WHERE id=?", (json.dumps(result), row['id']))
                 except Exception as error:
@@ -1403,9 +1774,13 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         def priority(pr):
             owner = self.owner(project,pr,owners)
             return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
+        batching = self.batches.enabled(project)
+        held = self.batches.tick(project, prs, owners, execute) if batching else set()
         pushed = False
         for pr in sorted(prs,key=priority):
             try:
+                if batching and (pr.get('_integration_batch') or pr['number'] in held):
+                    continue
                 owner = self.owner(project,pr,owners)
                 if execute and owner and owner['status'] == 'review' and owner.get('publish_pending'):
                     # A failed mirror is recoverable; scheduling still requires
@@ -1413,6 +1788,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     owner = self.retry_review_publication(project,owner) or owner
                 review = self.store.review(project['id'],pr['number'])
                 reason = gate(pr,owner,review)
+                if batching and owner and owner.get('status') == 'review':
+                    reason = ('source reviewed; awaiting integration batch' if self.source_receipt(project, pr, owner)
+                              else 'awaiting source review or actionable repair; candidate acceptance remains separate')
                 if execute and checks_blocker(pr) is None:
                     # A verified green snapshot ends this failure episode; head/base
                     # movement and cancelled/pending runs never reset the budget.
@@ -1421,7 +1799,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     self.store.db.execute('DELETE FROM ci_check_budget WHERE project=? AND pr=?',
                                           (project['id'], pr['number']))
                 failures = failed_checks(pr)
-                repair = {**pr, '_ci_repair': failures} if failures else None
+                # Shared controller defects retain their existing implementation owner.
+                # Observe every affected PR, but do not consume its budget or dispatch
+                # a redundant worker (including the shared owner's already-reviewed PR).
+                local_failures = [row for row in failures if not row.get('repair_owner')]
+                repair = {**pr, '_ci_repair': local_failures} if local_failures else None
                 repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
                 responsibility = ci_responsibility(pr, owner, failures, repair_blocker)
                 if execute:
@@ -1444,7 +1826,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         if error.returncode != 1: raise
                         # Prepared but unpushed (e.g. network failure): retry the guarded merge.
 
-                if reason is None and not pushed:
+                if reason is None and not pushed and not batching:
                     fresh=self.pr(project,pr['number']);current=json.loads(self.ticket(project,'show',owner['key']))
                     if gate(fresh,current,review) is not None: continue
                     self.merge(project,fresh,current,review)
@@ -1454,12 +1836,12 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.reconcile(project,merged,current,review)
                     # Reconciliation below retries delayed GitHub state without a second merge.
                     break
-                if not pr['baseIncluded'] or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
+                if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
                 elif repair:
                     if not repair_blocker and not owner.get('expired') and owner.get('model'):
                         self.launch(project,repair,owner,'fix')
-                elif pr['mergeable'] == 'MERGEABLE' and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
+                elif (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
@@ -1559,7 +1941,9 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         number=self.issue_number(project,owner)
         body=pr.get('body','') or ''
         if re.search(rf'(?im)^\s*(?:closes|fixes|resolves)\s+#{number}\b',body): return
-        self.gh(project,['api',f"repos/{project['repository']}/pulls/{pr['number']}",'--method','PATCH','-f',f'body={body.rstrip()}\n\nCloses #{number}.'])
+        updated = f'{body.rstrip()}\n\nCloses #{number}.'
+        self.gh(project,['api',f"repos/{project['repository']}/pulls/{pr['number']}",'--method','PATCH','-f',f'body={updated}'])
+        pr['body'] = updated
 
     def close_merged_issue(self,project,pr,owner):
         if pr['state'] != 'MERGED' or not pr.get('mergeCommit'): raise ValueError('unmerged PR cannot close an issue')

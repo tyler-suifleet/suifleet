@@ -15,7 +15,7 @@ module.exports = async ({ manifest, temporary, operator, group, device, execute,
     const out = path.join(temporary, command + '-unsigned.json'), request = path.join(temporary, command + '-request.json');
     const intent = command === 'create-deployment' ? { component: 'serverless-cli', version: '1', recipeBlob: 'fixture', artifactSha256: 'a'.repeat(64), recipeSha256: 'b'.repeat(64), targetDevices: [device.objectId] }
       : { group, devices: [device.objectId] };
-    await fs.writeFile(request, JSON.stringify({ command, sender: operator.toSuiAddress(), ...intent, out, maxGasMist: 50_000_000 }));
+    await fs.writeFile(request, JSON.stringify({ command, sender: operator.toSuiAddress(), ...intent, out, maxGasMist: command === 'create-deployment' ? 200_000_000 : 50_000_000 }));
     const built = run('build', request);
     assert.equal(built.unsigned, true);
     const transaction = JSON.parse(await fs.readFile(out));

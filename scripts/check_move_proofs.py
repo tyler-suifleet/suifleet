@@ -74,7 +74,12 @@ def main():
     expected = {f"{module}::{f}_{phase}" for module, functions in POSITIVES.items()
                 for f in functions for phase in ("Check", "Assume", "SpecNoAbortCheck")}
     for case in [None, *NEGATIVES]:
-        extra = (["--mutation", case[0], "--functions", case[2]] if case else
+        # This quantified receipt-version counterexample exceeds 30s on CI's
+        # two-core runner. Give this case one bounded 120s attempt (as in
+        # the registry gate); still require the exact failed obligation and
+        # ensures diagnostic below. A timeout never satisfies the control.
+        timeout = ["--timeout", "120"] if case and case[0] == "receipts-customer-version" else []
+        extra = (["--mutation", case[0], "--functions", case[2], *timeout] if case else
                  ["--functions", *positives])
         result = subprocess.run(command + extra, env=env, text=True, capture_output=True)
         output = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stdout + result.stderr)

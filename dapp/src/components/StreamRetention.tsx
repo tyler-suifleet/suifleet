@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
-import { useCurrentAccount, useCurrentClient } from '@mysten/dapp-kit-react';
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useFleetDataConfig } from '@/hooks/useFleetDataConfig';
 import { useFleetSelection } from '@/hooks/useFleetSelection';
 import { fetchCustomerFleets } from '@/lib/customer-fleets';

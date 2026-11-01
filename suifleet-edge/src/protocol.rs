@@ -64,6 +64,7 @@ pub mod component_catalog {
     pub const VALIDATE_VERSION: &str = "validate_version";
     pub const VERSION_PUBLISHER: &str = "version_publisher";
     pub const VERSIONS: &str = "versions";
+    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CatalogBinding {
         pub version_id: [u8; 32],
@@ -258,6 +259,10 @@ pub mod customer {
     pub const USED: &str = "used";
     pub const WITHDRAW_BUDGET: &str = "withdraw_budget";
     pub const WITHDRAW_BUDGET_SECURED: &str = "withdraw_budget_secured";
+    pub const ADD_MANY_TO_GROUP: &str = "add_many_to_group";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
+    pub const MAX_GROUP_BATCH: &str = "max_group_batch";
+    pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
         pub device_id: [u8; 32],
@@ -390,6 +395,14 @@ pub mod customer {
         pub policy_id: [u8; 32],
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupBatchApplied {
+        pub fleet_id: [u8; 32],
+        pub group_id: [u8; 32],
+        pub added: bool,
+        pub count: u64,
+    }
+    impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -451,6 +464,7 @@ pub mod deployment_manager {
     pub const SYNC_ROLLOUT_RECEIPTS: &str = "sync_rollout_receipts";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Control {
         pub revision: u64,
@@ -665,6 +679,27 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl TargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::TargetGroupsKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionCleanupKey {
+        pub dummy_field: bool,
+    }
+    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionKey {
+        pub revision: u64,
+    }
+    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionRecord {
+        pub deployment_id: [u8; 32],
+        pub revision: u64,
+        pub cohort: u64,
+        pub state: u8,
+        pub reason: String,
+        pub at_ms: u64,
+        pub admitted: Vec<[u8; 32]>,
+    }
+    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
 }
 pub mod desired_state {
     use super::*;
@@ -846,6 +881,7 @@ pub mod device_registry {
     pub const REVOKE_DEVICE: &str = "revoke_device";
     pub const ROTATE_DEVICE_KEY: &str = "rotate_device_key";
     pub const SET_META: &str = "set_meta";
+    pub const ARCH: &str = "arch";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CustodyKey {
         pub device_id: [u8; 32],

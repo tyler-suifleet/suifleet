@@ -11,6 +11,25 @@ from testnet_ci import trusted_pr, plan
 
 
 class TrustTests(unittest.TestCase):
+    def test_preparation_status_receipt_binds_api_id_and_exact_attempt(self):
+        import io
+        from contextlib import redirect_stdout
+        import testnet_ci
+        env = dict(PREPARATION_RESULT='failure', GITHUB_RUN_ID='42',
+                   GITHUB_RUN_ATTEMPT='2', GITHUB_SHA='c'*40)
+        with patch.dict('os.environ', env), patch.object(testnet_ci, 'api', return_value={'id': 90}) as api:
+            output = io.StringIO()
+            with redirect_stdout(output):
+                testnet_ci.status('owner/repo', 'a'*40, 'b'*40, 'error', 'https://example.test/run')
+            receipt = json.loads(output.getvalue().split('SUIFLEET_PREPARATION_V1 ', 1)[1])
+            self.assertEqual(receipt, dict(status=90, head='a'*40, base='b'*40,
+                                           run=42, attempt=2, controller='c'*40))
+            self.assertEqual(api.call_args.args[1]['state'], 'error')
+            for result in ('cancelled', 'skipped', 'success', ''):
+                with patch.dict('os.environ', {'PREPARATION_RESULT': result}), redirect_stdout(io.StringIO()) as output:
+                    testnet_ci.status('owner/repo', 'a'*40, 'b'*40, 'error', 'https://example.test/run')
+                self.assertEqual(output.getvalue(), '')
+
     def test_receipt_timeout_diagnostics_exclude_private_journal_and_log_values(self):
         import tempfile
         from live_package_upgrade import daemon_progress
@@ -23,9 +42,17 @@ class TrustTests(unittest.TestCase):
             diagnostic = daemon_progress(journal, log)
             self.assertTrue(diagnostic['initialized'])
             self.assertEqual(list(diagnostic['outcomes'].values()),
-                             [dict(status=1, reported=False, has_error=True)])
+                             [dict(error_categories=[], status=1, reported=False, has_error=True)])
             self.assertEqual(diagnostic['log_counts']['RPC request timeout'], 1)
             self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            journal.write_text(json.dumps(dict(deployments={'0x1': dict(status=2,
+                error='PRIVATE-CANARY: RPC request timeout; deployment has no authenticated recipe digest')})))
+            diagnostic = daemon_progress(journal, log)
+            self.assertEqual(list(diagnostic['outcomes'].values())[0]['error_categories'],
+                ['deployment has no authenticated recipe digest', 'RPC request timeout'])
+            self.assertNotIn('PRIVATE-CANARY', json.dumps(diagnostic))
+            log.write_text('Deployment schema rejected PRIVATE-CANARY')
+            self.assertEqual(daemon_progress(journal, log)['log_counts']['Deployment schema rejected'], 1)
             journal.write_text('malformed'); log.unlink()
             self.assertEqual(daemon_progress(journal, log)['outcomes'], {})
 
@@ -118,14 +145,15 @@ class TrustTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 verify_checkout(ref, run)
 
-    def test_workflow_checks_immutable_event_commit_before_revision_execution(self):
+    def test_workflow_checks_authenticated_planner_commit_before_revision_execution(self):
         workflow = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('ref: ${{ github.workflow_sha }}', workflow)
         checkout = workflow.split('      - name: Checkout authenticated test revision', 1)[1]
-        self.assertIn('github.event.workflow_run.head_sha || github.sha', checkout)
-        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', checkout)
+        self.assertNotIn('github.event.workflow_run.head_sha || github.sha', checkout)
+        self.assertNotIn('ref: ${{ steps.plan.outputs.head }}', workflow)
+        self.assertEqual(workflow.count('--checkout-candidate candidate'), 2)
         verify = checkout.index('--verify-checkout')
-        self.assertLess(verify, checkout.index('docker/setup-buildx-action'))
+        self.assertLess(verify, checkout.index('docker build'))
         self.assertLess(verify, checkout.index('SUIFLEET_TESTNET_KEY'))
 
     def test_live_gate_checkout_and_token_permissions(self):
@@ -188,6 +216,24 @@ class TrustTests(unittest.TestCase):
             (root/'fleet_data').mkdir();(root/'fleet_data/source.move').write_text('separate package changed')
             self.assertEqual(before,live.contracts_digest(root,compiled=built))
             self.assertNotEqual(before,live.contracts_digest(root,compiled={'digest':[2]*32}))
+
+    def test_successful_main_ci_requests_bind_current_main(self):
+        run = dict(status='completed', conclusion='success', workflow_id=7,
+                   repository={'full_name': 'a/b'}, head_sha='a'*40, head_branch='main')
+        def get(url):
+            if url.endswith('/commits/main'): return {'sha': 'a'*40}
+            if '/commits/' in url: return {'parents': [{'sha': 'b'*40}]}
+            if '/runs/' in url: return run
+            if '/workflows/' in url: return {'path': '.github/workflows/ci.yml'}
+            raise AssertionError(url)
+        for event in ('push', 'workflow_dispatch', 'schedule'):
+            run.update(event=event, head_sha='a'*40, head_branch='main')
+            self.assertEqual(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get),
+                             {'head': 'a'*40, 'base': 'b'*40, 'pr': ''})
+            run['head_sha'] = 'c'*40
+            self.assertIsNone(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get))
+            run.update(head_sha='a'*40, head_branch='other')
+            self.assertIsNone(plan('workflow_run', {'workflow_run': {'id': 1}}, 'a/b', get))
 
     def test_exact_sha_actor_and_main_binding(self):
         pr = self.fixture()
@@ -517,7 +563,7 @@ class TrustTests(unittest.TestCase):
         self.assertIn("if: inputs.gate == 'hardware'", workflow)
         testnet = (Path(__file__).resolve().parents[2]/'.github/workflows/testnet.yml').read_text()
         self.assertIn('-e GITHUB_EVENT_NAME', testnet)
-        self.assertIn('path: evidence/*.json', testnet)
+        self.assertIn('path: candidate/evidence/*.json', testnet)
 
     def test_unchanged_custodied_fixture_reuses_state_without_mutation(self):
         import live_package_upgrade as live

@@ -15,7 +15,10 @@ scope.add_argument('--dispatcher-only',action='store_true',help='Preserve the in
 scope.add_argument('--coordinator-only',action='store_true',help='Replace only coordinator.py; preserve dispatcher, worker and service units')
 scope.add_argument('--dashboard-only',action='store_true',help='Install only the fleet-status and agent-dashboard commands; touch no service, config or engine')
 parser.add_argument('--activation-project', help='Bootstrap the reviewed main runtime and enable safe local activation for this configured project')
+parser.add_argument('--upgrade-activation-supervisor', metavar='PROJECT', help='Upgrade an existing pinned supervisor from independently reviewed committed main before enabling batches')
 args = parser.parse_args()
+if args.upgrade_activation_supervisor and (args.activation_project or args.coordinator_only or args.dispatcher_only or args.dashboard_only):
+    parser.error('supervisor upgrade requires the full compatible runtime')
 if args.activation_project and (args.coordinator_only or args.dispatcher_only or args.dashboard_only):
     parser.error('activation bootstrap requires the full compatible runtime')
 source = Path(__file__).resolve().parent
@@ -94,6 +97,11 @@ def bootstrap_activation():
             raise
     print('Local runtime activation enabled; private configuration and model permissions preserved.')
 
+if args.upgrade_activation_supervisor:
+    from upgrade_activation import upgrade
+    upgrade(args.upgrade_activation_supervisor, source, home)
+    raise SystemExit(0)
+
 if args.activation_project:
     bootstrap_activation()
     raise SystemExit(0)
@@ -118,7 +126,7 @@ if args.dashboard_only:
     raise SystemExit(0)
 for directory in ['.local/lib/pr-coordinator','.config/pr-coordinator','.config/systemd/user']:
     (home/directory).mkdir(parents=True,exist_ok=True)
-for name in (('coordinator.py',) if args.coordinator_only else ('dispatcher.py',) if args.dispatcher_only else ('coordinator.py','worker.py','dispatcher.py','activation.py')):
+for name in (('coordinator.py','batch_integration.py') if args.coordinator_only else ('dispatcher.py',) if args.dispatcher_only else ('coordinator.py','worker.py','dispatcher.py','activation.py','batch_integration.py')):
     shutil.copy2(source/name,home/'.local/lib/pr-coordinator'/name)
 if not args.coordinator_only and not args.dispatcher_only:
     install_dashboard()

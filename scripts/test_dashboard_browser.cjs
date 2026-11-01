@@ -134,7 +134,7 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     await disconnected.goto(origin + "/rollouts");
     await waitText(disconnected, "You can still view available rollout records.");
     await disconnected.getByText("Create a gradual rollout", { exact: true }).click();
-    assert.equal(await disconnected.getByRole("button", { name: "Create without admitting devices", exact: true }).isDisabled(), true);
+    assert.equal(await disconnected.getByRole("button", { name: "Review rollout", exact: true }).isDisabled(), true);
     await disconnected.getByRole("combobox", { name: /^Rollout/ }).waitFor();
     await disconnected.close();
 
@@ -149,14 +149,14 @@ const { normalizeSuiAddress: id } = appRequire("@mysten/sui/utils");
     assert.deepEqual(stages, ["1Current2201100", "2Pending2000002"]);
     await page.getByText("Decision audit").click();
     const detail = await text(page, "rollout-detail");
-    for (const expected of ["#3", "#2", "#1", "granted 2", "2 settled, 1 failed (50%); failure threshold reached"]) assert.ok(detail.includes(expected), `detail lacks ${expected}: ${detail}`);
+    for (const expected of ["#3", "#2", "#1", "2 devices admitted", "2 settled, 1 failed (50%); failure threshold reached"]) assert.ok(detail.includes(expected), `detail lacks ${expected}: ${detail}`);
     await page.close();
 
     // Active advance reaches the wallet using only chain state: no indexer
     // token, 120-second telemetry snapshot or periodic fleet-data read exists.
     page = await open("/rollouts#onchain");
     await page.getByRole("button", { name: "app 2.0.0" }).click();
-    await page.getByLabel("Admission candidate IDs").fill(members[2]);
+    await page.getByRole("group", { name: "Select waiting devices to admit in the current cohort" }).locator("label").filter({ hasText: members[2] }).getByRole("checkbox").check();
     await page.getByRole("button", { name: "Check device health and continue" }).click();
     await waitText(page, "Fixture wallet stopped before signing");
     const submitted = await page.evaluate(() => window.rolloutTransaction);

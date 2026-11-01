@@ -1,4 +1,5 @@
 "use client";
+import { formatStorageQueryError } from "@/lib/storage-errors";
 
 // SF-129 owner reclaim of storage deposits. Every action is a dry run first:
 // the transaction is simulated with the owner's own gas and the recoverable
@@ -6,7 +7,8 @@
 // Rescanning, continuing a scan or switching account discards the preview.
 import { ARCHIVE_STREAMS, streamExpiryPlan } from "@/lib/stream-retention";
 import { useRef, useState } from "react";
-import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
+import { useCurrentAccount } from "@/hooks/useCurrentAccount";
+import { useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Transaction } from "@mysten/sui/transactions";
 import { PACKAGE_ID } from "@/lib/constants";
@@ -100,7 +102,7 @@ export function ArchiveReclaimPanel({ config, capId, epoch }: { config: StorageC
       } while (cursor);
       const scanned = await planArchiveReclaim(client, DATA_CONFIG!, config.storageOrigin ?? config.packageId, devices, epoch!, undefined, resume);
       setPlan(DATA_CONFIG!.streamRetentionOrigin ? streamExpiryPlan(scanned, stream) : scanned);
-    } catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
+    } catch (cause) { setScanError(formatStorageQueryError(cause, "Storage records")); }
     finally { setScanning(false); }
   }
   const count = plan ? plan.anchors.length + plan.loose.length : 0;
@@ -133,7 +135,7 @@ export function DeploymentReclaimPanel({ deployments }: { deployments: Deploymen
   async function scan() {
     setScanning(true); setScanError(undefined); setPlan(undefined);
     try { setPlan(await planDeploymentReclaim(client, deployments, account!.address)); }
-    catch (cause) { setScanError(cause instanceof Error ? cause.message : String(cause)); }
+    catch (cause) { setScanError(formatStorageQueryError(cause, "Storage records")); }
     finally { setScanning(false); }
   }
   const eligible = plan?.filter((r) => r.eligible) ?? [], kept = plan?.filter((r) => !r.eligible && r.reason !== "still in progress") ?? [];
