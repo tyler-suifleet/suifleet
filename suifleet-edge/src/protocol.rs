@@ -14,6 +14,7 @@ pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::Inb
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
 pub const SHARD_TYPES: &[&str] = &["deployment_manager::ReceiptShardKey", "deployment_manager::ReceiptDirectory", "deployment_manager::ReceiptKey", "deployment_manager::ReceiptIndexKey", "deployment_manager::ShardedReceipt", "deployment_manager::ReceiptShard", "component_catalog::ShardedCatalogBindingKey", "deployment_manager::ReceiptLayoutChanged", "deployment_manager::ShardedTargetGroupsKey"];
+pub const RECURRING_WINDOW_TYPES: &[&str] = &["deployment_manager::RecurringWindowKey", "deployment_manager::RecurringWindow", "deployment_manager::WeeklySlot"];
 /// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
 pub mod fleet_settings_values {
     pub const DEFAULT_CHECK_INTERVAL_MS: u64 = 1800000;
@@ -141,6 +142,7 @@ pub mod customer {
     pub const BIND_DEVICE_METADATA: &str = "bind_device_metadata";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
     pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
+    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
     pub const COMMIT_REVISION: &str = "commit_revision";
     pub const CONFIGURE_CHARGING: &str = "configure_charging";
     pub const CONFIGURE_ENROLLMENT: &str = "configure_enrollment";
@@ -192,6 +194,7 @@ pub mod customer {
     pub const SET_DEFAULT_FLEET: &str = "set_default_fleet";
     pub const SET_DEVICE_REVOKED: &str = "set_device_revoked";
     pub const SET_ENTITLEMENT: &str = "set_entitlement";
+    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
     pub const USED: &str = "used";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
@@ -323,6 +326,7 @@ pub mod deployment_manager {
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const CLEANUP_RECEIPT_CHUNK: &str = "cleanup_receipt_chunk";
     pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
+    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
@@ -352,6 +356,8 @@ pub mod deployment_manager {
     pub const RECEIPTS_VERSION: &str = "receipts_version";
     pub const RECIPE_BLOB_ID: &str = "recipe_blob_id";
     pub const RECIPE_SHA256: &str = "recipe_sha256";
+    pub const RECURRING_WINDOW: &str = "recurring_window";
+    pub const RECURRING_WINDOW_FIELDS: &str = "recurring_window_fields";
     pub const REPORT_ROLLOUT_HEALTH: &str = "report_rollout_health";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
@@ -367,6 +373,7 @@ pub mod deployment_manager {
     pub const SCHEDULED_START_MS: &str = "scheduled_start_ms";
     pub const SCHEMA_VERSION: &str = "schema_version";
     pub const SET_CONTROL: &str = "set_control";
+    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
     pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
@@ -527,6 +534,25 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl RecipeDigestKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RecipeDigestKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct WeeklySlot {
+        pub days: u8,
+        pub start_minute: u16,
+        pub duration_minutes: u16,
+    }
+    impl WeeklySlot { pub const MOVE_TYPE: &'static str = "deployment_manager::WeeklySlot"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RecurringWindow {
+        pub revision: u64,
+        pub timezone: String,
+        pub slots: Vec<super::deployment_manager::WeeklySlot>,
+    }
+    impl RecurringWindow { pub const MOVE_TYPE: &'static str = "deployment_manager::RecurringWindow"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RecurringWindowKey {
+        pub dummy_field: bool,
+    }
+    impl RecurringWindowKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RecurringWindowKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RolloutPolicy {
         pub concurrency: u64,

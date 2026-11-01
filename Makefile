@@ -139,6 +139,7 @@ check-interfaces:
 	$(RUN) node scripts/test_protocol.cjs
 	$(RUN) node scripts/test_component_catalog.cjs
 	$(RUN) node scripts/test_deployment_control.cjs
+	$(RUN) node scripts/test_recurring_window.cjs
 	$(RUN) node scripts/test_rollout.cjs
 	$(RUN) node scripts/test_receipt_shards.cjs
 	$(RUN) node scripts/test_browser_receipt_cleanup.cjs
