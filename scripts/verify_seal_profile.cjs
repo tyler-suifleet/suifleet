@@ -23,7 +23,8 @@ const { SealClient } = appRequire("@mysten/seal");
     assert.equal(object.type, `${dm.normalizeId(settings.keyServerPackage)}::key_server::KeyServer`);
   }
   const servers = await new SealClient({ suiClient: client, serverConfigs: parsed.keyServers, verifyKeyServers: true }).getKeyServers();
-  for (const server of servers.values()) {
+  for (const [objectId, server] of servers) {
+    assert.equal(server.url.replace(/\/$/, ""), settings.keyServerUrls[objectId], "hosted CSP Seal URL differs from chain");
     assert.notEqual(server.serverType, "Committee", "edge does not support committee providers");
     assert.equal(new URL(server.url).protocol, "https:");
   }
@@ -41,6 +42,6 @@ const { SealClient } = appRequire("@mysten/seal");
   console.log(JSON.stringify({ checked_at: new Date().toISOString(), network: m.network, chain: m.chain_identifier,
     package: m.call_package_id, registry: m.shared_objects.registry.id, upgrade_cap: m.upgrade_cap_id,
     namespace: m.type_origins["device_registry::DeviceRegistry"], threshold: parsed.threshold,
-    key_servers: [...servers.keys()], checks: ["current frontend schema/client range", "fresh chain identity", "package version and per-type origins", "latest UpgradeCap and expected owner", "registry type and shared version", "Seal key server types and HTTPS proof of possession", "frontend environment matches profile"],
+    key_servers: [...servers.keys()], checks: ["current frontend schema/client range", "fresh chain identity", "package version and per-type origins", "latest UpgradeCap and expected owner", "registry type and shared version", "Seal key server types, pinned hosted URLs and HTTPS proof of possession", "frontend environment matches profile"],
     limits: ["Read-only verification; no encrypted delivery or wallet acceptance", "Allow/deny/revoke delivery remains #32; final provider acceptance remains #159", "Testnet providers have no durability/SLA promise; reverify before use"] }, null, 2));
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

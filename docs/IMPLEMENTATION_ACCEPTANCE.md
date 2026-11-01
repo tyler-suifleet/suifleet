@@ -177,3 +177,18 @@ IdP/prover/Slush/extension-wallet acceptance remain explicitly unrun in
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). This changes
 acceptance ordering only; it grants no production/hardware/mainnet operation and
 waives no source, software, exact-head CI or review gate.
+
+
+SF-176 software hosting/release preparation follows the user’s 2026-10-31
+recovery direction. Real local marketing/docs/console builds, sealed provenance,
+tamper rejection, offline rollback regression, source/security review and normal
+CI/testnet gates remain required. Actual provider account/projects, three-origin
+preview URLs, external served bytes/TLS and hosted rollback rehearsal remain
+**unrun**, deferred to [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+Manual recorded-console/Slush screening remains in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
+Missing preview accounts alone do not block software review. Production still
+requires explicit user authorization, matching revision/digest and protected
+environment approval; this split authorizes no credentials, DNS, publication,
+mainnet/SuiNS or hardware operations. Offline fixtures are not hosted receipts.
