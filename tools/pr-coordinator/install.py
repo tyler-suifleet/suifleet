@@ -16,7 +16,10 @@ scope.add_argument('--coordinator-only',action='store_true',help='Replace only c
 scope.add_argument('--dashboard-only',action='store_true',help='Install only the fleet-status and agent-dashboard commands; touch no service, config or engine')
 parser.add_argument('--activation-project', help='Bootstrap the reviewed main runtime and enable safe local activation for this configured project')
 parser.add_argument('--upgrade-activation-supervisor', metavar='PROJECT', help='Upgrade an existing pinned supervisor from independently reviewed committed main before enabling batches')
+parser.add_argument('--local-infrastructure-policy', action='store_true', help='Explicit operator authority to bootstrap the 2026-11-01 local-test receipt verifier from committed main')
 args = parser.parse_args()
+if args.local_infrastructure_policy and not args.upgrade_activation_supervisor:
+    parser.error('local infrastructure policy requires an explicit supervisor upgrade')
 if args.upgrade_activation_supervisor and (args.activation_project or args.coordinator_only or args.dispatcher_only or args.dashboard_only):
     parser.error('supervisor upgrade requires the full compatible runtime')
 if args.activation_project and (args.coordinator_only or args.dispatcher_only or args.dashboard_only):
@@ -99,7 +102,7 @@ def bootstrap_activation():
 
 if args.upgrade_activation_supervisor:
     from upgrade_activation import upgrade
-    upgrade(args.upgrade_activation_supervisor, source, home)
+    upgrade(args.upgrade_activation_supervisor, source, home, local_policy=args.local_infrastructure_policy)
     raise SystemExit(0)
 
 if args.activation_project:

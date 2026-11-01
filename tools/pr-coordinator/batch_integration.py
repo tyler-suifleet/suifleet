@@ -27,8 +27,10 @@ def manifest_digest(project, batch_id, base, head, members):
 
 
 class BatchController:
-    def __init__(self, coordinator, clock=time.time):
+    def __init__(self, coordinator, clock=time.time, installed=None):
         self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
+        self.installed = Path(installed) if installed is not None else Path(__file__).with_name('installed.json')
+        self._installed_proofs = set()
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batches (
             project TEXT,id TEXT,status TEXT,base TEXT,head TEXT,branch TEXT,pr INTEGER,
             members TEXT,directory TEXT,error TEXT,created REAL,updated REAL,
@@ -45,9 +47,57 @@ class BatchController:
             PRIMARY KEY(project,pr,head,base))''')
 
     @staticmethod
-    def enabled(project):
+    def suspension(project):
         config = project.get('integration_batch', {})
-        return isinstance(config, dict) and config.get('enabled') is True
+        if not isinstance(config, dict) or config.get('enabled') is not True:
+            return None  # A deliberate permanent disable is never overridden.
+        required = config.get('suspend_until_installed')
+        if required is None:
+            return None
+        reason = config.get('suspension_reason')
+        if (not isinstance(required, str) or not SHA.fullmatch(required)
+                or not isinstance(reason, str) or not reason.strip() or len(reason) > 500):
+            raise ValueError('batch recovery suspension requires an exact commit and bounded reason')
+        return required
+
+    def enabled(self, project):
+        config = project.get('integration_batch', {})
+        if not isinstance(config, dict) or config.get('enabled') is not True:
+            return False
+        required = self.suspension(project)
+        if required is None:
+            return True
+        try:
+            metadata = json.loads(self.installed.read_text())
+            revision = metadata['revision']
+            if type(metadata.get('protocol')) is not int or metadata['protocol'] != 1 or not isinstance(revision, str) or not SHA.fullmatch(revision):
+                return False
+            proof = (str(project['root']), required, revision)
+            if proof not in self._installed_proofs:
+                # The installed generation is authorized by the merged-only
+                # activator. A branch tip, open PR or elapsed timer is no proof.
+                self.git(project, '--no-replace-objects', 'merge-base', '--is-ancestor', required, revision)
+                self._installed_proofs.add(proof)
+            return True
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            return False
+
+    def pause_status(self, project, pr):
+        if self.enabled(project):
+            return None
+        required = self.suspension(project)
+        if required:
+            # Only the exact repair source can use the single-PR bootstrap path.
+            if pr.get('headRefOid') != required:
+                return 'waiting-installed-repair'
+            return None
+        for batch in self.rows(project):
+            if batch['status'] in TERMINAL:
+                continue
+            members = json.loads(batch['members'])
+            if pr['number'] == batch.get('pr') or any(m['pr'] == pr['number'] for m in members):
+                return 'disabled-with-active-batch'
+        return None
 
     def settings(self, project):
         config = project.get('integration_batch', {})
@@ -64,6 +114,11 @@ class BatchController:
         cursor = self.db.execute('SELECT * FROM integration_batches WHERE project=? ORDER BY created', (project['id'],))
         names = [item[0] for item in cursor.description]
         return [dict(zip(names, row)) for row in cursor.fetchall()]
+
+    def reserved_members(self, project):
+        """Keep source members reserved until their integration epoch ends."""
+        return {member['pr'] for row in self.rows(project) if row['status'] not in TERMINAL
+                for member in json.loads(row['members'])}
 
     def update(self, batch, **values):
         values['updated'] = self.clock()
@@ -487,6 +542,64 @@ class BatchController:
             (project['id'],candidate['number'],candidate['headRefOid'],candidate['mergeCommit']['oid']))
         self.update(batch, status='done', error=None)
 
+    @staticmethod
+    def review_failure(batch):
+        try:
+            error = json.loads(batch.get('error') or '{}')
+            return error if error.get('kind') == 'candidate_review_changes' else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    def close_review_rejected_candidate(self, project, batch):
+        error = self.review_failure(batch)
+        if not error or error.get('candidate_retired'):
+            return
+        pr = self.c.pr(project, batch['pr'])
+        if (pr.get('state') == 'MERGED' or pr.get('headRefName') != batch['branch']
+                or pr.get('headRefOid') != batch['head']):
+            raise RuntimeError('rejected candidate identity/publication changed; retain evidence')
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', f"repos/{project['repository']}/pulls/{batch['pr']}",
+                                '--method', 'PATCH', '-f', 'state=closed'])
+            observed = self.c.pr(project, batch['pr'])
+            if (observed.get('state') != 'CLOSED' or observed.get('headRefName') != batch['branch']
+                    or observed.get('headRefOid') != batch['head']):
+                raise RuntimeError('rejected candidate closure not confirmed; retain evidence')
+        elif pr['state'] != 'CLOSED':
+            raise RuntimeError('rejected candidate state unavailable')
+        error['candidate_retired'] = True
+        self.update(batch, error=canonical(error))
+
+    def reject_review(self, project, batch, candidate, review):
+        from coordinator import feedback
+        if (not review or review.get('head') != batch['head']
+                or candidate['headRefOid'] != batch['head'] or candidate['baseRefOid'] != batch['base']
+                or review.get('feedback') != feedback(candidate)
+                or review.get('publication_done') != 1 or review.get('publication_pending')
+                or review.get('status') != 'done' or review['result'].get('verdict') != 'changes_requested'
+                or review.get('family') not in ('Codex', 'Claude')
+                or review.get('family') == self.synthetic_owner(batch)['agent']
+                or batch.get('publish_intent')):
+            return False
+        # Persist the rejected group and actual review before remote closure.
+        # An ambiguous PATCH cannot lose the finding or authorize publication.
+        error = dict(kind='candidate_review_changes', review_id=review['id'],
+                     review_head=review['head'], review_feedback=review['feedback'],
+                     result_hash=hashlib.sha256(canonical(review['result']).encode()).hexdigest(),
+                     findings=review['result']['evidence'], candidate_retired=False)
+        self.update(batch, status='failed', error=canonical(error))
+        self.close_review_rejected_candidate(project, batch)
+        return True
+
+    def cleanup_terminal(self, project, batch):
+        try:
+            if self.review_failure(batch):
+                self.close_review_rejected_candidate(project, batch)
+            self.cleanup(project, batch)
+        except Exception as error:
+            # A retained cleanup/closure receipt must not stop unrelated work.
+            print(f"{project['id']} batch {batch['id']}: terminal cleanup deferred ({type(error).__name__})", flush=True)
+
     def repair_context(self, project, pr):
         result = {}
         for batch in reversed(self.rows(project)):
@@ -497,9 +610,19 @@ class BatchController:
                     error = json.loads(batch['error'] or '{}')
                 except (TypeError, ValueError):
                     continue
-                if error.get('kind') == 'candidate_checks_failed':
+                if (error.get('kind') == 'candidate_checks_failed'
+                        and batch['base'] == pr.get('baseRefOid')):
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
                                                    candidate_base=batch['base'], checks=error['checks'])
+                    break
+                if (error.get('kind') == 'candidate_review_changes'
+                        and error.get('review_head') == batch['head']
+                        and type(error.get('review_id')) is int and error['review_id'] > 0
+                        and isinstance(error.get('findings'), str) and error['findings']
+                        and re.fullmatch(r'[0-9a-f]{64}', error.get('result_hash', ''))):
+                    result['_batch_review_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                        candidate_base=batch['base'], source_head=members[0]['head'],
+                        review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'])
                     break
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
@@ -510,10 +633,12 @@ class BatchController:
     def select(self, project, candidates, base, maximum):
         failed = []
         for row in self.rows(project):
-            if row['status'] != 'failed' or row['base'] != base:
+            if row['status'] != 'failed':
                 continue
             try:
-                if json.loads(row['error'] or '{}').get('kind') != 'candidate_checks_failed':
+                kind = json.loads(row['error'] or '{}').get('kind')
+                if (kind not in ('candidate_checks_failed', 'candidate_review_changes')
+                        or kind == 'candidate_checks_failed' and row['base'] != base):
                     continue
             except (TypeError, ValueError):
                 continue
@@ -544,7 +669,7 @@ class BatchController:
         if execute:
             for terminal in self.rows(project):
                 if terminal['status'] in TERMINAL:
-                    self.cleanup(project, terminal)
+                    self.cleanup_terminal(project, terminal)
         candidates = []
         def priority(pr):
             owner = self.c.owner(project, pr, owners) or {}
@@ -561,8 +686,7 @@ class BatchController:
         if len(active) > 1:
             raise RuntimeError('multiple active integration epochs; inspect before proceeding')
         batch = active[0] if active else None
-        if batch:
-            held.update(m['pr'] for m in json.loads(batch['members']))
+        held.update(self.reserved_members(project))
         if not execute:
             return held
         if batch is None and candidates:
@@ -626,6 +750,8 @@ class BatchController:
                         return held
                     owner = self.synthetic_owner(batch)
                     review = self.c.store.review(project['id'], batch['pr'])
+                    if self.reject_review(project, batch, candidate, review):
+                        return held
                     if gate(candidate, owner, review) is not None:
                         self.update(batch, status='awaiting_review', error=None)
                         self.c.launch(project, candidate, owner, 'review')
@@ -637,11 +763,182 @@ class BatchController:
             # Publication/reconciliation uncertainty retains all reservations.
             if isinstance(error, BatchInvalidated):
                 self.invalidate(project, batch, error)
+            elif batch['status'] == 'failed' and self.review_failure(batch):
+                # Preserve the durable review finding after uncertain closure.
+                print(f"{project['id']} batch {batch['id']}: rejected candidate closure deferred ({type(error).__name__})", flush=True)
             else:
                 # Transport/launch/local failures say nothing about candidate
                 # validity. Preserve completed CI and testnet for the next tick.
                 self.update(batch, error=type(error).__name__+': '+str(error)[:300])
         finally:
+            if batch['status'] == 'failed' and self.review_failure(batch):
+                # The caller schedules owner work from these same snapshots.
+                # Route the finding in this pass, not after another full scan.
+                for source in prs:
+                    source.update(self.repair_context(project, source))
+                # held was collected before rejection. Release the failed
+                # group's stale candidates so the caller can launch repair now,
+                # while preserving any live batch reservations.
+                held.difference_update(member['pr'] for member in json.loads(batch['members']))
+                held.update(self.reserved_members(project))
             if batch['status'] in TERMINAL:
-                self.cleanup(project, batch)
+                self.cleanup_terminal(project, batch)
         return held
+
+
+# Kept in an installed runtime module so activation never imports candidate code.
+LOCAL_COMMANDS = (
+    ('python3', '-m', 'unittest', 'discover', '-s', 'tools/pr-coordinator/tests'),
+    ('python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_tracking.py'),
+    ('python3', 'scripts/bootstrap_tracking.py'),
+)
+LOCAL_DOCS = {'docs/PR_COORDINATION.md', 'docs/ATOMIC_TICKETING.md',
+              'docs/RECOVERY_WATCHDOG.md'}
+
+
+def infrastructure_scope(paths):
+    return bool(paths) and all(
+        path in LOCAL_DOCS or path.startswith('tools/pr-coordinator/')
+        for path in paths)
+
+
+class LocalInfrastructure:
+    """User-authorized local validation, distinct from independent approval."""
+    def __init__(self, coordinator):
+        self.c, self.b = coordinator, coordinator.batches
+        self.db = coordinator.store.db
+        self.db.execute("""CREATE TABLE IF NOT EXISTS local_integrations (
+            project TEXT, pr INTEGER, head TEXT, base TEXT, status TEXT,
+            receipt TEXT, PRIMARY KEY(project,pr,head,base))""")
+
+    def eligible(self, project, pr, owner):
+        if project.get('local_infrastructure', {}).get('enabled') is not True:
+            return False
+        if (not owner or owner.get('spec', {}).get('area') != 'infra'
+                or owner.get('status') != 'review' or owner.get('expired')
+                or owner.get('publish_pending') or owner.get('branch') != pr.get('headRefName')
+                or pr.get('state') != 'OPEN' or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('baseRefName') != 'main' or pr.get('mergeable') != 'MERGEABLE'
+                or self.b.outstanding_requests(pr)
+                or any(not t.get('isResolved') for t in pr.get('threads', []))):
+            return False
+        base, head = pr['baseRefOid'], pr['headRefOid']
+        if not all(SHA.fullmatch(x) for x in (base, head)):
+            return False
+        self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
+        paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base+'...'+head).splitlines()
+        return infrastructure_scope(paths)
+
+    def fenced(self, project, pr, owner):
+        self.c.assert_review_owner(project, owner)
+        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
+            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+            (project['id'], pr['number'])).fetchone()
+        if active or pr['number'] in self.b.reserved_members(project):
+            raise RuntimeError('local integration has active or uncertain workers/batch')
+        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
+            raise RuntimeError('implementation worktree is dirty')
+        # The dispatcher directory is keyed by the immutable owning session.
+        from coordinator import claim_processes, worker_stopped
+        directory = self.c.state/'implementations'/owner['session']
+        path = directory/'process.json'
+        if not path.exists():
+            raise RuntimeError('implementation process identity is unavailable')
+        process = json.loads(path.read_text())
+        if (not worker_stopped(process.get('pid'), process.get('started'))
+                or claim_processes(owner['token'], process.get('started'))):
+            raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def tick(self, project, pr, owner):
+        """Return True when this PR belongs to the local lane (including holds)."""
+        if not self.eligible(project, pr, owner):
+            return False
+        self.fenced(project, pr, owner)
+        base, head = pr['baseRefOid'], pr['headRefOid']
+        key = (project['id'], pr['number'], head, base)
+        existing = self.db.execute('SELECT status,receipt FROM local_integrations WHERE project=? AND pr=? AND head=? AND base=?', key).fetchone()
+        if existing:
+            print(canonical(dict(project=project['id'], pr=pr['number'], local_infrastructure=existing[0],
+                                 diagnostic=json.loads(existing[1]).get('diagnostic'))), flush=True)
+            if existing[0] in ('publish_pending', 'published'):
+                proof = json.loads(existing[1])
+                self.b.git(project, 'fetch', '--no-tags', 'origin', 'main')
+                self.b.git(project, 'merge-base', '--is-ancestor', proof['commit'], 'origin/main')
+                self.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',
+                                (project['id'], pr['number'], head, proof['commit']))
+            return True  # Failed checks and uncertain publication are never blindly replayed.
+        if self.db.execute("SELECT 1 FROM local_integrations WHERE project=? AND pr=? AND status='publish_pending'", (project['id'], pr['number'])).fetchone():
+            raise RuntimeError('earlier local publication outcome remains uncertain')
+        if self.b.main(project) != base:
+            return True
+        import tempfile
+        directory = Path(tempfile.mkdtemp(prefix='local-infra-', dir=self.c.state))
+        tree = directory/'source'
+        receipt = dict(project=project['id'], pr=pr['number'], head=head, base=base,
+                       authorization='user-local-infrastructure-2026-11-01', checks=[])
+        self.db.execute('INSERT INTO local_integrations VALUES(?,?,?,?,?,?)', (*key, 'testing', canonical(receipt)))
+        try:
+            self.b.git(project, 'worktree', 'add', '--detach', str(tree), base)
+            metadata = self.b.git(project, 'log', '--format=%an <%ae>|%cn <%ce>', base+'..'+head)
+            if not metadata or any(x != IDENTITY+'|'+IDENTITY for x in metadata.splitlines()):
+                raise RuntimeError('source authorship mismatch')
+            if 'co-authored-by:' in self.b.git(project, 'log', '--format=%B', base+'..'+head).lower():
+                raise RuntimeError('additional source authorship')
+            self.b.git(project, 'merge', '--no-ff', head, '-m', f"Merge PR #{pr['number']}: local infrastructure", '-m',
+                       '- Integrate infrastructure under user local-test authority.\n- Validate the exact combined tree in isolated state.', cwd=tree)
+            receipt['commit'] = self.b.git(project, 'rev-parse', 'HEAD', cwd=tree)
+            receipt['tree'] = self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree)
+            paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base, receipt['commit']).splitlines()
+            if not infrastructure_scope(paths):
+                raise RuntimeError('combined scope is not infrastructure')
+            receipt['paths'] = paths
+            self.b.git(project, 'diff', '--check', base, receipt['commit'])
+            for index, command in enumerate(LOCAL_COMMANDS):
+                log = directory/f'check-{index}.log'
+                argv = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session',
+                        '--ro-bind', '/usr', '/usr', '--ro-bind', '/lib', '/lib',
+                        '--ro-bind', '/lib64', '/lib64', '--symlink', 'usr/bin', '/bin',
+                        '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
+                        '--bind', str(tree), '/source', '--chdir', '/source',
+                        '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin',
+                        '--setenv', 'HOME', '/tmp', '--setenv', 'LANG', 'C.UTF-8',
+                        '--setenv', 'PYTHONDONTWRITEBYTECODE', '1', *command]
+                check = dict(command=list(command), exit=None, log=str(log))
+                receipt['checks'].append(check)
+                try:
+                    with log.open('wb') as stream:
+                        result = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, timeout=900)
+                    check['exit'] = result.returncode
+                finally:
+                    check['sha256'] = hashlib.sha256(log.read_bytes()).hexdigest()
+                if result.returncode:
+                    raise RuntimeError('local infrastructure checks failed; exact inputs held for repair')
+            if (self.b.git(project, 'rev-parse', 'HEAD', cwd=tree) != receipt['commit']
+                    or self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree) != receipt['tree']
+                    or self.b.git(project, 'status', '--porcelain', cwd=tree)):
+                raise RuntimeError('tests modified the candidate')
+            fresh = self.c.pr(project, pr['number'])
+            current = json.loads(self.c.ticket(project, 'show', owner['key']))
+            if (fresh['headRefOid'] != head or fresh['baseRefOid'] != base
+                    or any(current.get(k) != owner.get(k) for k in ('token','session','branch','model','agent'))
+                    or not self.eligible(project, fresh, current) or self.b.main(project) != base):
+                raise RuntimeError('local integration inputs changed')
+            from coordinator import source_feedback
+            if current.get('spec') != owner.get('spec') or source_feedback(fresh) != source_feedback(pr):
+                raise RuntimeError('local integration specification or feedback changed')
+            self.fenced(project, fresh, current)
+            self.db.execute('UPDATE local_integrations SET status=?,receipt=? WHERE project=? AND pr=? AND head=? AND base=?',
+                            ('publish_pending', canonical(receipt), *key))
+            self.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',
+                            (project['id'], pr['number'], head, receipt['commit']))
+            self.b.git(project, 'push', 'origin', receipt['commit']+':refs/heads/main')
+            self.db.execute('UPDATE local_integrations SET status=? WHERE project=? AND pr=? AND head=? AND base=?', ('published', *key))
+        except Exception as error:
+            receipt['diagnostic'] = str(error) if type(error) is RuntimeError else type(error).__name__
+            self.db.execute("UPDATE local_integrations SET status=CASE WHEN status='publish_pending' THEN status ELSE 'failed' END, receipt=? WHERE project=? AND pr=? AND head=? AND base=?",
+                            (canonical(receipt), *key))
+            raise
+        finally:
+            if tree.exists():
+                self.c.cleanup(project, tree)
+        return True

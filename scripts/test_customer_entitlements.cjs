@@ -25,8 +25,22 @@ const register=()=>sui.buildRegisterDeviceTx("Pi",id("0xd"),"aarch64",A,fleet);
  current.device_limit="2"; await e.checkDeviceCapacity(client,register());
  const batch=register(); batch.moveCall({target:`${m.call_package_id}::customer::register_device`,arguments:[batch.object(C)]});
  await assert.rejects(()=>e.checkDeviceCapacity(client,batch),/Device limit reached/);
+ for (const version of ["1", "197"]) {
+  current.version=version; current.active_devices="0"; current.device_limit="1";
+  assert.equal((await e.readCustomerEntitlement(client,C)).version,version);
+  await e.checkDeviceCapacity(client,register());
+  assert.equal(e.buildGrantDeviceLimitTx(C,"2",await e.readCustomerEntitlement(client,C)).getData().commands[0].MoveCall.function,"set_entitlement");
+  current.active_devices="1";
+  await assert.rejects(()=>e.checkDeviceCapacity(client,register()),/Device limit reached.*1 active devices, limit 1/);
+ }
+ current.version="196";
+ await assert.rejects(()=>e.readCustomerEntitlement(client,C),/security migration required/);
+ await assert.rejects(()=>e.checkDeviceCapacity(client,register()),/security migration required/);
+ current.version="198";
+ await assert.rejects(()=>e.readCustomerEntitlement(client,C),/requires a newer console/);
+ current.version="197";
  current.registry_id=id("0xdead"); await assert.rejects(()=>e.readCustomerEntitlement(client,C),/does not belong/);
  assert.ok(!e.registrationFailure("MoveAbort customer 2").includes("MoveAbort"));
  assert.equal(e.registrationFailure("User rejected the request"),"User rejected the request");
- console.log("PASS: zero, boundary, raised grant, preserved allowance/period, invalid and below-count limits, multi-registration, registry binding, sanitized abort");
+ console.log("PASS: zero, boundary, raised grant, preserved allowance/period, invalid and below-count limits, multi-registration, v1/v197 reads/grants/capacity, v196 migration, unknown version rejection, registry binding, sanitized abort");
 })().catch(e=>{console.error(e);process.exitCode=1});

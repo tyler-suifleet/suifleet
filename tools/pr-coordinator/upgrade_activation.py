@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import sqlite3
 import sys
 import subprocess
 import tempfile
@@ -182,7 +183,23 @@ def rollback(module, engine, supervisor, receipt, journal):
     module.atomic(engine.journal, {**failed, 'action': 'Inspect supervisor upgrade before retrying this revision'})
 
 
-def upgrade(project_id, source, home):
+def verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=None):
+    """Explicit operator bootstrap: preserve old proof for every nonlocal step."""
+    old_engine.git('merge-base', '--is-ancestor', old_revision, target)
+    commits = old_engine.git('rev-list', '--first-parent', '--reverse', old_revision+'..'+target).splitlines()
+    previous = old_revision
+    with sqlite3.connect(f'file:{old_engine.state / "reviews.sqlite3"}?mode=ro', uri=True) as db:
+        for commit in commits:
+            try:
+                with helper_scope(old_helpers) if old_helpers else contextlib.nullcontext():
+                    old_engine.verify(previous, commit)
+            except RuntimeError:
+                if not new_engine.verify_local(db, commit):
+                    raise RuntimeError('policy bootstrap lacks exact local authorization evidence')
+            previous = commit
+
+
+def upgrade(project_id, source, home, local_policy=False):
     source, home = Path(source).resolve(), Path(home).resolve()
     settings = read_settings(project_id, home)
     library, state = home/'.local/lib/pr-coordinator', home/'.local/state/pr-coordinator'
@@ -219,8 +236,9 @@ def upgrade(project_id, source, home):
         verified = verify_source(source, target, old_engine)
         # This is the decisive authorization boundary: new code cannot authorize
         # its own installation. The installed supervisor must accept all changes.
-        with helper_scope(previous):
-            old_engine.verify(old_revision, target)
+        if not local_policy:
+            with helper_scope(previous):
+                old_engine.verify(old_revision, target)
         with tempfile.TemporaryDirectory(prefix='verified-supervisor-', dir=state) as temporary:
             verified_source = Path(temporary)
             for relative, data in verified.items():
@@ -230,6 +248,8 @@ def upgrade(project_id, source, home):
             new_module = load_module(verified_source/'activation.py', '_reviewed_activation_supervisor')
             new_engine = new_module.Activator(settings, library, state, services=old_engine.services)
             with helper_scope(verified_source):
+                if local_policy:
+                    verify_policy_upgrade(old_engine, new_engine, old_revision, target, old_helpers=previous)
                 new_engine.verify(old_revision, target)
             new_engine.validate(target)
             generation = new_engine.stage(target)

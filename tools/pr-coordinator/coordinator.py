@@ -581,6 +581,8 @@ def source_feedback(pr):
     payload = [pr['headRefOid'], pr.get('body', ''), comments, reviews, pr['threads'], pr.get('_acceptance_policy', {})]
     if pr.get('_batch_failure') or pr.get('_batch_conflict'):
         payload.append([pr.get('_batch_failure'), pr.get('_batch_conflict')])
+    if pr.get('_batch_review_failure'):
+        payload.append(pr['_batch_review_failure'])
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -1076,6 +1078,8 @@ class Coordinator:
             sys.path.insert(0, module_directory)
         from batch_integration import BatchController
         self.batches = BatchController(self)
+        from batch_integration import LocalInfrastructure
+        self.local_infrastructure = LocalInfrastructure(self)
 
     def gh(self, project, args):
         account = project['github_account']
@@ -1105,15 +1109,24 @@ class Coordinator:
             self.immutable_reads[key] = value
         return self.immutable_reads[key]
 
-    def prs(self, project):
+    def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         raw = [row for page in pages for row in page]
         self.open_numbers[project['id']] = {row['number'] for row in raw}
+        if on_snapshot is not None:
+            priority = {owner.get('branch'): owner.get('spec', {}).get('priority', 'P9') for owner in owners}
+            raw.sort(key=lambda row: (priority.get((row.get('head') or {}).get('ref'), 'P9'), row['number']))
         result = []
         for row in raw:
             try:
-                result.append(self.pr(project, row['number'], fields))
+                pr = self.pr(project, row['number'], fields)
+                result.append(pr)
+                if on_snapshot is not None:
+                    try:
+                        on_snapshot(pr)
+                    except Exception as error:
+                        print(f"{project['id']} PR#{row['number']}: early source dispatch deferred ({type(error).__name__}); snapshot retained", flush=True)
             except Exception as error:
                 print(f"{project['id']} PR#{row['number']}: snapshot unavailable ({type(error).__name__}); skipped", flush=True)
         return result
@@ -1176,7 +1189,11 @@ class Coordinator:
                     pr.update(repair_context(project, pr))
                 if pr.get('mergeable') == 'CONFLICTING':
                     pr['_batch_conflict'] = dict(candidate_base=pr['baseRefOid'], other_members=[], reason='conflict with current main')
-        if batches and batches.enabled(project):
+        if batches:
+            paused = batches.pause_status(project, pr)
+            if paused:
+                pr['_batch_pause'] = paused
+            # Keep status evidence fresh during recovery and legacy mode too.
             self.observe_pr(project, pr)
         return pr
 
@@ -1184,7 +1201,7 @@ class Coordinator:
         """Persist only public decision metadata for offline status, no extra polling."""
         if not re.fullmatch(r'[A-Za-z0-9_.-]+', project['id']):
             raise ValueError('invalid observer project namespace')
-        view = {key: pr.get(key) for key in ('number','headRefOid','baseRefOid','headRefName','state','isDraft','mergeable','_testnet_required')}
+        view = {key: pr.get(key) for key in ('number','headRefOid','baseRefOid','headRefName','state','isDraft','mergeable','_testnet_required','_batch_pause')}
         view['statusCheckRollup'] = [{key: value.get(key) for key in
             ('__typename','name','context','status','conclusion','state')} for value in pr['statusCheckRollup']]
         status = pr.get('_testnet_status') or {}
@@ -1208,7 +1225,7 @@ class Coordinator:
 
     def source_receipt(self, project, pr, owner):
         """Return typed published source proof, never infer approval from prose."""
-        if not owner or owner.get('agent') not in FAMILIES or pr.get('_batch_failure') or pr.get('_batch_conflict'):
+        if not owner or owner.get('agent') not in FAMILIES or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure'):
             return None
         rows = self.store.db.execute("SELECT * FROM jobs WHERE project=? AND pr=? AND kind='review' AND head=? AND status='done' AND publication_done=1 ORDER BY id DESC",
                                      (project['id'], pr['number'], pr['headRefOid'])).fetchall()
@@ -1445,6 +1462,8 @@ Do not edit the coordinator database or forge another model's review. Only this 
                 common += '\nSOURCE REVIEW WHILE CI IS UNREADY: inspect source and run scoped local checks now. Do not wait for CI. Report actionable defects as changes_requested; otherwise return blocked with acceptance_complete=false and completed source-review evidence. This is not merge approval. A fresh evidence review is required once all checks succeed.\n'
             return common + f'''Independently review this exact detached commit against origin/{pr['baseRefName']}. Check correctness, security, compatibility, all existing change requests and acceptance evidence. Run meaningful scoped tests using globally locked build/port resources only while in use. Do not modify the implementation branch or post GitHub reviews yourself. Return approve only when all feedback and acceptance are resolved; otherwise changes_requested or blocked with precise file/line findings. Independent source review is required even when CI passes.
 '''
+        if pr.get('_batch_review_failure'):
+            common += '\nCOMBINED REVIEW SOURCE REPAIR: an independently published integration review found a real source defect. Repair the owning source branch and add the requested regression checks. This is not a fabricated CI failure or a request to rebase for freshness. Preserve security and acceptance gates; inspect the actual candidate review if needed. Context: ' + json.dumps(pr['_batch_review_failure']) + '\n'
         if pr.get('_batch_failure') or pr.get('_batch_conflict'):
             common += '\nBATCH INTEGRATION REPAIR: the failure/conflict belongs to the combined candidate, not a fabricated failure of the original source head. Diagnose the pinned candidate/base and actual failed checks or conflicting members from this context, fix the owning source branch as needed, and record exact evidence. Resolve an actual conflict against the pinned candidate base if needed; do not rebase merely for freshness. Context: ' + json.dumps({k:pr[k] for k in ('_batch_failure','_batch_conflict') if k in pr}) + '\n'
         if pr.get('_ci_repair'):
@@ -1846,23 +1865,86 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(f"{project['id']}: scan failed: {error}",flush=True)
                 if not execute: raise
 
+    def start_source_review(self, project, pr, owners):
+        """Start read-only source work without waiting for unrelated snapshots.
+
+        This grants no merge authority. launch()/Store.reserve() still own
+        capacity, provider, active-worker and uncertain-launch fencing.
+        """
+        if (not self.batches.enabled(project) or pr.get('_review_mode') != 'source'
+                or pr.get('_integration_batch') or pr.get('state') != 'OPEN'
+                or pr['number'] in self.batches.reserved_members(project)
+                or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure')
+                or failed_checks(pr)):
+            return False
+        owner = self.owner(project, pr, owners)
+        if getattr(self, 'local_infrastructure', None) and self.local_infrastructure.eligible(project, pr, owner):
+            return False
+        if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
+                or owner.get('expired') or owner.get('branch') != pr.get('headRefName')):
+            return False
+        current = json.loads(self.ticket(project, 'show', owner['key']))
+        if (any(current.get(key) != owner.get(key) for key in
+                ('token', 'branch', 'agent', 'model', 'session'))
+                or current.get('status') != 'review' or current.get('publish_pending')
+                or current.get('expired')):
+            return False
+        owner = current
+        review = self.store.review(project['id'], pr['number'])
+        if review and review['head'] == pr['headRefOid']:
+            if (review.get('publication_pending') or review['result']['verdict'] == 'changes_requested'
+                    or review['feedback'] == feedback(pr)):
+                return False
+        if self.source_receipt(project, pr, owner):
+            return False
+        self.ensure_closing_reference(project, pr, owner)
+        self.launch(project, pr, owner, 'review')
+        return True
+
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute: self.collect(project,owners)
+        early_reviews = set()
+        def on_snapshot(pr):
+            if self.start_source_review(project, pr, owners):
+                early_reviews.add(pr['number'])
+        if execute and self.batches.enabled(project):
+            prs = self.prs(project, on_snapshot, owners)
+        else:
+            prs = self.prs(project)
+        # Historical reconciliation cannot delay independent source workers.
         if execute:
             try:
                 self.discover_merged(project,owners)
             except Exception as error:
                 print(f"{project['id']}: merged discovery unavailable ({type(error).__name__}); continuing open PRs", flush=True)
-        prs = self.prs(project)
         def priority(pr):
             owner = self.owner(project,pr,owners)
             return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
         batching = self.batches.enabled(project)
-        held = self.batches.tick(project, prs, owners, execute) if batching else set()
+        local_held = set()
+        for candidate in prs:
+            owner = self.owner(project, candidate, owners)
+            if getattr(self, 'local_infrastructure', None) and self.local_infrastructure.eligible(project, candidate, owner):
+                local_held.add(candidate['number'])
+                if execute:
+                    try:
+                        self.ensure_closing_reference(project, candidate, owner)
+                        candidate = self.pr(project, candidate['number'])
+                        self.local_infrastructure.tick(project, candidate, owner)
+                    except Exception as error:
+                        print(f"{project['id']} local infrastructure held: {type(error).__name__}", flush=True)
+        held = self.batches.tick(project, [p for p in prs if p['number'] not in local_held], owners, execute) if batching else set()
         pushed = False
         for pr in sorted(prs,key=priority):
+            if pr['number'] in local_held:
+                continue
             try:
+                if not batching and self.batches.pause_status(project, pr):
+                    print(json.dumps({'project':project['id'], 'pr':pr['number'],
+                                      'merge_blocker':'batch recovery paused; preserve source and candidate heads'}), flush=True)
+                    continue
                 if batching and pr.get('_integration_batch'):
                     continue
                 owner = self.owner(project,pr,owners)
@@ -1927,12 +2009,12 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # invalidate the batch before normal repair on a later tick;
                     # publication/reconciliation uncertainty never permits repair.
                     continue
-                if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
+                if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
                 elif repair:
                     if not repair_blocker and not owner.get('expired') and owner.get('model'):
                         self.launch(project,repair,owner,'fix')
-                elif (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
+                elif pr['number'] not in early_reviews and (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)

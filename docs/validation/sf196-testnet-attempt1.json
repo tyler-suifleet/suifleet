@@ -1,0 +1,487 @@
+{
+  "started": "2026-11-01T03:07:04Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "security publish base",
+      "gas_budget_mist": 700000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "8G7q9hXbyprW4ZHMBkubjv3PGVjA8aYshNczYwPnLFe7",
+      "gas_mist": 597285600,
+      "allowance_used_mist": 597285600
+    },
+    {
+      "label": "create customer before upgrade",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "HrjajdBNb2WtahJDkoqB24Pe9FCLo5eHdq4etYtzMxRk",
+      "gas_mist": 19110978,
+      "allowance_used_mist": 616396578
+    },
+    {
+      "label": "security upgrade head",
+      "gas_budget_mist": 753603422,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "9K8Y1GZR1hnSzUeHPSoFbqgacHmUbzH5PxHyh5oGpXLh",
+      "gas_mist": 738413363,
+      "allowance_used_mist": 1354809941
+    },
+    {
+      "label": "initialize existing customer policy",
+      "gas_budget_mist": 15190059,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Eyf4xN76Mdt1u5AHQYV3woGLYkkeyBTgYRWF5v8DBiky",
+      "gas_mist": 3424693,
+      "allowance_used_mist": 1358234634
+    },
+    {
+      "label": "old package set_credential",
+      "gas_budget_mist": 11765366,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "Gbk8SEffqDXXS6FYXK3ty2NCHDNuSYpUthNdRrd6aTbT",
+      "gas_mist": 1000293,
+      "allowance_used_mist": 1359234927,
+      "abort": [
+        "customer",
+        "assert_member",
+        "0"
+      ]
+    },
+    {
+      "label": "old package rename_fleet",
+      "gas_budget_mist": 10765073,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "EaPBafBtjhpvh4gCbtCfwUYwfkyrvcc8KBzhHfATHkwa",
+      "gas_mist": 1000204,
+      "allowance_used_mist": 1360235131,
+      "abort": [
+        "customer",
+        "assert_member",
+        "0"
+      ]
+    },
+    {
+      "label": "old package borrow_budget_cap",
+      "gas_budget_mist": 9764869,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "2eabqCqnrVfG2k4wuGtD1z3uxaUqBVDuRXigacMQsCEj",
+      "gas_mist": 1000204,
+      "allowance_used_mist": 1361235335,
+      "abort": [
+        "customer",
+        "assert_member",
+        "0"
+      ]
+    },
+    {
+      "label": "unimplemented factor cannot activate",
+      "gas_budget_mist": 8764665,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "4gPATd9ARkDD1BRDtUuvuiG9MuK6cZ4RJWKXja14Bj1H",
+      "gas_mist": 1000293,
+      "allowance_used_mist": 1362235628,
+      "abort": [
+        "security_policy",
+        "update",
+        "2"
+      ]
+    },
+    {
+      "label": "current all-off administration",
+      "gas_budget_mist": 7764372,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "G87RKEgwzio2RwfEpvciL1rBbPitqArJfwDStbJvhXTu",
+      "gas_mist": 1053404,
+      "allowance_used_mist": 1363289032
+    },
+    {
+      "label": "create disposable catalog",
+      "gas_budget_mist": 6710968,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "B7PyWGY3NR8JekHfx9dMczTe5zsPU7ojFa8snD3at6Lr",
+      "gas_mist": 2694800,
+      "allowance_used_mist": 1365983832
+    },
+    {
+      "label": "customer takes publisher custody",
+      "gas_budget_mist": 4016168,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4aLjMhvaTsMoFuJmQ5NfnyZfSLmJhHg3B4v6Sv57Jcqd",
+      "gas_mist": 1000169,
+      "allowance_used_mist": 1366984001
+    },
+    {
+      "label": "old catalog publisher excluded",
+      "gas_budget_mist": 3015999,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "7Xb7JGcKatXRZ5mTFMWEWEEvcXvu4969Uupj5Xn27BAL",
+      "gas_mist": 1000169,
+      "allowance_used_mist": 1367984170,
+      "abort": [
+        "component_catalog",
+        "publish_version",
+        "0"
+      ]
+    },
+    {
+      "label": "customer publishes authenticated version",
+      "gas_budget_mist": 2015830,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "2drS2myi9hVo4f1Ynh2kjJzA9usmot5SuCGZhMxonW9Z",
+      "gas_mist": 1000169,
+      "allowance_used_mist": 1368984339
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf196-host-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/tmp/sf196-network-183/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1270,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "faucet": {
+    "attempts": 1,
+    "cli_returncode": 0,
+    "balance_after_mist": 1370399327
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 1370399327,
+  "max_spend_mist": 1370000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "head": "b5bd5ca132fe55666ca0864cfc500dfc6329d2ad",
+  "success": false,
+  "verified_package_transactions": {
+    "security publish base": {
+      "kind": "publish",
+      "modules": 14,
+      "digest": "dc5f9f9ab524c0961a45470790319c470278b9d73fe60e93701142c17018d358"
+    },
+    "security upgrade head": {
+      "kind": "upgrade",
+      "modules": 15,
+      "policy": "00",
+      "digest": "c31c816744341362593211a96d2ebc441cd945c19804745117d63f55d8e0458d"
+    }
+  },
+  "type_origins": {
+    "device_registry::DeviceRegistry": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::Device": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::CustodyKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::DeviceOwnerCap": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::DeviceLoan": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::IdentityKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::Identity": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::DeviceRegistered": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::DeviceDeregistered": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::DeviceIdentityChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_registry::RegistryCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::DeviceGroup": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::MemberKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::IndexKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::GroupIndex": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::GroupCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::DeviceAddedToGroup": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::DeviceRemovedFromGroup": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::GroupDeleted": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_group::GroupIndexed": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_cap::DeviceAddressKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "device_cap::DeviceCap": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::TargetGroupsKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::TargetDevicesKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::StatusesKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RecipeDigestKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptsKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::CustomerFleetKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ManagedKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DelegateKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::Receipts": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ControlKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::Control": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DeploymentRecord": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DeploymentCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DeviceStatusUpdated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DeviceStatusReported": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::DeploymentDeleted": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptLayoutChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ShardedTargetGroupsKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptShardKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptDirectory": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptIndexKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ShardedReceipt": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::ReceiptShard": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RolloutKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RolloutPolicy": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::Rollout": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RolloutHealthKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RolloutHealth": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "deployment_manager::RolloutDecision": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::ComponentCatalog": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::ComponentVersion": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::CatalogCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::VersionPublished": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::ShardedCatalogBindingKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::CatalogBindingKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "component_catalog::CatalogBinding": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "security_policy::PolicyKey": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::Policy": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::FactorKey": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::FactorConfiguration": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::PolicyChanged": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::Action": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "security_policy::ActionCreated": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "seal_policy::AccessPolicy": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "seal_policy::AccessAdminCap": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "seal_policy::PolicyCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "seal_policy::AccessChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "seal_policy::KeyEpochRotated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "seal_policy::PolicyMigrated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::Limits": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::FleetBudget": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::BudgetOwnerCap": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::CustomerManagedKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::DeviceKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::GasAccount": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::BudgetCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::Deposited": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::Withdrawn": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::DeviceFunded": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::ReserveChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::GasDrawn": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::BudgetLow": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::DeviceStateChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::BudgetPaused": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_budget::BudgetConfigured": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "enrollment::EnrollmentPolicy": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "enrollment::SecurityRevisionKey": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "enrollment::SecurityGenerationKey": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "enrollment::ManagedKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "enrollment::PolicyCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "enrollment::DeviceEnrolled": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::DesiredKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::DesiredState": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::RetirementCheckKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::RetirementCheck": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::RevisionPlan": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::DesiredStateChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "desired_state::Retirement": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::Customer": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::Fleet": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::Membership": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::CustomerKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::BudgetKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::PolicyKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::BudgetLoan": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::DeviceKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::GroupCountKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::AssignmentKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::CustomerCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::FleetCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::CredentialChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::DeviceReleased": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::DeviceAssigned": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "customer::HandoverCompleted": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "customer::HandoverConsent": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "roles::DeployerRole": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "roles::RoleBuilder": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "roles::RoleKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "roles::RoleGranted": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "roles::RoleRevoked": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "roles::DelegatedDeployment": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_handover::Handover": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_handover::Proposed": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_handover::Progress": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_handover::StateChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::InboxKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::HeadKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::Head": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::DeviceInbox": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::InboxCreated": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_inbox::Announced": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_settings::SettingsKey": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_settings::Settings": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "fleet_settings::FleetSettingsChanged": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116"
+  },
+  "end_balance_mist": 1414988,
+  "spent_mist": 1368984339,
+  "allowance_used_mist": 1368984339,
+  "finished": "2026-11-01T03:08:06Z",
+  "independent_effects": [
+    {
+      "digest": "8G7q9hXbyprW4ZHMBkubjv3PGVjA8aYshNczYwPnLFe7",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 597285600,
+      "checkpoint": "401472699"
+    },
+    {
+      "digest": "HrjajdBNb2WtahJDkoqB24Pe9FCLo5eHdq4etYtzMxRk",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 19110978,
+      "checkpoint": "401472707"
+    },
+    {
+      "digest": "9K8Y1GZR1hnSzUeHPSoFbqgacHmUbzH5PxHyh5oGpXLh",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 738413363,
+      "checkpoint": "401472734"
+    },
+    {
+      "digest": "Eyf4xN76Mdt1u5AHQYV3woGLYkkeyBTgYRWF5v8DBiky",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 3424693,
+      "checkpoint": "401472763"
+    },
+    {
+      "digest": "Gbk8SEffqDXXS6FYXK3ty2NCHDNuSYpUthNdRrd6aTbT",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: f8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116, name: Identifier(\"customer\") }, function: 66, instruction: 28, function_name: Some(\"assert_member\") }, 0) in command 0"
+      },
+      "gas_mist": 1000293,
+      "checkpoint": "401472776"
+    },
+    {
+      "digest": "EaPBafBtjhpvh4gCbtCfwUYwfkyrvcc8KBzhHfATHkwa",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: f8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116, name: Identifier(\"customer\") }, function: 66, instruction: 28, function_name: Some(\"assert_member\") }, 0) in command 0"
+      },
+      "gas_mist": 1000204,
+      "checkpoint": "401472789"
+    },
+    {
+      "digest": "2eabqCqnrVfG2k4wuGtD1z3uxaUqBVDuRXigacMQsCEj",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: f8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116, name: Identifier(\"customer\") }, function: 66, instruction: 28, function_name: Some(\"assert_member\") }, 0) in command 0"
+      },
+      "gas_mist": 1000204,
+      "checkpoint": "401472801"
+    },
+    {
+      "digest": "4gPATd9ARkDD1BRDtUuvuiG9MuK6cZ4RJWKXja14Bj1H",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: 63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7, name: Identifier(\"security_policy\") }, function: 8, instruction: 96, function_name: Some(\"update\") }, 2) in command 0"
+      },
+      "gas_mist": 1000293,
+      "checkpoint": "401472813"
+    },
+    {
+      "digest": "G87RKEgwzio2RwfEpvciL1rBbPitqArJfwDStbJvhXTu",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 1053404,
+      "checkpoint": "401472824"
+    },
+    {
+      "digest": "B7PyWGY3NR8JekHfx9dMczTe5zsPU7ojFa8snD3at6Lr",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 2694800,
+      "checkpoint": "401472836"
+    },
+    {
+      "digest": "4aLjMhvaTsMoFuJmQ5NfnyZfSLmJhHg3B4v6Sv57Jcqd",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 1000169,
+      "checkpoint": "401472852"
+    },
+    {
+      "digest": "7Xb7JGcKatXRZ5mTFMWEWEEvcXvu4969Uupj5Xn27BAL",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: f8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116, name: Identifier(\"component_catalog\") }, function: 1, instruction: 16, function_name: Some(\"publish_version\") }, 0) in command 0"
+      },
+      "gas_mist": 1000169,
+      "checkpoint": "401472862"
+    },
+    {
+      "digest": "2drS2myi9hVo4f1Ynh2kjJzA9usmot5SuCGZhMxonW9Z",
+      "status": {
+        "status": "failure",
+        "error": "InsufficientGas"
+      },
+      "gas_mist": 1000169,
+      "checkpoint": "401472875"
+    }
+  ],
+  "readback_toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf196-host-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/tmp/sf196-network-183/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1270,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  }
+}

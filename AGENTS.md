@@ -232,3 +232,23 @@ orchestrator validates and independently reviews the exact combined candidate,
 rechecks every member and pinned base, then publishes once and reconciles all
 verified merged tickets. Source receipts alone never satisfy merge gates; see
 [batch integration](docs/PR_COORDINATION.md#reviewed-integration-batches).
+
+
+### Keep reviewed work moving
+
+User direction (2026-10-31): optimize PR open-to-close time while preserving
+source/security review and automated testnet validation. Use independent small
+PRs and stable source receipts with batch integration. For dependent features,
+merge a small additive framework/API first, then implement its consumers in
+parallel; preserve genuine dependencies and never guess an unmerged interface.
+Arbitrary unmerged-parent PR stacks are not yet supported by the coordinator.
+Human/outsider/manual-wallet, Pi and actual mainnet/production-provider acceptance
+wait until testnet feature completeness and remain tracked as unrun. New docs
+URLs introduced by a PR receive structural premerge checks and online checks
+after publication. Do not spin model workers solely to wait for CI or repeat an
+unchanged source review. See the low-latency workflow in docs/PR_COORDINATION.md.
+
+
+## Local-test infrastructure integration — user direction, 2026-11-01
+
+Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.

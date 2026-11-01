@@ -1272,4 +1272,57 @@ module fleet_storage::fleet_storage_tests {
     }
 
 
+
+    fun secured_wal_fixture(protected: bool): (ts::Scenario, System, ID, ID) {
+        let (mut s, system, fid, bid) = managed_setup(POOL);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        if (protected) customer::set_security_requirements_for_testing(&mut c, vector[0,0,0,1,0,0,0]);
+        let fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let clock = clock_at(&mut s, 1);
+        let arguments = vector[std::bcs::to_bytes(&string::utf8(b"withdraw_managed_wal")),
+            std::bcs::to_bytes(&c), std::bcs::to_bytes(&f), std::bcs::to_bytes(&fs), std::bcs::to_bytes(&b),
+            std::bcs::to_bytes(&10u64), std::bcs::to_bytes(&OWNER)];
+        customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs); ts::return_shared(b);
+        s.next_tx(OWNER);
+        (s, system, fid, bid)
+    }
+    #[test]
+    fun exact_managed_wal_withdrawal_restores_custody() {
+        let (mut s, system, fid, bid) = secured_wal_fixture(false);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let action = s.take_shared<sui_edge::security_policy::Action>(); let clock = clock_at(&mut s, 1);
+        let before = fleet_storage::wal_balance(&fs);
+        fleet_storage::withdraw_managed_wal_secured(&mut c, &mut f, &mut fs, &b, 10, OWNER, action, &clock, s.ctx());
+        assert!(fleet_storage::wal_balance(&fs) == before - 10);
+        // A normal subsequent loan proves that the exact cap was restored.
+        let (cap, loan) = customer::borrow_budget_cap(&c, &mut f, s.ctx());
+        customer::return_budget_cap(&mut f, cap, loan);
+        assert!(sui_edge::security_policy::generation(&customer::security(&c)) == 1);
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs); ts::return_shared(b); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun managed_storage_witness_cannot_skip_required_factor() {
+        let (mut s, system, fid, bid) = secured_wal_fixture(true);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let action = s.take_shared<sui_edge::security_policy::Action>(); let clock = clock_at(&mut s, 1);
+        fleet_storage::withdraw_managed_wal_secured(&mut c, &mut f, &mut fs, &b, 10, OWNER, action, &clock, s.ctx());
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs); ts::return_shared(b); finish(s, system);
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::security_policy)]
+    fun storage_amount_substitution_is_rejected() {
+        let (mut s, system, fid, bid) = secured_wal_fixture(false);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let action = s.take_shared<sui_edge::security_policy::Action>(); let clock = clock_at(&mut s, 1);
+        fleet_storage::withdraw_managed_wal_secured(&mut c, &mut f, &mut fs, &b, 11, OWNER, action, &clock, s.ctx());
+        clock::destroy_for_testing(clock);
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs); ts::return_shared(b); finish(s, system);
+    }
 }

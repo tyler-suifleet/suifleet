@@ -25,6 +25,7 @@ One component, `svc`, across daemon lifetimes:
                                           v5 remains unknown (interrupted)
 """
 import argparse
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -113,9 +114,37 @@ def run(binary):
     process = None
     install_group = None
     seen = set()
+
+    def stop_processes():
+        if process and process.poll() is None:
+            # Let the daemon stop its current run, whose PIDs may not have
+            # been recorded by the scenario yet. Bound a broken shutdown.
+            process.send_signal(signal.SIGTERM)
+            try:
+                process.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        if install_group:
+            try:
+                os.killpg(install_group, signal.SIGKILL)
+            except OSError:
+                pass
+        # Leave nothing behind when an assertion failed mid-run (only processes
+        # that still look like the component's, not a reused PID).
+        for pid in seen:
+            try:
+                if Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[0] in (b"sleep", b"/bin/sh", b"sh"):
+                    os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     try:
-        with tempfile.TemporaryDirectory(prefix="suifleet-supervisor-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="suifleet-supervisor-") as temporary, ExitStack() as cleanup:
+            # Stop writers before TemporaryDirectory removes the state tree,
+            # including when a scenario assertion fails.
+            cleanup.callback(stop_processes)
             root = Path(temporary)
             key = root / "device.key"
             key.write_text("07" * 32)
@@ -221,7 +250,11 @@ def run(binary):
                 wait_for(lambda: json.loads(committed.read_text())["deployment"] == "0x403",
                          "v3's configuration was not committed", process)
                 assert running("3.0.0"), status()
-                assert not any(map(alive, before)), "v1's processes survived its replacement"
+                # SIGKILL delivery and reparenting of nested escaped children
+                # can finish after the new run is ready. Require actual exit
+                # within the existing deadline, just as in the crash case.
+                wait_for(lambda: not any(map(alive, before)),
+                         "v1's processes survived its replacement", process)
                 assert read("stopped") == "graceful", "v1 was not stopped through its shutdown command"
                 active = json.loads((components / "active.json").read_text())
                 assert active["svc"]["version"] == "3.0.0", active
@@ -378,22 +411,6 @@ def run(binary):
                 assert reported == ["0x401", "0x402", "0x403", "0x404", "0x406"], reported
                 print("PASS: five explicit outcomes reported; interrupted install remains unreported")
     finally:
-        if process and process.poll() is None:
-            process.kill()
-            process.wait()
-        if install_group:
-            try:
-                os.killpg(install_group, signal.SIGKILL)
-            except OSError:
-                pass
-        # Leave nothing behind when an assertion failed mid-run (only processes
-        # that still look like the component's, not a reused PID).
-        for pid in seen:
-            try:
-                if Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")[0] in (b"sleep", b"/bin/sh", b"sh"):
-                    os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
         shim.kill()
         server.shutdown()
 
