@@ -1,6 +1,7 @@
 // SF-174 recurring weekly maintenance windows. Devices evaluate them with the
 // tz database pinned into the daemon; this browser preview uses Intl zone data
 // and is advisory (it may differ around very recent tzdb changes).
+import { TZDB_NAMES } from "./tzdb-names";
 
 export interface WeeklySlot { days: number; start_minute: number; duration_minutes: number }
 export interface RecurringWindow { revision: string; timezone: string; slots: WeeklySlot[] }
@@ -17,7 +18,11 @@ const DAY = 86_400_000;
 export function validateRecurring(r: Pick<RecurringWindow, "timezone" | "slots">) {
   if (!/^[A-Za-z0-9_+-][A-Za-z0-9/_+-]{0,63}$/.test(r.timezone)) throw new Error("Timezone must be an IANA name such as Europe/Berlin");
   if (r.timezone === DEVICE_LOCAL) throw new Error("Device-local timezones are not supported yet");
-  if (!zoneSupported(r.timezone)) throw new Error(`Unknown timezone ${r.timezone}`);
+  if (!DAEMON_ZONES.has(r.timezone)) {
+    const spelled = canonicalZone(r.timezone);
+    throw new Error(spelled ? `Timezone must be spelled exactly ${spelled}` : `Devices do not know timezone ${r.timezone}`);
+  }
+  if (!zoneSupported(r.timezone)) throw new Error(`This browser cannot preview timezone ${r.timezone}`);
   if (r.slots.length < 1 || r.slots.length > MAX_SLOTS) throw new Error(`Use 1 to ${MAX_SLOTS} weekly slots`);
   for (const s of r.slots) {
     if (!Number.isInteger(s.days) || s.days < 1 || s.days > 127) throw new Error("Each slot needs at least one weekday");
@@ -26,15 +31,24 @@ export function validateRecurring(r: Pick<RecurringWindow, "timezone" | "slots">
   }
 }
 
+/** Names the daemon accepts: its bundled tzdb, matched case-sensitively. */
+const DAEMON_ZONES = new Set(TZDB_NAMES);
+const BY_LOWER = new Map(TZDB_NAMES.map(n => [n.toLowerCase(), n]));
+/** The daemon's exact spelling of a zone typed in any case (aliases kept as
+ * typed rather than browser-canonicalized), or undefined if it has none. */
+export function canonicalZone(timezone: string): string | undefined {
+  return DAEMON_ZONES.has(timezone) ? timezone : BY_LOWER.get(timezone.toLowerCase());
+}
 export function zoneSupported(timezone: string): boolean {
   try { new Intl.DateTimeFormat("en-US", { timeZone: timezone }); return true; } catch { return false; }
 }
 export function browserZone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
+let known: string[] | undefined;
+/** Suggestions: zones both the daemon and this browser's preview support. */
 export function knownZones(): string[] {
-  const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
-  return intl.supportedValuesOf ? intl.supportedValuesOf("timeZone") : [];
+  return known ??= TZDB_NAMES.filter(zoneSupported);
 }
 
 const formatters = new Map<string, Intl.DateTimeFormat>();

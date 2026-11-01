@@ -306,6 +306,26 @@ mod tests {
         assert_eq!(Control { state: 2, ..Control::default() }.reason(now, 0, Some(&broken)).unwrap(), Some("cancelled"));
         assert!(tzdb_version().starts_with("20"));
     }
+    /// The dApp editor accepts exactly the names this daemon's bundled tz
+    /// database resolves to itself, so a saved window never defers as unknown.
+    /// Regenerate with `SUIFLEET_WRITE_TZ_NAMES=1 cargo test tz_names`.
+    #[test]
+    fn dapp_tz_names_match_bundled_database() {
+        let db = TimeZoneDatabase::bundled();
+        let mut names: Vec<String> = db.available().map(|n| n.as_str().to_string())
+            .filter(|n| zone(n).is_ok()).collect();
+        names.sort();
+        names.dedup();
+        assert!(names.iter().any(|n| n == "Europe/Berlin") && names.iter().any(|n| n == "Asia/Calcutta"));
+        let mut file = format!("// Generated from the daemon's bundled tz database (tzdb {}) by\n\
+            // suifleet-edge control::tests::dapp_tz_names_match_bundled_database; do not edit.\n\
+            export const TZDB_VERSION = \"{}\";\nexport const TZDB_NAMES: readonly string[] = [\n", tzdb_version(), tzdb_version());
+        for n in &names { file += &format!("  \"{n}\",\n"); }
+        file += "];\n";
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../dapp/src/lib/tzdb-names.ts");
+        if std::env::var_os("SUIFLEET_WRITE_TZ_NAMES").is_some() { std::fs::write(path, &file).unwrap(); }
+        assert_eq!(std::fs::read_to_string(path).unwrap(), file, "regenerate {path}");
+    }
     #[test]
     fn chain_json_layout_parses_strictly() {
         let r: Recurring = serde_json::from_str(r#"{"revision":"3","timezone":"Europe/Berlin",
@@ -320,4 +340,3 @@ mod tests {
         assert!(!serde_json::to_string(&old).unwrap().contains("recurring"));
     }
 }
-

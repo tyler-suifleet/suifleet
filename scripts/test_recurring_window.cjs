@@ -73,6 +73,24 @@ const open = { not_before_ms: "0", expires_ms: "0", window_start_ms: "0", window
     weekly("UTC", [[1, 0, 0]]), weekly("UTC", [[1, 0, 1441]]), weekly("UTC", Array(9).fill([1, 0, 1])),
   ]) assert.throws(() => c.buildRecurringWindowTx("0x42", bad), undefined, JSON.stringify(bad));
 
+  // Zone spelling: the daemon resolves names case-sensitively against its
+  // bundled tzdb (control.rs rejects "europe/berlin"), so the editor saves its
+  // exact spelling, keeps tzdb aliases as typed and never previews a miscased
+  // stored zone as admitting.
+  const storedZone = tx => tx.getData().inputs.map(i => i.Pure && Buffer.from(i.Pure.bytes, "base64").toString("latin1")).find(b => b && /\//.test(b));
+  assert.equal(r.canonicalZone("europe/berlin"), "Europe/Berlin");
+  assert.equal(r.canonicalZone("Asia/Calcutta"), "Asia/Calcutta");
+  assert.equal(r.canonicalZone("asia/calcutta"), "Asia/Calcutta");
+  assert.equal(r.canonicalZone("Mars/Olympus_Mons"), undefined);
+  assert.throws(() => r.validateRecurring(weekly("europe/berlin", [[64, 120, 120]])), /spelled exactly Europe\/Berlin/);
+  assert.throws(() => c.buildRecurringWindowTx("0x42", weekly("europe/berlin", [[64, 120, 120]])), /spelled exactly/);
+  assert.match(storedZone(c.buildRecurringWindowTx("0x42", berlin)), /^\x0dEurope\/Berlin$/);
+  assert.match(storedZone(c.buildRecurringWindowTx("0x42", weekly("Asia/Calcutta", [[64, 120, 120]]))), /^\x0dAsia\/Calcutta$/);
+  assert.match(c.controlReason(control, sunday, weekly("europe/berlin", [[64, 120, 120]])), /unsupported timezone \(europe\/berlin\); devices defer/);
+  const tzdb = load("lib/tzdb-names.ts");
+  assert.ok(tzdb.TZDB_NAMES.includes("Europe/Berlin") && !tzdb.TZDB_NAMES.includes("europe/berlin") && /^20\d\d[a-z]$/.test(tzdb.TZDB_VERSION));
+  assert.ok(r.knownZones().every(z => tzdb.TZDB_NAMES.includes(z)) && r.knownZones().includes("Europe/Berlin"));
+
   // Reads: introduction-origin key/value types, absent field, transport error.
   let key;
   const value = { type: `0x5::deployment_manager::RecurringWindow`, bcs: protocol.deployment_manager_RecurringWindowBcs.serialize(berlin).toBytes() };
@@ -92,6 +110,10 @@ const open = { not_before_ms: "0", expires_ms: "0", window_start_ms: "0", window
   assert.equal((html.match(/<li>/g) || []).length, 3);
   assert.match(html, /UTC \d{4}-\d\d-\d\dT17:00:00\.000Z/); // 02:00 JST
   assert.match(html, /Remove recurring window/);
+  const miscased = renderToStaticMarkup(React.createElement(ControlEditor, { control, recurring: weekly("europe/berlin", [[127, 120, 60]]),
+    recurringSupported: true, canEdit: true, pending: false, onSave() {}, onRecurring() {} }));
+  assert.equal((miscased.match(/<li>/g) || []).length, 0);
+  assert.match(miscased, /None: devices defer \(Timezone must be spelled exactly Europe\/Berlin\)/);
   const legacy = renderToStaticMarkup(React.createElement(ControlEditor, { control, recurringSupported: false, canEdit: true, pending: false, onSave() {} }));
   assert.match(legacy, /need the upgraded package/);
   console.log("PASS: recurring windows match daemon DST/midnight vectors, combine with controls, build/read origin-bound calls and preview three admissions");

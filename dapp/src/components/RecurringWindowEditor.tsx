@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { DeploymentControl } from "@/lib/deployment-control";
 import {
-  MAX_SLOTS, WEEKDAYS, browserZone, describeSlot, formatIn, knownZones, minuteLabel, nextAdmissionWindows,
+  MAX_SLOTS, WEEKDAYS, browserZone, canonicalZone, describeSlot, formatIn, knownZones, minuteLabel, nextAdmissionWindows,
   validateRecurring, type RecurringWindow, type WeeklySlot,
 } from "@/lib/recurring-window";
 
@@ -23,12 +23,17 @@ export function RecurringEditor({ control, recurring, supported, canEdit, pendin
   };
   const setSlot = (index: number, slot: Partial<WeeklySlot>) =>
     setDraft({ ...draft, slots: draft.slots.map((s, i) => i === index ? { ...s, ...slot } : s) });
+  // Save the daemon's exact zone spelling: devices reject other case variants.
+  const spelled = canonicalZone(draft.timezone);
+  const submitted = spelled ? { ...draft, timezone: spelled } : draft;
   let draftError = "";
-  try { validateRecurring(draft); } catch (error) { draftError = error instanceof Error ? error.message : String(error); }
-  const shown = editing ? (draftError ? null : draft) : recurring;
+  try { validateRecurring(submitted); } catch (error) { draftError = error instanceof Error ? error.message : String(error); }
+  const shown = editing ? (draftError ? null : submitted) : recurring;
   const timezone = shown?.timezone ?? "UTC";
-  let upcoming: { start: number; end: number }[] = [];
-  try { upcoming = shown ? nextAdmissionWindows(shown, control, Date.now()) : []; } catch { upcoming = []; }
+  let upcoming: { start: number; end: number }[] = [], upcomingError = "";
+  // A stored window devices cannot evaluate (for example a miscased zone) never admits.
+  try { if (shown) { validateRecurring(shown); upcoming = nextAdmissionWindows(shown, control, Date.now()); } }
+  catch (error) { upcomingError = error instanceof Error ? error.message : String(error); }
   if (!supported && !recurring) return <p>Recurring weekly windows need the upgraded package; regenerate the manifest after it is published.</p>;
   return <div className="space-y-1" aria-label="Recurring maintenance window">
     <p>Recurring window: {recurring
@@ -42,18 +47,19 @@ export function RecurringEditor({ control, recurring, supported, canEdit, pendin
         {upcoming.map(w => <li key={w.start}>
           {formatIn(w.start, timezone)} – {formatIn(w.end, timezone)} · UTC {new Date(w.start).toISOString()} – {Number.isFinite(w.end) ? new Date(w.end).toISOString() : "no end"}
         </li>)}
-      </ol> : <p>None: the schedule leaves no admission window.</p>}
+      </ol> : <p>{upcomingError ? `None: devices defer (${upcomingError}).` : "None: the schedule leaves no admission window."}</p>}
     </div>}
     {canEdit && supported && <div className="flex gap-3">
       <button disabled={pending} onClick={() => setEditing(!editing)}>{recurring ? "Edit recurring window" : "Add recurring window"}</button>
       {recurring && <button disabled={pending} onClick={() => { if (confirm("Remove the recurring window? Devices restart advance notice.")) send(null); }}>Remove recurring window</button>}
     </div>}
-    {editing && <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); send(draft); }}>
+    {editing && <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); send(submitted); }}>
       <label>Timezone (IANA)
         <input className="block border p-1" list="recurring-zones" value={draft.timezone}
           onChange={(e) => setDraft({ ...draft, timezone: e.target.value.trim() })} />
         <datalist id="recurring-zones">{knownZones().map(z => <option key={z} value={z} />)}</datalist>
       </label>
+      {spelled && spelled !== draft.timezone && <p>Saved as {spelled}, the spelling devices use.</p>}
       {draft.slots.map((slot, index) => <fieldset key={index} className="flex flex-wrap gap-2 items-end border p-2">
         <legend>Slot {index + 1}</legend>
         {WEEKDAYS.map((day, bit) => <label key={day}>
