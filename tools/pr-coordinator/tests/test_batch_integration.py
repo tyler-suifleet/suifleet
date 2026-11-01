@@ -167,6 +167,40 @@ class BatchTests(unittest.TestCase):
         temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
         return Fixture(Path(temp.name),conflict)
 
+    def test_actionable_source_failure_is_excluded_while_other_batch_waits(self):
+        from test_ci_repairs import failure
+        f=self.fixture();f.tick();batch=f.row()
+        # The active combined candidate remains held, but its source failure is
+        # no longer an eligible source for collection or publication.
+        f.source_prs[1]['statusCheckRollup']=[failure()]
+        self.assertIsNone(f.controller.source(f.project,f.source_prs[1],f.owners[0]))
+        self.assertEqual(f.tick(),{1,2})
+        self.assertEqual(f.row()['status'],'invalidated')
+        self.assertFalse(f.reconciled)
+        f.tick()
+        self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[2])
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+
+    def test_optional_skips_reach_independent_review_but_unknown_skip_blocks(self):
+        from test_optional_skips import OptionalSkips
+        f=self.fixture();f.tick();f.green();row=f.row()
+        candidate=f.candidate_prs[row['pr']]
+        # Use the real classifier with authenticated offline API fixtures.
+        evidence=OptionalSkips();evidence.setup_evidence()
+        evidence.pr.update(number=candidate['number'],headRefOid=candidate['headRefOid'],baseRefOid=candidate['baseRefOid'])
+        evidence.run.update(head_sha=candidate['headRefOid'],pull_requests=[dict(number=candidate['number'],
+            head=dict(sha=candidate['headRefOid']),base=dict(sha=candidate['baseRefOid'],ref='main'))])
+        evidence.job['head_sha']=candidate['headRefOid'];evidence.verified['head_sha']=candidate['headRefOid']
+        evidence.annotate()
+        candidate['statusCheckRollup'].append(evidence.check)
+        unknown=dict(__typename='CheckRun',name='required-security',status='COMPLETED',conclusion='SKIPPED')
+        candidate['statusCheckRollup'].append(unknown)
+        f.tick();self.assertEqual(f.row()['status'],'awaiting_ci');self.assertFalse(f.launched)
+        candidate['statusCheckRollup'].remove(unknown)
+        f.tick();self.assertEqual(f.row()['status'],'awaiting_review');self.assertEqual(len(f.launched),1)
+        self.assertFalse(f.reconciled)
+        f.approve();f.tick();self.assertEqual(f.row()['status'],'done')
+
     def test_disabled_has_no_external_effect(self):
         f=self.fixture();f.project['integration_batch']['enabled']=False
         self.assertEqual(f.tick(),set());self.assertEqual(f.controller.rows(f.project),[])
