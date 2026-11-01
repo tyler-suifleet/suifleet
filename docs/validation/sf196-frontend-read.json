@@ -1,0 +1,26 @@
+{
+  "result": "PASS",
+  "chain": "4c78adac",
+  "package": "0xe153c384bbad616b5e415a119bd6a453fd6c71acb1fad5ae843ecbd9b71b6c06",
+  "customer": "0xdbbaa7bf329e3ded9328ade7ea85095a74fc84835b682f42bc44cd53fa42d5a0",
+  "fleet": "0x00c39cc75a1e0c7e06f167683b1b3a5352a4733c2969cd38778a0cdbf3ab0f7e",
+  "authority_version": 197,
+  "generation": "1",
+  "requirements": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "checks": [
+    "actual production parser, verified public chain/package/origins",
+    "mixed introduction origins: Customer base, Policy intermediate, FleetSecurityKey final",
+    "actual serverless customer/fleet discovery and on-chain policy read"
+  ],
+  "limits": [
+    "No browser extension or signing session; manual wallet acceptance remains unrun"
+  ]
+}

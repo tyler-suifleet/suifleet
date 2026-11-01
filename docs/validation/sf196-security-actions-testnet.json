@@ -1,0 +1,163 @@
+{
+  "started": "2026-11-01T03:44:11Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "prepare canonical action: SF196 intent-bound fleet",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Ek7Z6Po9t3bD9WSqrxDoSpXtzEARkVBSKAtucAX8tUiF",
+      "gas_mist": 3219200,
+      "allowance_used_mist": 3219200
+    },
+    {
+      "label": "execute exact single-use action",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "DYbr2HEu6FgYdRkgeMMFno26hWXqswzSys8UmxUqPG31",
+      "gas_mist": 0,
+      "allowance_used_mist": 3219200
+    },
+    {
+      "label": "prepare canonical action: SF196 approved name",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AvThKbsdXGpSJzxEYi32GTejd6hovf8opGUrbA4zADYo",
+      "gas_mist": 3219200,
+      "allowance_used_mist": 6438400
+    },
+    {
+      "label": "substituted arguments rejected on chain",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "failure",
+      "digest": "EitgCUNZ8ui6MKcyxGCAnvTJfxQQyye6bGQUtaUQJNTv",
+      "gas_mist": 1000727,
+      "allowance_used_mist": 7439127,
+      "abort": [
+        "security_policy",
+        "begin_scoped_bytes",
+        "0"
+      ]
+    },
+    {
+      "label": "cancel retained action after failed substitution",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "hJ87ZXE2wvgAzJ6uxvWwjDnmF5M75SFeoyxECn8pLFw",
+      "gas_mist": 0,
+      "allowance_used_mist": 7439127
+    }
+  ],
+  "checks": [
+    "canonical SDK object BCS accepted; executed Action nonce deleted",
+    "argument substitution leaves fleet unchanged; rollback retains Action for authorized cancellation; nonce deleted"
+  ],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/tmp/sf196-host-tools/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/tmp/sf196-network-183/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1270,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 209716077,
+  "max_spend_mist": 100000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "head": "276131444a289e3cee8ca514c2dce3d29f802d5b",
+  "success": true,
+  "fixture": {
+    "base": "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+    "head": "0xe153c384bbad616b5e415a119bd6a453fd6c71acb1fad5ae843ecbd9b71b6c06",
+    "registry": "0x00544c8db3d54d0349a7adbc232f1d8793523727c0683e87dc7d31560fd9b4cd",
+    "cap": "0xbb2abde2a2d159ed0fc1ff45ccad23c945b81b6e6714fb7eec1ce09a1589d469",
+    "customer": "0xdbbaa7bf329e3ded9328ade7ea85095a74fc84835b682f42bc44cd53fa42d5a0",
+    "fleet": "0x00c39cc75a1e0c7e06f167683b1b3a5352a4733c2969cd38778a0cdbf3ab0f7e",
+    "budget": "0xac8269eeb2c781793d4732d11d7369800ed7b36799ec809c6dae06ce203184ea",
+    "base_digest": "bytecode-v1:dc5f9f9ab524c0961a45470790319c470278b9d73fe60e93701142c17018d358",
+    "head_digest": "bytecode-v1:5aac7fbba41991f94a661f7e6a4474d8cdc062a68d12a85590e69025e916b9c8",
+    "version": 3,
+    "security_origin": "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+    "upgrade_path": [
+      "0xf8a1805c865b883b84a8b561c13024f9bb50e0bc3975da2a702a4ef1bebe7116",
+      "0x63fa6486ed899d45ac3410724513c05bf977aa6b8dd97171ef280879f9b999c7",
+      "0xe153c384bbad616b5e415a119bd6a453fd6c71acb1fad5ae843ecbd9b71b6c06"
+    ]
+  },
+  "end_balance_mist": 204683761,
+  "spent_mist": 5032316,
+  "allowance_used_mist": 7439127,
+  "finished": "2026-11-01T03:45:02Z",
+  "independent_effects": [
+    {
+      "digest": "Ek7Z6Po9t3bD9WSqrxDoSpXtzEARkVBSKAtucAX8tUiF",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 3219200,
+      "checkpoint": "401482368"
+    },
+    {
+      "digest": "DYbr2HEu6FgYdRkgeMMFno26hWXqswzSys8UmxUqPG31",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 0,
+      "checkpoint": "401482386"
+    },
+    {
+      "digest": "AvThKbsdXGpSJzxEYi32GTejd6hovf8opGUrbA4zADYo",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 3219200,
+      "checkpoint": "401482540"
+    },
+    {
+      "digest": "EitgCUNZ8ui6MKcyxGCAnvTJfxQQyye6bGQUtaUQJNTv",
+      "status": {
+        "status": "failure",
+        "error": "MoveAbort(MoveLocation { module: ModuleId { address: e153c384bbad616b5e415a119bd6a453fd6c71acb1fad5ae843ecbd9b71b6c06, name: Identifier(\"security_policy\") }, function: 20, instruction: 90, function_name: Some(\"begin_scoped_bytes\") }, 0) in command 0"
+      },
+      "gas_mist": 1000727,
+      "checkpoint": "401482549"
+    },
+    {
+      "digest": "hJ87ZXE2wvgAzJ6uxvWwjDnmF5M75SFeoyxECn8pLFw",
+      "status": {
+        "status": "success"
+      },
+      "gas_mist": 0,
+      "checkpoint": "401482574"
+    }
+  ]
+}

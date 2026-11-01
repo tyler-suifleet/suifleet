@@ -198,7 +198,7 @@ class PackageTransactionTests(unittest.TestCase):
     """Publish/upgrade go through sui_toolchain's verify-before-sign submitter."""
 
     def submitter(self, calls, refuse=False):
-        def make(client, build_tool, package_dir, common, *, sender, sign, upgrade=None, record=None):
+        def make(client, build_tool, package_dir, common, *, sender, sign, upgrade=None, record=None, persist=None):
             calls.append(dict(build_tool=build_tool, package_dir=package_dir, sender=sender, upgrade=upgrade))
 
             def submit(budget):
@@ -206,6 +206,8 @@ class PackageTransactionTests(unittest.TestCase):
                 if refuse:
                     raise sui_toolchain.NotSubmitted("bytecode differs")
                 record.update(kind="upgrade" if upgrade else "publish")
+                if persist is not None:
+                    persist({"tx_bytes": "VERIFIEDBYTES", "digest": "VERIFIEDDIGEST"})
                 return client("execute-signed-tx", "--tx-bytes", "VERIFIEDBYTES", "--signatures", "SIG")
             return submit
         return make
@@ -227,6 +229,17 @@ class PackageTransactionTests(unittest.TestCase):
         pubfile.assert_called_once_with("/tmp/pub.toml", "4c78adac", "/tmp/package", "0x" + "a" * 64, "0xcap")
         self.assertEqual(run.ledger.used, 85_000_000)
         self.assertEqual(run.evidence["verified_package_transactions"]["publish base"], {"kind": "publish"})
+
+    def test_publish_persists_verified_identity_before_submission(self):
+        calls, chain, persisted = [], Chain(self.published()), []
+        run = live(chain, limit=500_000_000)
+        def checkpoint(identity):
+            self.assertEqual(chain.calls, [])
+            persisted.append(identity)
+        with patch.object(live_common.toolchain, "package_submitter", self.submitter(calls)), \
+                patch.object(live_common.toolchain, "write_pubfile"):
+            run.publish("publish base", "/tmp/package", "/tmp/pub.toml", persist=checkpoint)
+        self.assertEqual(persisted, [{"tx_bytes": "VERIFIEDBYTES", "digest": "VERIFIEDDIGEST"}])
 
     def test_upgrade_targets_the_cap_and_package_without_rewriting_the_pubfile(self):
         calls, chain = [], Chain(self.published())

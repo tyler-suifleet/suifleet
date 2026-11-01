@@ -93,6 +93,11 @@ class ToolIdentity(unittest.TestCase):
         with self.assertRaisesRegex(tc.Incompatible, 'checksum'):
             self.check(tools(), digest='0' * 64)
 
+    def test_unsigned_failure_preserves_stdout_diagnostic(self):
+        client = Mock(return_value=SimpleNamespace(returncode=1, stdout="incompatible existing layout", stderr="compiler notes"))
+        with self.assertRaisesRegex(tc.NotSubmitted, "incompatible existing layout"):
+            tc._serialized(client, ["test-upgrade", "contracts"], 1000)
+
 
 class ProtocolPreflight(unittest.TestCase):
     TOOLS = {'build': dict(tc.BUILD), 'network': dict(tc.NETWORK)}
@@ -102,6 +107,13 @@ class ProtocolPreflight(unittest.TestCase):
                               '4c78adac')
         self.assertEqual(result['protocol_version'], 140)
         self.assertTrue(result['build_cli_offline'])
+
+    def test_protocol140_requires_compatible_cli(self):
+        facts = {'chain_identifier': '4c78adac', 'protocol_version': 140}
+        obsolete = {'build': dict(tc.BUILD), 'network': dict(tc.NETWORK, max_protocol=139)}
+        with self.assertRaisesRegex(tc.Incompatible, '140 exceeds'):
+            tc.preflight(obsolete, facts, '4c78adac')
+        self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
 
     def test_newer_protocol_refused_before_writes(self):
         with self.assertRaisesRegex(tc.Incompatible, '141 exceeds'):
@@ -317,6 +329,15 @@ class Pubfile(unittest.TestCase):
         self.assertIn(f'upgrade-capability = "{CAP}"', text)
         self.assertIn('toolchain-version = "1.81.1"', text)
         self.assertIn('chain-id = "4c78adac"', text)
+
+    def test_latest_fixture_keeps_original_type_lineage(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "Pub.toml"
+            tc.write_pubfile(path, "4c78adac", Path(root) / "pkg", PACKAGE, CAP, version=2, original="0x1")
+            text = path.read_text()
+        self.assertIn(f'published-at = "{PACKAGE}"', text)
+        self.assertIn(f'original-id = "{tc.normal("0x1")}"', text)
+        self.assertIn("version = 2", text)
 
 
 if __name__ == '__main__':
