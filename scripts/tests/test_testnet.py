@@ -56,17 +56,17 @@ class TrustTests(unittest.TestCase):
 
     def test_large_package_reservation_preserves_run_ceiling_and_unknown_charge(self):
         from live_package_upgrade import PACKAGE_GAS, funding_shortfall
-        # Synthetic ledger position exercises the PR279 700M reservation
+        # Synthetic ledger position exercises the SF196 850M reservation
         # after 200M setup, and a 450M effects cost. This is accounting
         # regression evidence, not a live package-cost claim.
-        self.assertEqual(PACKAGE_GAS, 700_000_000)
+        self.assertEqual(PACKAGE_GAS, 850_000_000)
         self.assertIn('no single gas pool', funding_shortfall((450_000_000, 450_000_000), 900_000_000))
-        self.assertIsNone(funding_shortfall((700_000_000, 300_000_000), 1_000_000_000))
+        self.assertIsNone(funding_shortfall((850_000_000, 150_000_000), 1_000_000_000))
         for outcome in ('success', 'unknown'):
             ledger = Budget(1_000_000_000, [])
             ledger.grant(200_000_000)
             def submit(budget):
-                self.assertEqual(budget, PACKAGE_GAS)
+                self.assertEqual(budget, min(PACKAGE_GAS, 800_000_000))
                 if outcome == 'unknown':
                     raise RuntimeError('unknown outcome')
                 return dict(digest='offline', effects=dict(status=dict(status='success'),
@@ -74,7 +74,7 @@ class TrustTests(unittest.TestCase):
             if outcome == 'unknown':
                 with self.assertRaises(RuntimeError):
                     ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
-                self.assertEqual(ledger.used, 900_000_000)
+                self.assertEqual(ledger.used, 1_000_000_000)
             else:
                 ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
                 self.assertEqual(ledger.used, 650_000_000)

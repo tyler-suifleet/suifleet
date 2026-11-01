@@ -484,7 +484,7 @@ class RunFlow(unittest.TestCase):
                     patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
             evidence = json.loads((root / 'evidence.json').read_text())
             saved = json.loads((root / 'state.json').read_text())['publications'][key]
-            self.assertEqual(reservations, [live.PACKAGE_GAS])
+            self.assertEqual(reservations, [min(live.PACKAGE_GAS, args.max_spend_mist)])
             self.assertNotIn('pending_operation', saved)
             self.assertNotIn('base_package', saved)
             self.assertEqual(evidence['reconciliations'][0]['outcome'], 'failed')
@@ -636,7 +636,7 @@ class RunFlow(unittest.TestCase):
                     patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
             self.assertEqual(sent, ['BYTES'])  # The identical retained bytes, once.
             self.assertEqual(read, [digest])
-            self.assertEqual(reservations, [live.PACKAGE_GAS])
+            self.assertEqual(reservations, [min(live.PACKAGE_GAS, args.max_spend_mist - 5_010_000)])
             saved = json.loads((root / 'state.json').read_text())['publications'][key]
             self.assertNotIn('pending_operation', saved)
             evidence = json.loads((root / 'evidence.json').read_text())

@@ -30,9 +30,10 @@ import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent  # noqa: F401 (re-exported to the suites)
 
-# Base publish budget. After SF-136 a fresh main base publish costs ~0.55 SUI;
-# 0.4 SUI failed InsufficientGas (runs 40238821132, 40261665249).
-PACKAGE_GAS = 700_000_000
+# Package reservation: SF-196 current root upgrade used 751,037,763 MIST.
+# Leave measured storage headroom for a future fresh publication of that root;
+# the ledger still caps this reservation at the run allowance/balance.
+PACKAGE_GAS = 850_000_000
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
