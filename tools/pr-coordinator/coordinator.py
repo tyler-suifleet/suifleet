@@ -1921,11 +1921,11 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                     # Reconciliation below retries delayed GitHub state without a second merge.
                     break
                 if batching and pr['number'] in held:
-                    # Holding a source receipt suppresses duplicate source review,
-                    # not observation or bounded owner repair. launch() retains
-                    # the transactional worker/claim/head/budget/backoff fences.
-                    if repair and not repair_blocker and not owner.get('expired') and owner.get('model'):
-                        self.launch(project, repair, owner, 'fix')
+                    # The batch tick may have published using a newer snapshot.
+                    # Keep every held member reserved even if this older PR
+                    # snapshot has a failure. Pre-publication revalidation must
+                    # invalidate the batch before normal repair on a later tick;
+                    # publication/reconciliation uncertainty never permits repair.
                     continue
                 if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')

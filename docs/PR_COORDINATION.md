@@ -1207,14 +1207,17 @@ remain rollout acceptance until observed; offline fixtures do not establish them
 
 ### Batch CI observation and optional deployment applicability (SF-212)
 
-A held source receipt suppresses duplicate source review, not CI observation or
-bounded owner repair. Every owned source PR still records concrete exact-head
-ordinary/security/testnet failures while another batch owns integration. The
+A held source receipt suppresses duplicate source review and repair dispatch,
+while preserving CI observation. Nonmember failures use bounded owner repair.
+Every owned source PR still records concrete exact-head ordinary/security/testnet failures while another batch owns integration. The
 existing transactional per-PR worker reservation, published Review ownership,
 lease checks, fresh head/base/run verification, repair budgets and backoff remain
 in force. Concrete source failures are excluded from new batch collection; an
 active member developing such a failure invalidates its candidate through normal
-member revalidation. Pending source checks may still run on the combined candidate.
+member revalidation before normal repair dispatch on a later tick. Members remain
+reserved throughout publication/reconciliation uncertainty, including when a
+pre-tick PR snapshot reports a failure after publication. Pending source checks
+may still run on the combined candidate.
 No shared incident owner is replaced and no funded transaction is blindly replayed.
 
 Skipped checks remain blocking except for three narrowly authenticated jobs in
