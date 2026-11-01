@@ -148,7 +148,8 @@ class Activator:
                 row = db.execute('SELECT pr,head,base,review_id FROM activation_merges WHERE project=? AND commit_id=?',
                                  (self.settings['project'], commit)).fetchone()
                 if not row:
-                    self.verify_batch(db, commit, target, verified_batches)
+                    if not self.verify_local(db, commit):
+                        self.verify_batch(db, commit, target, verified_batches)
                     continue
                 pr, head, base, review_id = row
                 parents = self.git('show', '-s', '--format=%P', commit).split()
@@ -166,6 +167,53 @@ class Activator:
                         or source['head']['sha'] != head
                         or (source['head'].get('repo') or {}).get('full_name') != self.settings['repository']):
                     raise RuntimeError('remote merged source does not match receipt')
+
+    def verify_local(self, db, commit):
+        tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'local_integrations' not in tables:
+            return False
+        rows = db.execute("SELECT pr,head,base,status,receipt FROM local_integrations WHERE project=?",
+                          (self.settings['project'],)).fetchall()
+        for pr, head, base, status, raw in rows:
+            proof = json.loads(raw)
+            if proof.get('commit') != commit:
+                continue
+            if (status not in ('publish_pending', 'published')
+                    or proof.get('authorization') != 'user-local-infrastructure-2026-11-01'
+                    or proof.get('project') != self.settings['project']
+                    or proof.get('pr') != pr or proof.get('head') != head or proof.get('base') != base
+                    or self.git('show', '-s', '--format=%P', commit).split() != [base, head]
+                    or self.git('rev-parse', commit+'^{tree}') != proof.get('tree')
+                    or self.git('show', '-s', '--format=%an <%ae>|%cn <%ce>', commit)
+                       != 'Tyler Bush <tyler.jonathan.bush@gmail.com>|Tyler Bush <tyler.jonathan.bush@gmail.com>'):
+                raise RuntimeError('local integration receipt ancestry/tree/authority mismatch')
+            paths = self.git('diff', '--name-only', '--no-renames', base, commit).splitlines()
+            docs = {'docs/PR_COORDINATION.md', 'docs/ATOMIC_TICKETING.md', 'docs/RECOVERY_WATCHDOG.md'}
+            if (paths != proof.get('paths') or not paths
+                    or not all(p in docs or p.startswith(PREFIX) for p in paths)):
+                raise RuntimeError('local integration scope mismatch')
+            expected = [
+                ['python3', '-m', 'unittest', 'discover', '-s', PREFIX+'tests'],
+                ['python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_tracking.py'],
+                ['python3', 'scripts/bootstrap_tracking.py']]
+            checks = proof.get('checks', [])
+            if len(checks) != len(expected):
+                raise RuntimeError('local integration checks incomplete')
+            for check, command in zip(checks, expected):
+                log = Path(check['log'])
+                if (check.get('command') != command or check.get('exit') != 0
+                        or log.is_symlink() or not log.resolve().is_relative_to(self.state.resolve())
+                        or hashlib.sha256(log.read_bytes()).hexdigest() != check.get('sha256')):
+                    raise RuntimeError('local integration execution evidence mismatch')
+            source = self.gh(f'repos/{self.settings["repository"]}/pulls/{pr}')
+            if (not source.get('merged_at') or source.get('merge_commit_sha') != commit
+                    or source['base']['ref'] != 'main'
+                    or source['base']['repo']['full_name'] != self.settings['repository']
+                    or source['head']['sha'] != head
+                    or (source['head'].get('repo') or {}).get('full_name') != self.settings['repository']):
+                raise RuntimeError('local integration remote source mismatch')
+            return True
+        return False
 
     def verify_batch(self, db, commit, target, verified):
         """Verify the entire reviewed batch, never impersonate an individual merge.

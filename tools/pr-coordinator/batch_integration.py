@@ -783,3 +783,161 @@ class BatchController:
             if batch['status'] in TERMINAL:
                 self.cleanup_terminal(project, batch)
         return held
+
+
+# Kept in an installed runtime module so activation never imports candidate code.
+LOCAL_COMMANDS = (
+    ('python3', '-m', 'unittest', 'discover', '-s', 'tools/pr-coordinator/tests'),
+    ('python3', '-m', 'unittest', 'discover', '-s', 'scripts/tests', '-p', 'test_tracking.py'),
+    ('python3', 'scripts/bootstrap_tracking.py'),
+)
+LOCAL_DOCS = {'docs/PR_COORDINATION.md', 'docs/ATOMIC_TICKETING.md',
+              'docs/RECOVERY_WATCHDOG.md'}
+
+
+def infrastructure_scope(paths):
+    return bool(paths) and all(
+        path in LOCAL_DOCS or path.startswith('tools/pr-coordinator/')
+        for path in paths)
+
+
+class LocalInfrastructure:
+    """User-authorized local validation, distinct from independent approval."""
+    def __init__(self, coordinator):
+        self.c, self.b = coordinator, coordinator.batches
+        self.db = coordinator.store.db
+        self.db.execute("""CREATE TABLE IF NOT EXISTS local_integrations (
+            project TEXT, pr INTEGER, head TEXT, base TEXT, status TEXT,
+            receipt TEXT, PRIMARY KEY(project,pr,head,base))""")
+
+    def eligible(self, project, pr, owner):
+        if project.get('local_infrastructure', {}).get('enabled') is not True:
+            return False
+        if (not owner or owner.get('spec', {}).get('area') != 'infra'
+                or owner.get('status') != 'review' or owner.get('expired')
+                or owner.get('publish_pending') or owner.get('branch') != pr.get('headRefName')
+                or pr.get('state') != 'OPEN' or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('baseRefName') != 'main' or pr.get('mergeable') != 'MERGEABLE'
+                or self.b.outstanding_requests(pr)
+                or any(not t.get('isResolved') for t in pr.get('threads', []))):
+            return False
+        base, head = pr['baseRefOid'], pr['headRefOid']
+        if not all(SHA.fullmatch(x) for x in (base, head)):
+            return False
+        self.b.git(project, 'fetch', '--no-tags', 'origin', base, head)
+        paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base+'...'+head).splitlines()
+        return infrastructure_scope(paths)
+
+    def fenced(self, project, pr, owner):
+        self.c.assert_review_owner(project, owner)
+        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND "
+            "status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+            (project['id'], pr['number'])).fetchone()
+        if active or pr['number'] in self.b.reserved_members(project):
+            raise RuntimeError('local integration has active or uncertain workers/batch')
+        if owner.get('worktree') and self.b.git(project, 'status', '--porcelain', cwd=owner['worktree']):
+            raise RuntimeError('implementation worktree is dirty')
+        # The dispatcher directory is keyed by the immutable owning session.
+        from coordinator import claim_processes, worker_stopped
+        directory = self.c.state/'implementations'/owner['session']
+        path = directory/'process.json'
+        if not path.exists():
+            raise RuntimeError('implementation process identity is unavailable')
+        process = json.loads(path.read_text())
+        if (not worker_stopped(process.get('pid'), process.get('started'))
+                or claim_processes(owner['token'], process.get('started'))):
+            raise RuntimeError('implementation worker/helpers have not stopped')
+
+    def tick(self, project, pr, owner):
+        """Return True when this PR belongs to the local lane (including holds)."""
+        if not self.eligible(project, pr, owner):
+            return False
+        self.fenced(project, pr, owner)
+        base, head = pr['baseRefOid'], pr['headRefOid']
+        key = (project['id'], pr['number'], head, base)
+        existing = self.db.execute('SELECT status,receipt FROM local_integrations WHERE project=? AND pr=? AND head=? AND base=?', key).fetchone()
+        if existing:
+            print(canonical(dict(project=project['id'], pr=pr['number'], local_infrastructure=existing[0],
+                                 diagnostic=json.loads(existing[1]).get('diagnostic'))), flush=True)
+            if existing[0] in ('publish_pending', 'published'):
+                proof = json.loads(existing[1])
+                self.b.git(project, 'fetch', '--no-tags', 'origin', 'main')
+                self.b.git(project, 'merge-base', '--is-ancestor', proof['commit'], 'origin/main')
+                self.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',
+                                (project['id'], pr['number'], head, proof['commit']))
+            return True  # Failed checks and uncertain publication are never blindly replayed.
+        if self.db.execute("SELECT 1 FROM local_integrations WHERE project=? AND pr=? AND status='publish_pending'", (project['id'], pr['number'])).fetchone():
+            raise RuntimeError('earlier local publication outcome remains uncertain')
+        if self.b.main(project) != base:
+            return True
+        import tempfile
+        directory = Path(tempfile.mkdtemp(prefix='local-infra-', dir=self.c.state))
+        tree = directory/'source'
+        receipt = dict(project=project['id'], pr=pr['number'], head=head, base=base,
+                       authorization='user-local-infrastructure-2026-11-01', checks=[])
+        self.db.execute('INSERT INTO local_integrations VALUES(?,?,?,?,?,?)', (*key, 'testing', canonical(receipt)))
+        try:
+            self.b.git(project, 'worktree', 'add', '--detach', str(tree), base)
+            metadata = self.b.git(project, 'log', '--format=%an <%ae>|%cn <%ce>', base+'..'+head)
+            if not metadata or any(x != IDENTITY+'|'+IDENTITY for x in metadata.splitlines()):
+                raise RuntimeError('source authorship mismatch')
+            if 'co-authored-by:' in self.b.git(project, 'log', '--format=%B', base+'..'+head).lower():
+                raise RuntimeError('additional source authorship')
+            self.b.git(project, 'merge', '--no-ff', head, '-m', f"Merge PR #{pr['number']}: local infrastructure", '-m',
+                       '- Integrate infrastructure under user local-test authority.\n- Validate the exact combined tree in isolated state.', cwd=tree)
+            receipt['commit'] = self.b.git(project, 'rev-parse', 'HEAD', cwd=tree)
+            receipt['tree'] = self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree)
+            paths = self.b.git(project, 'diff', '--name-only', '--no-renames', base, receipt['commit']).splitlines()
+            if not infrastructure_scope(paths):
+                raise RuntimeError('combined scope is not infrastructure')
+            receipt['paths'] = paths
+            self.b.git(project, 'diff', '--check', base, receipt['commit'])
+            for index, command in enumerate(LOCAL_COMMANDS):
+                log = directory/f'check-{index}.log'
+                argv = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session',
+                        '--ro-bind', '/usr', '/usr', '--ro-bind', '/lib', '/lib',
+                        '--ro-bind', '/lib64', '/lib64', '--symlink', 'usr/bin', '/bin',
+                        '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
+                        '--bind', str(tree), '/source', '--chdir', '/source',
+                        '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin',
+                        '--setenv', 'HOME', '/tmp', '--setenv', 'LANG', 'C.UTF-8',
+                        '--setenv', 'PYTHONDONTWRITEBYTECODE', '1', *command]
+                check = dict(command=list(command), exit=None, log=str(log))
+                receipt['checks'].append(check)
+                try:
+                    with log.open('wb') as stream:
+                        result = subprocess.run(argv, stdout=stream, stderr=subprocess.STDOUT, timeout=900)
+                    check['exit'] = result.returncode
+                finally:
+                    check['sha256'] = hashlib.sha256(log.read_bytes()).hexdigest()
+                if result.returncode:
+                    raise RuntimeError('local infrastructure checks failed; exact inputs held for repair')
+            if (self.b.git(project, 'rev-parse', 'HEAD', cwd=tree) != receipt['commit']
+                    or self.b.git(project, 'rev-parse', 'HEAD^{tree}', cwd=tree) != receipt['tree']
+                    or self.b.git(project, 'status', '--porcelain', cwd=tree)):
+                raise RuntimeError('tests modified the candidate')
+            fresh = self.c.pr(project, pr['number'])
+            current = json.loads(self.c.ticket(project, 'show', owner['key']))
+            if (fresh['headRefOid'] != head or fresh['baseRefOid'] != base
+                    or any(current.get(k) != owner.get(k) for k in ('token','session','branch','model','agent'))
+                    or not self.eligible(project, fresh, current) or self.b.main(project) != base):
+                raise RuntimeError('local integration inputs changed')
+            from coordinator import source_feedback
+            if current.get('spec') != owner.get('spec') or source_feedback(fresh) != source_feedback(pr):
+                raise RuntimeError('local integration specification or feedback changed')
+            self.fenced(project, fresh, current)
+            self.db.execute('UPDATE local_integrations SET status=?,receipt=? WHERE project=? AND pr=? AND head=? AND base=?',
+                            ('publish_pending', canonical(receipt), *key))
+            self.db.execute('INSERT OR IGNORE INTO integrations(project,pr,head,commit_id,reconciled) VALUES(?,?,?,?,0)',
+                            (project['id'], pr['number'], head, receipt['commit']))
+            self.b.git(project, 'push', 'origin', receipt['commit']+':refs/heads/main')
+            self.db.execute('UPDATE local_integrations SET status=? WHERE project=? AND pr=? AND head=? AND base=?', ('published', *key))
+        except Exception as error:
+            receipt['diagnostic'] = str(error) if type(error) is RuntimeError else type(error).__name__
+            self.db.execute("UPDATE local_integrations SET status=CASE WHEN status='publish_pending' THEN status ELSE 'failed' END, receipt=? WHERE project=? AND pr=? AND head=? AND base=?",
+                            (canonical(receipt), *key))
+            raise
+        finally:
+            if tree.exists():
+                self.c.cleanup(project, tree)
+        return True
