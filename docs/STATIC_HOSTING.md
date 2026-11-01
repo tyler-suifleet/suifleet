@@ -31,7 +31,8 @@ receipt binds the revision and manifest digest; it explicitly records manual
 recording acceptance as unrun. This is a source release candidate, not evidence of
 a recorded real-wallet release. Production authorization must also state
 `Recorded console release accepted` after that acceptance actually occurs.
-SF-172 and SF-177 remain upstream merge/review prerequisites.
+SF-172 and SF-177 are integrated from reviewed main; future interface changes
+still require their normal review/merge gates.
 
 `site/prepare_hosted.py` copies outputs to new directories. It removes the private
 docs build marker, adds docs HSTS, and supplies console discovery files and CSP
@@ -42,9 +43,10 @@ is deliberately restricted to the testnet profile; new provider/wallet endpoints
 require reviewed policy and browser failure-path checks before enabling them.
 
 No provider account/projects, credentials, registrar ownership, TLS certificates,
-real preview publication or hosted rollback has been verified. These external
-provider checks remain pending in SF-176/#353; final real-wallet/provider/mainnet
-acceptance stays in #32/#159. Offline A→B→A fixture restoration is a regression
+real preview publication or hosted rollback has been verified. Under the user’s 2026-10-31 recovery direction, these external
+provider checks are deferred final acceptance in SF-042/#62 and SF-087/#159;
+manual real-wallet/recorded-console acceptance stays in SF-031/#32. Missing
+preview accounts alone do not block software review. None of these checks passed. Offline A→B→A fixture restoration is a regression
 check only, never a provider deployment or rollback receipt. Source completion
 does not authorize provisioning credentials or DNS/production publication.
 
