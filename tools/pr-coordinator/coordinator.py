@@ -1024,15 +1024,24 @@ class Coordinator:
             self.immutable_reads[key] = value
         return self.immutable_reads[key]
 
-    def prs(self, project):
+    def prs(self, project, on_snapshot=None, owners=()):
         fields = 'number,headRefOid,headRefName,baseRefName,baseRefOid,isCrossRepository,state,isDraft,mergeable,title,body,statusCheckRollup,mergeCommit'
         pages = json.loads(self.gh(project,['api',f"repos/{project['repository']}/pulls?state=open&per_page=100",'--paginate','--slurp']))
         raw = [row for page in pages for row in page]
         self.open_numbers[project['id']] = {row['number'] for row in raw}
+        if on_snapshot is not None:
+            priority = {owner.get('branch'): owner.get('spec', {}).get('priority', 'P9') for owner in owners}
+            raw.sort(key=lambda row: (priority.get((row.get('head') or {}).get('ref'), 'P9'), row['number']))
         result = []
         for row in raw:
             try:
-                result.append(self.pr(project, row['number'], fields))
+                pr = self.pr(project, row['number'], fields)
+                result.append(pr)
+                if on_snapshot is not None:
+                    try:
+                        on_snapshot(pr)
+                    except Exception as error:
+                        print(f"{project['id']} PR#{row['number']}: early source dispatch deferred ({type(error).__name__}); snapshot retained", flush=True)
             except Exception as error:
                 print(f"{project['id']} PR#{row['number']}: snapshot unavailable ({type(error).__name__}); skipped", flush=True)
         return result
@@ -1762,15 +1771,57 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 print(f"{project['id']}: scan failed: {error}",flush=True)
                 if not execute: raise
 
+    def start_source_review(self, project, pr, owners):
+        """Start read-only source work without waiting for unrelated snapshots.
+
+        This grants no merge authority. launch()/Store.reserve() still own
+        capacity, provider, active-worker and uncertain-launch fencing.
+        """
+        if (not self.batches.enabled(project) or pr.get('_review_mode') != 'source'
+                or pr.get('_integration_batch') or pr.get('state') != 'OPEN'
+                or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('_batch_failure') or pr.get('_batch_conflict')
+                or failed_checks(pr)):
+            return False
+        owner = self.owner(project, pr, owners)
+        if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
+                or owner.get('expired') or owner.get('branch') != pr.get('headRefName')):
+            return False
+        current = json.loads(self.ticket(project, 'show', owner['key']))
+        if (any(current.get(key) != owner.get(key) for key in
+                ('token', 'branch', 'agent', 'model', 'session'))
+                or current.get('status') != 'review' or current.get('publish_pending')
+                or current.get('expired')):
+            return False
+        owner = current
+        review = self.store.review(project['id'], pr['number'])
+        if review and review['head'] == pr['headRefOid']:
+            if (review.get('publication_pending') or review['result']['verdict'] == 'changes_requested'
+                    or review['feedback'] == feedback(pr)):
+                return False
+        if self.source_receipt(project, pr, owner):
+            return False
+        self.ensure_closing_reference(project, pr, owner)
+        self.launch(project, pr, owner, 'review')
+        return True
+
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute: self.collect(project,owners)
+        early_reviews = set()
+        def on_snapshot(pr):
+            if self.start_source_review(project, pr, owners):
+                early_reviews.add(pr['number'])
+        if execute and self.batches.enabled(project):
+            prs = self.prs(project, on_snapshot, owners)
+        else:
+            prs = self.prs(project)
+        # Historical reconciliation cannot delay independent source workers.
         if execute:
             try:
                 self.discover_merged(project,owners)
             except Exception as error:
                 print(f"{project['id']}: merged discovery unavailable ({type(error).__name__}); continuing open PRs", flush=True)
-        prs = self.prs(project)
         def priority(pr):
             owner = self.owner(project,pr,owners)
             return ((owner or {}).get('spec',{}).get('priority','P9'),pr['number'])
@@ -1841,7 +1892,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 elif repair:
                     if not repair_blocker and not owner.get('expired') and owner.get('model'):
                         self.launch(project,repair,owner,'fix')
-                elif (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
+                elif pr['number'] not in early_reviews and (batching or pr['mergeable'] == 'MERGEABLE') and (not review or review['head'] != pr['headRefOid'] or review['feedback'] != feedback(pr)):
                     self.launch(project,pr,owner,'review')
             except Exception as error:
                 print(f"{project['id']} PR#{pr['number']}: action deferred: {error}",flush=True)
