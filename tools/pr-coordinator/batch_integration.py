@@ -27,8 +27,10 @@ def manifest_digest(project, batch_id, base, head, members):
 
 
 class BatchController:
-    def __init__(self, coordinator, clock=time.time):
+    def __init__(self, coordinator, clock=time.time, installed=None):
         self.c, self.db, self.clock = coordinator, coordinator.store.db, clock
+        self.installed = Path(installed) if installed is not None else Path(__file__).with_name('installed.json')
+        self._installed_proofs = set()
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batches (
             project TEXT,id TEXT,status TEXT,base TEXT,head TEXT,branch TEXT,pr INTEGER,
             members TEXT,directory TEXT,error TEXT,created REAL,updated REAL,
@@ -45,9 +47,57 @@ class BatchController:
             PRIMARY KEY(project,pr,head,base))''')
 
     @staticmethod
-    def enabled(project):
+    def suspension(project):
         config = project.get('integration_batch', {})
-        return isinstance(config, dict) and config.get('enabled') is True
+        if not isinstance(config, dict) or config.get('enabled') is not True:
+            return None  # A deliberate permanent disable is never overridden.
+        required = config.get('suspend_until_installed')
+        if required is None:
+            return None
+        reason = config.get('suspension_reason')
+        if (not isinstance(required, str) or not SHA.fullmatch(required)
+                or not isinstance(reason, str) or not reason.strip() or len(reason) > 500):
+            raise ValueError('batch recovery suspension requires an exact commit and bounded reason')
+        return required
+
+    def enabled(self, project):
+        config = project.get('integration_batch', {})
+        if not isinstance(config, dict) or config.get('enabled') is not True:
+            return False
+        required = self.suspension(project)
+        if required is None:
+            return True
+        try:
+            metadata = json.loads(self.installed.read_text())
+            revision = metadata['revision']
+            if type(metadata.get('protocol')) is not int or metadata['protocol'] != 1 or not isinstance(revision, str) or not SHA.fullmatch(revision):
+                return False
+            proof = (str(project['root']), required, revision)
+            if proof not in self._installed_proofs:
+                # The installed generation is authorized by the merged-only
+                # activator. A branch tip, open PR or elapsed timer is no proof.
+                self.git(project, '--no-replace-objects', 'merge-base', '--is-ancestor', required, revision)
+                self._installed_proofs.add(proof)
+            return True
+        except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+            return False
+
+    def pause_status(self, project, pr):
+        if self.enabled(project):
+            return None
+        required = self.suspension(project)
+        if required:
+            # Only the exact repair source can use the single-PR bootstrap path.
+            if pr.get('headRefOid') != required:
+                return 'waiting-installed-repair'
+            return None
+        for batch in self.rows(project):
+            if batch['status'] in TERMINAL:
+                continue
+            members = json.loads(batch['members'])
+            if pr['number'] == batch.get('pr') or any(m['pr'] == pr['number'] for m in members):
+                return 'disabled-with-active-batch'
+        return None
 
     def settings(self, project):
         config = project.get('integration_batch', {})
