@@ -25,6 +25,25 @@ module sui_edge::security_policy {
         transaction: vector<u8>,
         attested: u8,
     }
+    public struct FactorKey has copy, drop, store { factor: u8 }
+    public struct FactorConfiguration has copy, drop, store { binding: vector<u8> }
+    /// Only the future authenticated in-package verifier may enroll a source.
+    /// Changing/replacing one uses every currently enforced class, never the
+    /// proposed new source, and invalidates outstanding proofs.
+    public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
+        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+        check_all(uid, ctx);
+        assert!(!binding.is_empty() && binding.length() <= 4096, EPolicy);
+        let key = FactorKey { factor };
+        if (df::exists(uid, key)) {
+            *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
+        } else df::add(uid, key, FactorConfiguration { binding });
+        invalidate(uid);
+    }
+    public(package) fun factor_configuration(uid: &UID, factor: u8): vector<u8> {
+        let key = FactorKey { factor };
+        if (df::exists(uid, key)) df::borrow<FactorKey, FactorConfiguration>(uid, key).binding else vector[]
+    }
     public struct PolicyChanged has copy, drop {
         customer_id: ID, generation: u64, requirements: vector<u8>,
     }
@@ -42,17 +61,35 @@ module sui_edge::security_policy {
         let needed = p.requirements[action];
         assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);
     }
+    /// Capability lending cannot be authorized by a wrapper grant: a caller
+    /// could otherwise substitute any operation while holding the capability.
+    public(package) fun assert_unprotected(uid: &UID) {
+        let p = read(uid);
+        let mut i = 0;
+        while (i < ACTIONS) { assert!(p.requirements[i] == 0, EFactor); i = i + 1; };
+    }
     public(package) fun check_all(uid: &UID, ctx: &TxContext) {
         let mut i = 0;
         while (i < ACTIONS) { check(uid, i, ctx); i = i + 1; };
     }
     public(package) fun update(uid: &mut UID, requirements: vector<u8>, ctx: &TxContext) {
-        check_all(uid, ctx);
         assert!(requirements.length() == ACTIONS, EPolicy);
+        let current = read(uid);
+        check(uid, 4, ctx);
+        let mut j = 0;
+        while (j < ACTIONS) {
+            if ((current.requirements[j] & requirements[j]) != current.requirements[j]) check(uid, j, ctx);
+            j = j + 1;
+        };
         let mut i = 0;
         while (i < ACTIONS) {
             assert!((requirements[i] & 15) == requirements[i], EPolicy);
             assert!((requirements[i] & AVAILABLE) == requirements[i], EUnavailable);
+            let mut bit = 1;
+            while (bit <= 8) {
+                if ((requirements[i] & bit) != 0) assert!(!factor_configuration(uid, bit).is_empty(), EFactor);
+                bit = bit * 2;
+            };
             i = i + 1;
         };
         let customer_id = uid.to_inner();
@@ -92,6 +129,15 @@ module sui_edge::security_policy {
             generation: a.generation, proposer: a.proposer, intent, expires_ms });
         transfer::share_object(a);
     }
+    /// Domain: introduction-package identity plus the globally unique customer
+    /// object ID. Object IDs derive from chain transaction digests; neither a UI
+    /// label nor a caller-supplied network string defines the signing domain.
+    public fun action_intent(customer: ID, arguments_bcs: vector<u8>): vector<u8> {
+        hash::blake2b256(&bcs::to_bytes(&vector[
+            bcs::to_bytes(&std::type_name::with_original_ids<Action>()),
+            bcs::to_bytes(&customer), arguments_bcs,
+        ]))
+    }
     public fun intent(a: &Action): vector<u8> { a.intent }
     public fun customer_id(a: &Action): ID { a.customer_id }
     public fun proposer(a: &Action): address { a.proposer }
@@ -108,18 +154,31 @@ module sui_edge::security_policy {
     /// action, performs one operation, then clears this internal stack-scoped
     /// grant before returning to the PTB. No public begin/end entry points.
     public(package) fun begin(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, clock: &Clock, ctx: &TxContext) {
+        begin_scoped(uid, a, arguments, 7, false, clock, ctx);
+    }
+    /// Class 7 is reserved for changes that require the union of current policy.
+    /// Pause skips only delay; it cannot alter schedule, recipients or targets.
+    public(package) fun begin_scoped(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
+        begin_scoped_bytes(uid, a, bcs::to_bytes(&arguments), class, pause, clock, ctx);
+    }
+    public(package) fun begin_scoped_bytes(uid: &mut UID, a: Action, arguments_bcs: vector<u8>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
+        assert!(class <= ACTIONS && (!pause || class == 1), EPolicy);
         let Action { id, customer_id, generation, proposer, intent, expires_ms, attested } = a;
         assert!(customer_id == uid.to_inner() && proposer == ctx.sender(), EPolicy);
         assert!(clock.timestamp_ms() < expires_ms, EPolicy);
-        assert!(intent == hash::blake2b256(&bcs::to_bytes(&arguments)), EPolicy);
+        assert!(intent == action_intent(uid.to_inner(), arguments_bcs), EPolicy);
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         assert!(p.schema == 1 && p.generation == generation, EPolicy);
         let mut required = 0;
         let mut i = 0;
-        while (i < ACTIONS) { required = required | p.requirements[i]; i = i + 1; };
+        while (i < ACTIONS) {
+            if (class == ACTIONS || class == i) required = required | p.requirements[i];
+            i = i + 1;
+        };
+        if (pause) required = required & 7;
         assert!((attested & required) == required, EFactor);
         p.transaction = *ctx.digest();
-        p.attested = attested;
+        p.attested = if (pause) attested | 8 else attested;
         id.delete();
     }
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }

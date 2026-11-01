@@ -31,8 +31,8 @@ export async function fetchOrganizationSecurity(client: SuiGrpcClient, customerI
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Customer"))) throw Error("Unexpected organization type");
   const { customer_CustomerBcs } = await import("./fleet-protocol");
   const customer = customer_CustomerBcs.parse(object.content);
-  if (customer.version === "1") return undefined;
-  if (customer.version !== "196") throw Error("Unsupported organization authority version");
+  if (customer.version === "1" || customer.version === "196") return undefined;
+  if (customer.version !== "197") throw Error("Unsupported organization authority version");
   const field = await client.getDynamicField({ parentId: customerId, name: {
     type: moveType("security_policy::PolicyKey"), bcs: security_policy_PolicyKeyBcs.serialize({ dummy_field: false }).toBytes(),
   } });
