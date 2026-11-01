@@ -66,7 +66,7 @@ def transaction(**spec):
     return tc.decode(built.stdout)
 
 
-def tools(network='sui 1.82.1-987123842623', build='sui 1.81.1-e04cf9aa915c'):
+def tools(network=tc.NETWORK['version'], build='sui 1.81.1-e04cf9aa915c'):
     versions = {'/b/sui': build, '/n/sui': network}
     run = Mock(side_effect=lambda cmd, **_: SimpleNamespace(returncode=0, stdout=versions[cmd[0]] + '\n'))
     return run
@@ -80,7 +80,7 @@ class ToolIdentity(unittest.TestCase):
     def test_exact_pins_accepted_with_provenance(self):
         found = self.check(tools())
         self.assertEqual(found['build']['max_protocol'], 138)
-        self.assertEqual(found['network']['max_protocol'], 139)
+        self.assertEqual(found['network']['max_protocol'], 140)
         self.assertEqual(found['network']['sha256'], tc.NETWORK['binary_sha256'])
 
     def test_path_substitution_is_refused(self):
@@ -93,6 +93,11 @@ class ToolIdentity(unittest.TestCase):
         with self.assertRaisesRegex(tc.Incompatible, 'checksum'):
             self.check(tools(), digest='0' * 64)
 
+    def test_unsigned_failure_preserves_stdout_diagnostic(self):
+        client = Mock(return_value=SimpleNamespace(returncode=1, stdout="incompatible existing layout", stderr="compiler notes"))
+        with self.assertRaisesRegex(tc.NotSubmitted, "incompatible existing layout"):
+            tc._serialized(client, ["test-upgrade", "contracts"], 1000)
+
 
 class ProtocolPreflight(unittest.TestCase):
     TOOLS = {'build': dict(tc.BUILD), 'network': dict(tc.NETWORK)}
@@ -103,9 +108,16 @@ class ProtocolPreflight(unittest.TestCase):
         self.assertEqual(result['protocol_version'], 139)
         self.assertTrue(result['build_cli_offline'])
 
-    def test_newer_protocol_refused_before_writes(self):
+    def test_protocol140_requires_compatible_cli(self):
+        facts = {'chain_identifier': '4c78adac', 'protocol_version': 140}
+        obsolete = {'build': dict(tc.BUILD), 'network': dict(tc.NETWORK, max_protocol=139)}
         with self.assertRaisesRegex(tc.Incompatible, '140 exceeds'):
-            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 140}, '4c78adac')
+            tc.preflight(obsolete, facts, '4c78adac')
+        self.assertEqual(tc.preflight(self.TOOLS, facts, '4c78adac')['protocol_version'], 140)
+
+    def test_newer_protocol_refused_before_writes(self):
+        with self.assertRaisesRegex(tc.Incompatible, '141 exceeds'):
+            tc.preflight(self.TOOLS, {'chain_identifier': '4c78adac', 'protocol_version': 141}, '4c78adac')
 
     def test_pinned_build_cli_alone_would_be_refused(self):
         # The SF-050 failure: protocol 139 against a 138 transaction CLI.

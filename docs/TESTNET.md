@@ -49,11 +49,28 @@ Live runs use two pinned Sui CLIs with separate jobs ([`scripts/sui_toolchain.py
 | Role | Pin | Supports protocol | Used for |
 |---|---|---|---|
 | Release compiler | `sui` on PATH, Dockerfile `SUI_VERSION` = `testnet-v1.81.1` (`1.81.1-e04cf9aa915c`) | up to 138 | offline `sui move build`, Move tests, the SF-050 lint/security baseline and all package bytecode |
-| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.82.1` (`1.82.1-987123842623`); archive sha256 `112bf204…2858c`, binary sha256 `de1d7eff…a0d6b` | up to 139 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
+| Transaction CLI | `/opt/sui-network/sui`, Dockerfile `SUI_NETWORK_VERSION` = `testnet-v1.83.0` (`1.83.0-16d2dc1e05ed`); archive sha256 `e5116805…1d7d8`, binary sha256 `29e1beb9…48fa` | up to 140 | every `sui client` call: reads, PTBs, the faucet, and building, signing and submitting publish/upgrade transactions |
 
 The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/src/lib.rs` at each release tag. Neither version string alone proves compatibility; the runs below do.
 
 **Why the split.** Since testnet moved to protocol 139, `sui client test-upgrade` from 1.81.1 fails with `protocol version 139 is newer than the maximum version 138 supported by this CLI`. Its client-side upgrade compatibility check needs the network's protocol config. Publish and plain PTBs don't, so cached runs kept passing while every fresh fixture with differing contracts published its base package and then failed at the upgrade. A free `--dry-run` reproduces this on testnet: 1.81.1 fails, and 1.82.1 passes the same upgrade.
+
+**SF-196 protocol-140 repair (2026-10-31).** The former 1.82.1 pin supports only
+139 and correctly refused current testnet before signing. The replacement is
+[testnet-v1.83.0](https://github.com/MystenLabs/sui/releases/tag/testnet-v1.83.0).
+Its [protocol source](https://github.com/MystenLabs/sui/blob/testnet-v1.83.0/crates/sui-protocol-config/src/lib.rs)
+sets `MAX_PROTOCOL_VERSION = 140`. The downloaded Linux x86_64 archive matched
+GitHub's published SHA-256
+`e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8`;
+the extracted `sui` is
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+Only the transaction CLI changes: the release compiler, locked framework,
+verify-before-sign, wallet checks, resource locks and non-replenishing allowance
+remain enforced. Regression tests explicitly reject protocol140 with a 139 CLI,
+accept it with this verified pin and reject 141. Local/testnet receipts below
+record actual effects separately from this identity check. Package build failures
+now preserve bounded stdout diagnostics as well as stderr; the CLI can report
+compatibility errors on stdout. A diagnostic change cannot authorize signing.
 
 **What each run checks:**
 - **Pinned identities, before anything else.** The release compiler's exact version, and the transaction CLI's exact version and binary SHA-256. A different `sui` on PATH, or an unpinned transaction binary, stops the run.
@@ -76,7 +93,7 @@ The protocol limits are `MAX_PROTOCOL_VERSION` in `crates/sui-protocol-config/sr
 
 Digests and effects are in [the SF-056 receipt](validation/sf056-testnet.json). These runs used the dedicated agent wallet, not the CI wallet. The automatic CI run on the PR head records its own evidence.
 
-**Updating the transaction CLI.** When testnet moves past protocol 139, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
+**Updating the transaction CLI.** When testnet moves past protocol 140, update `SUI_NETWORK_*` in the Dockerfile and `NETWORK` in `sui_toolchain.py` together, with the release's protocol limit and checksums. The tests in `scripts/tests/test_testnet_toolchain.py` check that the Dockerfile and the constants agree, and inside the dev image they check the installed binary's identity. Changing the release compiler is a separate, reviewed toolchain upgrade (the SF-050 baseline), not a fix for network protocol drift.
 
 ## SF-083 fleet budget run
 
