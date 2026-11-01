@@ -756,6 +756,23 @@ Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 
+## Conventional static origins (SF-176)
+
+The selected host and gated release preparation for suifleet.io,
+app.suifleet.io and docs.suifleet.io are in [STATIC_HOSTING.md](STATIC_HOSTING.md).
+No live DNS, TLS, preview, production publication or rollback rehearsal is claimed.
+The three-origin source build is integrated; actual recorded-console acceptance,
+provider provisioning and hosted preview checks remain unrun. Walrus is separate.
+
+### Conventional three-origin static release (SF-176)
+
+The [static hosting runbook](STATIC_HOSTING.md) defines the Cloudflare Pages
+provider/DNS/TLS plan. `static-site.yml` builds marketing, docs and the testnet
+console export at one revision; `collection.json` binds their sealed file lists.
+Production requires main-only dispatch, the exact collection digest, Tyler's
+issue authorization and protected environment approval. Preview credentials stay
+in a separate account. Source builds and offline restore fixtures do not establish
+live provider, DNS, TLS, recorded-wallet or hosted rollback acceptance.
 ## Company treasury
 
 Follow [TREASURY.md](TREASURY.md) for the proposed 2-of-3 hardware-key custody ceremony, recovery/rotation, manifest payment guard and bounded disposable testnet fixture. Production treasury keys, mainnet SuiNS target/default changes and the hardware signing ceremony are user-only final acceptance, not agent operations.
