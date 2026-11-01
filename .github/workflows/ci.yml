@@ -44,6 +44,12 @@ jobs:
           diff -r "$RUNNER_TEMP/site-a" "$RUNNER_TEMP/site-b"
           python3 site/check.py "$RUNNER_TEMP/site-a"
 
+      - name: Install coordinator sandbox prerequisite
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          bwrap --unshare-all --die-with-parent --ro-bind / / -- /usr/bin/true
+
       - name: Offline PR coordinator tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/pr-coordinator/tests -v
 
