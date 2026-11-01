@@ -657,7 +657,11 @@ devices defer on it.
 Use **Deployments → Add recurring window** (creator or customer-fleet admin). The
 editor shows the next three admission windows in the site zone and in UTC, after
 not-before, expiry and the absolute window; per-device notice may delay each one.
-The preview uses the browser's zone data and is advisory. Setting or removing the
+The preview uses the browser's zone data and is advisory. The editor accepts only
+zone names in the daemon's bundled tzdb (`dapp/src/lib/tzdb-names.ts`, generated and
+checked by the daemon's `dapp_tz_names_match_bundled_database` test) and saves the
+daemon's exact spelling, so `europe/berlin` is stored as `Europe/Berlin`; tzdb
+aliases such as `Asia/Calcutta` are kept as typed. Setting or removing the
 window (`set_recurring_window`/`clear_recurring_window`, or the `customer::`
 variants for fleet records) bumps the Control revision, so every device restarts
 its advance notice and re-reads admission. Cancelled records reject both calls.
