@@ -1,12 +1,12 @@
 # Recurring maintenance windows: SF-174 decision request
 
-Status: **awaiting product decision. Not approved and not implemented.**
-[SF-174/#340](https://github.com/tyler-suifleet/suifleet/issues/340) requires a
-recorded product decision on scope, the per-device timezone source and the
-on-chain representation before implementation starts. This document lays out the
-options and recommends a choice for each. It does not commit to the feature.
-Record the decision in #340, then update the status line here. If the feature is
-declined, add the reason here and close #340.
+Status: **approved 2026-10-27 and implemented (SF-174).** The user approved the
+recommended option for all three decisions in
+[#340](https://github.com/tyler-suifleet/suifleet/issues/340): weekly slots (scope
+A), one IANA zone per deployment with `device-local` reserved (timezone A), and
+the additive `RecurringWindowKey` field (on-chain representation). Operator usage
+is in [OPERATIONS.md](OPERATIONS.md#recurring-weekly-maintenance-windows-sf-174).
+The decision request below is kept as the design record.
 
 Greengrass has no native recurring maintenance window, so this is a product
 opportunity, not a parity gap ([parity audit](GREENGRASS_PARITY_AUDIT.md)).
@@ -82,7 +82,10 @@ Move validates only the structure: lengths, ranges and ASCII. It cannot validate
 zone names; the daemon fails closed on an unknown zone ("unknown timezone"). Any
 recurring-window change must also bump the `Control` revision, so the existing
 notice restarts and devices re-read admission. Alternatively, the recurring
-revision feeds the notice key. The implementation must pick one and test it.
+revision feeds the notice key. **Implemented:** both setters bump the `Control`
+revision (creating an explicit immediate `Control` if none exists). The daemon
+also compares the stored recurring rule, so a stale journal cannot keep an old
+notice. The Move tests and the simulator's edit case cover this.
 
 Compatibility: existing records without the field keep current behaviour. Old
 daemons ignore the unknown field and would admit outside the recurring window.

@@ -593,8 +593,9 @@ The deployment creator can pause/resume admission, permanently cancel admission,
 and set UTC Unix-millisecond not-before, expiry, a single absolute maintenance
 window `[start,end)`, and an advance-notice duration (at most seven days).
 Zero disables the respective deadline/window/notice. These are admission times,
-not promises that an update finishes before the window closes. A closed window
-waits for an operator to edit it; it does not recur automatically. Expiry and
+not promises that an update finishes before the window closes. A closed absolute
+window waits for an operator to edit it; for repeating site rules, add a
+[recurring weekly window](#recurring-weekly-maintenance-windows-sf-174). Expiry and
 cancellation observed by a device are terminal: create a new deployment to retry.
 Removing a desired component or deleting a record remains distinct from cancellation.
 
@@ -642,6 +643,45 @@ cannot enforce fields introduced later. Old package entry points remain callable
 status writes do not change controls, and deletion still prevents later object
 reads. Do not interpret deleting a record through an older package as acknowledged
 cancellation or retain a deleted record as an apply authorization.
+
+### Recurring weekly maintenance windows (SF-174)
+
+A deployment may also carry one recurring window: one IANA timezone (for example
+`Europe/Berlin`) and 1–8 weekly slots. Each slot selects weekdays, a local start
+time and a duration of 1 minute to 24 hours; a slot may cross midnight. Overlapping
+or touching slots merge. The rule ANDs with every control above: pause, cancel,
+not-before, expiry, the absolute window and advance notice still apply. Use one
+deployment per timezone; the reserved `device-local` zone is not supported yet and
+devices defer on it.
+
+Use **Deployments → Add recurring window** (creator or customer-fleet admin). The
+editor shows the next three admission windows in the site zone and in UTC, after
+not-before, expiry and the absolute window; per-device notice may delay each one.
+The preview uses the browser's zone data and is advisory. Setting or removing the
+window (`set_recurring_window`/`clear_recurring_window`, or the `customer::`
+variants for fleet records) bumps the Control revision, so every device restarts
+its advance notice and re-reads admission. Cancelled records reject both calls.
+
+Devices evaluate the rule locally with the tz database built into the daemon
+(`jiff-tzdb`, pinned exactly in `Cargo.toml`), never the host zoneinfo or `TZ`;
+UTC must still be synchronized. `suifleet --check-config` prints the tzdb release.
+A start in a DST gap opens at the first valid instant after it; a repeated local
+time opens once, at its earlier occurrence. While waiting, `state.json` records
+`outside recurring maintenance window` with `next_window_ms` (UTC) and `tzdb`, and
+the cadence timer wakes for that opening. An unknown or non-canonical zone name
+(names are case-sensitive) defers as `unknown timezone`; nothing is applied. The
+chain checks only structure (ASCII name of at most 64 bytes, slot ranges).
+
+Staged-rollout grants (`advance_rollout`) do not evaluate windows: a device can
+hold a grant while it waits for its window. Size `rate_window_ms` and bake
+expectations to the window. The same admission-boundary rule applies: a window
+closing after the final read never interrupts an admitted plan.
+
+`RecurringWindowKey`, `RecurringWindow` and `WeeklySlot` originate in the upgrade
+that introduced them (optional `recurring_window` type group). Daemons before
+**0.2.3** ignore the field and would admit outside the window, so manifests
+containing the group require edge >= 0.2.3. Upgrade the fleet before setting
+recurring windows. tzdb updates ship only with daemon releases.
 
 Validation commands (disposable network only for the final two):
 
