@@ -128,7 +128,7 @@ and human assignment. Reopened Done issues and closed issues with active or othe
 nonterminal Project statuses still fetch dependencies. Refresh preserves local
 claims; it does not release an inconsistent owner or fabricate completion.
 Missing/ambiguous data fails closed. Active tickets still resolve internal and
-external blockers; terminal snapshots omit obsolete incoming dependency edges.
+external blockers; terminal snapshots omit the terminal ticket’s own obsolete blocked-by edges.
 Complete issue/Project discovery, pagination, credential/account namespaces,
 cache expiry and quota/backoff rules remain in effect.
 
