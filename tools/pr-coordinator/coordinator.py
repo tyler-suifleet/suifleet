@@ -177,10 +177,91 @@ def checks_blocker(pr):
                 or testnet.get('description') != 'base:' + pr['baseRefOid']):
             return 'exact-head testnet status for current base is missing or unsuccessful'
     checks = pr['statusCheckRollup']
-    if not checks or not all((check.get('status') == 'COMPLETED' and check.get('conclusion') == 'SUCCESS')
+    if not checks or not all((check.get('status') == 'COMPLETED' and
+                              (check.get('conclusion') == 'SUCCESS' or verified_optional_skip(pr, check)))
                              if check.get('__typename') == 'CheckRun' else check.get('state') == 'SUCCESS' for check in checks):
         return 'checks have not all passed'
     return None
+
+
+# Trusted applicability policy, reviewed with this runtime. Pin the entire workflow
+# blob, not names or candidate-supplied labels/conditions. Workflow changes need a
+# new policy review; until then their skips fail closed.
+OPTIONAL_DEPLOYMENT_WORKFLOW = '.github/workflows/static-site.yml'
+OPTIONAL_DEPLOYMENT_BLOB = 'a5a5c9aea5d6a6addb7e13187d27ad705c5e395b'
+OPTIONAL_DEPLOYMENT_JOBS = frozenset(('preview', 'production-preflight', 'production'))
+
+
+def verified_optional_skip(pr, check):
+    proof = check.get('_optional_skip') or {}
+    return (check.get('conclusion') == 'SKIPPED' and check.get('name') in OPTIONAL_DEPLOYMENT_JOBS
+            and proof.get('head') == pr.get('headRefOid') and bool(pr.get('headRefOid'))
+            and proof.get('base') == pr.get('baseRefOid') and bool(pr.get('baseRefOid'))
+            and proof.get('url') == check.get('detailsUrl')
+            and proof.get('workflow_blob') == OPTIONAL_DEPLOYMENT_BLOB
+            and all(type(proof.get(key)) is int and proof[key] > 0 for key in ('run', 'job', 'attempt')))
+
+
+def annotate_optional_skips(pr, repository, read, immutable_read):
+    """Prove only the pinned deployment jobs are inapplicable to a PR run.
+
+    Do not rewrite conclusions or accept skips on push/manual/live workflows.
+    Mutable run/job/check evidence is fetched anew for every approval snapshot.
+    """
+    for check in pr.get('statusCheckRollup', []):
+        check.pop('_optional_skip', None)
+        if (check.get('__typename') != 'CheckRun' or check.get('status') != 'COMPLETED'
+                or check.get('conclusion') != 'SKIPPED' or check.get('name') not in OPTIONAL_DEPLOYMENT_JOBS
+                or pr.get('isCrossRepository') or pr.get('baseRefName') != 'main' or not pr.get('baseIncluded')):
+            continue
+        match = re.fullmatch(r'https://github\.com/' + re.escape(repository)
+                             + r'/actions/runs/([0-9]+)/job/([0-9]+)', check.get('detailsUrl') or '')
+        if not match:
+            continue
+        run_id, job_id = map(int, match.groups())
+        prefix = f'repos/{repository}'
+        try:
+            tree = immutable_read(f"{prefix}/git/trees/{pr['headRefOid']}?recursive=1")
+            blobs = [r for r in tree['tree'] if r['path'] == OPTIONAL_DEPLOYMENT_WORKFLOW]
+            if (tree.get('truncated') or len(blobs) != 1 or blobs[0].get('type') != 'blob'
+                    or blobs[0].get('sha') != OPTIONAL_DEPLOYMENT_BLOB):
+                continue
+            path = f'{prefix}/actions/runs/{run_id}'
+            run = read(path)
+            attempt = run['run_attempt']
+            if (run['id'] != run_id or run['head_sha'] != pr['headRefOid']
+                    or run['head_repository']['full_name'] != repository
+                    or run['path'] != OPTIONAL_DEPLOYMENT_WORKFLOW or run['event'] != 'pull_request'
+                    or run['status'] != 'completed' or run['conclusion'] != 'success'
+                    or type(attempt) is not int or attempt < 1
+                    or not any(p['number'] == pr['number'] and p['head']['sha'] == pr['headRefOid']
+                               and p['base']['sha'] == pr['baseRefOid'] and p['base']['ref'] == 'main'
+                               for p in run['pull_requests'])):
+                continue
+            jobs = read(f'{path}/attempts/{attempt}/jobs?per_page=100')
+            matches = [j for j in jobs['jobs'] if j['id'] == job_id]
+            if (jobs['total_count'] != len(jobs['jobs']) or jobs['total_count'] > 100 or len(matches) != 1
+                    or not any(j['name'] == 'build' and j['status'] == 'completed' and j['conclusion'] == 'success'
+                               for j in jobs['jobs'])):
+                continue
+            job = matches[0]
+            verified = read(f'{prefix}/check-runs/{job_id}')
+            if (job['run_id'] != run_id or job['head_sha'] != pr['headRefOid']
+                    or job['name'] != check['name'] or job['status'] != 'completed' or job['conclusion'] != 'skipped'
+                    or verified['id'] != job_id or verified['head_sha'] != pr['headRefOid']
+                    or verified['app']['slug'] != 'github-actions' or verified['check_suite']['id'] != run['check_suite_id']
+                    or verified['name'] != check['name'] or verified['status'] != 'completed'
+                    or verified['conclusion'] != 'skipped' or verified['details_url'] != check['detailsUrl']):
+                continue
+            fresh = read(path)
+            if fresh != run:
+                continue
+            check['_optional_skip'] = dict(head=pr['headRefOid'], base=pr['baseRefOid'], url=check['detailsUrl'],
+                                           workflow_blob=OPTIONAL_DEPLOYMENT_BLOB, run=run_id, job=job_id, attempt=attempt)
+        except Exception:
+            # Unknown/unavailable evidence stays blocking; do not leak API errors.
+            continue
+    return pr
 
 
 TESTNET_CONTEXT = 'testnet/package-upgrade'
@@ -1078,6 +1159,9 @@ class Coordinator:
                                      lambda path: preparation_job_logs(lambda args: self.gh(project, args), path))
         annotate_job_timeouts(pr, project['repository'],
                               lambda path: json.loads(self.gh(project, ['api', path])))
+        annotate_optional_skips(pr, project['repository'],
+                               lambda path: json.loads(self.gh(project, ['api', path])),
+                               lambda path: self.immutable_read(project, path))
         batches = getattr(self, 'batches', None)
         if batches and batches.enabled(project):
             row = self.store.db.execute('SELECT id,manifest_digest,members FROM integration_batches WHERE project=? AND pr=?',
@@ -1779,7 +1863,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
         pushed = False
         for pr in sorted(prs,key=priority):
             try:
-                if batching and (pr.get('_integration_batch') or pr['number'] in held):
+                if batching and pr.get('_integration_batch'):
                     continue
                 owner = self.owner(project,pr,owners)
                 if execute and owner and owner['status'] == 'review' and owner.get('publish_pending'):
@@ -1836,6 +1920,13 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                         self.reconcile(project,merged,current,review)
                     # Reconciliation below retries delayed GitHub state without a second merge.
                     break
+                if batching and pr['number'] in held:
+                    # The batch tick may have published using a newer snapshot.
+                    # Keep every held member reserved even if this older PR
+                    # snapshot has a failure. Pre-publication revalidation must
+                    # invalidate the batch before normal repair on a later tick;
+                    # publication/reconciliation uncertainty never permits repair.
+                    continue
                 if (batching and (pr.get('_batch_failure') or pr.get('_batch_conflict'))) or (not batching and not pr['baseIncluded']) or (review and review['head'] == pr['headRefOid'] and review['result']['verdict'] == 'changes_requested'):
                     self.launch(project,pr,owner,'fix')
                 elif repair:

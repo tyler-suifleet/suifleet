@@ -120,6 +120,11 @@ class BatchController:
         return outstanding
 
     def source(self, project, pr, owner):
+        from coordinator import failed_checks
+        # Concrete source failures need their existing owner before collection.
+        # Pending checks may still be validated on the combined candidate.
+        if failed_checks(pr):
+            return None
         if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
                 or owner.get('expired') or pr.get('_batch_failure') or pr.get('_batch_conflict')
                 or self.repair_context(project, pr) or pr.get('state') != 'OPEN'
