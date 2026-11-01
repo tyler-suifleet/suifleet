@@ -2,6 +2,7 @@
 import { StreamRetentionPanel } from "@/components/StreamRetention";
 
 import { PageHeader, Section, InfoCard } from "@/components/ui";
+import { OrganizationSecurity } from "@/components/OrganizationSecurity";
 import { FleetSettingsPanel } from "@/components/FleetSettings";
 
 export default function SettingsPage() {
@@ -11,6 +12,7 @@ export default function SettingsPage() {
       <p>Your settings are recorded securely on the Sui network, alongside your fleet budget. Devices read them at their next check. Your account approval app shows the network fee for saving.</p>
       <p><strong>Saving settings does not buy a subscription or add money to your budget.</strong> Fund device activity and storage separately on the Network budget page. Estimates below are planning tools, not a checkout.</p>
     </InfoCard>
+    <Section title="Organization security"><OrganizationSecurity /></Section>
     <StreamRetentionPanel />
     <Section title="Device reporting and storage"><FleetSettingsPanel /></Section>
   </div>;
