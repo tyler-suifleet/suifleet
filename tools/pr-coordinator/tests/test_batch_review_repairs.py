@@ -45,6 +45,33 @@ class BatchReviewRepairs(unittest.TestCase):
         self.assertEqual(sources[0]['_batch_review_failure']['review_id'],888)
         self.assertNotIn('_ci_repair',sources[0])
 
+    def test_real_batch_rejection_routes_owner_fix_in_same_project_tick(self):
+        for singleton in (True, False):
+            with self.subTest(singleton=singleton):
+                f,_,_=self.fixture(singleton=singleton)
+                with tempfile.TemporaryDirectory() as temp:
+                    engine=c.Coordinator({'workers':{'Codex':['true'],'Claude':['true']},'projects':[]},Path(temp))
+                    # Keep the real batch controller and its Git/remote fixture;
+                    # exercise the actual caller that consumes its held set.
+                    engine.batches=f.controller
+                    engine.owners=Mock(return_value=f.owners)
+                    engine.collect=Mock();engine.discover_merged=Mock()
+                    engine.prs=Mock(side_effect=lambda *args: [f.pr(f.project,n) for n in f.source_prs])
+                    engine.ensure_closing_reference=Mock();engine.launch=Mock()
+                    engine.tick_project(f.project,True)
+                    self.assertEqual(f.row()['status'],'failed')
+                    fixes=[call for call in engine.launch.call_args_list if call.args[3]=='fix']
+                    if singleton:
+                        self.assertEqual(len(fixes),1)
+                        project,source,owner,kind=fixes[0].args
+                        self.assertEqual(project,f.project)
+                        self.assertEqual(owner,f.owners[0])
+                        self.assertEqual(source['headRefOid'],f.source_prs[1]['headRefOid'])
+                        self.assertEqual(source['_batch_review_failure']['review_id'],888)
+                        self.assertNotIn('_ci_repair',source)
+                    else:
+                        self.assertEqual(fixes,[])
+
     def test_stale_unpublished_incomplete_or_already_publishing_review_never_routes(self):
         for change in [dict(head='f'*40),dict(feedback='stale'),dict(publication_done=0),
                        dict(publication_pending=True),dict(status='running'),dict(family='Codex'),dict(family='Other'),

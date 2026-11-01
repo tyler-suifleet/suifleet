@@ -725,6 +725,11 @@ class BatchController:
                 # Route the finding in this pass, not after another full scan.
                 for source in prs:
                     source.update(self.repair_context(project, source))
+                # held was collected before rejection. Release the failed
+                # group's stale candidates so the caller can launch repair now,
+                # while preserving any live batch reservations.
+                held.difference_update(member['pr'] for member in json.loads(batch['members']))
+                held.update(self.reserved_members(project))
             if batch['status'] in TERMINAL:
                 self.cleanup_terminal(project, batch)
         return held
