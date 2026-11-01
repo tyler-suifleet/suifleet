@@ -822,7 +822,11 @@ class CheckFreshnessTests(unittest.TestCase):
         engine.owners=lambda project:[owner]
         engine.collect=lambda *args:None
         engine.discover_merged=lambda *args:None
-        engine.prs=lambda project:[pr]
+        def snapshots(project, on_snapshot=None, owners=None):
+            if on_snapshot:
+                on_snapshot(pr)
+            return [pr]
+        engine.prs=snapshots
         engine.ensure_closing_reference=lambda *args:None
 
     def test_completed_checks_dispatch_fresh_review_once_across_restart(self):
