@@ -108,6 +108,8 @@ module sui_edge::customer {
     public fun set_credential(customer: &mut Customer, wallet: address, active: bool, administrator: bool, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         assert!(wallet != @0x0, EAccess);
+        let revokes_administrator = customer.credentials.contains(&wallet)
+            && *customer.credentials.get(&wallet) && (!active || !administrator);
         if (customer.credentials.contains(&wallet)) {
             let (_, was_admin) = customer.credentials.remove(&wallet);
             if (was_admin) customer.administrators = customer.administrators - 1;
@@ -118,7 +120,10 @@ module sui_edge::customer {
             transfer::transfer(Membership { id: object::new(ctx), customer_id: object::id(customer) }, wallet);
         };
         assert!(customer.administrators > 0, ELastAdmin);
-        if (customer.version == 197) security_policy::invalidate(&mut customer.id);
+        if (customer.version == 197) {
+            security_policy::invalidate(&mut customer.id);
+            if (revokes_administrator) enrollment::invalidate_authority(&mut customer.id);
+        };
         event::emit(CredentialChanged { customer_id: object::id(customer), wallet, active, administrator });
     }
 
@@ -198,6 +203,7 @@ module sui_edge::customer {
         customer.administrators = 1;
         transfer::transfer(Membership { id: object::new(ctx), customer_id }, recipient);
         security_policy::invalidate(&mut customer.id);
+        enrollment::invalidate_authority(&mut customer.id);
         event::emit(HandoverCompleted { customer_id, source: ctx.sender(), recipient });
         id.delete();
     }
@@ -333,7 +339,7 @@ module sui_edge::customer {
     public fun add_claims(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy); assert_action(customer, 2, ctx);
         enrollment::add_claims_as(policy, claims, object::id(fleet).to_address());
-        if (customer.version == 197) enrollment::bind_security_generation(policy, security_policy::generation(&security(customer)));
+        if (customer.version == 197) enrollment::bind_security_generation(policy, enrollment::authority_generation(&customer.id));
     }
     public fun revoke_claim(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy); assert_action(customer, 2, ctx);
@@ -347,8 +353,8 @@ module sui_edge::customer {
         registry: &mut DeviceRegistry, name: String, arch: String, clock: &Clock, ctx: &mut TxContext) {
         assert_enrollment(customer, fleet, policy);
         // Claims delegated under an earlier policy cannot enroll after a
-        // security/credential change without renewed current authorization.
-        if (customer.version == 197) assert!(enrollment::security_generation(policy) == security_policy::generation(&security(customer)), EBinding);
+        // enrollment-authority revocation without renewed current authorization.
+        if (customer.version == 197) assert!(enrollment::security_generation(policy) == enrollment::authority_generation(&customer.id), EBinding);
         let cap = enrollment::enroll_managed(policy, registry, name, arch, clock, ctx);
         enroll_checked(customer, fleet, budget, registry, cap, 0, 0, clock, ctx);
     }
@@ -835,6 +841,7 @@ module sui_edge::customer {
             // version 1. Its older wrappers must never authorize this state.
             security_policy::check_all(&customer.id, ctx);
             security_policy::invalidate(&mut customer.id);
+            enrollment::invalidate_authority(&mut customer.id);
         } else {
             assert!(customer.version == 1, EBinding);
             security_policy::initialize(&mut customer.id);
@@ -870,7 +877,11 @@ module sui_edge::customer {
                 i = i + 1;
             };
         };
+        let previous = security_policy::requirements(&security(customer));
         security_policy::update(&mut customer.id, requirements, ctx);
+        // Re-saving all-off settings changes action generation but preserves
+        // provisioned claims. Any change involving protection revokes them.
+        if (previous != requirements) enrollment::invalidate_authority(&mut customer.id);
     }
     public fun configure_charging_secured<W: drop>(customer: &mut Customer, registry: &DeviceRegistry,
         source: W, action: Action, clock: &Clock, ctx: &mut TxContext) {
@@ -905,6 +916,7 @@ module sui_edge::customer {
     public(package) fun configure_security_factor(customer: &mut Customer, factor: u8, binding: vector<u8>, ctx: &mut TxContext) {
         assert_security_administrator(customer, ctx);
         security_policy::configure_factor(&mut customer.id, factor, binding, ctx);
+        enrollment::invalidate_authority(&mut customer.id);
     }
     public fun security_factor_configuration(customer: &Customer, factor: u8): vector<u8> {
         assert!(customer.version == 197, EBinding);
@@ -1041,7 +1053,7 @@ module sui_edge::customer {
         security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
         add_claims(customer, fleet, policy, claims, ctx);
         security_policy::finish(&mut customer.id);
-        enrollment::bind_security_generation(policy, security_policy::generation(&security(customer)));
+        enrollment::bind_security_generation(policy, enrollment::authority_generation(&customer.id));
     }
 
     public fun revoke_claim_secured(customer: &mut Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, action: Action, security_clock: &Clock, ctx: &mut TxContext) {

@@ -54,6 +54,16 @@ module sui_edge::enrollment {
 
     public struct SecurityRevisionKey has copy, drop, store {}
     public struct SecurityGenerationKey has copy, drop, store {}
+    // Existing key, distinct parent UIDs: Customer stores the authority epoch;
+    // EnrollmentPolicy stores the epoch at which its claims were authorized.
+    public(package) fun authority_generation(customer: &UID): u64 {
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) else 0
+    }
+    public(package) fun invalidate_authority(customer: &mut UID) {
+        let next = authority_generation(customer) + 1;
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow_mut<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) = next
+        else df::add(customer, SecurityGenerationKey {}, next);
+    }
     public(package) fun security_revision(policy: &EnrollmentPolicy): u64 {
         if (df::exists(&policy.id, SecurityRevisionKey {})) *df::borrow<SecurityRevisionKey, u64>(&policy.id, SecurityRevisionKey {}) else 0
     }

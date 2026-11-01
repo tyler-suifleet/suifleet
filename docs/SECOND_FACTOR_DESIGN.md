@@ -307,10 +307,22 @@ merged prerequisite. Their exact in-package hooks are:
   under protection until a reviewed exact-operation adapter exists; no public
   arbitrary-class/witness or raw-cap escape is provided. Device-scoped bounded
   reporting, gas and storage writes retain their existing authority.
-- Enrollment grants are tied to the policy generation under which current
-  administrators authorized their claims. Stale grants cannot enroll after a
-  policy/credential/source change; current-factor `add_claims` can reauthorize the
-  policy. Managed policies remain closed to old standalone enrollment routes.
+- Enrollment grants bind a separate enrollment-authority epoch, stored under
+  `enrollment::SecurityGenerationKey` on the Customer UID; the same existing key
+  on each EnrollmentPolicy UID holds its authorized epoch. Missing fields read
+  as zero, without changing layouts or introduction origins. Administrator removal
+  or demotion, changed policy requirements, factor-source configuration, handover
+  and migration from the intermediate v196 authority increment this epoch.
+  Adding credentials, re-saving an unchanged all-off policy and completing an
+  unrelated secured action do not revoke provisioned claims. Queued Actions still
+  use the broader policy generation and retain their existing invalidation rules.
+  After a genuine authority revocation, a current administrator can reauthorize
+  the policy's remaining claims using `add_claims` (an empty vector is sufficient),
+  or `add_claims_secured` with the currently required factors. Review/revoke leaked
+  claims before rebinding; rebinding authorizes all remaining claims on that policy.
+  Claims previously bound to an action generation by the intermediate framework
+  may need this explicit reauthorization during migration. Managed policies remain
+  closed to old standalone enrollment routes.
 
 Catalog adoption changes publisher custody to the customer object address, so
 old wallet-publisher entry points cannot publish. Current publication checks the
