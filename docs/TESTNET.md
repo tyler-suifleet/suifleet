@@ -526,3 +526,26 @@ repairs funding only: exact-head/current-base hosted CI, automatic testnet and
 fresh independent review remain required, pending coordinator collection.
 Production-provider/manual-wallet/physical/mainnet acceptance remains unrun in
 SF-031/#32 and SF-087/#159.
+
+**SF-196 PTB reservation repair (run 41276436449).** Lane 2 verified chain
+`4c78adac` and held 3,879,392,297 MIST after its one successful faucet request.
+The effects artifact records base publication
+`4YYNaZ81QZR8BqaNDwefaMVAC4D3DemzfeQXbkLdYBTv` (613,441,200 MIST) and
+head upgrade `2hx47R8364RT29wpSkmjXpjyQWC4NgSkXSaepHXJCvxi`
+(767,170,563 MIST), both successful. Six transactions plus device funding
+consumed 1,430,017,981 MIST of the unchanged 1.6-SUI allowance. The inbox
+setup was refused before signing because its 200M reservation exceeded the
+169,982,019-MIST remainder. This is allowance reservation pressure, not a
+wallet funding shortfall; another faucet request cannot repair it.
+
+CI now explicitly selects the existing `--transaction-gas-budget` option at
+60M for ordinary package-gate PTBs. The historical three-deployment batch
+measured 42,002,565 MIST net (run 40246935467); the offline projection uses
+50M, plus 10M inbox and 20M base-deployment costs, and retains a full unknown
+60M cleanup reservation. These are projections, not new live results or a
+guarantee of gross gas requirements. Exact-head automatic testnet must still
+validate the selected budget and all effects. Publication budgets, suite/run
+ceilings, full-reservation refusal, failed/unknown accounting, fixture reuse,
+quarantine reservations and faucet limits are unchanged. Preserve the saved
+fixture and re-verify it on chain; never republish identical bytecode or clear
+an uncertain reservation. This repair made no public-wallet writes.
