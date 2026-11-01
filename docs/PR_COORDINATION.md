@@ -1399,3 +1399,8 @@ batch #433, attached the independently reproduced enrollment finding to source
 transition; offline tests do not establish its future installed acceptance. Normal
 independent review, genuine hosted checks and merged-only activation remain
 required before claiming automatic routing is deployed.
+
+
+## Local-test infrastructure integration — user direction, 2026-11-01
+
+Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.

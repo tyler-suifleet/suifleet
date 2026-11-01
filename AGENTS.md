@@ -247,3 +247,8 @@ wait until testnet feature completeness and remain tracked as unrun. New docs
 URLs introduced by a PR receive structural premerge checks and online checks
 after publication. Do not spin model workers solely to wait for CI or repeat an
 unchanged source review. See the low-latency workflow in docs/PR_COORDINATION.md.
+
+
+## Local-test infrastructure integration — user direction, 2026-11-01
+
+Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.
