@@ -5,6 +5,10 @@ the physical Raspberry Pi image/test deployment workflow; SF-031 owns live OTA
 acceptance. A boot test in QEMU is not evidence of Pi firmware, power-loss or
 public-network acceptance.
 
+Operators installing a first device should follow
+[Install the device client](INSTALL_DEVICE_CLIENT.md#yocto-image-and-recipe);
+this page records the packaging details and evidence.
+
 ## Pinned build inputs
 
 The Scarthgap profile uses the user's selected `meta-lts-mixins` `scarthgap/rust`
