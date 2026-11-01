@@ -542,6 +542,64 @@ class BatchController:
             (project['id'],candidate['number'],candidate['headRefOid'],candidate['mergeCommit']['oid']))
         self.update(batch, status='done', error=None)
 
+    @staticmethod
+    def review_failure(batch):
+        try:
+            error = json.loads(batch.get('error') or '{}')
+            return error if error.get('kind') == 'candidate_review_changes' else None
+        except (ValueError, TypeError, AttributeError):
+            return None
+
+    def close_review_rejected_candidate(self, project, batch):
+        error = self.review_failure(batch)
+        if not error or error.get('candidate_retired'):
+            return
+        pr = self.c.pr(project, batch['pr'])
+        if (pr.get('state') == 'MERGED' or pr.get('headRefName') != batch['branch']
+                or pr.get('headRefOid') != batch['head']):
+            raise RuntimeError('rejected candidate identity/publication changed; retain evidence')
+        if pr['state'] == 'OPEN':
+            self.c.gh(project, ['api', f"repos/{project['repository']}/pulls/{batch['pr']}",
+                                '--method', 'PATCH', '-f', 'state=closed'])
+            observed = self.c.pr(project, batch['pr'])
+            if (observed.get('state') != 'CLOSED' or observed.get('headRefName') != batch['branch']
+                    or observed.get('headRefOid') != batch['head']):
+                raise RuntimeError('rejected candidate closure not confirmed; retain evidence')
+        elif pr['state'] != 'CLOSED':
+            raise RuntimeError('rejected candidate state unavailable')
+        error['candidate_retired'] = True
+        self.update(batch, error=canonical(error))
+
+    def reject_review(self, project, batch, candidate, review):
+        from coordinator import feedback
+        if (not review or review.get('head') != batch['head']
+                or candidate['headRefOid'] != batch['head'] or candidate['baseRefOid'] != batch['base']
+                or review.get('feedback') != feedback(candidate)
+                or review.get('publication_done') != 1 or review.get('publication_pending')
+                or review.get('status') != 'done' or review['result'].get('verdict') != 'changes_requested'
+                or review.get('family') not in ('Codex', 'Claude')
+                or review.get('family') == self.synthetic_owner(batch)['agent']
+                or batch.get('publish_intent')):
+            return False
+        # Persist the rejected group and actual review before remote closure.
+        # An ambiguous PATCH cannot lose the finding or authorize publication.
+        error = dict(kind='candidate_review_changes', review_id=review['id'],
+                     review_head=review['head'], review_feedback=review['feedback'],
+                     result_hash=hashlib.sha256(canonical(review['result']).encode()).hexdigest(),
+                     findings=review['result']['evidence'], candidate_retired=False)
+        self.update(batch, status='failed', error=canonical(error))
+        self.close_review_rejected_candidate(project, batch)
+        return True
+
+    def cleanup_terminal(self, project, batch):
+        try:
+            if self.review_failure(batch):
+                self.close_review_rejected_candidate(project, batch)
+            self.cleanup(project, batch)
+        except Exception as error:
+            # A retained cleanup/closure receipt must not stop unrelated work.
+            print(f"{project['id']} batch {batch['id']}: terminal cleanup deferred ({type(error).__name__})", flush=True)
+
     def repair_context(self, project, pr):
         result = {}
         for batch in reversed(self.rows(project)):
@@ -556,6 +614,15 @@ class BatchController:
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
                                                    candidate_base=batch['base'], checks=error['checks'])
                     break
+                if (error.get('kind') == 'candidate_review_changes'
+                        and error.get('review_head') == batch['head']
+                        and type(error.get('review_id')) is int and error['review_id'] > 0
+                        and isinstance(error.get('findings'), str) and error['findings']
+                        and re.fullmatch(r'[0-9a-f]{64}', error.get('result_hash', ''))):
+                    result['_batch_review_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
+                        candidate_base=batch['base'], source_head=members[0]['head'],
+                        review_id=error['review_id'], result_hash=error['result_hash'], findings=error['findings'])
+                    break
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
@@ -565,10 +632,12 @@ class BatchController:
     def select(self, project, candidates, base, maximum):
         failed = []
         for row in self.rows(project):
-            if row['status'] != 'failed' or row['base'] != base:
+            if row['status'] != 'failed':
                 continue
             try:
-                if json.loads(row['error'] or '{}').get('kind') != 'candidate_checks_failed':
+                kind = json.loads(row['error'] or '{}').get('kind')
+                if (kind not in ('candidate_checks_failed', 'candidate_review_changes')
+                        or kind == 'candidate_checks_failed' and row['base'] != base):
                     continue
             except (TypeError, ValueError):
                 continue
@@ -599,7 +668,7 @@ class BatchController:
         if execute:
             for terminal in self.rows(project):
                 if terminal['status'] in TERMINAL:
-                    self.cleanup(project, terminal)
+                    self.cleanup_terminal(project, terminal)
         candidates = []
         def priority(pr):
             owner = self.c.owner(project, pr, owners) or {}
@@ -680,6 +749,8 @@ class BatchController:
                         return held
                     owner = self.synthetic_owner(batch)
                     review = self.c.store.review(project['id'], batch['pr'])
+                    if self.reject_review(project, batch, candidate, review):
+                        return held
                     if gate(candidate, owner, review) is not None:
                         self.update(batch, status='awaiting_review', error=None)
                         self.c.launch(project, candidate, owner, 'review')
@@ -691,11 +762,24 @@ class BatchController:
             # Publication/reconciliation uncertainty retains all reservations.
             if isinstance(error, BatchInvalidated):
                 self.invalidate(project, batch, error)
+            elif batch['status'] == 'failed' and self.review_failure(batch):
+                # Preserve the durable review finding after uncertain closure.
+                print(f"{project['id']} batch {batch['id']}: rejected candidate closure deferred ({type(error).__name__})", flush=True)
             else:
                 # Transport/launch/local failures say nothing about candidate
                 # validity. Preserve completed CI and testnet for the next tick.
                 self.update(batch, error=type(error).__name__+': '+str(error)[:300])
         finally:
+            if batch['status'] == 'failed' and self.review_failure(batch):
+                # The caller schedules owner work from these same snapshots.
+                # Route the finding in this pass, not after another full scan.
+                for source in prs:
+                    source.update(self.repair_context(project, source))
+                # held was collected before rejection. Release the failed
+                # group's stale candidates so the caller can launch repair now,
+                # while preserving any live batch reservations.
+                held.difference_update(member['pr'] for member in json.loads(batch['members']))
+                held.update(self.reserved_members(project))
             if batch['status'] in TERMINAL:
-                self.cleanup(project, batch)
+                self.cleanup_terminal(project, batch)
         return held

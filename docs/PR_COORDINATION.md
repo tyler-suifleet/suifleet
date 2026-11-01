@@ -1363,3 +1363,39 @@ watchdog instructions from a clean fetched main with
 enabled). Verify parent readiness, preserved worker identities, the installed
 revision, actual batch transitions and the refreshed CLI report. Local tests do
 not establish those operational results or hosted acceptance in advance.
+### Combined source findings must become owner repairs
+
+A fresh, published `changes_requested` review of an integration candidate is
+source work, not another CI wait. The batch controller binds the result to the
+exact candidate head, pinned base and current feedback before recording a failed
+candidate. It persists the actual review ID, result hash and findings before
+attempting remote closure. Failed or ambiguous closure preserves that evidence
+and is retried idempotently; terminal cleanup failures are isolated and do not
+stop independent queue selection. No publication intent may be reclassified this
+way after a push could have occurred.
+
+For a one-member batch, attribution is unambiguous: the original source head gets
+`_batch_review_failure`, and its existing owner receives normal feedback repair
+in the same scan. The worker gets the real published findings and requested
+regression checks. This is distinct from `_ci_repair`; changing CI evidence must
+not veto a genuine source-finding repair. Early read-only review is suppressed
+while that repair context is present. Existing claim, live/uncertain worker,
+capacity, provider and execution fences still apply. Source-complete receipts do
+not erase a later combined finding.
+
+The finding remains attached when unrelated main advances, and expires when the
+source head changes. The changed source then needs fresh independent review and
+actual combined CI/testnet. For an unattributed multi-member finding, do not guess
+which owner is responsible or dispatch every owner: record the failed exact group
+and split it deterministically into smaller candidates. The same rejected head
+combination is not resubmitted just because main advanced. Singleton findings
+become owner repairs; unaffected source-ready PRs remain eligible for another
+batch. Never disable batching, fabricate source-head CI failures, blindly rerun
+checks or clear old failed-job/claim receipts to force this transition.
+
+SF-214's operational recovery used the installed controller to retire rejected
+batch #433, attached the independently reproduced enrollment finding to source
+#421 and launched a verified same-claim repair. The code change generalizes that
+transition; offline tests do not establish its future installed acceptance. Normal
+independent review, genuine hosted checks and merged-only activation remain
+required before claiming automatic routing is deployed.
