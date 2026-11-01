@@ -1204,3 +1204,56 @@ the coordinator parent through the existing serialized operation. Do not install
 this PR's unmerged files or disable live-wallet, CI or independent-review gates.
 An actual hosted batch, post-merge issue reconciliation and installed activation
 remain rollout acceptance until observed; offline fixtures do not establish them.
+
+
+### Reduce time from PR opening to integration
+
+In batch mode the coordinator starts eligible independent source reviews as each
+fresh PR snapshot arrives, in ticket-priority/PR-number order. It does not wait
+for every other PR snapshot or historical merged-PR reconciliation. A failed
+snapshot or source launch remains isolated to that PR. The existing atomic
+reservation still controls capacity, provider waits, active workers and uncertain
+launches; dry runs launch nothing. Current source receipts are reused while only
+main or CI changes. Actual findings and combined-candidate conflicts go to the
+implementation owner. The final combined candidate still needs its own real
+CI/testnet results and independent integration approval before the sole
+orchestrator publishes it.
+
+For independent work, use separate small PRs targeting main and let the reviewed
+batch combine them. Do not repeatedly merge main into otherwise reviewed source
+branches just to refresh their base. Keep each change to one reviewable purpose,
+with reproducible checks and an explicit distinction between automated failures,
+pending CI, source findings and deferred final acceptance. Waiting for CI alone
+is not a reason to start another model review or owner repair.
+
+For dependent work, split an additive, independently useful interface/framework
+into a small prerequisite PR, including compatibility tests. Put consumers in
+separate tickets/PRs and record the committed API and real dependency. Merge the
+framework through the normal checks, then dispatch independent consumers together.
+For example, SF-196 defines the shared second-factor authority/framework; SF-198,
+SF-199, SF-200 and SF-201 implement its focused mechanisms. Do not bundle every
+consumer into the framework merely to keep one ticket busy.
+
+PR stacks can reduce waiting when dependent changes are reviewable separately,
+but arbitrary PRs based on unmerged parent branches are not supported by this
+coordinator's batch protocol: source proofs require a reviewed base in pinned
+main's ancestry. Do not bypass that condition or relabel an unmerged API as Done.
+Until a separately tested stack protocol exists, use the interface-first split
+above. A future true-stack implementation must verify the complete ordered
+ancestor set, review only each PR's incremental diff, test the combined tip and
+revalidate every parent/head/feedback receipt before publishing once.
+
+The current milestone is feature completeness with automated testnet validation.
+Manual human/outsider/real-wallet walkthroughs, physical Pi testing and actual
+mainnet/production-provider acceptance remain explicitly tracked for final
+acceptance. They do not hold otherwise reviewed software work. New main-branch
+documentation introduced by a PR is checked structurally before merge and online
+after publication; a premerge 404 for the new file cannot require that file to
+already exist on main. This sequencing grants no production credentials,
+hardware programming or mainnet authority and waives no automated/security test.
+
+Measure elapsed time separately for implementation, source review, actionable
+repair, ordinary CI, automated acceptance, final evidence review and integration.
+Count original feature PRs/tickets separately from synthetic batch PRs and model
+job attempts. Do not infer a production latency improvement from a passing unit
+test: verify it from real merged PRs after activating the reviewed scheduler.
