@@ -31,7 +31,7 @@ export async function fetchCustomerFleets(client: SuiGrpcClient, wallet: string,
     const { object } = await client.getObject({ objectId: id, include: { content: true } });
     if (normalizeStructTag(object.type) !== normalizeStructTag(moveType("customer::Customer"))) throw Error("Unexpected customer type");
     const c = customer_CustomerBcs.parse(object.content);
-    if (BigInt(c.version) !== BigInt(1)) throw Error("Customer authority version requires a newer dashboard");
+    if (![BigInt(1), BigInt(196), BigInt(197)].includes(BigInt(c.version))) throw Error("Customer authority version requires a newer dashboard");
     if (normalizeId(c.id) !== normalizeId(id) || normalizeId(c.registry_id) !== normalizeId(REGISTRY_ID)) throw Error("Customer registry mismatch");
     const credential = c.credentials.contents.find(entry => normalizeId(entry.key) === normalizeId(wallet));
     if (!credential && !supportBudgets.size && !readerBudgets.size) return; // Owned credentials are hints; current shared authority is decisive.

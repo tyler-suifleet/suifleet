@@ -51,6 +51,20 @@ module sui_edge::component_catalog {
         recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, ctx: &mut TxContext,
     ) {
         assert!(ctx.sender() == catalog.publisher, EPublisher);
+        publish_as(catalog, component_name, version, platform_os, platform_arch, recipe_blob_ids,
+            recipe_sha256s, artifact_sha256s, clock, ctx.sender(), ctx);
+    }
+    /// Custody is an unforgeable customer object address, never a wallet label.
+    public(package) fun adopt(catalog: &mut ComponentCatalog, authority: address, ctx: &TxContext) {
+        assert!(catalog.publisher == ctx.sender(), EPublisher);
+        catalog.publisher = authority;
+    }
+    public(package) fun publish_as(
+        catalog: &mut ComponentCatalog, component_name: String, version: String,
+        platform_os: vector<String>, platform_arch: vector<String>, recipe_blob_ids: vector<String>,
+        recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, authority: address, ctx: &mut TxContext,
+    ) {
+        assert!(catalog.publisher == authority, EPublisher);
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
@@ -72,11 +86,11 @@ module sui_edge::component_catalog {
         key.append(string::utf8(b"@")); key.append(version);
         assert!(!catalog.versions.contains(&key), EDuplicate);
         let value = ComponentVersion { id: object::new(ctx), catalog_id: object::id(catalog),
-            publisher: ctx.sender(), component_name, version, schema_version: 1, created_at: clock.timestamp_ms(),
+            publisher: authority, component_name, version, schema_version: 1, created_at: clock.timestamp_ms(),
             platform_os, platform_arch, recipe_blob_ids, recipe_sha256s, artifact_sha256s };
         catalog.versions.insert(key, object::id(&value));
         event::emit(VersionPublished { catalog_id: object::id(catalog), version_id: object::id(&value),
-            publisher: ctx.sender(), component_name, version });
+            publisher: authority, component_name, version });
         transfer::freeze_object(value);
     }
 
@@ -133,6 +147,7 @@ module sui_edge::component_catalog {
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
     }
     public fun versions(catalog: &ComponentCatalog): &VecMap<String, ID> { &catalog.versions }
+    public fun version_publisher(value: &ComponentVersion): address { value.publisher }
     public fun publisher(catalog: &ComponentCatalog): address { catalog.publisher }
 
     fun alpha(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }

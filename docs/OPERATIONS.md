@@ -756,6 +756,46 @@ Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 
+## Organization security framework (SF-196)
+
+The [approved design and exact child API](SECOND_FACTOR_DESIGN.md) define seven
+protected action classes and four optional mechanisms. The framework currently
+advertises availability **zero**: all-off administration works, but no mechanism
+can be activated until its verifier/enrollment implementation lands in
+SF-198/199/200/201. The settings page shows that distinction explicitly.
+
+Current customer authority is version **197**. Migration through
+`customer::initialize_security` retires version 1 and the published intermediate
+196 framework; it preserves existing policy state and invalidates queued actions.
+Upgrade custody-resolving clients and external producer packages to their verified
+compatible core dependency before migrating; old producer code must not be assumed
+to keep writing after the authority seal. Do not leave an intermediate package
+authoritative merely because it knows about policies. Retain each type's actual introduction origin in the deployment manifest.
+
+Before nonzero activation, reconcile every adopted fleet's device capabilities
+(`pending_devices == 0`) and seal it with `seal_security_fleet`. Empty new fleets
+are sealed automatically. A populated pending fleet cannot be adopted into an
+already protected organization. Adopt release catalogs into customer publisher
+custody; importing foreign releases also requires publication authorization.
+Whole-organization handover requires current factors and a separately signed,
+expiring recipient consent; it preserves the existing custody namespaces.
+
+Do not compose a generic budget-cap loan with a protected operation. Generic
+loans fail whenever any protection is enabled, including inside an action grant.
+Use exact budget withdrawal or the fleet_storage
+`withdraw_managed_{wal,storage,retention}_secured` wrappers. The enrolled storage
+producer constructs its private witness, computes the exact action arguments,
+restores custody and clears the grant before returning. Producer enrollment
+retains registry authority and requires the current customer factors. Other
+external administration requires a reviewed exact-operation adapter; no arbitrary
+witness or caller-selected action class substitutes for that adapter.
+
+[Recovery evidence](validation/sf196-framework-recovery.md) includes actual
+protocol-140 testnet effects, the failed first allowance-limited run, the staged
+fixture repair, local direct upgrades and current daemon/client reads. These
+fixtures are separate from the application deployment. They do not authorize a
+production rollout or establish the four child mechanisms as complete.
+
 ## Conventional static origins (SF-176)
 
 The selected host and gated release preparation for suifleet.io,
@@ -773,6 +813,7 @@ Production requires main-only dispatch, the exact collection digest, Tyler's
 issue authorization and protected environment approval. Preview credentials stay
 in a separate account. Source builds and offline restore fixtures do not establish
 live provider, DNS, TLS, recorded-wallet or hosted rollback acceptance.
+
 ## Company treasury
 
 Follow [TREASURY.md](TREASURY.md) for the proposed 2-of-3 hardware-key custody ceremony, recovery/rotation, manifest payment guard and bounded disposable testnet fixture. Production treasury keys, mainnet SuiNS target/default changes and the hardware signing ceremony are user-only final acceptance, not agent operations.
