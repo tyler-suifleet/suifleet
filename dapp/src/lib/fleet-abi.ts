@@ -2380,6 +2380,34 @@ export const MOVE_ABI = {
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
+      },
+      "clear_recurring_window": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "set_recurring_window": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "std::string::String",
+          "vector<u8>",
+          "vector<u16>",
+          "vector<u16>",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
       }
     },
     "structs": {
@@ -2883,6 +2911,27 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "clear_recurring_window": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "component_name": {
         "visibility": "Public",
         "entry": false,
@@ -3236,6 +3285,32 @@ export const MOVE_ABI = {
           "&std::string::String"
         ]
       },
+      "recurring_window": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::DeploymentRecord"
+        ],
+        "returns": [
+          "std::option::Option<sui_edge::deployment_manager::RecurringWindow>"
+        ]
+      },
+      "recurring_window_fields": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::deployment_manager::RecurringWindow"
+        ],
+        "returns": [
+          "u64",
+          "std::string::String",
+          "vector<u8>",
+          "vector<u16>",
+          "vector<u16>"
+        ]
+      },
       "report_rollout_health": {
         "visibility": "Public",
         "entry": false,
@@ -3431,6 +3506,20 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "set_recurring_window": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "std::string::String",
+          "vector<u8>",
+          "vector<u16>",
+          "vector<u16>",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "share_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -3501,17 +3590,6 @@ export const MOVE_ABI = {
         "returns": [
           "&vector<sui::object::ID>"
         ]
-      },
-      "clear_decision_audit": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&mut sui_edge::deployment_manager::DeploymentRecord",
-          "u64",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": []
       }
     },
     "structs": {
@@ -3578,6 +3656,72 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "DecisionCleanupKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DecisionKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "DecisionRecord": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
           ]
         ]
       },
@@ -3916,6 +4060,42 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "RecurringWindow": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "timezone",
+            "std::string::String"
+          ],
+          [
+            "slots",
+            "vector<sui_edge::deployment_manager::WeeklySlot>"
+          ]
+        ]
+      },
+      "RecurringWindowKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
       "Rollout": {
         "abilities": [
           "Copy",
@@ -4177,7 +4357,7 @@ export const MOVE_ABI = {
           ]
         ]
       },
-      "DecisionCleanupKey": {
+      "WeeklySlot": {
         "abilities": [
           "Copy",
           "Drop",
@@ -4186,60 +4366,16 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "fields": [
           [
-            "dummy_field",
-            "bool"
-          ]
-        ]
-      },
-      "DecisionKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "revision",
-            "u64"
-          ]
-        ]
-      },
-      "DecisionRecord": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "deployment_id",
-            "sui::object::ID"
-          ],
-          [
-            "revision",
-            "u64"
-          ],
-          [
-            "cohort",
-            "u64"
-          ],
-          [
-            "state",
+            "days",
             "u8"
           ],
           [
-            "reason",
-            "std::string::String"
+            "start_minute",
+            "u16"
           ],
           [
-            "at_ms",
-            "u64"
-          ],
-          [
-            "admitted",
-            "vector<sui::object::ID>"
+            "duration_minutes",
+            "u16"
           ]
         ]
       }
@@ -4919,6 +5055,17 @@ export const MOVE_ABI = {
           "sui_edge::device_registry::DeviceOwnerCap"
         ]
       },
+      "arch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Device"
+        ],
+        "returns": [
+          "std::string::String"
+        ]
+      },
       "assert_admin": {
         "visibility": "Public",
         "entry": false,
@@ -5159,17 +5306,6 @@ export const MOVE_ABI = {
           "&sui::tx_context::TxContext"
         ],
         "returns": []
-      },
-      "arch": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::device_registry::Device"
-        ],
-        "returns": [
-          "std::string::String"
-        ]
       }
     },
     "structs": {

@@ -143,6 +143,108 @@ module sui_edge::deployment_manager {
         }
     }
 
+    /// SF-174 recurring weekly maintenance windows, in their own
+    /// introduction-package origin. Move checks structure only; devices
+    /// resolve the IANA zone with a pinned tz database and fail closed on an
+    /// unknown one. A recurring window ANDs with every SF-018 control. Older
+    /// daemons ignore it, so manifests carrying these types raise the minimum
+    /// edge version.
+    const EInvalidRecurringWindow: u64 = 18;
+    const MAX_WEEKLY_SLOTS: u64 = 8;
+    const MAX_TIMEZONE_BYTES: u64 = 64;
+    public struct RecurringWindowKey has copy, drop, store {}
+    public struct WeeklySlot has copy, drop, store {
+        days: u8, // bit 0 Monday ... bit 6 Sunday; nonzero
+        start_minute: u16, // local wall-clock minute of day, 0..1439
+        duration_minutes: u16, // elapsed minutes, 1..1440
+    }
+    public struct RecurringWindow has copy, drop, store {
+        revision: u64,
+        timezone: String, // IANA name; "device-local" is reserved for a later extension
+        slots: vector<WeeklySlot>,
+    }
+
+    /// Creator-only and rejected after cancellation, like set_control. Every
+    /// change also bumps the Control revision so devices restart advance
+    /// notice and re-read admission.
+    public fun set_recurring_window(deployment: &mut DeploymentRecord, timezone: String,
+        days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, ctx: &mut TxContext) {
+        set_recurring_window_as(deployment, timezone, days, start_minutes, duration_minutes, ctx.sender());
+    }
+    public(package) fun set_recurring_window_as(deployment: &mut DeploymentRecord, timezone: String,
+        days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
+        assert_timezone(&timezone);
+        let count = days.length();
+        assert!(count > 0 && count <= MAX_WEEKLY_SLOTS && start_minutes.length() == count &&
+            duration_minutes.length() == count, EInvalidRecurringWindow);
+        let mut slots = vector[];
+        let mut i = 0;
+        while (i < count) {
+            let slot = WeeklySlot { days: days[i], start_minute: start_minutes[i], duration_minutes: duration_minutes[i] };
+            assert!(slot.days > 0 && slot.days < 128 && slot.start_minute < 1440 &&
+                slot.duration_minutes > 0 && slot.duration_minutes <= 1440, EInvalidRecurringWindow);
+            slots.push_back(slot);
+            i = i + 1;
+        };
+        let revision = bump_control(deployment);
+        if (df::exists(&deployment.id, RecurringWindowKey {})) {
+            let _: RecurringWindow = df::remove(&mut deployment.id, RecurringWindowKey {});
+        };
+        df::add(&mut deployment.id, RecurringWindowKey {}, RecurringWindow { revision, timezone, slots });
+    }
+    public fun clear_recurring_window(deployment: &mut DeploymentRecord, ctx: &mut TxContext) {
+        clear_recurring_window_as(deployment, ctx.sender());
+    }
+    public(package) fun clear_recurring_window_as(deployment: &mut DeploymentRecord, authority: address) {
+        assert!(authority == deployment.creator, ENotCreator);
+        assert!(df::exists(&deployment.id, RecurringWindowKey {}), EInvalidRecurringWindow);
+        bump_control(deployment);
+        let _: RecurringWindow = df::remove(&mut deployment.id, RecurringWindowKey {});
+    }
+    public fun recurring_window(deployment: &DeploymentRecord): Option<RecurringWindow> {
+        if (df::exists(&deployment.id, RecurringWindowKey {})) {
+            option::some(*df::borrow(&deployment.id, RecurringWindowKey {}))
+        } else { option::none() }
+    }
+    /// (revision, timezone, days, start minutes, durations) in slot order.
+    public fun recurring_window_fields(window: &RecurringWindow): (u64, String, vector<u8>, vector<u16>, vector<u16>) {
+        let (mut days, mut starts, mut durations) = (vector[], vector[], vector[]);
+        window.slots.do_ref!(|slot| {
+            days.push_back(slot.days); starts.push_back(slot.start_minute); durations.push_back(slot.duration_minutes);
+        });
+        (window.revision, window.timezone, days, starts, durations)
+    }
+    /// Revision of the replaced or newly created Control; an absent Control
+    /// becomes an explicit immediate one, which devices treat identically.
+    fun bump_control(deployment: &mut DeploymentRecord): u64 {
+        let mut control = if (df::exists(&deployment.id, ControlKey {})) {
+            df::remove(&mut deployment.id, ControlKey {})
+        } else {
+            Control { revision: 0, state: 0, not_before_ms: 0, expires_ms: 0,
+                window_start_ms: 0, window_end_ms: 0, notice_ms: 0 }
+        };
+        assert!(control.state != 2, ECancelled);
+        control.revision = control.revision + 1;
+        let revision = control.revision;
+        df::add(&mut deployment.id, ControlKey {}, control);
+        revision
+    }
+    /// IANA names use ASCII letters, digits and `/ _ - +` and never begin
+    /// with `/`; anything else (including `.`) is rejected.
+    fun assert_timezone(timezone: &String) {
+        let bytes = timezone.as_bytes();
+        let n = bytes.length();
+        assert!(n > 0 && n <= MAX_TIMEZONE_BYTES && bytes[0] != 47, EInvalidRecurringWindow);
+        let mut i = 0;
+        while (i < n) {
+            let b = bytes[i];
+            assert!((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) ||
+                b == 47 || b == 95 || b == 45 || b == 43, EInvalidRecurringWindow);
+            i = i + 1;
+        };
+    }
+
     // ── Objects ───────────────────────────────────────────────────────────────
 
     /// Shared deployment record. Core identity fields are stable; all mutable
@@ -555,6 +657,9 @@ module sui_edge::deployment_manager {
         assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
         if (df::exists(&deployment.id, ControlKey {})) {
             let _: Control = df::remove(&mut deployment.id, ControlKey {});
+        };
+        if (df::exists(&deployment.id, RecurringWindowKey {})) {
+            let _: RecurringWindow = df::remove(&mut deployment.id, RecurringWindowKey {});
         };
         // Remove dynamic fields before destroying the object.
         let _: vector<ID>       = df::remove(&mut deployment.id, TargetGroupsKey {});
