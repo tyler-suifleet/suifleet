@@ -778,6 +778,17 @@ module sui_edge::customer {
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::set_control_as(record, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, object::id(fleet).to_address());
     }
+    public fun set_recurring_window(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, timezone: String,
+        days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::set_recurring_window_as(record, timezone, days, start_minutes, duration_minutes, object::id(fleet).to_address());
+    }
+    public fun clear_recurring_window(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
+        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
+        deployment_manager::clear_recurring_window_as(record, object::id(fleet).to_address());
+    }
     public fun begin_revision(customer: &Customer, fleet: &Fleet, group: &DeviceGroup, ctx: &mut TxContext): RevisionPlan {
         assert_action(customer, 1, ctx); assert_fleet(customer, fleet); assert_group(fleet, group);
         desired_state::begin_as(group, object::id(fleet).to_address())

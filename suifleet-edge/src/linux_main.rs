@@ -770,7 +770,7 @@ fn self_check(path: &Path) -> anyhow::Result<()> {
         sui.address()
     );
     state::check(&cfg.runtime.state_dir, &binding)?;
-    println!("suifleet {} accepts this configuration, identity and journal", env!("CARGO_PKG_VERSION"));
+    println!("suifleet {} (tzdb {}) accepts this configuration, identity and journal", env!("CARGO_PKG_VERSION"), control::tzdb_version());
     Ok(())
 }
 
@@ -903,7 +903,7 @@ async fn poll(
             if d.terminal || journal.state.deployments.contains_key(id) {
                 return false;
             }
-            match d.control.reason(telemetry::now_ms(), d.notified_ms) {
+            match d.control.reason(telemetry::now_ms(), d.notified_ms, d.recurring.as_ref()) {
                 Ok(Some(reason)) => reason != d.reason,
                 // Rollout waits wake from their watched grant/policy field.
                 Ok(None) => {
@@ -1493,29 +1493,35 @@ async fn admit(sui: &SuiClient, journal: &mut Journal, id: &str, device: &str) -
     // A missing record (including old-package deletion) is never permission.
     anyhow::ensure!(sui.optional_object(id).await?.is_some(), "deployment deleted before admission");
     let control = sui.deployment_control(id).await?;
+    let recurring = sui.deployment_recurring_window(id).await?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
     let now = u64::try_from(now)?;
     // Use corrected UTC for schedule/window checks. Only a deployment's
     // terminal observation survives clock rollback, never a global clock floor.
     // Restart notice if its saved timestamp is ahead of the corrected clock.
     let notified = journal.state.deferred.get(id)
-        .filter(|d| d.control == control && d.notified_ms <= now)
+        .filter(|d| d.control == control && d.recurring == recurring && d.notified_ms <= now)
         .map(|d| d.notified_ms)
         .unwrap_or(now);
-    let policy_reason = control.reason(now, notified)?;
-    cadence::Window::remember(&mut journal.state.check_window, &control, now);
+    let policy_reason = control.reason(now, notified, recurring.as_ref())?;
+    cadence::Window::remember(&mut journal.state.check_window, &control, recurring.as_ref(), now);
     let reason = match policy_reason {
         Some(reason) => Some(reason),
         None => sui.rollout_admission(id, device).await?,
     };
+    let next_window_ms = recurring.as_ref().filter(|_| reason == Some("outside recurring maintenance window"))
+        .and_then(|r| r.occurrence(now).ok()).map(|(open, _)| open);
     let entry = control::Deferred {
-        control, notified_ms: notified,
+        tzdb: recurring.is_some().then(|| control::tzdb_version().to_owned()),
+        control, recurring, notified_ms: notified,
         reason: reason.unwrap_or("ready for admission").to_owned(),
         terminal: matches!(reason, Some("cancelled" | "expired" | "rollout aborted" | "rollout complete")),
+        next_window_ms,
     };
-    if journal.state.deferred.get(id).is_none_or(|old| old.reason != entry.reason || old.control != entry.control) {
+    if journal.state.deferred.get(id).is_none_or(|old| old.reason != entry.reason || old.control != entry.control || old.recurring != entry.recurring) {
         info!(deployment = id, reason = entry.reason, notice_ms = entry.control.notice_ms,
-            "Deployment admission notice (UTC); no disruptive work started");
+            timezone = entry.recurring.as_ref().map(|r| r.timezone.as_str()), next_window_ms = entry.next_window_ms,
+            tzdb = entry.tzdb.as_deref(), "Deployment admission notice (UTC); no disruptive work started");
     }
     journal.state.deferred.insert(id.to_owned(), entry);
     journal.save()?;
