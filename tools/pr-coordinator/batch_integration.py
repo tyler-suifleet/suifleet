@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -175,10 +176,10 @@ class BatchController:
         return outstanding
 
     def source(self, project, pr, owner):
-        from coordinator import failed_checks
+        from coordinator import source_check_failures
         # Concrete source failures need their existing owner before collection.
         # Pending checks may still be validated on the combined candidate.
-        if failed_checks(pr):
+        if source_check_failures(pr):
             return None
         if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
                 or owner.get('expired') or pr.get('_batch_failure') or pr.get('_batch_conflict')
@@ -612,8 +613,19 @@ class BatchController:
                     continue
                 if (error.get('kind') == 'candidate_checks_failed'
                         and batch['base'] == pr.get('baseRefOid')):
+                    checks = error['checks']
+                    # These rows were classified from the exact candidate/base
+                    # by failed_checks before persistence. Funding cannot be
+                    # repaired on an unchanged member's source branch. Retain
+                    # the failed candidate/selection fence and all acceptance
+                    # gates, but do not dispatch another owner repair for it.
+                    if checks and all(check.get('name') == 'testnet/package-upgrade'
+                                      and check.get('workflowName') == 'Automatic testnet'
+                                      and check.get('classification') == 'funding'
+                                      for check in checks):
+                        break
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                                                   candidate_base=batch['base'], checks=error['checks'])
+                                                   candidate_base=batch['base'], checks=checks)
                     break
                 if (error.get('kind') == 'candidate_review_changes'
                         and error.get('review_head') == batch['head']
@@ -627,7 +639,34 @@ class BatchController:
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
-            result['_batch_conflict'] = json.loads(row[0])
+            context = json.loads(row[0])
+            # A composition failure may only involve unmerged siblings. Owners
+            # must not import those stacks to repair an otherwise clean source.
+            # Recheck against pinned main, including receipts from older runtimes;
+            # after integration a new base will be tested by the next build.
+            main_conflict = True
+            if context.get('other_members'):
+                # Use a disposable worktree for Git versions predating
+                # merge-tree --write-tree. Never alter the owner's checkout.
+                with tempfile.TemporaryDirectory(prefix='batch-conflict-') as directory:
+                    probe = str(Path(directory)/'probe')
+                    self.git(project, 'worktree', 'add', '--detach', probe, pr['baseRefOid'])
+                    try:
+                        try:
+                            self.git(project, 'merge', '--no-commit', '--no-ff',
+                                     pr['headRefOid'], cwd=probe)
+                        except subprocess.CalledProcessError as error:
+                            if error.returncode != 1:
+                                raise
+                            # Exit one alone is not proof of a merge conflict.
+                            if not self.git(project, 'ls-files', '--unmerged', cwd=probe):
+                                raise
+                        else:
+                            main_conflict = False
+                    finally:
+                        self.git(project, 'worktree', 'remove', '--force', probe)
+            if main_conflict:
+                result['_batch_conflict'] = context
         return result
 
     def select(self, project, candidates, base, maximum):
@@ -683,25 +722,42 @@ class BatchController:
                 # source() already validates Review ownership without renewing a lease.
         held = {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
-        if len(active) > 1:
-            raise RuntimeError('multiple active integration epochs; inspect before proceeding')
-        batch = active[0] if active else None
-        held.update(self.reserved_members(project))
+        limit = project.get('integration_batch', {}).get('max_in_flight', 2)
+        if type(limit) is not int or not 1 <= limit <= 4:
+            raise ValueError('integration batch max_in_flight must be 1..4')
+        reserved = [m['pr'] for row in active for m in json.loads(row['members'])]
+        if len(reserved) != len(set(reserved)):
+            raise RuntimeError('duplicate active integration member; inspect before proceeding')
+        held.update(reserved)
         if not execute:
             return held
-        if batch is None and candidates:
+        # Preserve an ambiguous publication before admitting more work. A single
+        # normal owner still serially publishes main; pending CI does not own it.
+        uncertain = any(row.get('publish_intent') for row in active)
+        available = [m for m in candidates if m['pr'] not in reserved]
+        if len(active) < limit and available and not uncertain:
             base, batch_id = self.main(project), uuid.uuid4().hex
-            selected = self.select(project, candidates, base, maximum)
-            if not selected:
-                return held
-            directory = str(self.c.state/project['id']/'batches'/batch_id)
-            Path(directory).parent.mkdir(parents=True, exist_ok=True)
-            self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
-                 canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
-            batch = self.rows(project)[-1]
-        if not batch:
-            return held
+            selected = self.select(project, available, base, maximum)
+            if selected:
+                directory = str(self.c.state/project['id']/'batches'/batch_id)
+                Path(directory).parent.mkdir(parents=True, exist_ok=True)
+                self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
+                     canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
+                active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
+        for batch in active:
+            others = {m['pr'] for row in active if row['id'] != batch['id'] and row['status'] not in TERMINAL
+                      for m in json.loads(row['members'])}
+            pool = [m for m in candidates if m['pr'] not in others]
+            # Recheck after each advance; a prior candidate may have published or
+            # discovered an uncertain push during this same pass.
+            publish_allowed = not any(row['id'] != batch['id'] and row.get('publish_intent')
+                                      and row['status'] not in TERMINAL for row in self.rows(project))
+            self.advance(project, batch, pool, maximum, delay, prs, held, publish_allowed)
+        held.update(self.reserved_members(project))
+        return held
+
+    def advance(self, project, batch, candidates, maximum, delay, prs, held, publish_allowed=True):
         try:
             status = batch['status']
             if status in ('published', 'reconciling'):
@@ -722,7 +778,10 @@ class BatchController:
                         raise BatchInvalidated('integration base changed during collection')
                     selected = self.select(project, candidates, batch['base'], maximum)
                     self.update(batch, members=canonical(selected))
-                    if not selected or (len(selected) < maximum and self.clock()-batch['created'] < delay):
+                    if not selected:
+                        self.update(batch, status='invalidated', error='no eligible members remain during collection')
+                        return held
+                    if len(selected) < maximum and self.clock()-batch['created'] < delay:
                         return held
                     self.validate_members(project, batch)
                     self.update(batch, status='building')
@@ -733,29 +792,38 @@ class BatchController:
                     status = batch['status']
                 if status in ('branch_publishing', 'pr_creating'):
                     self.publish_candidate(project, batch)
-                elif status in ('awaiting_ci','awaiting_review','ready','approving_members'):
+                    status = batch['status']
+                if status in ('awaiting_ci','awaiting_review','ready','approving_members'):
                     self.adopt_approvals(project, batch)
                     from coordinator import checks_blocker, gate
                     self.validate_members(project, batch)
                     candidate = self.candidate(project, batch)
                     if candidate['state'] != 'OPEN' or candidate.get('isDraft'):
                         raise BatchInvalidated('integration candidate is not open and ready')
+                    owner = self.synthetic_owner(batch)
+                    review = self.c.store.review(project['id'], batch['pr'])
+                    # Published, exact-candidate source findings are actionable
+                    # before CI finishes. Neither a pending check nor a busy
+                    # sibling candidate should leave an independent reviewer idle.
+                    if self.reject_review(project, batch, candidate, review):
+                        return held
                     if checks_blocker(candidate) is not None:
-                        from coordinator import failed_checks
+                        from coordinator import failed_checks, feedback
                         failures = failed_checks(candidate)
                         if failures:
                             self.fail_candidate(project, batch, failures)
                             return held
                         self.update(batch, status='awaiting_ci')
-                        return held
-                    owner = self.synthetic_owner(batch)
-                    review = self.c.store.review(project['id'], batch['pr'])
-                    if self.reject_review(project, batch, candidate, review):
+                        if (not review or review.get('head') != candidate['headRefOid']
+                                or review.get('feedback') != feedback(candidate)):
+                            self.c.launch(project, candidate, owner, 'review')
                         return held
                     if gate(candidate, owner, review) is not None:
                         self.update(batch, status='awaiting_review', error=None)
                         self.c.launch(project, candidate, owner, 'review')
                     else:
+                        if not publish_allowed:
+                            return held
                         self.update(batch, status='ready', error=None)
                         self.publish_main(project, batch, candidate, owner, review)
                         self.reconcile(project, batch)
@@ -942,3 +1010,122 @@ class LocalInfrastructure:
             if tree.exists():
                 self.c.cleanup(project, tree)
         return True
+
+
+class SharedAcceptanceRepair:
+    """Route a real shared funding incident once, never to every feature owner."""
+    def __init__(self, coordinator):
+        self.c, self.db = coordinator, coordinator.store.db
+        self.db.execute('''CREATE TABLE IF NOT EXISTS shared_acceptance_repairs (
+            project TEXT, episode TEXT, owner_ticket TEXT, owner_head TEXT,
+            base TEXT, job INTEGER, state TEXT, diagnostic TEXT, updated REAL,
+            PRIMARY KEY(project,episode))''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS shared_acceptance_status (project TEXT PRIMARY KEY,owner_ticket TEXT,state TEXT,job INTEGER,diagnostic TEXT,updated REAL)')
+
+    def record(self, project, episode, owner, head, base, job, state, diagnostic):
+        self.db.execute('INSERT OR REPLACE INTO shared_acceptance_repairs VALUES(?,?,?,?,?,?,?,?,?)',
+            (project['id'],episode,owner,head,base,job,state,diagnostic,self.c.batches.clock()))
+        return dict(owner=owner,state=state,job=job,diagnostic=diagnostic)
+
+    def tick(self, project):
+        try:
+            result=self.route(project)
+        except Exception as error:
+            self.db.execute('INSERT OR REPLACE INTO shared_acceptance_status VALUES(?,?,?,?,?,?)',
+                (project['id'],project.get('shared_acceptance_repair',{}).get('ticket'),'held',None,
+                 type(error).__name__,self.c.batches.clock()))
+            raise
+        if result:
+            self.db.execute('INSERT OR REPLACE INTO shared_acceptance_status VALUES(?,?,?,?,?,?)',
+                (project['id'],result['owner'],result['state'],result.get('job'),result.get('diagnostic',''),self.c.batches.clock()))
+        return result
+
+    def route(self, project):
+        config=project.get('shared_acceptance_repair')
+        if config is None: return None
+        if (not isinstance(config,dict) or not isinstance(config.get('ticket'),str)
+                or not re.fullmatch(r'[A-Z][A-Z0-9]*-\d+',config['ticket'])
+                or type(config.get('max_attempts',3)) is not int
+                or not 1 <= config.get('max_attempts',3) <= 5):
+            raise ValueError('shared acceptance repair requires ticket and max_attempts1..5')
+        key=config['ticket']; maximum=config.get('max_attempts',3)
+        owner=json.loads(self.c.ticket(project,'show',key))
+        if owner['status']=='done':
+            self.db.execute("UPDATE shared_acceptance_repairs SET state='resolved',updated=? WHERE project=? AND owner_ticket=?",
+                            (self.c.batches.clock(),project['id'],key))
+            return dict(owner=key,state='resolved')
+        if owner.get('agent') not in ('Codex','Claude') or not owner.get('token'):
+            return dict(owner=key,state='blocked',diagnostic='shared repair owner has no implementation claim')
+        # Select the real linked source; labels and a caller's arbitrary PR number
+        # cannot redirect this authority to another source/claim.
+        number=self.c.issue_number(project,owner)
+        if not number: return dict(owner=key,state='blocked',diagnostic='owner issue unavailable')
+        prs=json.loads(self.c.gh(project,['pr','list','-R',project['repository'],'--state','open',
+                       '--head',owner['branch'],'--json','number,headRefName']))
+        if len(prs)!=1: return dict(owner=key,state='blocked',diagnostic='shared owner source is ambiguous or absent')
+        pr=self.c.pr(project,prs[0]['number']); head=pr['headRefOid']
+        if (pr.get('headRefName')!=owner['branch'] or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('state')!='OPEN'):
+            return dict(owner=key,state='blocked',diagnostic='shared owner source is not ready')
+        active=self.db.execute("SELECT id FROM jobs WHERE project=? AND pr=? AND status IN "
+            "('reserved','running','orphaned','quarantined','quota_wait','quota_launch') ORDER BY id DESC LIMIT 1",
+            (project['id'],pr['number'])).fetchone()
+        if active: return dict(owner=key,state='owner_busy',job=active[0])
+        if owner['status']!='review' or owner.get('expired') or owner.get('publish_pending'):
+            return dict(owner=key,state='blocked',diagnostic='shared owner requires published Review handoff or explicit recovery')
+        # Do not interrupt an in-flight candidate or ambiguous publication. Only
+        # already-failed exact-owner candidates establish a new repair episode.
+        if pr['number'] in self.c.batches.reserved_members(project):
+            return dict(owner=key,state='awaiting_validation',diagnostic='shared source has an active candidate')
+        failure=None
+        for batch in reversed(self.c.batches.rows(project)):
+            if batch['status']!='failed': continue
+            try:
+                error=json.loads(batch.get('error') or '{}'); checks=error.get('checks',[])
+                members=json.loads(batch['members'])
+            except (ValueError,TypeError): continue
+            if (error.get('kind')!='candidate_checks_failed' or not checks
+                    or not all(c.get('name')=='testnet/package-upgrade' and c.get('workflowName')=='Automatic testnet'
+                               and c.get('classification')=='funding' for c in checks)
+                    or not any(m['pr']==pr['number'] and m['head']==head for m in members)):
+                continue
+            failure=(batch,checks);break
+        if failure is None: return dict(owner=key,state='awaiting_validation',diagnostic='no failed candidate for current shared source')
+        batch,checks=failure
+        self.c.batches.verify_manifest(project,batch)
+        episode=hashlib.sha256(canonical([key,head,batch['base'],'funding']).encode()).hexdigest()
+        existing=self.db.execute('SELECT job,state,updated FROM shared_acceptance_repairs WHERE project=? AND episode=?',
+                                 (project['id'],episode)).fetchone()
+        if existing:
+            # Even a failed/unknown launch is durable: never silently replay it.
+            job,state,updated=existing
+            if state=='held' and not job:
+                # No Store reservation or process was created. Capacity may
+                # recover; retry the guarded reservation after a bounded delay.
+                if self.c.batches.clock()-updated < 60:
+                    return dict(owner=key,state='held',diagnostic='waiting for repair capacity; no job was launched')
+            else:
+                if job:
+                    row=self.db.execute('SELECT status FROM jobs WHERE id=?',(job,)).fetchone()
+                    state='awaiting_validation' if row and row[0]=='done' else 'repair_retained'
+                return self.record(project,episode,key,head,batch['base'],job,state,'existing incident retained; no blind replay')
+        count=self.db.execute('SELECT count(*) FROM shared_acceptance_repairs WHERE project=? AND owner_ticket=? AND owner_head=? AND episode!=?',
+                              (project['id'],key,head,episode)).fetchone()[0]
+        if count>=maximum: return dict(owner=key,state='blocked',diagnostic='shared repair attempts exhausted for unchanged source')
+        self.c.assert_review_owner(project,owner)
+        self.c.local_infrastructure.fenced(project,pr,owner)
+        context=dict(candidate_pr=batch['pr'],candidate_head=batch['head'],candidate_base=batch['base'],checks=checks,
+                     shared_owner=key,episode=episode)
+        snapshot={**pr,'_batch_failure':context}
+        self.record(project,episode,key,head,batch['base'],None,'launch_pending','shared cost repair reserved before launch')
+        try:
+            self.c.launch(project,snapshot,owner,'fix')
+            from coordinator import feedback
+            row=self.db.execute("SELECT id,status FROM jobs WHERE project=? AND pr=? AND kind='fix' AND head=? AND feedback=?",
+                                (project['id'],pr['number'],head,feedback(snapshot))).fetchone()
+            return self.record(project,episode,key,head,batch['base'],row[0] if row else None,
+                               ('repair_owned' if row[1] in ('reserved','running') else 'repair_retained') if row else 'held',
+                               'one shared-owner repair; victim branches unchanged')
+        except Exception:
+            self.record(project,episode,key,head,batch['base'],None,'launch_uncertain','inspect retained launch; no automatic replay')
+            raise
