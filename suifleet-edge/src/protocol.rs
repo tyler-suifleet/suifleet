@@ -15,6 +15,7 @@ pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::Inb
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
 pub const SETTINGS_TYPES: &[&str] = &["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"];
 pub const SHARD_TYPES: &[&str] = &["deployment_manager::ReceiptShardKey", "deployment_manager::ReceiptDirectory", "deployment_manager::ReceiptKey", "deployment_manager::ReceiptIndexKey", "deployment_manager::ShardedReceipt", "deployment_manager::ReceiptShard", "component_catalog::ShardedCatalogBindingKey", "deployment_manager::ReceiptLayoutChanged", "deployment_manager::ShardedTargetGroupsKey"];
+pub const RECURRING_WINDOW_TYPES: &[&str] = &["deployment_manager::RecurringWindowKey", "deployment_manager::RecurringWindow", "deployment_manager::WeeklySlot"];
 /// SF-130 per-fleet cost settings: defaults and inclusive bounds (Move field units).
 pub mod fleet_settings_values {
     pub const DEFAULT_CHECK_INTERVAL_MS: u64 = 1800000;
@@ -263,6 +264,8 @@ pub mod customer {
     pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const MAX_GROUP_BATCH: &str = "max_group_batch";
     pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
+    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
+    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
         pub device_id: [u8; 32],
@@ -413,6 +416,8 @@ pub mod deployment_manager {
     pub const BEGIN_RECEIPT_CLEANUP: &str = "begin_receipt_cleanup";
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const CLEANUP_RECEIPT_CHUNK: &str = "cleanup_receipt_chunk";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
+    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
@@ -442,6 +447,8 @@ pub mod deployment_manager {
     pub const RECEIPTS_VERSION: &str = "receipts_version";
     pub const RECIPE_BLOB_ID: &str = "recipe_blob_id";
     pub const RECIPE_SHA256: &str = "recipe_sha256";
+    pub const RECURRING_WINDOW: &str = "recurring_window";
+    pub const RECURRING_WINDOW_FIELDS: &str = "recurring_window_fields";
     pub const REPORT_ROLLOUT_HEALTH: &str = "report_rollout_health";
     pub const REPORT_STATUS: &str = "report_status";
     pub const REPORT_STATUS_FOR_GROUP: &str = "report_status_for_group";
@@ -457,6 +464,7 @@ pub mod deployment_manager {
     pub const SCHEDULED_START_MS: &str = "scheduled_start_ms";
     pub const SCHEMA_VERSION: &str = "schema_version";
     pub const SET_CONTROL: &str = "set_control";
+    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
     pub const SHARE_DEPLOYMENT: &str = "share_deployment";
     pub const STATUS_APPLIED: &str = "status_applied";
     pub const STATUS_FAILED: &str = "status_failed";
@@ -464,7 +472,6 @@ pub mod deployment_manager {
     pub const SYNC_ROLLOUT_RECEIPTS: &str = "sync_rollout_receipts";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
-    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Control {
         pub revision: u64,
@@ -486,6 +493,27 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl CustomerFleetKey { pub const MOVE_TYPE: &'static str = "deployment_manager::CustomerFleetKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionCleanupKey {
+        pub dummy_field: bool,
+    }
+    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionKey {
+        pub revision: u64,
+    }
+    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionRecord {
+        pub deployment_id: [u8; 32],
+        pub revision: u64,
+        pub cohort: u64,
+        pub state: u8,
+        pub reason: String,
+        pub at_ms: u64,
+        pub admitted: Vec<[u8; 32]>,
+    }
+    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DelegateKey {
         pub dummy_field: bool,
@@ -598,6 +626,25 @@ pub mod deployment_manager {
     }
     impl RecipeDigestKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RecipeDigestKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct WeeklySlot {
+        pub days: u8,
+        pub start_minute: u16,
+        pub duration_minutes: u16,
+    }
+    impl WeeklySlot { pub const MOVE_TYPE: &'static str = "deployment_manager::WeeklySlot"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RecurringWindow {
+        pub revision: u64,
+        pub timezone: String,
+        pub slots: Vec<super::deployment_manager::WeeklySlot>,
+    }
+    impl RecurringWindow { pub const MOVE_TYPE: &'static str = "deployment_manager::RecurringWindow"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct RecurringWindowKey {
+        pub dummy_field: bool,
+    }
+    impl RecurringWindowKey { pub const MOVE_TYPE: &'static str = "deployment_manager::RecurringWindowKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct RolloutPolicy {
         pub concurrency: u64,
         pub rate_count: u64,
@@ -679,27 +726,6 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl TargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::TargetGroupsKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionCleanupKey {
-        pub dummy_field: bool,
-    }
-    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionKey {
-        pub revision: u64,
-    }
-    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionRecord {
-        pub deployment_id: [u8; 32],
-        pub revision: u64,
-        pub cohort: u64,
-        pub state: u8,
-        pub reason: String,
-        pub at_ms: u64,
-        pub admitted: Vec<[u8; 32]>,
-    }
-    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
 }
 pub mod desired_state {
     use super::*;
@@ -860,6 +886,7 @@ pub mod device_registry {
     use super::*;
     pub const MODULE: &str = "device_registry";
     pub const ACTIVATE_DEVICE: &str = "activate_device";
+    pub const ARCH: &str = "arch";
     pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const BORROW_DEVICE: &str = "borrow_device";
     pub const CUSTODIED_DEVICE: &str = "custodied_device";
@@ -881,7 +908,6 @@ pub mod device_registry {
     pub const REVOKE_DEVICE: &str = "revoke_device";
     pub const ROTATE_DEVICE_KEY: &str = "rotate_device_key";
     pub const SET_META: &str = "set_meta";
-    pub const ARCH: &str = "arch";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CustodyKey {
         pub device_id: [u8; 32],

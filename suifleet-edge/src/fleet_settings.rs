@@ -223,7 +223,7 @@ mod tests {
         // The check cadence uses the bounded values.
         let cadence = crate::cadence::Cadence::default();
         assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&s)), [].iter(), 0, None).as_secs(), 1800);
-        let waiting = Deferred { control: Control::default(), notified_ms: 0, reason: "waiting for rollout eligibility".into(), terminal: false };
+        let waiting = Deferred { control: Control::default(), recurring: None, notified_ms: 0, reason: "waiting for rollout eligibility".into(), terminal: false, next_window_ms: None, tzdb: None };
         assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&s)), [&waiting].into_iter(), 0, None).as_secs(), 60);
         assert_eq!(cadence.delay(&runtime(&local(1, 1), Some(&Settings { rollout_check_interval_ms: 0, ..s })),
             [&waiting].into_iter(), 0, None).as_secs(), 1800);
