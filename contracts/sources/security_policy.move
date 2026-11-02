@@ -1,6 +1,15 @@
 /// Shared second-factor enforcement. Only reviewed in-package mechanism modules
 /// may attest; a public caller cannot manufacture a factor or a transaction grant.
 module sui_edge::security_policy {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_4: u8 = 4;
+    const SMALL_7: u8 = 7;
+    const SMALL_32: u8 = 32;
+
     use std::bcs;
     use sui::dynamic_field as df;
     use sui::event;
@@ -31,9 +40,9 @@ module sui_edge::security_policy {
     /// Changing/replacing one uses every currently enforced class, never the
     /// proposed new source, and invalidates outstanding proofs.
     public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+        p0(factor == 1 || factor == 2 || factor == 4 || factor == 8);
         check_all(uid, ctx);
-        assert!(!binding.is_empty() && binding.length() <= 4096, EPolicy);
+        p1(!binding.is_empty() && binding.length() <= 4096);
         let key = FactorKey { factor };
         if (df::exists(uid, key)) {
             *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
@@ -51,37 +60,37 @@ module sui_edge::security_policy {
     public fun available(): u8 { AVAILABLE }
     public fun action_count(): u64 { ACTIONS }
     public(package) fun initialize(uid: &mut UID) {
-        assert!(!df::exists(uid, PolicyKey {}), EPolicy);
-        df::add(uid, PolicyKey {}, Policy { schema: 1, generation: 0,
+        p1(!df::exists(uid, PolicyKey {}));
+        df::add(uid, PolicyKey {}, Policy { schema: (SMALL_1 as u64), generation: (SMALL_0 as u64),
             requirements: vector[0, 0, 0, 0, 0, 0, 0], transaction: vector[], attested: 0 });
     }
     public(package) fun check(uid: &UID, action: u64, ctx: &TxContext) {
         let p = df::borrow<PolicyKey, Policy>(uid, PolicyKey {});
-        assert!(p.schema == 1 && action < ACTIONS, EPolicy);
+        p1(p.schema == (SMALL_1 as u64) && action < ACTIONS);
         let needed = p.requirements[action];
-        assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);
+        p0(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed));
     }
     /// Capability lending cannot be authorized by a wrapper grant: a caller
     /// could otherwise substitute any operation while holding the capability.
     public(package) fun assert_unprotected(uid: &UID) {
         let p = read(uid);
-        let mut i = 0;
-        while (i < ACTIONS) { assert!(p.requirements[i] == 0, EFactor); i = i + 1; };
+        let mut i = (SMALL_0 as u64);
+        while (i < ACTIONS) { p0(p.requirements[i] == 0); i = i + 1; };
     }
     public(package) fun check_all(uid: &UID, ctx: &TxContext) {
-        let mut i = 0;
-        while (i < ACTIONS) { check(uid, i, ctx); i = i + 1; };
+        let mut i = (SMALL_0 as u64);
+        while (i < ACTIONS) { check(uid, i, ctx); i = i + (SMALL_1 as u64); };
     }
     public(package) fun update(uid: &mut UID, requirements: vector<u8>, ctx: &TxContext) {
         assert!(requirements.length() == ACTIONS, EPolicy);
         let current = read(uid);
-        check(uid, 4, ctx);
-        let mut j = 0;
+        check(uid, (SMALL_4 as u64), ctx);
+        let mut j = (SMALL_0 as u64);
         while (j < ACTIONS) {
             if ((current.requirements[j] & requirements[j]) != current.requirements[j]) check(uid, j, ctx);
-            j = j + 1;
+            j = j + (SMALL_1 as u64);
         };
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < ACTIONS) {
             assert!((requirements[i] & 15) == requirements[i], EPolicy);
             assert!((requirements[i] & AVAILABLE) == requirements[i], EUnavailable);
@@ -90,12 +99,12 @@ module sui_edge::security_policy {
                 if ((requirements[i] & bit) != 0) assert!(!factor_configuration(uid, bit).is_empty(), EFactor);
                 bit = bit * 2;
             };
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let customer_id = uid.to_inner();
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         p.requirements = requirements;
-        p.generation = p.generation + 1;
+        p.generation = p.generation + (SMALL_1 as u64);
         p.transaction = vector[];
         p.attested = 0;
         event::emit(PolicyChanged { customer_id, generation: p.generation, requirements });
@@ -103,7 +112,7 @@ module sui_edge::security_policy {
     /// Credential/configuration mutation invalidates every queued authorization.
     public(package) fun invalidate(uid: &mut UID) {
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
-        p.generation = p.generation + 1;
+        p.generation = p.generation + (SMALL_1 as u64);
         p.transaction = vector[];
         p.attested = 0;
     }
@@ -119,9 +128,9 @@ module sui_edge::security_policy {
         intent: vector<u8>, expires_ms: u64,
     }
     public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        assert!(intent.length() == 32, EPolicy);
+        p1(intent.length() == (SMALL_32 as u64));
         let now = clock.timestamp_ms();
-        assert!(expires_ms > now && expires_ms - now <= 604800000, EPolicy);
+        p1(expires_ms > now && expires_ms - now <= 604800000);
         let p = read(uid);
         let a = Action { id: object::new(ctx), customer_id: uid.to_inner(), generation: p.generation,
             proposer: ctx.sender(), intent, expires_ms, attested: 0 };
@@ -147,14 +156,14 @@ module sui_edge::security_policy {
     /// evidence, current authority, intent and expiry before marking its bit.
     /// This function is package-only; no public generic witness is accepted.
     public(package) fun attest(a: &mut Action, factor: u8) {
-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+        p0(factor == 1 || factor == 2 || factor == 4 || factor == 8);
         a.attested = a.attested | factor;
     }
     /// Each protected wrapper computes its own canonical intent, consumes the
     /// action, performs one operation, then clears this internal stack-scoped
     /// grant before returning to the PTB. No public begin/end entry points.
     public(package) fun begin(uid: &mut UID, a: Action, arguments: vector<vector<u8>>, clock: &Clock, ctx: &TxContext) {
-        begin_scoped(uid, a, arguments, 7, false, clock, ctx);
+        begin_scoped(uid, a, arguments, (SMALL_7 as u64), false, clock, ctx);
     }
     /// Class 7 is reserved for changes that require the union of current policy.
     /// Pause skips only delay; it cannot alter schedule, recipients or targets.
@@ -162,18 +171,18 @@ module sui_edge::security_policy {
         begin_scoped_bytes(uid, a, bcs::to_bytes(&arguments), class, pause, clock, ctx);
     }
     public(package) fun begin_scoped_bytes(uid: &mut UID, a: Action, arguments_bcs: vector<u8>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
-        assert!(class <= ACTIONS && (!pause || class == 1), EPolicy);
+        assert!(class <= ACTIONS && (!pause || class == (SMALL_1 as u64)), EPolicy);
         let Action { id, customer_id, generation, proposer, intent, expires_ms, attested } = a;
         assert!(customer_id == uid.to_inner() && proposer == ctx.sender(), EPolicy);
         assert!(clock.timestamp_ms() < expires_ms, EPolicy);
         assert!(intent == action_intent(uid.to_inner(), arguments_bcs), EPolicy);
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
-        assert!(p.schema == 1 && p.generation == generation, EPolicy);
+        assert!(p.schema == (SMALL_1 as u64) && p.generation == generation, EPolicy);
         let mut required = 0;
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < ACTIONS) {
             if (class == ACTIONS || class == i) required = required | p.requirements[i];
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         if (pause) required = required & 7;
         assert!((attested & required) == required, EFactor);
@@ -184,7 +193,7 @@ module sui_edge::security_policy {
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }
     public(package) fun cancel(uid: &UID, a: Action) {
         let Action { id, customer_id, generation: _, proposer: _, intent: _, expires_ms: _, attested: _ } = a;
-        assert!(customer_id == uid.to_inner(), EPolicy);
+        p1(customer_id == uid.to_inner());
         id.delete();
     }
     public(package) fun read(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }
@@ -196,7 +205,16 @@ module sui_edge::security_policy {
 
     #[test_only]
     public fun set_for_testing(uid: &mut UID, requirements: vector<u8>) {
-        assert!(requirements.length() == ACTIONS, EPolicy);
+        p1(requirements.length() == ACTIONS);
         df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {}).requirements = requirements;
+    }
+    // Share each named abort branch without changing its module or error code.
+    /// check_Factor: compact private symbol to bound published bytecode storage.
+    fun p0(condition: bool) {
+        if (!condition) abort EFactor
+    }
+    /// check_Policy: compact private symbol to bound published bytecode storage.
+    fun p1(condition: bool) {
+        if (!condition) abort EPolicy
     }
 }

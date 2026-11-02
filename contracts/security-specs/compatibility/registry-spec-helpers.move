@@ -7,14 +7,14 @@
 
 
 
-    #[mode(spec), ext(spec(prove, target = set_identity, no_opaque))]
+    #[mode(spec), ext(spec(prove, target = p2, no_opaque))]
     fun set_identity_security_spec(registry: &mut DeviceRegistry, device_id: ID, identity: Identity) {
         prover::prover::asserts(!df::exists(&registry.id, IdentityKey { device_id })
             || spec_typed_identity(registry, device_id));
         let expected = identity;
-        set_identity(registry, device_id, identity);
+        p2(registry, device_id, identity);
         prover::prover::ensures(spec_typed_identity(registry, device_id));
-        prover::prover::ensures(*identity_of(registry, device_id) == expected);
+        prover::prover::ensures(*p1(registry, device_id) == expected);
     }
 
     #[mode(spec), ext(spec(prove, target = revoke_device))]
@@ -24,7 +24,7 @@
         prover::prover::asserts(!df::exists(&registry.id, IdentityKey { device_id }) || spec_typed_identity(registry, device_id));
         revoke_device(registry, cap);
         prover::prover::ensures(spec_typed_identity(registry, device_id));
-        prover::prover::ensures(identity_of(registry, device_id).revoked);
+        prover::prover::ensures(p1(registry, device_id).revoked);
     }
 
     #[mode(spec), ext(spec(prove, target = reinstate_device))]
@@ -34,7 +34,7 @@
         prover::prover::asserts(!df::exists(&registry.id, IdentityKey { device_id }) || spec_typed_identity(registry, device_id));
         reinstate_device(registry, cap);
         prover::prover::ensures(spec_typed_identity(registry, device_id));
-        prover::prover::ensures(!identity_of(registry, device_id).revoked);
+        prover::prover::ensures(!p1(registry, device_id).revoked);
     }
 
     #[mode(spec), ext(spec(prove, target = rotate_device_key))]
@@ -42,11 +42,11 @@
         let device_id = cap.device_id;
         prover::prover::asserts(dof::exists_with_type<CustodyKey, Device>(&registry.id, CustodyKey { device_id }));
         prover::prover::asserts(spec_typed_identity(registry, device_id));
-        let revoked = identity_of(registry, device_id).revoked;
+        let revoked = p1(registry, device_id).revoked;
         rotate_device_key(registry, cap, new_address);
         prover::prover::ensures(spec_typed_identity(registry, device_id));
-        prover::prover::ensures(identity_of(registry, device_id).revoked == revoked);
-        prover::prover::ensures(identity_of(registry, device_id).signer == new_address);
+        prover::prover::ensures(p1(registry, device_id).revoked == revoked);
+        prover::prover::ensures(p1(registry, device_id).signer == new_address);
     }
 
     #[mode(spec), ext(spec(prove, target = borrow_device, no_opaque))]

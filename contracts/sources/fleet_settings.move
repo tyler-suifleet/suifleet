@@ -29,6 +29,11 @@
 /// `Settings.version` lets a later upgrade stop older versions overwriting a
 /// newer record.
 module sui_edge::fleet_settings {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+
     use sui::clock::Clock;
     use sui::dynamic_field as df;
     use sui::event;
@@ -129,14 +134,14 @@ module sui_edge::fleet_settings {
         archive_interval_ms: u64,
         archive_retention_epochs: u32,
     ): Settings {
-        assert!(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS, EOutOfBounds);
-        assert!(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
+        p0(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS);
+        p0(rollout_check_interval_ms == (SMALL_0 as u64) || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= MAX_ROLLOUT_CHECK_INTERVAL_MS
-            && rollout_check_interval_ms <= check_interval_ms), EOutOfBounds);
-        assert!(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS, EOutOfBounds);
-        assert!(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS, EOutOfBounds);
-        assert!(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
-            && archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS, EOutOfBounds);
+            && rollout_check_interval_ms <= check_interval_ms));
+        p0(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS);
+        p0(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS);
+        p0(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
+            && archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS);
         Settings {
             version: VERSION, check_interval_ms, rollout_check_interval_ms, health_interval_ms,
             archive_interval_ms, archive_retention_epochs,
@@ -174,5 +179,10 @@ module sui_edge::fleet_settings {
     public fun set_version_for_testing(budget: &mut FleetBudget, version: u64) {
         let current: &mut Settings = df::borrow_mut(fleet_budget::uid_mut(budget), SettingsKey {});
         current.version = version;
+    }
+    // Share each named abort branch without changing its module or error code.
+    /// check_OutOfBounds: compact private symbol to bound published bytecode storage.
+    fun p0(condition: bool) {
+        if (!condition) abort EOutOfBounds
     }
 }

@@ -58,6 +58,57 @@ class AuditAcceptanceTests(unittest.TestCase):
         self.output = SimpleNamespace(returncode=0, stdout=json.dumps({'lowest': '11',
             'audit': {'complete': True}}), stderr='')
 
+    def test_cleanup_owned_before_submission_and_replayed_from_journal(self):
+        original = self.step
+        def failed(label, ptb, calls):
+            self.assertEqual(self.disk['creation_cleanup'], 'completed')
+            self.assertIn('package::deployment_manager::delete_deployment', calls)
+            self.assertEqual(ptb[-1], '@completed')
+            raise RuntimeError('unknown submission')
+        self.step = failed
+        with self.assertRaisesRegex(RuntimeError, 'unknown submission'):
+            self.invoke(creation_cleanup='completed')
+        self.assertNotIn('record', self.fixture)
+        self.assertEqual(self.disk['creation_cleanup'], 'completed')
+        self.step = original
+        self.admit()  # Same owned input, never a substitute object.
+        self.assertIn(' + delete completed deployment', self.calls[0][0])
+        self.assertEqual(self.calls[0][1][-1], '@completed')
+        self.assertEqual(len(self.calls), 2)
+        self.admit()
+        self.assertEqual(len(self.calls), 2)  # No second deletion or creation.
+
+    def test_cleanup_cannot_replace_owned_pending_or_created_input(self):
+        self.admit()
+        for extra in ({}, {'pending_operation': {'label': 'unknown'}}):
+            self.fixture.update(extra)
+            with self.assertRaisesRegex(RuntimeError, 'durable ownership'):
+                self.invoke(creation_cleanup='replacement')
+        self.assertEqual(len(self.calls), 2)
+
+    def test_compact_creation_admits_before_sharing_and_retires_only_after_real_proof(self):
+        self.prove()
+        self.invoke(compact=True, creation_cleanup='completed')
+        self.assertEqual(len(self.calls), 1)
+        label, ptb, calls = self.calls[0]
+        self.assertTrue(label.startswith('create and admit'))
+        self.assertEqual(calls, ['package::deployment_manager::' + n for n in
+            ['rollout_policy', 'new_rollout_verified', 'advance_rollout_onchain', 'share_deployment', 'delete_deployment']])
+        self.assertLess(ptb.index(calls[2]), ptb.index(calls[3]))
+        self.assertEqual(self.fixture['admission_digest'], self.fixture['creation_digest'])
+        self.invoke(compact=True, retire=True)
+        self.assertTrue(self.fixture['retired'])
+        self.assertEqual(len(self.calls), 2)
+
+    def test_legacy_unknown_creation_plan_stays_exact_under_compact_option(self):
+        self.fixture.update(schema=1, binding=dict(chain=self.manifest['chain_identifier'], operator='operator',
+            fixture_key='bytecode-key', package='package', origins=self.manifest['type_origins'],
+            registry='registry', device='device'), pending_operation={'label': 'create durable decision audit rollout'})
+        self.prove()
+        self.invoke(compact=True)
+        self.assertEqual(len(self.calls), 2)
+        self.assertNotIn('advance_rollout_onchain', ' '.join(self.calls[0][2]))
+
     def test_timeout_restart_preserves_original_record_without_more_gas(self):
         self.admit()
         self.assertEqual(len(self.calls), 2)
@@ -249,8 +300,7 @@ class ScheduledAuditTests(unittest.TestCase):
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
         audit_call = next(node for node in calls if isinstance(node.func, ast.Name) and node.func.id == 'audit_acceptance')
         for label in ['head-package deployment to the device: applied, receipt Applied on chain',
-                      'independent gRPC reader confirmed all four receipt-writing transaction effects',
-                      'deployments deleted (storage rebate)']:
+                      'independent gRPC reader confirmed all four receipt-writing transaction effects']:
             check = next(node for node in calls if isinstance(node.func, ast.Name) and node.func.id == 'check'
                          and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == label)
             self.assertLess(check.lineno, audit_call.lineno)
