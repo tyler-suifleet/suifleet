@@ -33,7 +33,7 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 - Use the wallet only through its `client.yaml`: `sui client --client.config ~/.config/suifleet/testnet/agent/client.yaml …`, or `SUIFLEET_WALLET=…` for make targets. Never through the default `~/.sui` wallet, which `make down` deletes.
 - **Recovery phrases.** Each account directory holds a `RECOVERY_PHRASE.txt` (mode 0600) for the user to move to a password manager.
 - **Directory permissions.** Keep the directory 0700.
-- **Spend.** Live runs check the chain identity, the dedicated wallet and the balance first. Every mutation is charged to a strict allowance (`--max-spend-mist`; the package gate defaults to 1 SUI and CI gives it 1.6 SUI; `scripts/testnet_budget.py`): its gas budget and any SUI it sends to a run-owned account (test device, browser test key) are reserved before execution and settled from the effects. Failed and aborted transactions are charged; an unknown outcome keeps its whole reservation; rebates, faucet credits and sweeps never replenish it. A funded account's own transactions are bounded by its funding. See Cost below: a typical run costs about 0.0025 SUI.
+- **Spend.** Live runs check the chain identity, the dedicated wallet and the balance first. Every mutation is charged to a strict allowance (`--max-spend-mist`; the package gate and CI use a 1.6-SUI ceiling; `scripts/testnet_budget.py`): its gas budget and any SUI it sends to a run-owned account (test device, browser test key) are reserved before execution and settled from the effects. Failed and aborted transactions are charged; an unknown outcome keeps its whole reservation; rebates, faucet credits and sweeps never replenish it. A funded account's own transactions are bounded by its funding. See Cost below: a typical run costs about 0.0025 SUI.
 - **Record each run.** Write the transaction digests and the evidence JSON into the PR or issue. Never record keys.
 
 ## Funding
@@ -59,33 +59,85 @@ allowance. The attempted 30,000,000-MIST device transfer plus a full
 10,000,000-MIST gas reservation was refused before submission; neither is an
 actual fee or an additional unknown transaction in those receipts.
 
-Identity reuse was investigated independently of package caching. The encrypted
-lane state already retains device keys in completed fixtures and in-progress
-publications, so a future migration could select an existing signing identity
-without reusing its package objects. However, the entire available device gas
-must still be charged as a grant. Reusing an identity with 30,000,000 MIST fails
-at that grant in both measured positions. Even a synthetic 10,000,000-MIST
-balance leaves less than the required ordinary 200,000,000-MIST deployment
-reservation. Reuse can avoid a transfer transaction fee; it cannot erase the
-grant, replenish the allowance or prove deployment costs fit. No identity
-migration or reduced transaction budget is activated by this investigation.
+Recovery implements reuse of funded report identities independently of package
+pairs. It selects only completed-fixture signing identities from the authenticated
+same-operator/lane encrypted state, verifies the derived address before registering
+new objects, and charges the entire observed balance as a grant. Failed balance
+reads and conflicting keys fail closed. The exact compiled pair, UpgradeCap,
+per-type origins, quarantines and pending-operation journals are unchanged. A low
+balance now receives only the difference to the existing 30M target, instead of
+another 30M on top of already charged gas. No ceiling, transaction reservation,
+faucet rule or uncertainty fence is relaxed.
 
-Exact compiled base/head fixture reuse avoids both publication costs, but cannot
-substitute for a genuinely new pair. The older cached-run estimate elsewhere in
-this document is historical; no current cached or fresh acceptance run was
-performed for SF-221. Offline replays reproduce the observed refusal and preserve
-cached grants, unknown funding reservations and the one-faucet rule. They do not
-measure a smaller safe deployment budget or establish successful chain effects.
+### Disposable local measurements and remaining blocker
 
-SF-221 remains blocked on a demonstrated safe reduction that fits the complete
-fresh suite under the existing ceiling. Next: measure the required deployment
-transaction gas/storage on the retained exact fixture through protected CI, then
-evaluate an explicitly verified smaller reservation and reduced funding target
-against the complete suite. If those effects cannot fit, reduce actual package
-storage/setup costs through a separately reviewed compatible design. Do not
-republish identical packages, increase ceilings, discard uncertainty or weaken
-coverage to obtain a green result. New source acceptance must use the existing
-protected CI lane; this read-only investigation used no wallet or machine bypass.
+[Sanitized local effects](validation/sf221-local-costs.json) record actual
+1.83.0-node / 1.81.1-compiler execution in Docker `--network none`, using the
+built checkout's daemon and chain reader. Pair 0 is exactly historical
+`65770f0963ed076936de483f545b47be44b98520` →
+`5c7f1f16546781b3ab7fc46fc1eec99cbb21d71a`; it spends 1,571,117,571 MIST
+on fresh setup and refuses funding before submission. Reusing that same local
+fixture in a separate measured run completes all four OTA cases, independently
+reads Applied/Failed receipts, deletes deployments and retains the original audit.
+This is cached-suite evidence; the separate ledger does not pass the fresh run.
+
+| Retained pair-0 operation | Net MIST | Submitted gas reservation MIST |
+|---|---:|---:|
+| Device funding | 1,988,099 + 30,000,000 granted | 10,000,000 + 30,000,000 funding |
+| Index group and create inbox | 9,588,660 | 60,000,000 |
+| Three head deployments | 42,002,663 | 60,000,000 |
+| Old-package deployment | 13,494,499 | 60,000,000 |
+| Delete four deployments | 0 charged; rebate cannot replenish | 60,000,000 |
+| Create retained decision audit | 19,718,899 | 20,000,000 |
+| Admit audit cohort | 4,268,688 | 20,000,000 |
+
+The retained ledger totals **121,061,508 MIST**. These actual submitted bounds
+succeeded locally; they are not reduced synthetic reservations. The head batch's
+gross computation plus storage is 48,636,800 MIST, with 6,634,137 MIST rebate.
+Even its 42,002,663-MIST net cost alone exceeds the public fresh remainder of
+24,941,318 MIST, before funding, inbox, the old-package case or audit. Lowering
+reservations or funding alone therefore cannot make this exact pair fit.
+
+Pair 1 uses the same historical base and the recovery checkout's contracts.
+Their root bytecode is identical, so it correctly skips an upgrade; this is
+explicitly not proof that the costly pair fits. It reuses the real pair-0 device
+identity with **24,993,732 MIST**, charged in full, avoids the 30M transfer and
+1,988,099-MIST transfer fee, and reduces the allowance debit by **6,994,367 MIST**
+relative to a new 30M-funded identity. Fresh/cached ledgers are 905,399,655 and
+71,966,178 MIST. Both complete the actual four-case ordinary suite. The actual
+browser-wallet suite also passes connect/rejection, registration/activation,
+group/deployment/upload/read, simulation refusal, executed abort, wrong-network
+refusal, cleanup and sweep: 101,988,099 MIST charged, 23,629,209 MIST net wallet
+debit. Local blob storage returns real bytes; this is not Walrus certification or
+manual extension-wallet acceptance.
+
+Reproduction (warm Move cache, locked frontend dependencies and built clients):
+
+```bash
+python3 scripts/test_fresh_cost_localnet.py \
+  --base-ref 65770f0963ed076936de483f545b47be44b98520 \
+  --head-ref 5c7f1f16546781b3ab7fc46fc1eec99cbb21d71a \
+  --next-head-ref HEAD --evidence-dir /workspace/evidence/sf221-local
+```
+
+Run only in a disposable network-none dev container. The runner rejects existing
+local services, uses private temporary node/wallet state, preserves each exact
+pair within the test, records independent gas effects, and terminates its node
+and local blob server. The read-only audit reader now permits a loopback localnet
+only inside network-none Docker, retaining testnet chain and deployment checks.
+The actual retention floor has not passed the audit checkpoint: that proof stays
+**pending**, not passed.
+
+**SF-221 remains blocked on fresh distinct-pair cost**, despite the tested identity
+reduction. With even zero device grant and no inbox, the measured required head
+batch cannot fit the historical remainder. A compatible package/storage reduction
+of at least the complete remaining suite deficit is still needed; changing the
+exact pair or resetting allowances between phases is not a repair. No public
+wallet writes, identical public publications, wallet rotation, extra faucet calls,
+protected-CI bypass or SF-198 interference occurred. The changed head is handed
+to the existing protected CI through PR #465; hosted effects are pending and
+must not be invented or polled by this worker. Keep the draft and retained claim
+until actual acceptance is ready.
 
 Testnet SUI comes from the faucet's proof-of-work endpoint, which needs **Sui CLI ≥ 1.82.1**:
 

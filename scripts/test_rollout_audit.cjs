@@ -13,6 +13,16 @@ const type = n => `${id('0xa164')}::deployment_manager::${n}`;
 const record = revision => ({ deployment_id: deployment, revision: String(revision), cohort: '0', state: 0, reason: 'operator approved', at_ms: '1234', admitted: [id('0x1')] });
 const field = revision => ({ $kind: 'DynamicField', name: { type: type('DecisionKey'), bcs: bcs.u64().serialize(revision).toBytes() }, valueType: type('DecisionRecord'), value: { bcs: p.deployment_manager_DecisionRecordBcs.serialize(record(revision)).toBytes() } });
 (async () => {
+  const { auditNetwork } = require('./read_rollout_audit_live.cjs');
+  const isolated = { disposable: true, interfaces: ['lo'] };
+  assert.equal(auditNetwork(manifest, isolated), 'localnet');
+  assert.throws(() => auditNetwork(manifest, { disposable: true, interfaces: ['lo', 'eth0'] }), /network none/);
+  assert.throws(() => auditNetwork(manifest, { disposable: false, interfaces: ['lo'] }), /Docker/);
+  assert.throws(() => auditNetwork({ ...manifest, rpc_url: 'https://fullnode.testnet.sui.io' }, isolated), /http:/);
+  assert.throws(() => auditNetwork({ ...manifest, rpc_url: 'http://example.com' }, isolated), /loopback/);
+  assert.equal(auditNetwork({ network: 'testnet', chain_identifier: '4c78adac' }, isolated), 'testnet');
+  assert.throws(() => auditNetwork({ network: 'testnet', chain_identifier: 'other' }, isolated));
+  assert.throws(() => auditNetwork({ network: 'mainnet', chain_identifier: '4c78adac' }, isolated));
   let events = 0, pages = 0;
   const client = { async listDynamicFields({ cursor }) { pages++; return cursor ? { dynamicFields: [field(1)], hasNextPage: false } : { dynamicFields: [field(3), field(2)], hasNextPage: true, cursor: 'next' }; }, async listEvents() { events++; throw Error('requested data below earliest available; lowest available checkpoint is 999'); } };
   let result = await progress.fetchRolloutDecisions(client, deployment, 3n);
