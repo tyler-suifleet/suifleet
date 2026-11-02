@@ -397,6 +397,29 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(f.controller.repair_context(f.project,changed),{})
         f.tick();self.assertEqual([m['pr'] for m in json.loads(f.row()['members'])],[2])
 
+    def test_funding_only_failure_retains_acceptance_without_owner_repair(self):
+        f=self.fixture();f.project['integration_batch']['max_members']=1
+        f.source_prs.pop(2);f.tick();row=f.row()
+        failure=dict(name='testnet/package-upgrade',workflowName='Automatic testnet',
+                     conclusion='FAILURE',classification='funding',
+                     detailsUrl='https://github.com/owner/repo/actions/runs/10')
+        f.controller.fail_candidate(f.project,row,[failure])
+        original=json.loads(f.row()['error'])
+        self.assertEqual(f.controller.repair_context(f.project,f.source_prs[1]),{})
+        self.assertEqual(f.controller.select(f.project,json.loads(row['members']),row['base'],1),[])
+        f.tick()
+        self.assertEqual(f.row()['status'],'failed')
+        self.assertEqual(json.loads(f.row()['error']),original)
+        self.assertFalse(any(kind=='fix' for _,_,kind in f.launched))
+        # Unknown/source, mixed and misleadingly named failures stay actionable.
+        for checks in ([{**failure,'classification':'source'}],
+                       [{k:v for k,v in failure.items() if k!='classification'}],
+                       [failure,{**failure,'name':'check','workflowName':'CI'}],
+                       [{**failure,'name':'check','workflowName':'CI'}]):
+            with self.subTest(checks=checks):
+                f.controller.update(row,error=canonical(dict(kind='candidate_checks_failed',checks=checks)))
+                self.assertEqual(f.controller.repair_context(f.project,f.source_prs[1])['_batch_failure']['checks'],checks)
+
     def test_candidate_ci_failure_expires_on_new_base_without_losing_source(self):
         f=self.fixture();f.project['integration_batch']['max_members']=1
         f.source_prs.pop(2);f.tick();failed=f.row()

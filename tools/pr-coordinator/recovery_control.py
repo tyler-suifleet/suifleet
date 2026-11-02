@@ -90,7 +90,32 @@ def recoverable_repair(job):
         job['error'] == 'Verified stopped; ticket/PR remains reserved for explicit recovery')
 
 
-def stopped_repair(dispatcher, project, owner, reserved=False, before=None, origin=None):
+def blocked_repair_result(job):
+    """Only explicit operator recovery may consume a reconciled blocked result."""
+    try:
+        result = json.loads(job['result'])
+        return (job['status'] == 'done' and job['publication_done'] == 1
+                and not job['error'] and not job['launch_intent']
+                and isinstance(result, dict) and result.get('verdict') == 'blocked'
+                and result.get('acceptance_complete') is False
+                and isinstance(result.get('model'), str) and bool(result['model'])
+                and isinstance(result.get('evidence'), str) and bool(result['evidence'].strip()))
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def verify_blocked_receipts(job, model):
+    source = Path(job['directory'])
+    result = json.loads(job['result'])
+    require(result['model'] == model, 'blocked repair model changed')
+    require(json.loads((source/'result.json').read_text()) == result,
+            'blocked repair result receipt mismatch')
+    exit_receipt = json.loads((source/'exit.json').read_text())
+    require(type(exit_receipt.get('returncode')) is int and exit_receipt['returncode'] == 0,
+            'blocked repair needs a durable successful worker exit')
+
+
+def stopped_repair(dispatcher, project, owner, reserved=False, before=None, origin=None, blocked_engineering_repair=False):
     """Validate coordinator evidence; reserve recovery in the dispatcher ledger.
 
     Both service authority locks are held by the caller. A new implementation
@@ -113,9 +138,13 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
         job = matching[0]
         proof = json.loads(job['repair_claim'])
         require(all(proof.get(k) == v for k,v in expected.items()), 'repair claim identity changed')
-        require(job['family'] == owner['agent'] and recoverable_repair(job), 'repair is not a verified stopped orphan/quarantine')
+        blocked = blocked_engineering_repair and blocked_repair_result(job)
+        require(job['family'] == owner['agent'] and (recoverable_repair(job) or blocked), 'repair is not a verified stopped orphan/quarantine or explicitly authorized blocked engineering repair')
+        if blocked:
+            require(owner['status'] in ('blocked', 'in_progress'), 'blocked repair owner changed')
+            verify_blocked_receipts(job, owner['model'])
         require(not job['retry_after'] or job['retry_after'] <= time.time(), 'repair retry backoff remains')
-        require(not job['launch_intent'] and not job['result'], 'repair has pending intent or structured result')
+        require(not job['launch_intent'] and (blocked or not job['result']), 'repair has pending intent or structured result')
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='quota_recoveries'").fetchone():
             require(not db.execute("SELECT 1 FROM quota_recoveries WHERE job=? AND state IN ('waiting','launch_intent')", (job['id'],)).fetchone(), 'provider quota recovery owns repair')
         for table, where, params in [
@@ -129,8 +158,9 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
     identity = dict(pid=job['pid'], started=job['started'])
     require(identity['pid'] and identity['started'] and json.loads((source/'process.json').read_text()) == identity, 'repair process receipt mismatch')
     exit_receipt = json.loads((source/'exit.json').read_text())
-    require(type(exit_receipt.get('returncode')) is int and exit_receipt['returncode'] != 0, 'repair needs a durable failed exit')
-    require(not (source/'result.json').exists(), 'repair result needs reconciliation')
+    if not blocked:
+        require(type(exit_receipt.get('returncode')) is int and exit_receipt['returncode'] != 0, 'repair needs a durable failed exit')
+        require(not (source/'result.json').exists(), 'repair result needs reconciliation')
     from coordinator import quota_reset, QUOTA_GRACE
     from dispatcher import capacity_failure
     reset = quota_reset(source)
@@ -153,7 +183,7 @@ def stopped_repair(dispatcher, project, owner, reserved=False, before=None, orig
                 directory=str(source), claim=json.dumps(owner), pid=job['pid'], started=job['started'], message='stopped coordinator repair')
 
 
-def resume(dispatcher, project, slot, key, reason, worker_path, origin=None):
+def resume(dispatcher, project, slot, key, reason, worker_path, origin=None, blocked_engineering_repair=False):
     """Caller holds activation, daemon and dispatcher authority locks."""
     require(isinstance(reason, str) and len(reason.strip()) >= 20, 'specific actionable repair instruction required')
     owner = dispatcher.ticket(project, 'show', key)
@@ -166,7 +196,7 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None):
         require(not any(r['claim'] and json.loads(r['claim']).get('token') == owner.get('token')
                         for r in dispatcher.db.execute("SELECT * FROM runs WHERE project=? AND status!='finished'", (project['id'],))),
                 'another implementation recovery remains reserved')
-    row = stopped_repair(dispatcher, project, owner, origin=origin) if repair else candidates[0]
+    row = stopped_repair(dispatcher, project, owner, origin=origin, blocked_engineering_repair=blocked_engineering_repair) if repair else candidates[0]
     claim = json.loads(row['claim'])
     require(json.loads((Path(row['directory'])/'command.json').read_text()) == dispatcher.config['workers'][slot['family']], 'original command changed')
     fence(dispatcher, project, row, claim)
@@ -201,8 +231,9 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None):
         # replacement is the only intentional uncertain receipt at this point.
         fence(dispatcher, project, row, claim, reserved_session=session)
         if repair:
-            rechecked = stopped_repair(dispatcher, project, fresh, reserved=True, origin=origin)
-            require(rechecked['session'] == row['session'] and rechecked['manual_origin'] == row['manual_origin'],
+            rechecked = stopped_repair(dispatcher, project, fresh, reserved=True, origin=origin, blocked_engineering_repair=blocked_engineering_repair)
+            require(rechecked['session'] == row['session'] and rechecked['manual_origin'] == row['manual_origin']
+                    and rechecked['sources'] == row['sources'],
                     'repair source or manual origin changed during recovery')
             if row['manual_origin']:
                 (directory/'manual-origin.json').write_bytes(rechecked['manual_origin'])
@@ -234,7 +265,8 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None):
             from coordinator import Store
             with closing(Store(dispatcher.state/'reviews.sqlite3').db) as coordinator_db:
                 Store.retire_recovered_repairs(coordinator_db, row['sources'], dict(
-                    session=session, directory=str(directory), pid=child.pid, started=started))
+                    session=session, directory=str(directory), pid=child.pid, started=started),
+                    blocked_engineering_repair=blocked_engineering_repair)
         return dict(project=project['id'], ticket=key, family=slot['family'], session=session, pid=child.pid, started=started, directory=str(directory))
     except Exception:
         dispatcher.update(session, 'orphaned', 'Explicit recovery launch uncertain; inspect receipt before retry')
@@ -270,6 +302,8 @@ def main():
     parser.add_argument('--runtime', type=Path, default=Path.home()/'.local/lib/pr-coordinator/current')
     parser.add_argument('--project', required=True)
     parser.add_argument('--ticket', required=True)
+    parser.add_argument('--blocked-engineering-repair', action='store_true',
+                        help='Operator confirms concrete authorized code repairs, not an external decision or credential/hardware blocker')
     parser.add_argument('--manual-origin', type=Path, help='Existing private claim-bound origin PID/start receipt predating the stopped repair')
     parser.add_argument('--reason', required=True, help='Concrete authorized implementation repairs; never override external decisions')
     args = parser.parse_args()
@@ -299,7 +333,7 @@ def main():
             stack.callback(dispatcher.db.close)
             owner = dispatcher.ticket(project,'show',args.ticket)
             slot = next(s for s in config['implementation_slots'] if s['project'] == args.project and s['family'] == owner['agent'])
-            print(json.dumps(resume(dispatcher,project,slot,args.ticket,args.reason,args.runtime.resolve()/'worker.py', **({'origin': args.manual_origin} if args.manual_origin else {}))))
+            print(json.dumps(resume(dispatcher,project,slot,args.ticket,args.reason,args.runtime.resolve()/'worker.py', **({'blocked_engineering_repair': True} if args.blocked_engineering_repair else {}), **({'origin': args.manual_origin} if args.manual_origin else {}))))
         finally:
             # A first signal during restoration must not abort parent restart.
             for number in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
