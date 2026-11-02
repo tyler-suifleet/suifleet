@@ -85,7 +85,7 @@ module sui_edge::desired_state {
     }
 
     public(package) fun begin_as(group: &DeviceGroup, admin: address): RevisionPlan {
-        require_condition(device_group::admin(group) == admin, ENotAdmin);
+        assert!(device_group::admin(group) == admin, ENotAdmin);
         let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             (state.revision, state.components)
@@ -99,9 +99,9 @@ module sui_edge::desired_state {
     /// be the admin's own, target this group and authenticate its recipe
     /// through a direct digest or an immutable catalog version binding.
     public fun set_component(plan: &mut RevisionPlan, deployment: &mut DeploymentRecord) {
-        require_condition(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
-        require_condition(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
-        require_condition(deployment_manager::has_recipe_digest(deployment) ||
+        assert!(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
+        assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
+        assert!(deployment_manager::has_recipe_digest(deployment) ||
             component_catalog::has_authenticated_version(deployment), EUnverifiedRecipe);
         deployment_manager::mark_managed(deployment);
         let name = *deployment_manager::component_name(deployment);
@@ -115,7 +115,7 @@ module sui_edge::desired_state {
 
     /// Stop desiring a component. Devices retire it from management.
     public fun remove_component(plan: &mut RevisionPlan, name: String) {
-        require_condition(plan.components.contains(&name), EUnknownComponent);
+        assert!(plan.components.contains(&name), EUnknownComponent);
         plan.components.remove(&name);
     }
 
@@ -127,16 +127,16 @@ module sui_edge::desired_state {
     /// `ctx` scopes the SF-129 retirement check to the current transaction.
     public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
-        require_condition(device_group::group_id(group) == group_id, EWrongGroup);
-        require_condition(authority == admin && device_group::admin(group) == admin, ENotAdmin);
-        require_condition(revision(group) == base_revision, EStaleRevision);
+        assert!(device_group::group_id(group) == group_id, EWrongGroup);
+        assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
+        assert!(revision(group) == base_revision, EStaleRevision);
         let state = DesiredState { revision: base_revision + 1, components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();
         let uid = device_group::uid_mut(group);
         if (df::exists(uid, RetirementCheckKey {})) {
             let check: &RetirementCheck = df::borrow(uid, RetirementCheckKey {});
             if (check.tx == *ctx.digest()) {
-                require_condition(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
+                assert!(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
             } else {
                 let _: RetirementCheck = df::remove(uid, RetirementCheckKey {});
             };
@@ -169,7 +169,7 @@ module sui_edge::desired_state {
     /// and only by a group it targets (`set_component`), so those groups are
     /// the complete set to check. Creator only.
     public fun begin_retirement(deployment: &DeploymentRecord, ctx: &mut TxContext): Retirement {
-        require_condition(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
         let managed = deployment_manager::is_managed(deployment);
         let pending = if (managed) *deployment_manager::target_groups(deployment) else vector[];
         Retirement { deployment_id: object::id(deployment), managed, pending }
@@ -181,9 +181,9 @@ module sui_edge::desired_state {
     /// cannot make the record desired again.
     public fun confirm_not_desired(retirement: &mut Retirement, group: &mut DeviceGroup, ctx: &mut TxContext) {
         let group_id = device_group::group_id(group);
-        require_condition(retirement.pending.contains(&group_id), EWrongGroup);
+        assert!(retirement.pending.contains(&group_id), EWrongGroup);
         let (_, deployments) = components(group).into_keys_values();
-        require_condition(!deployments.contains(&retirement.deployment_id), EStillDesired);
+        assert!(!deployments.contains(&retirement.deployment_id), EStillDesired);
         let uid = device_group::uid_mut(group);
         if (df::exists(uid, RetirementCheckKey {})) {
             let check: &mut RetirementCheck = df::borrow_mut(uid, RetirementCheckKey {});
@@ -208,10 +208,10 @@ module sui_edge::desired_state {
     /// until its receipt cleanup has retired every root.
     public fun retire(retirement: Retirement, deployment: DeploymentRecord, ctx: &mut TxContext) {
         let Retirement { deployment_id, managed, pending } = retirement;
-        require_condition(object::id(&deployment) == deployment_id, EWrongRecord);
-        require_condition(pending.is_empty(), EUnconfirmed);
+        assert!(object::id(&deployment) == deployment_id, EWrongRecord);
+        assert!(pending.is_empty(), EUnconfirmed);
         // Assigned to a plan after `begin_retirement`: its groups were never checked.
-        require_condition(managed || !deployment_manager::is_managed(&deployment), ERetiring);
+        assert!(managed || !deployment_manager::is_managed(&deployment), ERetiring);
         // Sharded records (SF-127) keep their deletion path in the receipt
         // directory; their receipt roots must be retired first.
         let schema = deployment_manager::receipt_schema(&deployment);
@@ -241,8 +241,4 @@ module sui_edge::desired_state {
     }
 
     public fun plan_components(plan: &RevisionPlan): &VecMap<String, ID> { &plan.components }
-    // Shared abort branch preserves each condition, code and module.
-    fun require_condition(condition: bool, code: u64) {
-        if (!condition) abort code
-    }
 }

@@ -40,16 +40,16 @@ module sui_edge::fleet_handover {
     public fun propose(recipient: address, objects: vector<ID>, kinds: vector<u64>,
         expires_ms: u64, clock: &Clock, ctx: &mut TxContext,
     ) {
-        require_condition(recipient != ctx.sender() && recipient != @0x0, EParty);
+        check_Party(recipient != ctx.sender() && recipient != @0x0);
         let n = objects.length();
-        require_condition(n > 0 && n <= 512 && kinds.length() == n, EInventory);
-        require_condition(expires_ms > clock.timestamp_ms(), EExpired);
+        check_Inventory(n > 0 && n <= 512 && kinds.length() == n);
+        assert!(expires_ms > clock.timestamp_ms(), EExpired);
         let mut completed = vector[];
         let mut i = 0;
         while (i < n) {
-            require_condition(kinds[i] <= 4, EInventory);
+            check_Inventory(kinds[i] <= 4);
             let mut j = 0;
-            while (j < i) { require_condition(objects[j] != objects[i], EInventory); j = j + 1; };
+            while (j < i) { check_Inventory(objects[j] != objects[i]); j = j + 1; };
             completed.push_back(false);
             i = i + 1;
         };
@@ -71,19 +71,19 @@ module sui_edge::fleet_handover {
     }
 
     public fun cancel(h: &mut Handover, ctx: &TxContext) {
-        require_condition(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
-        require_condition(h.state < 2, EState);
+        check_Party(ctx.sender() == h.source || ctx.sender() == h.recipient);
+        check_State(h.state < 2);
         h.state = 2;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
     }
 
     fun step(h: &mut Handover, id: ID, kind: u64, clock: &Clock, ctx: &TxContext) {
-        require_condition(ctx.sender() == h.source, EParty);
-        require_condition(h.state == 1, EState);
-        require_condition(clock.timestamp_ms() < h.expires_ms, EExpired);
+        check_Party(ctx.sender() == h.source);
+        check_State(h.state == 1);
+        assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
         let (found, i) = h.objects.index_of(&id);
-        require_condition(found, EInventory);
-        require_condition(h.kinds[i] == kind && !h.completed[i], EInventory);
+        check_Inventory(found);
+        check_Inventory(h.kinds[i] == kind && !h.completed[i]);
         *h.completed.borrow_mut(i) = true;
         event::emit(Progress { handover_id: object::id(h), object_id: id, kind });
     }
@@ -119,17 +119,23 @@ module sui_edge::fleet_handover {
     }
 
     public fun finish(h: &mut Handover, ctx: &TxContext) {
-        require_condition(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
-        require_condition(h.state == 1, EState);
-        require_condition(!h.completed.contains(&false), EInventory);
+        check_Party(ctx.sender() == h.source || ctx.sender() == h.recipient);
+        check_State(h.state == 1);
+        check_Inventory(!h.completed.contains(&false));
         h.state = 3;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
     }
 
     public fun state(h: &Handover): u8 { h.state }
     public fun completed(h: &Handover): vector<bool> { h.completed }
-    // Shared abort branch preserves each condition, code and module.
-    fun require_condition(condition: bool, code: u64) {
-        if (!condition) abort code
+    // Share each named abort branch without changing its module or error code.
+    fun check_Inventory(condition: bool) {
+        if (!condition) abort EInventory
+    }
+    fun check_Party(condition: bool) {
+        if (!condition) abort EParty
+    }
+    fun check_State(condition: bool) {
+        if (!condition) abort EState
     }
 }

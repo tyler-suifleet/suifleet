@@ -141,7 +141,7 @@ module sui_edge::seal_policy {
     /// require its current, unrevoked key.
     public fun grant_device(policy: &mut AccessPolicy, cap: &AccessAdminCap, registry: &DeviceRegistry, device_id: ID) {
         check_admin(policy, cap);
-        require_condition(device_registry::is_custodied(registry, device_id), EUnknownDevice);
+        assert!(device_registry::is_custodied(registry, device_id), EUnknownDevice);
         add(&mut policy.devices, device_id);
         changed(policy, SCOPE_DEVICE, device_id.to_address(), true);
     }
@@ -166,7 +166,7 @@ module sui_edge::seal_policy {
 
     public fun grant_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup, ctx: &TxContext) {
         check_admin(policy, cap);
-        require_condition(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);
+        assert!(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);
         let group_id = device_group::group_id(group);
         add(&mut policy.groups, group_id);
         changed(policy, SCOPE_GROUP, group_id.to_address(), true);
@@ -188,8 +188,8 @@ module sui_edge::seal_policy {
 
     /// Move the policy to this code's version; older code then refuses it.
     public fun migrate(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
-        require_condition(cap.policy_id == object::id(policy), EWrongCap);
-        require_condition(policy.version < VERSION, ENotNewer);
+        assert!(cap.policy_id == object::id(policy), EWrongCap);
+        assert!(policy.version < VERSION, ENotNewer);
         policy.version = VERSION;
         event::emit(PolicyMigrated { policy_id: object::id(policy), version: VERSION });
     }
@@ -198,12 +198,12 @@ module sui_edge::seal_policy {
 
     /// An account granted by address.
     entry fun seal_approve_account(id: vector<u8>, policy: &AccessPolicy, ctx: &TxContext) {
-        require_condition(account_allowed(policy, &id, ctx.sender()), ENoAccess);
+        check_NoAccess(account_allowed(policy, &id, ctx.sender()));
     }
 
     /// A device granted directly, asking with its active key.
     entry fun seal_approve_device(id: vector<u8>, policy: &AccessPolicy, registry: &DeviceRegistry, device_id: ID, ctx: &TxContext) {
-        require_condition(device_allowed(policy, &id, registry, device_id, ctx.sender()), ENoAccess);
+        check_NoAccess(device_allowed(policy, &id, registry, device_id, ctx.sender()));
     }
 
     /// A device in a granted group, asking with its active key.
@@ -215,7 +215,7 @@ module sui_edge::seal_policy {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        require_condition(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()), ENoAccess);
+        check_NoAccess(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()));
     }
 
     public fun account_allowed(policy: &AccessPolicy, id: &vector<u8>, sender: address): bool {
@@ -253,7 +253,7 @@ module sui_edge::seal_policy {
 
     /// Whether `id` is a current identity of this policy, under this code version.
     public fun identity_matches(policy: &AccessPolicy, id: &vector<u8>): bool {
-        require_condition(policy.version == VERSION, EWrongVersion);
+        assert!(policy.version == VERSION, EWrongVersion);
         let length = id.length();
         if (length < PREFIX_LENGTH + MIN_NONCE || length > PREFIX_LENGTH + MAX_NONCE) return false;
         let prefix = identity_prefix(policy);
@@ -277,19 +277,19 @@ module sui_edge::seal_policy {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     fun check_admin(policy: &AccessPolicy, cap: &AccessAdminCap) {
-        require_condition(cap.policy_id == object::id(policy), EWrongCap);
-        require_condition(policy.version == VERSION, EWrongVersion);
+        assert!(cap.policy_id == object::id(policy), EWrongCap);
+        assert!(policy.version == VERSION, EWrongVersion);
     }
 
     fun add<T: copy + drop>(list: &mut vector<T>, item: T) {
-        require_condition(!list.contains(&item), EAlreadyGranted);
-        require_condition(list.length() < MAX_ENTRIES, ETooMany);
+        assert!(!list.contains(&item), EAlreadyGranted);
+        assert!(list.length() < MAX_ENTRIES, ETooMany);
         list.push_back(item);
     }
 
     fun remove<T: copy + drop>(list: &mut vector<T>, item: T) {
         let (found, index) = list.index_of(&item);
-        require_condition(found, ENotGranted);
+        assert!(found, ENotGranted);
         list.swap_remove(index);
     }
 
@@ -304,8 +304,8 @@ module sui_edge::seal_policy {
 
     #[test_only]
     public fun set_version_for_testing(policy: &mut AccessPolicy, version: u64) { policy.version = version }
-    // Shared abort branch preserves each condition, code and module.
-    fun require_condition(condition: bool, code: u64) {
-        if (!condition) abort code
+    // Share each named abort branch without changing its module or error code.
+    fun check_NoAccess(condition: bool) {
+        if (!condition) abort ENoAccess
     }
 }

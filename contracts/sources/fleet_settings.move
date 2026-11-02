@@ -106,7 +106,7 @@ module sui_edge::fleet_settings {
         let uid = fleet_budget::uid_mut(budget);
         let previous = if (df::exists(uid, SettingsKey {})) {
             let current: &mut Settings = df::borrow_mut(uid, SettingsKey {});
-            require_condition(current.version <= VERSION, ENewerVersion);
+            assert!(current.version <= VERSION, ENewerVersion);
             let previous = *current;
             *current = settings;
             option::some(previous)
@@ -129,14 +129,14 @@ module sui_edge::fleet_settings {
         archive_interval_ms: u64,
         archive_retention_epochs: u32,
     ): Settings {
-        require_condition(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS, EOutOfBounds);
-        require_condition(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
+        check_OutOfBounds(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS);
+        check_OutOfBounds(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= MAX_ROLLOUT_CHECK_INTERVAL_MS
-            && rollout_check_interval_ms <= check_interval_ms), EOutOfBounds);
-        require_condition(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS, EOutOfBounds);
-        require_condition(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS, EOutOfBounds);
-        require_condition(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
-            && archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS, EOutOfBounds);
+            && rollout_check_interval_ms <= check_interval_ms));
+        check_OutOfBounds(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS);
+        check_OutOfBounds(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS);
+        check_OutOfBounds(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
+            && archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS);
         Settings {
             version: VERSION, check_interval_ms, rollout_check_interval_ms, health_interval_ms,
             archive_interval_ms, archive_retention_epochs,
@@ -175,8 +175,8 @@ module sui_edge::fleet_settings {
         let current: &mut Settings = df::borrow_mut(fleet_budget::uid_mut(budget), SettingsKey {});
         current.version = version;
     }
-    // Shared abort branch preserves each condition, code and module.
-    fun require_condition(condition: bool, code: u64) {
-        if (!condition) abort code
+    // Share each named abort branch without changing its module or error code.
+    fun check_OutOfBounds(condition: bool) {
+        if (!condition) abort EOutOfBounds
     }
 }

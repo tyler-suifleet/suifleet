@@ -110,7 +110,7 @@ module sui_edge::device_group {
         device: &Device,
         ctx: &TxContext,
     ) {
-        require_condition(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         add_managed(group, device_registry::device_id(device));
     }
 
@@ -126,7 +126,7 @@ module sui_edge::device_group {
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun delete_group(mut group: DeviceGroup, ctx: &TxContext) {
-        require_condition(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
         if (is_indexed(&group)) {
@@ -140,8 +140,8 @@ module sui_edge::device_group {
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
     /// marking the group indexed. Admin only; repeat until `remaining` is 0.
     public fun index_members(group: &mut DeviceGroup, limit: u64, ctx: &mut TxContext) {
-        require_condition(ctx.sender() == group.admin, ENotAdmin);
-        require_condition(limit > 0, EInvalidLimit);
+        check_NotAdmin(ctx.sender() == group.admin);
+        assert!(limit > 0, EInvalidLimit);
         if (!is_indexed(group)) {
             df::add(&mut group.id, IndexKey {}, GroupIndex { members: 0 });
         };
@@ -165,7 +165,7 @@ module sui_edge::device_group {
 
     /// Called only by the recipient-confirmed fleet handover protocol.
     public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
-        require_condition(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         group.admin = recipient;
     }
 
@@ -211,7 +211,7 @@ module sui_edge::device_group {
             index.members = index.members - 1;
         };
         let (found, idx) = group.device_ids.index_of(&device_id);
-        require_condition(found || indexed, EDeviceNotInGroup);
+        assert!(found || indexed, EDeviceNotInGroup);
         if (found) { group.device_ids.swap_remove(idx); };
         event::emit(DeviceRemovedFromGroup {
             group_id: object::id(group),
@@ -223,7 +223,7 @@ module sui_edge::device_group {
     #[test_only]
     public fun legacy_add_for_testing(group: &mut DeviceGroup, device_id: ID) {
         let (found, _) = group.device_ids.index_of(&device_id);
-        require_condition(!found, EDeviceAlreadyInGroup);
+        assert!(!found, EDeviceAlreadyInGroup);
         group.device_ids.push_back(device_id);
     }
 
@@ -256,8 +256,8 @@ module sui_edge::device_group {
     /// For package modules that keep state on a group (desired_state).
     public(package) fun uid(group: &DeviceGroup): &UID { &group.id }
     public(package) fun uid_mut(group: &mut DeviceGroup): &mut UID { &mut group.id }
-    // Shared abort branch preserves each condition, code and module.
-    fun require_condition(condition: bool, code: u64) {
-        if (!condition) abort code
+    // Share each named abort branch without changing its module or error code.
+    fun check_NotAdmin(condition: bool) {
+        if (!condition) abort ENotAdmin
     }
 }
