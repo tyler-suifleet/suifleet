@@ -12,9 +12,9 @@
     "digest": "9e0d16f4b2f9482aa8aaba63cf0ed0e8f0405e87338d26ca1fbe0a83d1f0de2b"
   },
   "source_patch_order": [
-    "sf221-factoring-candidate.patch",
-    "sf221-assertion-candidate.patch",
-    "sf221-lifecycle-candidate.patch"
+    "sf221-factoring-candidate.patch.b64",
+    "sf221-assertion-candidate.patch.b64",
+    "sf221-lifecycle-candidate.patch.b64"
   ],
   "source_patch_sha256": "b25d86a73efb75f1e3d9ebe63b981cc882b4b32aaf612f36f9c602fba45ae2be",
   "compiler": "sui 1.81.1-e04cf9aa915c",

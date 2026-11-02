@@ -33,8 +33,8 @@
     "saved_vs_previous_bytes": 2706,
     "saved_vs_original_bytes": 3083,
     "patch_order": [
-      "docs/validation/sf221-factoring-candidate.patch",
-      "docs/validation/sf221-assertion-candidate.patch"
+      "docs/validation/sf221-factoring-candidate.patch.b64",
+      "docs/validation/sf221-assertion-candidate.patch.b64"
     ]
   },
   "candidate_commit": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",

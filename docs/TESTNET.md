@@ -101,9 +101,16 @@ both local harness executions. Physical, mainnet, manual real-wallet and
 production-provider acceptance remains unrun in #32/#159. No testnet ceiling,
 faucet bound, unknown-outcome fence or authenticated-state protection changes.
 
+The three archived SF-221 source candidates use Base64 (`.patch.b64`) to
+preserve unified-diff blank context lines without introducing trailing whitespace
+into the repository. Decode each before applying, for example:
+`base64 --decode docs/validation/sf221-factoring-candidate.patch.b64 > /tmp/sf221-factoring-candidate.patch`.
+Apply decoded patches in the recorded order. Existing patch SHA-256 values in
+the effects receipts describe the **decoded bytes** and remain unchanged.
+
 ### SF-221 assertion factoring and completed local temporal measurement (2026-11-02)
 
-A further [incremental source candidate](validation/sf221-assertion-candidate.patch)
+A further [incremental source candidate](validation/sf221-assertion-candidate.patch.b64)
 factors 52 scoped-action calls and assertion failure branches into private
 helpers. Apply it after the preceding factoring patch, on the same pinned
 combined `7335545` source (`git apply --unidiff-zero` for this incremental
@@ -165,7 +172,7 @@ PR #465 stays draft, with exact public CI pending and unpolled.
 
 ### SF-221 concrete source factoring attempt (2026-11-02)
 
-The [retained source patch](validation/sf221-factoring-candidate.patch) applies
+The [retained source patch](validation/sf221-factoring-candidate.patch.b64) applies
 only to combined candidate `7335545137acf5e773aac554eac027d787b3009d`.
 It factors the intent-vector prefixes of 53 secured customer wrappers and repeated
 fleet authorization checks into private functions, keeping public signatures,
@@ -1003,7 +1010,7 @@ Unknown submissions keep their entire gas reservation. No previous transaction's
 rebate replenishes the allowance. Failure regressions cover missing receipts,
 independent-effects failures, incorrect versions and unknown successor outcomes.
 
-[The additional source candidate](validation/sf221-lifecycle-candidate.patch)
+[The additional source candidate](validation/sf221-lifecycle-candidate.patch.b64)
 factors four identical group-authorization sequences, preserving check order,
 public signatures, layouts and existing abort functions/codes. It saves only 80
 more bytes (90,590 → 90,510) and remains outside production, applied after the
