@@ -892,6 +892,23 @@ module sui_edge::customer {
         configure_charging(customer, registry, source, ctx);
         security_policy::finish(&mut customer.id);
     }
+    /// All current classes authorize configuration and policy weakening.
+    public fun configure_security_delays(customer: &mut Customer, milliseconds: vector<u64>, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        security_policy::configure_delays(&mut customer.id, milliseconds, ctx);
+        enrollment::invalidate_authority(&mut customer.id);
+    }
+    public fun configure_security_delays_secured(customer: &mut Customer, milliseconds: vector<u64>, action: Action, clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"configure_security_delays")), bcs::to_bytes(customer), bcs::to_bytes(&milliseconds)];
+        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, clock, ctx);
+        configure_security_delays(customer, milliseconds, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+    public fun queue_security_action(customer: &Customer, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        security_policy::prepare_with_arguments(&customer.id, arguments_bcs, expires_ms, clock, ctx);
+    }
     public fun prepare_security_action(customer: &Customer, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         assert_security_administrator(customer, ctx);
         security_policy::prepare(&customer.id, intent, expires_ms, clock, ctx);
