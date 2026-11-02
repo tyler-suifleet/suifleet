@@ -388,6 +388,41 @@ module sui_edge::customer_tests {
         sui_edge::deployment_manager::report_verified_status(&mut d, &r, &cap, 1, s.ctx());
         ts::return_shared(d); ts::return_shared(r); ts::return_to_address(@0xD1, cap); s.end();
     }
+    fun fleet_deployment(s: &mut ts::Scenario, fid: ID, did: ID) {
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid); let clock = sui::clock::create_for_testing(s.ctx());
+        customer::create_deployment(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"), utf8(b"hash"),
+            utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), vector[], vector[did], &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+    }
+    #[test]
+    fun fleet_admin_sets_and_clears_recurring_window() {
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        fleet_deployment(&mut s, a, did);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        assert!(sui_edge::deployment_manager::recurring_window(&d).is_some());
+        customer::clear_recurring_window(&c, &f, &mut d, s.ctx());
+        assert!(sui_edge::deployment_manager::recurring_window(&d).is_none());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun recurring_window_cannot_cross_fleets() {
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        fleet_deployment(&mut s, a, did);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(b);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
+    }
+    #[test, expected_failure(abort_code = 2, location = sui_edge::deployment_manager)]
+    fun fleet_record_rejects_direct_creator_recurring_window() {
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        fleet_deployment(&mut s, a, did);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        sui_edge::deployment_manager::set_recurring_window(&mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(d); s.end();
+    }
     #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
     fun policy_device_grants_cannot_cross_fleets() {
         let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);

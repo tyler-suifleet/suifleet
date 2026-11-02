@@ -59,7 +59,7 @@ AWS provides device/group targets, component dependency resolution, deployment r
 | Failure-threshold abort | Missing | Fleet aggregation, minimum sample size and threshold evaluation | P1 |
 | Pause/resume/cancel | Missing | Durable state transitions; deletion is not cancellation | P1 |
 | Device update timeout | Partial: bounded command/download | End-to-end deadline, offline expiry, retry policy and backoff | P1 |
-| Maintenance windows/update deferral | Missing | Scheduler and component safe-to-update handshake | P1 |
+| Maintenance windows/update deferral | Partial: SF-018 not-before/expiry/absolute window/notice, plus SF-174 recurring weekly windows in an IANA zone, evaluated on the device with a bundled tz database (beyond Greengrass; [design](RECURRING_MAINTENANCE_WINDOWS.md)); locally/simulator tested | Component safe-to-update handshake; public-network and hardware acceptance | P1 |
 | Automatic application rollback | Missing | Versioned cache, reversible install, health checks and last-known-good state | P1 |
 | OS/firmware recovery | External apply hook only | Verified handoff to configured platform installer scripts; preserve SuiFleet state and report explicit results. Platform owns installation, reboot and firmware recovery | P1 |
 | Safe daemon self-update | Partial (SF-026): configured handoff to a verified, preflighted daemon binary through the base `--launch` binary; startup failures and hangs fall back via systemd restart/start timeout without the new daemon; real-systemd and simulator tested ([DAEMON_UPDATE.md](DAEMON_UPDATE.md)) | Physical power-loss during handoff and signed-release (SF-039) verification of daemon artifacts | P1 |
