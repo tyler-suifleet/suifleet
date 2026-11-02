@@ -38,6 +38,87 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 ordered guards and shared lifecycle: larger retained grants (2026-11-02)
+
+The [current source and effects receipt](validation/sf221-ordered-guard-costs.json)
+supersedes the local-only cost conclusion below, while preserving the actual
+batch-501 public failure. Source `79279216` includes main `df5d6d80`; its parent
+acceptance inputs match the failed composed candidate's contracts, daemon,
+frontend and acceptance scripts. No other implementation branch is imported.
+Protected exact-candidate public effects and independent review remain required;
+these disposable-chain measurements are local implementation evidence.
+
+The compatible source reduction shares the original private abort guards without
+materializing intermediate booleans: AND checks execute in order and OR checks
+skip later expressions after success. The same private helper aborts with the
+same original `u64` code; bounds checks still precede indexing/subtraction.
+Secured customer wrappers share exact prefix serialization and scoped activation,
+keeping their caller authentication before serialization. Existing verified
+constructors, group events and deletion bodies are reused with the same authority.
+Additional non-error literals use explicit widening from their original numeric
+values. APIs, layouts and type origins are unchanged. Bytecode is **85,448 bytes**,
+**2,412 fewer** than the last public failure's 87,860 bytes. Error constants and
+strict lint baselines are unchanged.
+
+The expanded network-none harness can prepare a prior funded device identity,
+seal/open its private fixture state using the production AES-GCM implementation,
+and then run the ordinary suite with its **entire retained balance charged**.
+The preparation has its own explicit ledger and effects; it never credits the
+ordinary ledger. Plaintext, ciphertext and the random local encryption secret
+stay in the private temporary runtime directory. The receipt contains only the
+ciphertext digest, public identity and funding/effects. This exercises local
+cryptographic restoration; protected CI artifact producer/run authentication is
+still checked by its existing offline regressions and the pending public gate.
+
+```
+python3 -u scripts/test_fresh_cost_localnet.py --base-ref df5d6d80 --head-ref 79279216 \
+  --compact-lifecycle --retained-device-grant-mist 30000000 \
+  --with-security --with-temporal --evidence-dir /effects
+```
+
+Run only in the documented disposable `--network none` dev container with warm
+compiler/frontend dependencies and built daemon helpers. The 30M value is the
+unchanged upper identity-reuse bound, not a new device-funding target or allowance.
+
+Both final harnesses exited **0**. Every ordinary reservation and cumulative
+charge is independently replayed from actual `gasUsed`, with the grant injected
+at its recorded point after setup. Wallet balance/refunds are separate fields.
+
+| Executed disposable-chain suite | Charged allowance (MIST) | Limit (MIST) |
+|---|---:|---:|
+| Cold ordinary fresh / cached | 1,575,862,078 / 27,735,669 | 1,600,000,000 each |
+| Full 30M retained grant ordinary fresh / cached | 1,597,815,584 / 40,741,302 | 1,600,000,000 each |
+| Fresh / cached security | 986,181,632 / 195,462,969 | 1,500,000,000 each |
+| Full browser fresh / cached (30M case) | 101,000,198 each | 150,000,000 each |
+| Full browser fresh / cached (cold case) | 101,988,099 / 101,000,198 | 150,000,000 each |
+| Actual post-pruning audit retirement, separate ledger | 0 (full 20M reserved) | 1,600,000,000 |
+
+The max-grant fresh run has **2,184,416 MIST remaining after all steps**. This is
+measured headroom, not a guarantee for future code growth or different public
+charges. The reader proved the original decision after the actual node retention
+floor passed its checkpoint, with event reads forbidden. Separate retirement
+rebates never credit ordinary. The receipt retains all ordinary effect components,
+security net fees, browser child digests/status and exact source hashes. The old
+harness retains gross `gasUsed` for ordinary/preparation/temporal, but only net
+fees from executed effects for security/browser parent transactions.
+
+Final source checks passed: strict compiler and unchanged unsuppressed lint;
+360 root, 79 storage and 60 data tests plus actual authority-removal controls;
+all 16 interfaces; 19 native VM cases; scoped core/native/object/registry proof
+gates with their exact negative controls. The source keeps all 112 original
+`u64` error declarations and values. New offline effects regressions preserve the
+failed full-reservation near miss, exact grant timing, maximum eligibility,
+cached pair reuse and the separate temporal ledger. Protected public CI and fresh
+independent review remain pending; no public result is claimed.
+
+A preceding real run of source `8e2cb673` with that same maximum retained grant
+completed all four deployment cases but refused the audit's full 11M reservation:
+**1,589,409,011 MIST used**, **10,590,989 remaining**, **409,011 short**. Its failed
+outcome, successful cached/security/browser runs and separate temporal cleanup
+remain in the receipt. Constructor/lifecycle sharing then saved another 239 bytes.
+No failed ledger was reset, refilled or relabeled, and the audit's durable cleanup
+ownership and unknown-outcome fences were preserved.
+
 ### SF-221 batch 501: confirmed public allowance blocker (2026-11-02)
 
 [Protected run 41521400618](https://github.com/tyler-suifleet/suifleet/actions/runs/41521400618)
@@ -59,7 +140,7 @@ Base publication cost **789,200,400**, versus the previous local **785,258,894**
 Thus the local success below does not establish public acceptance. A faucet or
 larger wallet balance cannot repair this allowance failure.
 
-**SF-221 remains blocked; no validated cost repair is delivered by this receipt.**
+**At this historical receipt, SF-221 remained blocked; it delivered no validated cost repair.**
 A disposable pinned-compiler experiment narrowed error constants and saved only
 631 bytes (87,860 to 87,229). Its unchanged Move tests fail because
 `expected_failure` requires `u64` error constants. It was not shipped; no
