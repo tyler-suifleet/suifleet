@@ -712,3 +712,73 @@ that measured deficit. The full ordinary/security fresh acceptance suite has
 **not** been demonstrated within its unchanged ceilings. SF-221 remains
 reserved and its PR draft; further compatible source/storage or transaction
 reduction is required. SF-201's live repair is separate and untouched.
+
+### SF-221 combined-candidate batching recovery (2026-11-01)
+
+The next repair batches head-package custody activation, indexing the existing
+pre-upgrade group and creating/following/sharing its inbox. It transfers the new
+owner cap after borrowing it inside the same PTB. Registration and membership
+still occur before the upgrade. A retained legacy activation marker selects the
+original single-call operation; a new batch marker requires the verified inbox
+APIs. Both paths retain verified-byte reconciliation and persist the returned
+IDs atomically with clearing the pending marker. No funding is added to this
+checkpoint, and no ceiling or ordinary gas reservation changes.
+
+[Actual combined-candidate effects](validation/sf221-combined-batch-costs.json)
+use candidate `7335545137acf5e773aac554eac027d787b3009d`, exact ordinary base
+`cf65ea175435d1b6e111b988d51d9654a63c9db2`, and the scoped SF-221 repair overlay
+in a separate temporary clone. Sibling source changes were preserved. With the
+pinned compiler and protocol-140 network-none chain, the combined batch costs
+17,325,479 MIST versus the earlier separate activation/inbox measurements of
+8,737,261 + 9,588,660: **1,000,442 MIST saved**. This is a real computation saving,
+not a reduced reservation or a rebate replenishing the ledger.
+
+This does **not** complete SF-221. The fresh ordinary phase still refuses funding
+at 1,581,648,189/1,600,000,000 MIST after creating its inbox. Its separate retained
+measurement passes all four ordinary OTA cases and cleanup at 111,472,848 MIST,
+including funding and audit setup; audit temporal retention remains pending.
+The full combined browser suite passes at 101,000,198 MIST charged. Fresh failure and retained
+success use separate measurement ledgers and cannot together be called a fresh
+CI success. Historical public run 41397980111 independently used 1,577,001,082
+MIST before funding, leaving 22,998,918; it was downloaded read-only, not rerun.
+
+A concrete pinned-compiler private-function name-shortening experiment on that
+combined head reduced root bytecode from 93,673 to 93,023 bytes (650 bytes across
+64 private functions). The compiler reported a different digest, as expected.
+This candidate was not published or shipped, and its
+changed digest cannot replace the exact head fixture. It does not demonstrate a
+sufficient storage reduction. Public signatures, layouts and required security
+coverage must not be removed to make the fixture cheaper. No safe complete
+storage/transaction reduction fitting the unchanged ceiling has been established;
+the claim and draft PR remain reserved rather than Review-ready.
+
+The local harness additionally accepts `--with-security` to run the genuine
+fresh and cached upgrade-security suites under their unchanged 1.5B allowance,
+using local HTTP blob storage. It requires the final requested head to equal the
+tested checkout HEAD before starting the node, so security cannot silently test
+another source revision. This option does not alter protected public CI or its
+coverage selection. It can be combined with the ordinary command above in an
+isolated checkout of the intended combined candidate. Local-test infrastructure
+integration authorization applies, but this cost repair is not acceptance-ready.
+
+Exact combined-checkout local command (inside the disposable network-none dev
+container with warm Move cache and built clients):
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+python3 -u scripts/test_fresh_cost_localnet.py --with-security \
+  --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 \
+  --head-ref 7335545137acf5e773aac554eac027d787b3009d \
+  --evidence-dir /candidate/full-evidence
+```
+
+The combined overlay's 191 offline tests pass, as do the repair branch's 191
+regressions (no skips after supplying installed PyYAML to the container).
+The actual security suite passes fresh (47 transactions; 1,049,739,232 MIST
+charged) and cached (45 transactions; 195,462,969 charged), preserving the
+old-package attacks, aborted authority bypasses, type origins, receipt
+migration/durable retry, catalog targeting and revocation checks. Branch-side
+common/audit suites pass 67 + 23 tests; the authenticated cache, independent
+receipt-effects and audit Node suites pass. The first Docker offline attempt
+lacked PyYAML and failed five environment imports; after mounting the host's
+installed module read-only, all 191 passed. No application failure was ignored.
