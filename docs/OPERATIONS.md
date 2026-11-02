@@ -665,6 +665,9 @@ aliases such as `Asia/Calcutta` are kept as typed. Setting or removing the
 window (`set_recurring_window`/`clear_recurring_window`, or the `customer::`
 variants for fleet records) bumps the Control revision, so every device restarts
 its advance notice and re-reads admission. Cancelled records reject both calls.
+The `customer::` variants enforce the deploy security class, like `set_control`.
+When it requires factors, use `set_recurring_window_secured` or
+`clear_recurring_window_secured` with an approved action.
 
 Devices evaluate the rule locally with the tz database built into the daemon
 (`jiff-tzdb`, pinned exactly in `Cargo.toml`), never the host zoneinfo or `TZ`;
