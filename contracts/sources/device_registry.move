@@ -212,7 +212,7 @@ module sui_edge::device_registry {
         let device_id = cap.device_id;
         let old_id = object::id(&cap);
         let identity = *identity_of(registry, device_id);
-        assert!(identity.owner_cap == old_id && is_custodied(registry, device_id), EWrongDevice);
+        check_WrongDevice(identity.owner_cap == old_id && is_custodied(registry, device_id));
         let DeviceOwnerCap { id, device_id: _ } = cap; id.delete();
         let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
         set_identity(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
@@ -235,7 +235,7 @@ module sui_edge::device_registry {
     /// accepted; issue a new cap for the new address afterwards. A revoked
     /// device stays revoked until it is reinstated.
     public fun rotate_device_key(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap, new_address: address) {
-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         let device: &mut Device = dof::borrow_mut(&mut registry.id, CustodyKey { device_id: cap.device_id });
         device.device_address = new_address;
         let revoked = identity_of(registry, cap.device_id).revoked;
@@ -248,7 +248,7 @@ module sui_edge::device_registry {
     public fun deregister_activated_device(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &TxContext) {
         let DeviceOwnerCap { id, device_id } = cap;
         id.delete();
-        assert!(dof::exists(&registry.id, CustodyKey { device_id }), ENotCustodied);
+        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id }));
         let device: Device = dof::remove(&mut registry.id, CustodyKey { device_id });
         deregister_device(registry, device, ctx);
     }
@@ -256,16 +256,16 @@ module sui_edge::device_registry {
     /// Lend the custodied Device to calls that take `&Device`/`&mut Device`
     /// (`device_cap::issue_cap`, `device_group::add_device`, `set_meta`).
     public fun borrow_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap): (Device, DeviceLoan) {
-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         let device = dof::remove(&mut registry.id, CustodyKey { device_id: cap.device_id });
         (device, DeviceLoan { device_id: cap.device_id })
     }
 
     public fun return_device(registry: &mut DeviceRegistry, device: Device, loan: DeviceLoan) {
         let DeviceLoan { device_id } = loan;
-        assert!(object::id(&device) == device_id, EWrongDevice);
+        check_WrongDevice(object::id(&device) == device_id);
         // The key cannot change while borrowed: only rotation updates it.
-        assert!(device.device_address == identity_of(registry, device_id).signer, EWrongDevice);
+        check_WrongDevice(device.device_address == identity_of(registry, device_id).signer);
         dof::add(&mut registry.id, CustodyKey { device_id }, device);
     }
 
@@ -279,7 +279,7 @@ module sui_edge::device_registry {
     }
 
     fun custodied(registry: &DeviceRegistry, cap: &DeviceOwnerCap): &Device {
-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         dof::borrow(&registry.id, CustodyKey { device_id: cap.device_id })
     }
 
@@ -319,7 +319,7 @@ module sui_edge::device_registry {
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
 
     public fun assert_admin(registry: &DeviceRegistry, ctx: &mut TxContext) {
-        assert!(registry.admin == ctx.sender(), EWrongDevice);
+        check_WrongDevice(registry.admin == ctx.sender());
     }
 
     /// A cap the registry's identity does not name.
@@ -331,4 +331,11 @@ module sui_edge::device_registry {
     /// For package modules that keep state on the registry (`roles`).
     public(package) fun uid(registry: &DeviceRegistry): &UID { &registry.id }
     public(package) fun uid_mut(registry: &mut DeviceRegistry): &mut UID { &mut registry.id }
+    // Share each named abort branch without changing its module or error code.
+    fun check_NotCustodied(condition: bool) {
+        if (!condition) abort ENotCustodied
+    }
+    fun check_WrongDevice(condition: bool) {
+        if (!condition) abort EWrongDevice
+    }
 }

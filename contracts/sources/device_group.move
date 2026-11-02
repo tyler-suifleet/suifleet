@@ -110,7 +110,7 @@ module sui_edge::device_group {
         device: &Device,
         ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         add_managed(group, device_registry::device_id(device));
     }
 
@@ -126,7 +126,7 @@ module sui_edge::device_group {
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
     public entry fun delete_group(mut group: DeviceGroup, ctx: &TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
         if (is_indexed(&group)) {
@@ -140,7 +140,7 @@ module sui_edge::device_group {
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
     /// marking the group indexed. Admin only; repeat until `remaining` is 0.
     public fun index_members(group: &mut DeviceGroup, limit: u64, ctx: &mut TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         assert!(limit > 0, EInvalidLimit);
         if (!is_indexed(group)) {
             df::add(&mut group.id, IndexKey {}, GroupIndex { members: 0 });
@@ -165,7 +165,7 @@ module sui_edge::device_group {
 
     /// Called only by the recipient-confirmed fleet handover protocol.
     public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        check_NotAdmin(ctx.sender() == group.admin);
         group.admin = recipient;
     }
 
@@ -256,4 +256,8 @@ module sui_edge::device_group {
     /// For package modules that keep state on a group (desired_state).
     public(package) fun uid(group: &DeviceGroup): &UID { &group.id }
     public(package) fun uid_mut(group: &mut DeviceGroup): &mut UID { &mut group.id }
+    // Share each named abort branch without changing its module or error code.
+    fun check_NotAdmin(condition: bool) {
+        if (!condition) abort ENotAdmin
+    }
 }

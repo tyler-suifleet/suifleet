@@ -1,0 +1,16 @@
+{
+  "experiment": "Unshipped equivalent BCS constant vector encoding; no acceptance substitution",
+  "head": "7335545137acf5e773aac554eac027d787b3009d",
+  "compiler": "sui 1.81.1-e04cf9aa915c",
+  "original_bytes": 93673,
+  "optimized_bytes": 93511,
+  "saved_bytes": 162,
+  "original_digest": "9f871833808a5dc4b04554094ab5fe50269ae361c2866b81584f5dc1c1c1b6ad",
+  "optimized_digest": "2319faf8a1b2bc93be867181bbc67d6772ee5be6e0a9e9000f28195052d36999",
+  "changes": [
+    {
+      "module": "customer",
+      "constants": 54
+    }
+  ]
+}

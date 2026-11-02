@@ -198,12 +198,12 @@ module sui_edge::seal_policy {
 
     /// An account granted by address.
     entry fun seal_approve_account(id: vector<u8>, policy: &AccessPolicy, ctx: &TxContext) {
-        assert!(account_allowed(policy, &id, ctx.sender()), ENoAccess);
+        check_NoAccess(account_allowed(policy, &id, ctx.sender()));
     }
 
     /// A device granted directly, asking with its active key.
     entry fun seal_approve_device(id: vector<u8>, policy: &AccessPolicy, registry: &DeviceRegistry, device_id: ID, ctx: &TxContext) {
-        assert!(device_allowed(policy, &id, registry, device_id, ctx.sender()), ENoAccess);
+        check_NoAccess(device_allowed(policy, &id, registry, device_id, ctx.sender()));
     }
 
     /// A device in a granted group, asking with its active key.
@@ -215,7 +215,7 @@ module sui_edge::seal_policy {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        assert!(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()), ENoAccess);
+        check_NoAccess(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()));
     }
 
     public fun account_allowed(policy: &AccessPolicy, id: &vector<u8>, sender: address): bool {
@@ -304,4 +304,8 @@ module sui_edge::seal_policy {
 
     #[test_only]
     public fun set_version_for_testing(policy: &mut AccessPolicy, version: u64) { policy.version = version }
+    // Share each named abort branch without changing its module or error code.
+    fun check_NoAccess(condition: bool) {
+        if (!condition) abort ENoAccess
+    }
 }

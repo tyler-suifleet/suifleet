@@ -154,7 +154,7 @@ module sui_edge::fleet_inbox {
     ) {
         assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
         let device_id = inbox.device_id;
-        assert!(device_registry::owner_cap_device_id(cap) == device_id, EWrongInbox);
+        check_WrongInbox(device_registry::owner_cap_device_id(cap) == device_id);
         assert_operator(registry, cap, device_id);
         assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
         let target = object::id(inbox);
@@ -165,7 +165,7 @@ module sui_edge::fleet_inbox {
 
     /// `device_group::add_device`, also listing the group in the device's inbox.
     public fun add_member(group: &mut DeviceGroup, inbox: &mut DeviceInbox, device: &Device, ctx: &mut TxContext) {
-        assert!(device_registry::device_id(device) == inbox.device_id, EWrongInbox);
+        check_WrongInbox(device_registry::device_id(device) == inbox.device_id);
         device_group::add_device(group, device, ctx);
         list_group(inbox, device_group::group_id(group));
     }
@@ -186,7 +186,7 @@ module sui_edge::fleet_inbox {
 
     /// Unlist a group (for example a deleted one). The device's operator only.
     public fun forget_group(inbox: &mut DeviceInbox, registry: &DeviceRegistry, cap: &DeviceOwnerCap, group_id: ID) {
-        assert!(device_registry::owner_cap_device_id(cap) == inbox.device_id, EWrongInbox);
+        check_WrongInbox(device_registry::owner_cap_device_id(cap) == inbox.device_id);
         assert_operator(registry, cap, inbox.device_id);
         unlist_group(inbox, group_id);
     }
@@ -217,10 +217,10 @@ module sui_edge::fleet_inbox {
     /// must still be in custody: a stale or deregistered device's cap fails.
     fun assert_operator(registry: &DeviceRegistry, cap: &DeviceOwnerCap, device_id: ID) {
         let identity = device_registry::identity(registry, device_id);
-        assert!(identity.is_some(), ENotOperator);
+        check_NotOperator(identity.is_some());
         let identity = identity.destroy_some();
-        assert!(device_registry::is_custodied(registry, device_id), ENotOperator);
-        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), ENotOperator);
+        check_NotOperator(device_registry::is_custodied(registry, device_id));
+        check_NotOperator(device_registry::identity_owner_cap(&identity) == object::id(cap));
     }
 
     fun bump(head: &mut Head, target: ID, deployment: &DeploymentRecord, clock: &Clock) {
@@ -254,5 +254,12 @@ module sui_edge::fleet_inbox {
     fun unlist_group(inbox: &mut DeviceInbox, group_id: ID) {
         let (found, i) = inbox.groups.index_of(&group_id);
         if (found) { inbox.groups.remove(i); };
+    }
+    // Share each named abort branch without changing its module or error code.
+    fun check_NotOperator(condition: bool) {
+        if (!condition) abort ENotOperator
+    }
+    fun check_WrongInbox(condition: bool) {
+        if (!condition) abort EWrongInbox
     }
 }

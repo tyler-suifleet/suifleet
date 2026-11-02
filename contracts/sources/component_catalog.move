@@ -68,11 +68,11 @@ module sui_edge::component_catalog {
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
-        assert!(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
-            && recipe_sha256s.length() == n && artifact_sha256s.length() == n, EManifest);
+        check_Manifest(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
+            && recipe_sha256s.length() == n && artifact_sha256s.length() == n);
         let mut i = 0;
         while (i < n) {
-            assert!(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]), EManifest);
+            check_Manifest(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]));
             validate_token(&recipe_blob_ids[i], 128);
             validate_hash(&recipe_sha256s[i]); validate_hash(&artifact_sha256s[i]);
             let mut j = 0;
@@ -153,16 +153,16 @@ module sui_edge::component_catalog {
     fun alpha(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
     fun digit(b: u8): bool { b >= 48 && b <= 57 }
     fun validate_token(s: &String, max: u64) {
-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= max, EManifest);
-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95, EManifest));
+        let b = s.as_bytes(); check_Manifest(b.length() > 0 && b.length() <= max);
+        b.do_ref!(|c| check_Manifest(alpha(*c) || digit(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
         let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= 128, EIdentity);
         b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
     }
     public fun validate_hash(s: &String) {
-        let b = s.as_bytes(); assert!(b.length() == 64, EManifest);
-        b.do_ref!(|c| assert!(digit(*c) || (*c >= 97 && *c <= 102), EManifest));
+        let b = s.as_bytes(); check_Manifest(b.length() == 64);
+        b.do_ref!(|c| check_Manifest(digit(*c) || (*c >= 97 && *c <= 102)));
     }
     fun valid_os(s: &String): bool {
         *s == string::utf8(b"linux") || *s == string::utf8(b"macos") || *s == string::utf8(b"*")
@@ -174,34 +174,41 @@ module sui_edge::component_catalog {
     }
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
-        let b = s.as_bytes(); let n = b.length(); assert!(n > 0 && n <= 128, EVersion);
+        let b = s.as_bytes(); let n = b.length(); check_Version(n > 0 && n <= 128);
         let mut i = 0; let mut part = 0u64;
         while (part < 3) {
             let start = i; let mut number: u64 = 0;
             while (i < n && digit(b[i])) {
                 let d = (b[i] - 48) as u64;
-                assert!(number <= (18446744073709551615 - d) / 10, EVersion);
+                check_Version(number <= (18446744073709551615 - d) / 10);
                 number = number * 10 + d; i = i + 1;
             };
-            assert!(i > start && (i - start == 1 || b[start] != 48), EVersion);
+            check_Version(i > start && (i - start == 1 || b[start] != 48));
             part = part + 1;
-            if (part < 3) { assert!(i < n && b[i] == 46, EVersion); i = i + 1; };
+            if (part < 3) { check_Version(i < n && b[i] == 46); i = i + 1; };
         };
         if (i == n) return;
         let mut prerelease = b[i] == 45;
-        assert!(prerelease || b[i] == 43, EVersion); i = i + 1;
+        check_Version(prerelease || b[i] == 43); i = i + 1;
         loop {
             let start = i; let mut numeric = true;
             while (i < n && b[i] != 46 && b[i] != 43) {
-                assert!(alpha(b[i]) || digit(b[i]) || b[i] == 45, EVersion);
+                check_Version(alpha(b[i]) || digit(b[i]) || b[i] == 45);
                 if (!digit(b[i])) numeric = false;
                 i = i + 1;
             };
-            assert!(i > start, EVersion);
-            if (prerelease && numeric) assert!(i - start == 1 || b[start] != 48, EVersion);
+            check_Version(i > start);
+            if (prerelease && numeric) check_Version(i - start == 1 || b[start] != 48);
             if (i == n) break;
-            if (b[i] == 43) { assert!(prerelease, EVersion); prerelease = false; };
+            if (b[i] == 43) { check_Version(prerelease); prerelease = false; };
             i = i + 1;
         };
+    }
+    // Share each named abort branch without changing its module or error code.
+    fun check_Manifest(condition: bool) {
+        if (!condition) abort EManifest
+    }
+    fun check_Version(condition: bool) {
+        if (!condition) abort EVersion
     }
 }

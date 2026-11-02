@@ -33,10 +33,287 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 - Use the wallet only through its `client.yaml`: `sui client --client.config ~/.config/suifleet/testnet/agent/client.yaml …`, or `SUIFLEET_WALLET=…` for make targets. Never through the default `~/.sui` wallet, which `make down` deletes.
 - **Recovery phrases.** Each account directory holds a `RECOVERY_PHRASE.txt` (mode 0600) for the user to move to a password manager.
 - **Directory permissions.** Keep the directory 0700.
-- **Spend.** Live runs check the chain identity, the dedicated wallet and the balance first. Every mutation is charged to a strict allowance (`--max-spend-mist`; the package gate defaults to 1 SUI and CI gives it 1.6 SUI; `scripts/testnet_budget.py`): its gas budget and any SUI it sends to a run-owned account (test device, browser test key) are reserved before execution and settled from the effects. Failed and aborted transactions are charged; an unknown outcome keeps its whole reservation; rebates, faucet credits and sweeps never replenish it. A funded account's own transactions are bounded by its funding. See Cost below: a typical run costs about 0.0025 SUI.
+- **Spend.** Live runs check the chain identity, the dedicated wallet and the balance first. Every mutation is charged to a strict allowance (`--max-spend-mist`; the package gate and CI use a 1.6-SUI ceiling; `scripts/testnet_budget.py`): its gas budget and any SUI it sends to a run-owned account (test device, browser test key) are reserved before execution and settled from the effects. Failed and aborted transactions are charged; an unknown outcome keeps its whole reservation; rebates, faucet credits and sweeps never replenish it. A funded account's own transactions are bounded by its funding. See Cost below: a typical run costs about 0.0025 SUI.
 - **Record each run.** Write the transaction digests and the evidence JSON into the PR or issue. Never record keys.
 
 ## Funding
+
+### SF-221 completed compact lifecycle cost repair (2026-11-02)
+
+This result supersedes the blocked experiments below. The [full effects receipt](validation/sf221-compact-costs.json)
+records actual **single-ledger fresh success**, cached acceptance, two browser
+runs and the original audit's proof after real pruning. No public fixture was
+rerun. Public protected CI and independent review remain pending after push.
+
+| Exact source fixture | Fresh ordinary | Cached ordinary | Fresh/cached security | Fresh/cached browser |
+|---|---:|---:|---:|---:|
+| This branch, compatible factored source | 1,583,397,678 | 27,735,669 | 1,009,991,632 / 195,462,969 | 101,000,198 / 101,000,198 |
+| Larger retained combined candidate, separately pinned | 1,598,856,478 | 27,735,669 | 1,025,440,432 / 195,462,969 | 101,000,198 / 101,000,198 |
+
+All amounts are charged MIST. The unchanged allowances are 1.6B ordinary,
+1.5B security and 150M browser. Fresh ordinary has **zero remaining deficit**:
+this branch retains 16,602,322 MIST; the larger candidate retains 1,143,522.
+Solvent operator balances are separately recorded in the receipts and never
+substitute for remaining allowance. Earlier failed ledgers remain unchanged.
+
+The repair combines three compatible reductions:
+
+- Factor repeated pure intent serialization, fleet checks and assertion abort
+  branches into private Move helpers. [Pinned compiler results](validation/sf221-final-source.json)
+  shrink this branch's modules from 91,636 to 88,562 bytes. Public signatures,
+  layouts, abilities, argument bytes, authority conditions and type origins
+  remain compatible. Other assertions keep their module/code but may abort in
+  the private helper; externally tested failure sites stay in their original
+  functions. All 350 branch Move tests, the ABI/schema check and actual old/new
+  package security/migration effects pass. No sibling feature is imported.
+- Top up report gas to 10M, instead of 30M. Actual four-report daemon execution
+  passes within that grant. Older cached identities up to 30M remain eligible;
+  their entire pre-existing balance is still charged. There is no ledger refund
+  or new wallet/secret. Same-lane encrypted identity handling is unchanged.
+- Journal ownership of the final proven deployment before audit creation, then
+  delete it in that same transaction. The explicit `--compact-lifecycle`
+  profile uses 15M for the first deployment, 10M for each successor and 11M
+  for atomic audit creation/admission/cleanup. CI selects this profile while
+  keeping its 60M general PTB cap. Every selected budget is reserved in full;
+  insufficient allowance or execution gas fails closed. Pending legacy audit
+  transactions retain their original plan. Unknown outcomes keep exact signed
+  bytes and full reservations; abort cleanup cannot delete their journal-owned
+  input. The audit retains its original two decisions and checkpoint.
+
+Temporal acceptance observes this branch's original checkpoint **164** below
+actual retention floor **1112**, then reads both original decisions with event
+reads forbidden. Explicit retirement charges zero, reserving the unchanged20M.
+It uses a separate bounded measurement ledger, not a reset of fresh allowance:
+optional retirement is not claimed to fit the nearly exhausted fresh ledger.
+Default ordinary execution retains the same record for later free proof reads.
+The larger candidate independently proves its own original record and floor.
+
+Reproduce in the disposable, warmed `--network none` dev environment:
+`python3 -u scripts/test_fresh_cost_localnet.py --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 --head-ref HEAD --compact-lifecycle --with-security --with-temporal --evidence-dir /workspace/effects`.
+The local Walrus transport stores real bytes but is not Walrus certification.
+The receipt pins source, bytecode and runtime provenance, all transaction
+digests/net fees/funding, exact commands and remaining limits. Final runtime
+adds a read-only refusal when the compact profile's general cap is below15M;
+source whitespace normalization independently compiles to the tested digest.
+
+Fresh/cached ordinary, security, browser and temporal phases all completed in
+both local harness executions. Physical, mainnet, manual real-wallet and
+production-provider acceptance remains unrun in #32/#159. No testnet ceiling,
+faucet bound, unknown-outcome fence or authenticated-state protection changes.
+
+The three archived SF-221 source candidates use Base64 (`.patch.b64`) to
+preserve unified-diff blank context lines without introducing trailing whitespace
+into the repository. Decode each before applying, for example:
+`base64 --decode docs/validation/sf221-factoring-candidate.patch.b64 > /tmp/sf221-factoring-candidate.patch`.
+Apply decoded patches in the recorded order. Existing patch SHA-256 values in
+the effects receipts describe the **decoded bytes** and remain unchanged.
+
+### SF-221 assertion factoring and completed local temporal measurement (2026-11-02)
+
+A further [incremental source candidate](validation/sf221-assertion-candidate.patch.b64)
+factors 52 scoped-action calls and assertion failure branches into private
+helpers. Apply it after the preceding factoring patch, on the same pinned
+combined `7335545` source (`git apply --unidiff-zero` for this incremental
+patch). Public signatures, struct layouts and authority
+conditions remain intact; acceptance scripts' explicitly checked abort sites
+remain in their original functions. Other assertions retain their module/code
+but abort inside a private helper. The candidate remains **outside production
+sources** because its cost reduction is insufficient.
+
+Compiler 1.81.1 now emits 90,590 bytes, versus the previous 93,296-byte candidate
+and original 93,673 bytes. All 363 Move tests pass. A new Docker `--network none`
+run executes the compatible upgrade and measures all suite phases, including
+real temporal pruning and retirement. [The complete effects receipt](validation/sf221-assertion-costs.json)
+pins the exact source, overlay/build hashes, commands and independent ordinary
+and retirement effects.
+
+| Phase | Transactions | Allowance charged (MIST) | Result |
+|---|---:|---:|---|
+| Fresh ordinary | 6 | 1,589,955,488 | Device funded; first deployment batch refused |
+| Cached ordinary, same pair | 5 | 109,484,749 | All four OTA cases and cleanup pass |
+| Fresh security | 47 | 1,026,058,432 | Upgrade, attacks, receipt migration and convergence pass |
+| Cached security | 45 | 195,462,969 | Same security coverage passes |
+| Browser automation | suite + funding | 101,000,198 | Connect/sign/network/error/cleanup checks pass |
+| Temporal proof and explicit retirement | 1 | 0 | Actual pruning proof and deletion pass |
+
+The fresh row includes the 30,000,000-MIST device grant. The cached row charges
+that still-unspent grant again under its own independent ledger. These raw
+candidate receipts predate explicit grant tracing; the cached 30M is identified
+as an **inferred allowance gap**, consistent with the successful same-fixture
+fresh funding and absence of fresh runtime transactions. Future receipts now
+record the device/address and pre-existing grant explicitly before charging it.
+Counting that grant once gives a measured fresh cost diagnostic of
+**1,669,440,237 MIST**, still **69,440,237 over the unchanged 1.6B ceiling**.
+The new source saves 20,785,600 MIST versus the previous factoring candidate.
+This arithmetic combines separate measurements; it never resets a real ledger
+or certifies a passing fresh run. The fresh run itself retains only 10,044,512
+MIST before its unchanged 60M deployment reservation.
+
+Temporal measurement now completes on this actual candidate: after the ordinary,
+security and browser phases, the disposable node restarts with checkpoint
+retention of two epochs and a one-second pruning delay. The production reader
+observes retention floor **1112 > original decision checkpoint 379**, reads both
+original current-state decisions with event reads forbidden, and only then
+retires the same record. Retirement effects are 1,000,000 computation plus
+988,000 storage minus 23,960,404 rebate MIST. The ledger charges zero; the rebate
+never replenishes it, and the full **20M reservation** remains required. Normal
+retained audit reads need no mutation; explicit retirement prevents recreation.
+This resolves the previously unmeasured local temporal cost, not public-network
+post-pruning acceptance.
+
+Reproduce with the receipt's exact candidate and overlays:
+`python3 -u scripts/test_fresh_cost_localnet.py --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 --head-ref HEAD --with-security --with-temporal --evidence-dir /workspace/effects`
+in a disposable `--network none` dev image with the pinned tools and cached
+locked dependencies. Initial pruning stays disabled until historical effects
+are captured; the harness then uses the real node's retention floor. No public
+wallet, encrypted fixture state, unknown reservation, spending ceiling or
+required test coverage is changed. Full fresh acceptance remains blocked;
+PR #465 stays draft, with exact public CI pending and unpolled.
+
+### SF-221 concrete source factoring attempt (2026-11-02)
+
+The [retained source patch](validation/sf221-factoring-candidate.patch.b64) applies
+only to combined candidate `7335545137acf5e773aac554eac027d787b3009d`.
+It factors the intent-vector prefixes of 53 secured customer wrappers and repeated
+fleet authorization checks into private functions, keeping public signatures,
+struct layouts, intent argument order and authorization checks. The pinned
+1.81.1 compiler reduces root modules from 93,673 to 93,296 bytes (377 bytes).
+All 363 Move tests pass with that patch. This is a tested source attempt, kept
+outside production sources because its reduction does not solve SF-221.
+
+[Actual factored-candidate effects](validation/sf221-factoring-costs.json) come
+from a new disposable Docker `--network none` chain, with SF-221 identity and
+activation repairs applied over that combined candidate. The compatible upgrade
+executes successfully, but fresh ordinary acceptance still refuses funding at
+1,578,752,989 / 1,600,000,000 MIST. The same exact pair's separate cached run
+passes all four OTA cases at 111,472,848 MIST. Their combined measured charges
+are 1,690,225,837 MIST: **90,225,837 MIST over the unchanged ceiling**, before
+future temporal audit work. The source reduction saves 2,895,200 MIST versus
+the preceding combined-candidate measurements; cached success does not certify
+fresh acceptance. Each phase has its own measurement ledger; no real allowance
+is reset mid-run.
+
+The remaining limitation is concrete: the immutable base publication plus the
+still-large compatible head publication leave only 21,247,011 MIST for required
+funding and runtime checks. Factoring the repeated wrapper scaffolding does not
+remove enough serialized module bytes. Removing existing public APIs/layouts or
+linking a different historical base would change compatibility or fixture scope;
+neither is an accepted reduction. This experiment does not prove that every
+possible compatible rewrite is insufficient. No sufficient safe rewrite has
+been demonstrated, so SF-221 remains blocked, not Review-ready. Temporal
+post-pruning proof and exact public acceptance remain unproved.
+
+To reproduce source compilation, extract the pinned combined commit's
+`contracts/`, apply the retained patch with `git apply`, then run
+`sui move build --path contracts` and `sui move test --path contracts` using
+compiler 1.81.1 and its locked cached dependencies. The effects artifact pins
+the exact local candidate commit, source/build digests, overlay file hashes,
+commands and independent ordinary transaction effects. Fresh/cached security executions pass with 47/45 transactions and
+1,046,844,032 / 195,462,969 MIST charged. Browser-wallet automation passes at
+101,000,198 MIST. These receipts remain separate local protocol checks, not
+public-network or manual-wallet acceptance.
+
+
+### SF-221 fresh-fixture cost blocker (2026-11-01)
+
+The [sanitized public effects](validation/sf221-cost-investigation.json) retain
+the five actual transaction digests, gas budgets and net gas costs from
+[run 41388382430](https://github.com/tyler-suifleet/suifleet/actions/runs/41388382430)
+and [run 41368161262](https://github.com/tyler-suifleet/suifleet/actions/runs/41368161262).
+These are historical failures, not acceptance of a new revision.
+
+| Run | Publish net MIST | Upgrade net MIST | Other setup net MIST | Allowance left MIST |
+|---|---:|---:|---:|---:|
+| 41388382430 | 772,926,000 | 783,726,563 | 18,406,119 | 24,941,318 |
+| 41368161262 | 772,926,000 | 785,902,163 | 18,406,119 | 22,765,718 |
+
+Both used the unchanged 1,600,000,000-MIST ceiling. The first wallet started
+with 3,859,853,660 MIST after its single faucet request and ended with
+2,284,794,978 MIST. Its net wallet debit and allowance used were both
+1,575,058,682 MIST. Wallet solvency therefore did not imply remaining run
+allowance. The attempted 30,000,000-MIST device transfer plus a full
+10,000,000-MIST gas reservation was refused before submission; neither is an
+actual fee or an additional unknown transaction in those receipts.
+
+Recovery implements reuse of funded report identities independently of package
+pairs. It selects only completed-fixture signing identities from the authenticated
+same-operator/lane encrypted state, verifies the derived address before registering
+new objects, and charges the entire observed balance as a grant. Failed balance
+reads and conflicting keys fail closed. The exact compiled pair, UpgradeCap,
+per-type origins, quarantines and pending-operation journals are unchanged. A low
+balance now receives only the difference to the existing 30M target, instead of
+another 30M on top of already charged gas. No ceiling, transaction reservation,
+faucet rule or uncertainty fence is relaxed.
+
+### Disposable local measurements and remaining blocker
+
+[Sanitized local effects](validation/sf221-local-costs.json) record actual
+1.83.0-node / 1.81.1-compiler execution in Docker `--network none`, using the
+built checkout's daemon and chain reader. Pair 0 is exactly historical
+`65770f0963ed076936de483f545b47be44b98520` →
+`5c7f1f16546781b3ab7fc46fc1eec99cbb21d71a`; it spends 1,571,117,571 MIST
+on fresh setup and refuses funding before submission. Reusing that same local
+fixture in a separate measured run completes all four OTA cases, independently
+reads Applied/Failed receipts, deletes deployments and retains the original audit.
+This is cached-suite evidence; the separate ledger does not pass the fresh run.
+
+| Retained pair-0 operation | Net MIST | Submitted gas reservation MIST |
+|---|---:|---:|
+| Device funding | 1,988,099 + 30,000,000 granted | 10,000,000 + 30,000,000 funding |
+| Index group and create inbox | 9,588,660 | 60,000,000 |
+| Three head deployments | 42,002,663 | 60,000,000 |
+| Old-package deployment | 13,494,499 | 60,000,000 |
+| Delete four deployments | 0 charged; rebate cannot replenish | 60,000,000 |
+| Create retained decision audit | 19,718,899 | 20,000,000 |
+| Admit audit cohort | 4,268,688 | 20,000,000 |
+
+The retained ledger totals **121,061,508 MIST**. These actual submitted bounds
+succeeded locally; they are not reduced synthetic reservations. The head batch's
+gross computation plus storage is 48,636,800 MIST, with 6,634,137 MIST rebate.
+Even its 42,002,663-MIST net cost alone exceeds the public fresh remainder of
+24,941,318 MIST, before funding, inbox, the old-package case or audit. Lowering
+reservations or funding alone therefore cannot make this exact pair fit.
+
+Pair 1 uses the same historical base and the recovery checkout's contracts.
+Their root bytecode is identical, so it correctly skips an upgrade; this is
+explicitly not proof that the costly pair fits. It reuses the real pair-0 device
+identity with **24,993,732 MIST**, charged in full, avoids the 30M transfer and
+1,988,099-MIST transfer fee, and reduces the allowance debit by **6,994,367 MIST**
+relative to a new 30M-funded identity. Fresh/cached ledgers are 905,399,655 and
+71,966,178 MIST. Both complete the actual four-case ordinary suite. The actual
+browser-wallet suite also passes connect/rejection, registration/activation,
+group/deployment/upload/read, simulation refusal, executed abort, wrong-network
+refusal, cleanup and sweep: 101,988,099 MIST charged, 23,629,209 MIST net wallet
+debit. Local blob storage returns real bytes; this is not Walrus certification or
+manual extension-wallet acceptance.
+
+Reproduction (warm Move cache, locked frontend dependencies and built clients):
+
+```bash
+python3 scripts/test_fresh_cost_localnet.py \
+  --base-ref 65770f0963ed076936de483f545b47be44b98520 \
+  --head-ref 5c7f1f16546781b3ab7fc46fc1eec99cbb21d71a \
+  --next-head-ref HEAD --evidence-dir /workspace/evidence/sf221-local
+```
+
+Run only in a disposable network-none dev container. The runner rejects existing
+local services, uses private temporary node/wallet state, preserves each exact
+pair within the test, records independent gas effects, and terminates its node
+and local blob server. The read-only audit reader now permits a loopback localnet
+only inside network-none Docker, retaining testnet chain and deployment checks.
+The actual retention floor has not passed the audit checkpoint: that proof stays
+**pending**, not passed.
+
+**SF-221 remains blocked on fresh distinct-pair cost**, despite the tested identity
+reduction. With even zero device grant and no inbox, the measured required head
+batch cannot fit the historical remainder. A compatible package/storage reduction
+of at least the complete remaining suite deficit is still needed; changing the
+exact pair or resetting allowances between phases is not a repair. No public
+wallet writes, identical public publications, wallet rotation, extra faucet calls,
+protected-CI bypass or SF-198 interference occurred. The changed head is handed
+to the existing protected CI through PR #465; hosted effects are pending and
+must not be invented or polled by this worker. Keep the draft and retained claim
+until actual acceptance is ready.
 
 Testnet SUI comes from the faucet's proof-of-work endpoint, which needs **Sui CLI ≥ 1.82.1**:
 
@@ -571,3 +848,251 @@ used, no package/object transaction was submitted, and no fixture state,
 reservation, spending ceiling or retry bound changed. A fresh normal automatic
 run, fresh independent review and exact-head/current-base CI are still
 required before merge.
+
+### SF-221 resumed cost investigation (2026-11-01)
+
+The retained effects artifact of [SF-198 run 41392636950](https://github.com/tyler-suifleet/suifleet/actions/runs/41392636950)
+confirms **1,575,909,482 / 1,600,000,000 MIST** charged before OTA,
+leaving **24,090,518 MIST**. Its error reports the required 280M core-phase
+reservations; this is not a wallet-balance failure. The sanitized transaction
+receipt is included in [the cost investigation](validation/sf221-cost-investigation.json).
+It is a historical failed run, not acceptance of the SF-221 branch.
+
+[The offline bytecode inventory](validation/sf221-bytecode-inventory.json)
+records fresh pinned-compiler builds of both exact historical pairs. The earlier
+pair is `65770f09` → `5c7f1f16` (91,636 → 93,030 root-module bytes); the SF-198
+pair is `cf65ea17` → `b0d3df07` (91,636 → 93,469 bytes). The base digests match,
+but both heads differ from base and from each other. No identical-bytecode
+shortcut can stand in for either upgrade. Builds used `sui 1.81.1-e04cf9aa915c`,
+`--dump-bytecode-as-base64 --build-env testnet --silence-warnings --no-tree-shaking`,
+the committed lockfiles and prewarmed dependencies in Docker `--network none`.
+Module SHA-256 hashes, exact package digests and table sizes are retained.
+These are compiler observations, not new transaction effects.
+
+The compiler's `move build --help` exposes no bytecode-size optimization flag.
+`--no-tree-shaking` controls unused dependency IDs and offline RPC behavior;
+it does not omit root modules. The actual root modules have no metadata table
+(kind `0x10`) to remove. Their large tables contain instructions (`0x0c`),
+identifiers (`0x07`) and signatures (`0x05`). Stripping arbitrary tables,
+omitting required modules, changing public names/layouts, or substituting a
+smaller source revision would not establish compatible acceptance of these
+exact fixtures. Bytecode rewriting is also outside the existing pinned
+compile-and-verify-before-sign path. None of these was enabled.
+
+The earlier independently executed head deployment batch costs 42,002,663
+MIST, exceeding the newer run's remainder by 17,912,145 MIST even before
+identity grants, inbox creation, the base deployment and audit work. This is
+an optimistic comparison using the earlier pair, not a claim that the SF-198
+head's unrun OTA has identical cost. Lower reservations alone cannot repair
+that measured deficit. The full ordinary/security fresh acceptance suite has
+**not** been demonstrated within its unchanged ceilings. SF-221 remains
+reserved and its PR draft; further compatible source/storage or transaction
+reduction is required. SF-201's live repair is separate and untouched.
+
+### SF-221 combined-candidate batching recovery (2026-11-01)
+
+The subsequent [grouping experiment](validation/sf221-grouping-analysis.json)
+is reproducible with `python3 scripts/analyze_fixture_grouping.py
+docs/validation/sf221-combined-batch-costs.json`. It validates the exact same
+base/head, chain and operator and rejects unknown effects or unexplained ledger
+charges before combining the prior fresh and retained measurements. These are
+prior isolated-chain effects, not a newly executed fresh run.
+
+Even hypothetically netting **every** measured cleanup rebate globally leaves
+1,643,145,434 MIST including the measured 30,000,000 MIST device grant, a
+43,145,434 MIST deficit. Erasing all measured computation as well still leaves
+a 19,275,434 MIST deficit. These deliberately optimistic scenarios are not
+executable transaction plans or changes to the non-replenishing ledger. In
+particular, grouping can change actual storage/computation effects, so this is
+not an impossibility proof for a different compatible source or lifecycle plan.
+It establishes that reclaiming the currently discarded negative net charges
+alone does not repair this fixture. Future temporal mutations add unmeasured
+cost; the retained audit's pending proof is not acceptance. Keep this PR draft
+and the implementation claim reserved until a sufficient reduction is measured
+through the full fresh suite. No public CI rerun is justified by this diagnostic.
+
+The next repair batches head-package custody activation, indexing the existing
+pre-upgrade group and creating/following/sharing its inbox. It transfers the new
+owner cap after borrowing it inside the same PTB. Registration and membership
+still occur before the upgrade. A retained legacy activation marker selects the
+original single-call operation; a new batch marker requires the verified inbox
+APIs. Both paths retain verified-byte reconciliation and persist the returned
+IDs atomically with clearing the pending marker. No funding is added to this
+checkpoint, and no ceiling or ordinary gas reservation changes.
+
+[Actual combined-candidate effects](validation/sf221-combined-batch-costs.json)
+use candidate `7335545137acf5e773aac554eac027d787b3009d`, exact ordinary base
+`cf65ea175435d1b6e111b988d51d9654a63c9db2`, and the scoped SF-221 repair overlay
+in a separate temporary clone. Sibling source changes were preserved. With the
+pinned compiler and protocol-140 network-none chain, the combined batch costs
+17,325,479 MIST versus the earlier separate activation/inbox measurements of
+8,737,261 + 9,588,660: **1,000,442 MIST saved**. This is a real computation saving,
+not a reduced reservation or a rebate replenishing the ledger.
+
+This does **not** complete SF-221. The fresh ordinary phase still refuses funding
+at 1,581,648,189/1,600,000,000 MIST after creating its inbox. Its separate retained
+measurement passes all four ordinary OTA cases and cleanup at 111,472,848 MIST,
+including funding and audit setup; audit temporal retention remains pending.
+The full combined browser suite passes at 101,000,198 MIST charged. Fresh failure and retained
+success use separate measurement ledgers and cannot together be called a fresh
+CI success. Historical public run 41397980111 independently used 1,577,001,082
+MIST before funding, leaving 22,998,918; it was downloaded read-only, not rerun.
+
+A concrete pinned-compiler private-function name-shortening experiment on that
+combined head reduced root bytecode from 93,673 to 93,023 bytes (650 bytes across
+64 private functions). The compiler reported a different digest, as expected.
+This candidate was not published or shipped, and its
+changed digest cannot replace the exact head fixture. It does not demonstrate a
+sufficient storage reduction. Public signatures, layouts and required security
+coverage must not be removed to make the fixture cheaper. No safe complete
+storage/transaction reduction fitting the unchanged ceiling has been established;
+the claim and draft PR remain reserved rather than Review-ready.
+
+The local harness additionally accepts `--with-security` to run the genuine
+fresh and cached upgrade-security suites under their unchanged 1.5B allowance,
+using local HTTP blob storage. It requires the final requested head to equal the
+tested checkout HEAD before starting the node, so security cannot silently test
+another source revision. This option does not alter protected public CI or its
+coverage selection. It can be combined with the ordinary command above in an
+isolated checkout of the intended combined candidate. Local-test infrastructure
+integration authorization applies, but this cost repair is not acceptance-ready.
+
+Exact combined-checkout local command (inside the disposable network-none dev
+container with warm Move cache and built clients):
+
+```bash
+python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
+python3 -u scripts/test_fresh_cost_localnet.py --with-security \
+  --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 \
+  --head-ref 7335545137acf5e773aac554eac027d787b3009d \
+  --evidence-dir /candidate/full-evidence
+```
+
+The combined overlay's 191 offline tests pass, as do the repair branch's 191
+regressions (no skips after supplying installed PyYAML to the container).
+The actual security suite passes fresh (47 transactions; 1,049,739,232 MIST
+charged) and cached (45 transactions; 195,462,969 charged), preserving the
+old-package attacks, aborted authority bypasses, type origins, receipt
+migration/durable retry, catalog targeting and revocation checks. Branch-side
+common/audit suites pass 67 + 23 tests; the authenticated cache, independent
+receipt-effects and audit Node suites pass. The first Docker offline attempt
+lacked PyYAML and failed five environment imports; after mounting the host's
+installed module read-only, all 191 passed. No application failure was ignored.
+
+Same-claim follow-up tested a second concrete source/storage candidate on the
+exact combined `7335545` source using the pinned compiler: replacing 54 static
+`BCS(String::utf8(bytes))` operation tags with `BCS(bytes)` preserves the encoded
+BCS value, but saves only **162 bytes** (93,673 → 93,511). The compiler digest
+changes; this unshipped experiment is **not** the historical head fixture and was
+not substituted for acceptance. [Compiler results](validation/sf221-bcs-storage-experiment.json)
+retain both digests. Together with the earlier 650-byte private-name experiment,
+these small source candidates do not establish the required reduction.
+
+Replaying the actual combined effects confirms a **93,121,037-MIST** fresh
+ordinary deficit before future temporal work. Even erasing all computation fees
+and device grants, while retaining current transaction grouping and clamping
+refund transactions to zero, leaves **1,640,251,037 MIST** of positive net storage.
+This rules out a funding/reservation/computation-only repair of that grouping.
+It is not a proof against all compatible source refactors or regrouping cleanup
+with creation: within-transaction rebates may reduce net effects, while a refund
+from a previous transaction must never replenish the allowance. A safe complete
+reduction remains unresolved. Ordinary/security/browser effects above remain the
+actual combined-candidate evidence; temporal pruning acceptance remains pending.
+No public rerun or new acceptance claim follows from this compiler experiment.
+
+The next same-claim bounded repair groups each completed ordinary deployment's
+removal with creation of its successor through the head package. The legacy
+entry runs first in its own PTB. Before deletion, every case must settle and its
+authoritative receipt must be read; protected public runs additionally verify
+its receipt-writing transaction effects through the independent gRPC reader.
+The final failed case still requires a Failed receipt and bounded cleanup.
+Unknown submissions keep their entire gas reservation. No previous transaction's
+rebate replenishes the allowance. Failure regressions cover missing receipts,
+independent-effects failures, incorrect versions and unknown successor outcomes.
+
+[The additional source candidate](validation/sf221-lifecycle-candidate.patch.b64)
+factors four identical group-authorization sequences, preserving check order,
+public signatures, layouts and existing abort functions/codes. It saves only 80
+more bytes (90,590 → 90,510) and remains outside production, applied after the
+factoring and assertion candidate patches. All 363 Move tests pass. Actual
+compatible upgrade and complete local cached ordinary acceptance pass with the
+changed grouping. Fresh setup still uses 1,589,347,488 MIST and refuses the first
+full deployment gas reservation. The separate cached ordinary measurement uses
+73,253,604 MIST, including its explicitly recorded 30M preexisting device grant.
+Counting that same grant once gives **1,632,601,092 MIST**, saving 36,839,145 over
+the previous candidate but leaving **32,601,092 MIST** plus reservation headroom
+unresolved. This diagnostic combines two distinct ledgers; it is not a successful
+fresh run, reset or permission to spend beyond a ceiling.
+
+The network-none local command was the same full ordinary/security/browser/
+temporal harness with `--head-ref HEAD --with-security --with-temporal` on
+candidate `a1f18755138b394257861957f79871b29186bcc8`. The candidate execution
+predates the final read-only created-version guard; its versions were still
+exercised by the real updater/history checks. The final guard is covered by the
+failure regressions. Final offline checks pass 200 testnet, 67 common and 23
+audit tests and the authenticated-cache, receipt-effects and audit Node suites.
+The first offline run failed a structural message assertion after success text
+changed; restoring its established text makes that check pass. No public
+fixtures, sibling PRs or hosted CI were rerun. The unchanged fresh ceiling still
+blocks SF-221; retain the draft PR and original claim rather than mark Review.
+
+[Full new effects and accounting](validation/sf221-lifecycle-costs.json) retain
+all six measured phases. Fresh/cached security pass at 1,025,440,432 /
+195,462,969 MIST (47 / 45 transactions); the browser flow passes at 101,000,198.
+Actual post-pruning proof and retirement pass on the original retained audit
+with zero additional ledger charge and the unchanged 20M reservation. They use
+a separate measurement ledger, so they do not turn failed fresh acceptance into
+success. There was one complete ephemeral browser-wallet flow against the
+fixture, not two separately executed fresh/cached browser flows. The three
+source patches reconstruct every measured source byte using
+`git apply --unidiff-zero` in their documented order. Final source correctness,
+ordinary fresh acceptance and protected exact-head public evidence remain gates.
+
+### SF-221 strict-lint CI repair (2026-11-02)
+
+Move-security run `41431114166`, job `125229637123`, failed on the new generic
+assertion helpers: `abort code` violates `EL04005` (named abort constants).
+The original `dd1bdde5` source reproduces that failure locally. Source commit
+`b77b880844240be84a0dbbb70b641b7cc96b373a` uses named-constant helpers for
+repeated errors and inline named assertions for infrequent checks. No lint
+allowance, baseline, check condition, error code/module or public ABI changes.
+An independent normalization of all 14 changed modules confirms identical
+original assertions and remaining source. The existing mutation anchors now
+match the restored inline checks; no security control was removed.
+
+Pinned `check_move_security.py` passes with strict warnings-as-errors and the
+unchanged unsuppressed baseline: 350 root, 79 storage and 60 data tests, all
+negative lint/linear-capability controls and eight authority-bypass mutations.
+`check_move_native_vm.py` passes 19 tests; the 203 testnet offline regressions
+pass without skips; `generate_interfaces.py --check` matches all 15 modules.
+
+[Exact repaired-source effects and hashes](validation/sf221-lint-repair.json)
+supersede the earlier source-size/cost measurements for this head. Release
+bytecode is **89,661 bytes**, digest
+`6fc9e5301d277f85f3e856d7393eed4853d305979471c9f832fe056b809bebaa`.
+The complete pinned network-none harness passes against base `cf65ea175435`:
+
+| Actual phase | Charged MIST | Transactions |
+|---|---:|---:|
+| Fresh ordinary | 1,591,840,078 | 11 |
+| Cached ordinary | 27,735,669 | 6 |
+| Fresh security | 1,018,424,032 | 47 |
+| Cached security | 195,462,969 | 45 |
+| Fresh browser | 101,000,198 | 1 operator funding transaction |
+| Cached browser | 101,000,198 | 1 operator funding transaction |
+
+Fresh ordinary leaves **8,159,922 MIST** below the unchanged 1.6B ceiling.
+The retained original audit checkpoint 187 is below the actual retention floor
+1195; the complete current-state proof and retirement pass. Retirement charges
+zero with the unchanged full 20M reservation under a separate bounded temporal
+measurement ledger, never replenishing or claiming more space in the fresh
+ordinary ledger. A preliminary read-only-checkout attempt passed ordinary
+acceptance but stopped before security transactions on a build-directory write
+error; the complete run uses a disposable writable tracked-source export.
+
+These are exact branch-source local results, not acceptance of a larger combined
+candidate. The historical larger-candidate headroom cannot be reused after this
+bytecode change; its exact combined source must pass its own cost/CI gates.
+Protected public-testnet/exact-head CI and fresh independent review remain
+pending and unpolled after push. Physical/mainnet/manual-wallet/provider
+acceptance stays unrun in SF-031/#32 and SF-087/#159.

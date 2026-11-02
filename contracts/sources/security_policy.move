@@ -31,9 +31,9 @@ module sui_edge::security_policy {
     /// Changing/replacing one uses every currently enforced class, never the
     /// proposed new source, and invalidates outstanding proofs.
     public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+        check_Factor(factor == 1 || factor == 2 || factor == 4 || factor == 8);
         check_all(uid, ctx);
-        assert!(!binding.is_empty() && binding.length() <= 4096, EPolicy);
+        check_Policy(!binding.is_empty() && binding.length() <= 4096);
         let key = FactorKey { factor };
         if (df::exists(uid, key)) {
             *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
@@ -51,22 +51,22 @@ module sui_edge::security_policy {
     public fun available(): u8 { AVAILABLE }
     public fun action_count(): u64 { ACTIONS }
     public(package) fun initialize(uid: &mut UID) {
-        assert!(!df::exists(uid, PolicyKey {}), EPolicy);
+        check_Policy(!df::exists(uid, PolicyKey {}));
         df::add(uid, PolicyKey {}, Policy { schema: 1, generation: 0,
             requirements: vector[0, 0, 0, 0, 0, 0, 0], transaction: vector[], attested: 0 });
     }
     public(package) fun check(uid: &UID, action: u64, ctx: &TxContext) {
         let p = df::borrow<PolicyKey, Policy>(uid, PolicyKey {});
-        assert!(p.schema == 1 && action < ACTIONS, EPolicy);
+        check_Policy(p.schema == 1 && action < ACTIONS);
         let needed = p.requirements[action];
-        assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);
+        check_Factor(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed));
     }
     /// Capability lending cannot be authorized by a wrapper grant: a caller
     /// could otherwise substitute any operation while holding the capability.
     public(package) fun assert_unprotected(uid: &UID) {
         let p = read(uid);
         let mut i = 0;
-        while (i < ACTIONS) { assert!(p.requirements[i] == 0, EFactor); i = i + 1; };
+        while (i < ACTIONS) { check_Factor(p.requirements[i] == 0); i = i + 1; };
     }
     public(package) fun check_all(uid: &UID, ctx: &TxContext) {
         let mut i = 0;
@@ -119,9 +119,9 @@ module sui_edge::security_policy {
         intent: vector<u8>, expires_ms: u64,
     }
     public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        assert!(intent.length() == 32, EPolicy);
+        check_Policy(intent.length() == 32);
         let now = clock.timestamp_ms();
-        assert!(expires_ms > now && expires_ms - now <= 604800000, EPolicy);
+        check_Policy(expires_ms > now && expires_ms - now <= 604800000);
         let p = read(uid);
         let a = Action { id: object::new(ctx), customer_id: uid.to_inner(), generation: p.generation,
             proposer: ctx.sender(), intent, expires_ms, attested: 0 };
@@ -147,7 +147,7 @@ module sui_edge::security_policy {
     /// evidence, current authority, intent and expiry before marking its bit.
     /// This function is package-only; no public generic witness is accepted.
     public(package) fun attest(a: &mut Action, factor: u8) {
-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+        check_Factor(factor == 1 || factor == 2 || factor == 4 || factor == 8);
         a.attested = a.attested | factor;
     }
     /// Each protected wrapper computes its own canonical intent, consumes the
@@ -184,7 +184,7 @@ module sui_edge::security_policy {
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }
     public(package) fun cancel(uid: &UID, a: Action) {
         let Action { id, customer_id, generation: _, proposer: _, intent: _, expires_ms: _, attested: _ } = a;
-        assert!(customer_id == uid.to_inner(), EPolicy);
+        check_Policy(customer_id == uid.to_inner());
         id.delete();
     }
     public(package) fun read(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }
@@ -196,7 +196,14 @@ module sui_edge::security_policy {
 
     #[test_only]
     public fun set_for_testing(uid: &mut UID, requirements: vector<u8>) {
-        assert!(requirements.length() == ACTIONS, EPolicy);
+        check_Policy(requirements.length() == ACTIONS);
         df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {}).requirements = requirements;
+    }
+    // Share each named abort branch without changing its module or error code.
+    fun check_Factor(condition: bool) {
+        if (!condition) abort EFactor
+    }
+    fun check_Policy(condition: bool) {
+        if (!condition) abort EPolicy
     }
 }

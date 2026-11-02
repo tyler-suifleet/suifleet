@@ -1,0 +1,23 @@
+{
+  "base": "cf65ea175435d1b6e111b988d51d9654a63c9db2",
+  "head": "7335545137acf5e773aac554eac027d787b3009d",
+  "chain": "4a71f590",
+  "limit_mist": 1600000000,
+  "measured_ledger_charge_mist": 1693121037,
+  "measured_deficit_mist": 93121037,
+  "computation_mist": 23870000,
+  "signed_storage_mist": 1589275434,
+  "funding_mist": 30000000,
+  "discarded_negative_net_mist": 49975603,
+  "hypothetical_global_net_mist": 1643145434,
+  "hypothetical_global_net_deficit_mist": 43145434,
+  "hypothetical_zero_computation_deficit_mist": 19275434,
+  "acceptance_complete": false,
+  "limits": [
+    "Observed effects are previous local receipts, not new executions.",
+    "Global rebate netting and erased computation are non-executable optimistic scenarios, not ledger changes.",
+    "Grouping can change actual computation and storage effects; this is not an impossibility proof for arbitrary regrouping or source reduction.",
+    "Retained success cannot certify fresh acceptance; future temporal operations and public exact-head acceptance remain unproved."
+  ],
+  "receipt_sha256": "77d7d99dd33bb64bb84b49ca6a582cb36aa2aa24c5938fc54e1d885bb40f6ecf"
+}

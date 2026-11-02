@@ -124,7 +124,7 @@ module sui_edge::enrollment {
         transfer::share_object(policy); policy_id
     }
     public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        check_NotOperator(policy.operator == authority);
         changed(policy);
         let mut i = 0;
         while (i < claims.length()) {
@@ -133,14 +133,14 @@ module sui_edge::enrollment {
         };
     }
     public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        check_NotOperator(policy.operator == authority);
         changed(policy);
         policy.claims.remove(claim);
     }
     public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        check_NotOperator(policy.operator == authority);
         changed(policy);
-        assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
+        check_Closed(df::exists(&policy.id, ManagedKey {}));
         policy.remaining = quota; policy.expires_at_ms = expires_at_ms;
         if (close) *df::borrow_mut<ManagedKey, bool>(&mut policy.id, ManagedKey {}) = false;
     }
@@ -204,8 +204,8 @@ module sui_edge::enrollment {
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
         assert!(object::id(registry) == policy.registry, EWrongRegistry);
         if (managed) {
-            assert!(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
-        } else assert!(policy.open, EClosed);
+            check_Closed(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}));
+        } else check_Closed(policy.open);
         assert!(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
         assert!(policy.remaining > 0, EQuotaExhausted);
         let sponsor = ctx.sponsor();
@@ -239,6 +239,13 @@ module sui_edge::enrollment {
     public fun is_open(policy: &EnrollmentPolicy): bool { policy.open }
 
     fun assert_operator(policy: &EnrollmentPolicy, ctx: &TxContext) {
-        assert!(ctx.sender() == policy.operator, ENotOperator);
+        check_NotOperator(ctx.sender() == policy.operator);
+    }
+    // Share each named abort branch without changing its module or error code.
+    fun check_Closed(condition: bool) {
+        if (!condition) abort EClosed
+    }
+    fun check_NotOperator(condition: bool) {
+        if (!condition) abort ENotOperator
     }
 }
