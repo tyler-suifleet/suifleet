@@ -139,6 +139,32 @@ def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, re
     return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
 
 
+def activation_plan(package, registry, device, group, operator, origins, pending=None):
+    """Combine head-only setup, retaining the exact legacy operation on recovery.
+
+    The pre-upgrade membership transaction stays before the upgrade. The new
+    owner cap can be borrowed to create the inbox before its PTB transfer.
+    """
+    legacy = 'activate identity in registry custody'
+    batched_label = 'activate identity + index group + create inbox (head)'
+    supported = all(name in origins for name in dm.INBOX_TYPES)
+    label = reconciler.normal_pending(pending)['label'] if pending else (batched_label if supported else legacy)
+    if label not in (legacy, batched_label) or (label == batched_label and not supported):
+        raise reconciler.Uncertain('pending activation does not match the verified head APIs')
+    calls = [f'{package}::device_registry::activate_device']
+    ptb = ['--move-call', calls[0], f'@{registry}', f'@{device}', '--assign', 'owner']
+    batched = label == batched_label
+    if batched:
+        calls += [f'{package}::device_group::index_members', f'{package}::fleet_inbox::new_inbox',
+                  f'{package}::fleet_inbox::follow_group', f'{package}::fleet_inbox::share_inbox']
+        ptb += ['--move-call', calls[1], f'@{group}', '10',
+                '--move-call', calls[2], f'@{registry}', 'owner', '--assign', 'inbox',
+                '--move-call', calls[3], 'inbox', f'@{group}',
+                '--move-call', calls[4], 'inbox']
+    ptb += ['--transfer-objects', '[owner]', f'@{operator}']
+    return label, calls, ptb, batched
+
+
 def gas_pools(gas):
     """(address balance, coin total). Gas selection draws one pool, never their sum."""
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
@@ -880,14 +906,24 @@ def run(args):
                     verify_publication(dict(publication, head_package=new), rpc_url, operator, client)
                     save_publication(head_package=new)
                 if "owner_cap" not in publication:
-                    activated = setup_ptb("activate identity in registry custody", [f"{new}::device_registry::activate_device"],
-                        "--move-call", f"{new}::device_registry::activate_device", f"@{registry}", f"@{device}",
-                        "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
-                    save_publication(owner_cap=created(activated, "::device_registry::DeviceOwnerCap")[0])
+                    activation_manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new,
+                        upgrade_cap=upgrade_cap, registry=registry, network=args.network,
+                        publisher=walrus.publisher, aggregator=aggregator))
+                    label, calls, ptb, batched = activation_plan(new, registry, device, group, operator,
+                        activation_manifest['type_origins'], publication.get('pending_operation'))
+                    activated = setup_ptb(label, calls, *ptb)
+                    values = dict(owner_cap=created(activated, "::device_registry::DeviceOwnerCap")[0])
+                    if batched:
+                        expected = dm.inbox_id(registry, activation_manifest['type_origins']['fleet_inbox::InboxKey'], device)
+                        assert created(activated, "::fleet_inbox::DeviceInbox") == [expected]
+                        values['inbox'] = expected
+                    save_publication(**values)
                 fixture = dict(owner_cap=publication["owner_cap"], base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                device=device, device_cap=device_cap, group=group, device_address=device_address,
                                device_key=publication["device_key"], created=evidence["started"],
                                provenance=provenance(tools, compatibility, evidence["toolchain"]["framework"], built, base, head))
+                if publication.get('inbox'):
+                    fixture['inbox'] = publication['inbox']
                 state["fixtures"][key_name] = fixture
                 state["publications"].pop(key_name)
                 save_state(state_path, state)
