@@ -42,7 +42,7 @@ def exercise(live, f, state_path, state, save):
         # Funding is charged as a grant; subsequent passkey-paid gas cannot
         # enlarge the allowance. Reused signing identities retain their gas.
         total=live.balance(key['address'])
-        if total<15_000_000:
+        if total<30_000_000:
             live.transaction(f'fund passkey {i}','--split-coins','gas','[30000000]','--assign','funding','--transfer-objects','[funding]',f'@{key["address"]}',budget=20_000_000,funding=30_000_000)
         result=tx(f'native possession proof {i}',operation='proof',key=i,package=f['head'],customer=f['customer'],administrator=live.operator,sender=key['address'],expires=int(live.object('0x6')['content']['timestamp_ms'])+300000)
         proof=live.created(result,'::passkey_factor::Enrollment')[0]
