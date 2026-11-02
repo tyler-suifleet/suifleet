@@ -1470,3 +1470,29 @@ parent. Verify installed revision/readiness and preserved worker identities.
 Implementation workers hand off their PR/head/tests to the sole orchestrator;
 they do not merge main or install their source. Merged-only rollout and actual
 future automatic integration remain unrun until that operator records them.
+
+
+### Overlap candidate preparation, review and CI (SF-220)
+
+Enabled integration batching permits two independent candidates in flight by
+default (`integration_batch.max_in_flight`, integer 1..4). Each source belongs to
+only one active candidate. Candidates are built against current main; another
+candidate waiting for CI does not reserve the entire project. The coordinator
+starts independent combined-source review immediately after publishing the
+candidate, while CI and protected testnet preparation run. Unchanged pending
+inputs reuse the existing review reservation. CI completion requests a fresh
+evidence review; an early source review is never final merge approval.
+
+A published actionable source finding is routed to its owner before CI finishes.
+A later candidate with complete checks and independent acceptance may integrate
+before an earlier candidate still waiting for CI. Main publication remains serial
+and nonforce, with exact head/base/feedback/claim/check verification. Uncertain
+publication fences all other main writes. Wallet concurrency and spend ceilings
+are unchanged.
+
+This is bounded speculation, not a stack that assumes another PR will merge. A
+main change invalidates other old-base candidates; their source reviews and
+branches remain intact while a fresh current-main candidate is prepared. Old
+CI/testnet/approval evidence cannot authorize the rebuilt tree. Keep the in-flight
+limit small to bound stale CI and testnet work; failed identical combinations are
+still excluded and substantive conflicts remain owner work.
