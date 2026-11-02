@@ -12,8 +12,11 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import recovery_control as control
+# Load aliases before individual fixtures patch coordinator.process_identity.
+import dispatcher
 
 REAL_POPEN = subprocess.Popen
+
 
 
 class RetainedRecoveryTests(unittest.TestCase):
@@ -391,6 +394,82 @@ class StoppedRepairTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError): self.resume()
                 mock.return_value = previous
                 self.child.assert_not_called()
+
+
+
+class BlockedEngineeringRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        StoppedRepairTests.setUp(self)
+        self.claim['status'] = 'blocked'
+        self.result = dict(verdict='blocked', acceptance_complete=False,
+                           model='original-model', evidence='Concrete filesystem repair remains.')
+        self.jobs.execute("UPDATE jobs SET status='done',publication_done=1,result=?", (json.dumps(self.result),))
+        (self.path/'result.json').write_text(json.dumps(self.result))
+        (self.path/'exit.json').write_text(json.dumps(dict(returncode=0)))
+
+    def resume(self):
+        return control.resume(self.d,self.project,self.slot,'SF-1',
+            'Implement the confirmed engineering repair; external decisions remain blocked.',
+            self.path/'worker.py',blocked_engineering_repair=True)
+
+    # Reuse the real stop/helper/claim/dependency/one-use fences, not orphan-only fixtures.
+    test_stopped_repair_with_finished_implementation_resumes_once = StoppedRepairTests.test_stopped_repair_with_finished_implementation_resumes_once
+    test_new_helper_after_resume_prevents_spawn = StoppedRepairTests.test_new_helper_after_resume_prevents_spawn
+    test_pending_retry_or_dependency_resume_cannot_be_stolen = StoppedRepairTests.test_pending_retry_or_dependency_resume_cannot_be_stolen
+    test_changed_owner_external_dependency_and_git_operation_are_fenced = StoppedRepairTests.test_changed_owner_external_dependency_and_git_operation_are_fenced
+    test_crash_after_intent_is_retained_and_never_replayed = StoppedRepairTests.test_crash_after_intent_is_retained_and_never_replayed
+
+    def test_live_uncertain_helpers_leases_and_competing_repairs_still_fence(self):
+        for method,value in [('stopped_identity',None),('capacity_helpers',[{'pid':4}]),
+                             ('owner_locks',['network:test']),('replacement_repair',True),('available',False)]:
+            with self.subTest(method=method):
+                mock=getattr(self.d,method); previous=mock.return_value
+                mock.return_value=value
+                with self.assertRaises(RuntimeError): self.resume()
+                mock.return_value=previous
+        self.child.assert_not_called()
+
+    def test_changed_reconciled_result_after_resume_prevents_launch(self):
+        original=self.d.ticket.side_effect
+        def ticket(project, command, *args):
+            result=original(project,command,*args)
+            if command=='resume':
+                changed={**self.result,'evidence':'changed during transition'}
+                self.jobs.execute('UPDATE jobs SET result=?',(json.dumps(changed),))
+                (self.path/'result.json').write_text(json.dumps(changed))
+            return result
+        self.d.ticket.side_effect=ticket
+        with self.assertRaisesRegex(RuntimeError,'source or manual origin changed'): self.resume()
+        self.child.assert_not_called()
+        self.d.update.assert_called_once()
+
+    def test_requires_explicit_operator_opt_in(self):
+        with self.assertRaisesRegex(RuntimeError, 'verified stopped'):
+            RetainedRecoveryTests.resume(self)
+        self.child.assert_not_called()
+
+    def test_rejects_approval_incomplete_publication_or_changed_result(self):
+        for change in [dict(verdict='approve'),dict(acceptance_complete=True),dict(model='other'),dict(evidence='')]:
+            with self.subTest(change=change):
+                self.jobs.execute('UPDATE jobs SET result=?',(json.dumps({**self.result,**change}),))
+                with self.assertRaises(RuntimeError): self.resume()
+        self.jobs.execute('UPDATE jobs SET result=?',(json.dumps(self.result),))
+        for field,value in [('publication_done',0),('launch_intent','pending'),('error','uncertain')]:
+            self.jobs.execute('UPDATE jobs SET '+field+'=?',(value,))
+            with self.assertRaises(RuntimeError): self.resume()
+            self.jobs.execute('UPDATE jobs SET '+field+'=?',(1 if field=='publication_done' else None,))
+        self.child.assert_not_called()
+
+    def test_rejects_missing_mismatched_or_failed_disk_receipts(self):
+        path=self.path/'result.json'
+        path.unlink()
+        with self.assertRaises(FileNotFoundError): self.resume()
+        path.write_text(json.dumps({**self.result,'evidence':'changed'}))
+        with self.assertRaisesRegex(RuntimeError, 'receipt mismatch'): self.resume()
+        path.write_text(json.dumps(self.result))
+        (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
+        with self.assertRaisesRegex(RuntimeError, 'successful worker exit'): self.resume()
+        self.child.assert_not_called()
 
 
 class ControlLifecycleTests(unittest.TestCase):
