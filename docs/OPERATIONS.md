@@ -874,3 +874,78 @@ keep its existing dedicated keystore binding and leave the shared config intact.
 The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
 including exploratory failures and limits; it is not proof of a manual extension
 wallet walkthrough or a live deployment of this frontend.
+
+## Optional passkey co-signature (SF-198)
+
+**Draft implementation, not deployable or accepted.** The isolated-chain upgrade
+currently fails `MovePackageTooBig` (103,244 bytes versus the 102,400-byte limit).
+The native setup/allowed/refused/recovery run has not reached feature execution.
+The dedicated agent wallet also reports no managed addresses, so no public
+mutation was attempted. The following documents the proposed interface and
+remaining procedure, not released functionality. The feature runner is deliberately
+local-only until safe cached-base reuse and the required testnet setup are ready.
+
+Passkey protection defaults off and applies per organization. First migrate legacy
+organization authority through the verified SF-196 procedure. The deployed
+manifest must include the actual introduction origins for
+`passkey_factor::Enrollment` and `passkey_factor::ProofCreated`; do not replace
+older type origins with the latest call package ID.
+
+In Settings → organization security, create a discoverable P-256 passkey, fund its
+address with the explicit **0.01 SUI** wallet transaction, prove possession with
+that passkey, then enroll the confirmed proof with the administrator wallet.
+Proofs expire in ten minutes and bind the organization, current policy generation
+and administrator. The console requests five minutes to allow submission time.
+Changing policy or enrolled factors invalidates outstanding proofs. A possession
+proof alone grants no wallet or fleet authority. Enroll a second independently
+recoverable passkey and save the public credential metadata before enabling
+protection for all action classes. Settings displays the verified administrator /
+passkey address pairs. The current wallet remains necessary for every action.
+
+The passkey is the **gas sponsor** of a protected wallet transaction. Sui validates
+both native signatures over identical transaction bytes; Move compares the
+verified sponsor with the administrator's enrolled, `0x06`-derived passkey address.
+The wallet remains transaction sender. Wallet-only calls, including direct
+contract calls, fail on chain. Existing intent-bound factor requirements still
+combine with AND. A passkey signature is neither a browser flag nor an optional
+multisig member. It also pays transaction gas: keep SUI at that address. Generic
+budget-cap loans may use native passkey sponsorship because it signs every use
+of the cap in the complete PTB; queued or partial action attestations cannot
+authorize those loans. Unreconciled imported fleet custody remains unavailable.
+
+Use HTTPS (localhost is allowed), a WebAuthn-capable browser with discoverable
+ES256 credentials and an authenticator supported by that browser. The console
+requests user verification and defaults to the SDK's cross-platform authenticator
+flow; platform/hybrid/cloud behavior depends on the browser and authenticator.
+The wallet must support signing a transaction with a different gas owner without
+altering its bytes. Unsupported browsers, rejected prompts, insufficient passkey
+gas and changed wallet bytes fail visibly. Native signature support is described
+in [Sui passkeys](https://docs.sui.io/develop/cryptography/passkeys) and
+[Mysten's SDK](https://sdk.mystenlabs.com/sui/cryptography/signers/passkey).
+
+For lost-device recovery, restore the **public metadata** backup on the same
+console origin, select an independently enrolled surviving key with **Use this
+key for signing**, then remove the lost key. A credential is bound to its RP
+hostname; copying metadata does not transfer a private key or allow using it on
+a different origin. Synced credentials depend on their cloud account and may
+share a compromise domain with the wallet. Keep independent custody. Metadata
+contains only public key and credential ID; store no seed, private key or PIN in
+the console. Never remove the final enrolled key while passkey protection is
+required. To remove all keys, first disable the factor using a surviving enrolled
+key plus wallet, then remove the final key. A wallet alone cannot reset required
+protection. Losing every enrolled passkey without another authorized recovery
+mechanism permanently locks protected administration; no support/email reset is
+provided. Public metadata can be backed up/restored in Settings; losing only
+browser metadata is distinct from losing an authenticator.
+
+Software verification uses `scripts/test_passkey_factor.cjs`, Move factor tests
+and `scripts/live_passkey_factor.py`. The latter uses synthetic WebAuthn assertions
+and **real native Sui signature validation**, not an actual hardware authenticator.
+For a disposable `--network none` node, use
+`scripts/test_security_policy_localnet.py --runner scripts/live_passkey_factor.py
+--base /path/to/pre-passkey/contracts --evidence /path/to/evidence.json`.
+Public testnet additionally requires the dedicated wallet, the global testnet
+lock, verified package/UpgradeCap lineage and its non-replenishing spend ceiling.
+Manual real-wallet/hardware-authenticator, physical, provider and mainnet checks
+remain unrun under [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
