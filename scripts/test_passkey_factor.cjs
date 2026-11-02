@@ -23,6 +23,12 @@ Object.defineProperty(global,'navigator',{configurable:true,value:{credentials:{
 }}});
 (async()=>{
  assert(p.passkeySupported());
+ // Independent SDK encoding proves the compact on-chain intent labels retain
+ // the exact BCS String bytes used by clients and pre-upgrade queued actions.
+ const source=fs.readFileSync('contracts/sources/customer.move','utf8');
+ const labels=[...source.matchAll(/b"\\x([0-9a-f]{2})([a-z_]+)"/g)];
+ assert.equal(labels.length,53);
+ for(const [,length,label] of labels) assert.deepEqual(Buffer.concat([Buffer.from(length,'hex'),Buffer.from(label)]),Buffer.from(bcs.string().serialize(label).toBytes()));
  const key=await p.createPasskey();assert.equal(p.savedPasskeys().length,1);
  const signer=p.passkeySigner(key),bytes=new Uint8Array([1,2,3]);
  const signed=await signer.signTransaction(bytes);

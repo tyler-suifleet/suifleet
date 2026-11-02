@@ -9,8 +9,12 @@ const { Transaction } = req('@mysten/sui/transactions');
 (async () => {
  const input = JSON.parse(fs.readFileSync(0,'utf8'));
  let keys;
- if (fs.existsSync(input.keys)) keys = JSON.parse(fs.readFileSync(input.keys,'utf8'));
- else {
+ try {
+  const stored = fs.readFileSync(input.keys,'utf8');
+  try { keys = JSON.parse(stored); } catch { throw Error('Invalid private fixture state'); }
+ }
+ catch (error) {
+  if (error.code !== 'ENOENT') throw error;
   keys = Array.from({length:2}, () => crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{type:'pkcs8',format:'pem'},publicKeyEncoding:{type:'spki',format:'der'}})).map(k=>({privateKey:k.privateKey, publicKey:crypto.ECDH.convertKey(k.publicKey.subarray(-65),'prime256v1',undefined,undefined,'compressed').toString('base64')}));
   fs.writeFileSync(input.keys,JSON.stringify(keys),{mode:0o600,flag:'wx'});
  }
@@ -35,7 +39,19 @@ const { Transaction } = req('@mysten/sui/transactions');
  else if(input.operation==='policy') tx.moveCall({target:`${input.package}::customer::set_security`,arguments:[tx.object(input.customer),tx.pure.vector('u8',Array(7).fill(input.mask))]});
  else if(input.operation==='remove') tx.moveCall({target:`${input.package}::passkey_factor::remove`,arguments:[tx.object(input.customer),tx.pure.address(input.administrator),tx.pure.address(signer(input.key).toSuiAddress())]});
  else throw Error('unsupported fixture operation');
- const bytes = await tx.build({client});
+ // Resolve inputs without requiring simulated success: refused-action tests
+ // must reach validators and record failed effects, rather than stop at preflight.
+ const kind = await tx.build({client,onlyTransactionKind:true});
+ const resolved = Transaction.fromKind(kind);
+ const owner = input.sponsor!==undefined ? signer(input.sponsor).toSuiAddress() : input.sender;
+ const coins = await client.core.listCoins({owner});
+ const coin = coins.objects.find(c=>BigInt(c.balance)>=BigInt(input.budget));
+ if(!coin) throw Error('fixture gas coin unavailable');
+ const price = await client.core.getReferenceGasPrice();
+ resolved.setSender(input.sender);resolved.setGasOwner(owner);
+ resolved.setGasBudget(input.budget);resolved.setGasPrice(price.referenceGasPrice);
+ resolved.setGasPayment([{objectId:coin.objectId,version:coin.version,digest:coin.digest}]);
+ const bytes = await resolved.build();
  const signature = input.operation==='proof' ? (await signer(input.key).signTransaction(bytes)).signature : input.sponsor!==undefined ? (await signer(input.sponsor).signTransaction(bytes)).signature : null;
- console.log(JSON.stringify({bytes:Buffer.from(bytes).toString('base64'),signature,digest:await tx.getDigest({client})}));
+ console.log(JSON.stringify({bytes:Buffer.from(bytes).toString('base64'),signature,digest:await resolved.getDigest()}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;});

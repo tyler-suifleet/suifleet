@@ -47,7 +47,7 @@ def run(a):
             # wallet authority signs only its verified bytes, never a digest alone.
             state['pending']={'operation':label,'digest':data['digest']};save()
             signatures = [prepared['signature']] if kwargs['operation'] == 'proof' else [live.signer(None, live.operator)(prepared['bytes'])] + ([prepared['signature']] if prepared['signature'] else [])
-            result = tc.bound(live.executor()('execute-signed-tx','--tx-bytes',prepared['bytes'],'--signatures',*signatures), data['digest'])
+            result = tc.bound(live.executor()('execute-signed-tx','--tx-bytes',prepared['bytes'],*[arg for signature in signatures for arg in ('--signatures', signature)]), data['digest'])
             del state['pending'];save()
             return result
         return live.ledger.execute(live.executor(), label, submit, gas=20_000_000, expect=kwargs.pop('expect','success'), require_full=True)
