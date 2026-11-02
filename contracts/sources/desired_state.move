@@ -15,6 +15,14 @@
 /// Introduced by a package upgrade: older package versions cannot read or
 /// write any of these types.
 module sui_edge::desired_state {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_3: u8 = 3;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
@@ -90,7 +98,7 @@ module sui_edge::desired_state {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             (state.revision, state.components)
         } else {
-            (0, vec_map::empty())
+            ((SMALL_0 as u64), vec_map::empty())
         };
         RevisionPlan { group_id: device_group::group_id(group), admin, base_revision, components }
     }
@@ -130,7 +138,7 @@ module sui_edge::desired_state {
         assert!(device_group::group_id(group) == group_id, EWrongGroup);
         assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
         assert!(revision(group) == base_revision, EStaleRevision);
-        let state = DesiredState { revision: base_revision + 1, components, updated_at: clock.timestamp_ms() };
+        let state = DesiredState { revision: base_revision + (SMALL_1 as u64), components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();
         let uid = device_group::uid_mut(group);
         if (df::exists(uid, RetirementCheckKey {})) {
@@ -215,8 +223,8 @@ module sui_edge::desired_state {
         // Sharded records (SF-127) keep their deletion path in the receipt
         // directory; their receipt roots must be retired first.
         let schema = deployment_manager::receipt_schema(&deployment);
-        if (schema == 2) component_catalog::delete_deployment(deployment, ctx)
-        else if (schema == 3) deployment_manager::delete_rollout(deployment, ctx)
+        if (schema == (SMALL_2 as u64)) component_catalog::delete_deployment(deployment, ctx)
+        else if (schema == (SMALL_3 as u64)) deployment_manager::delete_rollout(deployment, ctx)
         else deployment_manager::delete_deployment(deployment, ctx);
     }
 
@@ -229,7 +237,7 @@ module sui_edge::desired_state {
         if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             state.revision
-        } else { 0 }
+        } else { (SMALL_0 as u64) }
     }
 
     /// Empty until the first commit.

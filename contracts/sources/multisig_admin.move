@@ -1,5 +1,12 @@
 /// Native Sui multisig authentication; no off-chain service or caller-labelled address.
 module sui_edge::multisig_admin {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_7: u8 = 7;
+
     use std::bcs;
     use sui::clock::Clock;
     use sui::hash;
@@ -18,14 +25,14 @@ module sui_edge::multisig_admin {
         let mut bytes = vector[3];
         bytes.append(bcs::to_bytes(&threshold));
         let mut total = 0u64;
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < keys.length()) {
             let key = &keys[i];
             assert!(!key.is_empty(), EConfiguration);
-            let flag = key[0];
+            let flag = key[(SMALL_0 as u64)];
             assert!((flag == 0 && key.length() == 33) || ((flag == 1 || flag == 2 || flag == 6) && key.length() == 34), EConfiguration);
-            let mut j = 0;
-            while (j < i) { assert!(keys[j] != *key, EConfiguration); j = j + 1; };
+            let mut j = (SMALL_0 as u64);
+            while (j < i) { assert!(keys[j] != *key, EConfiguration); j = j + (SMALL_1 as u64); };
             assert!(weights[i] > 0, EConfiguration);
             total = total + (weights[i] as u64);
             bytes.append(*key); bytes.push_back(weights[i]); i = i + 1;
@@ -52,7 +59,7 @@ module sui_edge::multisig_admin {
 
     public fun enroll_secured(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, action: Action, clock: &Clock, ctx: &mut TxContext) {
         let arguments = vector[bcs::to_bytes(&b"enroll_multisig"), bcs::to_bytes(customer), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
-        customer::begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        customer::begin_security_action(customer, action, arguments, (SMALL_7 as u64), false, clock, ctx);
         enroll(customer, keys, weights, threshold, ctx);
         customer::finish_security_action(customer);
     }

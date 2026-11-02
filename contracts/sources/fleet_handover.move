@@ -1,5 +1,14 @@
 /// Explicit two-party, resumable authority handover. No key recovery.
 module sui_edge::fleet_handover {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_3: u8 = 3;
+    const SMALL_4: u8 = 4;
+
     use sui::clock::Clock;
     use sui::event;
     use sui_edge::device_group::{Self, DeviceGroup};
@@ -42,16 +51,16 @@ module sui_edge::fleet_handover {
     ) {
         p2(recipient != ctx.sender() && recipient != @0x0);
         let n = objects.length();
-        p1(n > 0 && n <= 512 && kinds.length() == n);
+        p1(n > (SMALL_0 as u64) && n <= 512 && kinds.length() == n);
         assert!(expires_ms > clock.timestamp_ms(), EExpired);
         let mut completed = vector[];
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < n) {
-            p1(kinds[i] <= 4);
-            let mut j = 0;
-            while (j < i) { p1(objects[j] != objects[i]); j = j + 1; };
+            p1(kinds[i] <= (SMALL_4 as u64));
+            let mut j = (SMALL_0 as u64);
+            while (j < i) { p1(objects[j] != objects[i]); j = j + (SMALL_1 as u64); };
             completed.push_back(false);
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let h = Handover { id: object::new(ctx), source: ctx.sender(), recipient,
             objects, kinds, completed, expires_ms, state: 0 };
@@ -90,32 +99,32 @@ module sui_edge::fleet_handover {
     }
 
     public fun device(h: &mut Handover, cap: DeviceOwnerCap, clock: &Clock, ctx: &TxContext) {
-        p0(h, object::id(&cap), 0, clock, ctx);
+        p0(h, object::id(&cap), (SMALL_0 as u64), clock, ctx);
         // Owned-object input authorization proves the source owns this cap.
         transfer::public_transfer(cap, h.recipient);
     }
 
     public fun group(h: &mut Handover, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
-        p0(h, object::id(group), 1, clock, ctx);
+        p0(h, object::id(group), (SMALL_1 as u64), clock, ctx);
         device_group::handover(group, h.recipient, ctx);
     }
 
     public fun deployment(h: &mut Handover, record: &mut DeploymentRecord, clock: &Clock, ctx: &TxContext) {
-        p0(h, object::id(record), 2, clock, ctx);
+        p0(h, object::id(record), (SMALL_2 as u64), clock, ctx);
         deployment_manager::handover(record, h.recipient, ctx);
     }
 
     public fun revoke_role(h: &mut Handover, registry: &mut DeviceRegistry,
         role_id: ID, clock: &Clock, ctx: &TxContext,
     ) {
-        p0(h, role_id, 3, clock, ctx);
+        p0(h, role_id, (SMALL_3 as u64), clock, ctx);
         roles::revoke(registry, role_id, ctx);
     }
 
     public fun close_enrollment(h: &mut Handover, policy: &mut EnrollmentPolicy,
         clock: &Clock, ctx: &TxContext,
     ) {
-        p0(h, object::id(policy), 4, clock, ctx);
+        p0(h, object::id(policy), (SMALL_4 as u64), clock, ctx);
         enrollment::close(policy, ctx);
     }
 

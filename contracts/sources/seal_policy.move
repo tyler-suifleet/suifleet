@@ -24,6 +24,12 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::seal_policy {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::bcs;
     use sui::event;
@@ -113,7 +119,7 @@ module sui_edge::seal_policy {
             id: object::new(ctx),
             version: VERSION,
             name,
-            key_epoch: 0,
+            key_epoch: (SMALL_0 as u64),
             accounts: vector[],
             devices: vector[],
             groups: vector[],
@@ -182,7 +188,7 @@ module sui_edge::seal_policy {
     /// Retire every identity of the current epoch.
     public fun rotate_key_epoch(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
         p0(policy, cap);
-        policy.key_epoch = policy.key_epoch + 1;
+        policy.key_epoch = policy.key_epoch + (SMALL_1 as u64);
         event::emit(KeyEpochRotated { policy_id: object::id(policy), key_epoch: policy.key_epoch });
     }
 
@@ -257,10 +263,10 @@ module sui_edge::seal_policy {
         let length = id.length();
         if (length < PREFIX_LENGTH + MIN_NONCE || length > PREFIX_LENGTH + MAX_NONCE) return false;
         let prefix = identity_prefix(policy);
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < PREFIX_LENGTH) {
             if (prefix[i] != id[i]) return false;
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         true
     }

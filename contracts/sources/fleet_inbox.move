@@ -19,6 +19,12 @@
 /// The inbox also lists the groups the device was added to (`groups`), so a
 /// device can find its groups after the node has pruned the events.
 module sui_edge::fleet_inbox {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::derived_object;
@@ -211,7 +217,7 @@ module sui_edge::fleet_inbox {
 
     /// empty_head: compact private symbol to bound published bytecode storage.
     fun p0(): Head {
-        Head { seq: 0, latest: option::none(), next_start_ms: 0, components: vec_map::empty() }
+        Head { seq: (SMALL_0 as u64), latest: option::none(), next_start_ms: (SMALL_0 as u64), components: vec_map::empty() }
     }
 
     /// The cap must be the one the registry's identity names and the device
@@ -228,14 +234,14 @@ module sui_edge::fleet_inbox {
     /// bump: compact private symbol to bound published bytecode storage.
     fun p2(head: &mut Head, target: ID, deployment: &DeploymentRecord, clock: &Clock) {
         let deployment_id = object::id(deployment);
-        head.seq = head.seq + 1;
+        head.seq = head.seq + (SMALL_1 as u64);
         head.latest = option::some(deployment_id);
         let name = *deployment_manager::component_name(deployment);
         if (head.components.contains(&name)) {
             *head.components.get_mut(&name) = deployment_id;
         } else {
             if (head.components.length() >= MAX_COMPONENTS) {
-                let (_, _) = head.components.remove_entry_by_idx(0);
+                let (_, _) = head.components.remove_entry_by_idx((SMALL_0 as u64));
             };
             head.components.insert(name, deployment_id);
         };

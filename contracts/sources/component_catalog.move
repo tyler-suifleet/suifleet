@@ -1,5 +1,18 @@
 /// Immutable authenticated component recipes; manifest order defines precedence.
 module sui_edge::component_catalog {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_3: u8 = 3;
+    const SMALL_4: u8 = 4;
+    const SMALL_10: u8 = 10;
+    const SMALL_16: u8 = 16;
+    const SMALL_64: u8 = 64;
+    const SMALL_128: u8 = 128;
+
     use std::string::{Self, String};
     use sui::clock::Clock;
     use sui::event;
@@ -68,25 +81,25 @@ module sui_edge::component_catalog {
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
-        p5(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
+        p5(n > (SMALL_0 as u64) && n <= (SMALL_16 as u64) && platform_arch.length() == n && recipe_blob_ids.length() == n
             && recipe_sha256s.length() == n && artifact_sha256s.length() == n);
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < n) {
             p5(p3(&platform_os[i]) && p4(&platform_arch[i]));
-            p2(&recipe_blob_ids[i], 128);
+            p2(&recipe_blob_ids[i], (SMALL_128 as u64));
             validate_hash(&recipe_sha256s[i]); validate_hash(&artifact_sha256s[i]);
-            let mut j = 0;
+            let mut j = (SMALL_0 as u64);
             while (j < i) {
                 assert!(platform_os[i] != platform_os[j] || platform_arch[i] != platform_arch[j], EDuplicate);
-                j = j + 1;
+                j = j + (SMALL_1 as u64);
             };
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let mut key = component_name;
         key.append(string::utf8(b"@")); key.append(version);
         assert!(!catalog.versions.contains(&key), EDuplicate);
         let value = ComponentVersion { id: object::new(ctx), catalog_id: object::id(catalog),
-            publisher: authority, component_name, version, schema_version: 1, created_at: clock.timestamp_ms(),
+            publisher: authority, component_name, version, schema_version: (SMALL_1 as u64), created_at: clock.timestamp_ms(),
             platform_os, platform_arch, recipe_blob_ids, recipe_sha256s, artifact_sha256s };
         catalog.versions.insert(key, object::id(&value));
         event::emit(VersionPublished { catalog_id: object::id(catalog), version_id: object::id(&value),
@@ -120,8 +133,8 @@ module sui_edge::component_catalog {
     }
     #[allow(lint(prefer_mut_tx_context))]
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
-        if (deployment_manager::receipt_schema(&deployment) == 2 &&
-            deployment_manager::receipts_version(&deployment) == 4) {
+        if (deployment_manager::receipt_schema(&deployment) == (SMALL_2 as u64) &&
+            deployment_manager::receipts_version(&deployment) == (SMALL_4 as u64)) {
             deployment_manager::remove_catalog_binding<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
         } else {
             deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
@@ -133,7 +146,7 @@ module sui_edge::component_catalog {
             d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, ctx);
     }
     public(package) fun remove_for_customer(record: &mut DeploymentRecord, authority: address) {
-        if (deployment_manager::receipts_version(record) == 4) {
+        if (deployment_manager::receipts_version(record) == (SMALL_4 as u64)) {
             deployment_manager::remove_catalog_binding_as<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {}, authority);
         } else {
             deployment_manager::remove_catalog_binding_as<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
@@ -156,15 +169,15 @@ module sui_edge::component_catalog {
     fun p1(b: u8): bool { b >= 48 && b <= 57 }
     /// validate_token: compact private symbol to bound published bytecode storage.
     fun p2(s: &String, max: u64) {
-        let b = s.as_bytes(); p5(b.length() > 0 && b.length() <= max);
+        let b = s.as_bytes(); p5(b.length() > (SMALL_0 as u64) && b.length() <= max);
         b.do_ref!(|c| p5(p0(*c) || p1(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= 128, EIdentity);
+        let b = s.as_bytes(); assert!(b.length() > (SMALL_0 as u64) && b.length() <= (SMALL_128 as u64), EIdentity);
         b.do_ref!(|c| assert!(p0(*c) || p1(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
     }
     public fun validate_hash(s: &String) {
-        let b = s.as_bytes(); p5(b.length() == 64);
+        let b = s.as_bytes(); p5(b.length() == (SMALL_64 as u64));
         b.do_ref!(|c| p5(p1(*c) || (*c >= 97 && *c <= 102)));
     }
     /// valid_os: compact private symbol to bound published bytecode storage.
@@ -179,17 +192,17 @@ module sui_edge::component_catalog {
     }
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
-        let b = s.as_bytes(); let n = b.length(); p6(n > 0 && n <= 128);
-        let mut i = 0; let mut part = 0u64;
-        while (part < 3) {
-            let start = i; let mut number: u64 = 0;
+        let b = s.as_bytes(); let n = b.length(); p6(n > (SMALL_0 as u64) && n <= (SMALL_128 as u64));
+        let mut i = (SMALL_0 as u64); let mut part = 0u64;
+        while (part < (SMALL_3 as u64)) {
+            let start = i; let mut number: u64 = (SMALL_0 as u64);
             while (i < n && p1(b[i])) {
                 let d = (b[i] - 48) as u64;
-                p6(number <= (18446744073709551615 - d) / 10);
-                number = number * 10 + d; i = i + 1;
+                p6(number <= (18446744073709551615 - d) / (SMALL_10 as u64));
+                number = number * (SMALL_10 as u64) + d; i = i + (SMALL_1 as u64);
             };
             p6(i > start && (i - start == 1 || b[start] != 48));
-            part = part + 1;
+            part = part + (SMALL_1 as u64);
             if (part < 3) { p6(i < n && b[i] == 46); i = i + 1; };
         };
         if (i == n) return;
@@ -200,13 +213,13 @@ module sui_edge::component_catalog {
             while (i < n && b[i] != 46 && b[i] != 43) {
                 p6(p0(b[i]) || p1(b[i]) || b[i] == 45);
                 if (!p1(b[i])) numeric = false;
-                i = i + 1;
+                i = i + (SMALL_1 as u64);
             };
             p6(i > start);
             if (prerelease && numeric) p6(i - start == 1 || b[start] != 48);
             if (i == n) break;
             if (b[i] == 43) { p6(prerelease); prerelease = false; };
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
     }
     // Share each named abort branch without changing its module or error code.

@@ -29,6 +29,11 @@
 /// `Settings.version` lets a later upgrade stop older versions overwriting a
 /// newer record.
 module sui_edge::fleet_settings {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+
     use sui::clock::Clock;
     use sui::dynamic_field as df;
     use sui::event;
@@ -130,7 +135,7 @@ module sui_edge::fleet_settings {
         archive_retention_epochs: u32,
     ): Settings {
         p0(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS);
-        p0(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
+        p0(rollout_check_interval_ms == (SMALL_0 as u64) || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= MAX_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= check_interval_ms));
         p0(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS);

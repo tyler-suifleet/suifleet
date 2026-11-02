@@ -1,4 +1,10 @@
 module sui_edge::device_registry {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
@@ -107,7 +113,7 @@ module sui_edge::device_registry {
         let registry = DeviceRegistry {
             id: object::new(ctx),
             admin: ctx.sender(),
-            device_count: 0,
+            device_count: (SMALL_0 as u64),
             schema_version: SCHEMA_VERSION,
         };
         event::emit(RegistryCreated {
@@ -150,7 +156,7 @@ module sui_edge::device_registry {
         });
 
         // Untrusted until `activate_device` takes it into custody.
-        registry.device_count = registry.device_count + 1;
+        registry.device_count = registry.device_count + (SMALL_1 as u64);
         device
     }
 
@@ -175,7 +181,7 @@ module sui_edge::device_registry {
             owner: ctx.sender(),
         });
 
-        registry.device_count = registry.device_count - 1;
+        registry.device_count = registry.device_count - (SMALL_1 as u64);
         id.delete();
     }
 

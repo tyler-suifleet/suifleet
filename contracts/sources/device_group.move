@@ -1,4 +1,10 @@
 module sui_edge::device_group {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
@@ -141,20 +147,20 @@ module sui_edge::device_group {
     /// marking the group indexed. Admin only; repeat until `remaining` is 0.
     public fun index_members(group: &mut DeviceGroup, limit: u64, ctx: &mut TxContext) {
         p0(ctx.sender() == group.admin);
-        assert!(limit > 0, EInvalidLimit);
+        assert!(limit > (SMALL_0 as u64), EInvalidLimit);
         if (!is_indexed(group)) {
-            df::add(&mut group.id, IndexKey {}, GroupIndex { members: 0 });
+            df::add(&mut group.id, IndexKey {}, GroupIndex { members: (SMALL_0 as u64) });
         };
-        let mut moved = 0;
+        let mut moved = (SMALL_0 as u64);
         while (moved < limit && !group.device_ids.is_empty()) {
             let device_id = group.device_ids.pop_back();
             // An older package may have re-added an indexed member.
             if (!df::exists(&group.id, MemberKey { device_id })) {
                 df::add(&mut group.id, MemberKey { device_id }, true);
                 let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-                index.members = index.members + 1;
+                index.members = index.members + (SMALL_1 as u64);
             };
-            moved = moved + 1;
+            moved = moved + (SMALL_1 as u64);
         };
         event::emit(GroupIndexed {
             group_id: object::id(group),
@@ -192,7 +198,7 @@ module sui_edge::device_group {
         if (is_indexed(group)) {
             df::add(&mut group.id, MemberKey { device_id }, true);
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members + 1;
+            index.members = index.members + (SMALL_1 as u64);
         } else {
             group.device_ids.push_back(device_id);
         };
@@ -208,7 +214,7 @@ module sui_edge::device_group {
         if (indexed) {
             let _: bool = df::remove(&mut group.id, MemberKey { device_id });
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members - 1;
+            index.members = index.members - (SMALL_1 as u64);
         };
         let (found, idx) = group.device_ids.index_of(&device_id);
         assert!(found || indexed, EDeviceNotInGroup);
@@ -243,7 +249,7 @@ module sui_edge::device_group {
         let indexed = if (is_indexed(group)) {
             let index: &GroupIndex = df::borrow(&group.id, IndexKey {});
             index.members
-        } else { 0 };
+        } else { (SMALL_0 as u64) };
         group.device_ids.length() + indexed
     }
 

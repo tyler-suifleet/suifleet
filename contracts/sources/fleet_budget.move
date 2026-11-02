@@ -38,6 +38,12 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::fleet_budget {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use sui::balance::{Self, Balance};
     use sui::clock::Clock;
     use sui::coin::{Self, Coin};
@@ -284,22 +290,22 @@ module sui_edge::fleet_budget {
             paused: false,
             default_limits,
             low_balance_threshold,
-            device_count: 0,
+            device_count: (SMALL_0 as u64),
             total_deposited: amount,
-            total_withdrawn: 0,
-            total_paid: 0,
-            total_allocated: 0,
-            total_reclaimed: 0,
+            total_withdrawn: (SMALL_0 as u64),
+            total_paid: (SMALL_0 as u64),
+            total_allocated: (SMALL_0 as u64),
+            total_reclaimed: (SMALL_0 as u64),
         };
         event::emit(BudgetCreated { budget_id, registry_id: budget.registry_id, owner_cap_id: budget.owner_cap_id, owner: ctx.sender() });
-        if (amount > 0) event::emit(Deposited { budget_id, amount, balance: amount });
+        if (amount > (SMALL_0 as u64)) event::emit(Deposited { budget_id, amount, balance: amount });
         (budget, cap)
     }
 
     public fun deposit(budget: &mut FleetBudget, cap: &BudgetOwnerCap, coin: Coin<SUI>) {
         assert_owner(budget, cap);
         let amount = coin.value();
-        pd(amount > 0);
+        pd(amount > (SMALL_0 as u64));
         budget.balance.join(coin.into_balance());
         budget.total_deposited = budget.total_deposited + amount;
         event::emit(Deposited { budget_id: object::id(budget), amount, balance: budget.balance.value() });
@@ -309,7 +315,7 @@ module sui_edge::fleet_budget {
     /// devices; take unused reserves back first with `reclaim_reserve`.
     public fun withdraw(budget: &mut FleetBudget, cap: &BudgetOwnerCap, amount: u64, ctx: &mut TxContext): Coin<SUI> {
         assert_owner(budget, cap);
-        pd(amount > 0);
+        pd(amount > (SMALL_0 as u64));
         pa(budget.balance.value() >= amount);
         budget.total_withdrawn = budget.total_withdrawn + amount;
         let coin = coin::take(&mut budget.balance, amount, ctx);
@@ -388,18 +394,18 @@ module sui_edge::fleet_budget {
             suspended: false,
             closed: false,
             period_start_ms: now,
-            drawn_in_period: 0,
-            draws_in_period: 0,
-            last_draw_ms: 0,
+            drawn_in_period: (SMALL_0 as u64),
+            draws_in_period: (SMALL_0 as u64),
+            last_draw_ms: (SMALL_0 as u64),
             total_drawn: float,
             enrolled_at_ms: now,
         };
         let account_id = object::id(&account);
         df::add(&mut budget.id, DeviceKey { device_id }, account_id);
-        budget.device_count = budget.device_count + 1;
+        budget.device_count = budget.device_count + (SMALL_1 as u64);
         event::emit(DeviceStateChanged { budget_id, device_id, account_id, enrolled: true, suspended: false, limits });
-        if (reserve > 0) p4(budget, &mut account, reserve);
-        if (float > 0) pay(budget, device_id, device_registry::identity_signer(&identity), float, ctx);
+        if (reserve > (SMALL_0 as u64)) p4(budget, &mut account, reserve);
+        if (float > (SMALL_0 as u64)) pay(budget, device_id, device_registry::identity_signer(&identity), float, ctx);
         transfer::share_object(account);
         account_id
     }
@@ -408,7 +414,7 @@ module sui_edge::fleet_budget {
     public fun fund_reserve(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, amount: u64) {
         assert_owner(budget, cap);
         p2(budget, account);
-        pd(amount > 0);
+        pd(amount > (SMALL_0 as u64));
         assert!(account.reserve.value() + amount <= MAX_LIMIT_MIST, EOverReserve);
         p4(budget, account, amount);
     }
@@ -418,7 +424,7 @@ module sui_edge::fleet_budget {
     public fun reclaim_reserve(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, amount: u64) {
         assert_owner(budget, cap);
         pb(account.budget_id == object::id(budget));
-        pd(amount > 0);
+        pd(amount > (SMALL_0 as u64));
         pa(account.reserve.value() >= amount);
         p5(budget, account, amount);
     }
@@ -437,7 +443,7 @@ module sui_edge::fleet_budget {
         assert_owner(budget, cap);
         assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
         p2(budget, account);
-        pd(amount > 0);
+        pd(amount > (SMALL_0 as u64));
         assert!(amount <= account.limits.float_cap, EOverFloat);
         let device_id = account.device_id;
         let identity = device_registry::identity(registry, device_id);
@@ -481,11 +487,11 @@ module sui_edge::fleet_budget {
         assert_owner(budget, cap);
         p2(budget, account);
         let _: ID = df::remove(&mut budget.id, DeviceKey { device_id: account.device_id });
-        budget.device_count = budget.device_count - 1;
+        budget.device_count = budget.device_count - (SMALL_1 as u64);
         account.closed = true;
         account.suspended = true;
         let rest = account.reserve.value();
-        if (rest > 0) p5(budget, account, rest);
+        if (rest > (SMALL_0 as u64)) p5(budget, account, rest);
         p7(account, false);
     }
 
@@ -515,17 +521,17 @@ module sui_edge::fleet_budget {
         ctx: &mut TxContext,
     ) {
         assert_may_draw(budget, account, registry, cap, ctx);
-        assert!(amount > 0, EZeroAmount);
+        assert!(amount > (SMALL_0 as u64), EZeroAmount);
         let now = clock.timestamp_ms();
         p3(account, now);
         let limits = account.limits;
         assert!(amount <= limits.float_cap, EOverFloat);
         assert!(account.draws_in_period < limits.max_draws_per_period, ERateLimited);
-        assert!(account.last_draw_ms == 0 || now >= account.last_draw_ms + limits.min_draw_interval_ms, ERateLimited);
+        assert!(account.last_draw_ms == (SMALL_0 as u64) || now >= account.last_draw_ms + limits.min_draw_interval_ms, ERateLimited);
         assert!(account.drawn_in_period + amount <= limits.period_allowance, EOverAllowance);
         assert!(account.reserve.value() >= amount, EInsufficientBalance);
         account.drawn_in_period = account.drawn_in_period + amount;
-        account.draws_in_period = account.draws_in_period + 1;
+        account.draws_in_period = account.draws_in_period + (SMALL_1 as u64);
         account.last_draw_ms = now;
         account.total_drawn = account.total_drawn + amount;
         let sender = ctx.sender();
@@ -580,7 +586,7 @@ module sui_edge::fleet_budget {
     /// assert_valid: compact private symbol to bound published bytecode storage.
     fun p1(limits: &Limits) {
         assert!(
-            limits.period_ms > 0 && limits.max_draws_per_period > 0
+            limits.period_ms > (SMALL_0 as u64) && limits.max_draws_per_period > (SMALL_0 as u64)
                 && limits.float_cap <= MAX_LIMIT_MIST && limits.period_allowance <= MAX_LIMIT_MIST, EInvalidLimits);
     }
 
@@ -597,8 +603,8 @@ module sui_edge::fleet_budget {
     fun p3(account: &mut GasAccount, now: u64) {
         if (now >= account.period_start_ms + account.limits.period_ms) {
             account.period_start_ms = now;
-            account.drawn_in_period = 0;
-            account.draws_in_period = 0;
+            account.drawn_in_period = (SMALL_0 as u64);
+            account.draws_in_period = (SMALL_0 as u64);
         };
     }
 
@@ -654,7 +660,7 @@ module sui_edge::fleet_budget {
     /// check_low: compact private symbol to bound published bytecode storage.
     fun p8(budget: &FleetBudget) {
         let balance = budget.balance.value();
-        if (balance < budget.low_balance_threshold || balance == 0) {
+        if (balance < budget.low_balance_threshold || balance == (SMALL_0 as u64)) {
             event::emit(BudgetLow { budget_id: object::id(budget), balance, threshold: budget.low_balance_threshold });
         };
     }
@@ -673,7 +679,7 @@ module sui_edge::fleet_budget {
     public fun spendable(budget: &FleetBudget): u64 { budget.balance.value() }
     /// Funds held back for SF-092 renewals. Zero until SF-092 adds them.
     #[allow(lint(unused_object_with_fields))]
-    public fun reserved(_budget: &FleetBudget): u64 { 0 }
+    public fun reserved(_budget: &FleetBudget): u64 { (SMALL_0 as u64) }
     public fun paused(budget: &FleetBudget): bool { budget.paused }
     public fun default_limits(budget: &FleetBudget): Limits { budget.default_limits }
     public fun low_balance_threshold(budget: &FleetBudget): u64 { budget.low_balance_threshold }
