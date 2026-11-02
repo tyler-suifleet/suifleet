@@ -1283,6 +1283,16 @@ member revalidation before normal repair dispatch on a later tick. Members remai
 reserved throughout publication/reconciliation uncertainty, including when a
 pre-tick PR snapshot reports a failure after publication. Pending source checks
 may still run on the combined candidate.
+SF-222 permits independent source-only review and collection of a published,
+independently source-ready Review claim when the existing exact-base automatic
+testnet classifier positively identifies its only failures as funding. Ordinary
+check failures, mixed funding/software failures and missing classifications still
+require owner repair. Pending source checks may overlap this review. Source
+review evidence must disclose missing funded acceptance and cannot approve a
+merge. Active repairs, human change requests, source/feedback/ownership/dependency
+validation and failed-group replay fencing remain binding. The final combined
+candidate still requires actual successful CI/security/funded testnet at its
+current head/base and independent acceptance; funding failures are never green.
 No shared incident owner is replaced and no funded transaction is blindly replayed.
 
 Skipped checks remain blocking except for three narrowly authenticated jobs in
