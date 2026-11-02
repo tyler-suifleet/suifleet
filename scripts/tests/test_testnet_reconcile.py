@@ -365,7 +365,7 @@ class Funding(unittest.TestCase):
 
     def test_ci_controller_requires_every_selected_suite_up_front(self):
         from ci_testnet_wallet import execute
-        for relevant, required in ((True, '3550000000'), (False, '1900000000')):
+        for relevant, required in ((True, '3250000000'), (False, '1600000000')):
             with tempfile.TemporaryDirectory() as root:
                 calls = []
 
@@ -376,7 +376,7 @@ class Funding(unittest.TestCase):
                                          lambda base: relevant), 0)
                 first = calls[0]
                 self.assertEqual(first[first.index('--required-balance-mist') + 1], required)
-                self.assertEqual(first[first.index('--max-spend-mist') + 1], '1900000000')
+                self.assertEqual(first[first.index('--max-spend-mist') + 1], '1600000000')
                 self.assertEqual(len(calls), 3 if relevant else 1)
 
 

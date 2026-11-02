@@ -1049,7 +1049,7 @@ if __name__ == "__main__":
     parser.add_argument("--base-ref", help="contracts to publish first (default: merge base with origin/main)")
     # SF-127 current-main package storage cost 1.120 SUI (run 40246935467);
     # setup, device funding and full deployment/cleanup reservations also fit.
-    parser.add_argument("--max-spend-mist", type=int, default=1_900_000_000)
+    parser.add_argument("--max-spend-mist", type=int, default=1_600_000_000)
     parser.add_argument("--required-balance-mist", type=int,
                         help="balance the whole selected suite sequence needs before any setup (default: --max-spend-mist); "
                         "this run's own allowance is unchanged")
