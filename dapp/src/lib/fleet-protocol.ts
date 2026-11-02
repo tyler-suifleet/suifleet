@@ -145,6 +145,14 @@ export const security_policy_FactorKeyBcs = bcs.struct("FactorKey", { factor: bc
 export const security_policy_PolicyBcs = bcs.struct("Policy", { schema: bcs.u64(), generation: bcs.u64(), requirements: bcs.vector(bcs.u8()), transaction: bcs.vector(bcs.u8()), attested: bcs.u8() });
 export const security_policy_PolicyChangedBcs = bcs.struct("PolicyChanged", { customer_id: bcs.Address, generation: bcs.u64(), requirements: bcs.vector(bcs.u8()) });
 export const security_policy_PolicyKeyBcs = bcs.struct("PolicyKey", { dummy_field: bcs.bool() });
+export const security_policy_ActionArgumentsBcs = bcs.struct("ActionArguments", { bytes: bcs.vector(bcs.u8()) });
+export const security_policy_ArgumentsKeyBcs = bcs.struct("ArgumentsKey", { dummy_field: bcs.bool() });
+export const security_policy_DelayGrantBcs = bcs.struct("DelayGrant", { elapsed_ms: bcs.u64(), transaction: bcs.vector(bcs.u8()), pause: bcs.bool() });
+export const security_policy_DelayGrantKeyBcs = bcs.struct("DelayGrantKey", { dummy_field: bcs.bool() });
+export const security_policy_DelayKeyBcs = bcs.struct("DelayKey", { dummy_field: bcs.bool() });
+export const security_policy_DelaysBcs = bcs.struct("Delays", { milliseconds: bcs.vector(bcs.u64()) });
+export const security_policy_QueuedAtBcs = bcs.struct("QueuedAt", { milliseconds: bcs.u64() });
+export const security_policy_QueuedAtKeyBcs = bcs.struct("QueuedAtKey", { dummy_field: bcs.bool() });
 export const calls = {
   component_catalog_begin_sharded_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::begin_sharded_receipts`, arguments: [tx.object(a0)] }),
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
@@ -293,6 +301,9 @@ export const calls = {
   customer_clear_decision_audit: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: number | bigint | string) => tx.moveCall({ target: `${packageId}::customer::clear_decision_audit`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure.u64(a3)] }),
   customer_max_group_batch: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::customer::max_group_batch`, arguments: [] }),
   customer_remove_many_from_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0], a3: string[]) => tx.moveCall({ target: `${packageId}::customer::remove_many_from_group`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2), tx.pure(bcs.vector(bcs.Address).serialize(a3))] }),
+  customer_configure_security_delays: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: (number | bigint | string)[]) => tx.moveCall({ target: `${packageId}::customer::configure_security_delays`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.u64()).serialize(a1))] }),
+  customer_configure_security_delays_secured: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: (number | bigint | string)[], a2: Parameters<Transaction["object"]>[0], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::configure_security_delays_secured`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.u64()).serialize(a1)), tx.object(a2), tx.object(a3)] }),
+  customer_queue_security_action: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[], a2: number | bigint | string, a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::customer::queue_security_action`, arguments: [tx.object(a0), tx.pure.vector("u8", a1), tx.pure.u64(a2), tx.object(a3)] }),
   deployment_manager_advance_rollout: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string[], a2: string[], a3: string[], a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::advance_rollout`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.Address).serialize(a1)), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.pure(bcs.vector(bcs.Address).serialize(a3)), tx.object(a4)] }),
   deployment_manager_advance_rollout_onchain: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string[], a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::advance_rollout_onchain`, arguments: [tx.object(a0), tx.object(a1), tx.pure(bcs.vector(bcs.Address).serialize(a2)), tx.object(a3)] }),
   deployment_manager_begin_receipt_cleanup: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::deployment_manager::begin_receipt_cleanup`, arguments: [tx.object(a0)] }),
@@ -677,4 +688,12 @@ export const TYPES = {
   security_policy_Policy: "security_policy::Policy",
   security_policy_PolicyChanged: "security_policy::PolicyChanged",
   security_policy_PolicyKey: "security_policy::PolicyKey",
+  security_policy_ActionArguments: "security_policy::ActionArguments",
+  security_policy_ArgumentsKey: "security_policy::ArgumentsKey",
+  security_policy_DelayGrant: "security_policy::DelayGrant",
+  security_policy_DelayGrantKey: "security_policy::DelayGrantKey",
+  security_policy_DelayKey: "security_policy::DelayKey",
+  security_policy_Delays: "security_policy::Delays",
+  security_policy_QueuedAt: "security_policy::QueuedAt",
+  security_policy_QueuedAtKey: "security_policy::QueuedAtKey",
 } as const;
