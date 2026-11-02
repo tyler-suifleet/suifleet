@@ -1040,3 +1040,52 @@ fixture, not two separately executed fresh/cached browser flows. The three
 source patches reconstruct every measured source byte using
 `git apply --unidiff-zero` in their documented order. Final source correctness,
 ordinary fresh acceptance and protected exact-head public evidence remain gates.
+
+### SF-221 strict-lint CI repair (2026-11-02)
+
+Move-security run `41431114166`, job `125229637123`, failed on the new generic
+assertion helpers: `abort code` violates `EL04005` (named abort constants).
+The original `dd1bdde5` source reproduces that failure locally. Source commit
+`b77b880844240be84a0dbbb70b641b7cc96b373a` uses named-constant helpers for
+repeated errors and inline named assertions for infrequent checks. No lint
+allowance, baseline, check condition, error code/module or public ABI changes.
+An independent normalization of all 14 changed modules confirms identical
+original assertions and remaining source. The existing mutation anchors now
+match the restored inline checks; no security control was removed.
+
+Pinned `check_move_security.py` passes with strict warnings-as-errors and the
+unchanged unsuppressed baseline: 350 root, 79 storage and 60 data tests, all
+negative lint/linear-capability controls and eight authority-bypass mutations.
+`check_move_native_vm.py` passes 19 tests; the 203 testnet offline regressions
+pass without skips; `generate_interfaces.py --check` matches all 15 modules.
+
+[Exact repaired-source effects and hashes](validation/sf221-lint-repair.json)
+supersede the earlier source-size/cost measurements for this head. Release
+bytecode is **89,661 bytes**, digest
+`6fc9e5301d277f85f3e856d7393eed4853d305979471c9f832fe056b809bebaa`.
+The complete pinned network-none harness passes against base `cf65ea175435`:
+
+| Actual phase | Charged MIST | Transactions |
+|---|---:|---:|
+| Fresh ordinary | 1,591,840,078 | 11 |
+| Cached ordinary | 27,735,669 | 6 |
+| Fresh security | 1,018,424,032 | 47 |
+| Cached security | 195,462,969 | 45 |
+| Fresh browser | 101,000,198 | 1 operator funding transaction |
+| Cached browser | 101,000,198 | 1 operator funding transaction |
+
+Fresh ordinary leaves **8,159,922 MIST** below the unchanged 1.6B ceiling.
+The retained original audit checkpoint 187 is below the actual retention floor
+1195; the complete current-state proof and retirement pass. Retirement charges
+zero with the unchanged full 20M reservation under a separate bounded temporal
+measurement ledger, never replenishing or claiming more space in the fresh
+ordinary ledger. A preliminary read-only-checkout attempt passed ordinary
+acceptance but stopped before security transactions on a build-directory write
+error; the complete run uses a disposable writable tracked-source export.
+
+These are exact branch-source local results, not acceptance of a larger combined
+candidate. The historical larger-candidate headroom cannot be reused after this
+bytecode change; its exact combined source must pass its own cost/CI gates.
+Protected public-testnet/exact-head CI and fresh independent review remain
+pending and unpolled after push. Physical/mainnet/manual-wallet/provider
+acceptance stays unrun in SF-031/#32 and SF-087/#159.
