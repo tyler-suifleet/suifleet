@@ -1,0 +1,1290 @@
+diff --git a/contracts/sources/component_catalog.move b/contracts/sources/component_catalog.move
+index 60e45fa6..3fb5c515 100644
+--- a/contracts/sources/component_catalog.move
++++ b/contracts/sources/component_catalog.move
+@@ -59 +59 @@ module sui_edge::component_catalog {
+-        assert!(catalog.publisher == ctx.sender(), EPublisher);
++        require_condition(catalog.publisher == ctx.sender(), EPublisher);
+@@ -67 +67 @@ module sui_edge::component_catalog {
+-        assert!(catalog.publisher == authority, EPublisher);
++        require_condition(catalog.publisher == authority, EPublisher);
+@@ -71 +71 @@ module sui_edge::component_catalog {
+-        assert!(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
++        require_condition(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
+@@ -75 +75 @@ module sui_edge::component_catalog {
+-            assert!(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]), EManifest);
++            require_condition(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]), EManifest);
+@@ -80 +80 @@ module sui_edge::component_catalog {
+-                assert!(platform_os[i] != platform_os[j] || platform_arch[i] != platform_arch[j], EDuplicate);
++                require_condition(platform_os[i] != platform_os[j] || platform_arch[i] != platform_arch[j], EDuplicate);
+@@ -87 +87 @@ module sui_edge::component_catalog {
+-        assert!(!catalog.versions.contains(&key), EDuplicate);
++        require_condition(!catalog.versions.contains(&key), EDuplicate);
+@@ -156,2 +156,2 @@ module sui_edge::component_catalog {
+-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= max, EManifest);
+-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95, EManifest));
++        let b = s.as_bytes(); require_condition(b.length() > 0 && b.length() <= max, EManifest);
++        b.do_ref!(|c| require_condition(alpha(*c) || digit(*c) || *c == 45 || *c == 95, EManifest));
+@@ -160,2 +160,2 @@ module sui_edge::component_catalog {
+-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= 128, EIdentity);
+-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
++        let b = s.as_bytes(); require_condition(b.length() > 0 && b.length() <= 128, EIdentity);
++        b.do_ref!(|c| require_condition(alpha(*c) || digit(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
+@@ -164,2 +164,2 @@ module sui_edge::component_catalog {
+-        let b = s.as_bytes(); assert!(b.length() == 64, EManifest);
+-        b.do_ref!(|c| assert!(digit(*c) || (*c >= 97 && *c <= 102), EManifest));
++        let b = s.as_bytes(); require_condition(b.length() == 64, EManifest);
++        b.do_ref!(|c| require_condition(digit(*c) || (*c >= 97 && *c <= 102), EManifest));
+@@ -177 +177 @@ module sui_edge::component_catalog {
+-        let b = s.as_bytes(); let n = b.length(); assert!(n > 0 && n <= 128, EVersion);
++        let b = s.as_bytes(); let n = b.length(); require_condition(n > 0 && n <= 128, EVersion);
+@@ -183 +183 @@ module sui_edge::component_catalog {
+-                assert!(number <= (18446744073709551615 - d) / 10, EVersion);
++                require_condition(number <= (18446744073709551615 - d) / 10, EVersion);
+@@ -186 +186 @@ module sui_edge::component_catalog {
+-            assert!(i > start && (i - start == 1 || b[start] != 48), EVersion);
++            require_condition(i > start && (i - start == 1 || b[start] != 48), EVersion);
+@@ -188 +188 @@ module sui_edge::component_catalog {
+-            if (part < 3) { assert!(i < n && b[i] == 46, EVersion); i = i + 1; };
++            if (part < 3) { require_condition(i < n && b[i] == 46, EVersion); i = i + 1; };
+@@ -192 +192 @@ module sui_edge::component_catalog {
+-        assert!(prerelease || b[i] == 43, EVersion); i = i + 1;
++        require_condition(prerelease || b[i] == 43, EVersion); i = i + 1;
+@@ -196 +196 @@ module sui_edge::component_catalog {
+-                assert!(alpha(b[i]) || digit(b[i]) || b[i] == 45, EVersion);
++                require_condition(alpha(b[i]) || digit(b[i]) || b[i] == 45, EVersion);
+@@ -200,2 +200,2 @@ module sui_edge::component_catalog {
+-            assert!(i > start, EVersion);
+-            if (prerelease && numeric) assert!(i - start == 1 || b[start] != 48, EVersion);
++            require_condition(i > start, EVersion);
++            if (prerelease && numeric) require_condition(i - start == 1 || b[start] != 48, EVersion);
+@@ -203 +203 @@ module sui_edge::component_catalog {
+-            if (b[i] == 43) { assert!(prerelease, EVersion); prerelease = false; };
++            if (b[i] == 43) { require_condition(prerelease, EVersion); prerelease = false; };
+@@ -206,0 +207,6 @@ module sui_edge::component_catalog {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/customer.move b/contracts/sources/customer.move
+index 23fa1939..ae24f01d 100644
+--- a/contracts/sources/customer.move
++++ b/contracts/sources/customer.move
+@@ -110 +110 @@ module sui_edge::customer {
+-        assert!(wallet != @0x0, EAccess);
++        require_condition(wallet != @0x0, EAccess);
+@@ -122 +122 @@ module sui_edge::customer {
+-        assert!(customer.administrators > 0, ELastAdmin);
++        require_condition(customer.administrators > 0, ELastAdmin);
+@@ -134 +134 @@ module sui_edge::customer {
+-        assert!((customer.version == 1 || security_authority(customer)) && customer.registry_id == object::id(registry), EBinding);
++        require_condition((customer.version == 1 || security_authority(customer)) && customer.registry_id == object::id(registry), EBinding);
+@@ -136,2 +136,2 @@ module sui_edge::customer {
+-        assert!(period >= customer.period, EPeriod);
+-        assert!(device_limit >= customer.active_devices, ELimit);
++        require_condition(period >= customer.period, EPeriod);
++        require_condition(device_limit >= customer.active_devices, ELimit);
+@@ -139 +139 @@ module sui_edge::customer {
+-        assert!(allowance >= customer.used, ELimit);
++        require_condition(allowance >= customer.used, ELimit);
+@@ -148 +148 @@ module sui_edge::customer {
+-        assert!(customer.registry_id == object::id(registry), EBinding);
++        require_condition(customer.registry_id == object::id(registry), EBinding);
+@@ -163 +163 @@ module sui_edge::customer {
+-        assert!(fleet_budget::registry_id(budget) == customer.registry_id, EBinding);
++        require_condition(fleet_budget::registry_id(budget) == customer.registry_id, EBinding);
+@@ -166 +166 @@ module sui_edge::customer {
+-        assert!(count <= customer.device_limit - customer.active_devices, ELimit);
++        require_condition(count <= customer.device_limit - customer.active_devices, ELimit);
+@@ -188 +188 @@ module sui_edge::customer {
+-        assert!(security_authority(customer) && expires_ms > clock.timestamp_ms()
++        require_condition(security_authority(customer) && expires_ms > clock.timestamp_ms()
+@@ -198 +198 @@ module sui_edge::customer {
+-        assert!(customer_id == object::id(customer) && security_authority(customer)
++        require_condition(customer_id == object::id(customer) && security_authority(customer)
+@@ -228 +228 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0 && object::id(budget) == fleet.budget_id && recipient != @0x0, EBinding);
++        require_condition(fleet.pending_devices == 0 && object::id(budget) == fleet.budget_id && recipient != @0x0, EBinding);
+@@ -241 +241 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0, EBinding);
++        require_condition(fleet.pending_devices == 0, EBinding);
+@@ -252 +252 @@ module sui_edge::customer {
+-        assert!(!customer.charge_type.is_empty()
++        require_condition(!customer.charge_type.is_empty()
+@@ -254 +254 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0, EBinding);
++        require_condition(fleet.pending_devices == 0, EBinding);
+@@ -268 +268 @@ module sui_edge::customer {
+-        assert!(fleet.version == 1 && object::id(fleet) == fleet_id && object::id(&cap) == cap_id, EBinding);
++        require_condition(fleet.version == 1 && object::id(fleet) == fleet_id && object::id(&cap) == cap_id, EBinding);
+@@ -303 +303 @@ module sui_edge::customer {
+-        assert!(object::id(source) != object::id(destination), EBinding);
++        require_condition(object::id(source) != object::id(destination), EBinding);
+@@ -335 +335 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id, EBinding);
++        require_condition(object::id(registry) == customer.registry_id, EBinding);
+@@ -357 +357 @@ module sui_edge::customer {
+-        if (security_authority(customer)) assert!(enrollment::security_generation(policy) == enrollment::authority_generation(&customer.id), EBinding);
++        if (security_authority(customer)) require_condition(enrollment::security_generation(policy) == enrollment::authority_generation(&customer.id), EBinding);
+@@ -363 +363 @@ module sui_edge::customer {
+-        assert!(fleet.enrollment_policies.contains(&object::id(policy)) && enrollment::operator(policy) == object::id(fleet).to_address(), EBinding);
++        require_condition(fleet.enrollment_policies.contains(&object::id(policy)) && enrollment::operator(policy) == object::id(fleet).to_address(), EBinding);
+@@ -367 +367 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
++        require_condition(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
+@@ -376 +376 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
++        require_condition(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
+@@ -382 +382 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
++        require_condition(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
+@@ -396,2 +396,2 @@ module sui_edge::customer {
+-        assert!(object::id(budget) == fleet.budget_id && object::id(registry) == customer.registry_id, EBinding);
+-        assert!(fleet.pending_devices > 0, EBinding);
++        require_condition(object::id(budget) == fleet.budget_id && object::id(registry) == customer.registry_id, EBinding);
++        require_condition(fleet.pending_devices > 0, EBinding);
+@@ -399 +399 @@ module sui_edge::customer {
+-        assert!(fleet_budget::account_id(budget, device_id).is_some(), EBinding);
++        require_condition(fleet_budget::account_id(budget, device_id).is_some(), EBinding);
+@@ -401,3 +401,3 @@ module sui_edge::customer {
+-        assert!(device_registry::identity_owner_cap(&identity) == object::id(&cap), EBinding);
+-        assert!(!df::exists(&customer.id, AssignmentKey { device_id }), EAssigned);
+-        assert!(fleet_budget::account_id(budget, device_id) == option::some(object::id(account)) && fleet_budget::account_owner_cap_id(account) == object::id(&cap), EBinding);
++        require_condition(device_registry::identity_owner_cap(&identity) == object::id(&cap), EBinding);
++        require_condition(!df::exists(&customer.id, AssignmentKey { device_id }), EAssigned);
++        require_condition(fleet_budget::account_id(budget, device_id) == option::some(object::id(account)) && fleet_budget::account_owner_cap_id(account) == object::id(&cap), EBinding);
+@@ -424 +424 @@ module sui_edge::customer {
+-        assert!(object::id(budget) == fleet.budget_id && fleet.pending_devices > 0, EBinding);
++        require_condition(object::id(budget) == fleet.budget_id && fleet.pending_devices > 0, EBinding);
+@@ -426,2 +426,2 @@ module sui_edge::customer {
+-        assert!(!fleet.devices.contains(&device_id), EAssigned);
+-        assert!(fleet_budget::account_id(budget, device_id) == option::some(object::id(account)), EBinding);
++        require_condition(!fleet.devices.contains(&device_id), EAssigned);
++        require_condition(fleet_budget::account_id(budget, device_id) == option::some(object::id(account)), EBinding);
+@@ -445 +445 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0, EBinding);
++        require_condition(fleet.pending_devices == 0, EBinding);
+@@ -458 +458 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0, EBinding);
++        require_condition(fleet.pending_devices == 0, EBinding);
+@@ -464 +464 @@ module sui_edge::customer {
+-        assert!(device_group::member_count(group) == ids.length(), EBinding);
++        require_condition(device_group::member_count(group) == ids.length(), EBinding);
+@@ -467 +467 @@ module sui_edge::customer {
+-            assert!(device_group::contains_device(group, ids[i]), EBinding);
++            require_condition(device_group::contains_device(group, ids[i]), EBinding);
+@@ -469 +469 @@ module sui_edge::customer {
+-            while (j < i) { assert!(ids[j] != ids[i], EBinding); j = j + 1; };
++            while (j < i) { require_condition(ids[j] != ids[i], EBinding); j = j + 1; };
+@@ -473 +473 @@ module sui_edge::customer {
+-        while (i < ids.length()) { assert!(fleet.devices.contains(&ids[i]), EBinding); i = i + 1; };
++        while (i < ids.length()) { require_condition(fleet.devices.contains(&ids[i]), EBinding); i = i + 1; };
+@@ -492 +492 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id, EBinding);
++        require_condition(object::id(registry) == customer.registry_id, EBinding);
+@@ -502,2 +502,2 @@ module sui_edge::customer {
+-        assert!(object::id(budget) == fleet.budget_id && fleet_budget::account_device_id(account) == device_id, EBinding);
+-        assert!(*df::borrow<GroupCountKey, u64>(&fleet.id, GroupCountKey { device_id }) == 0, EBinding);
++        require_condition(object::id(budget) == fleet.budget_id && fleet_budget::account_device_id(account) == device_id, EBinding);
++        require_condition(*df::borrow<GroupCountKey, u64>(&fleet.id, GroupCountKey { device_id }) == 0, EBinding);
+@@ -509 +509 @@ module sui_edge::customer {
+-        assert!(assignment == object::id(fleet), EBinding);
++        require_condition(assignment == object::id(fleet), EBinding);
+@@ -511 +511 @@ module sui_edge::customer {
+-        assert!(found, EBinding);
++        require_condition(found, EBinding);
+@@ -535 +535 @@ module sui_edge::customer {
+-        assert!(fleet.devices.contains(&device_id), EBinding);
++        require_condition(fleet.devices.contains(&device_id), EBinding);
+@@ -583 +583 @@ module sui_edge::customer {
+-        assert!(device_ids.length() > 0 && device_ids.length() <= MAX_GROUP_BATCH, EBatch);
++        require_condition(device_ids.length() > 0 && device_ids.length() <= MAX_GROUP_BATCH, EBatch);
+@@ -591 +591 @@ module sui_edge::customer {
+-        assert!(device_group::member_count(&group) == 0, EBinding);
++        require_condition(device_group::member_count(&group) == 0, EBinding);
+@@ -614 +614 @@ module sui_edge::customer {
+-        while (i < groups.length()) { assert!(fleet.groups.contains(&groups[i]), EBinding); i = i + 1; };
++        while (i < groups.length()) { require_condition(fleet.groups.contains(&groups[i]), EBinding); i = i + 1; };
+@@ -616 +616 @@ module sui_edge::customer {
+-        while (i < devices.length()) { assert!(fleet.devices.contains(&devices[i]), EBinding); i = i + 1; };
++        while (i < devices.length()) { require_condition(fleet.devices.contains(&devices[i]), EBinding); i = i + 1; };
+@@ -634 +634 @@ module sui_edge::customer {
+-        assert!(seal_policy::cap_policy(&cap) == policy_id, EBinding);
++        require_condition(seal_policy::cap_policy(&cap) == policy_id, EBinding);
+@@ -651 +651 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
++        require_condition(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_id), EBinding);
+@@ -693 +693 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -699 +699 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -704 +704 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -718 +718 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -723 +723 @@ module sui_edge::customer {
+-        let (found, index) = fleet.deployments.index_of(&object::id(&record)); assert!(found, EBinding);
++        let (found, index) = fleet.deployments.index_of(&object::id(&record)); require_condition(found, EBinding);
+@@ -735 +735 @@ module sui_edge::customer {
+-        assert!(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
++        require_condition(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
+@@ -741 +741 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -748 +748 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -754 +754 @@ module sui_edge::customer {
+-        assert!(deployment_manager::target_devices(record).contains(&device_cap::device_id(cap)), EBinding);
++        require_condition(deployment_manager::target_devices(record).contains(&device_cap::device_id(cap)), EBinding);
+@@ -760 +760 @@ module sui_edge::customer {
+-        assert!(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
++        require_condition(deployment_manager::target_groups(record).contains(&object::id(group)) && device_group::contains_device(group, device_cap::device_id(cap)), EBinding);
+@@ -765 +765 @@ module sui_edge::customer {
+-        assert!(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_cap::device_id(cap))
++        require_condition(object::id(registry) == customer.registry_id && fleet.devices.contains(&device_cap::device_id(cap))
+@@ -791 +791 @@ module sui_edge::customer {
+-        while (i < groups.length()) { assert!(fleet.groups.contains(&groups[i]), EBinding); i = i + 1; };
++        while (i < groups.length()) { require_condition(fleet.groups.contains(&groups[i]), EBinding); i = i + 1; };
+@@ -793 +793 @@ module sui_edge::customer {
+-        while (i < devices.length()) { assert!(fleet.devices.contains(&devices[i]), EBinding); i = i + 1; };
++        while (i < devices.length()) { require_condition(fleet.devices.contains(&devices[i]), EBinding); i = i + 1; };
+@@ -797 +797 @@ module sui_edge::customer {
+-        assert!(fleet.groups.contains(&object::id(group)) && device_group::admin(group) == object::id(fleet).to_address(), EBinding);
++        require_condition(fleet.groups.contains(&object::id(group)) && device_group::admin(group) == object::id(fleet).to_address(), EBinding);
+@@ -805 +805 @@ module sui_edge::customer {
+-        assert!(amount <= customer.allowance - customer.used, ELimit);
++        require_condition(amount <= customer.allowance - customer.used, ELimit);
+@@ -813 +813 @@ module sui_edge::customer {
+-        assert!(customer.charge_type == std::type_name::with_original_ids<W>().into_string().into_bytes(), EAccess);
++        require_condition(customer.charge_type == std::type_name::with_original_ids<W>().into_string().into_bytes(), EAccess);
+@@ -815,2 +815,2 @@ module sui_edge::customer {
+-        assert!(fleet.pending_devices == 0 && object::id(budget) == fleet.budget_id, EBinding);
+-        assert!(fleet.devices.contains(&device_cap::device_id(cap)), EBinding);
++        require_condition(fleet.pending_devices == 0 && object::id(budget) == fleet.budget_id, EBinding);
++        require_condition(fleet.devices.contains(&device_cap::device_id(cap)), EBinding);
+@@ -818 +818 @@ module sui_edge::customer {
+-        assert!(amount <= customer.allowance - customer.used, ELimit);
++        require_condition(amount <= customer.allowance - customer.used, ELimit);
+@@ -826 +826 @@ module sui_edge::customer {
+-        assert!((customer.version == 1 || security_authority(customer)) && object::id(registry) == customer.registry_id, EBinding);
++        require_condition((customer.version == 1 || security_authority(customer)) && object::id(registry) == customer.registry_id, EBinding);
+@@ -830 +830 @@ module sui_edge::customer {
+-        assert!(customer.charge_type.is_empty() || customer.charge_type == name, EBinding);
++        require_condition(customer.charge_type.is_empty() || customer.charge_type == name, EBinding);
+@@ -838 +838 @@ module sui_edge::customer {
+-        assert!(customer.credentials.contains(&ctx.sender()) && *customer.credentials.get(&ctx.sender()), EAccess);
++        require_condition(customer.credentials.contains(&ctx.sender()) && *customer.credentials.get(&ctx.sender()), EAccess);
+@@ -847 +847 @@ module sui_edge::customer {
+-            assert!(customer.version == 1, EBinding);
++            require_condition(customer.version == 1, EBinding);
+@@ -853 +853 @@ module sui_edge::customer {
+-        assert!(security_authority(customer), EBinding);
++        require_condition(security_authority(customer), EBinding);
+@@ -860 +860 @@ module sui_edge::customer {
+-        assert!(security_authority(customer) && fleet.pending_devices == 0, EBinding);
++        require_condition(security_authority(customer) && fleet.pending_devices == 0, EBinding);
+@@ -869 +869 @@ module sui_edge::customer {
+-        assert!(security_authority(customer), EBinding);
++        require_condition(security_authority(customer), EBinding);
+@@ -877 +877 @@ module sui_edge::customer {
+-                assert!(df::exists(&customer.id, FleetSecurityKey { fleet_id: customer.fleets[i] }), EBinding);
++                require_condition(df::exists(&customer.id, FleetSecurityKey { fleet_id: customer.fleets[i] }), EBinding);
+@@ -891 +891 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 7, clock, ctx);
+@@ -911 +911 @@ module sui_edge::customer {
+-        assert!(security_authority(customer) && *customer.credentials.get(&ctx.sender()), EAccess);
++        require_condition(security_authority(customer) && *customer.credentials.get(&ctx.sender()), EAccess);
+@@ -927 +927 @@ module sui_edge::customer {
+-        assert!(security_authority(customer), EBinding);
++        require_condition(security_authority(customer), EBinding);
+@@ -933 +933 @@ module sui_edge::customer {
+-        assert!(*customer.credentials.get(&ctx.sender()), EAccess);
++        require_condition(*customer.credentials.get(&ctx.sender()), EAccess);
+@@ -941 +941 @@ module sui_edge::customer {
+-        assert!(*customer.credentials.get(&ctx.sender()), EAccess);
++        require_condition(*customer.credentials.get(&ctx.sender()), EAccess);
+@@ -945 +945 @@ module sui_edge::customer {
+-        assert!((customer.version == 1 || security_authority(customer)) && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
++        require_condition((customer.version == 1 || security_authority(customer)) && fleet.version == 1 && fleet.customer_id == object::id(customer) && customer.fleets.contains(&object::id(fleet)), EBinding);
+@@ -947 +947 @@ module sui_edge::customer {
+-    fun assert_name(name: &String) { assert!(name.length() > 0 && name.length() <= 80, EName); }
++    fun assert_name(name: &String) { require_condition(name.length() > 0 && name.length() <= 80, EName); }
+@@ -967 +967 @@ module sui_edge::customer {
+-        assert!(fleet.deployments.contains(&object::id(record)), EBinding);
++        require_condition(fleet.deployments.contains(&object::id(record)), EBinding);
+@@ -979 +979 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 7, security_clock, ctx);
+@@ -987 +987 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -996 +996 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1006 +1006 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, clock, ctx);
+@@ -1016 +1016 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, clock, ctx);
+@@ -1024 +1024 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1032 +1032 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1042 +1042 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, clock, ctx);
+@@ -1050 +1050 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1058 +1058 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1067 +1067 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1075 +1075 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1083 +1083 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1091 +1091 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1099 +1099 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1108 +1108 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1117 +1117 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1125 +1125 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1134 +1134 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1143 +1143 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1152 +1152 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, clock, ctx);
+@@ -1161 +1161 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1170 +1170 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1178 +1178 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1189 +1189 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1198 +1198 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1206 +1206 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1214 +1214 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1222 +1222 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1230 +1230 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1238 +1238 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1247 +1247 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1258 +1258 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1268 +1268 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1277 +1277 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1285 +1285 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1293 +1293 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, security_clock, ctx);
+@@ -1301 +1301 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1309 +1309 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1317 +1317 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1325 +1325 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 2, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 2, security_clock, ctx);
+@@ -1334 +1334 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, security_clock, ctx);
+@@ -1342 +1342 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, security_clock, ctx);
+@@ -1351 +1351 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 1, clock, ctx);
+@@ -1359 +1359 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 6, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 6, security_clock, ctx);
+@@ -1367 +1367 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 7, security_clock, ctx);
+@@ -1375 +1375 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 0, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 0, security_clock, ctx);
+@@ -1383 +1383 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 0, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 0, clock, ctx);
+@@ -1391 +1391 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 3, false, security_clock, ctx);
++        begin_scoped_action(customer, action, arguments, 3, security_clock, ctx);
+@@ -1399 +1399 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 7, clock, ctx);
+@@ -1408 +1408 @@ module sui_edge::customer {
+-        assert!(recipient != @0x0, EBinding);
++        require_condition(recipient != @0x0, EBinding);
+@@ -1410 +1410 @@ module sui_edge::customer {
+-        security_policy::begin_scoped(&mut customer.id, action, arguments, 7, false, clock, ctx);
++        begin_scoped_action(customer, action, arguments, 7, clock, ctx);
+@@ -1420 +1420 @@ module sui_edge::customer {
+-        assert!((security_policy::attestations(&action) & 4) == 4, ESecondPerson);
++        require_condition((security_policy::attestations(&action) & 4) == 4, ESecondPerson);
+@@ -1431 +1431 @@ module sui_edge::customer {
+-            assert!(arguments_bcs.length() <= 16384, ESecondPerson);
++            require_condition(arguments_bcs.length() <= 16384, ESecondPerson);
+@@ -1434 +1434 @@ module sui_edge::customer {
+-            assert!(encoded.into_remainder_bytes().is_empty() && arguments.length() >= 2
++            require_condition(encoded.into_remainder_bytes().is_empty() && arguments.length() >= 2
+@@ -1457 +1457 @@ module sui_edge::customer {
+-        assert!(security_policy::proposer(&action) != ctx.sender(), ESecondPerson);
++        require_condition(security_policy::proposer(&action) != ctx.sender(), ESecondPerson);
+@@ -1477,0 +1478,11 @@ module sui_edge::customer {
++
++    fun begin_scoped_action(customer: &mut Customer, action: Action,
++        arguments: vector<vector<u8>>, class: u64, clock: &Clock, ctx: &mut TxContext) {
++        security_policy::begin_scoped(&mut customer.id, action, arguments, class, false, clock, ctx);
++    }
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/deployment_manager.move b/contracts/sources/deployment_manager.move
+index 40efc810..79fb40ad 100644
+--- a/contracts/sources/deployment_manager.move
++++ b/contracts/sources/deployment_manager.move
+@@ -103 +103 @@ module sui_edge::deployment_manager {
+-        assert!(deployment.creator == authority, ENotCreator);
++        require_condition(deployment.creator == authority, ENotCreator);
+@@ -105 +105 @@ module sui_edge::deployment_manager {
+-        assert!(c.state != 2, ECancelled);
++        require_condition(c.state != 2, ECancelled);
+@@ -114,4 +114,4 @@ module sui_edge::deployment_manager {
+-        assert!(authority == deployment.creator, ENotCreator);
+-        assert!(state <= 2, EInvalidControlState);
+-        assert!(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
+-        assert!((window_start_ms == 0 && window_end_ms == 0) ||
++        require_condition(authority == deployment.creator, ENotCreator);
++        require_condition(state <= 2, EInvalidControlState);
++        require_condition(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
++        require_condition((window_start_ms == 0 && window_end_ms == 0) ||
+@@ -119 +119 @@ module sui_edge::deployment_manager {
+-        assert!(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
++        require_condition(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
+@@ -122 +122 @@ module sui_edge::deployment_manager {
+-            assert!(previous.state != 2, ECancelled);
++            require_condition(previous.state != 2, ECancelled);
+@@ -310 +310 @@ module sui_edge::deployment_manager {
+-        assert!(bytes.length() == 64, EInvalidRecipeHash);
++        require_condition(bytes.length() == 64, EInvalidRecipeHash);
+@@ -314 +314 @@ module sui_edge::deployment_manager {
+-            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
++            require_condition((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
+@@ -348 +348 @@ module sui_edge::deployment_manager {
+-        assert!(authority == deployment.creator, ENotCreator);
++        require_condition(authority == deployment.creator, ENotCreator);
+@@ -367 +367 @@ module sui_edge::deployment_manager {
+-        assert!(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
++        require_condition(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
+@@ -435 +435 @@ module sui_edge::deployment_manager {
+-        assert!(targets.contains(&device_id), ENotTargeted);
++        require_condition(targets.contains(&device_id), ENotTargeted);
+@@ -451,3 +451,3 @@ module sui_edge::deployment_manager {
+-        assert!(targets.contains(&device_group::group_id(group)), ENotTargeted);
+-        assert!(device_group::admin(group) == deployment.creator, ENotTargeted);
+-        assert!(device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
++        require_condition(targets.contains(&device_group::group_id(group)), ENotTargeted);
++        require_condition(device_group::admin(group) == deployment.creator, ENotTargeted);
++        require_condition(device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
+@@ -468 +468 @@ module sui_edge::deployment_manager {
+-        assert!(!df::exists(&deployment.id, CustomerFleetKey {}), EPackageOutdated);
++        require_condition(!df::exists(&deployment.id, CustomerFleetKey {}), EPackageOutdated);
+@@ -472 +472 @@ module sui_edge::deployment_manager {
+-        assert!(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
++        require_condition(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
+@@ -476 +476 @@ module sui_edge::deployment_manager {
+-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
++        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+@@ -501 +501 @@ module sui_edge::deployment_manager {
+-        assert!(!df::exists(&deployment.id, ReceiptShardKey {}), EPackageOutdated);
++        require_condition(!df::exists(&deployment.id, ReceiptShardKey {}), EPackageOutdated);
+@@ -537 +537 @@ module sui_edge::deployment_manager {
+-        assert!(authority == deployment.creator, ENotCreator);
++        require_condition(authority == deployment.creator, ENotCreator);
+@@ -551 +551 @@ module sui_edge::deployment_manager {
+-        assert!(authority == deployment.creator, ENotCreator);
++        require_condition(authority == deployment.creator, ENotCreator);
+@@ -555 +555 @@ module sui_edge::deployment_manager {
+-        assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
++        require_condition(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
+@@ -586 +586 @@ module sui_edge::deployment_manager {
+-        assert!(ctx.sender() == d.creator, ENotCreator);
++        require_condition(ctx.sender() == d.creator, ENotCreator);
+@@ -590 +590 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_schema(d) != 2, EPackageOutdated);
++        require_condition(receipt_schema(d) != 2, EPackageOutdated);
+@@ -598,2 +598,2 @@ module sui_edge::deployment_manager {
+-        assert!(ctx.sender() == d.creator, ENotCreator);
+-        assert!(d.schema_version != 2, EPackageOutdated);
++        require_condition(ctx.sender() == d.creator, ENotCreator);
++        require_condition(d.schema_version != 2, EPackageOutdated);
+@@ -648 +648 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
++        require_condition(authority == d.creator, ENotCreator);
+@@ -652 +652 @@ module sui_edge::deployment_manager {
+-        assert!(d.schema_version == 1 || d.schema_version == 3, EPackageOutdated);
++        require_condition(d.schema_version == 1 || d.schema_version == 3, EPackageOutdated);
+@@ -686 +686 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
++        require_condition(authority == d.creator, ENotCreator);
+@@ -688 +688 @@ module sui_edge::deployment_manager {
+-        assert!(d.schema_version == 2, EPackageOutdated);
++        require_condition(d.schema_version == 2, EPackageOutdated);
+@@ -700 +700 @@ module sui_edge::deployment_manager {
+-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+@@ -702 +702 @@ module sui_edge::deployment_manager {
+-        assert!(shard.deployment == object::id(d) && shard.index < SHARD_COUNT &&
++        require_condition(shard.deployment == object::id(d) && shard.index < SHARD_COUNT &&
+@@ -709 +709 @@ module sui_edge::deployment_manager {
+-        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
++        require_condition(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+@@ -711 +711 @@ module sui_edge::deployment_manager {
+-        assert!(!receipt_directory(d).retiring, ECleanup);
++        require_condition(!receipt_directory(d).retiring, ECleanup);
+@@ -727 +727 @@ module sui_edge::deployment_manager {
+-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+@@ -729 +729 @@ module sui_edge::deployment_manager {
+-        assert!(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
++        require_condition(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
+@@ -738 +738 @@ module sui_edge::deployment_manager {
+-        assert!(directory.ready && !directory.retiring, EBarrier);
++        require_condition(directory.ready && !directory.retiring, EBarrier);
+@@ -742 +742 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_shard_index(device) == shard.index, EShard);
++        require_condition(receipt_shard_index(device) == shard.index, EShard);
+@@ -751 +751 @@ module sui_edge::deployment_manager {
+-        assert!(limit > 0 && limit <= CHUNK_LIMIT && start <= shard.count, EChunk);
++        require_condition(limit > 0 && limit <= CHUNK_LIMIT && start <= shard.count, EChunk);
+@@ -762 +762 @@ module sui_edge::deployment_manager {
+-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
++        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+@@ -777 +777 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_shard_index(device) == shard.index, EShard);
++        require_condition(receipt_shard_index(device) == shard.index, EShard);
+@@ -780 +780 @@ module sui_edge::deployment_manager {
+-            assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
++            require_condition(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+@@ -787 +787 @@ module sui_edge::deployment_manager {
+-        assert!(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
++        require_condition(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
+@@ -789 +789 @@ module sui_edge::deployment_manager {
+-        assert!(target_devices(d).contains(&device_cap::device_id(cap)), ENotTargeted);
++        require_condition(target_devices(d).contains(&device_cap::device_id(cap)), ENotTargeted);
+@@ -794 +794 @@ module sui_edge::deployment_manager {
+-        assert!(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
++        require_condition(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
+@@ -796 +796 @@ module sui_edge::deployment_manager {
+-        assert!(target_groups(d).contains(&device_group::group_id(group)) && device_group::admin(group) == d.creator &&
++        require_condition(target_groups(d).contains(&device_group::group_id(group)) && device_group::admin(group) == d.creator &&
+@@ -802 +802 @@ module sui_edge::deployment_manager {
+-        assert!(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
++        require_condition(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
+@@ -809 +809 @@ module sui_edge::deployment_manager {
+-        assert!(devices.length() <= CHUNK_LIMIT, EChunk);
++        require_condition(devices.length() <= CHUNK_LIMIT, EChunk);
+@@ -813 +813 @@ module sui_edge::deployment_manager {
+-            assert!(receipt_shard_index(device) == shard.index, EShard);
++            require_condition(receipt_shard_index(device) == shard.index, EShard);
+@@ -829,2 +829,2 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
+-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(authority == d.creator, ENotCreator);
++        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+@@ -837,2 +837,2 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_directory(d).retiring, ECleanup);
+-        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
++        require_condition(receipt_directory(d).retiring, ECleanup);
++        require_condition(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+@@ -848 +848 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_directory(d).retiring && shard.count == 0, ECleanup);
++        require_condition(receipt_directory(d).retiring && shard.count == 0, ECleanup);
+@@ -857 +857 @@ module sui_edge::deployment_manager {
+-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+@@ -859 +859 @@ module sui_edge::deployment_manager {
+-        assert!(directory.retiring && directory.remaining == 0, ECleanup);
++        require_condition(directory.retiring && directory.remaining == 0, ECleanup);
+@@ -899,3 +899,3 @@ module sui_edge::deployment_manager {
+-        assert!(has_receipts(d), ENoReceipts);
+-        assert!(has_current_receipts(d), EStaleReceipts);
+-        assert!(receipts_version(d) == legacy_receipts_version(d), EPackageOutdated);
++        require_condition(has_receipts(d), ENoReceipts);
++        require_condition(has_current_receipts(d), EStaleReceipts);
++        require_condition(receipts_version(d) == legacy_receipts_version(d), EPackageOutdated);
+@@ -907 +907 @@ module sui_edge::deployment_manager {
+-        assert!(!has_receipts(d) || receipts_version(d) <= legacy_receipts_version(d), EPackageOutdated);
++        require_condition(!has_receipts(d) || receipts_version(d) <= legacy_receipts_version(d), EPackageOutdated);
+@@ -915 +915 @@ module sui_edge::deployment_manager {
+-        assert!(has_receipts(d), ENoReceipts);
++        require_condition(has_receipts(d), ENoReceipts);
+@@ -957 +957 @@ module sui_edge::deployment_manager {
+-        assert!(receipts.version < LEGACY_RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(receipts.version < LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+@@ -969 +969 @@ module sui_edge::deployment_manager {
+-        assert!(receipts.version == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
++        require_condition(receipts.version == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+@@ -1037,2 +1037,2 @@ module sui_edge::deployment_manager {
+-        assert!(found && r.admitted_at[i] != 0 && r.outcomes[i] != 0 && !r.skipped[i], ENotTargeted);
+-        assert!(clock.timestamp_ms() >= r.admitted_at[i], ERolloutState);
++        require_condition(found && r.admitted_at[i] != 0 && r.outcomes[i] != 0 && !r.skipped[i], ENotTargeted);
++        require_condition(clock.timestamp_ms() >= r.admitted_at[i], ERolloutState);
+@@ -1070 +1070 @@ module sui_edge::deployment_manager {
+-        assert!(concurrency > 0 && concurrency <= 512 && rate_count > 0 && rate_count <= 512,
++        require_condition(concurrency > 0 && concurrency <= 512 && rate_count > 0 && rate_count <= 512,
+@@ -1072 +1072 @@ module sui_edge::deployment_manager {
+-        assert!(rate_window_ms > 0 && rate_window_ms <= 604800000 && bake_ms <= 604800000 &&
++        require_condition(rate_window_ms > 0 && rate_window_ms <= 604800000 && bake_ms <= 604800000 &&
+@@ -1095 +1095 @@ module sui_edge::deployment_manager {
+-        assert!(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
++        require_condition(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
+@@ -1099 +1099 @@ module sui_edge::deployment_manager {
+-            while (j < i) { assert!(members[j] != members[i], ERolloutPolicy); j = j + 1; };
++            while (j < i) { require_condition(members[j] != members[i], ERolloutPolicy); j = j + 1; };
+@@ -1101 +1101 @@ module sui_edge::deployment_manager {
+-                assert!(cohorts[i] == current + 1 && count >= policy.minimum_samples, ERolloutPolicy);
++                require_condition(cohorts[i] == current + 1 && count >= policy.minimum_samples, ERolloutPolicy);
+@@ -1106 +1106 @@ module sui_edge::deployment_manager {
+-        assert!(count >= policy.minimum_samples, ERolloutPolicy);
++        require_condition(count >= policy.minimum_samples, ERolloutPolicy);
+@@ -1123 +1123 @@ module sui_edge::deployment_manager {
+-        assert!(receipt_schema(d) == 3, ERolloutState);
++        require_condition(receipt_schema(d) == 3, ERolloutState);
+@@ -1140 +1140 @@ module sui_edge::deployment_manager {
+-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
++        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+@@ -1143 +1143 @@ module sui_edge::deployment_manager {
+-        assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
++        require_condition(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+@@ -1194,2 +1194,2 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
+-        assert!(receipt_schema(d) == 3, ERolloutState);
++        require_condition(authority == d.creator, ENotCreator);
++        require_condition(receipt_schema(d) == 3, ERolloutState);
+@@ -1198 +1198 @@ module sui_edge::deployment_manager {
+-        assert!(r.state == 0, ERolloutState);
++        require_condition(r.state == 0, ERolloutState);
+@@ -1200 +1200 @@ module sui_edge::deployment_manager {
+-        assert!(now > 0 && now >= r.progress_ms, ERolloutState);
++        require_condition(now > 0 && now >= r.progress_ms, ERolloutState);
+@@ -1265,2 +1265,2 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
+-        assert!(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
++        require_condition(authority == d.creator, ENotCreator);
++        require_condition(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
+@@ -1268 +1268 @@ module sui_edge::deployment_manager {
+-        assert!(r.state < 2, ERolloutState);
++        require_condition(r.state < 2, ERolloutState);
+@@ -1272 +1272 @@ module sui_edge::deployment_manager {
+-            assert!(found && r.admitted_at[index] == 0, ERolloutState);
++            require_condition(found && r.admitted_at[index] == 0, ERolloutState);
+@@ -1280 +1280 @@ module sui_edge::deployment_manager {
+-        assert!(!df::exists(&d.id, DecisionCleanupKey {}), ERolloutState);
++        require_condition(!df::exists(&d.id, DecisionCleanupKey {}), ERolloutState);
+@@ -1288 +1288 @@ module sui_edge::deployment_manager {
+-        assert!(reason.length() <= 256 && admitted.length() <= 512, ERolloutPolicy);
++        require_condition(reason.length() <= 256 && admitted.length() <= 512, ERolloutPolicy);
+@@ -1304,2 +1304,2 @@ module sui_edge::deployment_manager {
+-        assert!(authority == d.creator, ENotCreator);
+-        assert!(limit > 0 && limit <= 64, ERolloutPolicy);
++        require_condition(authority == d.creator, ENotCreator);
++        require_condition(limit > 0 && limit <= 64, ERolloutPolicy);
+@@ -1325 +1325 @@ module sui_edge::deployment_manager {
+-        assert!(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == 0, ERolloutState);
++        require_condition(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == 0, ERolloutState);
+@@ -1340,2 +1340,2 @@ module sui_edge::deployment_manager {
+-        assert!(ctx.sender() == d.creator, ENotCreator);
+-        assert!(receipt_schema(&d) == 3, ERolloutState);
++        require_condition(ctx.sender() == d.creator, ENotCreator);
++        require_condition(receipt_schema(&d) == 3, ERolloutState);
+@@ -1351,0 +1352,6 @@ module sui_edge::deployment_manager {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/desired_state.move b/contracts/sources/desired_state.move
+index bc4906c0..6f235861 100644
+--- a/contracts/sources/desired_state.move
++++ b/contracts/sources/desired_state.move
+@@ -88 +88 @@ module sui_edge::desired_state {
+-        assert!(device_group::admin(group) == admin, ENotAdmin);
++        require_condition(device_group::admin(group) == admin, ENotAdmin);
+@@ -102,3 +102,3 @@ module sui_edge::desired_state {
+-        assert!(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
+-        assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
+-        assert!(deployment_manager::has_recipe_digest(deployment) ||
++        require_condition(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
++        require_condition(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
++        require_condition(deployment_manager::has_recipe_digest(deployment) ||
+@@ -118 +118 @@ module sui_edge::desired_state {
+-        assert!(plan.components.contains(&name), EUnknownComponent);
++        require_condition(plan.components.contains(&name), EUnknownComponent);
+@@ -130,3 +130,3 @@ module sui_edge::desired_state {
+-        assert!(device_group::group_id(group) == group_id, EWrongGroup);
+-        assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
+-        assert!(revision(group) == base_revision, EStaleRevision);
++        require_condition(device_group::group_id(group) == group_id, EWrongGroup);
++        require_condition(authority == admin && device_group::admin(group) == admin, ENotAdmin);
++        require_condition(revision(group) == base_revision, EStaleRevision);
+@@ -139 +139 @@ module sui_edge::desired_state {
+-                assert!(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
++                require_condition(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
+@@ -172 +172 @@ module sui_edge::desired_state {
+-        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
++        require_condition(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+@@ -184 +184 @@ module sui_edge::desired_state {
+-        assert!(retirement.pending.contains(&group_id), EWrongGroup);
++        require_condition(retirement.pending.contains(&group_id), EWrongGroup);
+@@ -186 +186 @@ module sui_edge::desired_state {
+-        assert!(!deployments.contains(&retirement.deployment_id), EStillDesired);
++        require_condition(!deployments.contains(&retirement.deployment_id), EStillDesired);
+@@ -211,2 +211,2 @@ module sui_edge::desired_state {
+-        assert!(object::id(&deployment) == deployment_id, EWrongRecord);
+-        assert!(pending.is_empty(), EUnconfirmed);
++        require_condition(object::id(&deployment) == deployment_id, EWrongRecord);
++        require_condition(pending.is_empty(), EUnconfirmed);
+@@ -214 +214 @@ module sui_edge::desired_state {
+-        assert!(managed || !deployment_manager::is_managed(&deployment), ERetiring);
++        require_condition(managed || !deployment_manager::is_managed(&deployment), ERetiring);
+@@ -243,0 +244,6 @@ module sui_edge::desired_state {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/device_cap.move b/contracts/sources/device_cap.move
+index 90f5477f..282a4d01 100644
+--- a/contracts/sources/device_cap.move
++++ b/contracts/sources/device_cap.move
+@@ -62,0 +63 @@ module sui_edge::device_cap {
++
+diff --git a/contracts/sources/device_group.move b/contracts/sources/device_group.move
+index 6760a090..89da86fe 100644
+--- a/contracts/sources/device_group.move
++++ b/contracts/sources/device_group.move
+@@ -113 +113 @@ module sui_edge::device_group {
+-        assert!(ctx.sender() == group.admin, ENotAdmin);
++        require_condition(ctx.sender() == group.admin, ENotAdmin);
+@@ -129 +129 @@ module sui_edge::device_group {
+-        assert!(ctx.sender() == group.admin, ENotAdmin);
++        require_condition(ctx.sender() == group.admin, ENotAdmin);
+@@ -143,2 +143,2 @@ module sui_edge::device_group {
+-        assert!(ctx.sender() == group.admin, ENotAdmin);
+-        assert!(limit > 0, EInvalidLimit);
++        require_condition(ctx.sender() == group.admin, ENotAdmin);
++        require_condition(limit > 0, EInvalidLimit);
+@@ -168 +168 @@ module sui_edge::device_group {
+-        assert!(ctx.sender() == group.admin, ENotAdmin);
++        require_condition(ctx.sender() == group.admin, ENotAdmin);
+@@ -214 +214 @@ module sui_edge::device_group {
+-        assert!(found || indexed, EDeviceNotInGroup);
++        require_condition(found || indexed, EDeviceNotInGroup);
+@@ -226 +226 @@ module sui_edge::device_group {
+-        assert!(!found, EDeviceAlreadyInGroup);
++        require_condition(!found, EDeviceAlreadyInGroup);
+@@ -258,0 +259,6 @@ module sui_edge::device_group {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/device_registry.move b/contracts/sources/device_registry.move
+index 8b43dace..ec655059 100644
+--- a/contracts/sources/device_registry.move
++++ b/contracts/sources/device_registry.move
+@@ -215 +215 @@ module sui_edge::device_registry {
+-        assert!(identity.owner_cap == old_id && is_custodied(registry, device_id), EWrongDevice);
++        require_condition(identity.owner_cap == old_id && is_custodied(registry, device_id), EWrongDevice);
+@@ -238 +238 @@ module sui_edge::device_registry {
+-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
++        require_condition(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+@@ -251 +251 @@ module sui_edge::device_registry {
+-        assert!(dof::exists(&registry.id, CustodyKey { device_id }), ENotCustodied);
++        require_condition(dof::exists(&registry.id, CustodyKey { device_id }), ENotCustodied);
+@@ -259 +259 @@ module sui_edge::device_registry {
+-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
++        require_condition(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+@@ -266 +266 @@ module sui_edge::device_registry {
+-        assert!(object::id(&device) == device_id, EWrongDevice);
++        require_condition(object::id(&device) == device_id, EWrongDevice);
+@@ -268 +268 @@ module sui_edge::device_registry {
+-        assert!(device.device_address == identity_of(registry, device_id).signer, EWrongDevice);
++        require_condition(device.device_address == identity_of(registry, device_id).signer, EWrongDevice);
+@@ -282 +282 @@ module sui_edge::device_registry {
+-        assert!(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
++        require_condition(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), ENotCustodied);
+@@ -322 +322 @@ module sui_edge::device_registry {
+-        assert!(registry.admin == ctx.sender(), EWrongDevice);
++        require_condition(registry.admin == ctx.sender(), EWrongDevice);
+@@ -333,0 +334,6 @@ module sui_edge::device_registry {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/enrollment.move b/contracts/sources/enrollment.move
+index 3cbf29bd..f0e0e1af 100644
+--- a/contracts/sources/enrollment.move
++++ b/contracts/sources/enrollment.move
+@@ -127 +127 @@ module sui_edge::enrollment {
+-        assert!(policy.operator == authority, ENotOperator);
++        require_condition(policy.operator == authority, ENotOperator);
+@@ -136 +136 @@ module sui_edge::enrollment {
+-        assert!(policy.operator == authority, ENotOperator);
++        require_condition(policy.operator == authority, ENotOperator);
+@@ -141 +141 @@ module sui_edge::enrollment {
+-        assert!(policy.operator == authority, ENotOperator);
++        require_condition(policy.operator == authority, ENotOperator);
+@@ -143 +143 @@ module sui_edge::enrollment {
+-        assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
++        require_condition(df::exists(&policy.id, ManagedKey {}), EClosed);
+@@ -165 +165 @@ module sui_edge::enrollment {
+-        assert!(policy.claims.contains(claim), EUnknownClaim);
++        require_condition(policy.claims.contains(claim), EUnknownClaim);
+@@ -205 +205 @@ module sui_edge::enrollment {
+-        assert!(object::id(registry) == policy.registry, EWrongRegistry);
++        require_condition(object::id(registry) == policy.registry, EWrongRegistry);
+@@ -207,4 +207,4 @@ module sui_edge::enrollment {
+-            assert!(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
+-        } else assert!(policy.open, EClosed);
+-        assert!(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
+-        assert!(policy.remaining > 0, EQuotaExhausted);
++            require_condition(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
++        } else require_condition(policy.open, EClosed);
++        require_condition(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
++        require_condition(policy.remaining > 0, EQuotaExhausted);
+@@ -212 +212 @@ module sui_edge::enrollment {
+-        assert!(sponsor.is_some(), ENotSponsored);
++        require_condition(sponsor.is_some(), ENotSponsored);
+@@ -215,2 +215,2 @@ module sui_edge::enrollment {
+-        assert!(claim != device_address, ESponsorIsDevice);
+-        assert!(policy.claims.contains(claim), EUnknownClaim);
++        require_condition(claim != device_address, ESponsorIsDevice);
++        require_condition(policy.claims.contains(claim), EUnknownClaim);
+@@ -242 +242,7 @@ module sui_edge::enrollment {
+-        assert!(ctx.sender() == policy.operator, ENotOperator);
++        require_condition(ctx.sender() == policy.operator, ENotOperator);
++    }
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
+diff --git a/contracts/sources/fleet_budget.move b/contracts/sources/fleet_budget.move
+index 2d10ba7c..a745f7d1 100644
+--- a/contracts/sources/fleet_budget.move
++++ b/contracts/sources/fleet_budget.move
+@@ -302 +302 @@ module sui_edge::fleet_budget {
+-        assert!(amount > 0, EZeroAmount);
++        require_condition(amount > 0, EZeroAmount);
+@@ -312,2 +312,2 @@ module sui_edge::fleet_budget {
+-        assert!(amount > 0, EZeroAmount);
+-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
++        require_condition(amount > 0, EZeroAmount);
++        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
+@@ -351 +351 @@ module sui_edge::fleet_budget {
+-        assert!(budget.version == VERSION, EWrongVersion);
++        require_condition(budget.version == VERSION, EWrongVersion);
+@@ -359 +359 @@ module sui_edge::fleet_budget {
+-        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
++        require_condition(budget.version == MANAGED_VERSION, EWrongVersion);
+@@ -368 +368 @@ module sui_edge::fleet_budget {
+-        assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
++        require_condition(object::id(registry) == budget.registry_id, EWrongRegistry);
+@@ -370 +370 @@ module sui_edge::fleet_budget {
+-        assert!(!df::exists(&budget.id, DeviceKey { device_id }), EAlreadyEnrolled);
++        require_condition(!df::exists(&budget.id, DeviceKey { device_id }), EAlreadyEnrolled);
+@@ -372 +372 @@ module sui_edge::fleet_budget {
+-        assert!(identity.is_some(), EInactiveDevice);
++        require_condition(identity.is_some(), EInactiveDevice);
+@@ -374,2 +374,2 @@ module sui_edge::fleet_budget {
+-        assert!(device_registry::is_custodied(registry, device_id) && !device_registry::identity_revoked(&identity), EInactiveDevice);
+-        assert!(device_registry::identity_owner_cap(&identity) == object::id(owner_cap), EOwnerChanged);
++        require_condition(device_registry::is_custodied(registry, device_id) && !device_registry::identity_revoked(&identity), EInactiveDevice);
++        require_condition(device_registry::identity_owner_cap(&identity) == object::id(owner_cap), EOwnerChanged);
+@@ -377,2 +377,2 @@ module sui_edge::fleet_budget {
+-        assert!(float <= limits.float_cap, EOverFloat);
+-        assert!(reserve <= MAX_LIMIT_MIST, EOverReserve);
++        require_condition(float <= limits.float_cap, EOverFloat);
++        require_condition(reserve <= MAX_LIMIT_MIST, EOverReserve);
+@@ -411,2 +411,2 @@ module sui_edge::fleet_budget {
+-        assert!(amount > 0, EZeroAmount);
+-        assert!(account.reserve.value() + amount <= MAX_LIMIT_MIST, EOverReserve);
++        require_condition(amount > 0, EZeroAmount);
++        require_condition(account.reserve.value() + amount <= MAX_LIMIT_MIST, EOverReserve);
+@@ -420,3 +420,3 @@ module sui_edge::fleet_budget {
+-        assert!(account.budget_id == object::id(budget), EWrongAccount);
+-        assert!(amount > 0, EZeroAmount);
+-        assert!(account.reserve.value() >= amount, EInsufficientBalance);
++        require_condition(account.budget_id == object::id(budget), EWrongAccount);
++        require_condition(amount > 0, EZeroAmount);
++        require_condition(account.reserve.value() >= amount, EInsufficientBalance);
+@@ -438 +438 @@ module sui_edge::fleet_budget {
+-        assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
++        require_condition(object::id(registry) == budget.registry_id, EWrongRegistry);
+@@ -440,2 +440,2 @@ module sui_edge::fleet_budget {
+-        assert!(amount > 0, EZeroAmount);
+-        assert!(amount <= account.limits.float_cap, EOverFloat);
++        require_condition(amount > 0, EZeroAmount);
++        require_condition(amount <= account.limits.float_cap, EOverFloat);
+@@ -444 +444 @@ module sui_edge::fleet_budget {
+-        assert!(identity.is_some(), EInactiveDevice);
++        require_condition(identity.is_some(), EInactiveDevice);
+@@ -446 +446 @@ module sui_edge::fleet_budget {
+-        assert!(!device_registry::identity_revoked(&identity), EInactiveDevice);
++        require_condition(!device_registry::identity_revoked(&identity), EInactiveDevice);
+@@ -476 +476 @@ module sui_edge::fleet_budget {
+-        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
++        require_condition(budget.version == MANAGED_VERSION, EWrongVersion);
+@@ -494,2 +494,2 @@ module sui_edge::fleet_budget {
+-        assert!(object::id(cap) == budget.owner_cap_id && cap.budget_id == object::id(budget), ENotOwner);
+-        assert!(budget.version < VERSION, ENotUpgrade);
++        require_condition(object::id(cap) == budget.owner_cap_id && cap.budget_id == object::id(budget), ENotOwner);
++        require_condition(budget.version < VERSION, ENotUpgrade);
+@@ -580 +580 @@ module sui_edge::fleet_budget {
+-        assert!(
++        require_condition(
+@@ -589 +589 @@ module sui_edge::fleet_budget {
+-        assert!(account.budget_id == object::id(budget), EWrongAccount);
++        require_condition(account.budget_id == object::id(budget), EWrongAccount);
+@@ -591,2 +591,2 @@ module sui_edge::fleet_budget {
+-        assert!(!account.closed && df::exists(&budget.id, key), ENotEnrolled);
+-        assert!(*df::borrow<DeviceKey, ID>(&budget.id, key) == object::id(account), EWrongAccount);
++        require_condition(!account.closed && df::exists(&budget.id, key), ENotEnrolled);
++        require_condition(*df::borrow<DeviceKey, ID>(&budget.id, key) == object::id(account), EWrongAccount);
+@@ -604 +604 @@ module sui_edge::fleet_budget {
+-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
++        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
+@@ -641 +641 @@ module sui_edge::fleet_budget {
+-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
++        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
+@@ -710 +710 @@ module sui_edge::fleet_budget {
+-        assert!(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
++        require_condition(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
+@@ -712 +712 @@ module sui_edge::fleet_budget {
+-        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
++        require_condition(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
+@@ -722,0 +723,6 @@ module sui_edge::fleet_budget {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/fleet_handover.move b/contracts/sources/fleet_handover.move
+index 989ff73a..1d994542 100644
+--- a/contracts/sources/fleet_handover.move
++++ b/contracts/sources/fleet_handover.move
+@@ -43 +43 @@ module sui_edge::fleet_handover {
+-        assert!(recipient != ctx.sender() && recipient != @0x0, EParty);
++        require_condition(recipient != ctx.sender() && recipient != @0x0, EParty);
+@@ -45,2 +45,2 @@ module sui_edge::fleet_handover {
+-        assert!(n > 0 && n <= 512 && kinds.length() == n, EInventory);
+-        assert!(expires_ms > clock.timestamp_ms(), EExpired);
++        require_condition(n > 0 && n <= 512 && kinds.length() == n, EInventory);
++        require_condition(expires_ms > clock.timestamp_ms(), EExpired);
+@@ -50 +50 @@ module sui_edge::fleet_handover {
+-            assert!(kinds[i] <= 4, EInventory);
++            require_condition(kinds[i] <= 4, EInventory);
+@@ -52 +52 @@ module sui_edge::fleet_handover {
+-            while (j < i) { assert!(objects[j] != objects[i], EInventory); j = j + 1; };
++            while (j < i) { require_condition(objects[j] != objects[i], EInventory); j = j + 1; };
+@@ -74,2 +74,2 @@ module sui_edge::fleet_handover {
+-        assert!(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
+-        assert!(h.state < 2, EState);
++        require_condition(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
++        require_condition(h.state < 2, EState);
+@@ -81,3 +81,3 @@ module sui_edge::fleet_handover {
+-        assert!(ctx.sender() == h.source, EParty);
+-        assert!(h.state == 1, EState);
+-        assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
++        require_condition(ctx.sender() == h.source, EParty);
++        require_condition(h.state == 1, EState);
++        require_condition(clock.timestamp_ms() < h.expires_ms, EExpired);
+@@ -85,2 +85,2 @@ module sui_edge::fleet_handover {
+-        assert!(found, EInventory);
+-        assert!(h.kinds[i] == kind && !h.completed[i], EInventory);
++        require_condition(found, EInventory);
++        require_condition(h.kinds[i] == kind && !h.completed[i], EInventory);
+@@ -122,3 +122,3 @@ module sui_edge::fleet_handover {
+-        assert!(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
+-        assert!(h.state == 1, EState);
+-        assert!(!h.completed.contains(&false), EInventory);
++        require_condition(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
++        require_condition(h.state == 1, EState);
++        require_condition(!h.completed.contains(&false), EInventory);
+@@ -130,0 +131,6 @@ module sui_edge::fleet_handover {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/fleet_inbox.move b/contracts/sources/fleet_inbox.move
+index 7a31e2fd..369b84f1 100644
+--- a/contracts/sources/fleet_inbox.move
++++ b/contracts/sources/fleet_inbox.move
+@@ -133,2 +133,2 @@ module sui_edge::fleet_inbox {
+-        assert!(ctx.sender() == creator, ENotCreator);
+-        assert!(device_group::admin(group) == creator, ENotAdmin);
++        require_condition(ctx.sender() == creator, ENotCreator);
++        require_condition(device_group::admin(group) == creator, ENotAdmin);
+@@ -136 +136 @@ module sui_edge::fleet_inbox {
+-        assert!(deployment_manager::target_groups(deployment).contains(&group_id), ENotTargeted);
++        require_condition(deployment_manager::target_groups(deployment).contains(&group_id), ENotTargeted);
+@@ -155 +155 @@ module sui_edge::fleet_inbox {
+-        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
++        require_condition(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+@@ -157 +157 @@ module sui_edge::fleet_inbox {
+-        assert!(device_registry::owner_cap_device_id(cap) == device_id, EWrongInbox);
++        require_condition(device_registry::owner_cap_device_id(cap) == device_id, EWrongInbox);
+@@ -159 +159 @@ module sui_edge::fleet_inbox {
+-        assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
++        require_condition(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
+@@ -168 +168 @@ module sui_edge::fleet_inbox {
+-        assert!(device_registry::device_id(device) == inbox.device_id, EWrongInbox);
++        require_condition(device_registry::device_id(device) == inbox.device_id, EWrongInbox);
+@@ -183 +183 @@ module sui_edge::fleet_inbox {
+-        assert!(device_group::contains_device(group, inbox.device_id), ENotMember);
++        require_condition(device_group::contains_device(group, inbox.device_id), ENotMember);
+@@ -189 +189 @@ module sui_edge::fleet_inbox {
+-        assert!(device_registry::owner_cap_device_id(cap) == inbox.device_id, EWrongInbox);
++        require_condition(device_registry::owner_cap_device_id(cap) == inbox.device_id, EWrongInbox);
+@@ -220 +220 @@ module sui_edge::fleet_inbox {
+-        assert!(identity.is_some(), ENotOperator);
++        require_condition(identity.is_some(), ENotOperator);
+@@ -222,2 +222,2 @@ module sui_edge::fleet_inbox {
+-        assert!(device_registry::is_custodied(registry, device_id), ENotOperator);
+-        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), ENotOperator);
++        require_condition(device_registry::is_custodied(registry, device_id), ENotOperator);
++        require_condition(device_registry::identity_owner_cap(&identity) == object::id(cap), ENotOperator);
+@@ -249 +249 @@ module sui_edge::fleet_inbox {
+-            assert!(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
++            require_condition(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
+@@ -257,0 +258,6 @@ module sui_edge::fleet_inbox {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/fleet_settings.move b/contracts/sources/fleet_settings.move
+index be7245f4..4f81cfcf 100644
+--- a/contracts/sources/fleet_settings.move
++++ b/contracts/sources/fleet_settings.move
+@@ -109 +109 @@ module sui_edge::fleet_settings {
+-            assert!(current.version <= VERSION, ENewerVersion);
++            require_condition(current.version <= VERSION, ENewerVersion);
+@@ -132,2 +132,2 @@ module sui_edge::fleet_settings {
+-        assert!(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS, EOutOfBounds);
+-        assert!(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
++        require_condition(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS, EOutOfBounds);
++        require_condition(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
+@@ -136,3 +136,3 @@ module sui_edge::fleet_settings {
+-        assert!(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS, EOutOfBounds);
+-        assert!(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS, EOutOfBounds);
+-        assert!(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
++        require_condition(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS, EOutOfBounds);
++        require_condition(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS, EOutOfBounds);
++        require_condition(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
+@@ -177,0 +178,6 @@ module sui_edge::fleet_settings {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/roles.move b/contracts/sources/roles.move
+index b62840c5..a90cff05 100644
+--- a/contracts/sources/roles.move
++++ b/contracts/sources/roles.move
+@@ -80 +80 @@ module sui_edge::roles {
+-        assert!(device_group::admin(group) == builder.operator, ENotGroupAdmin);
++        require_condition(device_group::admin(group) == builder.operator, ENotGroupAdmin);
+@@ -89,2 +89,2 @@ module sui_edge::roles {
+-        assert!(ctx.sender() == operator, ENotOperator);
+-        assert!(!groups.is_empty(), ENoGroups);
++        require_condition(ctx.sender() == operator, ENotOperator);
++        require_condition(!groups.is_empty(), ENoGroups);
+@@ -102 +102 @@ module sui_edge::roles {
+-        assert!(df::exists(device_registry::uid(registry), key), ERoleRevoked);
++        require_condition(df::exists(device_registry::uid(registry), key), ERoleRevoked);
+@@ -104 +104 @@ module sui_edge::roles {
+-        assert!(ctx.sender() == operator, ENotOperator);
++        require_condition(ctx.sender() == operator, ENotOperator);
+@@ -125,2 +125,2 @@ module sui_edge::roles {
+-        assert!(is_active(registry, role), ERoleRevoked);
+-        assert!(!target_groups.is_empty(), ENoTargets);
++        require_condition(is_active(registry, role), ERoleRevoked);
++        require_condition(!target_groups.is_empty(), ENoTargets);
+@@ -129 +129 @@ module sui_edge::roles {
+-            assert!(role.groups.contains(&target_groups[i]), EOutsideScope);
++            require_condition(role.groups.contains(&target_groups[i]), EOutsideScope);
+@@ -145,0 +146,6 @@ module sui_edge::roles {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/seal_policy.move b/contracts/sources/seal_policy.move
+index 0db32d38..ca3a35b7 100644
+--- a/contracts/sources/seal_policy.move
++++ b/contracts/sources/seal_policy.move
+@@ -144 +144 @@ module sui_edge::seal_policy {
+-        assert!(device_registry::is_custodied(registry, device_id), EUnknownDevice);
++        require_condition(device_registry::is_custodied(registry, device_id), EUnknownDevice);
+@@ -169 +169 @@ module sui_edge::seal_policy {
+-        assert!(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);
++        require_condition(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);
+@@ -191,2 +191,2 @@ module sui_edge::seal_policy {
+-        assert!(cap.policy_id == object::id(policy), EWrongCap);
+-        assert!(policy.version < VERSION, ENotNewer);
++        require_condition(cap.policy_id == object::id(policy), EWrongCap);
++        require_condition(policy.version < VERSION, ENotNewer);
+@@ -201 +201 @@ module sui_edge::seal_policy {
+-        assert!(account_allowed(policy, &id, ctx.sender()), ENoAccess);
++        require_condition(account_allowed(policy, &id, ctx.sender()), ENoAccess);
+@@ -206 +206 @@ module sui_edge::seal_policy {
+-        assert!(device_allowed(policy, &id, registry, device_id, ctx.sender()), ENoAccess);
++        require_condition(device_allowed(policy, &id, registry, device_id, ctx.sender()), ENoAccess);
+@@ -218 +218 @@ module sui_edge::seal_policy {
+-        assert!(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()), ENoAccess);
++        require_condition(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()), ENoAccess);
+@@ -256 +256 @@ module sui_edge::seal_policy {
+-        assert!(policy.version == VERSION, EWrongVersion);
++        require_condition(policy.version == VERSION, EWrongVersion);
+@@ -280,2 +280,2 @@ module sui_edge::seal_policy {
+-        assert!(cap.policy_id == object::id(policy), EWrongCap);
+-        assert!(policy.version == VERSION, EWrongVersion);
++        require_condition(cap.policy_id == object::id(policy), EWrongCap);
++        require_condition(policy.version == VERSION, EWrongVersion);
+@@ -285,2 +285,2 @@ module sui_edge::seal_policy {
+-        assert!(!list.contains(&item), EAlreadyGranted);
+-        assert!(list.length() < MAX_ENTRIES, ETooMany);
++        require_condition(!list.contains(&item), EAlreadyGranted);
++        require_condition(list.length() < MAX_ENTRIES, ETooMany);
+@@ -292 +292 @@ module sui_edge::seal_policy {
+-        assert!(found, ENotGranted);
++        require_condition(found, ENotGranted);
+@@ -306,0 +307,6 @@ module sui_edge::seal_policy {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }
+diff --git a/contracts/sources/security_policy.move b/contracts/sources/security_policy.move
+index 74f2b83f..ea8f5802 100644
+--- a/contracts/sources/security_policy.move
++++ b/contracts/sources/security_policy.move
+@@ -34 +34 @@ module sui_edge::security_policy {
+-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
++        require_condition(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+@@ -36 +36 @@ module sui_edge::security_policy {
+-        assert!(!binding.is_empty() && binding.length() <= 4096, EPolicy);
++        require_condition(!binding.is_empty() && binding.length() <= 4096, EPolicy);
+@@ -54 +54 @@ module sui_edge::security_policy {
+-        assert!(!df::exists(uid, PolicyKey {}), EPolicy);
++        require_condition(!df::exists(uid, PolicyKey {}), EPolicy);
+@@ -69 +69 @@ module sui_edge::security_policy {
+-        while (i < ACTIONS) { assert!(p.requirements[i] == 0, EFactor); i = i + 1; };
++        while (i < ACTIONS) { require_condition(p.requirements[i] == 0, EFactor); i = i + 1; };
+@@ -137 +137 @@ module sui_edge::security_policy {
+-        assert!(!arguments_bcs.is_empty() && arguments_bcs.length() <= 16384, EPolicy);
++        require_condition(!arguments_bcs.is_empty() && arguments_bcs.length() <= 16384, EPolicy);
+@@ -139 +139 @@ module sui_edge::security_policy {
+-        assert!(df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).length() < 64, EPolicy);
++        require_condition(df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).length() < 64, EPolicy);
+@@ -151 +151 @@ module sui_edge::security_policy {
+-        assert!(intent.length() == 32, EPolicy);
++        require_condition(intent.length() == 32, EPolicy);
+@@ -153 +153 @@ module sui_edge::security_policy {
+-        assert!(expires_ms > now && expires_ms - now <= 604800000, EPolicy);
++        require_condition(expires_ms > now && expires_ms - now <= 604800000, EPolicy);
+@@ -182 +182 @@ module sui_edge::security_policy {
+-        assert!(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
++        require_condition(factor == 1 || factor == 2 || factor == 4 || factor == 8, EFactor);
+@@ -225 +225 @@ module sui_edge::security_policy {
+-        assert!(!df::exists(&a.id, FactorKey { factor: 0 }), EPolicy);
++        require_condition(!df::exists(&a.id, FactorKey { factor: 0 }), EPolicy);
+@@ -230 +230 @@ module sui_edge::security_policy {
+-        assert!(customer_id == customer, EPolicy);
++        require_condition(customer_id == customer, EPolicy);
+@@ -243 +243 @@ module sui_edge::security_policy {
+-        assert!(requirements.length() == ACTIONS, EPolicy);
++        require_condition(requirements.length() == ACTIONS, EPolicy);
+@@ -245,0 +246,6 @@ module sui_edge::security_policy {
++
++    // Keep the same condition, code and module authority. A call abort unwinds
++    // the caller without duplicating local-drop bytecode at every assertion.
++    fun require_condition(condition: bool, code: u64) {
++        if (!condition) abort code
++    }

@@ -38,6 +38,68 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 assertion factoring and completed local temporal measurement (2026-11-02)
+
+A further [incremental source candidate](validation/sf221-assertion-candidate.patch)
+factors 52 scoped-action calls and assertion failure branches into private
+helpers. Apply it after the preceding factoring patch, on the same pinned
+combined `7335545` source (`git apply --unidiff-zero` for this incremental
+patch). Public signatures, struct layouts and authority
+conditions remain intact; acceptance scripts' explicitly checked abort sites
+remain in their original functions. Other assertions retain their module/code
+but abort inside a private helper. The candidate remains **outside production
+sources** because its cost reduction is insufficient.
+
+Compiler 1.81.1 now emits 90,590 bytes, versus the previous 93,296-byte candidate
+and original 93,673 bytes. All 363 Move tests pass. A new Docker `--network none`
+run executes the compatible upgrade and measures all suite phases, including
+real temporal pruning and retirement. [The complete effects receipt](validation/sf221-assertion-costs.json)
+pins the exact source, overlay/build hashes, commands and independent ordinary
+and retirement effects.
+
+| Phase | Transactions | Allowance charged (MIST) | Result |
+|---|---:|---:|---|
+| Fresh ordinary | 6 | 1,589,955,488 | Device funded; first deployment batch refused |
+| Cached ordinary, same pair | 5 | 109,484,749 | All four OTA cases and cleanup pass |
+| Fresh security | 47 | 1,026,058,432 | Upgrade, attacks, receipt migration and convergence pass |
+| Cached security | 45 | 195,462,969 | Same security coverage passes |
+| Browser automation | suite + funding | 101,000,198 | Connect/sign/network/error/cleanup checks pass |
+| Temporal proof and explicit retirement | 1 | 0 | Actual pruning proof and deletion pass |
+
+The fresh row includes the 30,000,000-MIST device grant. The cached row charges
+that still-unspent grant again under its own independent ledger. These raw
+candidate receipts predate explicit grant tracing; the cached 30M is identified
+as an **inferred allowance gap**, consistent with the successful same-fixture
+fresh funding and absence of fresh runtime transactions. Future receipts now
+record the device/address and pre-existing grant explicitly before charging it.
+Counting that grant once gives a measured fresh cost diagnostic of
+**1,669,440,237 MIST**, still **69,440,237 over the unchanged 1.6B ceiling**.
+The new source saves 20,785,600 MIST versus the previous factoring candidate.
+This arithmetic combines separate measurements; it never resets a real ledger
+or certifies a passing fresh run. The fresh run itself retains only 10,044,512
+MIST before its unchanged 60M deployment reservation.
+
+Temporal measurement now completes on this actual candidate: after the ordinary,
+security and browser phases, the disposable node restarts with checkpoint
+retention of two epochs and a one-second pruning delay. The production reader
+observes retention floor **1112 > original decision checkpoint 379**, reads both
+original current-state decisions with event reads forbidden, and only then
+retires the same record. Retirement effects are 1,000,000 computation plus
+988,000 storage minus 23,960,404 rebate MIST. The ledger charges zero; the rebate
+never replenishes it, and the full **20M reservation** remains required. Normal
+retained audit reads need no mutation; explicit retirement prevents recreation.
+This resolves the previously unmeasured local temporal cost, not public-network
+post-pruning acceptance.
+
+Reproduce with the receipt's exact candidate and overlays:
+`python3 -u scripts/test_fresh_cost_localnet.py --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 --head-ref HEAD --with-security --with-temporal --evidence-dir /workspace/effects`
+in a disposable `--network none` dev image with the pinned tools and cached
+locked dependencies. Initial pruning stays disabled until historical effects
+are captured; the harness then uses the real node's retention floor. No public
+wallet, encrypted fixture state, unknown reservation, spending ceiling or
+required test coverage is changed. Full fresh acceptance remains blocked;
+PR #465 stays draft, with exact public CI pending and unpolled.
+
 ### SF-221 concrete source factoring attempt (2026-11-02)
 
 The [retained source patch](validation/sf221-factoring-candidate.patch) applies

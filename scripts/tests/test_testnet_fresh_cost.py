@@ -11,6 +11,65 @@ from analyze_fixture_grouping import analyze
 
 
 class FreshCostTests(unittest.TestCase):
+    def assertion_receipt(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-assertion-costs.json'
+        receipt = json.loads(path.read_text())
+        return receipt, {run['phase']: run for run in receipt['runs']}
+
+    def test_actual_assertion_reduction_funds_device_but_refuses_deployment(self):
+        receipt, runs = self.assertion_receipt()
+        accounting = receipt['ordinary_accounting']
+        self.assertFalse(receipt['acceptance_complete'])
+        self.assertEqual(receipt['source']['saved_vs_previous_bytes'], 2706)
+        for phase in ('pair-0-fresh', 'pair-0-retained'):
+            run = runs[phase]
+            ledger = Budget(run['max_spend_mist'], [])
+            # These raw historical receipts predate explicit grant tracing.
+            # The cached grant is declared as inferred, never hidden/released.
+            if phase.endswith('retained'):
+                ledger.grant(accounting['cached_inferred_preexisting_grant_mist'])
+            for tx in run['transactions']:
+                ledger.execute(None, tx['label'], lambda _, tx=tx: dict(
+                    digest=tx['digest'], effects=dict(status=dict(status=tx['status']), gasUsed=tx['gas_used'])),
+                    gas=tx['gas_budget_mist'], funding=tx['funding_mist'], require_full=True)
+            self.assertEqual(ledger.used, run['allowance_used_mist'])
+            if phase.endswith('fresh'):
+                self.assertEqual(run['transactions'][-1]['funding_mist'], 30_000_000)
+                client = Mock()
+                with self.assertRaises(Spent):
+                    ledger.execute(client, 'create 3 deployments via head', ['ptb'],
+                                   gas=60_000_000, require_full=True)
+                client.assert_not_called()
+        self.assertEqual(accounting['remaining_deficit_mist'], 69_440_237)
+        self.assertFalse(runs['pair-0-fresh']['success'])
+        self.assertTrue(runs['pair-0-retained']['success'])
+
+    def test_real_temporal_retirement_does_not_refill_or_skip_reservation(self):
+        _, runs = self.assertion_receipt()
+        temporal = runs['temporal']
+        pending = runs['pair-0-retained']['rollout_audit_pending']
+        self.assertTrue(temporal['success'])
+        retained, = temporal['retained_audits']
+        self.assertEqual(retained['record'], pending['record'])
+        self.assertEqual(retained['checkpoint'], pending['checkpoint'])
+        self.assertGreater(int(retained['proof']['lowest']), int(pending['checkpoint']))
+        self.assertTrue(retained['proof']['audit']['complete'])
+        tx, = temporal['transactions']
+        self.assertEqual(tx['digest'], retained['cleanup_digest'])
+        self.assertEqual(tx['gas_mist'], 0)
+        self.assertGreater(int(tx['gas_used']['storageRebate']),
+                           int(tx['gas_used']['computationCost']) + int(tx['gas_used']['storageCost']))
+        ledger = Budget(1_600_000_000, [])
+        ledger.grant(1_570_000_000)
+        execute = lambda _: dict(digest=tx['digest'], effects=dict(
+            status=dict(status=tx['status']), gasUsed=tx['gas_used']))
+        ledger.execute(None, tx['label'], execute, gas=tx['gas_budget_mist'], require_full=True)
+        self.assertEqual(ledger.used, 1_570_000_000)
+        ledger.grant(20_000_000)
+        with self.assertRaises(Spent):
+            ledger.execute(None, tx['label'], execute, gas=tx['gas_budget_mist'], require_full=True)
+        self.assertEqual(ledger.used, 1_590_000_000)
+
     def test_actual_factored_candidate_still_fails_fresh_ledger(self):
         path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-factoring-costs.json'
         receipt = json.loads(path.read_text())
