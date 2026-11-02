@@ -38,7 +38,61 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
-### SF-221 concrete recovery on current main (2026-11-02)
+### SF-221 compact integer recovery: actual local fresh success (2026-11-02)
+
+The [complete source and effects receipt](validation/sf221-small-integer-costs.json)
+records actual clean acceptance on source `00f59915`, combined with current main
+`df5d6d80`. The repaired harness exits **0**, with both ordinary outcomes true;
+this is a new executed fresh run, not an estimate assembled from cached effects.
+Earlier failed ledgers below remain unchanged.
+
+The pinned compiler emits smaller bytecode for named `u8` constants widened at
+use sites than for repeated `u64` literals. The change applies only to non-error
+integer values originally inferred as `u64`; byte flags and other integer types
+retain their original types. Named abort constants stay `u64` and pass the
+unchanged strict linter. Each module explains the representation. Reversing the
+literal substitutions and removing their definitions exactly restores all 16
+previous module sources. Public/package signatures, layouts, conditions and
+abort boundaries remain unchanged. Modules shrink from **90,455 to 87,860 bytes**,
+saving 2,595 bytes beyond stopped head `606c377d` (3,906 from the 91,766 baseline).
+
+| Actual disposable-chain suite | Charged allowance (MIST) | Limit (MIST) |
+|---|---:|---:|
+| Clean fresh ordinary | 1,594,383,278 | 1,600,000,000 |
+| Cached ordinary, separate ledger | 27,735,669 | 1,600,000,000 |
+| Fresh security | 1,004,702,832 | 1,500,000,000 |
+| Cached security | 195,462,969 | 1,500,000,000 |
+| Fresh / cached browser, each | 101,000,198 | 150,000,000 |
+
+Fresh ordinary retains **5,616,722 MIST** after completing every required step,
+including the full 11M audit-creation reservation. Base publication charges
+785,258,894 and the head upgrade 740,632,662. The new 10M report grant is charged
+in full. Cached ordinary charges its whole 4,993,732 retained grant plus the
+5,006,268 top-up; its operator's net balance loss is separately recorded as
+10,998,110. All cumulative charges and full reservations independently replay
+from actual effects. Refunds, sweeps and separate runs never refill allowance.
+The operator's initial 1,000 SUI is solvency evidence only.
+
+The original decision checkpoint **171** is below the actual retention floor
+**1156**. Both original decisions remain readable with event reads forbidden.
+Explicit retirement succeeds under its separate full 20M reservation, charging
+zero; it is not a continuation or reset of the ordinary ledger.
+
+Strict lint/unsuppressed diagnostics, 360 root + 79 storage + 60 data Move tests,
+all authority-removal controls, all 16 generated interfaces, 19 native VM tests,
+core/native/object/registry proofs and their exact negative controls pass.
+The pinned offline testnet suite passes 204 tests without skips; signing/cache,
+funding, full-reservation and unknown-outcome regressions remain enforced.
+
+**Protected public exact-head/current-base CI and independent review remain
+pending gates.** Local success does not establish public effects. Headroom is
+small: higher public charges or larger authenticated retained grants can still
+exhaust it. No public success is claimed or inferred. No ceiling, reservation,
+identity encryption, uncertainty fence or protected CI gate changed. Additional
+compiler probes were not shipped. Physical/mainnet/manual-wallet/provider
+acceptance remains unrun in #32/#159.
+
+### SF-221 prior recovery at stopped head 606c377d (2026-11-02)
 
 The [new source and effects receipt](validation/sf221-recovery-reduction.json)
 records a concrete compatible reduction on PR465 after integrating main
