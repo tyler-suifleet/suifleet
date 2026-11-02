@@ -525,6 +525,19 @@ def failed_checks(pr):
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
+def source_check_failures(pr):
+    """Source-only scheduling may defer positively classified testnet funding.
+
+    Keep failed_checks unchanged: repair ownership and final acceptance still
+    consume every failure. Only the existing exact-base testnet classifier can
+    supply this exception; ordinary check names or PR prose cannot.
+    """
+    funding = testnet_failure(pr)
+    if not funding or funding.get('classification') != 'funding':
+        return failed_checks(pr)
+    return [failure for failure in failed_checks(pr) if failure != funding]
+
+
 def ci_check_keys(pr):
     # A source failure episode follows the check across head/base/run changes.
     return sorted({json.dumps([row.get('workflowName', ''), row['name']], separators=(',', ':'))
@@ -1453,7 +1466,7 @@ Do not edit the coordinator database or forge another model's review. Only this 
         if kind == 'review' and pr.get('_integration_batch'):
             common += '\nINTEGRATION BATCH: this is a coordinator-owned integration PR, not an implementation claim. Do not create tickets or edit source branches. Validate the immutable batch manifest in the snapshot, every member source receipt, compatibility of the actual combined diff and all member acceptance requirements. Require current candidate/base CI, protected testnet and feature evidence before approval. Approval binds the batch manifest digest as well as this exact candidate commit.\n'
         if kind == 'review' and pr.get('_review_mode') == 'source':
-            return common + '\nBATCH SOURCE REVIEW: independently review this immutable source head and all existing feedback now. Do not wait for CI or rebase the branch. Return typed booleans source_complete and acceptance_ready in result.json, plus the normal fields. source_complete=true only if all source/security/compatibility findings are resolved. acceptance_ready=true only if every remaining requirement is automated CI/testnet evidence that the combined candidate will verify, or is explicitly deferred by the trusted acceptance policy; unresolved manual/external/product requirements keep it false. This is NOT merge approval: return blocked, acceptance_complete=false when source-ready, or changes_requested for actionable defects. The integration reviewer will assess the actual combined code and final evidence. Never infer readiness from earlier review prose.\n'
+            return common + '\nBATCH SOURCE REVIEW: independently review this immutable source head and all existing feedback now. Do not wait for CI or rebase the branch. Return typed booleans source_complete and acceptance_ready in result.json, plus the normal fields. source_complete=true only if all source/security/compatibility findings are resolved. acceptance_ready=true only if every remaining requirement is automated CI/testnet evidence that the combined candidate will verify, or is explicitly deferred by the trusted acceptance policy; unresolved manual/external/product requirements keep it false. This is NOT merge approval: return blocked, acceptance_complete=false when source-ready, or changes_requested for actionable defects. The integration reviewer will assess the actual combined code and final evidence. If the snapshot has a classified funding-only testnet failure, disclose the missing funded acceptance in your evidence; it remains required on the exact combined candidate and grants no merge approval or wallet mutation. Never infer readiness from earlier review prose.\n'
         if kind == 'review':
             previous = self.store.review(project['id'], pr['number'])
             if previous and previous['head'] == pr['headRefOid']:
@@ -1876,7 +1889,7 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 or pr['number'] in self.batches.reserved_members(project)
                 or pr.get('isDraft') or pr.get('isCrossRepository')
                 or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure')
-                or failed_checks(pr)):
+                or source_check_failures(pr)):
             return False
         owner = self.owner(project, pr, owners)
         if getattr(self, 'local_infrastructure', None) and self.local_infrastructure.eligible(project, pr, owner):
