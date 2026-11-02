@@ -5,6 +5,73 @@ Codex / gpt-6.1-sol; no finer runtime build exposed. Original claim, session
 Draft [PR #451](https://github.com/tyler-suifleet/suifleet/pull/451) closes
 [SF-198/#397](https://github.com/tyler-suifleet/suifleet/issues/397).
 
+## Protected-run allowance repair, third recovery
+
+Codex / gpt-6.1-sol (no finer runtime build exposed), same original claim,
+session, branch and worktree. Repair commit `94870221c95d96abcdb88aa6f3579a8f3f6b684d`.
+Inspected sanitized artifact 13111436498 (`package-upgrade.json`) from
+[run 41374657219](https://github.com/tyler-suifleet/suifleet/actions/runs/41374657219),
+which tested head d5e2dd25 against base 8ad43d7e in dedicated lane 1, chain
+`4c78adac`. The five successful recorded effects charged 772,926,000;
+8,425,378; 1,243,578; 784,577,363; and 8,737,163 MIST. Total allowance used
+was **1,575,909,482 / 1,600,000,000 MIST**, before device funding. The single
+faucet credit supplied wallet balance but did not replenish this allowance.
+Native feature cases never ran. These artifact effects were inspected, not
+independently fetched again from the public fullnode by this recovery.
+
+The old “verified/reused base” diagnostic followed a **fresh publication** in
+this run. It did not prove cache reuse. The completed pair and original device
+identity were saved before the failure and the workflow persisted encrypted
+fixture artifact 13111112721. This repair changes no contract bytes, so the
+same base/head content key remains reusable; it must not publish either package
+again. Cache reuse now also checks the UpgradeCap owner/latest package/version
+and registry sharing before proceeding. A stale or missing object fails closed.
+
+Core OTA preflight now checks existing device gas, the exact funding deficit,
+the top-up reservation, inbox setup when needed, both deployment PTBs and
+cleanup at full configured budgets **before any core-phase mutation**. This is
+a conservative reservation bound, not a gas estimate or a claim that later
+audit cases fit; those still reserve independently. If a fresh fixture exhausts
+the allowance, its durable state remains for a subsequent bounded run. No
+in-process ledger reset or automatic repeated run is introduced. Allowance
+exhaustion is repair work, not a wallet funding failure that a faucet can fix.
+Both device and passkey funding now transfer only the deficit. Existing passkey
+gas is charged as a grant, closing the previous cached-gas accounting omission.
+All ceilings, failed/unknown reservations, fixture keys and quarantine rules
+remain unchanged.
+
+Fresh verification:
+
+- `docker run --rm --network none --user "$(id -u):$(id -g)" -v
+  "$PWD:/workspace" -w /workspace -e INSIDE_DEV_CONTAINER=1 -e PYTHONPATH=/deps
+  -v /usr/lib/python3/dist-packages/yaml:/deps/yaml:ro
+  -v /tmp/sf196-network-183/sui:/opt/sui-network/sui:ro
+  suifleet-dev:latest make test-testnet`: **pass**, 23 rollout + 177 testnet +
+  67 shared-live + 3 passkey tests, authenticated cache and receipt-effect Node
+  suites; pinned installed-toolchain assertion passes. Regression drives
+  `run()` through completed-fixture reuse with zero signing/publication,
+  reproduces the exact failed-run arithmetic, checks full-reservation boundaries,
+  deficit-only funding and charging retained gas. Mocked negative-path cleanup
+  diagnostics are expected test output, not live activity.
+- `node scripts/test_passkey_fixture.cjs` and
+  `node scripts/test_passkey_factor.cjs`: **pass**.
+- `python3 -m py_compile scripts/live_package_upgrade.py
+  scripts/live_passkey_factor.py` and `git diff --check`: **pass**.
+
+Initial regression attempts exposed the old funding-class expectation and
+incomplete offline CLI/Walrus test doubles (invalid derived address, missing
+publisher); corrected before the final complete suite. No failure was ignored.
+The reported green ordinary/security CI applies to the prior d5e2dd25 head;
+new-head hosted checks remain pending after push and are not watched or polled.
+Actual native public-testnet setup/allowed/refused/recovery evidence and fresh
+source acceptance are still required. Keep PR #451 **draft**, claim reserved
+and **not Review**. The existing protected CI lane owns the signing state;
+this recovery did not decrypt it, create/rotate keys, request a faucet, mutate
+public chain state, republish code or acquire a mutation resource. SF-173
+publisher and SF-181 USDC blockers are untouched. Deferred manual/hardware/
+provider/mainnet checks remain unrun in #32/#159. Historical evidence below
+remains scoped to its original commands and revisions.
+
 ## Repair
 
 Preserved unfinished source changes in 3b1d8ee2, then reconciled the quarantined
