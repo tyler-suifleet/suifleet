@@ -3,6 +3,73 @@
   "purpose": "SF-221 read-only investigation; not acceptance of this source revision",
   "runs": [
     {
+      "head": "b0d3df076171a800a6f85c63e9a9e8d6f873c4ee",
+      "base": "cf65ea175435d1b6e111b988d51d9654a63c9db2",
+      "chain": "4c78adac",
+      "transactions": [
+        {
+          "label": "publish base",
+          "gas_budget_mist": 850000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "A8ZpAsYh3FgvgZqQKkzT8wfnefnPSRpbiWRW1uoGxUK6",
+          "gas_mist": 772926000,
+          "allowance_used_mist": 772926000
+        },
+        {
+          "label": "register device + issue cap (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GgWHUs6wuwhXHrgTF5E2gBEJXYndYTs1RWx9ZNRmvYe",
+          "gas_mist": 8425378,
+          "allowance_used_mist": 781351378
+        },
+        {
+          "label": "add device to group (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8BQNCwd6bq9BMYofpBmsPvHvNnMHDwh7G7VpDAq3umK3",
+          "gas_mist": 1243578,
+          "allowance_used_mist": 782594956
+        },
+        {
+          "label": "upgrade to head",
+          "gas_budget_mist": 817405044,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "9FbusEPQbxS2Dq5ecvTYFkL6hnDcN5aXZ3C9fSVrCo88",
+          "gas_mist": 784577363,
+          "allowance_used_mist": 1567172319
+        },
+        {
+          "label": "activate identity in registry custody",
+          "gas_budget_mist": 32827681,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BxCHJJX3jn1Nkqqw1rWacdQfPv9VYezCH3Ceaxymkbe4",
+          "gas_mist": 8737163,
+          "allowance_used_mist": 1575909482
+        }
+      ],
+      "funding": {
+        "required_mist": 3650000000,
+        "held_mist": 400000000,
+        "address_mist": 3635306260,
+        "coin_mist": 0
+      },
+      "start_balance_mist": 4635306260,
+      "end_balance_mist": 3059396778,
+      "spent_mist": 1575909482,
+      "allowance_used_mist": 1575909482,
+      "max_spend_mist": 1600000000,
+      "error": "core OTA phase requires 280000000 MIST of full reservations; 24090518 remain; retain and reuse the prepared fixture",
+      "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:068e4d1da36e833c64beb84a9e46357f833de837e6fdf252bf23c8f4a1777eb4@1.81.1-e04cf9aa915c",
+      "url": "https://github.com/tyler-suifleet/suifleet/actions/runs/41392636950",
+      "remaining_mist": 24090518
+    },
+    {
       "url": "https://github.com/tyler-suifleet/suifleet/actions/runs/41388382430",
       "head": "5c7f1f16546781b3ab7fc46fc1eec99cbb21d71a",
       "base": "65770f0963ed076936de483f545b47be44b98520",

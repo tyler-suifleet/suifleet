@@ -10,6 +10,24 @@ from testnet_budget import Budget, Spent
 
 
 class FreshCostTests(unittest.TestCase):
+    def test_sf198_public_failure_uses_exact_distinct_compiler_fixture(self):
+        evidence = Path(__file__).resolve().parents[2] / 'docs/validation'
+        runs = json.loads((evidence / 'sf221-cost-investigation.json').read_text())['runs']
+        run = next(r for r in runs if r['url'].endswith('/41392636950'))
+        inventory = json.loads((evidence / 'sf221-bytecode-inventory.json').read_text())
+        revisions = {r['ref']: r for r in inventory['revisions']}
+        base, head = (revisions[run[k]] for k in ('base', 'head'))
+        self.assertNotEqual(base['digest'], head['digest'])
+        self.assertEqual(run['fixture'], 'bytecode-v1:' + base['digest'] +
+                         '..bytecode-v1:' + head['digest'] + '@1.81.1-e04cf9aa915c')
+        self.assertEqual(run['remaining_mist'], 24_090_518)
+        self.assertEqual(run['allowance_used_mist'], 1_575_909_482)
+        for revision in (base, head):
+            self.assertEqual(revision['root_bytes'], sum(m['bytes'] for m in revision['modules']))
+            # Metadata removal cannot explain a saving: table 0x10 is absent
+            # in the pinned compiler's actual root modules for this pair.
+            self.assertTrue(all('16' not in m['table_bytes'] for m in revision['modules']))
+
     def test_real_local_head_batch_cannot_fit_even_with_free_identity_and_net_only_reservation(self):
         receipt = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-local-costs.json'
         local = json.loads(receipt.read_text())

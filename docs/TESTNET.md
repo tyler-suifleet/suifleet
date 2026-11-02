@@ -672,3 +672,43 @@ used, no package/object transaction was submitted, and no fixture state,
 reservation, spending ceiling or retry bound changed. A fresh normal automatic
 run, fresh independent review and exact-head/current-base CI are still
 required before merge.
+
+### SF-221 resumed cost investigation (2026-11-01)
+
+The retained effects artifact of [SF-198 run 41392636950](https://github.com/tyler-suifleet/suifleet/actions/runs/41392636950)
+confirms **1,575,909,482 / 1,600,000,000 MIST** charged before OTA,
+leaving **24,090,518 MIST**. Its error reports the required 280M core-phase
+reservations; this is not a wallet-balance failure. The sanitized transaction
+receipt is included in [the cost investigation](validation/sf221-cost-investigation.json).
+It is a historical failed run, not acceptance of the SF-221 branch.
+
+[The offline bytecode inventory](validation/sf221-bytecode-inventory.json)
+records fresh pinned-compiler builds of both exact historical pairs. The earlier
+pair is `65770f09` → `5c7f1f16` (91,636 → 93,030 root-module bytes); the SF-198
+pair is `cf65ea17` → `b0d3df07` (91,636 → 93,469 bytes). The base digests match,
+but both heads differ from base and from each other. No identical-bytecode
+shortcut can stand in for either upgrade. Builds used `sui 1.81.1-e04cf9aa915c`,
+`--dump-bytecode-as-base64 --build-env testnet --silence-warnings --no-tree-shaking`,
+the committed lockfiles and prewarmed dependencies in Docker `--network none`.
+Module SHA-256 hashes, exact package digests and table sizes are retained.
+These are compiler observations, not new transaction effects.
+
+The compiler's `move build --help` exposes no bytecode-size optimization flag.
+`--no-tree-shaking` controls unused dependency IDs and offline RPC behavior;
+it does not omit root modules. The actual root modules have no metadata table
+(kind `0x10`) to remove. Their large tables contain instructions (`0x0c`),
+identifiers (`0x07`) and signatures (`0x05`). Stripping arbitrary tables,
+omitting required modules, changing public names/layouts, or substituting a
+smaller source revision would not establish compatible acceptance of these
+exact fixtures. Bytecode rewriting is also outside the existing pinned
+compile-and-verify-before-sign path. None of these was enabled.
+
+The earlier independently executed head deployment batch costs 42,002,663
+MIST, exceeding the newer run's remainder by 17,912,145 MIST even before
+identity grants, inbox creation, the base deployment and audit work. This is
+an optimistic comparison using the earlier pair, not a claim that the SF-198
+head's unrun OTA has identical cost. Lower reservations alone cannot repair
+that measured deficit. The full ordinary/security fresh acceptance suite has
+**not** been demonstrated within its unchanged ceilings. SF-221 remains
+reserved and its PR draft; further compatible source/storage or transaction
+reduction is required. SF-201's live repair is separate and untouched.
