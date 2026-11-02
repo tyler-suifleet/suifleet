@@ -342,3 +342,26 @@ Final human/extension-wallet, provider, physical and mainnet acceptance remains
 unrun in #32/#159. The child mechanisms and their activation/enrollment UI are
 still their respective tickets; this framework must not be advertised as four
 completed second-factor mechanisms.
+
+
+## SF-200 delay implementation
+
+The historical framework-only availability-zero statement above describes SF-196.
+SF-200 enables bit 8 only; other mechanisms remain unavailable on this source.
+Delay is per class, optional and off by default, from one second to six days.
+The Sui Clock timestamp is immutable queue metadata under the Action UID, without
+changing its published layout. Execution recomputes the exact intent and checks
+policy generation, current proposer authority, expiry and timing. A private
+transaction-bound elapsed-time grant lets each secondary class check its own
+configured duration; a short primary delay cannot authorize a longer secondary
+one. Settings, source and recovery operations use the maximum current union delay.
+Timing is never a reusable attestation supplied by a caller.
+
+Current administrators cancel without a delay or execution factors. Only
+`pause_deployment_secured` skips the deployment delay, retaining other factors;
+resume, targeting, release, funds, credentials, policy and handover stay protected.
+Other proposed emergency features in the design do not introduce implemented
+bypasses. Old-package queues lack the new timestamp and fail closed even after
+time passes. Dynamic fields retain separately verified introduction origins.
+See [the operational procedure](OPERATIONS.md#organization-delay-and-cancellation-sf-200)
+and [SF-200 evidence](validation/sf200-delay.md).
