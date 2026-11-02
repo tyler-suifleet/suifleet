@@ -929,3 +929,51 @@ from a previous transaction must never replenish the allowance. A safe complete
 reduction remains unresolved. Ordinary/security/browser effects above remain the
 actual combined-candidate evidence; temporal pruning acceptance remains pending.
 No public rerun or new acceptance claim follows from this compiler experiment.
+
+The next same-claim bounded repair groups each completed ordinary deployment's
+removal with creation of its successor through the head package. The legacy
+entry runs first in its own PTB. Before deletion, every case must settle and its
+authoritative receipt must be read; protected public runs additionally verify
+its receipt-writing transaction effects through the independent gRPC reader.
+The final failed case still requires a Failed receipt and bounded cleanup.
+Unknown submissions keep their entire gas reservation. No previous transaction's
+rebate replenishes the allowance. Failure regressions cover missing receipts,
+independent-effects failures, incorrect versions and unknown successor outcomes.
+
+[The additional source candidate](validation/sf221-lifecycle-candidate.patch)
+factors four identical group-authorization sequences, preserving check order,
+public signatures, layouts and existing abort functions/codes. It saves only 80
+more bytes (90,590 → 90,510) and remains outside production, applied after the
+factoring and assertion candidate patches. All 363 Move tests pass. Actual
+compatible upgrade and complete local cached ordinary acceptance pass with the
+changed grouping. Fresh setup still uses 1,589,347,488 MIST and refuses the first
+full deployment gas reservation. The separate cached ordinary measurement uses
+73,253,604 MIST, including its explicitly recorded 30M preexisting device grant.
+Counting that same grant once gives **1,632,601,092 MIST**, saving 36,839,145 over
+the previous candidate but leaving **32,601,092 MIST** plus reservation headroom
+unresolved. This diagnostic combines two distinct ledgers; it is not a successful
+fresh run, reset or permission to spend beyond a ceiling.
+
+The network-none local command was the same full ordinary/security/browser/
+temporal harness with `--head-ref HEAD --with-security --with-temporal` on
+candidate `a1f18755138b394257861957f79871b29186bcc8`. The candidate execution
+predates the final read-only created-version guard; its versions were still
+exercised by the real updater/history checks. The final guard is covered by the
+failure regressions. Final offline checks pass 200 testnet, 67 common and 23
+audit tests and the authenticated-cache, receipt-effects and audit Node suites.
+The first offline run failed a structural message assertion after success text
+changed; restoring its established text makes that check pass. No public
+fixtures, sibling PRs or hosted CI were rerun. The unchanged fresh ceiling still
+blocks SF-221; retain the draft PR and original claim rather than mark Review.
+
+[Full new effects and accounting](validation/sf221-lifecycle-costs.json) retain
+all six measured phases. Fresh/cached security pass at 1,025,440,432 /
+195,462,969 MIST (47 / 45 transactions); the browser flow passes at 101,000,198.
+Actual post-pruning proof and retirement pass on the original retained audit
+with zero additional ledger charge and the unchanged 20M reservation. They use
+a separate measurement ledger, so they do not turn failed fresh acceptance into
+success. There was one complete ephemeral browser-wallet flow against the
+fixture, not two separately executed fresh/cached browser flows. The three
+source patches reconstruct every measured source byte using
+`git apply --unidiff-zero` in their documented order. Final source correctness,
+ordinary fresh acceptance and protected exact-head public evidence remain gates.

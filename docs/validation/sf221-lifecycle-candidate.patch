@@ -1,0 +1,65 @@
+diff --git a/contracts/sources/customer.move b/contracts/sources/customer.move
+index ae24f01d..ec18ab22 100644
+--- a/contracts/sources/customer.move
++++ b/contracts/sources/customer.move
+@@ -438,10 +438,7 @@ module sui_edge::customer {
+     /// Adopt a legacy group only after every member is assigned to this fleet.
+     /// Updating its stored admin defeats old package mutation entry points too.
+     public fun adopt_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup, ctx: &mut TxContext) {
+-        assert_action(customer, 6, ctx);
+-        // Membership changes can retarget deployments and alter group access.
+-        assert_action(customer, 1, ctx); assert_action(customer, 2, ctx);
+-        assert_fleet(customer, fleet);
++        assert_group_actions(customer, fleet, ctx);
+         require_condition(fleet.pending_devices == 0, EBinding);
+         let ids = *device_group::device_ids(group);
+         adopt_group_members(fleet, group, ids, ctx);
+@@ -451,10 +448,7 @@ module sui_edge::customer {
+     /// Count, uniqueness and on-chain membership prevent hidden foreign members.
+     public fun adopt_indexed_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+         members: vector<ID>, ctx: &mut TxContext) {
+-        assert_action(customer, 6, ctx);
+-        // Membership changes can retarget deployments and alter group access.
+-        assert_action(customer, 1, ctx); assert_action(customer, 2, ctx);
+-        assert_fleet(customer, fleet);
++        assert_group_actions(customer, fleet, ctx);
+         require_condition(fleet.pending_devices == 0, EBinding);
+         adopt_group_members(fleet, group, members, ctx);
+     }
+@@ -527,10 +521,7 @@ module sui_edge::customer {
+ 
+     public fun add_to_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+         device_id: ID, ctx: &mut TxContext) {
+-        assert_action(customer, 6, ctx);
+-        // Membership changes can retarget deployments and alter group access.
+-        assert_action(customer, 1, ctx); assert_action(customer, 2, ctx);
+-        assert_fleet(customer, fleet);
++        assert_group_actions(customer, fleet, ctx);
+         assert_group(fleet, group);
+         require_condition(fleet.devices.contains(&device_id), EBinding);
+         device_group::add_managed(group, device_id);
+@@ -540,10 +531,7 @@ module sui_edge::customer {
+ 
+     public fun remove_from_group(customer: &Customer, fleet: &mut Fleet, group: &mut DeviceGroup,
+         device_id: ID, ctx: &mut TxContext) {
+-        assert_action(customer, 6, ctx);
+-        // Membership changes can retarget deployments and alter group access.
+-        assert_action(customer, 1, ctx); assert_action(customer, 2, ctx);
+-        assert_fleet(customer, fleet);
++        assert_group_actions(customer, fleet, ctx);
+         assert_group(fleet, group);
+         device_group::remove_managed(group, device_id);
+         let count: &mut u64 = df::borrow_mut(&mut fleet.id, GroupCountKey { device_id });
+@@ -1486,4 +1474,12 @@ module sui_edge::customer {
+     fun require_condition(condition: bool, code: u64) {
+         if (!condition) abort code
+     }
++
++
++    fun assert_group_actions(customer: &Customer, fleet: &Fleet, ctx: &mut TxContext) {
++        assert_action(customer, 6, ctx);
++        assert_action(customer, 1, ctx);
++        assert_action(customer, 2, ctx);
++        assert_fleet(customer, fleet);
++    }
+ }
