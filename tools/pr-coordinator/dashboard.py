@@ -606,7 +606,13 @@ def batch_receipts(db):
             row['members'] = [{'pr': m['pr'], 'head': m['head']} for m in members]
             row['id'] = safe_text(row['id'], 48)
             rows.append(row)
-        return {'state': 'ok', 'rows': rows}
+        shared=[]
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='shared_acceptance_status'").fetchone():
+            for raw in db.execute('SELECT project,owner_ticket,state,job,diagnostic,updated FROM shared_acceptance_status'):
+                item=dict(raw)
+                shared.append({k:safe_text(item[k],160) for k in ('project','owner_ticket','state','diagnostic')}
+                              | {'job':item['job'],'updated':item['updated']})
+        return {'state': 'ok', 'rows': rows, 'shared_repairs': shared}
     except (sqlite3.DatabaseError, ValueError, TypeError, KeyError):
         return {'state': 'unavailable', 'detail': 'batch receipts unreadable', 'rows': []}
 
@@ -1210,6 +1216,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
+    model['shared_repairs'] = [r for r in batches.get('shared_repairs',[]) if wanted(r['project'])]
     pipeline_snapshots = visible_pipeline_snapshots(pr_snapshot, paths, config, now, project)
     model['pipeline'] = derive_pipeline(pipeline_snapshots, jobs, by_ticket, model['workers'], batches, cache, now,
         batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True})
@@ -1365,6 +1372,13 @@ def render(model, width=100, delta=None, interval=None):
         head = ' '.join(x for x in (f"[{a['state']}]", a.get('family') or '', a['role'], a.get('ticket') or '',
                                     f"PR #{a['pr']}" if a.get('pr') else '') if x)
         lines.append(fit(f"  {head}{when}: " + ' — '.join(x for x in (a.get('title'), a['summary']) if x), width))
+
+    if model.get('shared_repairs'):
+        lines += ['', 'SHARED ACCEPTANCE REPAIRS']
+        for repair in model['shared_repairs']:
+            label=repair['state'].replace('_',' ')
+            job=f" · job {repair['job']}" if repair.get('job') else ''
+            lines.append(fit(f"  {repair['project']} {repair['owner_ticket']}: {label}{job} — {repair['diagnostic']}",width))
 
     lines += ['', 'LOCAL TICKET HISTORY (completed and closed tickets excluded from open totals above)']
     if model['sources'].get('tickets', {}).get('state') != 'ok':
