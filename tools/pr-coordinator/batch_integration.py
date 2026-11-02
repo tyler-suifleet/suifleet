@@ -711,25 +711,42 @@ class BatchController:
                 # source() already validates Review ownership without renewing a lease.
         held = {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
-        if len(active) > 1:
-            raise RuntimeError('multiple active integration epochs; inspect before proceeding')
-        batch = active[0] if active else None
-        held.update(self.reserved_members(project))
+        limit = project.get('integration_batch', {}).get('max_in_flight', 2)
+        if type(limit) is not int or not 1 <= limit <= 4:
+            raise ValueError('integration batch max_in_flight must be 1..4')
+        reserved = [m['pr'] for row in active for m in json.loads(row['members'])]
+        if len(reserved) != len(set(reserved)):
+            raise RuntimeError('duplicate active integration member; inspect before proceeding')
+        held.update(reserved)
         if not execute:
             return held
-        if batch is None and candidates:
+        # Preserve an ambiguous publication before admitting more work. A single
+        # normal owner still serially publishes main; pending CI does not own it.
+        uncertain = any(row.get('publish_intent') for row in active)
+        available = [m for m in candidates if m['pr'] not in reserved]
+        if len(active) < limit and available and not uncertain:
             base, batch_id = self.main(project), uuid.uuid4().hex
-            selected = self.select(project, candidates, base, maximum)
-            if not selected:
-                return held
-            directory = str(self.c.state/project['id']/'batches'/batch_id)
-            Path(directory).parent.mkdir(parents=True, exist_ok=True)
-            self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
-                 canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
-            batch = self.rows(project)[-1]
-        if not batch:
-            return held
+            selected = self.select(project, available, base, maximum)
+            if selected:
+                directory = str(self.c.state/project['id']/'batches'/batch_id)
+                Path(directory).parent.mkdir(parents=True, exist_ok=True)
+                self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
+                     canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
+                active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
+        for batch in active:
+            others = {m['pr'] for row in active if row['id'] != batch['id'] and row['status'] not in TERMINAL
+                      for m in json.loads(row['members'])}
+            pool = [m for m in candidates if m['pr'] not in others]
+            # Recheck after each advance; a prior candidate may have published or
+            # discovered an uncertain push during this same pass.
+            publish_allowed = not any(row['id'] != batch['id'] and row.get('publish_intent')
+                                      and row['status'] not in TERMINAL for row in self.rows(project))
+            self.advance(project, batch, pool, maximum, delay, prs, held, publish_allowed)
+        held.update(self.reserved_members(project))
+        return held
+
+    def advance(self, project, batch, candidates, maximum, delay, prs, held, publish_allowed=True):
         try:
             status = batch['status']
             if status in ('published', 'reconciling'):
@@ -761,29 +778,38 @@ class BatchController:
                     status = batch['status']
                 if status in ('branch_publishing', 'pr_creating'):
                     self.publish_candidate(project, batch)
-                elif status in ('awaiting_ci','awaiting_review','ready','approving_members'):
+                    status = batch['status']
+                if status in ('awaiting_ci','awaiting_review','ready','approving_members'):
                     self.adopt_approvals(project, batch)
                     from coordinator import checks_blocker, gate
                     self.validate_members(project, batch)
                     candidate = self.candidate(project, batch)
                     if candidate['state'] != 'OPEN' or candidate.get('isDraft'):
                         raise BatchInvalidated('integration candidate is not open and ready')
+                    owner = self.synthetic_owner(batch)
+                    review = self.c.store.review(project['id'], batch['pr'])
+                    # Published, exact-candidate source findings are actionable
+                    # before CI finishes. Neither a pending check nor a busy
+                    # sibling candidate should leave an independent reviewer idle.
+                    if self.reject_review(project, batch, candidate, review):
+                        return held
                     if checks_blocker(candidate) is not None:
-                        from coordinator import failed_checks
+                        from coordinator import failed_checks, feedback
                         failures = failed_checks(candidate)
                         if failures:
                             self.fail_candidate(project, batch, failures)
                             return held
                         self.update(batch, status='awaiting_ci')
-                        return held
-                    owner = self.synthetic_owner(batch)
-                    review = self.c.store.review(project['id'], batch['pr'])
-                    if self.reject_review(project, batch, candidate, review):
+                        if (not review or review.get('head') != candidate['headRefOid']
+                                or review.get('feedback') != feedback(candidate)):
+                            self.c.launch(project, candidate, owner, 'review')
                         return held
                     if gate(candidate, owner, review) is not None:
                         self.update(batch, status='awaiting_review', error=None)
                         self.c.launch(project, candidate, owner, 'review')
                     else:
+                        if not publish_allowed:
+                            return held
                         self.update(batch, status='ready', error=None)
                         self.publish_main(project, batch, candidate, owner, review)
                         self.reconcile(project, batch)
