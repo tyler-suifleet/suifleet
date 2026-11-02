@@ -1918,6 +1918,13 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
     def tick_project(self, project, execute):
         owners = self.owners(project)
         if execute: self.collect(project,owners)
+        if execute and project.get('shared_acceptance_repair'):
+            try:
+                from batch_integration import SharedAcceptanceRepair
+                shared = SharedAcceptanceRepair(self).tick(project)
+                print(json.dumps({'project': project['id'], 'shared_acceptance_repair': shared}), flush=True)
+            except Exception as error:
+                print(f"{project['id']}: shared acceptance recovery held ({type(error).__name__}); continuing other work", flush=True)
         early_reviews = set()
         def on_snapshot(pr):
             if self.start_source_review(project, pr, owners):
