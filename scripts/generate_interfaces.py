@@ -400,6 +400,10 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "vector<u64>":
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
+                elif base == "vector<vector<u8>>":
+                    types += [f"{arg}: number[][]"]; arguments += [f"tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize({arg}))"]
+                elif base == "u16":
+                    types += [f"{arg}: number"]; arguments += [f"tx.pure.u16({arg})"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
                 elif base == "u32":

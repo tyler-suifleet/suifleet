@@ -292,3 +292,48 @@ No hosted CI was watched or polled, no unchanged failing public fixture repeated
 no wallets created on public networks and no spending controls changed. Historical
 standalone public evidence above remains historical, not current-base success.
 Manual wallet/Pi/mainnet/provider/hosting checks remain unrun in #32/#159/#62.
+
+## Pinned batch conflict repair, 2026-11-02
+
+Resolved the actual conflict against pinned accepted main
+`df5d6d8005801034a75d4ce4180dcf713d82efd8`, which includes SF-201 native
+multisig. Both mechanism implementations, settings panels, generated calls and
+operator guides are preserved. Availability is the union (5); the second-person
+console bit still requires its introduction origin. Policy tests now cover
+0/1/4/5 and reject unsupported bits. This is a conflict repair, not a claim that
+the original reviewed source failed its standalone checks.
+
+Fresh combined-tree checks:
+
+- Pinned `sui move test --path contracts`: **373/373 passed**.
+- `python3 scripts/generate_interfaces.py`, then `--check`: **16 modules match**.
+- `python3 scripts/check_contract_interfaces.py`: **1,292 references against 18
+  modules, zero drift**.
+- `node scripts/test_second_person.cjs`, `test_security_policy.cjs`,
+  `test_multisig_admin.cjs`, `test_dashboard_stats.cjs`: **passed**.
+- `cd dapp && ./node_modules/.bin/tsc --noEmit`: **passed**.
+- Pinned image `node scripts/test_multisig_admin_browser.cjs`: **passed**, actual
+  Chromium with fixture wallet/transport; `cd dapp && pnpm build`: **passed**.
+- Network-none `python3 scripts/test_second_person_localnet.py --base
+  /base/contracts --evidence docs/validation/sf199-combined-localnet.json`:
+  **FAILED** at compatible upgrade: `MovePackageTooBig { object_size: 104427,
+  max_object_size: 102400 }`. [Failure receipt](sf199-combined-localnet.json)
+  records four successful setup transactions and the failed upgrade effects;
+  no subsequent second-person behavior was tested in this run. Its HEAD is the
+  pre-merge run-start revision; it is not relabeled as final-head acceptance.
+
+Setup failures: first container used the wrong uid and could not write; a host
+interface check used a container wrapper that did not share its temporary summary
+path; both passed on corrected invocations. The first isolated run referenced an
+unmounted `/workspace` chain-facts path and stopped before publication; correcting
+the path exposed the real package-size failure above. A unittest discovery command
+for `test_generated_interfaces.py` found zero tests and is not counted as testing.
+
+**Blocked:** the combined package is 2,027 bytes over the protocol limit. A
+compatible source-size reduction or reviewed package-boundary design is required,
+then rerun isolated-chain upgrade/behavior checks and the coordinator's exact
+candidate CI/public-testnet gates. No spending limit or protocol cap was changed.
+The merge-conflict repair alone does not complete acceptance. Existing PR #453 /
+SF-199 remains the owner of this integration finding; no new issue was created.
+No public-wallet mutation, hardware operation, hosted-CI polling or main merge
+occurred. Manual wallet/Pi/mainnet/provider/hosting remain unrun in #32/#159/#62.

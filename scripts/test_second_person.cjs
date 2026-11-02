@@ -15,10 +15,10 @@ const args = [Array.from(bcs.string().serialize('set_security').toBytes()),Array
 const bytes = bcs.vector(bcs.vector(bcs.u8())).serialize(args).toBytes();
 const action = {id:R,customer_id:C,generation:'8',proposer:A,intent:Array(32).fill(0),expires_ms:'9999999999999',attested:4};
 const encoded = wire.security_policy_ActionBcs.serialize(action).toBytes();
-assert.equal(security.AVAILABLE_SECURITY_FACTORS,4);
+assert.equal(security.AVAILABLE_SECURITY_FACTORS,5);
 assert.equal(approvals.secondPersonSupported(),true);
 assert.deepEqual(security.validateSecurityRequirements([4,0,0,0,0,0,0]),[4,0,0,0,0,0,0]);
-assert.throws(()=>security.validateSecurityRequirements([5,0,0,0,0,0,0]),/unavailable/);
+assert.throws(()=>security.validateSecurityRequirements([6,0,0,0,0,0,0]),/unavailable/);
 const request = approvals.decodeRequest(R,C,encoded,bytes);
 assert.equal(request.operation,'set_security'); assert.equal(request.proposer,A); assert.equal(request.approved,true);
 assert.deepEqual(approvals.policyValues(request),[0,0,0,0,0,0,0]);

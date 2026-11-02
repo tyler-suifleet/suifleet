@@ -1056,23 +1056,28 @@ class SharedAcceptanceRepair:
             return dict(owner=key,state='resolved')
         if owner.get('agent') not in ('Codex','Claude') or not owner.get('token'):
             return dict(owner=key,state='blocked',diagnostic='shared repair owner has no implementation claim')
+        if owner.get('status')!='review' or owner.get('expired') or owner.get('publish_pending'):
+            return dict(owner=key,state='blocked',diagnostic='shared owner requires published Review handoff or explicit recovery')
         # Select the real linked source; labels and a caller's arbitrary PR number
         # cannot redirect this authority to another source/claim.
         number=self.c.issue_number(project,owner)
         if not number: return dict(owner=key,state='blocked',diagnostic='owner issue unavailable')
         prs=json.loads(self.c.gh(project,['pr','list','-R',project['repository'],'--state','open',
-                       '--head',owner['branch'],'--json','number,headRefName']))
+                       '--head',owner['branch'],'--json','number,headRefName,headRefOid,baseRefName,isDraft,isCrossRepository,state']))
         if len(prs)!=1: return dict(owner=key,state='blocked',diagnostic='shared owner source is ambiguous or absent')
-        pr=self.c.pr(project,prs[0]['number']); head=pr['headRefOid']
-        if (pr.get('headRefName')!=owner['branch'] or pr.get('isDraft') or pr.get('isCrossRepository')
-                or pr.get('state')!='OPEN'):
+        pr=prs[0]
+        if (not isinstance(pr,dict) or type(pr.get('number')) is not int
+                or pr['number']<=0 or pr.get('headRefName')!=owner['branch']
+                or not isinstance(pr.get('headRefOid'),str)
+                or not re.fullmatch(r'[0-9a-f]{40}',pr['headRefOid'])
+                or pr.get('baseRefName')!='main' or pr.get('isDraft') is not False
+                or pr.get('isCrossRepository') is not False or pr.get('state')!='OPEN'):
             return dict(owner=key,state='blocked',diagnostic='shared owner source is not ready')
+        head=pr['headRefOid']
         active=self.db.execute("SELECT id FROM jobs WHERE project=? AND pr=? AND status IN "
             "('reserved','running','orphaned','quarantined','quota_wait','quota_launch') ORDER BY id DESC LIMIT 1",
             (project['id'],pr['number'])).fetchone()
         if active: return dict(owner=key,state='owner_busy',job=active[0])
-        if owner['status']!='review' or owner.get('expired') or owner.get('publish_pending'):
-            return dict(owner=key,state='blocked',diagnostic='shared owner requires published Review handoff or explicit recovery')
         # Do not interrupt an in-flight candidate or ambiguous publication. Only
         # already-failed exact-owner candidates establish a new repair episode.
         if pr['number'] in self.c.batches.reserved_members(project):
@@ -1112,6 +1117,13 @@ class SharedAcceptanceRepair:
         count=self.db.execute('SELECT count(*) FROM shared_acceptance_repairs WHERE project=? AND owner_ticket=? AND owner_head=? AND episode!=?',
                               (project['id'],key,head,episode)).fetchone()[0]
         if count>=maximum: return dict(owner=key,state='blocked',diagnostic='shared repair attempts exhausted for unchanged source')
+        # Cheap metadata only suppresses work. It never authorizes a launch.
+        fresh=self.c.pr(project,pr['number'])
+        identity=('number','headRefName','headRefOid','baseRefName','isDraft','isCrossRepository','state')
+        if any(type(fresh.get(k)) is not type(pr[k]) or fresh.get(k)!=pr[k] for k in identity):
+            return dict(owner=key,state='held',diagnostic='shared owner source changed during evidence hydration')
+        pr=fresh
+        self.c.batches.verify_manifest(project,batch)
         self.c.assert_review_owner(project,owner)
         self.c.local_infrastructure.fenced(project,pr,owner)
         context=dict(candidate_pr=batch['pr'],candidate_head=batch['head'],candidate_base=batch['base'],checks=checks,

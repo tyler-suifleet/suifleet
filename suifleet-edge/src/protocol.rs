@@ -1585,6 +1585,15 @@ pub mod security_policy {
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
 }
+pub mod multisig_admin {
+    use super::*;
+    pub const MODULE: &str = "multisig_admin";
+    pub const ADMINISTRATOR: &str = "administrator";
+    pub const APPROVE: &str = "approve";
+    pub const ENROLL: &str = "enroll";
+    pub const ENROLL_SECURED: &str = "enroll_secured";
+    pub const PREPARE_POLICY_CHANGE: &str = "prepare_policy_change";
+}
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {
     pub deployment_id: String,

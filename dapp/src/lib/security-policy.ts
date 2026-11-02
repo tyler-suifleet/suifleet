@@ -12,10 +12,9 @@ export const SECURITY_FACTORS = [
   { bit: 4, name: "Second-person approval", description: "Require approval from another authorized credential. The proposer cannot approve their own request.", ticket: "SF-199" },
   { bit: 8, name: "Delay and cancellation", description: "Wait through an on-chain cancellation window before executing. A current administrator can cancel.", ticket: "SF-200" },
 ] as const;
-// The framework deliberately fails closed until the corresponding child verifier
-// and its enrollment UI ship. Never present a checkbox as working protection.
+// Only implemented verifiers are available; enrollment is checked on chain.
 export const APPROVAL_ORIGINS = ["customer::SecondPersonConfiguration"] as const;
-export const AVAILABLE_SECURITY_FACTORS = MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0;
+export const AVAILABLE_SECURITY_FACTORS = 1 | (MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0);
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {
