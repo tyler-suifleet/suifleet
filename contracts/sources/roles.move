@@ -16,6 +16,12 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::roles {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
@@ -124,10 +130,10 @@ module sui_edge::roles {
     ) {
         assert!(is_active(registry, role), ERoleRevoked);
         assert!(!target_groups.is_empty(), ENoTargets);
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < target_groups.length()) {
             assert!(role.groups.contains(&target_groups[i]), EOutsideScope);
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let deployment_id = deployment_manager::create_delegated(role.operator, component_name, version,
             recipe_blob_id, artifact_sha256, recipe_sha256, target_groups, clock, ctx);

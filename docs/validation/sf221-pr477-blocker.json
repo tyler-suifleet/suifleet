@@ -1,0 +1,769 @@
+{
+  "schema_version": 1,
+  "purpose": "Unresolved pinned combined-candidate allowance failure; not a repair or approval",
+  "candidate": "17d0b556e45c3297373f7254701ed20c8ea43d3e",
+  "base": "9f52de309a26bd600225802dd2f763a0298947c3",
+  "source_head": "e3fc3d9f20a680ab33a559dc95d272a52d9f0a3d",
+  "public_run": "https://github.com/tyler-suifleet/suifleet/actions/runs/41455587854",
+  "public": {
+    "head": "17d0b556e45c3297373f7254701ed20c8ea43d3e",
+    "base": "9f52de309a26bd600225802dd2f763a0298947c3",
+    "chain": "4c78adac",
+    "operator": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+    "transactions": [
+      {
+        "label": "publish base",
+        "gas_budget_mist": 850000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "FsLsyMLZdZpNUVbrdRdxXoZRbJYFc4uRJh44pktAKSRG",
+        "gas_mist": 772926000,
+        "allowance_used_mist": 772926000
+      },
+      {
+        "label": "register device + issue cap (base)",
+        "gas_budget_mist": 60000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7eCoGBbFYe7CTmCEzKRFwRbroZ7uM5YukVMjEh4DYYb",
+        "gas_mist": 8425378,
+        "allowance_used_mist": 781351378
+      },
+      {
+        "label": "add device to group (base)",
+        "gas_budget_mist": 60000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "5PL8JrNGBjusYs6cuFNd3H6hbKJt3TNHpAiiBkrjeGMM",
+        "gas_mist": 1243578,
+        "allowance_used_mist": 782594956
+      },
+      {
+        "label": "upgrade to head",
+        "gas_budget_mist": 817405044,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "F8hT81eFvSWotAjE1arGLgodC5zjVT3i5dfiNiUWgMB6",
+        "gas_mist": 770638163,
+        "allowance_used_mist": 1553233119
+      },
+      {
+        "label": "activate identity + index group + create inbox (head)",
+        "gas_budget_mist": 46766881,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "CsGvY4NUdWkxU2qjvbvesUzdUYPVWsLUCu8TQCmD3dGx",
+        "gas_mist": 17325381,
+        "allowance_used_mist": 1570558500
+      }
+    ],
+    "funding": {
+      "required_mist": 3250000000,
+      "held_mist": 0,
+      "address_mist": 2629435006,
+      "coin_mist": 78358890
+    },
+    "preexisting_device_grant_mist": 14981196,
+    "allowance_used_mist": 1585539696,
+    "max_spend_mist": 1600000000,
+    "success": false
+  },
+  "public_blocker": {
+    "next_operation": "create deployment 3.0.0 via base",
+    "required_reservation_mist": 15000000,
+    "remaining_mist": 14460304
+  },
+  "isolated_command": "python3 -u scripts/test_fresh_cost_localnet.py --base-ref 9f52de309a26bd600225802dd2f763a0298947c3 --head-ref HEAD --compact-lifecycle --with-security --evidence-dir /effects",
+  "isolated_network": "Docker --network none, loopback only; dedicated disposable local node and identities, no public writes",
+  "isolated_ordinary": {
+    "fresh": {
+      "started": "2026-11-02T14:22:34Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "publish base",
+          "gas_budget_mist": 850000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "E6YvBWEfbtK7y2JxqGYWzpNcv3eDmqBGtxb7YsNjqavw",
+          "gas_mist": 768984494,
+          "allowance_used_mist": 768984494,
+          "gas_used": {
+            "computationCost": "7350000",
+            "storageCost": "766574000",
+            "storageRebate": "4939506",
+            "nonRefundableStorageFee": "494"
+          }
+        },
+        {
+          "label": "register device + issue cap (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "2qYmkFL3kX4zSB7fcn3jfzks2V8yTbxDgFMhdGxSTap9",
+          "gas_mist": 8425477,
+          "allowance_used_mist": 777409971,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "10191600",
+            "storageRebate": "2766123",
+            "nonRefundableStorageFee": "277"
+          }
+        },
+        {
+          "label": "add device to group (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "3A4gEsXXUgax4f5P4MeE3LRAFFUpjT4padzTauSJwE1s",
+          "gas_mist": 1243677,
+          "allowance_used_mist": 778653648,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "5016000",
+            "storageRebate": "4772323",
+            "nonRefundableStorageFee": "477"
+          }
+        },
+        {
+          "label": "upgrade to head",
+          "gas_budget_mist": 821346352,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "9f3aM8YkmviectixYUuAEBqe2mxJikkbU3q9jfvi7Bi1",
+          "gas_mist": 770638262,
+          "allowance_used_mist": 1549291910,
+          "gas_used": {
+            "computationCost": "7370000",
+            "storageCost": "765890000",
+            "storageRebate": "2621738",
+            "nonRefundableStorageFee": "262"
+          }
+        },
+        {
+          "label": "activate identity + index group + create inbox (head)",
+          "gas_budget_mist": 50708090,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EdZ638fwD6kVSXc8MLzJCR6MCcv6EvdwrukkDb8pNYBd",
+          "gas_mist": 17325479,
+          "allowance_used_mist": 1566617389,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "23119200",
+            "storageRebate": "6793721",
+            "nonRefundableStorageFee": "679"
+          }
+        },
+        {
+          "label": "top up device gas",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 10000000,
+          "status": "success",
+          "digest": "FLoEKMHPJkPeKTDbAPPhKtzkKA6AnsvCVgMmCExntoy4",
+          "gas_mist": 1988099,
+          "allowance_used_mist": 1578605488,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "1976000",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        },
+        {
+          "label": "create deployment 3.0.0 via base",
+          "gas_budget_mist": 15000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "B6sCKKM4gZTGpbR2HCGhGNgseBhrBaLgb8DxPgUb1Yst",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 1592099987,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "13482400",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        }
+      ],
+      "checks": [
+        "verified/reused base package 0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1; no identical package is republished",
+        "head package 0xd75d0c60965ec9abbbc939df704ba54a87c0116aee353542f9a2b59ccb477f75 (package version 2); manifest verified over gRPC",
+        "pre-upgrade group indexed in place; device inbox at its derived address lists the group"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "4d6c2f37",
+          "epoch": 0,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        },
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        }
+      },
+      "funding": {
+        "required_mist": 1600000000,
+        "held_mist": 0,
+        "address_mist": 0,
+        "coin_mist": 1000000000000
+      },
+      "chain": "4d6c2f37",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xe376349801a8d1b96cd830797f7586d0617ce5911a42b7a4f31a16278665e5c8",
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "17d0b556e45c3297373f7254701ed20c8ea43d3e",
+      "base": "9f52de309a26bd600225802dd2f763a0298947c3",
+      "start_balance_mist": 1000000000000,
+      "walrus": "local",
+      "reconciliations": [],
+      "device": "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a",
+      "device_address": "0x67a5d6ab05b3d19916a5f023da2d27d6801c97dac2043c3b9268635df51cef4e",
+      "preexisting_device_grant_mist": 0,
+      "base_package": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+      "head_package": "0xd75d0c60965ec9abbbc939df704ba54a87c0116aee353542f9a2b59ccb477f75",
+      "registry": "0xad1cfe4d4cfdeb675eaf99d7f51c7f640626cbe82aa8ecbac39c1d1d937f9a3a",
+      "upgrade_cap": "0x70b1d8ccaf769137864baa2ccb5444be23c8b487332fc7052424076fa7f97a08",
+      "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:49109f010b675b30a15b725749b223a5a1e34b81c408b72855c7100b007f9920@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::Device": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::DeviceGroup": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_cap::DeviceCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_cap::DeviceAddressKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeploymentRecord": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeploymentCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeviceStatusUpdated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::TargetGroupsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::TargetDevicesKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::StatusesKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RecipeDigestKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Receipts": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeviceStatusReported": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::IdentityKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::Identity": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::DeviceIdentityChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::CustodyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::DeviceOwnerCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DelegateKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::EnrollmentPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::DeviceEnrolled": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::DeployerRole": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::RoleKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::RoleGranted": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::DeviceAddedToGroup": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ManagedKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredState": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredStateChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ControlKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Control": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Rollout": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutDecision": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ComponentCatalog": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ComponentVersion": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::VersionPublished": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogBindingKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogBinding": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessAdminCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::PolicyCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::KeyEpochRotated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::PolicyMigrated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_handover::Handover": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::FleetBudget": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetOwnerCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Limits": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::GasAccount": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Deposited": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Withdrawn": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceFunded": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::ReserveChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::GasDrawn": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetLow": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceStateChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetPaused": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetConfigured": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutHealthKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutHealth": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::SettingsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::Settings": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::FleetSettingsChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::DeviceInbox": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::InboxKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::HeadKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::Head": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::InboxCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::Announced": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::MemberKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::IndexKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupIndex": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupIndexed": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Customer": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Fleet": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Membership": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CustomerKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::BudgetKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::AssignmentKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::GroupCountKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CustomerCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::FleetCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CredentialChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceAssigned": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceReleased": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::ManagedKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::PolicyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::CustomerFleetKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::PolicyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::Policy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::Action": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::PolicyChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::ActionCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::HandoverConsent": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::SecurityRevisionKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::SecurityGenerationKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::FactorKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::FactorConfiguration": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::HandoverCompleted": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::FleetSecurityKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptShardKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptDirectory": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptIndexKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ShardedReceipt": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptShard": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ShardedCatalogBindingKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptLayoutChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ShardedTargetGroupsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionRecord": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionCleanupKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::GroupBatchApplied": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1"
+      },
+      "receipts": {
+        "0xbce623bf370ed5166d7fbd0ca9223bab6cc6e7a4f0d6a551e202fe853df1cea0": {
+          "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a": 1
+        }
+      },
+      "report_transactions": [],
+      "cleanup_error": "insufficient remaining allowance for full gas budget before bounded abort cleanup",
+      "success": false,
+      "allowance_used_mist": 1592099987,
+      "max_spend_mist": 1600000000,
+      "end_balance_mist": 998407900013,
+      "spent_mist": 1592099987,
+      "finished": "2026-11-02T14:22:59Z"
+    },
+    "retained": {
+      "started": "2026-11-02T14:22:59Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "top up device gas",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 1251567,
+          "status": "success",
+          "digest": "23dvqFwNTedYiL7Zf3hPmZLWtt7mMNaeRmaYLC1kDozS",
+          "gas_mist": 1988099,
+          "allowance_used_mist": 11988099,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "1976000",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        },
+        {
+          "label": "create deployment 3.0.0 via base",
+          "gas_budget_mist": 15000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "H2EJw6QC3yRwd4vLVfV4DPJa57u5iPr6y4qx9qmVWdwR",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 25482598,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "13482400",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        },
+        {
+          "label": "create deployment 1.0.0 + delete completed predecessor",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8nxeBRHkxaJSRF3jkbRMAvgqAuqrsbNMdpdqeWajP9Pf",
+          "gas_mist": 1374144,
+          "allowance_used_mist": 26856742,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "17814400",
+            "storageRebate": "17440256",
+            "nonRefundableStorageFee": "1744"
+          }
+        },
+        {
+          "label": "create deployment 2.0.0 + delete completed predecessor",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "9CbTX6BgqXhjhXAkZV9WwrNc9nfPLvDkubrcrZ2khmEo",
+          "gas_mist": 3646367,
+          "allowance_used_mist": 30503109,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "18316000",
+            "storageRebate": "15669633",
+            "nonRefundableStorageFee": "1567"
+          }
+        },
+        {
+          "label": "create deployment 4.0.0 + delete completed predecessor",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GBWHQou1Bkiv86JvSrb2CPxiRiLRw2hxLxo7agKbxYsb",
+          "gas_mist": 751007,
+          "allowance_used_mist": 31254116,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "17814400",
+            "storageRebate": "18063393",
+            "nonRefundableStorageFee": "1807"
+          }
+        },
+        {
+          "label": "create and admit durable decision audit rollout + delete completed deployment",
+          "gas_budget_mist": 11000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EoemxQFWhSzBDVbqYJnUtVXtc5W4vPK4P8NRH19WZADp",
+          "gas_mist": 10242973,
+          "allowance_used_mist": 41497089,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "22974800",
+            "storageRebate": "13731827",
+            "nonRefundableStorageFee": "1373"
+          }
+        }
+      ],
+      "checks": [
+        "reused fixture bytecode-v1:\u2026: base 0x7a8c90220d\u2026, head 0xd75d0c6096\u2026 (re-verified on chain; no package storage spent)",
+        "head package 0xd75d0c60965ec9abbbc939df704ba54a87c0116aee353542f9a2b59ccb477f75 (package version 2); manifest verified over gRPC",
+        "pre-upgrade group indexed in place; device inbox at its derived address lists the group",
+        "head-package deployment to the device: applied, receipt Applied on chain",
+        "head-package deployment to the pre-upgrade group: applied via report_status_for_group",
+        "deployment created through the OLD package's entry point: applied and receipted (mixed versions)",
+        "injected health failure reported Failed on chain",
+        "head-package deployments announced to the device inbox and the indexed group's head; group report authorized by the member index",
+        "deployments deleted (storage rebate)"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "4d6c2f37",
+          "epoch": 0,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        },
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        }
+      },
+      "funding": {
+        "required_mist": 1600000000,
+        "held_mist": 0,
+        "address_mist": 0,
+        "coin_mist": 998407900013
+      },
+      "chain": "4d6c2f37",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xe376349801a8d1b96cd830797f7586d0617ce5911a42b7a4f31a16278665e5c8",
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "17d0b556e45c3297373f7254701ed20c8ea43d3e",
+      "base": "9f52de309a26bd600225802dd2f763a0298947c3",
+      "start_balance_mist": 998407900013,
+      "walrus": "local",
+      "fixture_provenance": {
+        "base_commit": "9f52de309a26bd600225802dd2f763a0298947c3",
+        "head_commit": "17d0b556e45c3297373f7254701ed20c8ea43d3e",
+        "build_cli": "sui 1.81.1-e04cf9aa915c",
+        "network_cli": "sui 1.83.0-16d2dc1e05ed",
+        "network_cli_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+        "protocol_version": 140,
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        },
+        "verified_transactions": {
+          "base": {
+            "kind": "publish",
+            "modules": 15,
+            "digest": "043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411"
+          },
+          "upgrade": {
+            "kind": "upgrade",
+            "modules": 16,
+            "policy": "00",
+            "digest": "49109f010b675b30a15b725749b223a5a1e34b81c408b72855c7100b007f9920"
+          }
+        }
+      },
+      "device": "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a",
+      "device_address": "0x67a5d6ab05b3d19916a5f023da2d27d6801c97dac2043c3b9268635df51cef4e",
+      "preexisting_device_grant_mist": 8748433,
+      "base_package": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+      "head_package": "0xd75d0c60965ec9abbbc939df704ba54a87c0116aee353542f9a2b59ccb477f75",
+      "registry": "0xad1cfe4d4cfdeb675eaf99d7f51c7f640626cbe82aa8ecbac39c1d1d937f9a3a",
+      "upgrade_cap": "0x70b1d8ccaf769137864baa2ccb5444be23c8b487332fc7052424076fa7f97a08",
+      "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:49109f010b675b30a15b725749b223a5a1e34b81c408b72855c7100b007f9920@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::Device": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::DeviceGroup": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_cap::DeviceCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_cap::DeviceAddressKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeploymentRecord": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeploymentCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeviceStatusUpdated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::TargetGroupsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::TargetDevicesKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::StatusesKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RecipeDigestKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Receipts": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DeviceStatusReported": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::IdentityKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::Identity": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::DeviceIdentityChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::CustodyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_registry::DeviceOwnerCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DelegateKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::EnrollmentPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::DeviceEnrolled": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::DeployerRole": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::RoleKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "roles::RoleGranted": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::DeviceAddedToGroup": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ManagedKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredState": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "desired_state::DesiredStateChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ControlKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Control": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::Rollout": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutDecision": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ComponentCatalog": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ComponentVersion": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::VersionPublished": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogBindingKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::CatalogBinding": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessPolicy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessAdminCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::PolicyCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::AccessChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::KeyEpochRotated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "seal_policy::PolicyMigrated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_handover::Handover": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::FleetBudget": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetOwnerCap": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Limits": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::GasAccount": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Deposited": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::Withdrawn": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceFunded": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::ReserveChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::GasDrawn": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetLow": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::DeviceStateChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetPaused": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_budget::BudgetConfigured": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutHealthKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::RolloutHealth": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::SettingsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::Settings": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_settings::FleetSettingsChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::DeviceInbox": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::InboxKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::HeadKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::Head": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::InboxCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "fleet_inbox::Announced": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::MemberKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::IndexKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupIndex": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "device_group::GroupIndexed": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Customer": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Fleet": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::Membership": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CustomerKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::BudgetKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::AssignmentKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::GroupCountKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CustomerCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::FleetCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::CredentialChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceAssigned": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::DeviceReleased": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::ManagedKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::PolicyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::CustomerFleetKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::PolicyKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::Policy": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::Action": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::PolicyChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::ActionCreated": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::HandoverConsent": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::SecurityRevisionKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "enrollment::SecurityGenerationKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::FactorKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "security_policy::FactorConfiguration": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::HandoverCompleted": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::FleetSecurityKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptShardKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptDirectory": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptIndexKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ShardedReceipt": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptShard": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "component_catalog::ShardedCatalogBindingKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ReceiptLayoutChanged": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::ShardedTargetGroupsKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionRecord": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "deployment_manager::DecisionCleanupKey": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1",
+        "customer::GroupBatchApplied": "0x7a8c90220d5c0ad792b017e621fbcb2322ca89f55c0682841a31f79c1408c7a1"
+      },
+      "receipts": {
+        "0x5035c8b99c9272ed86dbb5bd8ed49cb573a9390910deb92b426abd87b8147bba": {
+          "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a": 1
+        },
+        "0xa9a59e8a1155864991ba1e8f8c25b65e57e332b046819f547d3e48b1047da785": {
+          "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a": 1
+        },
+        "0xf10185d95da907ce53f20a5fb78128754e6d9c0102bb4bd78ec51efde14ac8c3": {
+          "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a": 1
+        },
+        "0xd74bfd111986edd7f127d1042b2a25176449b3753362eb613b17634ee167029e": {
+          "0xf3f2f33019db7e1df9af4f8839f47343b495c2d0146b1fbe98da6f441748854a": 2
+        }
+      },
+      "report_transactions": [],
+      "rollout_audit_pending": {
+        "status": "pending",
+        "acceptance_complete": false,
+        "record": "0x72b1ff28db3e2006cf26c79b54598cfb7ba2ac8c64679fcd1201e910b9ab75b0",
+        "checkpoint": "242",
+        "admission_digest": "EoemxQFWhSzBDVbqYJnUtVXtc5W4vPK4P8NRH19WZADp",
+        "retained": true
+      },
+      "success": true,
+      "allowance_used_mist": 41497089,
+      "max_spend_mist": 1600000000,
+      "end_balance_mist": 998375151357,
+      "spent_mist": 32748656,
+      "finished": "2026-11-02T14:23:22Z"
+    }
+  },
+  "isolated_blocker": {
+    "next_operation": "create deployment 1.0.0 + delete completed predecessor",
+    "required_reservation_mist": 10000000,
+    "remaining_mist": 7900013,
+    "cleanup_error": "insufficient remaining allowance for full gas budget before bounded abort cleanup"
+  },
+  "limits": [
+    "Fresh ordinary failed. Cached ordinary ran under a separate unchanged ledger and is not a fresh success or replenishment.",
+    "Only the first two ordinary runs certify the pinned source. Later exploratory source changes in the disposable checkout invalidate provenance for subsequent security/browser phases; those phases are deliberately excluded from this receipt.",
+    "Temporary compiler-only experiments (u8 abort constants with u64 casts: 511 bytes; shared finish helper: 162 bytes) are unshipped, not combined, and not independently regression/acceptance validated. They do not establish a sufficient repair or a physical minimum.",
+    "No spending ceiling, full-reservation check, encrypted identity state, unknown-outcome record or faucet bound changed.",
+    "Exact future repaired combined-candidate CI/public acceptance remains required. Physical/mainnet/manual-wallet/production-provider evidence remains unrun in #32/#159."
+  ],
+  "next_step": "Owner must identify and validate a larger compatible bytecode/storage or lifecycle reduction against this exact combined composition, then execute fresh/cached ordinary/security/browser suites without exploratory source changes and unchanged ceilings. Protected CI must obtain actual exact-head/base public effects; do not rerun identical failed fixtures blindly."
+}

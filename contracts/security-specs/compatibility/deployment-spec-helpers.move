@@ -1,6 +1,6 @@
-    #[mode(spec), ext(spec(prove, target = new_receipts))]
+    #[mode(spec), ext(spec(prove, target = p4))]
     fun new_receipts_security_spec(): Receipts {
-        let receipts = new_receipts();
+        let receipts = p4();
         prover::prover::ensures(receipts.version == LEGACY_RECEIPTS_VERSION);
         prover::prover::ensures(receipts.statuses.is_empty());
         receipts
@@ -24,17 +24,17 @@
         (*byte >= 48 && *byte <= 57) || (*byte >= 97 && *byte <= 102)
     }
 
-    #[mode(spec), ext(spec_only(loop_inv(target = assert_recipe_hash)), pure)]
+    #[mode(spec), ext(spec_only(loop_inv(target = p0)), pure)]
     fun assert_recipe_hash_loop(bytes: &vector<u8>, i: u64): bool {
         i <= bytes.length() && prover::vector_iter::all_range!(bytes, 0, i, |byte| spec_hex_byte(byte))
     }
 
-    #[mode(spec), ext(spec(prove, target = assert_recipe_hash))]
+    #[mode(spec), ext(spec(prove, target = p0))]
     fun assert_recipe_hash_security_spec(recipe_sha256: &String) {
         let bytes = recipe_sha256.as_bytes();
         prover::prover::asserts(bytes.length() == 64);
         prover::prover::asserts(prover::vector_iter::all!(bytes, |byte| spec_hex_byte(byte)));
-        assert_recipe_hash(recipe_sha256);
+        p0(recipe_sha256);
     }
 
     #[mode(spec), ext(spec(prove, target = new_deployment_verified, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
@@ -78,7 +78,7 @@
         prover::prover::ensures(d.recipe_blob_id == blob);
     }
 
-    #[mode(spec), ext(spec(prove, no_opaque, target = make_deployment, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
+    #[mode(spec), ext(spec(prove, no_opaque, target = p1, boogie_opt = b"vcsMaxKeepGoingSplits:2 vcsSplitOnEveryAssert vcsFinalAssertTimeout:120"))]
     fun make_deployment_security_spec(creator: address, component_name: String,
         version: String, recipe_blob_id: String, artifact_sha256: String,
         target_groups: vector<ID>, target_devices: vector<ID>, clock: &Clock,
@@ -86,7 +86,7 @@
         prover::prover::asserts(!target_groups.is_empty() || !target_devices.is_empty());
         let artifact = artifact_sha256;
         let blob = recipe_blob_id;
-        let record = make_deployment(creator, component_name, version, recipe_blob_id,
+        let record = p1(creator, component_name, version, recipe_blob_id,
             artifact_sha256, target_groups, target_devices, clock, ctx);
         prover::prover::ensures(record.creator == creator);
         prover::prover::ensures(record.artifact_sha256 == artifact);
