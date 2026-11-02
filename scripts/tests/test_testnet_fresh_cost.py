@@ -11,6 +11,34 @@ from analyze_fixture_grouping import analyze
 
 
 class FreshCostTests(unittest.TestCase):
+    def test_actual_factored_candidate_still_fails_fresh_ledger(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-factoring-costs.json'
+        receipt = json.loads(path.read_text())
+        report = analyze(receipt)
+        self.assertEqual(receipt['source']['saved_bytes'], 377)
+        self.assertNotEqual(receipt['source']['original_digest'], receipt['source']['factored_digest'])
+        self.assertEqual(report['measured_deficit_mist'], 90_225_837)
+        self.assertFalse(receipt['acceptance_complete'])
+        runs = {run['phase']: run for run in receipt['runs']}
+        for phase in ('pair-0-fresh', 'pair-0-retained'):
+            run = runs[phase]
+            ledger = Budget(run['max_spend_mist'], [])
+            for tx in run['transactions']:
+                ledger.execute(None, tx['label'], lambda _, tx=tx: dict(
+                    digest=tx['digest'], effects=dict(status=dict(status=tx['status']), gasUsed=tx['gas_used'])),
+                    gas=tx['gas_budget_mist'], funding=tx['funding_mist'], require_full=True)
+            self.assertEqual(ledger.used, run['allowance_used_mist'])
+            if phase.endswith('fresh'):
+                client = Mock()
+                with self.assertRaises(Spent):
+                    ledger.execute(client, 'top up device gas', ['ptb'], gas=10_000_000,
+                                   funding=30_000_000, require_full=True)
+                client.assert_not_called()
+        # A passing, cheaper source candidate is still a different exact pair;
+        # cached effects cannot certify its failed fresh allowance.
+        self.assertFalse(runs['pair-0-fresh']['success'])
+        self.assertTrue(runs['pair-0-retained']['success'])
+
     def test_global_cleanup_netting_still_needs_source_or_effects_reduction(self):
         path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-combined-batch-costs.json'
         report = analyze(json.loads(path.read_text()))

@@ -38,6 +38,50 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 concrete source factoring attempt (2026-11-02)
+
+The [retained source patch](validation/sf221-factoring-candidate.patch) applies
+only to combined candidate `7335545137acf5e773aac554eac027d787b3009d`.
+It factors the intent-vector prefixes of 53 secured customer wrappers and repeated
+fleet authorization checks into private functions, keeping public signatures,
+struct layouts, intent argument order and authorization checks. The pinned
+1.81.1 compiler reduces root modules from 93,673 to 93,296 bytes (377 bytes).
+All 363 Move tests pass with that patch. This is a tested source attempt, kept
+outside production sources because its reduction does not solve SF-221.
+
+[Actual factored-candidate effects](validation/sf221-factoring-costs.json) come
+from a new disposable Docker `--network none` chain, with SF-221 identity and
+activation repairs applied over that combined candidate. The compatible upgrade
+executes successfully, but fresh ordinary acceptance still refuses funding at
+1,578,752,989 / 1,600,000,000 MIST. The same exact pair's separate cached run
+passes all four OTA cases at 111,472,848 MIST. Their combined measured charges
+are 1,690,225,837 MIST: **90,225,837 MIST over the unchanged ceiling**, before
+future temporal audit work. The source reduction saves 2,895,200 MIST versus
+the preceding combined-candidate measurements; cached success does not certify
+fresh acceptance. Each phase has its own measurement ledger; no real allowance
+is reset mid-run.
+
+The remaining limitation is concrete: the immutable base publication plus the
+still-large compatible head publication leave only 21,247,011 MIST for required
+funding and runtime checks. Factoring the repeated wrapper scaffolding does not
+remove enough serialized module bytes. Removing existing public APIs/layouts or
+linking a different historical base would change compatibility or fixture scope;
+neither is an accepted reduction. This experiment does not prove that every
+possible compatible rewrite is insufficient. No sufficient safe rewrite has
+been demonstrated, so SF-221 remains blocked, not Review-ready. Temporal
+post-pruning proof and exact public acceptance remain unproved.
+
+To reproduce source compilation, extract the pinned combined commit's
+`contracts/`, apply the retained patch with `git apply`, then run
+`sui move build --path contracts` and `sui move test --path contracts` using
+compiler 1.81.1 and its locked cached dependencies. The effects artifact pins
+the exact local candidate commit, source/build digests, overlay file hashes,
+commands and independent ordinary transaction effects. Fresh/cached security executions pass with 47/45 transactions and
+1,046,844,032 / 195,462,969 MIST charged. Browser-wallet automation passes at
+101,000,198 MIST. These receipts remain separate local protocol checks, not
+public-network or manual-wallet acceptance.
+
+
 ### SF-221 fresh-fixture cost blocker (2026-11-01)
 
 The [sanitized public effects](validation/sf221-cost-investigation.json) retain
