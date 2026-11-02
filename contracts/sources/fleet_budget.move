@@ -38,8 +38,8 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::fleet_budget {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -377,7 +377,7 @@ module sui_edge::fleet_budget {
         let identity = device_registry::identity(registry, device_id);
         p9(identity.is_some());
         let identity = identity.destroy_some();
-        p9(device_registry::is_custodied(registry, device_id) && !device_registry::identity_revoked(&identity));
+        p9(device_registry::is_custodied(registry, device_id)); p9(!device_registry::identity_revoked(&identity));
         assert!(device_registry::identity_owner_cap(&identity) == object::id(owner_cap), EOwnerChanged);
         let limits = budget.default_limits;
         assert!(float <= limits.float_cap, EOverFloat);
@@ -720,7 +720,7 @@ module sui_edge::fleet_budget {
     /// custodied capability; unrelated old accounts remain retired by identity.
     public(package) fun rebind_account(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
         p2(budget, account);
-        pb(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap));
+        pb(object::id(registry) == budget.registry_id); pb(account.device_id == device_registry::owner_cap_device_id(cap));
         let identity = device_registry::identity(registry, account.device_id).destroy_some();
         assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
         account.owner_cap_id = object::id(cap);
@@ -733,6 +733,8 @@ module sui_edge::fleet_budget {
 
     #[test_only]
     public fun set_version_for_testing(budget: &mut FleetBudget, version: u64) { budget.version = version; }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_InactiveDevice: compact private symbol to bound published bytecode storage.
     fun p9(condition: bool) {

@@ -1,8 +1,11 @@
 /// Shared second-factor enforcement. Only reviewed in-package mechanism modules
 /// may attest; a public caller cannot manufacture a factor or a transaction grant.
 module sui_edge::security_policy {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    const SMALL_604800000: u32 = 604800000;
+    const SMALL_4096: u16 = 4096;
+
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -40,9 +43,9 @@ module sui_edge::security_policy {
     /// Changing/replacing one uses every currently enforced class, never the
     /// proposed new source, and invalidates outstanding proofs.
     public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
-        p0(factor == 1 || factor == 2 || factor == 4 || factor == 8);
+        if (!(factor == 1)) { if (!(factor == 2)) { if (!(factor == 4)) { p0(factor == 8); }; }; };
         check_all(uid, ctx);
-        p1(!binding.is_empty() && binding.length() <= 4096);
+        p1(!binding.is_empty()); p1(binding.length() <= (SMALL_4096 as u64));
         let key = FactorKey { factor };
         if (df::exists(uid, key)) {
             *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
@@ -66,16 +69,16 @@ module sui_edge::security_policy {
     }
     public(package) fun check(uid: &UID, action: u64, ctx: &TxContext) {
         let p = df::borrow<PolicyKey, Policy>(uid, PolicyKey {});
-        p1(p.schema == (SMALL_1 as u64) && action < ACTIONS);
+        p1(p.schema == (SMALL_1 as u64)); p1(action < ACTIONS);
         let needed = p.requirements[action];
-        p0(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed));
+        if (!(needed == 0)) { p0(p.transaction == *ctx.digest()); p0((p.attested & needed) == needed); };
     }
     /// Capability lending cannot be authorized by a wrapper grant: a caller
     /// could otherwise substitute any operation while holding the capability.
     public(package) fun assert_unprotected(uid: &UID) {
         let p = read(uid);
         let mut i = (SMALL_0 as u64);
-        while (i < ACTIONS) { p0(p.requirements[i] == 0); i = i + 1; };
+        while (i < ACTIONS) { p0(p.requirements[i] == 0); i = i + (SMALL_1 as u64); };
     }
     public(package) fun check_all(uid: &UID, ctx: &TxContext) {
         let mut i = (SMALL_0 as u64);
@@ -130,7 +133,7 @@ module sui_edge::security_policy {
     public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         p1(intent.length() == (SMALL_32 as u64));
         let now = clock.timestamp_ms();
-        p1(expires_ms > now && expires_ms - now <= 604800000);
+        p1(expires_ms > now); p1(expires_ms - now <= (SMALL_604800000 as u64));
         let p = read(uid);
         let a = Action { id: object::new(ctx), customer_id: uid.to_inner(), generation: p.generation,
             proposer: ctx.sender(), intent, expires_ms, attested: 0 };
@@ -156,7 +159,7 @@ module sui_edge::security_policy {
     /// evidence, current authority, intent and expiry before marking its bit.
     /// This function is package-only; no public generic witness is accepted.
     public(package) fun attest(a: &mut Action, factor: u8) {
-        p0(factor == 1 || factor == 2 || factor == 4 || factor == 8);
+        if (!(factor == 1)) { if (!(factor == 2)) { if (!(factor == 4)) { p0(factor == 8); }; }; };
         a.attested = a.attested | factor;
     }
     /// Each protected wrapper computes its own canonical intent, consumes the
@@ -208,6 +211,8 @@ module sui_edge::security_policy {
         p1(requirements.length() == ACTIONS);
         df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {}).requirements = requirements;
     }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_Factor: compact private symbol to bound published bytecode storage.
     fun p0(condition: bool) {

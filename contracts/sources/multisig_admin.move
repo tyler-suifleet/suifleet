@@ -1,7 +1,11 @@
 /// Native Sui multisig authentication; no off-chain service or caller-labelled address.
 module sui_edge::multisig_admin {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    const SMALL_34: u8 = 34;
+    const SMALL_33: u8 = 33;
+    const SMALL_10: u8 = 10;
+
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -21,21 +25,21 @@ module sui_edge::multisig_admin {
     /// derivation is flag 3 || threshold LE u16 || (flagged key || weight)*.
     /// Native transaction authentication verifies the threshold before Move runs.
     public fun administrator(keys: &vector<vector<u8>>, weights: &vector<u8>, threshold: u16): address {
-        assert!(keys.length() > 0 && keys.length() <= 10 && keys.length() == weights.length(), EConfiguration);
+        assert!(keys.length() > (SMALL_0 as u64) && keys.length() <= (SMALL_10 as u64) && keys.length() == weights.length(), EConfiguration);
         let mut bytes = vector[3];
         bytes.append(bcs::to_bytes(&threshold));
-        let mut total = 0u64;
+        let mut total = (SMALL_0 as u64);
         let mut i = (SMALL_0 as u64);
         while (i < keys.length()) {
             let key = &keys[i];
             assert!(!key.is_empty(), EConfiguration);
             let flag = key[(SMALL_0 as u64)];
-            assert!((flag == 0 && key.length() == 33) || ((flag == 1 || flag == 2 || flag == 6) && key.length() == 34), EConfiguration);
+            assert!((flag == 0 && key.length() == (SMALL_33 as u64)) || ((flag == 1 || flag == 2 || flag == 6) && key.length() == (SMALL_34 as u64)), EConfiguration);
             let mut j = (SMALL_0 as u64);
             while (j < i) { assert!(keys[j] != *key, EConfiguration); j = j + (SMALL_1 as u64); };
             assert!(weights[i] > 0, EConfiguration);
             total = total + (weights[i] as u64);
-            bytes.append(*key); bytes.push_back(weights[i]); i = i + 1;
+            bytes.append(*key); bytes.push_back(weights[i]); i = i + (SMALL_1 as u64);
         };
         assert!(threshold > 0 && (threshold as u64) <= total, EConfiguration);
         sui::address::from_bytes(hash::blake2b256(&bytes))

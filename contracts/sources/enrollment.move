@@ -17,8 +17,8 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::enrollment {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -75,7 +75,7 @@ module sui_edge::enrollment {
     }
     /// changed: compact private symbol to bound published bytecode storage.
     fun p0(policy: &mut EnrollmentPolicy) {
-        if (!df::exists(&policy.id, SecurityRevisionKey {})) df::add(&mut policy.id, SecurityRevisionKey {}, 0u64);
+        if (!df::exists(&policy.id, SecurityRevisionKey {})) df::add(&mut policy.id, SecurityRevisionKey {}, (SMALL_0 as u64));
         let revision = df::borrow_mut<SecurityRevisionKey, u64>(&mut policy.id, SecurityRevisionKey {});
         *revision = *revision + (SMALL_1 as u64);
     }
@@ -211,7 +211,7 @@ module sui_edge::enrollment {
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
         assert!(object::id(registry) == policy.registry, EWrongRegistry);
         if (managed) {
-            p2(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}));
+            p2(!policy.open); p2(df::exists(&policy.id, ManagedKey {})); p2(*df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}));
         } else p2(policy.open);
         assert!(policy.expires_at_ms == (SMALL_0 as u64) || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
         assert!(policy.remaining > (SMALL_0 as u64), EQuotaExhausted);
@@ -249,6 +249,8 @@ module sui_edge::enrollment {
     fun p1(policy: &EnrollmentPolicy, ctx: &TxContext) {
         p3(ctx.sender() == policy.operator);
     }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_Closed: compact private symbol to bound published bytecode storage.
     fun p2(condition: bool) {

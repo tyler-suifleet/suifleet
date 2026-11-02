@@ -1,7 +1,9 @@
 /// Explicit two-party, resumable authority handover. No key recovery.
 module sui_edge::fleet_handover {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    const SMALL_512: u16 = 512;
+
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -49,9 +51,9 @@ module sui_edge::fleet_handover {
     public fun propose(recipient: address, objects: vector<ID>, kinds: vector<u64>,
         expires_ms: u64, clock: &Clock, ctx: &mut TxContext,
     ) {
-        p2(recipient != ctx.sender() && recipient != @0x0);
+        p2(recipient != ctx.sender()); p2(recipient != @0x0);
         let n = objects.length();
-        p1(n > (SMALL_0 as u64) && n <= 512 && kinds.length() == n);
+        p1(n > (SMALL_0 as u64)); p1(n <= (SMALL_512 as u64)); p1(kinds.length() == n);
         assert!(expires_ms > clock.timestamp_ms(), EExpired);
         let mut completed = vector[];
         let mut i = (SMALL_0 as u64);
@@ -80,7 +82,7 @@ module sui_edge::fleet_handover {
     }
 
     public fun cancel(h: &mut Handover, ctx: &TxContext) {
-        p2(ctx.sender() == h.source || ctx.sender() == h.recipient);
+        if (!(ctx.sender() == h.source)) { p2(ctx.sender() == h.recipient); };
         p3(h.state < 2);
         h.state = 2;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
@@ -93,7 +95,7 @@ module sui_edge::fleet_handover {
         assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
         let (found, i) = h.objects.index_of(&id);
         p1(found);
-        p1(h.kinds[i] == kind && !h.completed[i]);
+        p1(h.kinds[i] == kind); p1(!h.completed[i]);
         *h.completed.borrow_mut(i) = true;
         event::emit(Progress { handover_id: object::id(h), object_id: id, kind });
     }
@@ -129,7 +131,7 @@ module sui_edge::fleet_handover {
     }
 
     public fun finish(h: &mut Handover, ctx: &TxContext) {
-        p2(ctx.sender() == h.source || ctx.sender() == h.recipient);
+        if (!(ctx.sender() == h.source)) { p2(ctx.sender() == h.recipient); };
         p3(h.state == 1);
         p1(!h.completed.contains(&false));
         h.state = 3;
@@ -138,6 +140,8 @@ module sui_edge::fleet_handover {
 
     public fun state(h: &Handover): u8 { h.state }
     public fun completed(h: &Handover): vector<bool> { h.completed }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_Inventory: compact private symbol to bound published bytecode storage.
     fun p1(condition: bool) {

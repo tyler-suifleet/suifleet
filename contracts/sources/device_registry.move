@@ -1,6 +1,6 @@
 module sui_edge::device_registry {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -218,7 +218,7 @@ module sui_edge::device_registry {
         let device_id = cap.device_id;
         let old_id = object::id(&cap);
         let identity = *p1(registry, device_id);
-        p4(identity.owner_cap == old_id && is_custodied(registry, device_id));
+        p4(identity.owner_cap == old_id); p4(is_custodied(registry, device_id));
         let DeviceOwnerCap { id, device_id: _ } = cap; id.delete();
         let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
         p2(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
@@ -340,6 +340,8 @@ module sui_edge::device_registry {
     /// For package modules that keep state on the registry (`roles`).
     public(package) fun uid(registry: &DeviceRegistry): &UID { &registry.id }
     public(package) fun uid_mut(registry: &mut DeviceRegistry): &mut UID { &mut registry.id }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_NotCustodied: compact private symbol to bound published bytecode storage.
     fun p3(condition: bool) {

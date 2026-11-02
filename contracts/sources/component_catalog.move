@@ -1,7 +1,7 @@
 /// Immutable authenticated component recipes; manifest order defines precedence.
 module sui_edge::component_catalog {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
     const SMALL_0: u8 = 0;
     const SMALL_1: u8 = 1;
@@ -81,11 +81,10 @@ module sui_edge::component_catalog {
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
-        p5(n > (SMALL_0 as u64) && n <= (SMALL_16 as u64) && platform_arch.length() == n && recipe_blob_ids.length() == n
-            && recipe_sha256s.length() == n && artifact_sha256s.length() == n);
+        p5(n > (SMALL_0 as u64)); p5(n <= (SMALL_16 as u64)); p5(platform_arch.length() == n); p5(recipe_blob_ids.length() == n); p5(recipe_sha256s.length() == n); p5(artifact_sha256s.length() == n);
         let mut i = (SMALL_0 as u64);
         while (i < n) {
-            p5(p3(&platform_os[i]) && p4(&platform_arch[i]));
+            p5(p3(&platform_os[i])); p5(p4(&platform_arch[i]));
             p2(&recipe_blob_ids[i], (SMALL_128 as u64));
             validate_hash(&recipe_sha256s[i]); validate_hash(&artifact_sha256s[i]);
             let mut j = (SMALL_0 as u64);
@@ -128,7 +127,7 @@ module sui_edge::component_catalog {
     public fun create_deployment_paused(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
         let mut record = deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
-        deployment_manager::set_control(&mut record, 1, 0, 0, 0, 0, 0, ctx);
+        deployment_manager::set_control(&mut record, 1, (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), ctx);
         deployment_manager::share_deployment(record);
     }
     #[allow(lint(prefer_mut_tx_context))]
@@ -169,7 +168,7 @@ module sui_edge::component_catalog {
     fun p1(b: u8): bool { b >= 48 && b <= 57 }
     /// validate_token: compact private symbol to bound published bytecode storage.
     fun p2(s: &String, max: u64) {
-        let b = s.as_bytes(); p5(b.length() > (SMALL_0 as u64) && b.length() <= max);
+        let b = s.as_bytes(); p5(b.length() > (SMALL_0 as u64)); p5(b.length() <= max);
         b.do_ref!(|c| p5(p0(*c) || p1(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
@@ -192,8 +191,8 @@ module sui_edge::component_catalog {
     }
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
-        let b = s.as_bytes(); let n = b.length(); p6(n > (SMALL_0 as u64) && n <= (SMALL_128 as u64));
-        let mut i = (SMALL_0 as u64); let mut part = 0u64;
+        let b = s.as_bytes(); let n = b.length(); p6(n > (SMALL_0 as u64)); p6(n <= (SMALL_128 as u64));
+        let mut i = (SMALL_0 as u64); let mut part = (SMALL_0 as u64);
         while (part < (SMALL_3 as u64)) {
             let start = i; let mut number: u64 = (SMALL_0 as u64);
             while (i < n && p1(b[i])) {
@@ -201,27 +200,29 @@ module sui_edge::component_catalog {
                 p6(number <= (18446744073709551615 - d) / (SMALL_10 as u64));
                 number = number * (SMALL_10 as u64) + d; i = i + (SMALL_1 as u64);
             };
-            p6(i > start && (i - start == 1 || b[start] != 48));
+            p6(i > start); if (!(i - start == (SMALL_1 as u64))) { p6(b[start] != 48); };
             part = part + (SMALL_1 as u64);
-            if (part < 3) { p6(i < n && b[i] == 46); i = i + 1; };
+            if (part < (SMALL_3 as u64)) { p6(i < n); p6(b[i] == 46); i = i + (SMALL_1 as u64); };
         };
         if (i == n) return;
         let mut prerelease = b[i] == 45;
-        p6(prerelease || b[i] == 43); i = i + 1;
+        if (!(prerelease)) { p6(b[i] == 43); }; i = i + (SMALL_1 as u64);
         loop {
             let start = i; let mut numeric = true;
             while (i < n && b[i] != 46 && b[i] != 43) {
-                p6(p0(b[i]) || p1(b[i]) || b[i] == 45);
+                if (!(p0(b[i]))) { if (!(p1(b[i]))) { p6(b[i] == 45); }; };
                 if (!p1(b[i])) numeric = false;
                 i = i + (SMALL_1 as u64);
             };
             p6(i > start);
-            if (prerelease && numeric) p6(i - start == 1 || b[start] != 48);
+            if (prerelease && numeric) if (!(i - start == (SMALL_1 as u64))) { p6(b[start] != 48); };
             if (i == n) break;
             if (b[i] == 43) { p6(prerelease); prerelease = false; };
             i = i + (SMALL_1 as u64);
         };
     }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
     /// check_Manifest: compact private symbol to bound published bytecode storage.
     fun p5(condition: bool) {
