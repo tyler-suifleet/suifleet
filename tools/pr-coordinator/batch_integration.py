@@ -613,8 +613,19 @@ class BatchController:
                     continue
                 if (error.get('kind') == 'candidate_checks_failed'
                         and batch['base'] == pr.get('baseRefOid')):
+                    checks = error['checks']
+                    # These rows were classified from the exact candidate/base
+                    # by failed_checks before persistence. Funding cannot be
+                    # repaired on an unchanged member's source branch. Retain
+                    # the failed candidate/selection fence and all acceptance
+                    # gates, but do not dispatch another owner repair for it.
+                    if checks and all(check.get('name') == 'testnet/package-upgrade'
+                                      and check.get('workflowName') == 'Automatic testnet'
+                                      and check.get('classification') == 'funding'
+                                      for check in checks):
+                        break
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
-                                                   candidate_base=batch['base'], checks=error['checks'])
+                                                   candidate_base=batch['base'], checks=checks)
                     break
                 if (error.get('kind') == 'candidate_review_changes'
                         and error.get('review_head') == batch['head']
