@@ -76,7 +76,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
 CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
-DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
+DEVICE_FUNDING = 30_000_000  # Target MIST of report gas after a top-up.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
@@ -429,6 +429,29 @@ def balance_of(client, address):
     gas = client("gas", address)
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
     return sum(int(c.get("mistBalance", 0)) for c in coins) + (int(gas.get("addressMistBalance") or 0) if isinstance(gas, dict) else 0)
+
+
+def funded_identity(state, balance):
+    """Reuse only a funded identity from this authenticated operator/lane state.
+
+    Package pairs/objects and pending mutations remain independent. The caller
+    verifies the key's derived address before registration and still grants its
+    entire balance to the new run. Prefer the smallest sufficient grant; never
+    consume an unrelated wallet or silently accept a failed balance read.
+    """
+    candidates = {}
+    for fixture in state['fixtures'].values():
+        address, key = fixture.get('device_address'), fixture.get('device_key')
+        if address and key:
+            if address in candidates and candidates[address] != key:
+                raise RuntimeError('cached device identity has conflicting keys')
+            candidates[address] = key
+    funded = [(balance(address), address, key) for address, key in candidates.items()]
+    eligible = [item for item in funded if DEVICE_MINIMUM <= item[0] <= DEVICE_FUNDING]
+    if not eligible:
+        return None
+    _, address, key = min(eligible)
+    return dict(device_address=address, device_key=key)
 
 
 def plain(value):
@@ -807,8 +830,13 @@ def run(args):
                 toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
                 check(f"verified/reused base package {old}; no identical package is republished")
                 if "device_key" not in publication:
-                    address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
-                    save_publication(device_key=key.read_text().strip(), device_address=address)
+                    identity = funded_identity(state, lambda address: balance_of(client, address))
+                    if identity:
+                        save_publication(**identity)
+                        check('reused funded report identity from the authenticated same-lane state; exact package pair unchanged')
+                    else:
+                        address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
+                        save_publication(device_key=key.read_text().strip(), device_address=address)
                 key.write_text(publication["device_key"] + "\n"); key.chmod(0o600)
                 device_address = publication["device_address"]
                 assert dm.object_id(subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()) == dm.object_id(device_address)
@@ -869,8 +897,9 @@ def run(args):
             device_gas = balance_of(client, device_address)
             ledger.grant(device_gas)  # Include all pre-existing device gas in the ceiling.
             if device_gas < DEVICE_MINIMUM:
-                transaction("top up device gas", "--split-coins", "gas", f"[{DEVICE_FUNDING}]", "--assign", "fee",
-                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=DEVICE_FUNDING)
+                funding = DEVICE_FUNDING - device_gas
+                transaction("top up device gas", "--split-coins", "gas", f"[{funding}]", "--assign", "fee",
+                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=funding)
 
             # 3. Manifest over gRPC.
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new, upgrade_cap=upgrade_cap,
