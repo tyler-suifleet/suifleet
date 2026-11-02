@@ -1,10 +1,12 @@
 """Fail-closed fixture reuse and encrypted-state plumbing; no chain writes."""
 import json
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import live_passkey_factor as target
 from ci_testnet_wallet import save_pending, restore_pending
 
