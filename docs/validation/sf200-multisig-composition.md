@@ -38,7 +38,10 @@ setup failures, not passes. The successful frontend run used the container's roo
 user for existing build output. Interface/Move runs used uid 1001 and an empty
 keystore. No production or public-testnet wallet was mounted.
 
-## Blocking combined package-size finding
+## Historical combined package-size finding
+
+Superseded by the [size repair and successful pinned-base upgrade](sf200-size-repair.md).
+The failure below remains historical evidence; it is not the result of the repaired head.
 
 `python3 scripts/test_security_policy_localnet.py --suite live_security_delay --base /base/contracts --evidence /workspace/docs/validation/sf200-multisig-combined-localnet.json`
 ran in the same network-none container, with the pre-framework source exported
