@@ -35,6 +35,7 @@ class RetainedRecoveryTests(unittest.TestCase):
         self.addCleanup(self.d.db.close)
         self.d.db.row_factory = sqlite3.Row
         self.d.db.executescript('''
+          CREATE TABLE backoff(project TEXT,family TEXT,attempts INTEGER,retry_after REAL,reason TEXT);
           CREATE TABLE runs(session TEXT PRIMARY KEY,project TEXT,family TEXT,status TEXT,directory TEXT,claim TEXT,pid INTEGER,started TEXT,message TEXT);
           CREATE TABLE retired_runs(session TEXT PRIMARY KEY,status TEXT,message TEXT,reason TEXT,at REAL);
           CREATE TABLE dependency_resumes(claim TEXT,state TEXT);
@@ -92,7 +93,6 @@ class RetainedRecoveryTests(unittest.TestCase):
 
     def real_availability(self, reason, occupied=False):
         self.d.db.executescript("""
-          CREATE TABLE backoff(project TEXT,family TEXT,attempts INTEGER,retry_after REAL,reason TEXT);
           ALTER TABLE dependency_resumes ADD COLUMN project TEXT;
           ALTER TABLE dependency_resumes ADD COLUMN family TEXT;
         """)
@@ -112,6 +112,13 @@ class RetainedRecoveryTests(unittest.TestCase):
 
     def test_provider_stagger_still_blocks_explicit_recovery(self):
         self.real_availability('provider capacity recovery stagger')
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
+
+    def test_provider_quota_pause_still_blocks_explicit_recovery(self):
+        self.real_availability(dispatcher.QUOTA_PAUSE)
         with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
             self.resume()
         self.child.assert_not_called()
@@ -449,6 +456,7 @@ class BlockedEngineeringRecoveryTests(unittest.TestCase):
     real_availability = RetainedRecoveryTests.real_availability
     test_explicit_recovery_ignores_idle_backoff = RetainedRecoveryTests.test_explicit_recovery_ignores_idle_backoff
     test_provider_stagger_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_stagger_still_blocks_explicit_recovery
+    test_provider_quota_pause_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_quota_pause_still_blocks_explicit_recovery
     test_occupied_slot_still_blocks_explicit_recovery = RetainedRecoveryTests.test_occupied_slot_still_blocks_explicit_recovery
 
     # Reuse the real stop/helper/claim/dependency/one-use fences, not orphan-only fixtures.
