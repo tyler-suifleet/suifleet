@@ -13,7 +13,7 @@ module sui_edge::security_policy {
     const ACTIONS: u64 = 7;
     // Mechanism implementations land separately in SF-198/199/200/201. Keep
     // unsupported options unavailable, rather than accepting unverified proofs.
-    const AVAILABLE: u8 = 0;
+    const AVAILABLE: u8 = 1;
 
     public struct PolicyKey has copy, drop, store {}
     public struct Policy has copy, drop, store {
