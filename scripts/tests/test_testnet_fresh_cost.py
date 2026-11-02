@@ -7,9 +7,37 @@ from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from testnet_budget import Budget, Spent
+from analyze_fixture_grouping import analyze
 
 
 class FreshCostTests(unittest.TestCase):
+    def test_global_cleanup_netting_still_needs_source_or_effects_reduction(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-combined-batch-costs.json'
+        report = analyze(json.loads(path.read_text()))
+        self.assertEqual(report['measured_deficit_mist'], 93_121_037)
+        self.assertEqual(report['discarded_negative_net_mist'], 49_975_603)
+        self.assertEqual(report['hypothetical_global_net_deficit_mist'], 43_145_434)
+        self.assertEqual(report['hypothetical_zero_computation_deficit_mist'], 19_275_434)
+        self.assertEqual(report['funding_mist'], 30_000_000)
+        self.assertFalse(report['acceptance_complete'])
+
+    def test_grouping_experiment_rejects_mixed_provenance_and_unexplained_costs(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-combined-batch-costs.json'
+        for field in ('base', 'head', 'chain', 'operator'):
+            receipt = json.loads(path.read_text())
+            receipt['runs'][1][field] = 'unrelated'
+            with self.assertRaisesRegex(ValueError, 'different ' + field):
+                analyze(receipt)
+        for mutation, error in (
+            (lambda r: r['runs'][0]['transactions'][0].update(status='unknown'), 'known successful'),
+            (lambda r: r['runs'][0]['transactions'][0].update(gas_mist=0), 'effects disagree'),
+            (lambda r: r['runs'][1].update(allowance_used_mist=0), 'unexplained'),
+        ):
+            receipt = json.loads(path.read_text())
+            mutation(receipt)
+            with self.assertRaisesRegex(ValueError, error):
+                analyze(receipt)
+
     def test_sf198_public_failure_uses_exact_distinct_compiler_fixture(self):
         evidence = Path(__file__).resolve().parents[2] / 'docs/validation'
         runs = json.loads((evidence / 'sf221-cost-investigation.json').read_text())['runs']

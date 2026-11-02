@@ -715,6 +715,26 @@ reduction is required. SF-201's live repair is separate and untouched.
 
 ### SF-221 combined-candidate batching recovery (2026-11-01)
 
+The subsequent [grouping experiment](validation/sf221-grouping-analysis.json)
+is reproducible with `python3 scripts/analyze_fixture_grouping.py
+docs/validation/sf221-combined-batch-costs.json`. It validates the exact same
+base/head, chain and operator and rejects unknown effects or unexplained ledger
+charges before combining the prior fresh and retained measurements. These are
+prior isolated-chain effects, not a newly executed fresh run.
+
+Even hypothetically netting **every** measured cleanup rebate globally leaves
+1,643,145,434 MIST including the measured 30,000,000 MIST device grant, a
+43,145,434 MIST deficit. Erasing all measured computation as well still leaves
+a 19,275,434 MIST deficit. These deliberately optimistic scenarios are not
+executable transaction plans or changes to the non-replenishing ledger. In
+particular, grouping can change actual storage/computation effects, so this is
+not an impossibility proof for a different compatible source or lifecycle plan.
+It establishes that reclaiming the currently discarded negative net charges
+alone does not repair this fixture. Future temporal mutations add unmeasured
+cost; the retained audit's pending proof is not acceptance. Keep this PR draft
+and the implementation claim reserved until a sufficient reduction is measured
+through the full fresh suite. No public CI rerun is justified by this diagnostic.
+
 The next repair batches head-package custody activation, indexing the existing
 pre-upgrade group and creating/following/sharing its inbox. It transfers the new
 owner cap after borrowing it inside the same PTB. Registration and membership
