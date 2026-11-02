@@ -337,3 +337,62 @@ The merge-conflict repair alone does not complete acceptance. Existing PR #453 /
 SF-199 remains the owner of this integration finding; no new issue was created.
 No public-wallet mutation, hardware operation, hosted-CI polling or main merge
 occurred. Manual wallet/Pi/mainnet/provider/hosting remain unrun in #32/#159/#62.
+
+## Compatible package-size repair after independent review, 2026-11-02
+
+Addresses the blocking combined-package finding on PR #453 at `d5af3c50`.
+Fifty secured Customer wrappers now share a private canonical-argument/authorization
+helper. It preserves the operation tag's BCS bytes (String and vector<u8> have the
+same encoding), full Customer snapshot, argument ordering, class, clock and
+non-pause semantics. Each wrapper still executes its original operation and clears
+the grant before returning. Private class selectors use u8 literals, widened at
+the unchanged u64 security-policy boundary. Public APIs, layouts, type origins,
+protocol limits and spending controls are unchanged.
+
+Pinned compiler build: raw package bytecode decreased from 95,778 to **93,559
+bytes** (2,219 bytes). Raw bytecode excludes linkage/type-origin overhead; the
+successful real upgrade below is the compatibility/size evidence. This remains
+close to the protocol limit: future additions must repeat actual upgrade checks.
+
+Fresh checks on the repaired application tree:
+
+- `/tmp/sf199-tools/sui move test --path contracts`: **373/373 passed**.
+- `/tmp/sf199-tools/sui move build --path contracts`: **passed**.
+- Pinned network-none image: `python3 scripts/generate_interfaces.py --check`:
+  **16 modules match**; `python3 scripts/check_contract_interfaces.py`:
+  **1,292 references / 18 modules, zero drift**.
+- `node scripts/test_second_person.cjs`, `test_security_policy.cjs`,
+  `test_multisig_admin.cjs`, `test_dashboard_stats.cjs`: **passed**.
+- `cd dapp && ./node_modules/.bin/tsc --noEmit`: **passed**.
+- Pinned image, `cd dapp && ./node_modules/.bin/next build`: **passed**, static
+  production export (the exact package build script).
+- Source comparison against the reviewed head verified all **50** changed wrapper
+  tags, tail-argument ordering, classes, clocks and non-pause flags match.
+- Pinned disposable `--network none` container, with the existing warm Move cache,
+  checkout/common Git metadata and `/tmp/sf199-base:/base` mounted:
+  `python3 scripts/test_second_person_localnet.py --base /base/contracts --evidence
+  docs/validation/sf199-size-localnet.json`: **passed 26 independently effects-checked
+  transactions**, including compatible existing-object upgrade, old/current bypass
+  refusals, distinct approval, exact execution, rejection, policy recovery and
+  console queue reads. [Receipt](sf199-size-localnet.json).
+  Upgrade `HoejVHPMFojmzqLKDEeFio7JNWc8DLP8JcbzML74J58j` succeeded.
+  Local allowance charged **1,648,099,799 MIST**; signed net effects gas was
+  **1,609,530,412 MIST**. These are disposable-chain amounts, not public spending.
+  Receipt HEAD is the precommit run-start revision; its bytecode digest identifies
+  the repaired tree. It is not relabeled as final-head/public-testnet evidence.
+- `git diff --check`: **passed**.
+
+Setup failures were corrected, not counted as passes: the helper initially used
+an immutable TxContext where the administrator API needs a mutable reference;
+the first disposable invocation omitted the common Git metadata mount; `pnpm
+build` attempted an unnecessary modules purge without a TTY, so the equivalent
+installed `next build` script was run directly. An initial source comparison
+included earlier non-wrapper code; restricting it to the changed wrapper section
+verified all 50 transformations. No dependency update was needed.
+
+The source defect and isolated-chain failure are repaired. Hosted CI is pending;
+this worker does not watch/poll it. The coordinator must run exact-candidate CI,
+protected automatic public-testnet acceptance and fresh independent review before
+merge. No public-wallet mutation, main merge, new issue, hardware or production
+operation occurred. Manual wallet/Pi/mainnet/provider checks remain explicitly
+unrun in SF-031/#32 and SF-087/#159 (hosting in SF-042/#62).
