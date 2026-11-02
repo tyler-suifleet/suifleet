@@ -12,6 +12,38 @@ from ci_testnet_wallet import save_pending, restore_pending
 
 
 class CachedPasskeyTests(unittest.TestCase):
+    def test_existing_enrollment_binding_is_read_and_malformed_binding_refused(self):
+        addresses = ['0x' + '1' * 64, '0x' + '2' * 64]
+        binding = [2, *bytes.fromhex('1' * 64 + '2' * 64)]
+        live = SimpleNamespace(client=Mock(return_value={'dynamicFields':[{'fieldId':'factor'}]}),
+            object=Mock(return_value={'objType':'0x1::dynamic_field::Field<0x2::security_policy::FactorKey,0x2::security_policy::FactorConfiguration>',
+                                     'content':{'name':{'factor':2},'value':{'binding':binding}}}))
+        self.assertEqual(target.enrolled_keys(live, 'customer'), addresses)
+        import base64
+        live.object.return_value['content']['value']['binding'] = base64.b64encode(bytes(binding)).decode()
+        self.assertEqual(target.enrolled_keys(live, 'customer'), addresses)
+        for malformed in ([3, *binding[1:]], [2, 0], []):
+            live.object.return_value['content']['value']['binding'] = malformed
+            with self.assertRaisesRegex(RuntimeError, 'invalid cached'):
+                target.enrolled_keys(live, 'customer')
+        live.client.return_value = {'dynamicFields':[]}
+        self.assertEqual(target.enrolled_keys(live, 'customer'), [])
+
+    def test_private_subprocess_diagnostics_are_redacted_without_retry(self):
+        import subprocess
+        for stderr, expected in [('fixture gas coin unavailable', 'fixture gas coin unavailable'),
+                                 ('private PEM secret request bytes', 'diagnostic withheld')]:
+            with self.subTest(stderr=stderr), TemporaryDirectory() as directory:
+                live = SimpleNamespace(network='testnet', rpc_url='read-only')
+                result = subprocess.CompletedProcess([], 1, '', stderr)
+                state = {'pending': {'digest': 'preserve-uncertainty'}}
+                with patch.object(target.subprocess, 'run', return_value=result) as run:
+                    with self.assertRaisesRegex(RuntimeError, expected) as failure:
+                        target.exercise(live, {}, Path(directory) / 'state.json', state, Mock())
+                    self.assertNotIn('private PEM', str(failure.exception))
+                    self.assertEqual(run.call_count, 1)
+                    self.assertEqual(state['pending']['digest'], 'preserve-uncertainty')
+
     def test_cached_gas_is_charged_and_only_deficit_is_transferred(self):
         from testnet_budget import Budget, Spent
         for balance in (0, 29_000_000, 30_000_000, 31_000_000):

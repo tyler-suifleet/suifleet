@@ -6,7 +6,46 @@ const req = createRequire(require('node:path').resolve('dapp/package.json'));
 const { PasskeyKeypair } = req('@mysten/sui/keypairs/passkey');
 const { SuiGrpcClient } = req('@mysten/sui/grpc');
 const { Transaction } = req('@mysten/sui/transactions');
-(async () => {
+// Resolve payment explicitly: the gRPC build plugin simulates full transactions,
+// which would prevent expected refusals from reaching validators.
+async function resolvePayment(resolved, client, owner, sender, budget) {
+ const [{balance}, price] = await Promise.all([
+  client.core.getBalance({owner}), client.core.getReferenceGasPrice(),
+ ]);
+ resolved.setSender(sender);resolved.setGasOwner(owner);resolved.setGasBudget(budget);
+ resolved.setGasPrice(price.referenceGasPrice);
+ if (BigInt(balance.addressBalance ?? '0') >= BigInt(budget)) {
+  const [{systemState}, {chainIdentifier}] = await Promise.all([
+   client.core.getCurrentSystemState(), client.core.getChainIdentifier(),
+  ]);
+  // Coinless payment requires chain-bound replay protection, including a nonce.
+  const epoch = BigInt(systemState.epoch);
+  resolved.setGasPayment([]);
+  resolved.setExpiration({ValidDuring:{minEpoch:String(epoch),maxEpoch:String(epoch+1n),
+   minTimestamp:null,maxTimestamp:null,chain:chainIdentifier,nonce:crypto.randomBytes(4).readUInt32LE()}});
+ } else {
+  let cursor, total = 0n;
+  const payments = [], seen = new Set();
+  do {
+   const page = await client.core.listCoins({owner,cursor});
+   for (const coin of page.objects) {
+    if (seen.has(coin.objectId)) throw Error('invalid fixture gas pagination');
+    seen.add(coin.objectId);
+    payments.push({objectId:coin.objectId,version:coin.version,digest:coin.digest});
+    total += BigInt(coin.balance);
+    if (total >= BigInt(budget) || payments.length === 256) break;
+   }
+   if (total >= BigInt(budget) || payments.length === 256) break;
+   if (page.hasNextPage && (!page.cursor || page.cursor === cursor)) throw Error('invalid fixture gas pagination');
+   cursor = page.hasNextPage ? page.cursor : null;
+  } while (cursor);
+  if (total < BigInt(budget)) throw Error('fixture gas coin unavailable');
+  resolved.setGasPayment(payments);
+ }
+ return resolved.build();
+}
+module.exports = { resolvePayment };
+if (require.main === module) (async () => {
  const input = JSON.parse(fs.readFileSync(0,'utf8'));
  let keys;
  try {
@@ -43,14 +82,7 @@ const { Transaction } = req('@mysten/sui/transactions');
  const kind = await tx.build({client,onlyTransactionKind:true});
  const resolved = Transaction.fromKind(kind);
  const owner = input.sponsor!==undefined ? signer(input.sponsor).toSuiAddress() : input.sender;
- const coins = await client.core.listCoins({owner});
- const coin = coins.objects.find(c=>BigInt(c.balance)>=BigInt(input.budget));
- if(!coin) throw Error('fixture gas coin unavailable');
- const price = await client.core.getReferenceGasPrice();
- resolved.setSender(input.sender);resolved.setGasOwner(owner);
- resolved.setGasBudget(input.budget);resolved.setGasPrice(price.referenceGasPrice);
- resolved.setGasPayment([{objectId:coin.objectId,version:coin.version,digest:coin.digest}]);
- const bytes = await resolved.build();
+ const bytes = await resolvePayment(resolved, client, owner, input.sender, input.budget);
  const signature = input.operation==='proof' ? (await signer(input.key).signTransaction(bytes)).signature : input.sponsor!==undefined ? (await signer(input.sponsor).signTransaction(bytes)).signature : null;
  console.log(JSON.stringify({bytes:Buffer.from(bytes).toString('base64'),signature,digest:await resolved.getDigest()}));
 })().catch(e=>{console.error(e.message);process.exitCode=1;});
