@@ -605,7 +605,7 @@ module fleet_storage::fleet_storage {
         action: Action, clock: &Clock, ctx: &mut TxContext) {
         assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
         let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_wal")),
-            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&amount), bcs::to_bytes(&recipient)];
+            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(fs)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&amount), bcs::to_bytes(&recipient)];
         let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
         let coin = withdraw_wal(fs, budget, &cap, amount, ctx);
         customer::finish_storage_action(customer, fleet, cap, loan);
@@ -618,7 +618,7 @@ module fleet_storage::fleet_storage {
         action: Action, clock: &Clock, ctx: &mut TxContext) {
         assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
         let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_storage")),
-            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&size), bcs::to_bytes(&recipient)];
+            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(fs)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&size), bcs::to_bytes(&recipient)];
         let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
         let storage = withdraw_storage(fs, budget, &cap, size, ctx);
         customer::finish_storage_action(customer, fleet, cap, loan);
@@ -631,7 +631,7 @@ module fleet_storage::fleet_storage {
         action: Action, clock: &Clock, ctx: &mut TxContext) {
         assert!(recipient != @0x0 && customer::fleet_budget(fleet) == object::id(budget), EWrongBudget);
         let arguments = vector[bcs::to_bytes(&std::string::utf8(b"withdraw_managed_retention")),
-            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(fleet), bcs::to_bytes(fs), bcs::to_bytes(budget), bcs::to_bytes(&wal), bcs::to_bytes(&gas), bcs::to_bytes(&recipient)];
+            bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&object::id(fleet)), bcs::to_bytes(&object::id(fs)), bcs::to_bytes(&object::id(budget)), bcs::to_bytes(&wal), bcs::to_bytes(&gas), bcs::to_bytes(&recipient)];
         let (cap, loan) = customer::begin_storage_action(customer, fleet, action, bcs::to_bytes(&arguments), clock, CustomerCharge {}, ctx);
         let (wal_coin, gas_coin) = withdraw_retention(fs, budget, &cap, wal, gas, ctx);
         customer::finish_storage_action(customer, fleet, cap, loan);

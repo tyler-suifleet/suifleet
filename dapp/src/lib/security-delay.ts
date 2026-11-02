@@ -27,9 +27,11 @@ export function buildDelayConfigurationTx(customer: string, values: readonly num
   tx.moveCall({ target: `${PACKAGE_ID}::customer::configure_security_delays`, arguments: [tx.object(customer), tx.pure(durations.serialize(validateDelays(values)).toBytes())] });
   return tx;
 }
+// Shared mutable targets bind their IDs; never encode counters or balances.
+export function targetIdentity(id: string): Uint8Array { return bcs.Address.serialize(id).toBytes(); }
 export function editArguments(customerBytes: Uint8Array, edit: SecurityEdit): Uint8Array {
   const values = edit.operation === "configure_security_delays" ? durations.serialize(validateDelays(edit.values)).toBytes() : requirements.serialize(edit.values).toBytes();
-  return vectors.serialize([bcs.string().serialize(edit.operation).toBytes(), bcs.Address.serialize(wire.customer_CustomerBcs.parse(customerBytes).id).toBytes(), values]).toBytes();
+  return vectors.serialize([bcs.string().serialize(edit.operation).toBytes(), targetIdentity(wire.customer_CustomerBcs.parse(customerBytes).id), values]).toBytes();
 }
 export function securityIntent(customer: string, argumentsBcs: Uint8Array): number[] {
   // Move's TypeName is its address without 0x, followed by module and type.

@@ -254,7 +254,7 @@ module sui_edge::security_policy {
         if (pause) required = required & 7;
         assert!((attested & required) == required, EFactor);
         p.transaction = *ctx.digest();
-        p.attested = if (pause) attested | 8 else attested;
+        p.attested = attested;
         id.delete();
     }
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }

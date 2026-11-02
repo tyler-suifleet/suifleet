@@ -914,9 +914,15 @@ Use the existing operation-specific `*_secured` wrapper to consume the action.
 delays, under the current union of requirements. All secured wrappers encode the
 Customer reference as its BCS object ID; device usage and active-device counters
 do not invalidate a queued recovery. Credential/policy generation changes still
-invalidate pending actions. Other referenced objects retain their operation-specific
-snapshots and revisions. Previously queued intents encoding full Customer bytes
-must be canceled and queued again; clients must use this revised encoding. The console provides direct
+invalidate pending actions. Device/tenant-mutable Fleet, DeviceRegistry, FleetBudget, GasAccount,
+FleetStorage, DeploymentRecord and EnrollmentPolicy references also
+bind object IDs. Group/enrollment security revisions and deployment control,
+targets and administrator rollout revision remain bound; device outcomes are
+read at execution rather than pinned. DeviceGroup/AccessPolicy/catalog administrator-only
+contents and immutable release values remain bound in full. Execution rechecks
+current authority, custody and membership. Previously queued intents encoding
+full mutable object bytes or the full rollout snapshot must be canceled and
+queued again; clients must use this revised encoding. The console provides direct
 queue/execute controls for security settings and lists all discovered queued
 actions for countdown/cancellation; other API-originated operations execute through
 the originating client. Browser countdowns are advisory; Sui Clock enforces timing.

@@ -9,6 +9,8 @@ const load=loader(), delay=load('lib/security-delay.ts');
 const { bcs }=appRequire('@mysten/sui/bcs');
 const C='0x'+'c'.padStart(64,'0'), A='0x'+'a'.padStart(64,'0');
 assert.equal(delay.delaySupported(),true);
+assert.deepEqual(delay.targetIdentity(C),bcs.Address.serialize(C).toBytes());
+assert.notDeepEqual(delay.targetIdentity(C),delay.targetIdentity(A));
 const partial=structuredClone(manifest);delete partial.type_origins[catalog.optional_type_origins.security_delay[0]];
 assert.throws(()=>load('lib/deployment-manifest.ts').parseManifest(JSON.stringify(partial)),/partial security delay/);
 assert.deepEqual(delay.validateDelays(Array(7).fill(1000)),Array(7).fill(1000));

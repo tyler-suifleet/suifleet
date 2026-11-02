@@ -242,13 +242,17 @@ Standalone wallet-owned objects remain outside managed organization custody.
   followed by BCS of every explicit argument in declaration order, excluding
   Action, Clock and TxContext. Customer references use BCS object ID only, so
   ordinary device storage charges cannot invalidate administrator recovery.
-  Other references use the complete current object BCS;
-  owned values use their complete BCS. This binds both IDs and current contents.
+  Fleet, DeviceRegistry, FleetBudget, GasAccount, FleetStorage,
+  DeploymentRecord and EnrollmentPolicy references also use BCS object IDs.
+  Their device/tenant-mutable counters, balances, claims consumed by enrollment
+  and receipts cannot invalidate a delay. DeviceGroup, AccessPolicy and catalog
+  references retain complete BCS: their contents change only through administrator actions;
+  catalog release values and other owned values retain their complete BCS.
   Group operations append BCS desired-state revision; deployment-reference
   operations append `deployment_manager::security_snapshot` (BCS vector of
-  control, target groups/devices and optional rollout state); enrollment edits
-  append their security revision. Storage wrappers bind customer identity and fleet/storage/
-  budget contents, exact amounts and recipient. `remove_device_secured` includes
+  control, target groups/devices and optional administrator rollout revision);
+  enrollment edits append their security revision. Storage wrappers bind customer/fleet/storage/
+  budget identities, exact amounts and recipient. `remove_device_secured` includes
   the ultimate recipient; source enrollment includes the original witness type.
 - `security_policy::action_intent(customer_id, arguments_bcs)` computes
   Blake2b-256 of BCS `vector<vector<u8>>` containing BCS original `TypeName<Action>`,
@@ -258,8 +262,9 @@ Standalone wallet-owned objects remain outside managed organization custody.
   a caller-supplied network label has no authority.
 - An execution wrapper consumes Action, recomputes this intent, checks current
   generation/proposer/expiry and enabled requirements, executes one operation,
-  then clears its transaction-local grant before returning. Complete object BCS
-  and dynamic revisions reject stale state even if a direct all-off write did
+  then clears its transaction-local grant before returning. Explicit authority
+  revisions, administrator-controlled snapshots and current custody/membership
+  checks reject stale authority even if a direct all-off write did
   not increment the policy generation. Credential/policy/source changes and
   completed secured operations invalidate outstanding actions.
 - Ordinary operations enforce their own class. Raw recipe deployments, rollouts
