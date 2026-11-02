@@ -4679,6 +4679,28 @@
         "Use user-authored scoped commits and Closes issue PR; hand off to sole coordinator local infrastructure lane; installation merged-only."
       ],
       "validation": "Real bubblewrap local lane tests, complete offline coordinator suite, tracking tests/plan, diff check. User local-test infrastructure policy applies; no fabricated hosted success."
+    },
+    {
+      "key": "SF-227",
+      "title": "Let explicit stopped-repair recovery bypass idle eligibility backoff",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/recovery_control.py",
+        "tools/pr-coordinator/tests/test_recovery_control.py"
+      ],
+      "resources": [],
+      "description": "Explicit same-claim stopped engineering repair is rejected by idle no-eligible-ticket backoff because recovery_control passes recovering=False for reconciled review repairs. Retained implementation recovery already passes recovering=True. Apply the same guarded capacity behavior to both verified recovery origins.",
+      "evidence": "Bounded fleet recovery 2026-11-02: SF-221 recovery_control --blocked-engineering-repair refused no configured implementation capacity; dispatcher backoff reason idle: no eligible ticket despite zero verified workers. Existing stop/helper/dependency/resource/provider gates passed before availability check.",
+      "acceptance": [
+        "Verified explicit stopped repair recovery bypasses idle eligibility delay while preserving provider stagger, real execution capacity, stop/claim/resource/dependency checks and maintenance holds.",
+        "Offline real capacity regression covers reconciled repair origin and retained origin, provider stagger and occupied slots; no database edits or installed working-tree code.",
+        "Scoped user-authored PR closes this issue; normal coordinator integration and merged-only activation."
+      ],
+      "validation": "Focused recovery/dispatcher tests and complete offline coordinator suite; compile/diff checks. User authorized infrastructure local-test integration applies."
     }
   ]
 }
