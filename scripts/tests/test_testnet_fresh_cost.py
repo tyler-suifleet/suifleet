@@ -280,3 +280,20 @@ class CompleteCompactAcceptance(unittest.TestCase):
             self.assertEqual(temporal['allowance_used_mist'], 0)
             self.assertEqual([runs[p]['allowance_used_mist'] for p in ('wallet-fresh', 'wallet-retained')],
                              [101_000_198, 101_000_198])
+
+
+class FreshCostOutcomeRegression(unittest.TestCase):
+    def test_cached_success_cannot_green_a_failed_fresh_run(self):
+        import tempfile
+        from test_fresh_cost_localnet import write_outcomes
+        outcomes = [dict(pair=0, phase='fresh', success=False, error='full gas budget refused'),
+                    dict(pair=0, phase='retained', success=True)]
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            with self.assertRaisesRegex(RuntimeError, 'pair 0 fresh'):
+                write_outcomes(output, outcomes)
+            self.assertEqual(json.loads((output / 'outcomes.json').read_text()), outcomes)
+            with self.assertRaisesRegex(RuntimeError, 'no runs'):
+                write_outcomes(output, [])
+            write_outcomes(output, [dict(pair=0, phase='fresh', success=True),
+                                    dict(pair=0, phase='retained', success=True)])

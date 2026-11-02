@@ -135,6 +135,18 @@ def measure_temporal(options, output, root):
     (output / 'temporal.json').write_text(json.dumps(live.evidence, indent=2) + '\n')
 
 
+def write_outcomes(output, outcomes):
+    """Retain all diagnostics, then fail if any required ordinary run failed.
+
+    Later cached/browser success must never turn a failed cold ledger green.
+    """
+    (output / 'outcomes.json').write_text(json.dumps(outcomes, indent=2) + '\n')
+    failed = [f"pair {run['pair']} {run['phase']}" for run in outcomes
+              if run.get('success') is not True]
+    if not outcomes or failed:
+        raise RuntimeError('incomplete ordinary acceptance: ' + (', '.join(failed) or 'no runs'))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-ref', required=True)
@@ -257,7 +269,7 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
                 node = subprocess.Popen(node_command, stdout=node_log, stderr=subprocess.STDOUT)
                 live_common.wait_for(lambda: temporal_ready(), 'pruning node did not restart', timeout=120)
                 measure_temporal(options, output, root)
-            (output / 'outcomes.json').write_text(json.dumps(outcomes, indent=2) + '\n')
+            write_outcomes(output, outcomes)
         finally:
             for storage in LocalStorage.instances:
                 storage.close()
