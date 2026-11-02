@@ -38,6 +38,69 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 completed compact lifecycle cost repair (2026-11-02)
+
+This result supersedes the blocked experiments below. The [full effects receipt](validation/sf221-compact-costs.json)
+records actual **single-ledger fresh success**, cached acceptance, two browser
+runs and the original audit's proof after real pruning. No public fixture was
+rerun. Public protected CI and independent review remain pending after push.
+
+| Exact source fixture | Fresh ordinary | Cached ordinary | Fresh/cached security | Fresh/cached browser |
+|---|---:|---:|---:|---:|
+| This branch, compatible factored source | 1,583,397,678 | 27,735,669 | 1,009,991,632 / 195,462,969 | 101,000,198 / 101,000,198 |
+| Larger retained combined candidate, separately pinned | 1,598,856,478 | 27,735,669 | 1,025,440,432 / 195,462,969 | 101,000,198 / 101,000,198 |
+
+All amounts are charged MIST. The unchanged allowances are 1.6B ordinary,
+1.5B security and 150M browser. Fresh ordinary has **zero remaining deficit**:
+this branch retains 16,602,322 MIST; the larger candidate retains 1,143,522.
+Solvent operator balances are separately recorded in the receipts and never
+substitute for remaining allowance. Earlier failed ledgers remain unchanged.
+
+The repair combines three compatible reductions:
+
+- Factor repeated pure intent serialization, fleet checks and assertion abort
+  branches into private Move helpers. [Pinned compiler results](validation/sf221-final-source.json)
+  shrink this branch's modules from 91,636 to 88,562 bytes. Public signatures,
+  layouts, abilities, argument bytes, authority conditions and type origins
+  remain compatible. Other assertions keep their module/code but may abort in
+  the private helper; externally tested failure sites stay in their original
+  functions. All 350 branch Move tests, the ABI/schema check and actual old/new
+  package security/migration effects pass. No sibling feature is imported.
+- Top up report gas to 10M, instead of 30M. Actual four-report daemon execution
+  passes within that grant. Older cached identities up to 30M remain eligible;
+  their entire pre-existing balance is still charged. There is no ledger refund
+  or new wallet/secret. Same-lane encrypted identity handling is unchanged.
+- Journal ownership of the final proven deployment before audit creation, then
+  delete it in that same transaction. The explicit `--compact-lifecycle`
+  profile uses 15M for the first deployment, 10M for each successor and 11M
+  for atomic audit creation/admission/cleanup. CI selects this profile while
+  keeping its 60M general PTB cap. Every selected budget is reserved in full;
+  insufficient allowance or execution gas fails closed. Pending legacy audit
+  transactions retain their original plan. Unknown outcomes keep exact signed
+  bytes and full reservations; abort cleanup cannot delete their journal-owned
+  input. The audit retains its original two decisions and checkpoint.
+
+Temporal acceptance observes this branch's original checkpoint **164** below
+actual retention floor **1112**, then reads both original decisions with event
+reads forbidden. Explicit retirement charges zero, reserving the unchanged20M.
+It uses a separate bounded measurement ledger, not a reset of fresh allowance:
+optional retirement is not claimed to fit the nearly exhausted fresh ledger.
+Default ordinary execution retains the same record for later free proof reads.
+The larger candidate independently proves its own original record and floor.
+
+Reproduce in the disposable, warmed `--network none` dev environment:
+`python3 -u scripts/test_fresh_cost_localnet.py --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 --head-ref HEAD --compact-lifecycle --with-security --with-temporal --evidence-dir /workspace/effects`.
+The local Walrus transport stores real bytes but is not Walrus certification.
+The receipt pins source, bytecode and runtime provenance, all transaction
+digests/net fees/funding, exact commands and remaining limits. Final runtime
+adds a read-only refusal when the compact profile's general cap is below15M;
+source whitespace normalization independently compiles to the tested digest.
+
+Fresh/cached ordinary, security, browser and temporal phases all completed in
+both local harness executions. Physical, mainnet, manual real-wallet and
+production-provider acceptance remains unrun in #32/#159. No testnet ceiling,
+faucet bound, unknown-outcome fence or authenticated-state protection changes.
+
 ### SF-221 assertion factoring and completed local temporal measurement (2026-11-02)
 
 A further [incremental source candidate](validation/sf221-assertion-candidate.patch)

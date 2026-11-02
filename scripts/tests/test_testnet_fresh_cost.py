@@ -253,3 +253,30 @@ class FreshCostTests(unittest.TestCase):
         ledger.faucet(lambda: None)
         self.assertEqual(ledger.used, 60_000_000)
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
+
+class CompleteCompactAcceptance(unittest.TestCase):
+    def test_actual_fresh_and_cached_ledgers_fit_without_replenishment(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-compact-costs.json'
+        receipt = json.loads(path.read_text())
+        self.assertEqual(receipt['remaining_deficit_mist'], 0)
+        for candidate in ('branch', 'larger_candidate'):
+            runs = {r['phase']: r for r in receipt['measurements'][candidate]['runs']}
+            fresh = runs['pair-0-fresh']
+            for phase in ('pair-0-fresh', 'pair-0-retained'):
+                run = runs[phase]
+                self.assertTrue(run['success'])
+                self.assertEqual(run['fixture'], fresh['fixture'])
+                ledger = Budget(1_600_000_000, [])
+                ledger.grant(run['preexisting_device_grant_mist'])
+                for tx in run['transactions']:
+                    ledger.execute(None, tx['label'], lambda _, tx=tx: dict(digest=tx['digest'],
+                        effects=dict(status=dict(status=tx['status']), gasUsed=tx['gas_used'])),
+                        gas=tx['gas_budget_mist'], funding=tx['funding_mist'], require_full=True)
+                self.assertEqual(ledger.used, run['allowance_used_mist'])
+            self.assertEqual(fresh['rollout_audit_pending']['record'], runs['temporal']['rollout_audit']['record'])
+            temporal = runs['temporal']
+            self.assertGreater(int(temporal['rollout_audit']['lowest']), int(temporal['rollout_audit']['checkpoint']))
+            self.assertEqual(temporal['transactions'][0]['gas_budget_mist'], 20_000_000)
+            self.assertEqual(temporal['allowance_used_mist'], 0)
+            self.assertEqual([runs[p]['allowance_used_mist'] for p in ('wallet-fresh', 'wallet-retained')],
+                             [101_000_198, 101_000_198])
