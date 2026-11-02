@@ -15,6 +15,16 @@ import deployment_manifest as dm
 import sui_toolchain as tc
 
 
+def fund_passkey(live, index, address):
+    total = live.balance(address)
+    live.ledger.grant(total)  # Cached gas is not free allowance.
+    deficit = max(0, 30_000_000 - total)
+    if deficit:
+        live.transaction(f'fund passkey {index}', '--split-coins', 'gas', f'[{deficit}]',
+                         '--assign', 'funding', '--transfer-objects', '[funding]',
+                         f'@{address}', budget=20_000_000, funding=deficit)
+
+
 def exercise(live, f, state_path, state, save):
     def fixture(**kwargs):
         result = subprocess.run(['node','scripts/passkey_transaction.cjs'], input=json.dumps(dict(keys=str(state_path.with_suffix('.keys.json')), network=live.network, endpoint=live.rpc_url, **kwargs)), capture_output=True, text=True, check=True)
@@ -41,9 +51,7 @@ def exercise(live, f, state_path, state, save):
     for i,key in enumerate(keys):
         # Funding is charged as a grant; subsequent passkey-paid gas cannot
         # enlarge the allowance. Reused signing identities retain their gas.
-        total=live.balance(key['address'])
-        if total<30_000_000:
-            live.transaction(f'fund passkey {i}','--split-coins','gas','[30000000]','--assign','funding','--transfer-objects','[funding]',f'@{key["address"]}',budget=20_000_000,funding=30_000_000)
+        fund_passkey(live, i, key['address'])
         result=tx(f'native possession proof {i}',operation='proof',key=i,package=f['head'],customer=f['customer'],administrator=live.operator,sender=key['address'],expires=int(live.object('0x6')['content']['timestamp_ms'])+300000)
         proof=live.created(result,'::passkey_factor::Enrollment')[0]
         live.transaction(f'wallet enrolls passkey {i}','--move-call',f'{f["head"]}::passkey_factor::enroll',f'@{f["customer"]}',f'@{proof}','@0x6',budget=20_000_000)

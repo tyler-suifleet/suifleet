@@ -162,7 +162,9 @@ def failure_class(error):
     from rollout_audit_acceptance import RetentionPending
     if isinstance(error, RetentionPending):
         return "infrastructure"  # Still unsuccessful; retry the SAME aged fixture.
-    if isinstance(error, (Spent, FundingShortfall)):
+    if isinstance(error, Spent):
+        return "source"  # Faucet credits cannot repair a run allowance; repair/reuse the fixture.
+    if isinstance(error, FundingShortfall):
         return "funding"
     if isinstance(error, reconciler.Uncertain):
         return "uncertain"
@@ -431,6 +433,22 @@ def balance_of(client, address):
     return sum(int(c.get("mistBalance", 0)) for c in coins) + (int(gas.get("addressMistBalance") or 0) if isinstance(gas, dict) else 0)
 
 
+def report_funding_plan(remaining, device_gas, ptb_budget, *, needs_inbox):
+    """Reserve the core OTA phase before transferring funds or creating objects.
+
+    This is a conservative full-budget bound, not a gas estimate or permission
+    to spend. Audit cases still reserve independently. Existing device funds
+    remain charged; refunds and faucet credits cannot enlarge this allowance.
+    """
+    top_up = max(0, DEVICE_FUNDING - device_gas) if device_gas < DEVICE_MINIMUM else 0
+    required = device_gas + top_up + (10_000_000 if top_up else 0)
+    required += (3 + int(needs_inbox)) * ptb_budget  # head/base deployments and cleanup
+    if required > remaining:
+        raise Spent(f"core OTA phase requires {required} MIST of full reservations; "
+                    f"{remaining} remain; retain and reuse the prepared fixture")
+    return top_up, required
+
+
 def plain(value):
     """Move JSON with or without JSON-RPC-style {"fields": ...} wrappers."""
     if isinstance(value, dict):
@@ -671,6 +689,7 @@ def run(args):
             if fixture and (not fixture.get("owner_cap") or not fixture_alive(fixture, operator, client)):
                 raise RuntimeError("cached fixture needs object reconciliation; immutable code is not republished")
             if fixture:
+                verify_publication(fixture, rpc_url, operator, client)
                 state["fixtures"][key_name] = fixture
                 save_state(state_path, state)
                 evidence["fixture_provenance"] = fixture.get("provenance")
@@ -805,7 +824,7 @@ def run(args):
                 old, registry, upgrade_cap = (publication[k] for k in ("base_package", "registry", "upgrade_cap"))
                 verify_publication(publication, rpc_url, operator, client)
                 toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
-                check(f"verified/reused base package {old}; no identical package is republished")
+                check(f"verified checkpointed base package {old}; publication effects are recorded above")
                 if "device_key" not in publication:
                     address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
                     save_publication(device_key=key.read_text().strip(), device_address=address)
@@ -865,13 +884,6 @@ def run(args):
                 save_state(state_path, state)
             old, new, registry, upgrade_cap = (fixture[k] for k in ("base_package", "head_package", "registry", "upgrade_cap"))
             device, cap, group, device_address = (fixture[k] for k in ("device", "device_cap", "group", "device_address"))
-            # Report gas: top up only when low.
-            device_gas = balance_of(client, device_address)
-            ledger.grant(device_gas)  # Include all pre-existing device gas in the ceiling.
-            if device_gas < DEVICE_MINIMUM:
-                transaction("top up device gas", "--split-coins", "gas", f"[{DEVICE_FUNDING}]", "--assign", "fee",
-                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=DEVICE_FUNDING)
-
             # 3. Manifest over gRPC.
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new, upgrade_cap=upgrade_cap,
                                                   registry=registry, network=args.network,
@@ -884,6 +896,15 @@ def run(args):
             # its inbox, once per fixture (the inbox address can be claimed once).
             inboxes = all(name in manifest["type_origins"] for name in dm.INBOX_TYPES)
             inbox = dm.inbox_id(registry, manifest["type_origins"]["fleet_inbox::InboxKey"], device) if inboxes else None
+            device_gas = balance_of(client, device_address)
+            evidence['fixture_prepared'] = True  # Durable even if this run cannot afford the core phase.
+            top_up, reserved = report_funding_plan(ledger.remaining, device_gas, ptb_budget,
+                                                 needs_inbox=inboxes and not fixture.get('inbox'))
+            evidence['core_ota_preflight'] = dict(required_mist=reserved, remaining_mist=ledger.remaining)
+            ledger.grant(device_gas)
+            if top_up:
+                transaction("top up device gas", "--split-coins", "gas", f"[{top_up}]", "--assign", "fee",
+                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=top_up)
             if inboxes and not fixture.get("inbox"):
                 # An earlier run whose outcome was lost may already have claimed
                 # the derived address; adopt that inbox (free read, verified

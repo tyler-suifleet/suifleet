@@ -339,7 +339,7 @@ class Funding(unittest.TestCase):
 
     def test_failure_classes(self):
         self.assertEqual(live.failure_class(live.FundingShortfall('x')), 'funding')
-        self.assertEqual(live.failure_class(live.Spent('x')), 'funding')
+        self.assertEqual(live.failure_class(live.Spent('x')), 'source')  # A faucet cannot restore allowance.
         self.assertEqual(live.failure_class(rc.Uncertain('x')), 'uncertain')
         self.assertEqual(live.failure_class(RuntimeError("code: 'Deadline expired before operation could complete'")),
                          'infrastructure')
@@ -393,6 +393,35 @@ def signed(argv):
 class RunFlow(unittest.TestCase):
     """Drive run() up to its first chain verification with an offline CLI."""
 
+    def test_completed_sf198_fixture_is_reused_without_signing_or_publishing(self):
+        # Run 41374657219 persisted its completed fixture before OTA funding
+        # failed. Script-only repairs must enter the free-read reuse path.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = dict(base_package=PACKAGE, head_package=HEAD, registry=REGISTRY,
+                           upgrade_cap=CAP, device=DEVICE, device_cap='cap', group='group',
+                           owner_cap='owner', device_address=DEVICE, device_key='offline-only')
+            def state(key, digest, tools):
+                return dict(chain='4c78adac', operator=ADDRESS, fixtures={key: fixture}, publications={})
+            args, key, patches, commands = self.harness(root, state, upgrade=True)
+            verify = Mock()
+            with self.assertRaisesRegex(RuntimeError, 'manifest boundary'):
+                self.run_flow(args, patches, [
+                    patch.object(live.subprocess, 'check_output', side_effect=lambda command, **kwargs:
+                                 'b' * 40 if command[0] == 'git' else DEVICE),
+                    patch.object(live, 'fixture_alive', return_value=True),
+                    patch.object(live, 'verify_publication', verify),
+                    patch.object(live.dm, 'resolve', side_effect=RuntimeError('manifest boundary'))])
+            verify.assert_called_once_with(fixture, 'https://offline.invalid', ADDRESS, unittest.mock.ANY)
+            self.assertFalse(any('execute-signed-tx' in c or 'keytool' in c for c in commands))
+            saved = json.loads((root / 'state.json').read_text())
+            self.assertEqual(saved['fixtures'][key], fixture)
+            self.assertEqual(saved['publications'], {})
+            evidence = json.loads((root / 'evidence.json').read_text())
+            self.assertEqual(evidence['transactions'], [])
+            self.assertEqual(evidence['allowance_used_mist'], 0)
+            self.assertTrue(any('reused fixture' in c for c in evidence['checks']))
+
     def harness(self, root, state, *, balance='2000000000', execute=None, faucet=None, required=None, upgrade=False,
                 tx_block=None):
         tools = {'build': {'path': '/compiler', 'version': tc.BUILD['version']},
@@ -444,7 +473,8 @@ class RunFlow(unittest.TestCase):
                                max_spend_mist=800000000, required_balance_mist=required, build_sui='/compiler',
                                network_sui='/network', faucet_tool='/network' if faucet else None, base_ref='b' * 40,
                                walrus='simulated', state=str(root / 'state.json'), fresh=False)
-        walrus = SimpleNamespace(aggregator='http://offline.invalid', mode='simulated', close=Mock())
+        walrus = SimpleNamespace(aggregator='http://offline.invalid', publisher='http://offline.invalid',
+                                 mode='simulated', close=Mock())
         patches = [patch.object(live.subprocess, 'run', side_effect=command),
                    patch.object(live.subprocess, 'check_output', return_value='b' * 40),
                    patch.object(live.toolchain, 'check_tools', return_value=tools),

@@ -12,6 +12,25 @@ from ci_testnet_wallet import save_pending, restore_pending
 
 
 class CachedPasskeyTests(unittest.TestCase):
+    def test_cached_gas_is_charged_and_only_deficit_is_transferred(self):
+        from testnet_budget import Budget, Spent
+        for balance in (0, 29_000_000, 30_000_000, 31_000_000):
+            with self.subTest(balance=balance):
+                live = SimpleNamespace(balance=Mock(return_value=balance), ledger=Budget(100_000_000, []),
+                                       transaction=Mock())
+                target.fund_passkey(live, 0, 'retained-address')
+                self.assertEqual(live.ledger.used, balance)
+                if balance < 30_000_000:
+                    self.assertEqual(live.transaction.call_args.kwargs['funding'], 30_000_000 - balance)
+                    self.assertIn(f'[{30_000_000 - balance}]', live.transaction.call_args.args)
+                else:
+                    live.transaction.assert_not_called()
+        live.ledger = Budget(20_000_000, [])
+        live.transaction.reset_mock()
+        with self.assertRaises(Spent):
+            target.fund_passkey(live, 0, 'retained-address')
+        live.transaction.assert_not_called()
+
     def test_signing_identity_and_uncertainty_survive_ci_roundtrip(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
