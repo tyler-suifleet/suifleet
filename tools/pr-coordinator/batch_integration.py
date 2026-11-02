@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -627,7 +628,34 @@ class BatchController:
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
-            result['_batch_conflict'] = json.loads(row[0])
+            context = json.loads(row[0])
+            # A composition failure may only involve unmerged siblings. Owners
+            # must not import those stacks to repair an otherwise clean source.
+            # Recheck against pinned main, including receipts from older runtimes;
+            # after integration a new base will be tested by the next build.
+            main_conflict = True
+            if context.get('other_members'):
+                # Use a disposable worktree for Git versions predating
+                # merge-tree --write-tree. Never alter the owner's checkout.
+                with tempfile.TemporaryDirectory(prefix='batch-conflict-') as directory:
+                    probe = str(Path(directory)/'probe')
+                    self.git(project, 'worktree', 'add', '--detach', probe, pr['baseRefOid'])
+                    try:
+                        try:
+                            self.git(project, 'merge', '--no-commit', '--no-ff',
+                                     pr['headRefOid'], cwd=probe)
+                        except subprocess.CalledProcessError as error:
+                            if error.returncode != 1:
+                                raise
+                            # Exit one alone is not proof of a merge conflict.
+                            if not self.git(project, 'ls-files', '--unmerged', cwd=probe):
+                                raise
+                        else:
+                            main_conflict = False
+                    finally:
+                        self.git(project, 'worktree', 'remove', '--force', probe)
+            if main_conflict:
+                result['_batch_conflict'] = context
         return result
 
     def select(self, project, candidates, base, maximum):

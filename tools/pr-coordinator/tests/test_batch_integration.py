@@ -291,9 +291,38 @@ class BatchTests(unittest.TestCase):
         f=self.fixture(True);f.tick();row=f.row();members=json.loads(row['members'])
         self.assertEqual([m['pr'] for m in members],[1])
         ctx=f.controller.repair_context(f.project,f.source_prs[2])
-        self.assertIn('_batch_conflict',ctx)
-        self.assertEqual(ctx['_batch_conflict']['candidate_base'],f.base)
+        self.assertNotIn('_batch_conflict',ctx)
+        for _ in range(3):
+            f.tick()
+            self.assertNotIn('_batch_conflict',f.controller.repair_context(f.project,f.source_prs[2]))
+        self.assertEqual(len(f.controller.rows(f.project)),1)
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+        self.assertEqual([p['headRefOid'] for p in f.source_prs.values()],f.heads)
         f.green();f.tick();f.approve();f.tick();self.assertEqual(f.reconciled,[1])
+        f.tick()
+        ctx=f.controller.repair_context(f.project,f.pr(f.project,2))
+        self.assertIn('_batch_conflict',ctx)
+        self.assertNotEqual(ctx['_batch_conflict']['candidate_base'],f.base)
+
+    def test_main_conflict_with_siblings_still_routes_owner_repair(self):
+        f=self.fixture(True)
+        (f.repo/'common').write_text('main change\n')
+        f.git('add','.');f.git('commit','-qm','main change');f.git('push','-q','origin','main')
+        base=f.git('rev-parse','HEAD')
+        context=dict(candidate_base=base,batch_id='old-runtime',other_members=[dict(pr=1,head=f.heads[0])])
+        f.db.execute('INSERT INTO integration_batch_conflicts VALUES(?,?,?,?,?,?)',
+                     ('test',2,f.heads[1],base,'old-runtime',canonical(context)))
+        self.assertEqual(f.controller.repair_context(f.project,f.pr(f.project,2))['_batch_conflict'],context)
+
+    def test_sibling_conflict_probe_errors_do_not_become_clean_results(self):
+        f=self.fixture(True);f.tick()
+        original=f.controller.git
+        def fail(project,*args,**kwargs):
+            if args[:3]==('merge','--no-commit','--no-ff'):raise subprocess.CalledProcessError(128,args)
+            return original(project,*args,**kwargs)
+        with patch.object(f.controller,'git',side_effect=fail):
+            with self.assertRaises(subprocess.CalledProcessError):
+                f.controller.repair_context(f.project,f.source_prs[2])
 
     def test_changed_head_feedback_owner_and_main_invalidate(self):
         for change in ('head','feedback','owner','main'):
