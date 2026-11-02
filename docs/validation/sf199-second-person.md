@@ -318,7 +318,7 @@ Fresh combined-tree checks:
   /base/contracts --evidence docs/validation/sf199-combined-localnet.json`:
   **FAILED** at compatible upgrade: `MovePackageTooBig { object_size: 104427,
   max_object_size: 102400 }`. [Failure receipt](sf199-combined-localnet.json)
-  records four successful setup transactions and the failed upgrade effects;
+  records three successful setup transactions and the failed upgrade effects;
   no subsequent second-person behavior was tested in this run. Its HEAD is the
   pre-merge run-start revision; it is not relabeled as final-head acceptance.
 
