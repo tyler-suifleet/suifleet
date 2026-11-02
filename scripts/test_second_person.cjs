@@ -32,16 +32,20 @@ for (const decision of ['approve','reject','cancel']) {
 assert.equal(approvals.configureTx(C,consent).getData().commands[0].MoveCall.function,'configure_second_person');
 (async()=>{
  const client = manifestClient(m), original = client.getObject;
- let changed=false, malformed=false, page=0;
+ let changed=false, malformed=false, unavailable=false, page=0;
  client.getObject = async input => input.objectId===C ? {object:{type:`${m.call_package_id}::customer::Customer`,content:changed?wire.customer_CustomerBcs.serialize({...customer,name:'Changed'}).toBytes():content}} : input.objectId===R ? {object:{type:`${m.call_package_id}::security_policy::Action`,content:encoded}} : original(input);
  client.listDynamicFields=async()=> ++page%2 ? {dynamicFields:[],hasNextPage:true,cursor:'next'} : {dynamicFields:[{name:{type:`${m.call_package_id}::security_policy::FactorKey`,bcs:Uint8Array.of(0)}}],hasNextPage:false};
  client.getDynamicField=async input=>{
  const type=input.name.type.split('::').at(-1);
- if(type==='FactorKey' && input.parentId===C)return {dynamicField:{value:{type:malformed?'vector<u8>':`vector<${'0x'+'0'.repeat(63)+'2'}::object::ID>`,bcs:bcs.vector(bcs.Address).serialize([R]).toBytes()}}};
+ if(type==='FactorKey' && input.parentId===C)return {dynamicField:{value:{type:malformed?'vector<u8>':`vector<${'0x'+'0'.repeat(63)+'2'}::object::ID>`,bcs:bcs.vector(bcs.Address).serialize(unavailable?[id(99),R]:[R]).toBytes()}}};
  if(type==='FactorKey' && input.parentId===R)return {dynamicField:{value:{type:`${m.call_package_id}::security_policy::FactorConfiguration`,bcs:wire.security_policy_FactorConfigurationBcs.serialize({binding:Array.from(bytes)}).toBytes()}}};
  return {dynamicField:{value:{type:`${m.call_package_id}::security_policy::Policy`,bcs:wire.security_policy_PolicyBcs.serialize({schema:'1',generation:'8',requirements:[0,0,0,0,4,0,0],transaction:[],attested:0}).toBytes()}}};
  };
  assert.deepEqual(await approvals.fetchRequests(client,C),[request]);
+ unavailable=true;
+ const partial=await approvals.fetchRequests(client,C);
+ assert.equal(partial[0].id,id(99)); assert.equal(typeof partial[0].error,'string');
+ assert.deepEqual(partial[1],request); unavailable=false;
  malformed=true;await assert.rejects(approvals.fetchRequests(client,C),/pending index type/);malformed=false;
  assert.equal((await approvals.proposePolicyTx(client,C,[0,0,0,0,0,0,0],100n)).getData().commands[0].MoveCall.function,'propose_approval');
  assert.equal((await approvals.executePolicyTx(client,C,request)).getData().commands[0].MoveCall.function,'set_security_secured');
@@ -62,6 +66,8 @@ assert.equal(approvals.configureTx(C,consent).getData().commands[0].MoveCall.fun
  assert.match(html,/Pending approvals/);assert.match(html,/set_security/);assert.match(html,/Expires/);assert.doesNotMatch(html,/>Approve exact action</);
  account=B;html=renderToStaticMarkup(React.createElement(View));assert.match(html,/>Approve exact action</);assert.match(html,/>Reject</);
  uiRequest={...request,expires:1n};html=renderToStaticMarkup(React.createElement(View));assert.match(html,/Expired/);assert.match(html,/<button disabled="">Approve exact action/);
+ uiRequest={id:id(99),error:'Object deleted'};
+ html=renderToStaticMarkup(React.createElement(View));assert.match(html,/Object deleted/);assert.doesNotMatch(html,/>Approve exact action</);
  uiError=Error('connection unavailable');html=renderToStaticMarkup(React.createElement(View));assert.match(html,/connection unavailable/);
  client.ledgerService.getServiceInfo=async()=>({response:{chainId:'11111111111111111111111111111111'}});
  await assert.rejects(approvals.fetchRequests(client,C),/chain identifier mismatch/);

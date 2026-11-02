@@ -9,6 +9,7 @@ const load = loader(), approvals = load('lib/second-person.ts'), security = load
 (async () => {
  const client = new SuiGrpcClient({network:m.network,baseUrl:m.rpc_url});
  const requests = await approvals.fetchRequests(client,customer);
+ if (requests.some(r => 'error' in r)) throw Error('console contains an unreadable request');
  if (expected === 'unprotected-ids') { const policy=await security.fetchOrganizationSecurity(client,customer); if (!policy || policy.requirements.some(v=>v!==0)) throw Error('resume requires verified all-off policy'); process.stdout.write(JSON.stringify(requests.map(r=>r.id))); return; }
  if (expected === 'empty' ? requests.length !== 0 : !requests.some(r=>r.id === expected)) throw Error('console current-state queue mismatch');
  console.log('PASS console live queue: '+requests.length+' pending requests, verified deployment/origins/arguments');

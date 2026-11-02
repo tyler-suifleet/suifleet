@@ -911,11 +911,13 @@ immutable under `security_policy::FactorKey { factor: 0 }` on the Action, as a
 `FactorConfiguration` public binding. The same reserved key on the Customer holds
 a `vector<ID>` of up to 64 pending disclosed requests. Zero is not a configurable
 factor. These reuse **existing** type origins; only SecondPersonConfiguration has a new introduction
-origin. The Action and Customer layouts are unchanged. Verifier enrollment seals customer
-authority at **199** (all-off framework customers may remain 197); current clients
+origin. The Action and Customer layouts are unchanged. The first disclosed proposal atomically seals customer
+authority at **199**, before enrollment approval (customers with no disclosed requests may remain 197); current clients
 accept both. Old customer code rejects authority 199, including its immutable
 cancellation route, which cannot maintain the new queue. The daemon must include
-199 custody-read support before rollout. This prevents an older cancel entry from
+199 custody-read support before creating the first request. The first proposal verifies
+the supplied customer snapshot and replaces only its version with the sealed 199
+snapshot in the disclosed bytes, preserving exact execution binding. This prevents an older cancel entry from
 leaving orphan IDs or unreadable requests. Pending discovery paginates
 current dynamic fields and re-reads every object; event pruning cannot erase this
 index. Errors are reported, never converted into an empty queue.

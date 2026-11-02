@@ -1424,12 +1424,22 @@ module sui_edge::customer {
         begin_security_action(customer, action, arguments, 7, false, clock, ctx);
         configure_security_factor(customer, 4, bcs::to_bytes(&SecondPersonConfiguration { schema: 1 }), ctx);
         finish_security_action(customer);
-        // Retire old customer code before approval-backed policy activation.
-        // Its immutable cancel API cannot maintain our new pending index.
-        customer.version = 199;
     }
     public fun propose_approval(customer: &mut Customer, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         assert_security_administrator(customer, ctx);
+        // Seal before any disclosed Action exists, including enrollment. Old
+        // immutable cancellation/execution cannot maintain the pending index.
+        let arguments_bcs = if (customer.version == 197) {
+            assert!(arguments_bcs.length() <= 16384, ESecondPerson);
+            let mut encoded = sui::bcs::new(arguments_bcs);
+            let mut arguments = encoded.peel_vec!(|bytes| bytes.peel_vec_u8());
+            assert!(encoded.into_remainder_bytes().is_empty() && arguments.length() >= 2
+                && arguments[1] == bcs::to_bytes(customer), ESecondPerson);
+            customer.version = 199;
+            // Preserve exact execution binding after the atomic version change.
+            *arguments.borrow_mut(1) = bcs::to_bytes(customer);
+            bcs::to_bytes(&arguments)
+        } else { arguments_bcs };
         security_policy::prepare_disclosed(&mut customer.id, arguments_bcs, expires_ms, clock, ctx);
     }
     public fun approve_action(customer: &Customer, action: &mut Action, clock: &Clock, ctx: &mut TxContext) {

@@ -23,6 +23,7 @@ export function SecondPersonApprovals() {
     {query.isPending && <p>Reading requests…</p>}{query.error && <p role="alert">{query.error.message}</p>}
     {query.data?.requests.length === 0 && <p>No pending requests.</p>}
     {query.data?.requests.map(request => {
+      if ("error" in request) return <article key={request.id} className="rounded border p-3 break-all" role="alert">Request {request.id} is unavailable: {request.error}. Refresh to retry; other requests remain available.</article>;
       const mine = !!account && normalizeSuiAddress(account.address) === normalizeSuiAddress(request.proposer);
       const stale = request.generation !== query.data.policy?.generation;
       const expired = request.expires <= BigInt(Date.now());

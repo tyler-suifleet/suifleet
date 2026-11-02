@@ -8,7 +8,7 @@ module sui_edge::second_person_tests {
     use sui_edge::device_registry::{Self, DeviceRegistry};
     use sui_edge::security_policy::{Self as policy, Action};
 
-    fun setup(): Scenario {
+    fun unenrolled(): Scenario {
         let mut s = ts::begin(@0xA);
         device_registry::init_for_testing(s.ctx());
         clock::create_for_testing(s.ctx()).share_for_testing(); s.next_tx(@0xA);
@@ -17,9 +17,17 @@ module sui_edge::second_person_tests {
         let mut c = s.take_shared<Customer>();
         customer::initialize_security(&mut c, s.ctx());
         customer::set_credential(&mut c, @0xB, true, true, s.ctx());
-        customer::set_credential(&mut c, @0xC, true, false, s.ctx()); let clock = s.take_shared<Clock>();
+        customer::set_credential(&mut c, @0xC, true, false, s.ctx());
+        ts::return_shared(c); s.next_tx(@0xA); s
+    }
+    fun setup(): Scenario {
+        let mut s = unenrolled();
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
         let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]);
         customer::propose_approval(&mut c, bytes, 1000, &clock, s.ctx());
+        // The very first request seals authority, before any independent consent.
+        let expected = bcs::to_bytes(&c);
+        assert!(expected[32] == 199 && expected[33] == 0);
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xB);
         let c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>(); let mut action = s.take_shared<Action>();
         customer::approve_action(&c, &mut action, &clock, s.ctx());
@@ -44,6 +52,28 @@ module sui_edge::second_person_tests {
         let c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>(); let mut a = s.take_shared<Action>();
         customer::approve_action(&c, &mut a, &clock, s.ctx()); assert!(policy::attestations(&a) == 4);
         ts::return_shared(c); ts::return_shared(clock); ts::return_shared(a); s.next_tx(@0xA);
+    }
+    #[test]
+    fun first_request_cancel_keeps_old_authority_sealed() {
+        let mut s = unenrolled();
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]);
+        customer::propose_approval(&mut c, bytes, 1000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
+        let mut c = s.take_shared<Customer>(); let a = s.take_shared<Action>();
+        assert!(policy::disclosed_arguments(&a) == bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]));
+        customer::cancel_disclosed_security_action(&mut c, a, s.ctx());
+        assert!(customer::pending_security_actions(&c).is_empty());
+        assert!(bcs::to_bytes(&c)[32] == 199);
+        assert!(policy::requirements(&customer::security(&c)) == vector[0,0,0,0,0,0,0]);
+        ts::return_shared(c); s.end();
+    }
+    #[test, expected_failure(abort_code = 9, location = sui_edge::customer)]
+    fun first_request_rejects_wrong_customer_snapshot() {
+        let mut s = unenrolled();
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), vector[0u8]]);
+        customer::propose_approval(&mut c, bytes, 1000, &clock, s.ctx()); abort 99
     }
     #[test]
     fun distinct_approval_executes_and_recovers_all_off() {

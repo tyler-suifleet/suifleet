@@ -36,6 +36,7 @@ async function typedObject(client: SuiGrpcClient, id: string, type: Parameters<t
   if (normalizeStructTag(object.type) !== normalizeStructTag(moveType(type))) throw Error(`Unexpected ${type} object`);
   return object.content;
 }
+export interface UnavailableApprovalRequest { id: string; error: string }
 export async function fetchRequests(client: SuiGrpcClient, customer: string) {
   await verifyDeployment(client);
   if (!secondPersonSupported()) throw Error("This deployment has no second-person verifier");
@@ -59,10 +60,14 @@ export async function fetchRequests(client: SuiGrpcClient, customer: string) {
   if (indexType !== `vector<${normalizeStructTag("0x2::object::ID")}>`) throw Error("Unexpected pending index type");
   const ids = bcs.vector(bcs.Address).parse(dynamicField.value.bcs);
   return Promise.all(ids.map(async id => {
-    const content = await typedObject(client, id, "security_policy::Action");
-    const { dynamicField: disclosed } = await client.getDynamicField({ parentId: id, name: { type: moveType("security_policy::FactorKey"), bcs: bcs.u8().serialize(0).toBytes() } });
-    if (normalizeStructTag(disclosed.value.type) !== normalizeStructTag(moveType("security_policy::FactorConfiguration"))) throw Error("Unexpected proposal arguments type");
-    return decodeRequest(id, customer, content, Uint8Array.from(security_policy_FactorConfigurationBcs.parse(disclosed.value.bcs).binding));
+    try {
+      const content = await typedObject(client, id, "security_policy::Action");
+      const { dynamicField: disclosed } = await client.getDynamicField({ parentId: id, name: { type: moveType("security_policy::FactorKey"), bcs: bcs.u8().serialize(0).toBytes() } });
+      if (normalizeStructTag(disclosed.value.type) !== normalizeStructTag(moveType("security_policy::FactorConfiguration"))) throw Error("Unexpected proposal arguments type");
+      return decodeRequest(id, customer, content, Uint8Array.from(security_policy_FactorConfigurationBcs.parse(disclosed.value.bcs).binding));
+    } catch (error) {
+      return { id, error: error instanceof Error ? error.message : "Request could not be read" } satisfies UnavailableApprovalRequest;
+    }
   }));
 }
 export async function proposeEnrollmentTx(client: SuiGrpcClient, customer: string, expires: bigint) {

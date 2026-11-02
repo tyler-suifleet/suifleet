@@ -15,10 +15,10 @@ on merged SF-196. This records software/test acceptance, not production rollout.
 - Current-state pending index, bounded to 64 requests, supports dashboard discovery
   without retained events. Arguments are immutable public bytes, at most 16 KiB.
 - Existing Customer and Action layouts and introduction origins are preserved.
-  Only `customer::SecondPersonConfiguration` has a new origin. Enrollment seals
-  customer authority at 199; new console/daemon reads support 197 and 199. Old
-  customer execution and immutable cancellation routes reject the enrolled state.
-  Upgrade the daemon/client before enrollment; this evidence did not roll out any
+  Only `customer::SecondPersonConfiguration` has a new origin. The first disclosed
+  proposal seals customer authority at 199 before enrollment approval; new console/daemon reads support 197 and 199. Old
+  customer execution and immutable cancellation routes reject the sealed state, including the pending enrollment window.
+  Upgrade the daemon/client before the first request; this evidence did not roll out any
   existing application deployment.
 - Settings and dashboard implement enrollment and policy-change proposals and
   execution, plus independent approval/rejection/cancellation of disclosed actions.
@@ -134,3 +134,52 @@ and actual mainnet acceptance remain unrun in [SF-031/#32](https://github.com/ty
 [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). No production
 credentials, original application objects, mainnet or physical programming used.
+
+## PR #453 feedback repair, 2026-11-01
+
+The independent review correctly identified an uncovered pre-enrollment window:
+old-package cancellation could delete the first disclosed Action while authority
+was still 197, orphaning its pending-index entry. The earlier receipt exercised
+old routes only after enrollment and did not prove this window safe.
+
+`propose_approval` now atomically seals authority 199 before creating the first
+Action. It validates the first request's supplied customer snapshot and rewrites
+only that snapshot to the post-seal bytes used at execution. Cancellation keeps
+the seal; requirements remain all-off until explicitly configured. Setup explains
+the permanent protocol transition. Existing layouts, ABI and origins are unchanged.
+The queue now reports each unreadable/deleted/malformed request individually,
+without hiding valid requests or offering execution controls for unreadable data.
+Index/network failures still surface as queue errors. The live console checker
+rejects partial results rather than treating an unreadable request as acceptance.
+
+Fresh repair verification (same pinned image, user 1001, network none):
+
+- `sui move test --path contracts`: **363/363 passed**, including first-request
+  sealing, canonical disclosed snapshot, cancellation preserving the seal and
+  all-off policy, and wrong first snapshot rejection.
+- `python3 scripts/check_move_security.py`: passed compiler/warnings/security
+  baseline, negative fixtures and bypass mutation regressions.
+- `node scripts/test_second_person.cjs`: passed, including a deleted/unreadable
+  index member alongside a valid request and unavailable-row rendering.
+- `node scripts/test_security_policy.cjs`: passed.
+- `node dapp/node_modules/typescript/bin/tsc --noEmit --project dapp/tsconfig.json`:
+  passed; `pnpm build` in dapp passed static export after the setup text change.
+- `python3 scripts/generate_interfaces.py --check`: passed 15 modules;
+  `python3 scripts/check_contract_interfaces.py`: 1,279 references, 17 modules,
+  zero drift. No generated ABI changes required.
+- `python3 scripts/test_second_person_localnet.py --base /base/contracts
+  --evidence docs/validation/sf199-feedback-localnet.json`: passed **26**
+  effects-checked transactions, including old-package cancellation and secured
+  execution refusals **before** independent enrollment approval, followed by
+  readable queue, enrollment, exact execution, rejection and recovery. See the
+  [fresh isolated receipt](sf199-feedback-localnet.json). This is isolated-chain
+  evidence, not a public-network rerun; historical public receipts above retain
+  their original source digest.
+
+Initial repair tool invocations failed on host missing `sui`, container cache
+ownership/missing Git mount, and unsupported Move indexed-assignment syntax;
+these were corrected before the successful checks. Only disposable local wallets
+were created; no public wallet mutation or production/physical operation occurred.
+Hosted CI/automatic testnet and fresh independent review remain coordinator gates;
+this worker does not watch CI or claim approval. Deferred acceptance remains in
+#32/#159/#62 as above.

@@ -123,6 +123,10 @@ def run(args):
         vector = 'vector[' + ','.join(str(b) + 'u8' for b in json.loads(raw)) + ']'
         result = tx('propose verifier enrollment', '--move-call', f'{head}::customer::propose_approval', f'@{c}', vector, f'{expiry}u64', CLOCK)
         enrollment = live.created(result, '::security_policy::Action')[0]
+        assert int(live.object(c)['content']['version']) == 199
+        if not args.fresh:
+            live.attack('pre-enrollment old cancel cannot orphan index', '--move-call', f'{base}::customer::cancel_security_action', f'@{c}', f'@{enrollment}', module='customer', function='assert_member', code=0, budget=20_000_000)
+            live.attack('pre-enrollment old execution refused', '--move-call', f'{base}::customer::set_security_secured', f'@{c}', 'vector[0u8,0u8,0u8,0u8,0u8,0u8,0u8]', f'@{enrollment}', CLOCK, module='customer', function='assert_member', code=0, budget=20_000_000)
         console_queue(enrollment)
         tx('independent signed enrollment approval', '--move-call', f'{head}::customer::approve_action', f'@{c}', f'@{enrollment}', CLOCK, sender=child)
         tx('configure verifier and enable optional administration protection', '--move-call', f'{head}::customer::configure_second_person', f'@{c}', f'@{enrollment}', CLOCK,
