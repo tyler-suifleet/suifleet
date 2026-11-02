@@ -183,3 +183,64 @@ were created; no public wallet mutation or production/physical operation occurre
 Hosted CI/automatic testnet and fresh independent review remain coordinator gates;
 this worker does not watch CI or claim approval. Deferred acceptance remains in
 #32/#159/#62 as above.
+
+## Stopped-worker recovery, 2026-11-02
+
+Codex running model `gpt-6.1-sol` (no finer build version exposed) recovered
+its retained SF-199 claim and PR #453. The initially clean source branch now
+includes accepted main `cf65ea175435d1b6e111b988d51d9654a63c9db2` through merge
+`249c1f5ae49857df64b9bb806869d35be8724ec0`. This changes coordinator infrastructure
+only; the application/Move/interfaces and their prior evidence are unchanged.
+No unmerged sibling was imported. SF-221 PR #465 was OPEN at head
+`b912f262149d1620345b8edac47de60821dd6093`, with its retained owner in Review;
+its cost/source repair is not accepted main and was not copied here.
+
+Read-only artifact recovery used the existing `producer_check` and
+`download_fixture` path for main-only run **41392636950**, encrypted artifact
+**13118319842**. Producer provenance and single-file/private-mode transport
+passed; ciphertext SHA-256 was
+`874cb79a4144443fb23ecba86fb52f67ac2fbb950a186d70477739905a76270b`.
+The temporary ciphertext was removed after inspection. The protected CI key is
+not available locally: decryption and actual on-chain fixture authentication
+were **not** performed or claimed. No device identity was read, replaced or
+rotated, and no uncertainty marker was changed.
+
+Offline replay consumed public effects artifact **13119410153** from the same
+run through the existing Budget class: charged allowance **1,575,909,482 MIST**,
+remaining **24,090,518**, unchanged limit **1,600,000,000**. The recorded prepared
+fixture pair is `bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:068e4d1da36e833c64beb84a9e46357f833de837e6fdf252bf23c8f4a1777eb4@1.81.1-e04cf9aa915c`.
+The recorded core phase requires **280,000,000** in full reservations. Replaying
+its 200M deployment reservation raised `Spent` before the client was invoked,
+without changing used allowance. Separately, effects artifact **13120408740**
+from run **41397980111** reproduced its earlier 30M device-funding refusal:
+**1,577,001,082** charged, **22,998,918** remaining. These are recorded artifact
+replays, not new chain effects or fresh/cached-chain acceptance. No new cost
+harness or synthetic successful acceptance was introduced.
+
+Current integration verification:
+
+- Pinned compiler `sui move test --path contracts`: **363/363 passed**.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  **175 tests, OK, one existing skip**.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet_reconcile.py'`:
+  **44 passed**, including retained bytes, authenticated identity/provenance,
+  restart adoption and uncertainty preservation paths.
+- `node scripts/test_second_person.cjs`, `node scripts/test_dashboard_stats.cjs`,
+  `node scripts/test_security_policy.cjs`: **passed**.
+- Pinned compiler on PATH, `python3 scripts/generate_interfaces.py --check`:
+  **15 modules match**. Initial host attempt failed because `sui` was absent
+  from PATH; the pinned-compiler rerun passed.
+- `cd dapp && ./node_modules/.bin/tsc --noEmit`: **passed**.
+- `git diff --check`: **passed**. No new production build, isolated-chain or
+  public-testnet acceptance is claimed for this integration-only recovery.
+
+**Blocked dependency:** SF-221 / [PR #465](https://github.com/tyler-suifleet/suifleet/pull/465)
+([issue #463](https://github.com/tyler-suifleet/suifleet/issues/463)) owns the
+unchanged cost failure. Resume this retained claim once that prerequisite is
+verified on merged main, integrate only its accepted interface/source, repair
+any resulting SF-199 conflicts, then hand the actual candidate to the sole
+coordinator for required CI/public-testnet acceptance and independent review.
+Do not repeat fresh publication of identical packages, raise limits, reset
+reservations or treat the artifact replay as passing acceptance. SF-199 stays
+blocked, not Review-ready. No hosted CI polling or chain writes occurred.
+Manual wallet/Pi/mainnet/provider/hosting checks remain unrun in #32/#159/#62.
