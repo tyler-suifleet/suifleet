@@ -38,6 +38,33 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 current combined-candidate blocker (2026-11-02)
+
+The earlier branch-only results below do **not** establish acceptance of the
+current combined candidate. PR477 (`17d0b556`, base `9f52de30`) failed protected
+[run 41455587854](https://github.com/tyler-suifleet/suifleet/actions/runs/41455587854).
+The [pinned effects and isolated reproduction](validation/sf221-pr477-blocker.json)
+retain this unresolved failure. Public publication/upgrade charged 1,543,564,163
+MIST; setup charged 26,994,337; the authenticated reused device grant charged
+14,981,196. The resulting 1,585,539,696 charge leaves 14,460,304, insufficient
+for the first deployment’s full 15M reservation despite a solvent operator.
+
+On an isolated node, the exact candidate with a fresh 10M device grant reaches
+1,592,099,987 after the first deployment, leaving 7,900,013 before the next
+full 10M reservation. The separate cached ordinary run succeeds at 41,497,089;
+it does not replenish the failed fresh ledger or establish fresh acceptance.
+Local gas differs from public gas; both sets of effects remain explicit.
+
+No runtime fix is established by this investigation. Temporary compiler-only
+experiments saved 511 and 162 bytes separately; neither was shipped or validated
+as a sufficient combined repair. Later phases of the exploratory local process
+are excluded because its disposable source changed; only the original ordinary
+runs certify the pinned candidate. A larger compatible cost reduction and clean
+fresh/cached ordinary/security/browser validation remain required, followed by
+actual protected exact-head/base public acceptance. Limits, coverage and
+uncertainty controls remain unchanged. Deferred external checks remain unrun in
+#32/#159.
+
 ### SF-221 completed compact lifecycle cost repair (2026-11-02)
 
 This result supersedes the blocked experiments below. The [full effects receipt](validation/sf221-compact-costs.json)
