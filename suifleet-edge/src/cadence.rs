@@ -1,7 +1,7 @@
 //! Local wakeups never authorize an apply: every wake performs fresh admission reads.
 use crate::{
     config::RuntimeConfig,
-    control::{Control, Deferred},
+    control::{Control, Deferred, Recurring},
 };
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -26,18 +26,26 @@ impl Window {
             end_ms,
         })
     }
-    pub fn remember(current: &mut Option<Self>, control: &Control, now: u64) {
-        let Some(window) = Self::control(control).filter(|w| w.start_ms <= now && now < w.end_ms)
-        else {
-            return;
-        };
-        *current = Some(match *current {
-            Some(old) if old.end_ms > now => Self {
-                start_ms: old.start_ms.min(window.start_ms),
-                end_ms: old.end_ms.max(window.end_ms),
-            },
-            _ => window,
-        });
+    /// The recurring occurrence containing or following `now`, bounded by
+    /// expiry. Unknown zones yield none: admission already fails closed.
+    fn recurring(control: &Control, recurring: Option<&Recurring>, now: u64) -> Option<Self> {
+        let (start_ms, end_ms) = recurring?.occurrence(now).ok()?;
+        let end_ms = if control.expires_ms == 0 { end_ms } else { end_ms.min(control.expires_ms) };
+        (control.state != 2 && end_ms > start_ms).then_some(Self { start_ms, end_ms })
+    }
+    fn windows(control: &Control, recurring: Option<&Recurring>, now: u64) -> impl Iterator<Item = Self> {
+        [Self::control(control), Self::recurring(control, recurring, now)].into_iter().flatten()
+    }
+    pub fn remember(current: &mut Option<Self>, control: &Control, recurring: Option<&Recurring>, now: u64) {
+        for window in Self::windows(control, recurring, now).filter(|w| w.start_ms <= now && now < w.end_ms) {
+            *current = Some(match *current {
+                Some(old) if old.end_ms > now => Self {
+                    start_ms: old.start_ms.min(window.start_ms),
+                    end_ms: old.end_ms.max(window.end_ms),
+                },
+                _ => window,
+            });
+        }
     }
     fn delay(self, now: u64, fast_ms: u64) -> Option<u64> {
         if self.start_ms >= self.end_ms || now >= self.end_ms {
@@ -107,16 +115,21 @@ impl Cadence {
         }
         for d in controls.filter(|d| !d.terminal) {
             let c = &d.control;
-            if let Some(next) = Window::control(c).and_then(|w| w.delay(now, fast_ms)) {
+            let recurring = d.recurring.as_ref();
+            for next in Window::windows(c, recurring, now).filter_map(|w| w.delay(now, fast_ms)) {
                 delay = delay.min(next);
             }
             if c.state != 0 || (c.expires_ms != 0 && now >= c.expires_ms) {
                 continue;
             }
-            let start = c
+            let mut start = c
                 .not_before_ms
                 .max(c.window_start_ms)
                 .max(d.notified_ms.saturating_add(c.notice_ms));
+            // The recurring occurrence containing or following that instant.
+            if let Some(Ok((open, _))) = recurring.map(|r| r.occurrence(start.max(now))) {
+                start = start.max(open);
+            }
             // Arm the admission time, not each constituent constraint: an
             // earlier wake must not consume a later, shorter maintenance window.
             if start > now
@@ -131,9 +144,10 @@ impl Cadence {
             // Only do this if the boundary crossed during this poll, so an
             // obsolete deferral cannot cause a busy loop on later polls.
             // This is only a wakeup hint; the next poll rechecks chain authority.
-            if matches!(d.reason.as_str(), "not yet scheduled" | "outside maintenance window" | "advance notice")
+            if matches!(d.reason.as_str(), "not yet scheduled" | "outside maintenance window"
+                    | "outside recurring maintenance window" | "advance notice")
                 && start >= self.poll_started_ms
-                && matches!(c.reason(now, d.notified_ms), Ok(None))
+                && matches!(c.reason(now, d.notified_ms, recurring), Ok(None))
             {
                 delay = 1;
             }
@@ -155,7 +169,7 @@ pub fn discovery_bound<'a>(
 ) -> u64 {
     let active = |w: Window| w.start_ms <= now && now < w.end_ms;
     let fast = window.is_some_and(active) || controls.filter(|d| !d.terminal).any(|d| {
-        Window::control(&d.control).is_some_and(active)
+        Window::windows(&d.control, d.recurring.as_ref(), now).any(active)
             || (d.control.state == 0
                 && (d.control.expires_ms == 0 || now < d.control.expires_ms)
                 && matches!(d.reason.as_str(), "waiting for rollout eligibility" | "ready for admission"))
@@ -174,9 +188,12 @@ mod tests {
     fn deferred(control: Control) -> Deferred {
         Deferred {
             control,
+            recurring: None,
             notified_ms: 0,
             reason: "not yet scheduled".into(),
             terminal: false,
+            next_window_ms: None,
+            tzdb: None,
         }
     }
     #[test]
@@ -244,6 +261,46 @@ mod tests {
         assert_eq!(c.delay(&cfg, [&d].into_iter(), 0, None).as_millis(), 2500);
     }
     #[test]
+    fn recurring_windows_arm_next_opening_and_fast_cadence_while_open() {
+        use crate::control::{Recurring, WeeklySlot};
+        let cfg = RuntimeConfig::default();
+        let c = Cadence::default();
+        let saturday_noon = 1_793_444_400_000; // 2026-10-31 12:00 Europe/Berlin
+        let open = 1_793_494_800_000; // Sunday 02:00 CET
+        let mut d = deferred(Control::default());
+        d.reason = "outside recurring maintenance window".into();
+        d.recurring = Some(Recurring { revision: 1, timezone: "Europe/Berlin".into(),
+            slots: vec![WeeklySlot { days: 64, start_minute: 120, duration_minutes: 120 }] });
+        // Closed: wake for the opening (or the routine poll, if sooner).
+        assert_eq!(c.delay(&cfg, [&d].into_iter(), open - 60_000, None).as_millis(), 60_000);
+        assert_eq!(c.delay(&cfg, [&d].into_iter(), saturday_noon, None).as_secs(), 1800);
+        // Crossing the opening during a poll rechecks at once.
+        assert_eq!(c.delay(&cfg, [&d].into_iter(), open + 1, None).as_millis(), 1);
+        // Open: fast discovery until it closes, then the routine bound again.
+        let fast = RuntimeConfig { rollout_poll_seconds: 2, ..Default::default() };
+        assert_eq!(discovery_bound(&fast, [&d].into_iter(), open + 1, None), 2);
+        assert_eq!(discovery_bound(&fast, [&d].into_iter(), open + 7_200_000, None), 60);
+        // Notice ending after this week's close arms next week's opening.
+        let mut late = d.clone();
+        late.control.notice_ms = 604_800_000;
+        late.notified_ms = open;
+        let next_open = open + 7 * 86_400_000;
+        assert_eq!(c.delay(&cfg, [&late].into_iter(), next_open - 1000, None).as_millis(), 1000);
+        // An expiry before the opening never arms it; unknown zones fail closed.
+        let mut expiring = d.clone();
+        expiring.control.expires_ms = open - 1;
+        assert_eq!(c.delay(&cfg, [&expiring].into_iter(), open - 60_000, None).as_secs(), 1800);
+        let mut unknown = d.clone();
+        unknown.recurring.as_mut().unwrap().timezone = "Mars/Olympus_Mons".into();
+        assert_eq!(c.delay(&cfg, [&unknown].into_iter(), open - 60_000, None).as_secs(), 1800);
+        // Remembered while open, so post-completion polling stays fast.
+        let mut window = None;
+        Window::remember(&mut window, &Control::default(), d.recurring.as_ref(), saturday_noon);
+        assert!(window.is_none());
+        Window::remember(&mut window, &Control::default(), d.recurring.as_ref(), open + 1);
+        assert_eq!(window, Some(Window { start_ms: open, end_ms: open + 7_200_000 }));
+    }
+    #[test]
     fn report_retry_crossing_admission_deadline_rechecks_without_consuming_window() {
         let cfg = RuntimeConfig::default();
         let cadence = Cadence::default();
@@ -285,7 +342,7 @@ mod tests {
                 window_start_ms: 5000,
                 window_end_ms: 600000,
                 ..Default::default()
-            },
+            }, None,
             6000,
         );
         Window::remember(
@@ -294,7 +351,7 @@ mod tests {
                 window_start_ms: 5500,
                 window_end_ms: 900000,
                 ..Default::default()
-            },
+            }, None,
             6500,
         );
         // No deferrals remain after completion. Only the bounded window persists.
