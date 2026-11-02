@@ -778,7 +778,10 @@ class BatchController:
                         raise BatchInvalidated('integration base changed during collection')
                     selected = self.select(project, candidates, batch['base'], maximum)
                     self.update(batch, members=canonical(selected))
-                    if not selected or (len(selected) < maximum and self.clock()-batch['created'] < delay):
+                    if not selected:
+                        self.update(batch, status='invalidated', error='no eligible members remain during collection')
+                        return held
+                    if len(selected) < maximum and self.clock()-batch['created'] < delay:
                         return held
                     self.validate_members(project, batch)
                     self.update(batch, status='building')
@@ -1007,3 +1010,122 @@ class LocalInfrastructure:
             if tree.exists():
                 self.c.cleanup(project, tree)
         return True
+
+
+class SharedAcceptanceRepair:
+    """Route a real shared funding incident once, never to every feature owner."""
+    def __init__(self, coordinator):
+        self.c, self.db = coordinator, coordinator.store.db
+        self.db.execute('''CREATE TABLE IF NOT EXISTS shared_acceptance_repairs (
+            project TEXT, episode TEXT, owner_ticket TEXT, owner_head TEXT,
+            base TEXT, job INTEGER, state TEXT, diagnostic TEXT, updated REAL,
+            PRIMARY KEY(project,episode))''')
+        self.db.execute('CREATE TABLE IF NOT EXISTS shared_acceptance_status (project TEXT PRIMARY KEY,owner_ticket TEXT,state TEXT,job INTEGER,diagnostic TEXT,updated REAL)')
+
+    def record(self, project, episode, owner, head, base, job, state, diagnostic):
+        self.db.execute('INSERT OR REPLACE INTO shared_acceptance_repairs VALUES(?,?,?,?,?,?,?,?,?)',
+            (project['id'],episode,owner,head,base,job,state,diagnostic,self.c.batches.clock()))
+        return dict(owner=owner,state=state,job=job,diagnostic=diagnostic)
+
+    def tick(self, project):
+        try:
+            result=self.route(project)
+        except Exception as error:
+            self.db.execute('INSERT OR REPLACE INTO shared_acceptance_status VALUES(?,?,?,?,?,?)',
+                (project['id'],project.get('shared_acceptance_repair',{}).get('ticket'),'held',None,
+                 type(error).__name__,self.c.batches.clock()))
+            raise
+        if result:
+            self.db.execute('INSERT OR REPLACE INTO shared_acceptance_status VALUES(?,?,?,?,?,?)',
+                (project['id'],result['owner'],result['state'],result.get('job'),result.get('diagnostic',''),self.c.batches.clock()))
+        return result
+
+    def route(self, project):
+        config=project.get('shared_acceptance_repair')
+        if config is None: return None
+        if (not isinstance(config,dict) or not isinstance(config.get('ticket'),str)
+                or not re.fullmatch(r'[A-Z][A-Z0-9]*-\d+',config['ticket'])
+                or type(config.get('max_attempts',3)) is not int
+                or not 1 <= config.get('max_attempts',3) <= 5):
+            raise ValueError('shared acceptance repair requires ticket and max_attempts1..5')
+        key=config['ticket']; maximum=config.get('max_attempts',3)
+        owner=json.loads(self.c.ticket(project,'show',key))
+        if owner['status']=='done':
+            self.db.execute("UPDATE shared_acceptance_repairs SET state='resolved',updated=? WHERE project=? AND owner_ticket=?",
+                            (self.c.batches.clock(),project['id'],key))
+            return dict(owner=key,state='resolved')
+        if owner.get('agent') not in ('Codex','Claude') or not owner.get('token'):
+            return dict(owner=key,state='blocked',diagnostic='shared repair owner has no implementation claim')
+        # Select the real linked source; labels and a caller's arbitrary PR number
+        # cannot redirect this authority to another source/claim.
+        number=self.c.issue_number(project,owner)
+        if not number: return dict(owner=key,state='blocked',diagnostic='owner issue unavailable')
+        prs=json.loads(self.c.gh(project,['pr','list','-R',project['repository'],'--state','open',
+                       '--head',owner['branch'],'--json','number,headRefName']))
+        if len(prs)!=1: return dict(owner=key,state='blocked',diagnostic='shared owner source is ambiguous or absent')
+        pr=self.c.pr(project,prs[0]['number']); head=pr['headRefOid']
+        if (pr.get('headRefName')!=owner['branch'] or pr.get('isDraft') or pr.get('isCrossRepository')
+                or pr.get('state')!='OPEN'):
+            return dict(owner=key,state='blocked',diagnostic='shared owner source is not ready')
+        active=self.db.execute("SELECT id FROM jobs WHERE project=? AND pr=? AND status IN "
+            "('reserved','running','orphaned','quarantined','quota_wait','quota_launch') ORDER BY id DESC LIMIT 1",
+            (project['id'],pr['number'])).fetchone()
+        if active: return dict(owner=key,state='owner_busy',job=active[0])
+        if owner['status']!='review' or owner.get('expired') or owner.get('publish_pending'):
+            return dict(owner=key,state='blocked',diagnostic='shared owner requires published Review handoff or explicit recovery')
+        # Do not interrupt an in-flight candidate or ambiguous publication. Only
+        # already-failed exact-owner candidates establish a new repair episode.
+        if pr['number'] in self.c.batches.reserved_members(project):
+            return dict(owner=key,state='awaiting_validation',diagnostic='shared source has an active candidate')
+        failure=None
+        for batch in reversed(self.c.batches.rows(project)):
+            if batch['status']!='failed': continue
+            try:
+                error=json.loads(batch.get('error') or '{}'); checks=error.get('checks',[])
+                members=json.loads(batch['members'])
+            except (ValueError,TypeError): continue
+            if (error.get('kind')!='candidate_checks_failed' or not checks
+                    or not all(c.get('name')=='testnet/package-upgrade' and c.get('workflowName')=='Automatic testnet'
+                               and c.get('classification')=='funding' for c in checks)
+                    or not any(m['pr']==pr['number'] and m['head']==head for m in members)):
+                continue
+            failure=(batch,checks);break
+        if failure is None: return dict(owner=key,state='awaiting_validation',diagnostic='no failed candidate for current shared source')
+        batch,checks=failure
+        self.c.batches.verify_manifest(project,batch)
+        episode=hashlib.sha256(canonical([key,head,batch['base'],'funding']).encode()).hexdigest()
+        existing=self.db.execute('SELECT job,state,updated FROM shared_acceptance_repairs WHERE project=? AND episode=?',
+                                 (project['id'],episode)).fetchone()
+        if existing:
+            # Even a failed/unknown launch is durable: never silently replay it.
+            job,state,updated=existing
+            if state=='held' and not job:
+                # No Store reservation or process was created. Capacity may
+                # recover; retry the guarded reservation after a bounded delay.
+                if self.c.batches.clock()-updated < 60:
+                    return dict(owner=key,state='held',diagnostic='waiting for repair capacity; no job was launched')
+            else:
+                if job:
+                    row=self.db.execute('SELECT status FROM jobs WHERE id=?',(job,)).fetchone()
+                    state='awaiting_validation' if row and row[0]=='done' else 'repair_retained'
+                return self.record(project,episode,key,head,batch['base'],job,state,'existing incident retained; no blind replay')
+        count=self.db.execute('SELECT count(*) FROM shared_acceptance_repairs WHERE project=? AND owner_ticket=? AND owner_head=? AND episode!=?',
+                              (project['id'],key,head,episode)).fetchone()[0]
+        if count>=maximum: return dict(owner=key,state='blocked',diagnostic='shared repair attempts exhausted for unchanged source')
+        self.c.assert_review_owner(project,owner)
+        self.c.local_infrastructure.fenced(project,pr,owner)
+        context=dict(candidate_pr=batch['pr'],candidate_head=batch['head'],candidate_base=batch['base'],checks=checks,
+                     shared_owner=key,episode=episode)
+        snapshot={**pr,'_batch_failure':context}
+        self.record(project,episode,key,head,batch['base'],None,'launch_pending','shared cost repair reserved before launch')
+        try:
+            self.c.launch(project,snapshot,owner,'fix')
+            from coordinator import feedback
+            row=self.db.execute("SELECT id,status FROM jobs WHERE project=? AND pr=? AND kind='fix' AND head=? AND feedback=?",
+                                (project['id'],pr['number'],head,feedback(snapshot))).fetchone()
+            return self.record(project,episode,key,head,batch['base'],row[0] if row else None,
+                               ('repair_owned' if row[1] in ('reserved','running') else 'repair_retained') if row else 'held',
+                               'one shared-owner repair; victim branches unchanged')
+        except Exception:
+            self.record(project,episode,key,head,batch['base'],None,'launch_uncertain','inspect retained launch; no automatic replay')
+            raise
