@@ -780,12 +780,12 @@ module sui_edge::customer {
     }
     public fun set_recurring_window(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, timezone: String,
         days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::set_recurring_window_as(record, timezone, days, start_minutes, duration_minutes, object::id(fleet).to_address());
     }
     public fun clear_recurring_window(customer: &Customer, fleet: &Fleet, record: &mut DeploymentRecord, ctx: &mut TxContext) {
-        assert_admin(customer, ctx); assert_fleet(customer, fleet);
+        assert_action(customer, 1, ctx); assert_fleet(customer, fleet);
         assert!(fleet.deployments.contains(&object::id(record)), EBinding);
         deployment_manager::clear_recurring_window_as(record, object::id(fleet).to_address());
     }
@@ -1339,6 +1339,25 @@ module sui_edge::customer {
         let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_control")), bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(record), bcs::to_bytes(&state), bcs::to_bytes(&not_before_ms), bcs::to_bytes(&expires_ms), bcs::to_bytes(&window_start_ms), bcs::to_bytes(&window_end_ms), bcs::to_bytes(&notice_ms), deployment_manager::security_snapshot(record)];
         security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
         set_control(customer, fleet, record, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    /// Recurrence wrappers also bind the current recurring window, so an
+    /// approval cannot be replayed after another schedule change.
+    public fun set_recurring_window_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, timezone: String,
+        days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_recurring_window")), bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(record), bcs::to_bytes(&timezone), bcs::to_bytes(&days), bcs::to_bytes(&start_minutes), bcs::to_bytes(&duration_minutes), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
+        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
+        set_recurring_window(customer, fleet, record, timezone, days, start_minutes, duration_minutes, ctx);
+        security_policy::finish(&mut customer.id);
+    }
+
+    public fun clear_recurring_window_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"clear_recurring_window")), bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(record), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
+        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
+        clear_recurring_window(customer, fleet, record, ctx);
         security_policy::finish(&mut customer.id);
     }
 

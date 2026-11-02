@@ -415,6 +415,127 @@ module sui_edge::customer_tests {
         customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
         ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
     }
+    // Protected organizations change recurrence only through an approved,
+    // intent-bound deploy-class action.
+    fun recurring_setup(requirements: vector<u8>): (ts::Scenario, ID) {
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        fleet_deployment(&mut s, a, did);
+        let mut c = s.take_shared<Customer>(); customer::set_security_requirements_for_testing(&mut c, requirements);
+        ts::return_shared(c); s.next_tx(OWNER); (s, a)
+    }
+    fun set_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord, timezone: vector<u8>): vector<vector<u8>> {
+        vector[std::bcs::to_bytes(&utf8(b"set_recurring_window")), std::bcs::to_bytes(c), std::bcs::to_bytes(f), std::bcs::to_bytes(d),
+            std::bcs::to_bytes(&utf8(timezone)), std::bcs::to_bytes(&vector[64u8]), std::bcs::to_bytes(&vector[120u16]), std::bcs::to_bytes(&vector[120u16]),
+            sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
+    }
+    fun clear_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord): vector<vector<u8>> {
+        vector[std::bcs::to_bytes(&utf8(b"clear_recurring_window")), std::bcs::to_bytes(c), std::bcs::to_bytes(f), std::bcs::to_bytes(d),
+            sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
+    }
+    /// Prepares an action for `arguments`; `attested` simulates the approved
+    /// factor through the test-only package hook.
+    fun prepare_recurring(s: &mut ts::Scenario, set: bool, timezone: vector<u8>, attested: u8, fid: ID): ID {
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        let arguments = if (set) set_recurring_arguments(&c, &f, &d, timezone) else clear_recurring_arguments(&c, &f, &d);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(d);
+        let id = s.next_tx(OWNER).created()[0];
+        if (attested != 0) {
+            let mut action = s.take_shared_by_id<sui_edge::security_policy::Action>(id);
+            sui_edge::security_policy::attest(&mut action, attested); ts::return_shared(action); s.next_tx(OWNER);
+        };
+        id
+    }
+    fun execute_recurring(s: &mut ts::Scenario, set: bool, timezone: vector<u8>, fid: ID, id: ID) {
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        let action = s.take_shared_by_id<sui_edge::security_policy::Action>(id); let clock = sui::clock::create_for_testing(s.ctx());
+        if (set) customer::set_recurring_window_secured(&mut c, &f, &mut d, utf8(timezone), vector[64], vector[120], vector[120], action, &clock, s.ctx())
+        else customer::clear_recurring_window_secured(&mut c, &f, &mut d, action, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.next_tx(OWNER);
+    }
+    fun has_recurring_window(s: &mut ts::Scenario): bool {
+        let d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        let present = sui_edge::deployment_manager::recurring_window(&d).is_some(); ts::return_shared(d); s.next_tx(OWNER); present
+    }
+    #[test]
+    fun protected_customer_sets_and_clears_recurring_window_with_approval() {
+        let (mut s, a) = recurring_setup(vector[1,1,1,1,1,1,1]);
+        let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 1, a); execute_recurring(&mut s, true, b"Europe/Berlin", a, id);
+        assert!(has_recurring_window(&mut s));
+        let id = prepare_recurring(&mut s, false, b"", 1, a); execute_recurring(&mut s, false, b"", a, id);
+        assert!(!has_recurring_window(&mut s));
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun protected_customer_rejects_direct_recurring_window() {
+        let (mut s, a) = recurring_setup(vector[0,1,0,0,0,0,0]);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun protected_customer_rejects_direct_recurring_window_clear() {
+        let (mut s, a) = recurring_setup(vector[0,0,0,0,0,0,0]);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); customer::set_security_requirements_for_testing(&mut c, vector[0,1,0,0,0,0,0]);
+        ts::return_shared(c); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::clear_recurring_window(&c, &f, &mut d, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
+    }
+    #[test]
+    fun recurring_window_enforces_only_the_deploy_class() {
+        // Like set_control: protection of an unrelated class does not block it.
+        let (mut s, a) = recurring_setup(vector[1,0,1,1,1,1,1]);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        customer::clear_recurring_window(&c, &f, &mut d, s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun recurring_window_secured_requires_attestation() {
+        let (mut s, a) = recurring_setup(vector[0,1,0,0,0,0,0]);
+        let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 0, a); execute_recurring(&mut s, true, b"Europe/Berlin", a, id);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::security_policy)]
+    fun recurring_window_secured_rejects_parameter_substitution() {
+        let (mut s, a) = recurring_setup(vector[0,1,0,0,0,0,0]);
+        let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 1, a); execute_recurring(&mut s, true, b"America/New_York", a, id);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::security_policy)]
+    fun recurring_window_secured_rejects_wrong_operation() {
+        let (mut s, a) = recurring_setup(vector[0,1,0,0,0,0,0]);
+        let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 1, a); execute_recurring(&mut s, false, b"", a, id);
+        s.end();
+    }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::security_policy)]
+    fun recurring_window_secured_rejects_stale_schedule() {
+        // Only publication is protected, so a direct schedule change can land
+        // between approval and execution without bumping the policy generation.
+        let (mut s, a) = recurring_setup(vector[1,0,0,0,0,0,0]);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"Europe/Berlin"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.next_tx(OWNER);
+        let id = prepare_recurring(&mut s, false, b"", 0, a);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(a);
+        let mut d = s.take_shared<sui_edge::deployment_manager::DeploymentRecord>();
+        customer::set_recurring_window(&c, &f, &mut d, utf8(b"America/New_York"), vector[64], vector[120], vector[120], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(d); s.next_tx(OWNER);
+        execute_recurring(&mut s, false, b"", a, id);
+        s.end();
+    }
     #[test, expected_failure(abort_code = 2, location = sui_edge::deployment_manager)]
     fun fleet_record_rejects_direct_creator_recurring_window() {
         let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);

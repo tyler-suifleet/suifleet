@@ -58,6 +58,7 @@ pub mod component_catalog {
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISHER: &str = "publisher";
     pub const VALIDATE_HASH: &str = "validate_hash";
@@ -65,7 +66,6 @@ pub mod component_catalog {
     pub const VALIDATE_VERSION: &str = "validate_version";
     pub const VERSION_PUBLISHER: &str = "version_publisher";
     pub const VERSIONS: &str = "versions";
-    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CatalogBinding {
         pub version_id: [u8; 32],
@@ -126,6 +126,7 @@ pub mod customer {
     pub const ACTIVE_DEVICES: &str = "active_devices";
     pub const ADD_CLAIMS: &str = "add_claims";
     pub const ADD_CLAIMS_SECURED: &str = "add_claims_secured";
+    pub const ADD_MANY_TO_GROUP: &str = "add_many_to_group";
     pub const ADD_TO_GROUP: &str = "add_to_group";
     pub const ADD_TO_GROUP_SECURED: &str = "add_to_group_secured";
     pub const ADOPT_BUDGET: &str = "adopt_budget";
@@ -160,6 +161,9 @@ pub mod customer {
     pub const BIND_DEVICE_METADATA_SECURED: &str = "bind_device_metadata_secured";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
     pub const CANCEL_SECURITY_ACTION: &str = "cancel_security_action";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
+    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
+    pub const CLEAR_RECURRING_WINDOW_SECURED: &str = "clear_recurring_window_secured";
     pub const COMMIT_REVISION: &str = "commit_revision";
     pub const COMMIT_REVISION_SECURED: &str = "commit_revision_secured";
     pub const CONFIGURE_CHARGING: &str = "configure_charging";
@@ -196,6 +200,7 @@ pub mod customer {
     pub const HANDOVER: &str = "handover";
     pub const HANDOVER_SECURED: &str = "handover_secured";
     pub const INITIALIZE_SECURITY: &str = "initialize_security";
+    pub const MAX_GROUP_BATCH: &str = "max_group_batch";
     pub const NEW_CATALOG_DEPLOYMENT: &str = "new_catalog_deployment";
     pub const NEW_CATALOG_DEPLOYMENT_SECURED: &str = "new_catalog_deployment_secured";
     pub const NEW_DEPLOYMENT: &str = "new_deployment";
@@ -222,6 +227,7 @@ pub mod customer {
     pub const REMOVE_DEVICE_SECURED: &str = "remove_device_secured";
     pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
     pub const REMOVE_FROM_GROUP_SECURED: &str = "remove_from_group_secured";
+    pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
     pub const RENAME_FLEET: &str = "rename_fleet";
     pub const RENAME_FLEET_SECURED: &str = "rename_fleet_secured";
     pub const REPORT_GROUP_STATUS: &str = "report_group_status";
@@ -255,17 +261,13 @@ pub mod customer {
     pub const SET_DEVICE_REVOKED: &str = "set_device_revoked";
     pub const SET_DEVICE_REVOKED_SECURED: &str = "set_device_revoked_secured";
     pub const SET_ENTITLEMENT: &str = "set_entitlement";
+    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
+    pub const SET_RECURRING_WINDOW_SECURED: &str = "set_recurring_window_secured";
     pub const SET_SECURITY: &str = "set_security";
     pub const SET_SECURITY_SECURED: &str = "set_security_secured";
     pub const USED: &str = "used";
     pub const WITHDRAW_BUDGET: &str = "withdraw_budget";
     pub const WITHDRAW_BUDGET_SECURED: &str = "withdraw_budget_secured";
-    pub const ADD_MANY_TO_GROUP: &str = "add_many_to_group";
-    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
-    pub const MAX_GROUP_BATCH: &str = "max_group_batch";
-    pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
-    pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
-    pub const SET_RECURRING_WINDOW: &str = "set_recurring_window";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
         pub device_id: [u8; 32],
@@ -367,6 +369,14 @@ pub mod customer {
     }
     impl FleetSecurityKey { pub const MOVE_TYPE: &'static str = "customer::FleetSecurityKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupBatchApplied {
+        pub fleet_id: [u8; 32],
+        pub group_id: [u8; 32],
+        pub added: bool,
+        pub count: u64,
+    }
+    impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct GroupCountKey {
         pub device_id: [u8; 32],
     }
@@ -398,14 +408,6 @@ pub mod customer {
         pub policy_id: [u8; 32],
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct GroupBatchApplied {
-        pub fleet_id: [u8; 32],
-        pub group_id: [u8; 32],
-        pub added: bool,
-        pub count: u64,
-    }
-    impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -1403,6 +1405,15 @@ pub mod fleet_settings {
     }
     impl SettingsKey { pub const MOVE_TYPE: &'static str = "fleet_settings::SettingsKey"; }
 }
+pub mod multisig_admin {
+    use super::*;
+    pub const MODULE: &str = "multisig_admin";
+    pub const ADMINISTRATOR: &str = "administrator";
+    pub const APPROVE: &str = "approve";
+    pub const ENROLL: &str = "enroll";
+    pub const ENROLL_SECURED: &str = "enroll_secured";
+    pub const PREPARE_POLICY_CHANGE: &str = "prepare_policy_change";
+}
 pub mod roles {
     use super::*;
     pub const MODULE: &str = "roles";
@@ -1597,15 +1608,6 @@ pub mod security_policy {
         pub dummy_field: bool,
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
-}
-pub mod multisig_admin {
-    use super::*;
-    pub const MODULE: &str = "multisig_admin";
-    pub const ADMINISTRATOR: &str = "administrator";
-    pub const APPROVE: &str = "approve";
-    pub const ENROLL: &str = "enroll";
-    pub const ENROLL_SECURED: &str = "enroll_secured";
-    pub const PREPARE_POLICY_CHANGE: &str = "prepare_policy_change";
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {
