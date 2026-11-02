@@ -931,6 +931,8 @@ def run(args):
             device, cap, group, device_address = (fixture[k] for k in ("device", "device_cap", "group", "device_address"))
             # Report gas: top up only when low.
             device_gas = balance_of(client, device_address)
+            evidence.update(device=device, device_address=device_address,
+                            preexisting_device_grant_mist=device_gas)
             ledger.grant(device_gas)  # Include all pre-existing device gas in the ceiling.
             if device_gas < DEVICE_MINIMUM:
                 funding = DEVICE_FUNDING - device_gas

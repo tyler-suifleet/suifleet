@@ -74,6 +74,67 @@ class LocalStorage(live_common.Walrus):
         self.worker.join()
 
 
+def temporal_ready():
+    try:
+        dm.chain_facts('http://127.0.0.1:9000')
+        return True
+    except Exception:
+        return False
+
+
+def measure_temporal(options, output, root):
+    """Read the original aged decision and charge its optional retirement.
+
+    Separate measurement ledger, never a continuation/reset of a failed fresh run.
+    The production reader must observe the node's actual retention floor.
+    """
+    import rollout_audit_acceptance as audit
+    import testnet_reconcile as reconciler
+    live = live_common.Live(options['wallet'], 'localnet', 1_600_000_000)
+    live.preflight()
+    state_path = Path(options['state'])
+    state = upgrade.load_state(state_path, live.chain, live.operator)
+    receipts = []
+    for key, fixture in state['fixtures'].items():
+        retained = fixture.get('rollout_audit')
+        if not retained:
+            continue
+        assert not retained.get('pending_operation'), 'unresolved audit operation must be reconciled first'
+        manifest = dm.resolve(SimpleNamespace(chain_identifier=live.chain, rpc=live.rpc_url,
+            package=fixture['head_package'], upgrade_cap=fixture['upgrade_cap'],
+            registry=fixture['registry'], network='localnet',
+            publisher='http://127.0.0.1:1', aggregator='http://127.0.0.1:1'))
+        before = dict(retained)
+        # Bounded wait for this actual node to prune; no stand-in floor or event data.
+        deadline = time.monotonic() + 180
+        def step(label, ptb, calls):
+            return audit.checkpointed_step(state_path, state, retained, label, ptb, calls,
+                client=live.client, sign=live.signer(None, live.operator), mutate=live.execute,
+                ledger=live.ledger, operator=live.operator, chain=reconciler.Chain(live.rpc_url))
+        while True:
+            try:
+                audit.run(step, live.client, manifest, fixture['device'], live.evidence, root,
+                    fixture=retained, save=lambda: upgrade.save_state(state_path, state),
+                    operator=live.operator, fixture_key=key, retire=True)
+                break
+            except audit.RetentionPending:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(5)
+        assert retained['record'] == before['record'] and retained['checkpoint'] == before['checkpoint']
+        assert retained['retired'] and retained['proof']['audit']['complete']
+        receipts.append(dict(fixture=key, record=retained['record'], checkpoint=retained['checkpoint'],
+            proof=retained['proof'], cleanup_digest=retained['cleanup_digest']))
+    assert receipts, 'no retained audit to measure'
+    for tx in live.evidence['transactions']:
+        result = live.client('tx-block', tx['digest'])
+        tx['gas_used'] = result['effects']['gasUsed']
+    live.evidence.pop('rollout_audit_pending', None)
+    live.evidence.update(success=True, allowance_used_mist=live.ledger.used,
+                         retained_audits=receipts, end_balance_mist=live.balance())
+    (output / 'temporal.json').write_text(json.dumps(live.evidence, indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-ref', required=True)
@@ -82,6 +143,8 @@ def main():
     parser.add_argument('--evidence-dir', required=True)
     parser.add_argument('--with-security', action='store_true',
                         help='also execute fresh/cached upgrade-security suites against this checkout HEAD')
+    parser.add_argument('--with-temporal', action='store_true',
+                        help='restart the disposable node with real checkpoint pruning, prove retained audit and measure retirement')
     args = parser.parse_args()
     if not Path('/.dockerenv').exists() or {p.name for p in Path('/sys/class/net').iterdir()} != {'lo'}:
         raise SystemExit('requires disposable Docker --network none')
@@ -106,8 +169,15 @@ def main():
         upgrade.ROOT = clone
         os.environ['SUI_CONFIG_DIR'] = str(root / 'node')
         node_log = (root / 'node.log').open('w')
-        node = subprocess.Popen([sui_toolchain.NETWORK_DEFAULT, 'start', '--with-faucet', '--force-regenesis'],
-                                stdout=node_log, stderr=subprocess.STDOUT)
+        node_dir = root / 'node'
+        if args.with_temporal:
+            node_dir.mkdir()
+            subprocess.run([sui_toolchain.NETWORK_DEFAULT, 'genesis', '--working-dir', str(node_dir),
+                            '--epoch-duration-ms', '10000', '--with-faucet'],
+                           check=True, stdout=node_log, stderr=subprocess.STDOUT)
+        node_command = [sui_toolchain.NETWORK_DEFAULT, 'start', '--with-faucet']
+        node_command += ['--network.config', str(node_dir)] if args.with_temporal else ['--force-regenesis']
+        node = subprocess.Popen(node_command, stdout=node_log, stderr=subprocess.STDOUT)
         try:
             for _ in range(120):
                 if node.poll() is not None:
@@ -170,6 +240,20 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
             wallet_gate.contracts_digest = lambda _: upgrade.contracts_digest(clone / 'contracts')
             wallet_gate.run(SimpleNamespace(wallet=options['wallet'], network='localnet',
                 state=options['state'], max_spend_mist=150_000_000, evidence=str(output / 'wallet.json')))
+            if args.with_temporal:
+                # Finish all historical effects reads before enabling actual pruning.
+                # This changes only this disposable node, never the public reader or proof.
+                node.terminate()
+                node.wait(timeout=30)
+                config = node_dir / 'fullnode.yaml'
+                text = config.read_text()
+                text = text.replace('authority-store-pruning-config:\n',
+                    'authority-store-pruning-config:\n  num-epochs-to-retain-for-checkpoints: 2\n'
+                    '  pruning-run-delay-seconds: 1\n  smooth: false\n')
+                config.write_text(text)
+                node = subprocess.Popen(node_command, stdout=node_log, stderr=subprocess.STDOUT)
+                live_common.wait_for(lambda: temporal_ready(), 'pruning node did not restart', timeout=120)
+                measure_temporal(options, output, root)
             (output / 'outcomes.json').write_text(json.dumps(outcomes, indent=2) + '\n')
         finally:
             for storage in LocalStorage.instances:
