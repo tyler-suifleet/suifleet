@@ -124,7 +124,7 @@ module sui_edge::enrollment {
         transfer::share_object(policy); policy_id
     }
     public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        require_condition(policy.operator == authority, ENotOperator);
         changed(policy);
         let mut i = 0;
         while (i < claims.length()) {
@@ -133,14 +133,14 @@ module sui_edge::enrollment {
         };
     }
     public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        require_condition(policy.operator == authority, ENotOperator);
         changed(policy);
         policy.claims.remove(claim);
     }
     public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        require_condition(policy.operator == authority, ENotOperator);
         changed(policy);
-        assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
+        require_condition(df::exists(&policy.id, ManagedKey {}), EClosed);
         policy.remaining = quota; policy.expires_at_ms = expires_at_ms;
         if (close) *df::borrow_mut<ManagedKey, bool>(&mut policy.id, ManagedKey {}) = false;
     }
@@ -162,7 +162,7 @@ module sui_edge::enrollment {
     #[allow(lint(prefer_mut_tx_context))]
     public fun revoke_claim(policy: &mut EnrollmentPolicy, claim: address, ctx: &TxContext) {
         assert_operator(policy, ctx);
-        assert!(policy.claims.contains(claim), EUnknownClaim);
+        require_condition(policy.claims.contains(claim), EUnknownClaim);
         policy.claims.remove(claim);
     }
 
@@ -202,18 +202,18 @@ module sui_edge::enrollment {
     }
     fun enroll_internal(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
-        assert!(object::id(registry) == policy.registry, EWrongRegistry);
+        require_condition(object::id(registry) == policy.registry, EWrongRegistry);
         if (managed) {
-            assert!(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
-        } else assert!(policy.open, EClosed);
-        assert!(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
-        assert!(policy.remaining > 0, EQuotaExhausted);
+            require_condition(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
+        } else require_condition(policy.open, EClosed);
+        require_condition(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
+        require_condition(policy.remaining > 0, EQuotaExhausted);
         let sponsor = ctx.sponsor();
-        assert!(sponsor.is_some(), ENotSponsored);
+        require_condition(sponsor.is_some(), ENotSponsored);
         let claim = sponsor.destroy_some();
         let device_address = ctx.sender();
-        assert!(claim != device_address, ESponsorIsDevice);
-        assert!(policy.claims.contains(claim), EUnknownClaim);
+        require_condition(claim != device_address, ESponsorIsDevice);
+        require_condition(policy.claims.contains(claim), EUnknownClaim);
         policy.claims.remove(claim);
         policy.remaining = policy.remaining - 1;
         policy.enrolled = policy.enrolled + 1;
@@ -239,6 +239,10 @@ module sui_edge::enrollment {
     public fun is_open(policy: &EnrollmentPolicy): bool { policy.open }
 
     fun assert_operator(policy: &EnrollmentPolicy, ctx: &TxContext) {
-        assert!(ctx.sender() == policy.operator, ENotOperator);
+        require_condition(ctx.sender() == policy.operator, ENotOperator);
+    }
+    // Shared abort branch preserves each condition, code and module.
+    fun require_condition(condition: bool, code: u64) {
+        if (!condition) abort code
     }
 }

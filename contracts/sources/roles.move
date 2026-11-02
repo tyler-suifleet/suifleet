@@ -77,7 +77,7 @@ module sui_edge::roles {
     }
 
     public fun allow_group(builder: &mut RoleBuilder, group: &DeviceGroup) {
-        assert!(device_group::admin(group) == builder.operator, ENotGroupAdmin);
+        require_condition(device_group::admin(group) == builder.operator, ENotGroupAdmin);
         let id = device_group::group_id(group);
         if (!builder.groups.contains(&id)) {
             builder.groups.push_back(id);
@@ -86,8 +86,8 @@ module sui_edge::roles {
 
     public fun grant(builder: RoleBuilder, registry: &mut DeviceRegistry, delegate: address, ctx: &mut TxContext) {
         let RoleBuilder { operator, groups } = builder;
-        assert!(ctx.sender() == operator, ENotOperator);
-        assert!(!groups.is_empty(), ENoGroups);
+        require_condition(ctx.sender() == operator, ENotOperator);
+        require_condition(!groups.is_empty(), ENoGroups);
         let role = DeployerRole { id: object::new(ctx), operator, groups };
         let role_id = object::id(&role);
         df::add(device_registry::uid_mut(registry), RoleKey { role_id }, operator);
@@ -99,9 +99,9 @@ module sui_edge::roles {
     #[allow(lint(prefer_mut_tx_context))]
     public fun revoke(registry: &mut DeviceRegistry, role_id: ID, ctx: &TxContext) {
         let key = RoleKey { role_id };
-        assert!(df::exists(device_registry::uid(registry), key), ERoleRevoked);
+        require_condition(df::exists(device_registry::uid(registry), key), ERoleRevoked);
         let operator: address = *df::borrow(device_registry::uid(registry), key);
-        assert!(ctx.sender() == operator, ENotOperator);
+        require_condition(ctx.sender() == operator, ENotOperator);
         let _: address = df::remove(device_registry::uid_mut(registry), key);
         event::emit(RoleRevoked { role_id, operator });
     }
@@ -122,11 +122,11 @@ module sui_edge::roles {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        assert!(is_active(registry, role), ERoleRevoked);
-        assert!(!target_groups.is_empty(), ENoTargets);
+        require_condition(is_active(registry, role), ERoleRevoked);
+        require_condition(!target_groups.is_empty(), ENoTargets);
         let mut i = 0;
         while (i < target_groups.length()) {
-            assert!(role.groups.contains(&target_groups[i]), EOutsideScope);
+            require_condition(role.groups.contains(&target_groups[i]), EOutsideScope);
             i = i + 1;
         };
         let deployment_id = deployment_manager::create_delegated(role.operator, component_name, version,
@@ -143,4 +143,8 @@ module sui_edge::roles {
     }
     public fun role_operator(role: &DeployerRole): address { role.operator }
     public fun role_groups(role: &DeployerRole): &vector<ID> { &role.groups }
+    // Shared abort branch preserves each condition, code and module.
+    fun require_condition(condition: bool, code: u64) {
+        if (!condition) abort code
+    }
 }

@@ -299,7 +299,7 @@ module sui_edge::fleet_budget {
     public fun deposit(budget: &mut FleetBudget, cap: &BudgetOwnerCap, coin: Coin<SUI>) {
         assert_owner(budget, cap);
         let amount = coin.value();
-        assert!(amount > 0, EZeroAmount);
+        require_condition(amount > 0, EZeroAmount);
         budget.balance.join(coin.into_balance());
         budget.total_deposited = budget.total_deposited + amount;
         event::emit(Deposited { budget_id: object::id(budget), amount, balance: budget.balance.value() });
@@ -309,8 +309,8 @@ module sui_edge::fleet_budget {
     /// devices; take unused reserves back first with `reclaim_reserve`.
     public fun withdraw(budget: &mut FleetBudget, cap: &BudgetOwnerCap, amount: u64, ctx: &mut TxContext): Coin<SUI> {
         assert_owner(budget, cap);
-        assert!(amount > 0, EZeroAmount);
-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
+        require_condition(amount > 0, EZeroAmount);
+        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
         budget.total_withdrawn = budget.total_withdrawn + amount;
         let coin = coin::take(&mut budget.balance, amount, ctx);
         event::emit(Withdrawn { budget_id: object::id(budget), amount, balance: budget.balance.value() });
@@ -348,7 +348,7 @@ module sui_edge::fleet_budget {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
-        assert!(budget.version == VERSION, EWrongVersion);
+        require_condition(budget.version == VERSION, EWrongVersion);
         enroll_internal(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
     }
 
@@ -356,7 +356,7 @@ module sui_edge::fleet_budget {
         budget: &mut FleetBudget, cap: &BudgetOwnerCap, registry: &DeviceRegistry,
         owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
-        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
+        require_condition(budget.version == MANAGED_VERSION, EWrongVersion);
         enroll_internal(budget, cap, registry, owner_cap, float, reserve, clock, ctx)
     }
 
@@ -365,17 +365,17 @@ module sui_edge::fleet_budget {
         owner_cap: &DeviceOwnerCap, float: u64, reserve: u64, clock: &Clock, ctx: &mut TxContext,
     ): ID {
         assert_owner(budget, cap);
-        assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
+        require_condition(object::id(registry) == budget.registry_id, EWrongRegistry);
         let device_id = device_registry::owner_cap_device_id(owner_cap);
-        assert!(!df::exists(&budget.id, DeviceKey { device_id }), EAlreadyEnrolled);
+        require_condition(!df::exists(&budget.id, DeviceKey { device_id }), EAlreadyEnrolled);
         let identity = device_registry::identity(registry, device_id);
-        assert!(identity.is_some(), EInactiveDevice);
+        require_condition(identity.is_some(), EInactiveDevice);
         let identity = identity.destroy_some();
-        assert!(device_registry::is_custodied(registry, device_id) && !device_registry::identity_revoked(&identity), EInactiveDevice);
-        assert!(device_registry::identity_owner_cap(&identity) == object::id(owner_cap), EOwnerChanged);
+        require_condition(device_registry::is_custodied(registry, device_id) && !device_registry::identity_revoked(&identity), EInactiveDevice);
+        require_condition(device_registry::identity_owner_cap(&identity) == object::id(owner_cap), EOwnerChanged);
         let limits = budget.default_limits;
-        assert!(float <= limits.float_cap, EOverFloat);
-        assert!(reserve <= MAX_LIMIT_MIST, EOverReserve);
+        require_condition(float <= limits.float_cap, EOverFloat);
+        require_condition(reserve <= MAX_LIMIT_MIST, EOverReserve);
         let now = clock.timestamp_ms();
         let budget_id = object::id(budget);
         let mut account = GasAccount {
@@ -408,8 +408,8 @@ module sui_edge::fleet_budget {
     public fun fund_reserve(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, amount: u64) {
         assert_owner(budget, cap);
         assert_current(budget, account);
-        assert!(amount > 0, EZeroAmount);
-        assert!(account.reserve.value() + amount <= MAX_LIMIT_MIST, EOverReserve);
+        require_condition(amount > 0, EZeroAmount);
+        require_condition(account.reserve.value() + amount <= MAX_LIMIT_MIST, EOverReserve);
         allocate(budget, account, amount);
     }
 
@@ -417,9 +417,9 @@ module sui_edge::fleet_budget {
     /// Works on a removed (closed) account too.
     public fun reclaim_reserve(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount, amount: u64) {
         assert_owner(budget, cap);
-        assert!(account.budget_id == object::id(budget), EWrongAccount);
-        assert!(amount > 0, EZeroAmount);
-        assert!(account.reserve.value() >= amount, EInsufficientBalance);
+        require_condition(account.budget_id == object::id(budget), EWrongAccount);
+        require_condition(amount > 0, EZeroAmount);
+        require_condition(account.reserve.value() >= amount, EInsufficientBalance);
         reclaim(budget, account, amount);
     }
 
@@ -435,15 +435,15 @@ module sui_edge::fleet_budget {
         ctx: &mut TxContext,
     ) {
         assert_owner(budget, cap);
-        assert!(object::id(registry) == budget.registry_id, EWrongRegistry);
+        require_condition(object::id(registry) == budget.registry_id, EWrongRegistry);
         assert_current(budget, account);
-        assert!(amount > 0, EZeroAmount);
-        assert!(amount <= account.limits.float_cap, EOverFloat);
+        require_condition(amount > 0, EZeroAmount);
+        require_condition(amount <= account.limits.float_cap, EOverFloat);
         let device_id = account.device_id;
         let identity = device_registry::identity(registry, device_id);
-        assert!(identity.is_some(), EInactiveDevice);
+        require_condition(identity.is_some(), EInactiveDevice);
         let identity = identity.destroy_some();
-        assert!(!device_registry::identity_revoked(&identity), EInactiveDevice);
+        require_condition(!device_registry::identity_revoked(&identity), EInactiveDevice);
         account.total_drawn = account.total_drawn + amount;
         pay(budget, device_id, device_registry::identity_signer(&identity), amount, ctx);
     }
@@ -473,7 +473,7 @@ module sui_edge::fleet_budget {
         remove_internal(budget, cap, account);
     }
     public(package) fun remove_managed(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
-        assert!(budget.version == MANAGED_VERSION, EWrongVersion);
+        require_condition(budget.version == MANAGED_VERSION, EWrongVersion);
         remove_internal(budget, cap, account);
     }
     fun remove_internal(budget: &mut FleetBudget, cap: &BudgetOwnerCap, account: &mut GasAccount) {
@@ -491,8 +491,8 @@ module sui_edge::fleet_budget {
     /// Move the budget to this package version. Older versions then refuse
     /// every mutating call on it and its accounts.
     public fun migrate(budget: &mut FleetBudget, cap: &BudgetOwnerCap) {
-        assert!(object::id(cap) == budget.owner_cap_id && cap.budget_id == object::id(budget), ENotOwner);
-        assert!(budget.version < VERSION, ENotUpgrade);
+        require_condition(object::id(cap) == budget.owner_cap_id && cap.budget_id == object::id(budget), ENotOwner);
+        require_condition(budget.version < VERSION, ENotUpgrade);
         budget.version = VERSION;
     }
 
@@ -577,7 +577,7 @@ module sui_edge::fleet_budget {
     // ── Internal ──────────────────────────────────────────────────────────────
 
     fun assert_valid(limits: &Limits) {
-        assert!(
+        require_condition(
             limits.period_ms > 0 && limits.max_draws_per_period > 0
                 && limits.float_cap <= MAX_LIMIT_MIST && limits.period_allowance <= MAX_LIMIT_MIST,
             EInvalidLimits,
@@ -586,10 +586,10 @@ module sui_edge::fleet_budget {
 
     /// The account belongs to this budget and is its device's current one.
     fun assert_current(budget: &FleetBudget, account: &GasAccount) {
-        assert!(account.budget_id == object::id(budget), EWrongAccount);
+        require_condition(account.budget_id == object::id(budget), EWrongAccount);
         let key = DeviceKey { device_id: account.device_id };
-        assert!(!account.closed && df::exists(&budget.id, key), ENotEnrolled);
-        assert!(*df::borrow<DeviceKey, ID>(&budget.id, key) == object::id(account), EWrongAccount);
+        require_condition(!account.closed && df::exists(&budget.id, key), ENotEnrolled);
+        require_condition(*df::borrow<DeviceKey, ID>(&budget.id, key) == object::id(account), EWrongAccount);
     }
 
     fun roll_period(account: &mut GasAccount, now: u64) {
@@ -601,7 +601,7 @@ module sui_edge::fleet_budget {
     }
 
     fun allocate(budget: &mut FleetBudget, account: &mut GasAccount, amount: u64) {
-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
+        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
         account.reserve.join(budget.balance.split(amount));
         budget.total_allocated = budget.total_allocated + amount;
         emit_reserve(budget, account, true, amount);
@@ -638,7 +638,7 @@ module sui_edge::fleet_budget {
     }
 
     fun pay(budget: &mut FleetBudget, device_id: ID, recipient: address, amount: u64, ctx: &mut TxContext) {
-        assert!(budget.balance.value() >= amount, EInsufficientBalance);
+        require_condition(budget.balance.value() >= amount, EInsufficientBalance);
         budget.total_paid = budget.total_paid + amount;
         transfer::public_transfer(coin::take(&mut budget.balance, amount, ctx), recipient);
         event::emit(DeviceFunded { budget_id: object::id(budget), device_id, device_address: recipient, amount, balance: budget.balance.value() });
@@ -707,9 +707,9 @@ module sui_edge::fleet_budget {
     /// custodied capability; unrelated old accounts remain retired by identity.
     public(package) fun rebind_account(budget: &FleetBudget, account: &mut GasAccount, registry: &DeviceRegistry, cap: &DeviceOwnerCap) {
         assert_current(budget, account);
-        assert!(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
+        require_condition(object::id(registry) == budget.registry_id && account.device_id == device_registry::owner_cap_device_id(cap), EWrongAccount);
         let identity = device_registry::identity(registry, account.device_id).destroy_some();
-        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
+        require_condition(device_registry::identity_owner_cap(&identity) == object::id(cap), EOwnerChanged);
         account.owner_cap_id = object::id(cap);
     }
 
@@ -720,4 +720,8 @@ module sui_edge::fleet_budget {
 
     #[test_only]
     public fun set_version_for_testing(budget: &mut FleetBudget, version: u64) { budget.version = version; }
+    // Shared abort branch preserves each condition, code and module.
+    fun require_condition(condition: bool, code: u64) {
+        if (!condition) abort code
+    }
 }

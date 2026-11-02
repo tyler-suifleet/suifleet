@@ -130,10 +130,10 @@ module sui_edge::fleet_inbox {
     /// the group's admin, as devices require.
     public fun announce_group(group: &mut DeviceGroup, deployment: &DeploymentRecord, clock: &Clock, ctx: &mut TxContext) {
         let creator = deployment_manager::creator(deployment);
-        assert!(ctx.sender() == creator, ENotCreator);
-        assert!(device_group::admin(group) == creator, ENotAdmin);
+        require_condition(ctx.sender() == creator, ENotCreator);
+        require_condition(device_group::admin(group) == creator, ENotAdmin);
         let group_id = device_group::group_id(group);
-        assert!(deployment_manager::target_groups(deployment).contains(&group_id), ENotTargeted);
+        require_condition(deployment_manager::target_groups(deployment).contains(&group_id), ENotTargeted);
         let uid = device_group::uid_mut(group);
         if (!df::exists(uid, HeadKey {})) {
             df::add(uid, HeadKey {}, empty_head());
@@ -152,11 +152,11 @@ module sui_edge::fleet_inbox {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+        require_condition(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
         let device_id = inbox.device_id;
-        assert!(device_registry::owner_cap_device_id(cap) == device_id, EWrongInbox);
+        require_condition(device_registry::owner_cap_device_id(cap) == device_id, EWrongInbox);
         assert_operator(registry, cap, device_id);
-        assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
+        require_condition(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
         let target = object::id(inbox);
         bump(&mut inbox.head, target, deployment, clock);
     }
@@ -165,7 +165,7 @@ module sui_edge::fleet_inbox {
 
     /// `device_group::add_device`, also listing the group in the device's inbox.
     public fun add_member(group: &mut DeviceGroup, inbox: &mut DeviceInbox, device: &Device, ctx: &mut TxContext) {
-        assert!(device_registry::device_id(device) == inbox.device_id, EWrongInbox);
+        require_condition(device_registry::device_id(device) == inbox.device_id, EWrongInbox);
         device_group::add_device(group, device, ctx);
         list_group(inbox, device_group::group_id(group));
     }
@@ -180,13 +180,13 @@ module sui_edge::fleet_inbox {
     /// inboxes, or through `device_group::add_device`). Permissionless: it
     /// only records verified membership.
     public fun follow_group(inbox: &mut DeviceInbox, group: &DeviceGroup) {
-        assert!(device_group::contains_device(group, inbox.device_id), ENotMember);
+        require_condition(device_group::contains_device(group, inbox.device_id), ENotMember);
         list_group(inbox, device_group::group_id(group));
     }
 
     /// Unlist a group (for example a deleted one). The device's operator only.
     public fun forget_group(inbox: &mut DeviceInbox, registry: &DeviceRegistry, cap: &DeviceOwnerCap, group_id: ID) {
-        assert!(device_registry::owner_cap_device_id(cap) == inbox.device_id, EWrongInbox);
+        require_condition(device_registry::owner_cap_device_id(cap) == inbox.device_id, EWrongInbox);
         assert_operator(registry, cap, inbox.device_id);
         unlist_group(inbox, group_id);
     }
@@ -217,10 +217,10 @@ module sui_edge::fleet_inbox {
     /// must still be in custody: a stale or deregistered device's cap fails.
     fun assert_operator(registry: &DeviceRegistry, cap: &DeviceOwnerCap, device_id: ID) {
         let identity = device_registry::identity(registry, device_id);
-        assert!(identity.is_some(), ENotOperator);
+        require_condition(identity.is_some(), ENotOperator);
         let identity = identity.destroy_some();
-        assert!(device_registry::is_custodied(registry, device_id), ENotOperator);
-        assert!(device_registry::identity_owner_cap(&identity) == object::id(cap), ENotOperator);
+        require_condition(device_registry::is_custodied(registry, device_id), ENotOperator);
+        require_condition(device_registry::identity_owner_cap(&identity) == object::id(cap), ENotOperator);
     }
 
     fun bump(head: &mut Head, target: ID, deployment: &DeploymentRecord, clock: &Clock) {
@@ -246,7 +246,7 @@ module sui_edge::fleet_inbox {
 
     fun list_group(inbox: &mut DeviceInbox, group_id: ID) {
         if (!inbox.groups.contains(&group_id)) {
-            assert!(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
+            require_condition(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
             inbox.groups.push_back(group_id);
         };
     }
@@ -254,5 +254,9 @@ module sui_edge::fleet_inbox {
     fun unlist_group(inbox: &mut DeviceInbox, group_id: ID) {
         let (found, i) = inbox.groups.index_of(&group_id);
         if (found) { inbox.groups.remove(i); };
+    }
+    // Shared abort branch preserves each condition, code and module.
+    fun require_condition(condition: bool, code: u64) {
+        if (!condition) abort code
     }
 }

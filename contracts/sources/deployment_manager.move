@@ -100,9 +100,9 @@ module sui_edge::deployment_manager {
         std::bcs::to_bytes(&parts)
     }
     public(package) fun pause_as(deployment: &mut DeploymentRecord, authority: address) {
-        assert!(deployment.creator == authority, ENotCreator);
+        require_condition(deployment.creator == authority, ENotCreator);
         let mut c = control(deployment);
-        assert!(c.state != 2, ECancelled);
+        require_condition(c.state != 2, ECancelled);
         c.state = 1;
         c.revision = c.revision + 1;
         if (df::exists(&deployment.id, ControlKey {})) {
@@ -111,15 +111,15 @@ module sui_edge::deployment_manager {
     }
     public(package) fun set_control_as(deployment: &mut DeploymentRecord, state: u8,
         not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
-        assert!(state <= 2, EInvalidControlState);
-        assert!(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
-        assert!((window_start_ms == 0 && window_end_ms == 0) ||
+        require_condition(authority == deployment.creator, ENotCreator);
+        require_condition(state <= 2, EInvalidControlState);
+        require_condition(expires_ms == 0 || expires_ms > not_before_ms, EInvalidSchedule);
+        require_condition((window_start_ms == 0 && window_end_ms == 0) ||
             window_end_ms > window_start_ms, EInvalidSchedule);
-        assert!(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
+        require_condition(notice_ms <= 604800000, EInvalidSchedule); // at most seven days
         let revision = if (df::exists(&deployment.id, ControlKey {})) {
             let previous: Control = df::remove(&mut deployment.id, ControlKey {});
-            assert!(previous.state != 2, ECancelled);
+            require_condition(previous.state != 2, ECancelled);
             previous.revision + 1
         } else { 1 };
         df::add(&mut deployment.id, ControlKey {}, Control {
@@ -307,11 +307,11 @@ module sui_edge::deployment_manager {
 
     fun assert_recipe_hash(recipe_sha256: &String) {
         let bytes = recipe_sha256.as_bytes();
-        assert!(bytes.length() == 64, EInvalidRecipeHash);
+        require_condition(bytes.length() == 64, EInvalidRecipeHash);
         let mut i = 0;
         while (i < bytes.length()) {
             let byte = bytes[i];
-            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
+            require_condition((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
             i = i + 1;
         };
     }
@@ -345,7 +345,7 @@ module sui_edge::deployment_manager {
         remove_catalog_binding_as<K, V>(deployment, key, ctx.sender());
     }
     public(package) fun remove_catalog_binding_as<K: copy + drop + store, V: store + drop>(deployment: &mut DeploymentRecord, key: K, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
+        require_condition(authority == deployment.creator, ENotCreator);
         let _: V = df::remove(&mut deployment.id, key);
         if (df::exists(&deployment.id, ReceiptShardKey {})) {
             let directory: &mut ReceiptDirectory = df::borrow_mut(&mut deployment.id, ReceiptShardKey {});
@@ -364,7 +364,7 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): DeploymentRecord {
-        assert!(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
+        require_condition(!target_groups.is_empty() || !target_devices.is_empty(), ENoTargets);
 
         let mut record = DeploymentRecord {
             id: object::new(ctx),
@@ -432,7 +432,7 @@ module sui_edge::deployment_manager {
         device_cap::assert_active(cap, registry, ctx);
         let device_id = device_cap::device_id(cap);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetDevicesKey {});
-        assert!(targets.contains(&device_id), ENotTargeted);
+        require_condition(targets.contains(&device_id), ENotTargeted);
         record_status(deployment, cap, status, ctx);
     }
 
@@ -448,9 +448,9 @@ module sui_edge::deployment_manager {
     ) {
         device_cap::assert_active(cap, registry, ctx);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetGroupsKey {});
-        assert!(targets.contains(&device_group::group_id(group)), ENotTargeted);
-        assert!(device_group::admin(group) == deployment.creator, ENotTargeted);
-        assert!(device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
+        require_condition(targets.contains(&device_group::group_id(group)), ENotTargeted);
+        require_condition(device_group::admin(group) == deployment.creator, ENotTargeted);
+        require_condition(device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
         record_status(deployment, cap, status, ctx);
     }
 
@@ -465,15 +465,15 @@ module sui_edge::deployment_manager {
     }
 
     fun record_status(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        assert!(!df::exists(&deployment.id, CustomerFleetKey {}), EPackageOutdated);
+        require_condition(!df::exists(&deployment.id, CustomerFleetKey {}), EPackageOutdated);
         record_status_internal(deployment, cap, status, ctx);
     }
     public(package) fun record_customer_status(deployment: &mut DeploymentRecord, fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        assert!(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
+        require_condition(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
         record_status_internal(deployment, cap, status, ctx);
     }
     fun record_status_internal(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
 
         let device_id = device_cap::device_id(cap);
         if (deployment.schema_version == 3) {
@@ -498,7 +498,7 @@ module sui_edge::deployment_manager {
     }
 
     public(package) fun bind_customer(deployment: &mut DeploymentRecord, fleet_id: ID) {
-        assert!(!df::exists(&deployment.id, ReceiptShardKey {}), EPackageOutdated);
+        require_condition(!df::exists(&deployment.id, ReceiptShardKey {}), EPackageOutdated);
         // Preserve already-authoritative historical receipts at the cutover.
         let receipts = receipts_mut(deployment);
         receipts.version = 3;
@@ -534,7 +534,7 @@ module sui_edge::deployment_manager {
         delete_as(deployment, ctx.sender());
     }
     public(package) fun delete_for_customer(mut deployment: DeploymentRecord, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
+        require_condition(authority == deployment.creator, ENotCreator);
         finish_receipt_cleanup(&mut deployment);
         if (deployment.schema_version == 3) {
             finish_decision_audit(&mut deployment, authority);
@@ -548,11 +548,11 @@ module sui_edge::deployment_manager {
         delete_as(deployment, authority);
     }
     fun delete_as(mut deployment: DeploymentRecord, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
+        require_condition(authority == deployment.creator, ENotCreator);
 
         finish_receipt_cleanup(&mut deployment);
         // Catalog records require their defining module to remove the binding first.
-        assert!(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
+        require_condition(deployment.schema_version == SCHEMA_VERSION, EPackageOutdated);
         if (df::exists(&deployment.id, ControlKey {})) {
             let _: Control = df::remove(&mut deployment.id, ControlKey {});
         };
@@ -583,11 +583,11 @@ module sui_edge::deployment_manager {
     /// Authority changes in place so every still-callable package checks the
     /// recipient as creator. Preserve payload, targets, receipts and controls.
     public(package) fun handover(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
-        assert!(ctx.sender() == d.creator, ENotCreator);
+        require_condition(ctx.sender() == d.creator, ENotCreator);
         // Catalog-bound records resolve dependencies through the original
         // publisher index. Supersede them under a recipient-owned catalog;
         // changing only creator would retain the old publisher as an authority.
-        assert!(receipt_schema(d) != 2, EPackageOutdated);
+        require_condition(receipt_schema(d) != 2, EPackageOutdated);
         d.creator = recipient;
     }
 
@@ -595,8 +595,8 @@ module sui_edge::deployment_manager {
     // localnet harness also executes the actual published base bytecode.
     #[test_only]
     public(package) fun legacy_handover_for_testing(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
-        assert!(ctx.sender() == d.creator, ENotCreator);
-        assert!(d.schema_version != 2, EPackageOutdated);
+        require_condition(ctx.sender() == d.creator, ENotCreator);
+        require_condition(d.schema_version != 2, EPackageOutdated);
         d.creator = recipient;
     }
 
@@ -645,11 +645,11 @@ module sui_edge::deployment_manager {
         begin_sharded_receipts_as(d, ctx.sender(), ctx);
     }
     public(package) fun begin_sharded_receipts_as(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
-        assert!(authority == d.creator, ENotCreator);
+        require_condition(authority == d.creator, ENotCreator);
         if (df::exists(&d.id, ReceiptShardKey {})) return;
         // Catalog bindings need relocating by their defining module first; an
         // old catalog delete could otherwise remove a binding and reset schema.
-        assert!(d.schema_version == 1 || d.schema_version == 3, EPackageOutdated);
+        require_condition(d.schema_version == 1 || d.schema_version == 3, EPackageOutdated);
         receipts_mut(d);
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
         receipts.version = RECEIPTS_VERSION;
@@ -683,9 +683,9 @@ module sui_edge::deployment_manager {
     public(package) fun begin_catalog_receipts_as<K: copy + drop + store, N: copy + drop + store, V: store>(
         d: &mut DeploymentRecord, old_key: K, new_key: N, authority: address, ctx: &mut TxContext,
     ) {
-        assert!(authority == d.creator, ENotCreator);
+        require_condition(authority == d.creator, ENotCreator);
         if (df::exists(&d.id, ReceiptShardKey {})) return;
-        assert!(d.schema_version == 2, EPackageOutdated);
+        require_condition(d.schema_version == 2, EPackageOutdated);
         let binding: V = df::remove(&mut d.id, old_key);
         df::add(&mut d.id, new_key, binding);
         d.schema_version = 1;
@@ -697,18 +697,18 @@ module sui_edge::deployment_manager {
         d.schema_version = 2;
     }
     fun assert_bound(d: &DeploymentRecord, shard: &ReceiptShard) {
-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
         let directory = receipt_directory(d);
-        assert!(shard.deployment == object::id(d) && shard.index < SHARD_COUNT &&
+        require_condition(shard.deployment == object::id(d) && shard.index < SHARD_COUNT &&
             directory.roots[shard.index] == object::id(shard), EShard);
     }
     /// At most 64 old entries inspected per call. The v2 snapshot is frozen;
     /// replaying a finished root is idempotent. Finish makes all roots visible
     /// together, never a partial authoritative fleet view.
     public fun migrate_receipt_chunk(d: &mut DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
-        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+        require_condition(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
         assert_bound(d, shard);
-        assert!(!receipt_directory(d).retiring, ECleanup);
+        require_condition(!receipt_directory(d).retiring, ECleanup);
         if (shard.migrated) return;
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         let end = std::u64::min(shard.migration_cursor + limit, receipts.statuses.length());
@@ -724,9 +724,9 @@ module sui_edge::deployment_manager {
         };
     }
     public fun finish_receipt_migration(d: &mut DeploymentRecord) {
-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
-        assert!(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
+        require_condition(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
         directory.ready = true;
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
         receipts.statuses = vec_map::empty();
@@ -735,11 +735,11 @@ module sui_edge::deployment_manager {
     fun assert_readable(d: &DeploymentRecord, shard: &ReceiptShard) {
         assert_bound(d, shard);
         let directory = receipt_directory(d);
-        assert!(directory.ready && !directory.retiring, EBarrier);
+        require_condition(directory.ready && !directory.retiring, EBarrier);
     }
     public fun receipt_status_v3(d: &DeploymentRecord, shard: &ReceiptShard, device: ID): Option<u8> {
         assert_readable(d, shard);
-        assert!(receipt_shard_index(device) == shard.index, EShard);
+        require_condition(receipt_shard_index(device) == shard.index, EShard);
         let key = ReceiptKey { device };
         if (df::exists(&shard.id, key)) {
             let receipt: &ShardedReceipt = df::borrow(&shard.id, key);
@@ -748,7 +748,7 @@ module sui_edge::deployment_manager {
     }
     public fun receipt_page_v3(d: &DeploymentRecord, shard: &ReceiptShard, start: u64, limit: u64): (vector<ID>, vector<u8>, u64) {
         assert_readable(d, shard);
-        assert!(limit > 0 && limit <= CHUNK_LIMIT && start <= shard.count, EChunk);
+        require_condition(limit > 0 && limit <= CHUNK_LIMIT && start <= shard.count, EChunk);
         let end = std::u64::min(start + limit, shard.count);
         let mut devices = vector[]; let mut statuses = vector[]; let mut i = start;
         while (i < end) {
@@ -759,7 +759,7 @@ module sui_edge::deployment_manager {
         (devices, statuses, end)
     }
     fun put_receipt(shard: &mut ReceiptShard, device: ID, status: u8, live: bool) {
-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
         let key = ReceiptKey { device };
         if (df::exists(&shard.id, key)) {
             let receipt: &mut ShardedReceipt = df::borrow_mut(&mut shard.id, key);
@@ -774,43 +774,43 @@ module sui_edge::deployment_manager {
     fun record_sharded(d: &DeploymentRecord, shard: &mut ReceiptShard, cap: &DeviceCap, status: u8, ctx: &TxContext) {
         assert_readable(d, shard);
         let device = device_cap::device_id(cap);
-        assert!(receipt_shard_index(device) == shard.index, EShard);
+        require_condition(receipt_shard_index(device) == shard.index, EShard);
         if (receipt_schema(d) == 3) {
             let r = rollout(d); let (found, i) = r.members.index_of(&device);
-            assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+            require_condition(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
         };
         put_receipt(shard, device, status, true);
         event::emit(DeviceStatusReported { deployment_id: object::id(d), device_id: device, status, reporter: ctx.sender() });
     }
     public fun report_status_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
         cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
-        assert!(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
+        require_condition(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
         device_cap::assert_active(cap, registry, ctx);
-        assert!(target_devices(d).contains(&device_cap::device_id(cap)), ENotTargeted);
+        require_condition(target_devices(d).contains(&device_cap::device_id(cap)), ENotTargeted);
         record_sharded(d, shard, cap, status, ctx);
     }
     public fun report_status_for_group_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
         cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &mut TxContext) {
-        assert!(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
+        require_condition(!df::exists(&d.id, CustomerFleetKey {}), EPackageOutdated);
         device_cap::assert_active(cap, registry, ctx);
-        assert!(target_groups(d).contains(&device_group::group_id(group)) && device_group::admin(group) == d.creator &&
+        require_condition(target_groups(d).contains(&device_group::group_id(group)) && device_group::admin(group) == d.creator &&
             device_group::contains_device(group, device_cap::device_id(cap)), ENotTargeted);
         record_sharded(d, shard, cap, status, ctx);
     }
     public(package) fun record_customer_status_v4(d: &DeploymentRecord, shard: &mut ReceiptShard,
         fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        assert!(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
+        require_condition(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, ENotTargeted);
         record_sharded(d, shard, cap, status, ctx);
     }
     /// Coordinator copies only chain-authoritative shard outcomes. Reporting
     /// never mutates the deployment; sticky failures survive report overwrites.
     public fun sync_rollout_receipts(d: &mut DeploymentRecord, shard: &ReceiptShard, devices: vector<ID>) {
         assert_readable(d, shard);
-        assert!(devices.length() <= CHUNK_LIMIT, EChunk);
+        require_condition(devices.length() <= CHUNK_LIMIT, EChunk);
         let mut i = 0;
         while (i < devices.length()) {
             let device = devices[i];
-            assert!(receipt_shard_index(device) == shard.index, EShard);
+            require_condition(receipt_shard_index(device) == shard.index, EShard);
             if (df::exists(&shard.id, ReceiptKey { device })) {
                 let receipt: ShardedReceipt = *df::borrow(&shard.id, ReceiptKey { device });
                 // Pre-rollout v2 packages can write receipts without a grant.
@@ -826,16 +826,16 @@ module sui_edge::deployment_manager {
         begin_receipt_cleanup_as(d, ctx.sender());
     }
     public(package) fun begin_receipt_cleanup_as(d: &mut DeploymentRecord, authority: address) {
-        assert!(authority == d.creator, ENotCreator);
-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(authority == d.creator, ENotCreator);
+        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         directory.retiring = true; directory.ready = false;
         event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
     }
     public fun cleanup_receipt_chunk(d: &DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
         assert_bound(d, shard);
-        assert!(receipt_directory(d).retiring, ECleanup);
-        assert!(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
+        require_condition(receipt_directory(d).retiring, ECleanup);
+        require_condition(limit > 0 && limit <= CHUNK_LIMIT, EChunk);
         let mut n = 0;
         while (shard.count > 0 && n < limit) {
             shard.count = shard.count - 1;
@@ -845,7 +845,7 @@ module sui_edge::deployment_manager {
     }
     public fun retire_receipt_shard(d: &mut DeploymentRecord, shard: ReceiptShard) {
         assert_bound(d, &shard);
-        assert!(receipt_directory(d).retiring && shard.count == 0, ECleanup);
+        require_condition(receipt_directory(d).retiring && shard.count == 0, ECleanup);
         let ReceiptShard { id, deployment: _, index, count: _, migration_cursor: _, migrated: _ } = shard;
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         *(&mut directory.roots[index]) = @0x0.to_id();
@@ -854,9 +854,9 @@ module sui_edge::deployment_manager {
     }
     fun finish_receipt_cleanup(d: &mut DeploymentRecord) {
         if (!df::exists(&d.id, ReceiptShardKey {})) return;
-        assert!(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(receipts_version(d) == RECEIPTS_VERSION, EPackageOutdated);
         let directory: &ReceiptDirectory = df::borrow(&d.id, ReceiptShardKey {});
-        assert!(directory.retiring && directory.remaining == 0, ECleanup);
+        require_condition(directory.retiring && directory.remaining == 0, ECleanup);
         let ReceiptDirectory { roots: _, original_schema, migrated: _, ready: _, retiring: _, remaining: _ } = df::remove(&mut d.id, ReceiptShardKey {});
         d.schema_version = original_schema;
         let groups: vector<ID> = df::remove(&mut d.id, ShardedTargetGroupsKey {});
@@ -896,15 +896,15 @@ module sui_edge::deployment_manager {
 
     /// Authoritative statuses: only reports from an active device identity.
     public fun receipt_statuses(d: &DeploymentRecord): &VecMap<ID, u8> {
-        assert!(has_receipts(d), ENoReceipts);
-        assert!(has_current_receipts(d), EStaleReceipts);
-        assert!(receipts_version(d) == legacy_receipts_version(d), EPackageOutdated);
+        require_condition(has_receipts(d), ENoReceipts);
+        require_condition(has_current_receipts(d), EStaleReceipts);
+        require_condition(receipts_version(d) == legacy_receipts_version(d), EPackageOutdated);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         &receipts.statuses
     }
 
     public fun receipt_status(d: &DeploymentRecord, device_id: ID): Option<u8> {
-        assert!(!has_receipts(d) || receipts_version(d) <= legacy_receipts_version(d), EPackageOutdated);
+        require_condition(!has_receipts(d) || receipts_version(d) <= legacy_receipts_version(d), EPackageOutdated);
         if (!has_current_receipts(d)) return option::none();
         let statuses = receipt_statuses(d);
         if (statuses.contains(&device_id)) option::some(*statuses.get(&device_id))
@@ -912,7 +912,7 @@ module sui_edge::deployment_manager {
     }
 
     public fun receipts_version(d: &DeploymentRecord): u64 {
-        assert!(has_receipts(d), ENoReceipts);
+        require_condition(has_receipts(d), ENoReceipts);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         receipts.version
     }
@@ -954,7 +954,7 @@ module sui_edge::deployment_manager {
     #[test_only]
     public fun old_package_report_for_testing(d: &mut DeploymentRecord, device_id: ID, status: u8) {
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
-        assert!(receipts.version < LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(receipts.version < LEGACY_RECEIPTS_VERSION, EPackageOutdated);
         if (receipts.statuses.contains(&device_id)) {
             *receipts.statuses.get_mut(&device_id) = status;
         } else {
@@ -966,7 +966,7 @@ module sui_edge::deployment_manager {
     #[test_only]
     public fun pre_rollout_report_for_testing(d: &mut DeploymentRecord, device: ID, status: u8) {
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
-        assert!(receipts.version == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
+        require_condition(receipts.version == LEGACY_RECEIPTS_VERSION, EPackageOutdated);
         receipts.statuses.insert(device, status);
     }
 
@@ -1034,8 +1034,8 @@ module sui_edge::deployment_manager {
         let device = device_cap::device_id(cap);
         let r = rollout(d);
         let (found, i) = r.members.index_of(&device);
-        assert!(found && r.admitted_at[i] != 0 && r.outcomes[i] != 0 && !r.skipped[i], ENotTargeted);
-        assert!(clock.timestamp_ms() >= r.admitted_at[i], ERolloutState);
+        require_condition(found && r.admitted_at[i] != 0 && r.outcomes[i] != 0 && !r.skipped[i], ENotTargeted);
+        require_condition(clock.timestamp_ms() >= r.admitted_at[i], ERolloutState);
         if (!df::exists(&d.id, RolloutHealthKey {})) {
             df::add(&mut d.id, RolloutHealthKey {}, RolloutHealth { devices: vector[], healthy: vector[], at_ms: vector[], signers: vector[] });
         };
@@ -1067,9 +1067,9 @@ module sui_edge::deployment_manager {
     public fun rollout_policy(concurrency: u64, rate_count: u64, rate_window_ms: u64,
         bake_ms: u64, minimum_samples: u64, failure_bps: u64, offline_timeout_ms: u64,
     ): RolloutPolicy {
-        assert!(concurrency > 0 && concurrency <= 512 && rate_count > 0 && rate_count <= 512,
+        require_condition(concurrency > 0 && concurrency <= 512 && rate_count > 0 && rate_count <= 512,
             ERolloutPolicy);
-        assert!(rate_window_ms > 0 && rate_window_ms <= 604800000 && bake_ms <= 604800000 &&
+        require_condition(rate_window_ms > 0 && rate_window_ms <= 604800000 && bake_ms <= 604800000 &&
             minimum_samples > 0 && minimum_samples <= 512 && failure_bps > 0 && failure_bps <= 10000 &&
             offline_timeout_ms > 0 && offline_timeout_ms <= 604800000, ERolloutPolicy);
         RolloutPolicy { concurrency, rate_count, rate_window_ms, bake_ms, minimum_samples,
@@ -1092,18 +1092,18 @@ module sui_edge::deployment_manager {
         target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let n = members.length();
-        assert!(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
+        require_condition(n > 0 && n <= 512 && cohorts.length() == n && cohorts[0] == 0, ERolloutPolicy);
         let mut i = 0; let mut count = 0; let mut current = 0;
         while (i < n) {
             let mut j = 0;
-            while (j < i) { assert!(members[j] != members[i], ERolloutPolicy); j = j + 1; };
+            while (j < i) { require_condition(members[j] != members[i], ERolloutPolicy); j = j + 1; };
             if (cohorts[i] != current) {
-                assert!(cohorts[i] == current + 1 && count >= policy.minimum_samples, ERolloutPolicy);
+                require_condition(cohorts[i] == current + 1 && count >= policy.minimum_samples, ERolloutPolicy);
                 current = cohorts[i]; count = 0;
             };
             count = count + 1; i = i + 1;
         };
-        assert!(count >= policy.minimum_samples, ERolloutPolicy);
+        require_condition(count >= policy.minimum_samples, ERolloutPolicy);
         // Direct targets bind the snapshot even if there are no groups. The
         // operator check in the daemon remains mandatory for every member.
         let mut d = new_customer_deployment(authority, component_name, version, recipe_blob_id, artifact_sha256,
@@ -1120,7 +1120,7 @@ module sui_edge::deployment_manager {
     }
 
     public fun rollout(d: &DeploymentRecord): Rollout {
-        assert!(receipt_schema(d) == 3, ERolloutState);
+        require_condition(receipt_schema(d) == 3, ERolloutState);
         *df::borrow(&d.id, RolloutKey {})
     }
     public fun rollout_progress(d: &DeploymentRecord): (u8, u64) {
@@ -1137,10 +1137,10 @@ module sui_edge::deployment_manager {
     // paths can still write ordinary receipts, but cannot settle rollout grants.
     // Paused/aborted inflight work may truthfully finish; failure stays sticky.
     fun record_rollout_outcome(d: &mut DeploymentRecord, device: ID, status: u8) {
-        assert!(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
+        require_condition(status == STATUS_APPLIED || status == STATUS_FAILED, EInvalidStatus);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         let (found, i) = r.members.index_of(&device);
-        assert!(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
+        require_condition(found && r.admitted_at[i] != 0 && !r.skipped[i], ENotTargeted);
         if (r.outcomes[i] != STATUS_FAILED) { *(&mut r.outcomes[i]) = status; };
     }
 
@@ -1191,13 +1191,13 @@ module sui_edge::deployment_manager {
         advance_rollout_as(d, online, healthy, unhealthy, clock, ctx.sender());
     }
     public(package) fun advance_rollout_as(d: &mut DeploymentRecord, online: vector<ID>, healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, authority: address) {
-        assert!(authority == d.creator, ENotCreator);
-        assert!(receipt_schema(d) == 3, ERolloutState);
+        require_condition(authority == d.creator, ENotCreator);
+        require_condition(receipt_schema(d) == 3, ERolloutState);
         let control = control(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
-        assert!(r.state == 0, ERolloutState);
+        require_condition(r.state == 0, ERolloutState);
         let now = clock.timestamp_ms();
-        assert!(now > 0 && now >= r.progress_ms, ERolloutState);
+        require_condition(now > 0 && now >= r.progress_ms, ERolloutState);
         let mut samples = 0; let mut failures = 0; let mut inflight = 0;
         let mut recent = 0; let mut all_done = true; let mut all_healthy = true;
         let mut cohort_samples = 0; let mut i = 0;
@@ -1262,14 +1262,14 @@ module sui_edge::deployment_manager {
         control_rollout_as(d, state, skip, reason, clock, ctx.sender());
     }
     public(package) fun control_rollout_as(d: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, authority: address) {
-        assert!(authority == d.creator, ENotCreator);
-        assert!(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
+        require_condition(authority == d.creator, ENotCreator);
+        require_condition(reason.length() > 0 && reason.length() <= 256 && state <= 2, ERolloutPolicy);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
-        assert!(r.state < 2, ERolloutState);
+        require_condition(r.state < 2, ERolloutState);
         let mut i = 0;
         while (i < skip.length()) {
             let (found, index) = r.members.index_of(&skip[i]);
-            assert!(found && r.admitted_at[index] == 0, ERolloutState);
+            require_condition(found && r.admitted_at[index] == 0, ERolloutState);
             *(&mut r.skipped[index]) = true; i = i + 1;
         };
         r.state = state; r.bake_started_ms = 0; r.progress_ms = clock.timestamp_ms();
@@ -1277,7 +1277,7 @@ module sui_edge::deployment_manager {
     }
 
     fun audit_rollout(d: &mut DeploymentRecord, reason: String, admitted: vector<ID>, clock: &Clock) {
-        assert!(!df::exists(&d.id, DecisionCleanupKey {}), ERolloutState);
+        require_condition(!df::exists(&d.id, DecisionCleanupKey {}), ERolloutState);
         let id = object::id(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         r.revision = r.revision + 1;
@@ -1285,7 +1285,7 @@ module sui_edge::deployment_manager {
         let cohort = r.cohort;
         let state = r.state;
         // Every caller bounds reasons to 256 bytes and grants to 512 members.
-        assert!(reason.length() <= 256 && admitted.length() <= 512, ERolloutPolicy);
+        require_condition(reason.length() <= 256 && admitted.length() <= 512, ERolloutPolicy);
         df::add(&mut d.id, DecisionKey { revision }, DecisionRecord {
             deployment_id: id, revision, cohort, state, reason, at_ms: clock.timestamp_ms(), admitted,
         });
@@ -1301,8 +1301,8 @@ module sui_edge::deployment_manager {
         clear_decision_audit_as(d, limit, ctx.sender());
     }
     public(package) fun clear_decision_audit_as(d: &mut DeploymentRecord, limit: u64, authority: address) {
-        assert!(authority == d.creator, ENotCreator);
-        assert!(limit > 0 && limit <= 64, ERolloutPolicy);
+        require_condition(authority == d.creator, ENotCreator);
+        require_condition(limit > 0 && limit <= 64, ERolloutPolicy);
         if (!df::exists(&d.id, DecisionCleanupKey {})) {
             let revision = rollout(d).revision;
             df::add(&mut d.id, DecisionCleanupKey {}, revision);
@@ -1322,7 +1322,7 @@ module sui_edge::deployment_manager {
 
     fun finish_decision_audit(d: &mut DeploymentRecord, authority: address) {
         clear_decision_audit_as(d, 64, authority);
-        assert!(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == 0, ERolloutState);
+        require_condition(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == 0, ERolloutState);
         let _: u64 = df::remove(&mut d.id, DecisionCleanupKey {});
     }
 
@@ -1337,8 +1337,8 @@ module sui_edge::deployment_manager {
     }
 
     public fun delete_rollout(mut d: DeploymentRecord, ctx: &TxContext) {
-        assert!(ctx.sender() == d.creator, ENotCreator);
-        assert!(receipt_schema(&d) == 3, ERolloutState);
+        require_condition(ctx.sender() == d.creator, ENotCreator);
+        require_condition(receipt_schema(&d) == 3, ERolloutState);
         finish_receipt_cleanup(&mut d);
         finish_decision_audit(&mut d, ctx.sender());
         let _: Rollout = df::remove(&mut d.id, RolloutKey {});
@@ -1349,4 +1349,8 @@ module sui_edge::deployment_manager {
         delete_deployment(d, ctx);
     }
 
+    // Shared abort branch preserves each condition, code and module.
+    fun require_condition(condition: bool, code: u64) {
+        if (!condition) abort code
+    }
 }
