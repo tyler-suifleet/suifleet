@@ -40,6 +40,11 @@ const { renderToStaticMarkup } = appRequire("react-dom/server");
 let reports = {};
 let devices = [{ objectId: "a", name: "Never reported", ownerCapId: "cap" }];
 const Dashboard = loader({
+  // Wallet/query behavior is covered by test_second_person.cjs. Keep this
+  // dashboard wiring test independent of those providers, like its fleet hooks.
+  "@/components/SecondPersonApprovals": {
+    SecondPersonApprovals: () => React.createElement("section", { "aria-label": "Pending approvals" }),
+  },
   "@/hooks/useDevices": { useDevices: () => ({ data: devices }) },
   "@/hooks/useDeployments": { useDeployments: () => ({ data: [
     deployment({}, { deploymentId: "active", timestampMs: 0, targetGroups: [], targetDevices: ["a"] }),
@@ -57,6 +62,7 @@ const Dashboard = loader({
   "next/link": { __esModule: true, default: ({ children, href, ...props }) => React.createElement("a", { href, ...props }, children) },
 })("app/page.tsx").default;
 let markup = renderToStaticMarkup(React.createElement(Dashboard));
+assert.match(markup, /aria-label="Pending approvals"/);
 assert.match(markup, /Registered devices/);
 assert.match(markup, /Health not reported/);
 assert.doesNotMatch(markup, /Devices \(healthy/);
