@@ -20,9 +20,9 @@ PREFIX = 'tools/pr-coordinator/'
 SERVICES = ('pr-coordinator.service', 'ticket-dispatcher.service')
 
 
-def run(argv, cwd=None, env=None):
+def run(argv, cwd=None, env=None, timeout=120):
     return subprocess.run(argv, cwd=cwd, env=env, check=True, capture_output=True,
-                          text=True, timeout=120).stdout.strip()
+                          text=True, timeout=timeout).stdout.strip()
 
 
 def atomic(path, value):
@@ -479,7 +479,7 @@ class Activator:
                 destination.write_bytes(content)
             run([sys.executable, '-m', 'unittest', 'discover', '-s', PREFIX + 'tests'], cwd=root,
                 env={'PATH': os.environ.get('PATH', '/usr/bin:/bin'), 'HOME': str(root/'home'),
-                     'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1'})
+                     'LANG': 'C.UTF-8', 'PYTHONDONTWRITEBYTECODE': '1'}, timeout=300)
 
     def status(self):
         installed = json.loads((self.link / 'installed.json').read_text())

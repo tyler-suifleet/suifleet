@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import tempfile
 import time
 import uuid
 
@@ -175,10 +176,10 @@ class BatchController:
         return outstanding
 
     def source(self, project, pr, owner):
-        from coordinator import failed_checks
+        from coordinator import source_check_failures
         # Concrete source failures need their existing owner before collection.
         # Pending checks may still be validated on the combined candidate.
-        if failed_checks(pr):
+        if source_check_failures(pr):
             return None
         if (not owner or owner.get('status') != 'review' or owner.get('publish_pending')
                 or owner.get('expired') or pr.get('_batch_failure') or pr.get('_batch_conflict')
@@ -627,7 +628,34 @@ class BatchController:
         row = self.db.execute('SELECT context FROM integration_batch_conflicts WHERE project=? AND pr=? AND head=? AND base=?',
             (project['id'],pr['number'],pr['headRefOid'],pr['baseRefOid'])).fetchone()
         if row:
-            result['_batch_conflict'] = json.loads(row[0])
+            context = json.loads(row[0])
+            # A composition failure may only involve unmerged siblings. Owners
+            # must not import those stacks to repair an otherwise clean source.
+            # Recheck against pinned main, including receipts from older runtimes;
+            # after integration a new base will be tested by the next build.
+            main_conflict = True
+            if context.get('other_members'):
+                # Use a disposable worktree for Git versions predating
+                # merge-tree --write-tree. Never alter the owner's checkout.
+                with tempfile.TemporaryDirectory(prefix='batch-conflict-') as directory:
+                    probe = str(Path(directory)/'probe')
+                    self.git(project, 'worktree', 'add', '--detach', probe, pr['baseRefOid'])
+                    try:
+                        try:
+                            self.git(project, 'merge', '--no-commit', '--no-ff',
+                                     pr['headRefOid'], cwd=probe)
+                        except subprocess.CalledProcessError as error:
+                            if error.returncode != 1:
+                                raise
+                            # Exit one alone is not proof of a merge conflict.
+                            if not self.git(project, 'ls-files', '--unmerged', cwd=probe):
+                                raise
+                        else:
+                            main_conflict = False
+                    finally:
+                        self.git(project, 'worktree', 'remove', '--force', probe)
+            if main_conflict:
+                result['_batch_conflict'] = context
         return result
 
     def select(self, project, candidates, base, maximum):
@@ -683,25 +711,42 @@ class BatchController:
                 # source() already validates Review ownership without renewing a lease.
         held = {member['pr'] for member in candidates}
         active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
-        if len(active) > 1:
-            raise RuntimeError('multiple active integration epochs; inspect before proceeding')
-        batch = active[0] if active else None
-        held.update(self.reserved_members(project))
+        limit = project.get('integration_batch', {}).get('max_in_flight', 2)
+        if type(limit) is not int or not 1 <= limit <= 4:
+            raise ValueError('integration batch max_in_flight must be 1..4')
+        reserved = [m['pr'] for row in active for m in json.loads(row['members'])]
+        if len(reserved) != len(set(reserved)):
+            raise RuntimeError('duplicate active integration member; inspect before proceeding')
+        held.update(reserved)
         if not execute:
             return held
-        if batch is None and candidates:
+        # Preserve an ambiguous publication before admitting more work. A single
+        # normal owner still serially publishes main; pending CI does not own it.
+        uncertain = any(row.get('publish_intent') for row in active)
+        available = [m for m in candidates if m['pr'] not in reserved]
+        if len(active) < limit and available and not uncertain:
             base, batch_id = self.main(project), uuid.uuid4().hex
-            selected = self.select(project, candidates, base, maximum)
-            if not selected:
-                return held
-            directory = str(self.c.state/project['id']/'batches'/batch_id)
-            Path(directory).parent.mkdir(parents=True, exist_ok=True)
-            self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-                (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
-                 canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
-            batch = self.rows(project)[-1]
-        if not batch:
-            return held
+            selected = self.select(project, available, base, maximum)
+            if selected:
+                directory = str(self.c.state/project['id']/'batches'/batch_id)
+                Path(directory).parent.mkdir(parents=True, exist_ok=True)
+                self.db.execute('INSERT INTO integration_batches VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (project['id'],batch_id,'collecting',base,None,'integration/batch/'+batch_id,None,
+                     canonical(selected),directory,None,self.clock(),self.clock(),None,0,None))
+                active = [row for row in self.rows(project) if row['status'] not in TERMINAL]
+        for batch in active:
+            others = {m['pr'] for row in active if row['id'] != batch['id'] and row['status'] not in TERMINAL
+                      for m in json.loads(row['members'])}
+            pool = [m for m in candidates if m['pr'] not in others]
+            # Recheck after each advance; a prior candidate may have published or
+            # discovered an uncertain push during this same pass.
+            publish_allowed = not any(row['id'] != batch['id'] and row.get('publish_intent')
+                                      and row['status'] not in TERMINAL for row in self.rows(project))
+            self.advance(project, batch, pool, maximum, delay, prs, held, publish_allowed)
+        held.update(self.reserved_members(project))
+        return held
+
+    def advance(self, project, batch, candidates, maximum, delay, prs, held, publish_allowed=True):
         try:
             status = batch['status']
             if status in ('published', 'reconciling'):
@@ -733,29 +778,38 @@ class BatchController:
                     status = batch['status']
                 if status in ('branch_publishing', 'pr_creating'):
                     self.publish_candidate(project, batch)
-                elif status in ('awaiting_ci','awaiting_review','ready','approving_members'):
+                    status = batch['status']
+                if status in ('awaiting_ci','awaiting_review','ready','approving_members'):
                     self.adopt_approvals(project, batch)
                     from coordinator import checks_blocker, gate
                     self.validate_members(project, batch)
                     candidate = self.candidate(project, batch)
                     if candidate['state'] != 'OPEN' or candidate.get('isDraft'):
                         raise BatchInvalidated('integration candidate is not open and ready')
+                    owner = self.synthetic_owner(batch)
+                    review = self.c.store.review(project['id'], batch['pr'])
+                    # Published, exact-candidate source findings are actionable
+                    # before CI finishes. Neither a pending check nor a busy
+                    # sibling candidate should leave an independent reviewer idle.
+                    if self.reject_review(project, batch, candidate, review):
+                        return held
                     if checks_blocker(candidate) is not None:
-                        from coordinator import failed_checks
+                        from coordinator import failed_checks, feedback
                         failures = failed_checks(candidate)
                         if failures:
                             self.fail_candidate(project, batch, failures)
                             return held
                         self.update(batch, status='awaiting_ci')
-                        return held
-                    owner = self.synthetic_owner(batch)
-                    review = self.c.store.review(project['id'], batch['pr'])
-                    if self.reject_review(project, batch, candidate, review):
+                        if (not review or review.get('head') != candidate['headRefOid']
+                                or review.get('feedback') != feedback(candidate)):
+                            self.c.launch(project, candidate, owner, 'review')
                         return held
                     if gate(candidate, owner, review) is not None:
                         self.update(batch, status='awaiting_review', error=None)
                         self.c.launch(project, candidate, owner, 'review')
                     else:
+                        if not publish_allowed:
+                            return held
                         self.update(batch, status='ready', error=None)
                         self.publish_main(project, batch, candidate, owner, review)
                         self.reconcile(project, batch)

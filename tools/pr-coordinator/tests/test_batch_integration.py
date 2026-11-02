@@ -43,7 +43,7 @@ class Fixture:
         self.db.execute('CREATE TABLE integrations(project TEXT,pr INTEGER,head TEXT,commit_id TEXT,reconciled INTEGER,PRIMARY KEY(project,pr))')
         self.store = types.SimpleNamespace(db=self.db, review=self.review)
         self.project = dict(id='test', root=str(self.repo), repository='owner/repo',review_github_account='reviewer',
-                            integration_batch=dict(enabled=True,max_members=2,collection_seconds=0))
+                            integration_batch=dict(enabled=True,max_members=2,collection_seconds=0,max_in_flight=1))
         self.owners = []
         self.source_prs = {}
         self.receipts = {}
@@ -141,6 +141,10 @@ class Fixture:
         return self.approvals.get(number)
 
     def launch(self, project, pr, owner, kind):
+        # Mirror Store.reserve's immutable-input deduplication.
+        key = (pr['number'], pr['headRefOid'], coordinator_module.feedback(pr), kind)
+        if key in getattr(self, '_launch_keys', set()): return
+        self._launch_keys = getattr(self, '_launch_keys', set()) | {key}
         self.launched.append((copy.deepcopy(pr),copy.deepcopy(owner),kind))
 
     def reconcile(self, project, pr, owner, review):
@@ -195,9 +199,9 @@ class BatchTests(unittest.TestCase):
         candidate['statusCheckRollup'].append(evidence.check)
         unknown=dict(__typename='CheckRun',name='required-security',status='COMPLETED',conclusion='SKIPPED')
         candidate['statusCheckRollup'].append(unknown)
-        f.tick();self.assertEqual(f.row()['status'],'awaiting_ci');self.assertFalse(f.launched)
+        f.tick();self.assertEqual(f.row()['status'],'awaiting_ci');self.assertEqual(len(f.launched),1)
         candidate['statusCheckRollup'].remove(unknown)
-        f.tick();self.assertEqual(f.row()['status'],'awaiting_review');self.assertEqual(len(f.launched),1)
+        f.tick();self.assertEqual(f.row()['status'],'awaiting_review');self.assertEqual(len(f.launched),2)
         self.assertFalse(f.reconciled)
         f.approve();f.tick();self.assertEqual(f.row()['status'],'done')
 
@@ -217,8 +221,8 @@ class BatchTests(unittest.TestCase):
         f=self.fixture();self.assertEqual(f.tick(),{1,2});row=f.row()
         self.assertEqual(row['status'],'awaiting_ci');self.assertEqual(len(f.candidate_prs),1)
         self.assertEqual(f.git('rev-parse','main',cwd=f.remote),f.base)
-        f.tick();self.assertFalse(f.launched)
-        f.green();f.tick();self.assertEqual(len(f.launched),1)
+        f.tick();self.assertEqual(len(f.launched),1)
+        f.green();f.tick();self.assertEqual(len(f.launched),2)
         self.assertEqual(f.launched[0][1]['key'],'integration:'+row['id'])
         self.assertNotIn('token',f.launched[0][1])
         f.approve();f.tick();row=f.row()
@@ -291,9 +295,38 @@ class BatchTests(unittest.TestCase):
         f=self.fixture(True);f.tick();row=f.row();members=json.loads(row['members'])
         self.assertEqual([m['pr'] for m in members],[1])
         ctx=f.controller.repair_context(f.project,f.source_prs[2])
-        self.assertIn('_batch_conflict',ctx)
-        self.assertEqual(ctx['_batch_conflict']['candidate_base'],f.base)
+        self.assertNotIn('_batch_conflict',ctx)
+        for _ in range(3):
+            f.tick()
+            self.assertNotIn('_batch_conflict',f.controller.repair_context(f.project,f.source_prs[2]))
+        self.assertEqual(len(f.controller.rows(f.project)),1)
+        self.assertEqual(f.row()['status'],'awaiting_ci')
+        self.assertEqual([p['headRefOid'] for p in f.source_prs.values()],f.heads)
         f.green();f.tick();f.approve();f.tick();self.assertEqual(f.reconciled,[1])
+        f.tick()
+        ctx=f.controller.repair_context(f.project,f.pr(f.project,2))
+        self.assertIn('_batch_conflict',ctx)
+        self.assertNotEqual(ctx['_batch_conflict']['candidate_base'],f.base)
+
+    def test_main_conflict_with_siblings_still_routes_owner_repair(self):
+        f=self.fixture(True)
+        (f.repo/'common').write_text('main change\n')
+        f.git('add','.');f.git('commit','-qm','main change');f.git('push','-q','origin','main')
+        base=f.git('rev-parse','HEAD')
+        context=dict(candidate_base=base,batch_id='old-runtime',other_members=[dict(pr=1,head=f.heads[0])])
+        f.db.execute('INSERT INTO integration_batch_conflicts VALUES(?,?,?,?,?,?)',
+                     ('test',2,f.heads[1],base,'old-runtime',canonical(context)))
+        self.assertEqual(f.controller.repair_context(f.project,f.pr(f.project,2))['_batch_conflict'],context)
+
+    def test_sibling_conflict_probe_errors_do_not_become_clean_results(self):
+        f=self.fixture(True);f.tick()
+        original=f.controller.git
+        def fail(project,*args,**kwargs):
+            if args[:3]==('merge','--no-commit','--no-ff'):raise subprocess.CalledProcessError(128,args)
+            return original(project,*args,**kwargs)
+        with patch.object(f.controller,'git',side_effect=fail):
+            with self.assertRaises(subprocess.CalledProcessError):
+                f.controller.repair_context(f.project,f.source_prs[2])
 
     def test_changed_head_feedback_owner_and_main_invalidate(self):
         for change in ('head','feedback','owner','main'):

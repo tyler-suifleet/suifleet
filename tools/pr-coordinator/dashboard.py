@@ -407,7 +407,7 @@ def reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr=None):
     if project:
         projects = {project}
     for name in sorted(projects):
-        local = {key: row for (p, key), row in by_ticket.items() if p == name and row['status'] != 'done'}
+        local = {key: row for (p, key), row in by_ticket.items() if p == name and row['status'] not in ('done', 'closed')}
         counts = {}
         for row in local.values():
             counts[row['status']] = counts.get(row['status'], 0) + 1
@@ -838,6 +838,12 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         except (ValueError, TypeError):
             row['spec'], row['remote'] = {}, {}
             model['warnings'].append(f"Ticket {short_key(row['key'])} has an unreadable specification")
+        if row['remote'].get('state') == 'closed' and row['status'] != 'done':
+            if row['status'] == 'backlog' and not row.get('token'):
+                # Presentation only: cancellation is not implementation completion.
+                row['status'] = 'closed'
+            else:
+                model['warnings'].append(f"Ticket {short_key(row['key'])} is closed on GitHub but retains local ownership/status {row['status']}")
         by_ticket[(row['project'], short_key(row['key']))] = row
     for name, stamp in refresh.items():
         if wanted(name):
@@ -1360,14 +1366,14 @@ def render(model, width=100, delta=None, interval=None):
                                     f"PR #{a['pr']}" if a.get('pr') else '') if x)
         lines.append(fit(f"  {head}{when}: " + ' — '.join(x for x in (a.get('title'), a['summary']) if x), width))
 
-    lines += ['', 'LOCAL TICKET HISTORY (completed tickets excluded from open totals above)']
+    lines += ['', 'LOCAL TICKET HISTORY (completed and closed tickets excluded from open totals above)']
     if model['sources'].get('tickets', {}).get('state') != 'ok':
         lines.append('  Unknown: ticket store unavailable (not an empty queue).')
     elif not model['queue']:
         lines.append('  Empty: no tickets for this project filter.')
     for project_id, counts in sorted(model['queue'].items()):
-        order = ['backlog', 'in_progress', 'review', 'blocked', 'done']
-        parts = [f"{counts[s]} {s.replace('_', ' ')}" for s in order if s in counts]
+        order = ['backlog', 'in_progress', 'review', 'blocked', 'done', 'closed']
+        parts = [f"{counts[s]} {('closed without implementation' if s == 'closed' else s.replace('_', ' '))}" for s in order if s in counts]
         parts += [f'{v} {k}' for k, v in sorted(counts.items()) if k not in order]
         lines.append(fit(f'  {project_id}: ' + ' · '.join(parts), width))
 
