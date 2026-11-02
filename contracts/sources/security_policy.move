@@ -11,9 +11,8 @@ module sui_edge::security_policy {
     const EFactor: u64 = 1;
     const EUnavailable: u64 = 2;
     const ACTIONS: u64 = 7;
-    // Delay is available. Cryptographic/approval options remain fail-closed
-    // until their reviewed SF-198/199/201 implementations ship.
-    const AVAILABLE: u8 = 8;
+    // Native multisig and delay are implemented; other factors remain fail-closed.
+    const AVAILABLE: u8 = 9;
 
     // Separate fields preserve the published Policy and Action layouts/origins.
     public struct DelayKey has copy, drop, store {}

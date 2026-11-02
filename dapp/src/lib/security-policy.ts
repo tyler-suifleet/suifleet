@@ -13,9 +13,8 @@ export const SECURITY_FACTORS = [
   { bit: 4, name: "Second-person approval", description: "Require approval from another authorized credential. The proposer cannot approve their own request.", ticket: "SF-199" },
   { bit: 8, name: "Delay and cancellation", description: "Wait through an on-chain cancellation window before executing. A current administrator can cancel.", ticket: "SF-200" },
 ] as const;
-// Delay ships with its queue and chain-clock enforcement; other factors remain
-// unavailable. Activation also requires the verified delay introduction origins.
-export const AVAILABLE_SECURITY_FACTORS = 8;
+// Native multisig and delay are implemented; enrollment is checked on chain.
+export const AVAILABLE_SECURITY_FACTORS = 9;
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {

@@ -10,7 +10,7 @@ const load = loader(), security = load('lib/security-policy.ts'), wire = load('l
 const C = '0x' + 'c'.padStart(64, '0');
 assert.equal(security.securitySupported(), true);
 assert.deepEqual(security.validateSecurityRequirements([0,0,0,0,0,0,0]), [0,0,0,0,0,0,0]);
-for (let mask=1; mask<16; mask++) { if(mask === 8) assert.deepEqual(security.validateSecurityRequirements([mask,0,0,0,0,0,0]), [mask,0,0,0,0,0,0]); else assert.throws(() => security.validateSecurityRequirements([mask,0,0,0,0,0,0]), /unavailable/); }
+for (let mask=1; mask<16; mask++) { if((mask & ~9) === 0) assert.deepEqual(security.validateSecurityRequirements([mask,0,0,0,0,0,0]), [mask,0,0,0,0,0,0]); else assert.throws(() => security.validateSecurityRequirements([mask,0,0,0,0,0,0]), /unavailable/); }
 for (let mask=0; mask<16; mask++) assert.deepEqual(security.validateSecurityRequirements(Array(7).fill(mask),15),Array(7).fill(mask));
 for (const v of [[], Array(8).fill(0), [16,0,0,0,0,0,0], [-1,0,0,0,0,0,0], [0.1,0,0,0,0,0,0]]) assert.throws(()=>security.validateSecurityRequirements(v,15));
 const tx = security.buildSecurityPolicyTx(C,[0,0,0,0,0,0,0]).getData();

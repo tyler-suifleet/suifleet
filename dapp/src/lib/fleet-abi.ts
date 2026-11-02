@@ -8695,5 +8695,79 @@ export const MOVE_ABI = {
         ]
       }
     }
+  },
+  "multisig_admin": {
+    "functions": {
+      "administrator": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&vector<vector<u8>>",
+          "&vector<u8>",
+          "u16"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "approve": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::security_policy::Action",
+          "vector<vector<u8>>",
+          "vector<u8>",
+          "u16",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "enroll": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "vector<vector<u8>>",
+          "vector<u8>",
+          "u16",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "enroll_secured": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "vector<vector<u8>>",
+          "vector<u8>",
+          "u16",
+          "sui_edge::security_policy::Action",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "prepare_policy_change": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {}
   }
 } as const;

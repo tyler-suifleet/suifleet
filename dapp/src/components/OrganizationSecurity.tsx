@@ -1,4 +1,5 @@
 "use client";
+import { MultisigAdministrator } from "./MultisigAdministrator";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
@@ -16,7 +17,7 @@ export function OrganizationSecurity() {
   const policy = useQuery({ queryKey: ["organization-security", fleet?.customerId], enabled: !!fleet && securitySupported(), queryFn: () => fetchOrganizationSecurity(client, fleet!.customerId), refetchInterval: 10000 });
   const timing = useQuery({ queryKey: ["organization-delays", fleet?.customerId, policy.data?.generation.toString()], enabled: !!policy.data && delaySupported(), queryFn: () => fetchSecurityDelays(client, fleet!.customerId) });
   const queue = useQuery({ queryKey: ["organization-queue", fleet?.customerId, policy.data?.generation.toString(), timing.data], enabled: !!policy.data && timing.isSuccess, queryFn: () => fetchQueuedSecurityActions(client, fleet!.customerId, policy.data!.generation, policy.data!.requirements, timing.data ?? []), refetchInterval: 10000 });
-  if (!fleet) return <p>Select an organization to view its security policy.</p>;
+  if (!fleet) return <><p>Select an organization to view its security policy.</p><MultisigAdministrator/></>;
   const refresh = async () => { await policy.refetch(); await timing.refetch(); await queue.refetch(); };
   const run = async (transaction: Parameters<typeof mutation.mutateAsync>[0]["transaction"]) => { try { setError(""); await mutation.mutateAsync({ transaction }); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : "Security action failed"); } };
   const submit = async (edit: SecurityEdit) => {
@@ -35,7 +36,7 @@ export function OrganizationSecurity() {
     {[policy.error, timing.error, queue.error].map((e, i) => e && <p role="alert" key={i}>{e.message}</p>)}
     {policy.isSuccess && !policy.data && <p>This organization has legacy authority. Migrate it before configuring protections. A missing policy does not mean protections are configured off.</p>}
     {policy.data && <><p>Verified policy generation: {policy.data.generation.toString()}.</p><ul>{SECURITY_ACTIONS.map((name, i) => <li key={name}>{name}: {policy.data!.requirements[i] === 0 ? "All protections off" : SECURITY_FACTORS.filter(f => (policy.data!.requirements[i] & f.bit) !== 0).map(f => f.name).join(" + ")}</li>)}</ul></>}
-    {SECURITY_FACTORS.filter(f => f.bit !== 8).map(f => <div key={f.bit} className="rounded border p-3"><strong>{f.name}</strong><p>{f.description}</p><p>Not available yet: requires {f.ticket} and verified enrollment.</p></div>)}
+    {SECURITY_FACTORS.filter(f => f.bit !== 8 && f.bit !== 1).map(f => <div key={f.bit} className="rounded border p-3"><strong>{f.name}</strong><p>{f.description}</p><p>Not available yet: requires {f.ticket} and verified enrollment.</p></div>)}
     {!delaySupported() && <p>Delay and cancellation require the upgraded package and its verified delay type origins.</p>}
     {policy.data && timing.isSuccess && fleet.administrator && <DelaySettings key={`${fleet.customerId}:${policy.data.generation}`} requirements={policy.data.requirements} delays={timing.data} busy={mutation.isPending} submit={submit}/>}
     <p>Any current administrator can cancel a queued action immediately. Pausing a deployment skips the delay; resuming uses the full policy. Execution uses the chain clock. The countdown uses your browser clock and is advisory.</p>
@@ -50,6 +51,7 @@ export function OrganizationSecurity() {
     {queue.isSuccess && queue.data.length === 0 && <p>No queued actions found in available chain history.</p>}
     <p>Protected organizations keep publishers and fleet capabilities in organization custody. Generic capability loans are unavailable while protection is enabled. Whole-organization handover requires recipient confirmation.</p>
     <p>Disabling protection or lowering delays requires the currently effective protections and cancellation window. There is no email or support reset. A canceled or invalidated action must be queued again.</p>
+    <MultisigAdministrator key={fleet.customerId} customerId={fleet.customerId}/>
     {error && <p role="alert">{error}</p>}
   </section>;
 }

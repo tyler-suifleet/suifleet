@@ -42,7 +42,7 @@ const now=BigInt(Date.now());
 const fakeQueue=[{...action,readyAt:now+60000n,expires:now+70000n}];
 const view=loader({
  '@tanstack/react-query':{useQuery:({queryKey})=>({data:queryKey[0]==='organization-security'?{generation:1n,requirements:Array(7).fill(8)}:queryKey[0]==='organization-delays'?Array(7).fill(1000):fakeQueue,isSuccess:true,isPending:false,error:null,refetch:async()=>{}})},
- '@mysten/dapp-kit-react':{useCurrentClient:()=>({}),useCurrentAccount:()=>({address:C})},
+ '@mysten/dapp-kit-react':{useDAppKit:()=>({}),useCurrentClient:()=>({}),useCurrentAccount:()=>({address:C})},
  '@/hooks/useFleetSelection':{useFleetSelection:()=>({fleet:{customerId:C,customerName:'Test org',administrator:true}})},
  '@/hooks/useFleetTransaction':{useFleetTransaction:()=>({isPending:false,mutateAsync:async()=>{}})},
 })("components/OrganizationSecurity.tsx");

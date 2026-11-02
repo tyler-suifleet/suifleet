@@ -354,7 +354,8 @@ completed second-factor mechanisms.
 ## SF-200 delay implementation
 
 The historical framework-only availability-zero statement above describes SF-196.
-SF-200 enables bit 8 only; other mechanisms remain unavailable on this source.
+SF-200 enables bit 8 alongside SF-201 native multisig bit 1. Passkey and
+second-person mechanisms remain unavailable on this source.
 Delay is per class, optional and off by default, from one second to six days.
 The Sui Clock timestamp is immutable queue metadata under the Action UID, without
 changing its published layout. Execution recomputes the exact intent and checks
@@ -372,3 +373,25 @@ bypasses. Old-package queues lack the new timestamp and fail closed even after
 time passes. Dynamic fields retain separately verified introduction origins.
 See [the operational procedure](OPERATIONS.md#organization-delay-and-cancellation-sf-200)
 and [SF-200 evidence](validation/sf200-delay.md).
+
+## SF-201 native multisig implementation
+
+SF-201 makes bit 1 available alongside SF-200 delay bit 8; passkey and
+second-person bits retain their fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
+derivation for flagged Ed25519, secp256k1, secp256r1 and passkey keys. Enrollment
+requires an already registered administrator sending from that derived native
+multisig address. Its bounded binding is BCS address, vector of flagged public
+keys, vector of weights, u16 threshold (in that order). Sui transaction
+verification authenticates the threshold before Move executes. No address label
+or client assertion substitutes for that proof.
+
+`approve` checks current administrator authority, exact enrolled configuration,
+Action organization/generation and expiry, then package-attests bit 1. An action's
+immutable intent/proposer and its operation-specific consumer retain the SF-196
+argument/domain/expiry/single-use checks. Approval may precede execution in the
+same PTB or be a separate quorum transaction. Replacement uses the current union
+of requirements through `enroll_secured`; enabling/weakening/recovery uses the
+existing policy wrapper. Native quorum members are not distinct organization
+approvers for any future second-person factor. See [operations](OPERATIONS.md#native-multisig-administrators-sf-201)
+and [validation](validation/sf201-multisig.md) for the serverless bundle workflow
+and explicitly deferred manual-wallet/hardware acceptance.

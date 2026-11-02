@@ -743,6 +743,35 @@ class GitHubInventory(unittest.TestCase):
         self.assertEqual(entry['untracked_issues'], [])
         self.assertEqual(entry['absent_from_github'], [])
 
+    def test_closed_unclaimed_is_not_backlog_or_done_and_reopens(self):
+        self.ticket(1, 'backlog'); self.ticket(2, 'done')
+        def remote(state):
+            with sqlite3.connect(self.f.paths['tickets']) as db:
+                db.execute('UPDATE tickets SET remote=? WHERE key=?',
+                           (json.dumps(dict(state=state, url='https://github.com/owner/suifleet/issues/1')), 'suifleet::SF-001'))
+        remote('closed')
+        # No inventory is needed to honor the affirmative ticket snapshot.
+        model = self.f.collect(project='suifleet')
+        self.assertEqual(model['inventory']['suifleet']['tracked_open'], 0)
+        self.assertEqual(model['queue']['suifleet'], {'closed': 1, 'done': 1})
+        self.assertIn('1 closed without implementation', '\n'.join(dash.render(model, 200)))
+        self.snapshot(issues=[], stamp=NOW-2000)
+        self.assertEqual(self.f.collect()['inventory']['suifleet']['absent_from_github'], [])
+        remote('open')
+        self.assertEqual(self.f.collect()['inventory']['suifleet']['tracked_open'], 1)
+        with sqlite3.connect(self.f.paths['tickets']) as db:
+            self.assertEqual(db.execute("SELECT status FROM tickets WHERE key='suifleet::SF-001'").fetchone()[0], 'backlog')
+
+    def test_closed_claim_and_unknown_remote_remain_visible(self):
+        self.ticket(1, 'review'); self.ticket(2, 'backlog')
+        with sqlite3.connect(self.f.paths['tickets']) as db:
+            db.execute('UPDATE tickets SET remote=? WHERE key=?',
+                       (json.dumps(dict(state='closed')), 'suifleet::SF-001'))
+        model = self.f.collect(project='suifleet')
+        self.assertEqual(model['inventory']['suifleet']['tracked_open'], 2)
+        self.assertEqual(model['queue']['suifleet'], {'review': 1, 'backlog': 1})
+        self.assertTrue(any('closed on GitHub but retains local ownership' in w for w in model['warnings']))
+
     def test_discrepancies_staleness_and_project_filter(self):
         self.ticket(1); self.ticket(2)
         self.snapshot(issues=[dict(number=1, title='one'), dict(number=99, title='untracked')], stamp=NOW-2000)

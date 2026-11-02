@@ -192,3 +192,16 @@ Missing preview accounts alone do not block software review. Production still
 requires explicit user authorization, matching revision/digest and protected
 environment approval; this split authorizes no credentials, DNS, publication,
 mainnet/SuiNS or hardware operations. Offline fixtures are not hosted receipts.
+
+SF-201 native multisig administration retains all source/security, Move/frontend,
+isolated existing-object/old-package upgrade, actual automated testnet and
+exact-head/current-base CI/review gates. Actual local/public transaction effects
+and the serverless console checks are recorded in
+[SF-201 validation](validation/sf201-multisig.md). Manual Slush, extension-wallet
+and physical hardware/passkey-member sessions remain **unrun** in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); final production,
+provider and actual mainnet acceptance remain in
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159), hosting in
+[SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62). The explicit
+SF-201 policy entry records this user-authorized ordering without claiming final
+wallet/hardware compatibility or granting production/hardware/mainnet authority.
