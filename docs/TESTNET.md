@@ -38,6 +38,45 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 concrete recovery on current main (2026-11-02)
+
+The [new source and effects receipt](validation/sf221-recovery-reduction.json)
+records a concrete compatible reduction on PR465 after integrating main
+`df5d6d80`: 91,766 to 90,455 module bytes (1,311 saved). Private bytecode
+symbols have descriptive source comments; the initializer and legacy abort
+boundaries remain intact. Public/package APIs, layouts, named error codes,
+conditions and pinned lint diagnostics are preserved. Proof observations and
+mutation selectors follow the renamed private functions without changing their
+obligations or expected solver failures. All 16 generated module interfaces match.
+
+Actual clean local-chain ordinary acceptance still **fails**: 1,598,300,787 MIST
+is charged after the first deployment, leaving 1,699,213 before the next full
+10M reservation. The operator still holds 998,401,699,213 MIST; wallet solvency
+cannot replace allowance. Bounded abort cleanup is also refused and recorded.
+The separate cached run passes at 41,497,089, including its entire 8,748,433
+preexisting device grant and 1,251,567 top-up. It never refills the failed ledger.
+Fresh/cached security charge 1,024,634,832/195,462,969; both browser runs charge
+101,000,198. The retained audit checkpoint 225 is below actual pruning floor 1091;
+proof and retirement pass under a separate fully reserved 20M temporal ledger,
+charging 0, without replenishing ordinary acceptance.
+
+This run exposed a reporting defect: the old local measurement harness returned
+zero after recording a failed fresh phase and successful later phases. The
+repaired finalizer retains the outcomes and raises on failed ordinary acceptance;
+these actual saved outcomes now produce exit1. The original full run's exit0
+is explicitly **not** successful fresh acceptance. Regression coverage includes
+failed fresh plus successful cached, empty runs and complete ordinary success.
+
+The source reduction, guard repair and current-main integration are concrete;
+the ticket remains blocked on sufficient fresh cost reduction. A cross-run
+remainder estimate reaches 1,614,315,278 MIST, 14,315,278 above the ceiling; it is
+not executed completion or a reason to reduce reservations. The u8 error-constant
+experiment failed unchanged strict lint and was removed. A separate 429-byte
+error-dispatch compiler experiment is unshipped and has no acceptance claim.
+No ceilings, encrypted identity or unknown-outcome guards changed. No public
+wallet operations, sibling repairs, hardware or production operations ran.
+Protected exact-head/base testnet and independent review remain required.
+
 ### SF-221 current combined-candidate blocker (2026-11-02)
 
 The earlier branch-only results below do **not** establish acceptance of the
