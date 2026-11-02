@@ -288,3 +288,97 @@ new-head hosted CI is requested by push and must be collected by the existing
 coordinator, without worker polling. No protected state was decrypted or public
 transaction submitted. Deferred manual/hardware/provider/mainnet checks remain
 unrun in #32/#159.
+
+
+## Current-main integration and source-review recovery, 2026-11-02
+
+Codex / gpt-6.1-sol (no finer runtime build exposed), same original claim,
+session, branch, worktree and PR #451. This section supersedes earlier draft /
+Blocked handoff instructions **only for source-review readiness**, under the
+explicit user recovery direction. Public native effects remain a final merge
+gate; they are not an API development dependency or a passed acceptance check.
+
+Merge `1c5f4c4d1194e7c46dd3f181cf05e286871be16d` integrates fetched main
+`3fbf160e25d010ee88f976feb90b2cbbd3f04579` with preserved feature head
+`b0d3df076171a800a6f85c63e9a9e8d6f873c4ee`. Main changes only coordinator
+code/docs/tests; merge has no conflicts and no contract/frontend/signing-state
+changes. Tyler Bush is both author and committer. The earlier local note naming
+cf65ea17 as this merge base was incorrect: that was the protected run's base.
+The actual tested merged base is 3fbf160e, as recorded by the merge parents.
+
+Inspected already-completed ordinary CI and CodeQL at b0d3df07: success, including
+[CI run 41388586121](https://github.com/tyler-suifleet/suifleet/actions/runs/41388586121).
+Inspected the completed failure log of
+[protected run 41392636950](https://github.com/tyler-suifleet/suifleet/actions/runs/41392636950):
+base cf65ea17, head b0d3df07, chain 4c78adac, primary CI lane 0.
+Five recorded package transactions consumed **1,575,909,482 / 1,600,000,000
+MIST**; core OTA preflight required 280,000,000 MIST with only 24,090,518
+remaining. It stopped before native feature cases. No native public acceptance
+is inferred from the successful package upgrade or historical lane-1 enrollment.
+This measured shared cost failure is tracked in existing
+[SF-221/#463](https://github.com/tyler-suifleet/suifleet/issues/463), separately
+owned. No issue, allowance, wallet, faucet, signing state, unknown reservation,
+fixture publication or workflow authority was changed by this recovery.
+No hosted wait/watch/poll loop was used.
+
+The runbook and design still incorrectly described the repaired package-size
+failure and local-only adapter as current blockers. Updated their status to
+separate passing isolated implementation evidence, independent source review,
+and still-unproved public native feature acceptance. No release is claimed.
+
+Fresh combined-base validation uses network-none suifleet-dev:latest, host UID,
+checkout /workspace, INSIDE_DEV_CONTAINER=1, PyYAML mounted at /deps/yaml with
+PYTHONPATH=/deps and pinned /tmp/sf196-network-183/sui at /opt/sui-network/sui.
+Move cache is a private copy /tmp/sf198-private-move mounted at /home/dev/.move.
+Initial Move and isolated attempts failed because the shared cache's Git index
+was root-owned; a frontend attempt without its cache failed resolving GitHub
+inside network-none. These are failed environment attempts, not passed tests.
+The shared cache was left unchanged; the copied cache is host-user owned.
+
+The fresh isolated invocation is the fourth-recovery Docker command above with
+that private cache mount and output
+`docs/validation/sf198-current-main-localnet.json`: **PASS, 23 effects-checked
+transactions**, allowance used **1,714,804,025 / 1,800,000,000 MIST**. It compiles
+the pre-feature base and current contracts, performs actual compatible upgrade
+of existing objects, verifies split type origins, interrupts/resumes enrollment
+with the same two keys and executes coinless setup, allowed action, wallet-only /
+removed-key aborts, old-package refusal, backup recovery, surviving-key action,
+disable and final removal. Local node identity/keys are disposable and never
+public-wallet identities. Receipt records every digest and net cost. Resource
+build:suifleet-localnet held only during use and released after node exit.
+
+Fresh `make test-testnet`: **PASS**, 23 + 177 + 67 + 5 Python tests and Node
+cache/receipt suites. `make test-contracts`: **PASS**, root359/storage79/data60.
+`make check-interfaces`: **PASS**, 16 compiled modules and ABI/negative/recipe
+checks. Remaining combined source/frontend/coordinator results follow below.
+
+Final combined commands/results:
+
+- Container `bash -ec 'make test-contracts; make check-interfaces; make
+  test-customer-fleets; make dapp-typecheck; make dapp-build'`: **exit 0**.
+  This includes SDK passkey signing/tamper/binding/recovery, private fixture and
+  coin/address-balance negatives, actual Chromium console regressions, frontend
+  TypeScript and Next.js 16.4.1 static production export. No manual wallet or
+  hardware-authenticator result is implied.
+- Host `python3 -m unittest discover -s tools/pr-coordinator/tests`: **685 tests
+  pass**, exit 0. Mocked failure/worker diagnostics and ResourceWarnings appear
+  in this offline suite; final result is OK. No model workers were launched.
+- `git diff --check` and structural relative-file link checks of changed
+  operational/design documents: **pass**.
+
+Only the coordinator integration, corrected guidance and fresh evidence changed
+in this recovery; no new feature/API change was needed after inspection and
+combined validation. Original source/payment/size repairs are retained, not reset
+or replaced. The runbook status correction is the concrete remaining source
+repair. No unrelated dirty/staged work existed at entry or was discarded.
+
+PR #451 is now handed off Ready for independent **SOURCE** review with the
+original claim published Review, following the explicit recovery authorization.
+Review is not Done, source approval, public native acceptance or merge approval.
+New-head ordinary/security/current-base CI and protected public-testnet native
+setup/allowed/refused/recovery are **pending/unproved**; the existing coordinator
+must enforce them before merge. SF-221/#463 owns shared cost repair separately.
+No dependency_wait or false dependency is introduced. Manual wallet/hardware,
+Pi/provider/mainnet remain unrun in #32/#159. No resources remain held. All new
+commits retain Tyler Bush as author and committer. The worker pushes once and
+exits without watching hosted CI or starting another worker.

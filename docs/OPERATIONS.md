@@ -877,13 +877,16 @@ wallet walkthrough or a live deployment of this frontend.
 
 ## Optional passkey co-signature (SF-198)
 
-**Draft implementation, not deployable or accepted.** The isolated-chain upgrade
-currently fails `MovePackageTooBig` (103,244 bytes versus the 102,400-byte limit).
-The native setup/allowed/refused/recovery run has not reached feature execution.
-The dedicated agent wallet also reports no managed addresses, so no public
-mutation was attempted. The following documents the proposed interface and
-remaining procedure, not released functionality. The feature runner is deliberately
-local-only until safe cached-base reuse and the required testnet setup are ready.
+**Implementation pending independent source review and public-testnet acceptance.**
+The package-size defect is repaired: isolated existing-object upgrades and native
+setup/allowed/refused/recovery effects have passed; see the revision-scoped
+[recovery evidence](validation/sf198-recovery.md). The protected CI adapter reuses
+the exact published package pair and encrypted signing state. Its public native
+feature effects remain unproved: the latest package gate exhausted its unchanged
+allowance before reaching that suite. Shared cost repair is tracked in
+[SF-221/#463](https://github.com/tyler-suifleet/suifleet/issues/463).
+Source review may proceed while that final merge gate remains unsatisfied.
+This procedure does not establish released functionality or manual wallet acceptance.
 
 Passkey protection defaults off and applies per organization. First migrate legacy
 organization authority through the verified SF-196 procedure. The deployed

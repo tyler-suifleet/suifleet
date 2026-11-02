@@ -345,8 +345,10 @@ completed second-factor mechanisms.
 
 ### SF-198 native sponsorship
 
-Draft only: package-size and required testnet acceptance blockers remain in
-SF-198/#397. This section describes the proposed implementation, not acceptance.
+Implementation awaiting independent source review and required public-testnet
+acceptance in SF-198/#397. The package-size repair and isolated native feature
+effects passed; shared acceptance-cost repair remains in SF-221/#463. This
+section describes the implementation, not completed public acceptance.
 
 SF-198 uses Sui's native verified passkey **gas sponsor** plus the existing
 administrator wallet sender. Both sign the same TransactionData bytes. The
