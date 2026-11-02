@@ -86,3 +86,40 @@ Manual real-wallet/hardware-key, physical, provider and mainnet acceptance remai
 unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [#159](https://github.com/tyler-suifleet/suifleet/issues/159). Their deferral does
 not waive software/security/public-testnet gates.
+
+## Exact-head CI repair, second recovery
+
+Codex / gpt-6.1-sol (no finer runtime build exposed), original claim/session.
+Inspected actual job 125038218940 logs and sanitized artifact 13108877670
+from run 41369972588 at head 8b8cc9c7. Four blocking HIGH
+`js/file-system-race` findings were in `scripts/test_passkey_fixture.cjs`
+(lines 12, 14, 16, 17), not the production fixture generator. Repair 10af9125
+uses one opened descriptor for fstat/read/truncate/write assertions and directory
+contents for the read-error assertion. No finding filter or gate changed.
+The actual ordinary check job 125038218941 also failed isolated discovery with
+`ModuleNotFoundError: live_passkey_factor`; the test now establishes its scripts
+import path like the neighboring standalone tests.
+
+Fresh checks: `node scripts/test_passkey_fixture.cjs`,
+`node scripts/test_passkey_factor.cjs`, Node syntax and `git diff --check` pass.
+`env -u INSIDE_DEV_CONTAINER make test-testnet RUN=` passes on host (toolchain
+installation check skipped); full `make test-testnet` in network-none
+`suifleet-dev:latest` with host UID, checkout at /workspace, INSIDE_DEV_CONTAINER=1,
+PYTHONPATH=/deps, host `/usr/lib/python3/dist-packages/yaml` mounted at /deps/yaml
+and existing `/tmp/sf196-network-183/sui` mounted at /opt/sui-network/sui passes:
+23 rollout + 175 testnet + 67 common + 2 passkey tests, authenticated cache and
+receipt-effect Node suites. The pinned installed-toolchain assertion passes.
+Initial host run with INSIDE_DEV_CONTAINER=1 failed for absent sui; cached-image
+attempts failed for missing PyYAML and a mistakenly mounted 1.81.1 CLI; these
+were environment failures, corrected by the explicit mounts above. An extra
+misnamed `node scripts/test_passkey.cjs` invocation failed before execution;
+the actual `test_passkey_factor.cjs` suite passed.
+
+Pushing this repair requests ordinary CI and, on successful originating CI, the
+existing protected automatic native-feature testnet lane. No hosted waits or
+polling, machine-wallet creation, limit increase, fixture deletion or public
+transaction was performed. The local CodeQL CLI remains unavailable; fresh
+CodeQL and genuine native public-testnet effects remain unverified. The claim
+stays reserved and PR draft until actual required acceptance is ready. Missing
+machine active-address is not the blocker to this CI route. Independent feature
+review remains required; no approval, Review readiness or merge is claimed.
