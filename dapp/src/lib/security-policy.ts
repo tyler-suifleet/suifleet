@@ -14,7 +14,8 @@ export const SECURITY_FACTORS = [
 ] as const;
 // The framework deliberately fails closed until the corresponding child verifier
 // and its enrollment UI ship. Never present a checkbox as working protection.
-export const AVAILABLE_SECURITY_FACTORS = 0;
+export const APPROVAL_ORIGINS = ["customer::SecondPersonConfiguration"] as const;
+export const AVAILABLE_SECURITY_FACTORS = MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0;
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {
@@ -32,7 +33,7 @@ export async function fetchOrganizationSecurity(client: SuiGrpcClient, customerI
   const { customer_CustomerBcs } = await import("./fleet-protocol");
   const customer = customer_CustomerBcs.parse(object.content);
   if (customer.version === "1" || customer.version === "196") return undefined;
-  if (customer.version !== "197") throw Error("Unsupported organization authority version");
+  if (!["197", "199"].includes(customer.version)) throw Error("Unsupported organization authority version");
   const field = await client.getDynamicField({ parentId: customerId, name: {
     type: moveType("security_policy::PolicyKey"), bcs: security_policy_PolicyKeyBcs.serialize({ dummy_field: false }).toBytes(),
   } });

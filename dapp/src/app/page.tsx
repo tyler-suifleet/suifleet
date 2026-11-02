@@ -7,6 +7,7 @@ import { useFleetHealth, useNow } from "@/hooks/useFleetHealth";
 import { useFleetAlerts } from "@/hooks/useFleetAlerts";
 import { historicalFailures } from "@/lib/alerts";
 import { deviceHref } from "@/lib/device-services";
+import { SecondPersonApprovals } from "@/components/SecondPersonApprovals";
 import Link from "next/link";
 import { deviceHealthTile, deploymentTile } from "@/lib/dashboard-stats";
 import { PageHeader, Section, StatusDot } from "@/components/ui";
@@ -27,6 +28,7 @@ export default function DashboardPage() {
       <PageHeader title="Dashboard" subtitle="Your fleet at a glance. Track device health, recent updates and active incidents." />
       <Link href="/get-started" className="inline-flex items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-800 hover:bg-blue-100">New here? Sign in and register your first device</Link>
 
+      <SecondPersonApprovals />
       {/* Stat cards */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
         <StatCard label={healthTile.label} value={dl ? "—" : healthTile.value} hint={dl ? undefined : healthTile.hint} href="/devices" />
