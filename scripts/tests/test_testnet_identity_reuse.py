@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from live_package_upgrade import funded_identity, load_state, DEVICE_FUNDING
+from live_package_upgrade import funded_identity, load_state, DEVICE_FUNDING, DEVICE_MAX_REUSE
 from testnet_budget import Budget, Spent
 
 
@@ -34,7 +34,7 @@ class IdentityReuseTests(unittest.TestCase):
     def test_unfunded_and_excessive_grants_are_not_selected(self):
         state = self.state()
         self.assertIsNone(funded_identity(state, lambda _: 9_999_999))
-        self.assertIsNone(funded_identity(state, lambda _: DEVICE_FUNDING + 1))
+        self.assertIsNone(funded_identity(state, lambda _: DEVICE_MAX_REUSE + 1))
 
     def test_failed_balance_read_is_not_a_fresh_identity_fallback(self):
         balance = Mock(side_effect=RuntimeError('unavailable'))

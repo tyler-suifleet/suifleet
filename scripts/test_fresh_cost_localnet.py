@@ -141,6 +141,7 @@ def main():
     parser.add_argument('--head-ref', default='HEAD')
     parser.add_argument('--next-head-ref', help='exercise same-lane identity reuse across a second exact package pair')
     parser.add_argument('--evidence-dir', required=True)
+    parser.add_argument('--compact-lifecycle', action='store_true')
     parser.add_argument('--with-security', action='store_true',
                         help='also execute fresh/cached upgrade-security suites against this checkout HEAD')
     parser.add_argument('--with-temporal', action='store_true',
@@ -205,7 +206,7 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
             options = dict(wallet=str(root / 'client.yaml'), network='localnet', base_ref=args.base_ref,
                 max_spend_mist=1_600_000_000, required_balance_mist=None, state=str(root / 'state.json'),
                 faucet_tool=None, build_sui='sui', network_sui=sui_toolchain.NETWORK_DEFAULT,
-                transaction_gas_budget=60_000_000, fresh=False, walrus='local', retire_rollout_audit=False)
+                transaction_gas_budget=60_000_000, compact_lifecycle=args.compact_lifecycle, fresh=False, walrus='local', retire_rollout_audit=False)
             outcomes = []
             for pair, head in enumerate(heads):
                 subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '--detach', head], check=True)
@@ -238,8 +239,10 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
             # Wallet uses the same actual browser suite with local blob transport.
             wallet_gate.Walrus = LocalStorage
             wallet_gate.contracts_digest = lambda _: upgrade.contracts_digest(clone / 'contracts')
-            wallet_gate.run(SimpleNamespace(wallet=options['wallet'], network='localnet',
-                state=options['state'], max_spend_mist=150_000_000, evidence=str(output / 'wallet.json')))
+            for phase in ('fresh', 'retained'):
+                wallet_gate.run(SimpleNamespace(wallet=options['wallet'], network='localnet',
+                    state=options['state'], max_spend_mist=150_000_000,
+                    evidence=str(output / f'wallet-{phase}.json')))
             if args.with_temporal:
                 # Finish all historical effects reads before enabling actual pruning.
                 # This changes only this disposable node, never the public reader or proof.

@@ -76,7 +76,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
 CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
-DEVICE_FUNDING = 30_000_000  # Target MIST of report gas after a top-up.
+DEVICE_FUNDING = 10_000_000  # Four sequential reports; measured locally below 6M total.
+DEVICE_MAX_REUSE = 30_000_000  # Keep previously funded identities eligible; charge the full grant.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
@@ -200,7 +201,7 @@ def failure_class(error):
 
 
 def completed_deployment_cases(cases, *, head, call, transaction, created, settled,
-                               receipts, proof, cleanup, evidence, read_version):
+                               receipts, proof, cleanup, evidence, read_version, compact=False):
     """Recycle only a predecessor whose receipt and independent effects passed.
 
     A failed/unknown create+delete leaves the predecessor in bounded cleanup;
@@ -214,7 +215,8 @@ def completed_deployment_cases(cases, *, head, call, transaction, created, settl
         arguments = call(package, version, **options)
         if previous:
             arguments += ["--move-call", f"{head}::deployment_manager::delete_deployment", f"@{previous}"]
-        made = transaction(f"create deployment {version}" + (" + delete completed predecessor" if previous else " via base"), *arguments)
+        budgets = {'budget': 10_000_000 if previous else 15_000_000} if compact else {}
+        made = transaction(f"create deployment {version}" + (" + delete completed predecessor" if previous else " via base"), *arguments, **budgets)
         record_ids = created(made, "::deployment_manager::DeploymentRecord")
         if len(record_ids) != 1:
             raise RuntimeError('deployment case did not create exactly one record')
@@ -511,7 +513,7 @@ def funded_identity(state, balance):
                 raise RuntimeError('cached device identity has conflicting keys')
             candidates[address] = key
     funded = [(balance(address), address, key) for address, key in candidates.items()]
-    eligible = [item for item in funded if DEVICE_MINIMUM <= item[0] <= DEVICE_FUNDING]
+    eligible = [item for item in funded if DEVICE_MINIMUM <= item[0] <= DEVICE_MAX_REUSE]
     if not eligible:
         return None
     _, address, key = min(eligible)
@@ -619,7 +621,10 @@ def package_client(network_sui, wallet, *command, json_output=True, check=True, 
 
 
 def run(args):
+    compact = getattr(args, "compact_lifecycle", False)
     ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
+    if compact and ptb_budget < 15_000_000:
+        raise ValueError("compact lifecycle needs an explicit ordinary gas cap of at least 15000000 MIST")
     os.umask(0o077)
     evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": args.network,
                 "transactions": [], "checks": []}
@@ -712,6 +717,7 @@ def run(args):
     def transaction(label, *ptb, budget=None, funding=0):
         # Fresh publication can consume most of the run ceiling. Never submit
         # an ordinary PTB with its configured gas budget silently reduced.
+        # Compact lifecycle calls explicitly select their documented budgets.
         return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
 
     def created(result, suffix):
@@ -1070,7 +1076,7 @@ def run(args):
                 proof=(lambda record: receipt_effects(root / 'release/deployment.json', [record]))
                       if args.network == 'testnet' else None,
                 cleanup=cleanup, evidence=evidence,
-                read_version=lambda record: plain(client("object", record)["content"])["version"])
+                read_version=lambda record: plain(client("object", record)["content"])["version"], compact=compact)
             direct, via_group, via_old, failed = (by_version[v] for v in ("1.0.0", "2.0.0", "3.0.0", "4.0.0"))
             check("head-package deployment to the device: applied, receipt Applied on chain")
             check("head-package deployment to the pre-upgrade group: applied via report_status_for_group")
@@ -1094,27 +1100,41 @@ def run(args):
             process.wait(timeout=60)
             process = None
 
-            # 6. Cleanup in one transaction: storage rebate.
-            deletes = []
-            for deployment in cleanup:
-                deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
-            transaction("delete final completed deployment", *deletes)
-            cleanup.clear()
-            check("deployments deleted (storage rebate)")
-            # Temporal audit acceptance must never prevent daemon, receipt or
-            # cleanup regressions from running. Pending is evidence, not a pass.
-            # Reuse the verified upgraded package and the same bounded ledger.
+            # Transfer only the final proven deployment to the durable audit
+            # journal. Its deletion shares audit creation's storage charge.
             from rollout_audit_acceptance import run_scheduled as audit_acceptance, checkpointed_step
             audit_fixture = fixture.setdefault('rollout_audit', {})
+            recycle = (cleanup[0] if len(cleanup) == 1
+                and 'deployment_manager::DecisionKey' in manifest['type_origins']
+                and not audit_fixture.get('record')
+                and not audit_fixture.get('creation_cleanup')
+                and not audit_fixture.get('pending_operation') else None)
+            if not recycle:
+                deletes = []
+                for deployment in cleanup:
+                    deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
+                transaction("delete final completed deployment", *deletes)
+                cleanup.clear()
+
+            def save_audit():
+                save_state(state_path, state)
+                # The persisted journal, including unknown outcomes, now owns
+                # this object. Abort cleanup must never invalidate its bytes.
+                owned = audit_fixture.get('creation_cleanup')
+                if owned in cleanup:
+                    cleanup.remove(owned)
+
             def audit_step(label, ptb, calls):
                 return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
                     client=client, sign=sign, mutate=mutate, ledger=ledger,
                     operator=operator, chain=reconciler.Chain(rpc_url),
-                    checkpoint=checkpoint_setup, record_other=other_execution)
+                    checkpoint=checkpoint_setup, record_other=other_execution,
+                    gas=11_000_000 if compact and label.startswith('create and admit') else 20_000_000)
             audit_acceptance(audit_step, client, manifest, device, evidence, root,
-                fixture=audit_fixture, save=lambda: save_state(state_path, state),
+                fixture=audit_fixture, save=save_audit, creation_cleanup=recycle, compact=compact,
                 operator=operator, fixture_key=key_name,
                 retire=getattr(args, 'retire_rollout_audit', False))
+            check("deployments deleted (storage rebate)")
 
     finally:
         if process and process.poll() is None:
@@ -1161,6 +1181,8 @@ if __name__ == "__main__":
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
+    parser.add_argument("--compact-lifecycle", action="store_true",
+                        help="explicit 15M first/10M successor deployment budgets and 11M atomic audit budget; full reservations remain enforced")
     parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
     parser.add_argument("--retire-rollout-audit", action="store_true",
                         help="delete the retained audit only after real post-pruning proof; retires its automatic reuse")
