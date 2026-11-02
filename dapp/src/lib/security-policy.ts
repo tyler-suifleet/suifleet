@@ -2,6 +2,7 @@ import type { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeStructTag } from "@mysten/sui/utils";
 import { MANIFEST, SECURITY_TYPES, moveType, verifyDeployment } from "./deployment-manifest";
+import { delaySupported } from "./security-delay";
 import { PACKAGE_ID } from "./constants";
 import { security_policy_PolicyBcs, security_policy_PolicyKeyBcs } from "./fleet-protocol";
 
@@ -12,9 +13,9 @@ export const SECURITY_FACTORS = [
   { bit: 4, name: "Second-person approval", description: "Require approval from another authorized credential. The proposer cannot approve their own request.", ticket: "SF-199" },
   { bit: 8, name: "Delay and cancellation", description: "Wait through an on-chain cancellation window before executing. A current administrator can cancel.", ticket: "SF-200" },
 ] as const;
-// The framework deliberately fails closed until the corresponding child verifier
-// and its enrollment UI ship. Never present a checkbox as working protection.
-export const AVAILABLE_SECURITY_FACTORS = 0;
+// Delay ships with its queue and chain-clock enforcement; other factors remain
+// unavailable. Activation also requires the verified delay introduction origins.
+export const AVAILABLE_SECURITY_FACTORS = 8;
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {
@@ -43,7 +44,7 @@ export async function fetchOrganizationSecurity(client: SuiGrpcClient, customerI
 }
 export function buildSecurityPolicyTx(customerId: string, requirements: readonly number[]) {
   if (!securitySupported()) throw Error("Deploy the organization security framework first");
-  const values = validateSecurityRequirements(requirements);
+  const values = validateSecurityRequirements(requirements, delaySupported() ? AVAILABLE_SECURITY_FACTORS : 0);
   const tx = new Transaction();
   tx.moveCall({ target: `${PACKAGE_ID}::customer::set_security`, arguments: [tx.object(customerId), tx.pure.vector("u8", values)] });
   return tx;
