@@ -198,6 +198,44 @@ def failure_class(error):
     return "source"
 
 
+
+def completed_deployment_cases(cases, *, head, call, transaction, created, settled,
+                               receipts, proof, cleanup, evidence, read_version):
+    """Recycle only a predecessor whose receipt and independent effects passed.
+
+    A failed/unknown create+delete leaves the predecessor in bounded cleanup;
+    successful effects replace it with the successor before any further reads.
+    """
+    by_version = {}
+    previous = None
+    evidence["receipts"] = {}
+    evidence["report_transactions"] = []
+    for package, version, options, status in cases:
+        arguments = call(package, version, **options)
+        if previous:
+            arguments += ["--move-call", f"{head}::deployment_manager::delete_deployment", f"@{previous}"]
+        made = transaction(f"create deployment {version}" + (" + delete completed predecessor" if previous else " via base"), *arguments)
+        record_ids = created(made, "::deployment_manager::DeploymentRecord")
+        if len(record_ids) != 1:
+            raise RuntimeError('deployment case did not create exactly one record')
+        if previous:
+            cleanup.remove(previous)
+        record = record_ids[0]
+        cleanup.append(record)
+        if read_version(record) != version:
+            raise RuntimeError('created deployment version differs from requested case')
+        by_version[version] = record
+        settled(record, status)
+        evidence["receipts"][record] = receipts(record)
+        if proof:
+            result = proof(record)
+            if len(result) != 1:
+                raise RuntimeError('deployment case needs one independent receipt proof')
+            evidence["report_transactions"].extend(result)
+        previous = record
+    return by_version
+
+
 def receipt_effects(manifest, deployments):
     """Read-only proof; retain a bounded, sanitized failure instead of losing stderr."""
     proof = subprocess.run(['node', str(ROOT / 'scripts/testnet_receipt_effects.cjs'),
@@ -1017,30 +1055,27 @@ def run(args):
                 path = components / component.DEFAULT_COMPONENT / "history.jsonl"
                 return [json.loads(line)["version"] for line in path.read_text().splitlines()] if path.exists() else []
 
-            # Batched to save computation fees. One transaction cannot call two
-            # versions of a package (InvalidLinkage), so the old package's
-            # entry point gets its own.
-            # The base entry must exercise legacy event discovery even when
-            # identical bytecode reuses the head package ID. Otherwise its later
-            # announcement supersedes the failed deployment in the inbox head.
-            by_version = {}
-            for label, arguments in (
-                ("create 3 deployments via head", [*call(new, "1.0.0", devices=[device]), *call(new, "2.0.0", groups=[group]),
-                                                   *call(new, "4.0.0", devices=[device], fail="health")]),
-                ("create 1 deployment via base", call(old, "3.0.0", devices=[device], announce=False))):
-                for record_id in created(transaction(label, *arguments), "::deployment_manager::DeploymentRecord"):
-                    cleanup.append(record_id)
-                    cleanup_package = new
-                    by_version[plain(client("object", record_id)["content"])["version"]] = record_id
+            # Each case completes and is independently read before the next
+            # transaction can delete it. Only head entry points share a PTB;
+            # calling two versions of one package would be InvalidLinkage.
+            cases = [
+                (old, "3.0.0", dict(devices=[device], announce=False), 1),
+                (new, "1.0.0", dict(devices=[device]), 1),
+                (new, "2.0.0", dict(groups=[group]), 1),
+                (new, "4.0.0", dict(devices=[device], fail="health"), 2),
+            ]
+            cleanup_package = new
+            by_version = completed_deployment_cases(cases, head=new, call=call,
+                transaction=transaction, created=created, settled=settled, receipts=receipts,
+                proof=(lambda record: receipt_effects(root / 'release/deployment.json', [record]))
+                      if args.network == 'testnet' else None,
+                cleanup=cleanup, evidence=evidence,
+                read_version=lambda record: plain(client("object", record)["content"])["version"])
             direct, via_group, via_old, failed = (by_version[v] for v in ("1.0.0", "2.0.0", "3.0.0", "4.0.0"))
-            settled(direct, 1)
             check("head-package deployment to the device: applied, receipt Applied on chain")
-            settled(via_group, 1)
             check("head-package deployment to the pre-upgrade group: applied via report_status_for_group")
-            settled(via_old, 1)
             check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)" if old != new
                   else "deployment through the base package (no upgrade in this run): applied and receipted")
-            settled(failed, 2)
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
             if inboxes:
@@ -1052,10 +1087,7 @@ def run(args):
                 assert latest.get(dm.object_id(group)) == {dm.object_id(via_group)}, heads
                 check("head-package deployments announced to the device inbox and the indexed group's head; "
                       "group report authorized by the member index")
-            evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
             if args.network == 'testnet':
-                evidence['report_transactions'] = receipt_effects(
-                    root / 'release/deployment.json', (direct, via_group, via_old, failed))
                 assert len(evidence['report_transactions']) == 4
                 check('independent gRPC reader confirmed all four receipt-writing transaction effects')
             process.send_signal(signal.SIGINT)
@@ -1064,9 +1096,9 @@ def run(args):
 
             # 6. Cleanup in one transaction: storage rebate.
             deletes = []
-            for deployment in (direct, via_group, via_old, failed):
+            for deployment in cleanup:
                 deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
-            transaction("delete 4 deployments", *deletes)
+            transaction("delete final completed deployment", *deletes)
             cleanup.clear()
             check("deployments deleted (storage rebate)")
             # Temporal audit acceptance must never prevent daemon, receipt or
