@@ -201,7 +201,16 @@ def resume(dispatcher, project, slot, key, reason, worker_path, origin=None, blo
     require(json.loads((Path(row['directory'])/'command.json').read_text()) == dispatcher.config['workers'][slot['family']], 'original command changed')
     fence(dispatcher, project, row, claim)
     owners = dispatcher.ticket(project, 'list')
-    require(dispatcher.available(slot, [o for o in owners if not repair or o.get('token') != owner['token']], retention=False, recovering=not repair), 'no configured implementation capacity')
+    # Explicit operator recovery must respect another worker's family-wide quota
+    # wait. Automatic quota recovery owns clearing that pause after its reset.
+    from dispatcher import QUOTA_PAUSE
+    pause = dispatcher.db.execute('SELECT retry_after,reason FROM backoff WHERE project=? AND family=?',
+                                  (slot['project'], slot['family'])).fetchone()
+    require(not (pause and pause['retry_after'] > time.time() and pause['reason'] == QUOTA_PAUSE),
+            'no configured implementation capacity: provider quota reset wait')
+    # Both stopped origins are explicit recovery, not new-ticket dispatch.
+    # Keep real capacity/provider fences while ignoring idle eligibility delay.
+    require(dispatcher.available(slot, [o for o in owners if not repair or o.get('token') != owner['token']], retention=False, recovering=True), 'no configured implementation capacity')
     # A durable one-use reservation precedes any ticket transition or spawn.
     # Failures stay visible as orphaned; no automatic replay of uncertain intent.
     session = 'recovery-' + uuid.uuid4().hex

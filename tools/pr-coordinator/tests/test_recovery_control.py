@@ -35,6 +35,7 @@ class RetainedRecoveryTests(unittest.TestCase):
         self.addCleanup(self.d.db.close)
         self.d.db.row_factory = sqlite3.Row
         self.d.db.executescript('''
+          CREATE TABLE backoff(project TEXT,family TEXT,attempts INTEGER,retry_after REAL,reason TEXT);
           CREATE TABLE runs(session TEXT PRIMARY KEY,project TEXT,family TEXT,status TEXT,directory TEXT,claim TEXT,pid INTEGER,started TEXT,message TEXT);
           CREATE TABLE retired_runs(session TEXT PRIMARY KEY,status TEXT,message TEXT,reason TEXT,at REAL);
           CREATE TABLE dependency_resumes(claim TEXT,state TEXT);
@@ -89,6 +90,46 @@ class RetainedRecoveryTests(unittest.TestCase):
         # Repeating cannot launch the same source twice.
         with self.assertRaises(RuntimeError): self.resume()
         self.assertEqual(self.child.call_count,1)
+
+    def real_availability(self, reason, occupied=False):
+        self.d.db.executescript("""
+          ALTER TABLE dependency_resumes ADD COLUMN project TEXT;
+          ALTER TABLE dependency_resumes ADD COLUMN family TEXT;
+        """)
+        self.d.db.execute('INSERT INTO backoff VALUES(?,?,?,?,?)',
+                          ('project', 'Claude', 1, 10**12, reason))
+        (self.path/'reviews.sqlite3').touch(exist_ok=True)
+        self.d.repair_owned.return_value = False
+        if occupied:
+            self.d.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                ('busy','project','Claude','running',str(self.path),None,456,'300','busy'))
+        self.d.available.side_effect = lambda *a, **kw: dispatcher.Dispatcher.available(self.d, *a, **kw)
+
+    def test_explicit_recovery_ignores_idle_backoff(self):
+        self.real_availability('idle: no eligible ticket')
+        self.assertEqual(self.resume()['family'], 'Claude')
+        self.child.assert_called_once()
+
+    def test_provider_stagger_still_blocks_explicit_recovery(self):
+        self.real_availability('provider capacity recovery stagger')
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
+
+    def test_provider_quota_pause_still_blocks_explicit_recovery(self):
+        self.real_availability(dispatcher.QUOTA_PAUSE)
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
+
+    def test_occupied_slot_still_blocks_explicit_recovery(self):
+        self.real_availability('idle: no eligible ticket', occupied=True)
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
 
     def test_codex_uses_its_original_model_too(self):
         self.claim['agent'] = 'Codex'
@@ -411,6 +452,12 @@ class BlockedEngineeringRecoveryTests(unittest.TestCase):
         return control.resume(self.d,self.project,self.slot,'SF-1',
             'Implement the confirmed engineering repair; external decisions remain blocked.',
             self.path/'worker.py',blocked_engineering_repair=True)
+
+    real_availability = RetainedRecoveryTests.real_availability
+    test_explicit_recovery_ignores_idle_backoff = RetainedRecoveryTests.test_explicit_recovery_ignores_idle_backoff
+    test_provider_stagger_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_stagger_still_blocks_explicit_recovery
+    test_provider_quota_pause_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_quota_pause_still_blocks_explicit_recovery
+    test_occupied_slot_still_blocks_explicit_recovery = RetainedRecoveryTests.test_occupied_slot_still_blocks_explicit_recovery
 
     # Reuse the real stop/helper/claim/dependency/one-use fences, not orphan-only fixtures.
     test_stopped_repair_with_finished_implementation_resumes_once = StoppedRepairTests.test_stopped_repair_with_finished_implementation_resumes_once
