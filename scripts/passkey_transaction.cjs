@@ -12,8 +12,7 @@ const { Transaction } = req('@mysten/sui/transactions');
  try {
   const stored = fs.readFileSync(input.keys,'utf8');
   try { keys = JSON.parse(stored); } catch { throw Error('Invalid private fixture state'); }
- }
- catch (error) {
+ } catch (error) {
   if (error.code !== 'ENOENT') throw error;
   keys = Array.from({length:2}, () => crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{type:'pkcs8',format:'pem'},publicKeyEncoding:{type:'spki',format:'der'}})).map(k=>({privateKey:k.privateKey, publicKey:crypto.ECDH.convertKey(k.publicKey.subarray(-65),'prime256v1',undefined,undefined,'compressed').toString('base64')}));
   fs.writeFileSync(input.keys,JSON.stringify(keys),{mode:0o600,flag:'wx'});
