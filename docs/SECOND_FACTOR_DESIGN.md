@@ -342,3 +342,25 @@ Final human/extension-wallet, provider, physical and mainnet acceptance remains
 unrun in #32/#159. The child mechanisms and their activation/enrollment UI are
 still their respective tickets; this framework must not be advertised as four
 completed second-factor mechanisms.
+
+### SF-198 native sponsorship
+
+Implementation awaiting independent source review and required public-testnet
+acceptance in SF-198/#397. The package-size repair and isolated native feature
+effects passed; shared acceptance-cost repair remains in SF-221/#463. This
+section describes the implementation, not completed public acceptance.
+
+SF-198 uses Sui's native verified passkey **gas sponsor** plus the existing
+administrator wallet sender. Both sign the same TransactionData bytes. The
+passkey factor is authenticated from `TxContext::sponsor`, not a transferable
+Action attestation or browser-reported signature type. Its address is
+Blake2b-256(`0x06 || compressed P-256 public key`). Native enrollment transactions
+prove possession before a currently authorized administrator installs the key.
+Bindings use BCS `vector<address>` alternating administrator/passkey addresses;
+all existing factor requirements authorize changes. Empty bindings cannot enable
+protection. Native sponsorship satisfies only bit 2; the other mechanisms remain
+unavailable pending their owners. The transaction signature makes generic
+capability loans safe for passkey-only requirements: all cap uses are covered by
+the exact signed PTB. Intent-based attestations and other requirement bits still
+cannot authorize these generic loans. See the operational enrollment and recovery
+procedure above in [OPERATIONS.md](OPERATIONS.md#optional-passkey-co-signature-sf-198).

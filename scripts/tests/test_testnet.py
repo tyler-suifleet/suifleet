@@ -849,6 +849,30 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
 
 class BytecodeFixtureTests(unittest.TestCase):
+    def test_sf198_prepared_fixture_needs_next_run_not_faucet_or_republication(self):
+        import live_package_upgrade as live
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Exact five settled effects from protected run 41374657219.
+        used = sum((772_926_000, 8_425_378, 1_243_578, 784_577_363, 8_737_163))
+        self.assertEqual(used, 1_575_909_482)
+        with self.assertRaisesRegex(Spent, 'retain and reuse'):
+            live.report_funding_plan(PACKAGE_UPGRADE_CEILING - used, 0,
+                                     PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.failure_class(Spent('allowance exhausted')), 'source')
+        self.assertEqual(live.failure_class(live.FundingShortfall('balance low')), 'funding')
+        # A script-only repair preserves both compiled digests: the durable
+        # fixture can run the whole core phase under the unchanged allowance.
+        top_up, required = live.report_funding_plan(PACKAGE_UPGRADE_CEILING, 9_000_000,
+                                                   PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(top_up, 21_000_000)
+        self.assertEqual(required, 280_000_000)
+        self.assertEqual(live.report_funding_plan(required, 9_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=True), (top_up, required))
+        with self.assertRaises(Spent):
+            live.report_funding_plan(required - 1, 9_000_000, PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.report_funding_plan(220_000_000, 30_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=False), (0, 210_000_000))
+
     def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
         import copy, live_package_upgrade as live
         tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}

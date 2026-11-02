@@ -10,6 +10,7 @@ pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "com
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
 pub const SECURITY_TYPES: &[&str] = &["security_policy::PolicyKey", "security_policy::Policy", "security_policy::Action", "security_policy::PolicyChanged", "security_policy::ActionCreated", "customer::HandoverConsent", "enrollment::SecurityRevisionKey", "enrollment::SecurityGenerationKey", "security_policy::FactorKey", "security_policy::FactorConfiguration", "customer::HandoverCompleted", "customer::FleetSecurityKey"];
+pub const PASSKEY_TYPES: &[&str] = &["passkey_factor::Enrollment", "passkey_factor::ProofCreated"];
 pub const CUSTOMER_TYPES: &[&str] = &["customer::Customer", "customer::Fleet", "customer::Membership", "customer::CustomerKey", "customer::BudgetKey", "customer::DeviceKey", "customer::AssignmentKey", "customer::GroupCountKey", "customer::CustomerCreated", "customer::FleetCreated", "customer::CredentialChanged", "customer::DeviceAssigned", "customer::DeviceReleased", "enrollment::ManagedKey", "customer::PolicyKey", "deployment_manager::CustomerFleetKey"];
 pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::InboxKey", "fleet_inbox::HeadKey", "fleet_inbox::Head", "fleet_inbox::InboxCreated", "fleet_inbox::Announced", "device_group::MemberKey", "device_group::IndexKey", "device_group::GroupIndex", "device_group::GroupIndexed"];
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
@@ -57,6 +58,7 @@ pub mod component_catalog {
     pub const CREATE_DEPLOYMENT: &str = "create_deployment";
     pub const CREATE_DEPLOYMENT_PAUSED: &str = "create_deployment_paused";
     pub const DELETE_DEPLOYMENT: &str = "delete_deployment";
+    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISHER: &str = "publisher";
     pub const VALIDATE_HASH: &str = "validate_hash";
@@ -64,7 +66,6 @@ pub mod component_catalog {
     pub const VALIDATE_VERSION: &str = "validate_version";
     pub const VERSION_PUBLISHER: &str = "version_publisher";
     pub const VERSIONS: &str = "versions";
-    pub const NEW_DEPLOYMENT: &str = "new_deployment";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CatalogBinding {
         pub version_id: [u8; 32],
@@ -125,6 +126,7 @@ pub mod customer {
     pub const ACTIVE_DEVICES: &str = "active_devices";
     pub const ADD_CLAIMS: &str = "add_claims";
     pub const ADD_CLAIMS_SECURED: &str = "add_claims_secured";
+    pub const ADD_MANY_TO_GROUP: &str = "add_many_to_group";
     pub const ADD_TO_GROUP: &str = "add_to_group";
     pub const ADD_TO_GROUP_SECURED: &str = "add_to_group_secured";
     pub const ADOPT_BUDGET: &str = "adopt_budget";
@@ -159,6 +161,7 @@ pub mod customer {
     pub const BIND_DEVICE_METADATA_SECURED: &str = "bind_device_metadata_secured";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
     pub const CANCEL_SECURITY_ACTION: &str = "cancel_security_action";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const COMMIT_REVISION: &str = "commit_revision";
     pub const COMMIT_REVISION_SECURED: &str = "commit_revision_secured";
     pub const CONFIGURE_CHARGING: &str = "configure_charging";
@@ -195,6 +198,7 @@ pub mod customer {
     pub const HANDOVER: &str = "handover";
     pub const HANDOVER_SECURED: &str = "handover_secured";
     pub const INITIALIZE_SECURITY: &str = "initialize_security";
+    pub const MAX_GROUP_BATCH: &str = "max_group_batch";
     pub const NEW_CATALOG_DEPLOYMENT: &str = "new_catalog_deployment";
     pub const NEW_CATALOG_DEPLOYMENT_SECURED: &str = "new_catalog_deployment_secured";
     pub const NEW_DEPLOYMENT: &str = "new_deployment";
@@ -221,6 +225,7 @@ pub mod customer {
     pub const REMOVE_DEVICE_SECURED: &str = "remove_device_secured";
     pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
     pub const REMOVE_FROM_GROUP_SECURED: &str = "remove_from_group_secured";
+    pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
     pub const RENAME_FLEET: &str = "rename_fleet";
     pub const RENAME_FLEET_SECURED: &str = "rename_fleet_secured";
     pub const REPORT_GROUP_STATUS: &str = "report_group_status";
@@ -259,10 +264,6 @@ pub mod customer {
     pub const USED: &str = "used";
     pub const WITHDRAW_BUDGET: &str = "withdraw_budget";
     pub const WITHDRAW_BUDGET_SECURED: &str = "withdraw_budget_secured";
-    pub const ADD_MANY_TO_GROUP: &str = "add_many_to_group";
-    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
-    pub const MAX_GROUP_BATCH: &str = "max_group_batch";
-    pub const REMOVE_MANY_FROM_GROUP: &str = "remove_many_from_group";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
         pub device_id: [u8; 32],
@@ -364,6 +365,14 @@ pub mod customer {
     }
     impl FleetSecurityKey { pub const MOVE_TYPE: &'static str = "customer::FleetSecurityKey"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct GroupBatchApplied {
+        pub fleet_id: [u8; 32],
+        pub group_id: [u8; 32],
+        pub added: bool,
+        pub count: u64,
+    }
+    impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct GroupCountKey {
         pub device_id: [u8; 32],
     }
@@ -395,14 +404,6 @@ pub mod customer {
         pub policy_id: [u8; 32],
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct GroupBatchApplied {
-        pub fleet_id: [u8; 32],
-        pub group_id: [u8; 32],
-        pub added: bool,
-        pub count: u64,
-    }
-    impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -413,6 +414,7 @@ pub mod deployment_manager {
     pub const BEGIN_RECEIPT_CLEANUP: &str = "begin_receipt_cleanup";
     pub const BEGIN_SHARDED_RECEIPTS: &str = "begin_sharded_receipts";
     pub const CLEANUP_RECEIPT_CHUNK: &str = "cleanup_receipt_chunk";
+    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const COMPONENT_NAME: &str = "component_name";
     pub const CONTROL: &str = "control";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
@@ -464,7 +466,6 @@ pub mod deployment_manager {
     pub const SYNC_ROLLOUT_RECEIPTS: &str = "sync_rollout_receipts";
     pub const TARGET_DEVICES: &str = "target_devices";
     pub const TARGET_GROUPS: &str = "target_groups";
-    pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Control {
         pub revision: u64,
@@ -486,6 +487,27 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl CustomerFleetKey { pub const MOVE_TYPE: &'static str = "deployment_manager::CustomerFleetKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionCleanupKey {
+        pub dummy_field: bool,
+    }
+    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionKey {
+        pub revision: u64,
+    }
+    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DecisionRecord {
+        pub deployment_id: [u8; 32],
+        pub revision: u64,
+        pub cohort: u64,
+        pub state: u8,
+        pub reason: String,
+        pub at_ms: u64,
+        pub admitted: Vec<[u8; 32]>,
+    }
+    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct DelegateKey {
         pub dummy_field: bool,
@@ -679,27 +701,6 @@ pub mod deployment_manager {
         pub dummy_field: bool,
     }
     impl TargetGroupsKey { pub const MOVE_TYPE: &'static str = "deployment_manager::TargetGroupsKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionCleanupKey {
-        pub dummy_field: bool,
-    }
-    impl DecisionCleanupKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionCleanupKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionKey {
-        pub revision: u64,
-    }
-    impl DecisionKey { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DecisionRecord {
-        pub deployment_id: [u8; 32],
-        pub revision: u64,
-        pub cohort: u64,
-        pub state: u8,
-        pub reason: String,
-        pub at_ms: u64,
-        pub admitted: Vec<[u8; 32]>,
-    }
-    impl DecisionRecord { pub const MOVE_TYPE: &'static str = "deployment_manager::DecisionRecord"; }
 }
 pub mod desired_state {
     use super::*;
@@ -860,6 +861,7 @@ pub mod device_registry {
     use super::*;
     pub const MODULE: &str = "device_registry";
     pub const ACTIVATE_DEVICE: &str = "activate_device";
+    pub const ARCH: &str = "arch";
     pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const BORROW_DEVICE: &str = "borrow_device";
     pub const CUSTODIED_DEVICE: &str = "custodied_device";
@@ -881,7 +883,6 @@ pub mod device_registry {
     pub const REVOKE_DEVICE: &str = "revoke_device";
     pub const ROTATE_DEVICE_KEY: &str = "rotate_device_key";
     pub const SET_META: &str = "set_meta";
-    pub const ARCH: &str = "arch";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct CustodyKey {
         pub device_id: [u8; 32],
@@ -1376,6 +1377,33 @@ pub mod fleet_settings {
         pub dummy_field: bool,
     }
     impl SettingsKey { pub const MOVE_TYPE: &'static str = "fleet_settings::SettingsKey"; }
+}
+pub mod passkey_factor {
+    use super::*;
+    pub const MODULE: &str = "passkey_factor";
+    pub const ENROLL: &str = "enroll";
+    pub const KEY_ADDRESS: &str = "key_address";
+    pub const KEYS: &str = "keys";
+    pub const PROVE_ENROLLMENT: &str = "prove_enrollment";
+    pub const REMOVE: &str = "remove";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Enrollment {
+        pub id: [u8; 32],
+        pub customer: [u8; 32],
+        pub administrator: [u8; 32],
+        pub key: [u8; 32],
+        pub generation: u64,
+        pub expires_ms: u64,
+    }
+    impl Enrollment { pub const MOVE_TYPE: &'static str = "passkey_factor::Enrollment"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ProofCreated {
+        pub proof_id: [u8; 32],
+        pub customer: [u8; 32],
+        pub administrator: [u8; 32],
+        pub key: [u8; 32],
+    }
+    impl ProofCreated { pub const MOVE_TYPE: &'static str = "passkey_factor::ProofCreated"; }
 }
 pub mod roles {
     use super::*;
