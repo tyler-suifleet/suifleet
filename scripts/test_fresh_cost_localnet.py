@@ -80,6 +80,8 @@ def main():
     parser.add_argument('--head-ref', default='HEAD')
     parser.add_argument('--next-head-ref', help='exercise same-lane identity reuse across a second exact package pair')
     parser.add_argument('--evidence-dir', required=True)
+    parser.add_argument('--with-security', action='store_true',
+                        help='also execute fresh/cached upgrade-security suites against this checkout HEAD')
     args = parser.parse_args()
     if not Path('/.dockerenv').exists() or {p.name for p in Path('/sys/class/net').iterdir()} != {'lo'}:
         raise SystemExit('requires disposable Docker --network none')
@@ -94,6 +96,9 @@ def main():
         clone = root / 'source'
         refs = [args.head_ref] + ([args.next_head_ref] if args.next_head_ref else [])
         heads = [subprocess.check_output(['git', '-C', str(upgrade.ROOT), 'rev-parse', ref], text=True).strip() for ref in refs]
+        if args.with_security and heads[-1] != subprocess.check_output(
+                ['git', '-C', str(upgrade.ROOT), 'rev-parse', 'HEAD'], text=True).strip():
+            raise SystemExit('--with-security requires the final head to equal the tested checkout HEAD')
         subprocess.run(['git', 'clone', '--quiet', '--shared', '--no-hardlinks', str(upgrade.ROOT), str(clone)], check=True)
         subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '--detach', args.head_ref], check=True)
         # Only the package source/history moves: the harness and built clients
@@ -152,6 +157,14 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
                             assert tx['status'] == effects['status']['status']
                     evidence.write_text(json.dumps(receipt, indent=2) + '\n')
                     # Retained run reuses SAME pair; no identical republication.
+            if args.with_security:
+                import live_upgrade_security as security
+                security.Walrus = LocalStorage
+                for phase in ('fresh', 'retained'):
+                    security.run(SimpleNamespace(wallet=options['wallet'], network='localnet',
+                        base_ref=security.DEFAULT_BASE, walrus='local', fresh=False,
+                        state=str(root / 'security-state.json'), max_spend_mist=1_500_000_000,
+                        evidence=str(output / f'security-{phase}.json')))
             # Wallet uses the same actual browser suite with local blob transport.
             wallet_gate.Walrus = LocalStorage
             wallet_gate.contracts_digest = lambda _: upgrade.contracts_digest(clone / 'contracts')
