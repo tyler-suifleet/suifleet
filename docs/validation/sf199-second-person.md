@@ -244,3 +244,51 @@ Do not repeat fresh publication of identical packages, raise limits, reset
 reservations or treat the artifact replay as passing acceptance. SF-199 stays
 blocked, not Review-ready. No hosted CI polling or chain writes occurred.
 Manual wallet/Pi/mainnet/provider/hosting checks remain unrun in #32/#159/#62.
+
+
+## Authorized source recovery after cancelled integration wait, 2026-11-02
+
+This supersedes the preceding SF-221 dependency wait. The user cancelled that
+integration-only wait: SF-221 is a shared acceptance-cost repair, not an SF-199
+API/development prerequisite, and is **not** asserted merged or complete.
+Codex running `gpt-6.1-sol` (no finer build version exposed) resumed the original
+claim and PR #453. The initial worktree was clean. Accepted main
+`3fbf160e25d010ee88f976feb90b2cbbd3f04579` merged cleanly in `b7109bcc`;
+only coordinator infrastructure changed, with no application conflict or guessed
+unmerged interface. No source defect requiring another application patch emerged.
+
+Fresh checks on that integrated tree:
+
+- Pinned `sui move test --path contracts`: **363/363 passed**.
+- `python3 scripts/generate_interfaces.py --check`: **15 modules match**;
+  `python3 scripts/check_contract_interfaces.py`: **1,279 references, 17 modules,
+  zero drift**.
+- `node scripts/test_second_person.cjs`, `test_security_policy.cjs`, and
+  `test_dashboard_stats.cjs`: **passed**; frontend `tsc --noEmit`: **passed**.
+- `pnpm build` inside the pinned image: **passed**, static production export.
+- `python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'`:
+  **175 tests, OK, one existing skip** (offline fixtures, no public transactions).
+- Accepted-main coordinator `test_shared_acceptance_repair.py`: **13 passed**;
+  `test_batch_integration.py`: **40 passed**.
+- Network-none pinned-image `python3 scripts/test_second_person_localnet.py
+  --base /base/contracts --evidence docs/validation/sf199-recovery-localnet.json`:
+  **passed 26 effects-checked transactions**, existing-object compatible upgrade,
+  old/current bypass refusals, distinct approval, exact execution, rejection,
+  recovery and live console queue reads. [Receipt](sf199-recovery-localnet.json).
+  The receipt retains HEAD observed at run start (`17cd0e75`), before the merge
+  commit was created; the tested application/contracts tree equals the integrated
+  tree. No receipt was relabeled. Local allowance charged 1,648,869,799 MIST;
+  this disposable-chain setup does not spend public funds or change CI limits.
+
+Initial disposable invocations failed on missing warm Move cache; rerunning with
+this claim's existing cache passed. The host lacks pnpm; the production build
+passed in the pinned image. These setup failures were not counted as passes.
+
+Local/source implementation is ready for **independent SOURCE review** under the
+explicit recovery direction. This is not final acceptance-ready or merge approval.
+Exact-head/current-base hosted CI, protected automatic public-testnet validation
+and fresh independent final acceptance remain pending mandatory merge gates.
+No hosted CI was watched or polled, no unchanged failing public fixture repeated,
+no wallets created on public networks and no spending controls changed. Historical
+standalone public evidence above remains historical, not current-base success.
+Manual wallet/Pi/mainnet/provider/hosting checks remain unrun in #32/#159/#62.
