@@ -29,7 +29,7 @@ export function buildDelayConfigurationTx(customer: string, values: readonly num
 }
 export function editArguments(customerBytes: Uint8Array, edit: SecurityEdit): Uint8Array {
   const values = edit.operation === "configure_security_delays" ? durations.serialize(validateDelays(edit.values)).toBytes() : requirements.serialize(edit.values).toBytes();
-  return vectors.serialize([bcs.string().serialize(edit.operation).toBytes(), customerBytes, values]).toBytes();
+  return vectors.serialize([bcs.string().serialize(edit.operation).toBytes(), bcs.Address.serialize(wire.customer_CustomerBcs.parse(customerBytes).id).toBytes(), values]).toBytes();
 }
 export function securityIntent(customer: string, argumentsBcs: Uint8Array): number[] {
   // Move's TypeName is its address without 0x, followed by module and type.
@@ -79,7 +79,7 @@ export async function fetchQueuedSecurityActions(client: SuiGrpcClient, customer
   await verifyDeployment(client); requireDelay();
   const events = await incrementalEvents(client, moveType("security_policy::ActionCreated"));
   const ids = [...new Set(events.map(e => wire.security_policy_ActionCreatedBcs.parse(e.bcs)).filter(e => e.customer_id === customer).map(e => e.action_id))];
-  const current = await currentCustomerBytes(client, customer);
+  const current = bcs.Address.serialize(wire.customer_CustomerBcs.parse(await currentCustomerBytes(client, customer)).id).toBytes();
   const result: QueuedSecurityAction[] = [];
   for (let offset = 0; offset < ids.length; offset += 50) {
     const { objects } = await client.getObjects({ objectIds: ids.slice(offset, offset + 50), include: { content: true } });
@@ -105,7 +105,7 @@ export async function fetchQueuedSecurityActions(client: SuiGrpcClient, customer
           const name = bcs.string().parse(Uint8Array.from(args[0]));
           if (args.length === 3 && (name === "set_security" || name === "configure_security_delays")) {
             const values = name === "set_security" ? requirements.parse(Uint8Array.from(args[2])) : durations.parse(Uint8Array.from(args[2])).map(Number);
-            stateChanged = args[1].length !== current.length || args[1].some((v, i) => v !== current[i]);
+            stateChanged = args[1].length !== 32 || args[1].some((v, i) => v !== current[i]);
             edit = { operation: name, values };
           }
         }

@@ -14,8 +14,11 @@ assert.throws(()=>load('lib/deployment-manifest.ts').parseManifest(JSON.stringif
 assert.deepEqual(delay.validateDelays(Array(7).fill(1000)),Array(7).fill(1000));
 for(const values of [[],Array(6).fill(1000),[999,...Array(6).fill(1000)],Array(7).fill(518400001),Array(7).fill(NaN),Array(7).fill(1000.5)]) assert.throws(()=>delay.validateDelays(values));
 const edit={operation:'set_security',values:[8,0,0,0,0,0,0]};
-const args=delay.editArguments(new Uint8Array([1,2,3]),edit);
-assert.deepEqual(bcs.vector(bcs.vector(bcs.u8())).parse(args),[Array.from(bcs.string().serialize('set_security').toBytes()),[1,2,3],[7,8,0,0,0,0,0,0]]);
+const wire0=load('lib/fleet-protocol.ts');
+const customerState={id:C,version:'197',registry_id:manifest.shared_objects.registry.id,name:'Org',credentials:{contents:[]},administrators:'1',fleets:[],default_fleet:null,active_devices:'0',device_limit:'0',allowance:'0',used:'0',period:'0',charge_type:[]};
+const args=delay.editArguments(wire0.customer_CustomerBcs.serialize(customerState).toBytes(),edit);
+assert.deepEqual(args,delay.editArguments(wire0.customer_CustomerBcs.serialize({...customerState,used:'55',active_devices:'3'}).toBytes(),edit));
+assert.deepEqual(bcs.vector(bcs.vector(bcs.u8())).parse(args),[Array.from(bcs.string().serialize('set_security').toBytes()),Array.from(bcs.Address.serialize(C).toBytes()),[7,8,0,0,0,0,0,0]]);
 const queue=delay.buildQueueSecurityTx(C,args,100000n).getData();
 assert.equal(queue.commands[0].MoveCall.function,'queue_security_action');
 assert.equal(queue.commands[0].MoveCall.arguments.length,4);
@@ -55,7 +58,7 @@ console.log('PASS delay bounds, canonical args, domain isolation, SDK queue/conf
  const event=wire.security_policy_ActionCreatedBcs.serialize({action_id:A,customer_id:C,generation:'1',proposer:C,intent,expires_ms:'10000'}).toBytes();
  const actionBytes=wire.security_policy_ActionBcs.serialize({id:A,customer_id:C,generation:'1',proposer:C,intent,expires_ms:'10000',attested:0}).toBytes();
  const client=manifestClient(manifest),original=client.getObject;
- client.getObject=async request=>request.objectId===C?{object:{type:manifest.call_package_id+'::customer::Customer',content:customerBytes}}:original(request);
+ client.getObject=async request=>request.objectId===C?{object:{type:manifest.call_package_id+'::customer::Customer',content:mode==='usage'?wire.customer_CustomerBcs.serialize({...customerState,used:'42',active_devices:'2'}).toBytes():customerBytes}}:original(request);
  let mode='valid';
  client.getObjects=async()=>({objects:mode==='deleted'?[new ObjectError('gone','deleted',{reason:'deleted',objectId:A})]:mode==='transport'?[new Error('transport failed')]:[{type:manifest.call_package_id+'::security_policy::Action',content:actionBytes}]});
  client.getDynamicField=async({name})=>{
@@ -69,6 +72,7 @@ console.log('PASS delay bounds, canonical args, domain isolation, SDK queue/conf
  let rows=await api.fetchQueuedSecurityActions(client,C,1n,Array(7).fill(8),Array(7).fill(1000));
  assert.equal(rows[0].readyAt,1000n);assert.deepEqual(rows[0].edit,edit);assert.equal(rows[0].stale,false);
  rows=await api.fetchQueuedSecurityActions(client,C,2n,Array(7).fill(8),Array(7).fill(1000));assert.equal(rows[0].stale,true);
+ mode='usage';rows=await api.fetchQueuedSecurityActions(client,C,1n,Array(7).fill(8),Array(7).fill(1000));assert.equal(rows[0].stale,false);
  mode='legacy';rows=await api.fetchQueuedSecurityActions(client,C,1n,Array(7).fill(8),Array(7).fill(1000));assert.equal(rows[0].readyAt,undefined);
  mode='deleted';assert.deepEqual(await api.fetchQueuedSecurityActions(client,C,1n,Array(7).fill(8),Array(7).fill(1000)),[]);
  mode='transport';await assert.rejects(api.fetchQueuedSecurityActions(client,C,1n,Array(7).fill(8),Array(7).fill(1000)),/transport failed/);

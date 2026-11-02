@@ -910,8 +910,13 @@ never include credentials or confidential data. Existing
 when called through the new package. Calls to its older bytecode create no trusted
 timestamp and cannot execute delay-protected operations through the new kernel.
 Use the existing operation-specific `*_secured` wrapper to consume the action.
-`configure_security_delays_secured` binds the complete customer BCS and seven new
-delays, under the current union of requirements. The console provides direct
+`configure_security_delays_secured` binds the customer object ID and seven new
+delays, under the current union of requirements. All secured wrappers encode the
+Customer reference as its BCS object ID; device usage and active-device counters
+do not invalidate a queued recovery. Credential/policy generation changes still
+invalidate pending actions. Other referenced objects retain their operation-specific
+snapshots and revisions. Previously queued intents encoding full Customer bytes
+must be canceled and queued again; clients must use this revised encoding. The console provides direct
 queue/execute controls for security settings and lists all discovered queued
 actions for countdown/cancellation; other API-originated operations execute through
 the originating client. Browser countdowns are advisory; Sui Clock enforces timing.

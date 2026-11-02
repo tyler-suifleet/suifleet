@@ -240,12 +240,14 @@ Standalone wallet-owned objects remain outside managed organization custody.
   ability. Execution or current-administrator cancellation consumes it.
 - Canonical arguments are BCS `vector<vector<u8>>`: BCS operation-name String,
   followed by BCS of every explicit argument in declaration order, excluding
-  Action, Clock and TxContext. References use the complete current object BCS;
+  Action, Clock and TxContext. Customer references use BCS object ID only, so
+  ordinary device storage charges cannot invalidate administrator recovery.
+  Other references use the complete current object BCS;
   owned values use their complete BCS. This binds both IDs and current contents.
   Group operations append BCS desired-state revision; deployment-reference
   operations append `deployment_manager::security_snapshot` (BCS vector of
   control, target groups/devices and optional rollout state); enrollment edits
-  append their security revision. Storage wrappers bind customer/fleet/storage/
+  append their security revision. Storage wrappers bind customer identity and fleet/storage/
   budget contents, exact amounts and recipient. `remove_device_secured` includes
   the ultimate recipient; source enrollment includes the original witness type.
 - `security_policy::action_intent(customer_id, arguments_bcs)` computes

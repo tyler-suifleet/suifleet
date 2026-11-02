@@ -1208,6 +1208,35 @@ module fleet_storage::fleet_storage_tests {
         clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
         ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap); finish(s, system);
     }
+    #[test]
+    fun delayed_recovery_survives_device_storage_charge() {
+        let (mut s, mut system, fid, bid) = managed_setup(POOL);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::configure_security_delays(&mut c, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
+        customer::set_security(&mut c, vector[8,8,8,8,8,8,8], s.ctx());
+        let clock = clock_at(&mut s, 0);
+        let args = vector[std::bcs::to_bytes(&string::utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])];
+        customer::queue_security_action(&c, std::bcs::to_bytes(&args), 10000, &clock, s.ctx());
+        clock::destroy_for_testing(clock); ts::return_shared(c);
+        s.next_tx(DEVICE);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
+        let a = s.take_shared<GasAccount>(); let r = s.take_shared<DeviceRegistry>(); let cap = s.take_from_sender<DeviceCap>();
+        let clock = clock_at(&mut s, 1);
+        fleet_storage::register_managed_blob(&mut c, &f, &mut fs, &b, &a, &r, &cap, &mut system, blob_id(BLOB), ROOT, BLOB, RS2, &clock, s.ctx());
+        assert!(customer::used(&c) == encoded(&system, BLOB));
+        assert!(customer::active_devices(&c) == 1);
+        clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(fs);
+        ts::return_shared(b); ts::return_shared(a); ts::return_shared(r); ts::return_to_address(DEVICE, cap);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        let action = s.take_shared<sui_edge::security_policy::Action>();
+        let clock = clock_at(&mut s, 1000);
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], action, &clock, s.ctx());
+        assert!(sui_edge::security_policy::requirements(&customer::security(&c)) == vector[0,0,0,0,0,0,0]);
+        clock::destroy_for_testing(clock); ts::return_shared(c); finish(s, system);
+    }
     #[test, expected_failure(abort_code = fleet_storage::EWrongVersion)]
     fun legacy_upload_entry_point_rejects_managed_budget() {
         let (mut s, mut system, _, bid) = managed_setup(POOL);
@@ -1281,7 +1310,7 @@ module fleet_storage::fleet_storage_tests {
         let fs = s.take_shared<FleetStorage>(); let b = s.take_shared_by_id<FleetBudget>(bid);
         let clock = clock_at(&mut s, 1);
         let arguments = vector[std::bcs::to_bytes(&string::utf8(b"withdraw_managed_wal")),
-            std::bcs::to_bytes(&c), std::bcs::to_bytes(&f), std::bcs::to_bytes(&fs), std::bcs::to_bytes(&b),
+            std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&f), std::bcs::to_bytes(&fs), std::bcs::to_bytes(&b),
             std::bcs::to_bytes(&10u64), std::bcs::to_bytes(&OWNER)];
         customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
         clock::destroy_for_testing(clock);

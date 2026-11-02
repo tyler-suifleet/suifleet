@@ -10,6 +10,6 @@ const assert = require('node:assert/strict');
   assert.equal(object.type,origin+'::customer::Customer');
   const value=JSON.parse(values);
   const bytes=operation==='configure_security_delays'?bcs.vector(bcs.u64()).serialize(value):bcs.vector(bcs.u8()).serialize(value);
-  const args=bcs.vector(bcs.vector(bcs.u8())).serialize([bcs.string().serialize(operation).toBytes(),object.content,bytes.toBytes()]).toBytes();
+  const args=bcs.vector(bcs.vector(bcs.u8())).serialize([bcs.string().serialize(operation).toBytes(),bcs.Address.serialize(customer).toBytes(),bytes.toBytes()]).toBytes();
   process.stdout.write(JSON.stringify(Array.from(args)));
 })().catch(e=>{console.error(e.message);process.exit(1)});

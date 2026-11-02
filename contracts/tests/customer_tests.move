@@ -258,7 +258,7 @@ module sui_edge::customer_tests {
         let c = s.take_shared<Customer>();
         let clock = sui::clock::create_for_testing(s.ctx());
         let requirements = vector[0u8,0,0,0,0,0,0];
-        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&c), std::bcs::to_bytes(&requirements)];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
         customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let action = s.take_shared<sui_edge::security_policy::Action>();
@@ -292,7 +292,7 @@ module sui_edge::customer_tests {
         let mut c = s.take_shared<Customer>();
         customer::set_security_requirements_for_testing(&mut c, vector[1,0,0,0,0,0,0]);
         let requirements = vector[0u8,0,0,0,0,0,0];
-        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&c), std::bcs::to_bytes(&requirements)];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
         let clock = sui::clock::create_for_testing(s.ctx());
         customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
