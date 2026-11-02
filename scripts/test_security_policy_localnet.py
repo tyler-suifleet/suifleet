@@ -46,8 +46,9 @@ def run(args):
                     raise RuntimeError("disposable node startup timed out")
                 for _ in range(3):
                     subprocess.run([*cli, "faucet", "--url", "http://127.0.0.1:9123/v2/gas"], capture_output=True, env=env, check=True)
-                subprocess.run([sys.executable, "scripts/live_security_policy.py", "--wallet", str(wallet), "--network", "localnet",
-                                "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence], env=env, check=True)
+                subprocess.run([sys.executable, "scripts/" + args.suite + ".py", "--wallet", str(wallet), "--network", "localnet",
+                                "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence,
+                                "--max-spend-mist", "3000000000" if args.suite == "live_security_delay" else "1600000000"], env=env, check=True)
             finally:
                 node.terminate()
                 try:
@@ -58,6 +59,7 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--suite", choices=["live_security_policy", "live_security_delay"], default="live_security_policy")
     parser.add_argument("--base", required=True)
     parser.add_argument("--evidence", required=True)
     run(parser.parse_args())
