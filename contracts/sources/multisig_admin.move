@@ -41,17 +41,17 @@ module sui_edge::multisig_admin {
         customer::assert_security_administrator(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
         assert!(ctx.sender() == sender, EAuthority);
-        customer::configure_security_factor(customer, 1, binding(sender, keys, weights, threshold), ctx);
+        customer::configure_security_factor(customer, 1, p0(sender, keys, weights, threshold), ctx);
     }
 
     /// Convenience producer for the exact existing policy-change wrapper.
     public fun prepare_policy_change(customer: &Customer, requirements: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_security")), bcs::to_bytes(customer), bcs::to_bytes(&requirements)];
+        let arguments = vector[bcs::to_bytes(&b"set_security"), bcs::to_bytes(customer), bcs::to_bytes(&requirements)];
         customer::prepare_security_action(customer, security_policy::action_intent(object::id(customer), bcs::to_bytes(&arguments)), expires_ms, clock, ctx);
     }
 
     public fun enroll_secured(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, action: Action, clock: &Clock, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"enroll_multisig")), bcs::to_bytes(customer), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
+        let arguments = vector[bcs::to_bytes(&b"enroll_multisig"), bcs::to_bytes(customer), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
         customer::begin_security_action(customer, action, arguments, 7, false, clock, ctx);
         enroll(customer, keys, weights, threshold, ctx);
         customer::finish_security_action(customer);
@@ -63,13 +63,14 @@ module sui_edge::multisig_admin {
         customer::assert_security_administrator(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
         assert!(ctx.sender() == sender, EAuthority);
-        assert!(customer::security_factor_configuration(customer, 1) == binding(sender, keys, weights, threshold), EAuthority);
+        assert!(customer::security_factor_configuration(customer, 1) == p0(sender, keys, weights, threshold), EAuthority);
         assert!(security_policy::customer_id(action) == object::id(customer)
             && security_policy::action_generation(action) == security_policy::generation(&customer::security(customer))
             && clock.timestamp_ms() < security_policy::expires_ms(action), EAction);
         security_policy::attest(action, 1);
     }
-    fun binding(sender: address, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16): vector<u8> {
+    /// binding: compact private symbol to bound published bytecode storage.
+    fun p0(sender: address, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16): vector<u8> {
         let mut bytes = bcs::to_bytes(&sender);
         bytes.append(bcs::to_bytes(&keys)); bytes.append(bcs::to_bytes(&weights));
         bytes.append(bcs::to_bytes(&threshold)); bytes

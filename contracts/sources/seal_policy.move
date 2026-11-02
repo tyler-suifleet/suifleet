@@ -126,62 +126,62 @@ module sui_edge::seal_policy {
     }
 
     public fun grant_account(policy: &mut AccessPolicy, cap: &AccessAdminCap, account: address) {
-        check_admin(policy, cap);
+        p0(policy, cap);
         add(&mut policy.accounts, account);
-        changed(policy, SCOPE_ACCOUNT, account, true);
+        p2(policy, SCOPE_ACCOUNT, account, true);
     }
 
     public fun revoke_account(policy: &mut AccessPolicy, cap: &AccessAdminCap, account: address) {
-        check_admin(policy, cap);
-        remove(&mut policy.accounts, account);
-        changed(policy, SCOPE_ACCOUNT, account, false);
+        p0(policy, cap);
+        p1(&mut policy.accounts, account);
+        p2(policy, SCOPE_ACCOUNT, account, false);
     }
 
     /// The device must be activated (in registry custody). Approvals further
     /// require its current, unrevoked key.
     public fun grant_device(policy: &mut AccessPolicy, cap: &AccessAdminCap, registry: &DeviceRegistry, device_id: ID) {
-        check_admin(policy, cap);
+        p0(policy, cap);
         assert!(device_registry::is_custodied(registry, device_id), EUnknownDevice);
         add(&mut policy.devices, device_id);
-        changed(policy, SCOPE_DEVICE, device_id.to_address(), true);
+        p2(policy, SCOPE_DEVICE, device_id.to_address(), true);
     }
 
     public fun revoke_device(policy: &mut AccessPolicy, cap: &AccessAdminCap, device_id: ID) {
-        check_admin(policy, cap);
-        remove(&mut policy.devices, device_id);
-        changed(policy, SCOPE_DEVICE, device_id.to_address(), false);
+        p0(policy, cap);
+        p1(&mut policy.devices, device_id);
+        p2(policy, SCOPE_DEVICE, device_id.to_address(), false);
     }
 
     /// Only a group's own admin may grant it: the group's admin decides its
     /// membership, and so which devices the grant covers.
     public(package) fun grant_managed_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
-        check_admin(policy, cap);
+        p0(policy, cap);
         let group_id = device_group::group_id(group);
         add(&mut policy.groups, group_id);
-        changed(policy, SCOPE_GROUP, group_id.to_address(), true);
+        p2(policy, SCOPE_GROUP, group_id.to_address(), true);
     }
     public fun cap_policy(cap: &AccessAdminCap): ID { cap.policy_id }
     public fun policy_devices(policy: &AccessPolicy): &vector<ID> { &policy.devices }
     public fun policy_groups(policy: &AccessPolicy): &vector<ID> { &policy.groups }
 
     public fun grant_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup, ctx: &TxContext) {
-        check_admin(policy, cap);
+        p0(policy, cap);
         assert!(device_group::admin(group) == ctx.sender(), ENotGroupAdmin);
         let group_id = device_group::group_id(group);
         add(&mut policy.groups, group_id);
-        changed(policy, SCOPE_GROUP, group_id.to_address(), true);
+        p2(policy, SCOPE_GROUP, group_id.to_address(), true);
     }
 
     /// Takes the ID, so a deleted group can still be revoked.
     public fun revoke_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group_id: ID) {
-        check_admin(policy, cap);
-        remove(&mut policy.groups, group_id);
-        changed(policy, SCOPE_GROUP, group_id.to_address(), false);
+        p0(policy, cap);
+        p1(&mut policy.groups, group_id);
+        p2(policy, SCOPE_GROUP, group_id.to_address(), false);
     }
 
     /// Retire every identity of the current epoch.
     public fun rotate_key_epoch(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
-        check_admin(policy, cap);
+        p0(policy, cap);
         policy.key_epoch = policy.key_epoch + 1;
         event::emit(KeyEpochRotated { policy_id: object::id(policy), key_epoch: policy.key_epoch });
     }
@@ -198,12 +198,12 @@ module sui_edge::seal_policy {
 
     /// An account granted by address.
     entry fun seal_approve_account(id: vector<u8>, policy: &AccessPolicy, ctx: &TxContext) {
-        check_NoAccess(account_allowed(policy, &id, ctx.sender()));
+        p3(account_allowed(policy, &id, ctx.sender()));
     }
 
     /// A device granted directly, asking with its active key.
     entry fun seal_approve_device(id: vector<u8>, policy: &AccessPolicy, registry: &DeviceRegistry, device_id: ID, ctx: &TxContext) {
-        check_NoAccess(device_allowed(policy, &id, registry, device_id, ctx.sender()));
+        p3(device_allowed(policy, &id, registry, device_id, ctx.sender()));
     }
 
     /// A device in a granted group, asking with its active key.
@@ -215,7 +215,7 @@ module sui_edge::seal_policy {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        check_NoAccess(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()));
+        p3(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()));
     }
 
     public fun account_allowed(policy: &AccessPolicy, id: &vector<u8>, sender: address): bool {
@@ -276,7 +276,8 @@ module sui_edge::seal_policy {
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    fun check_admin(policy: &AccessPolicy, cap: &AccessAdminCap) {
+    /// check_admin: compact private symbol to bound published bytecode storage.
+    fun p0(policy: &AccessPolicy, cap: &AccessAdminCap) {
         assert!(cap.policy_id == object::id(policy), EWrongCap);
         assert!(policy.version == VERSION, EWrongVersion);
     }
@@ -287,13 +288,15 @@ module sui_edge::seal_policy {
         list.push_back(item);
     }
 
-    fun remove<T: copy + drop>(list: &mut vector<T>, item: T) {
+    /// remove: compact private symbol to bound published bytecode storage.
+    fun p1<T: copy + drop>(list: &mut vector<T>, item: T) {
         let (found, index) = list.index_of(&item);
         assert!(found, ENotGranted);
         list.swap_remove(index);
     }
 
-    fun changed(policy: &AccessPolicy, scope: u8, subject: address, granted: bool) {
+    /// changed: compact private symbol to bound published bytecode storage.
+    fun p2(policy: &AccessPolicy, scope: u8, subject: address, granted: bool) {
         event::emit(AccessChanged { policy_id: object::id(policy), scope, subject, granted });
     }
 
@@ -305,7 +308,8 @@ module sui_edge::seal_policy {
     #[test_only]
     public fun set_version_for_testing(policy: &mut AccessPolicy, version: u64) { policy.version = version }
     // Share each named abort branch without changing its module or error code.
-    fun check_NoAccess(condition: bool) {
+    /// check_NoAccess: compact private symbol to bound published bytecode storage.
+    fun p3(condition: bool) {
         if (!condition) abort ENoAccess
     }
 }

@@ -165,8 +165,8 @@ module sui_edge::device_registry {
         // its loan can never be repaid, so the transaction aborts.
         let device_id = object::id(&device);
         if (df::exists(&registry.id, IdentityKey { device_id })) {
-            let owner_cap = identity_of(registry, device_id).owner_cap;
-            set_identity(registry, device_id, Identity { signer: device.device_address, revoked: true, owner_cap });
+            let owner_cap = p1(registry, device_id).owner_cap;
+            p2(registry, device_id, Identity { signer: device.device_address, revoked: true, owner_cap });
         };
         let Device { id, name: _, device_address: _, arch: _, meta: _, registered_at: _, schema_version: _ } = device;
 
@@ -200,7 +200,7 @@ module sui_edge::device_registry {
     public fun activate_device(registry: &mut DeviceRegistry, device: Device, ctx: &mut TxContext): DeviceOwnerCap {
         let device_id = object::id(&device);
         let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
-        set_identity(registry, device_id, Identity { signer: device.device_address, revoked: false, owner_cap: object::id(&cap) });
+        p2(registry, device_id, Identity { signer: device.device_address, revoked: false, owner_cap: object::id(&cap) });
         dof::add(&mut registry.id, CustodyKey { device_id }, device);
         cap
     }
@@ -211,35 +211,35 @@ module sui_edge::device_registry {
     public(package) fun rebind_owner(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
         let device_id = cap.device_id;
         let old_id = object::id(&cap);
-        let identity = *identity_of(registry, device_id);
-        check_WrongDevice(identity.owner_cap == old_id && is_custodied(registry, device_id));
+        let identity = *p1(registry, device_id);
+        p4(identity.owner_cap == old_id && is_custodied(registry, device_id));
         let DeviceOwnerCap { id, device_id: _ } = cap; id.delete();
         let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
-        set_identity(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
+        p2(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
         cap
     }
 
     /// Stop trusting any report from the device until it is reinstated.
     public fun revoke_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap) {
-        let signer = custodied(registry, cap).device_address;
-        set_identity(registry, cap.device_id, Identity { signer, revoked: true, owner_cap: object::id(cap) });
+        let signer = p0(registry, cap).device_address;
+        p2(registry, cap.device_id, Identity { signer, revoked: true, owner_cap: object::id(cap) });
     }
 
     /// Trust the device's current key again after a revocation.
     public fun reinstate_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap) {
-        let signer = custodied(registry, cap).device_address;
-        set_identity(registry, cap.device_id, Identity { signer, revoked: false, owner_cap: object::id(cap) });
+        let signer = p0(registry, cap).device_address;
+        p2(registry, cap.device_id, Identity { signer, revoked: false, owner_cap: object::id(cap) });
     }
 
     /// Move the device to a new key. Every cap bound to the old key stops being
     /// accepted; issue a new cap for the new address afterwards. A revoked
     /// device stays revoked until it is reinstated.
     public fun rotate_device_key(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap, new_address: address) {
-        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         let device: &mut Device = dof::borrow_mut(&mut registry.id, CustodyKey { device_id: cap.device_id });
         device.device_address = new_address;
-        let revoked = identity_of(registry, cap.device_id).revoked;
-        set_identity(registry, cap.device_id, Identity { signer: new_address, revoked, owner_cap: object::id(cap) });
+        let revoked = p1(registry, cap.device_id).revoked;
+        p2(registry, cap.device_id, Identity { signer: new_address, revoked, owner_cap: object::id(cap) });
     }
 
     /// Deregister an activated device: leaves a revoked tombstone, so caps never
@@ -248,7 +248,7 @@ module sui_edge::device_registry {
     public fun deregister_activated_device(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &TxContext) {
         let DeviceOwnerCap { id, device_id } = cap;
         id.delete();
-        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id }));
+        p3(dof::exists(&registry.id, CustodyKey { device_id }));
         let device: Device = dof::remove(&mut registry.id, CustodyKey { device_id });
         deregister_device(registry, device, ctx);
     }
@@ -256,16 +256,16 @@ module sui_edge::device_registry {
     /// Lend the custodied Device to calls that take `&Device`/`&mut Device`
     /// (`device_cap::issue_cap`, `device_group::add_device`, `set_meta`).
     public fun borrow_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap): (Device, DeviceLoan) {
-        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         let device = dof::remove(&mut registry.id, CustodyKey { device_id: cap.device_id });
         (device, DeviceLoan { device_id: cap.device_id })
     }
 
     public fun return_device(registry: &mut DeviceRegistry, device: Device, loan: DeviceLoan) {
         let DeviceLoan { device_id } = loan;
-        check_WrongDevice(object::id(&device) == device_id);
+        p4(object::id(&device) == device_id);
         // The key cannot change while borrowed: only rotation updates it.
-        check_WrongDevice(device.device_address == identity_of(registry, device_id).signer);
+        p4(device.device_address == p1(registry, device_id).signer);
         dof::add(&mut registry.id, CustodyKey { device_id }, device);
     }
 
@@ -274,20 +274,23 @@ module sui_edge::device_registry {
     /// never activated are untrusted.
     public fun is_active_signer(registry: &DeviceRegistry, device_id: ID, signer: address): bool {
         if (!dof::exists(&registry.id, CustodyKey { device_id })) return false;
-        let identity = identity_of(registry, device_id);
+        let identity = p1(registry, device_id);
         !identity.revoked && identity.signer == signer
     }
 
-    fun custodied(registry: &DeviceRegistry, cap: &DeviceOwnerCap): &Device {
-        check_NotCustodied(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+    /// custodied: compact private symbol to bound published bytecode storage.
+    fun p0(registry: &DeviceRegistry, cap: &DeviceOwnerCap): &Device {
+        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
         dof::borrow(&registry.id, CustodyKey { device_id: cap.device_id })
     }
 
-    fun identity_of(registry: &DeviceRegistry, device_id: ID): &Identity {
+    /// identity_of: compact private symbol to bound published bytecode storage.
+    fun p1(registry: &DeviceRegistry, device_id: ID): &Identity {
         df::borrow(&registry.id, IdentityKey { device_id })
     }
 
-    fun set_identity(registry: &mut DeviceRegistry, device_id: ID, identity: Identity) {
+    /// set_identity: compact private symbol to bound published bytecode storage.
+    fun p2(registry: &mut DeviceRegistry, device_id: ID, identity: Identity) {
         let Identity { signer, revoked, owner_cap } = identity;
         if (df::exists(&registry.id, IdentityKey { device_id })) {
             *df::borrow_mut(&mut registry.id, IdentityKey { device_id }) = identity;
@@ -319,7 +322,7 @@ module sui_edge::device_registry {
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
 
     public fun assert_admin(registry: &DeviceRegistry, ctx: &mut TxContext) {
-        check_WrongDevice(registry.admin == ctx.sender());
+        p4(registry.admin == ctx.sender());
     }
 
     /// A cap the registry's identity does not name.
@@ -332,10 +335,12 @@ module sui_edge::device_registry {
     public(package) fun uid(registry: &DeviceRegistry): &UID { &registry.id }
     public(package) fun uid_mut(registry: &mut DeviceRegistry): &mut UID { &mut registry.id }
     // Share each named abort branch without changing its module or error code.
-    fun check_NotCustodied(condition: bool) {
+    /// check_NotCustodied: compact private symbol to bound published bytecode storage.
+    fun p3(condition: bool) {
         if (!condition) abort ENotCustodied
     }
-    fun check_WrongDevice(condition: bool) {
+    /// check_WrongDevice: compact private symbol to bound published bytecode storage.
+    fun p4(condition: bool) {
         if (!condition) abort EWrongDevice
     }
 }

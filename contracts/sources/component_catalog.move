@@ -68,12 +68,12 @@ module sui_edge::component_catalog {
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
-        check_Manifest(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
+        p5(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
             && recipe_sha256s.length() == n && artifact_sha256s.length() == n);
         let mut i = 0;
         while (i < n) {
-            check_Manifest(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]));
-            validate_token(&recipe_blob_ids[i], 128);
+            p5(p3(&platform_os[i]) && p4(&platform_arch[i]));
+            p2(&recipe_blob_ids[i], 128);
             validate_hash(&recipe_sha256s[i]); validate_hash(&artifact_sha256s[i]);
             let mut j = 0;
             while (j < i) {
@@ -150,65 +150,72 @@ module sui_edge::component_catalog {
     public fun version_publisher(value: &ComponentVersion): address { value.publisher }
     public fun publisher(catalog: &ComponentCatalog): address { catalog.publisher }
 
-    fun alpha(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
-    fun digit(b: u8): bool { b >= 48 && b <= 57 }
-    fun validate_token(s: &String, max: u64) {
-        let b = s.as_bytes(); check_Manifest(b.length() > 0 && b.length() <= max);
-        b.do_ref!(|c| check_Manifest(alpha(*c) || digit(*c) || *c == 45 || *c == 95));
+    /// alpha: compact private symbol to bound published bytecode storage.
+    fun p0(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
+    /// digit: compact private symbol to bound published bytecode storage.
+    fun p1(b: u8): bool { b >= 48 && b <= 57 }
+    /// validate_token: compact private symbol to bound published bytecode storage.
+    fun p2(s: &String, max: u64) {
+        let b = s.as_bytes(); p5(b.length() > 0 && b.length() <= max);
+        b.do_ref!(|c| p5(p0(*c) || p1(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
         let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= 128, EIdentity);
-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
+        b.do_ref!(|c| assert!(p0(*c) || p1(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
     }
     public fun validate_hash(s: &String) {
-        let b = s.as_bytes(); check_Manifest(b.length() == 64);
-        b.do_ref!(|c| check_Manifest(digit(*c) || (*c >= 97 && *c <= 102)));
+        let b = s.as_bytes(); p5(b.length() == 64);
+        b.do_ref!(|c| p5(p1(*c) || (*c >= 97 && *c <= 102)));
     }
-    fun valid_os(s: &String): bool {
+    /// valid_os: compact private symbol to bound published bytecode storage.
+    fun p3(s: &String): bool {
         *s == string::utf8(b"linux") || *s == string::utf8(b"macos") || *s == string::utf8(b"*")
     }
     /// Rust's `std::env::consts::ARCH` names; `x86` is 32-bit i686 (SF-076).
-    fun valid_arch(s: &String): bool {
+    /// valid_arch: compact private symbol to bound published bytecode storage.
+    fun p4(s: &String): bool {
         *s == string::utf8(b"x86_64") || *s == string::utf8(b"aarch64") || *s == string::utf8(b"arm")
             || *s == string::utf8(b"x86") || *s == string::utf8(b"*")
     }
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
-        let b = s.as_bytes(); let n = b.length(); check_Version(n > 0 && n <= 128);
+        let b = s.as_bytes(); let n = b.length(); p6(n > 0 && n <= 128);
         let mut i = 0; let mut part = 0u64;
         while (part < 3) {
             let start = i; let mut number: u64 = 0;
-            while (i < n && digit(b[i])) {
+            while (i < n && p1(b[i])) {
                 let d = (b[i] - 48) as u64;
-                check_Version(number <= (18446744073709551615 - d) / 10);
+                p6(number <= (18446744073709551615 - d) / 10);
                 number = number * 10 + d; i = i + 1;
             };
-            check_Version(i > start && (i - start == 1 || b[start] != 48));
+            p6(i > start && (i - start == 1 || b[start] != 48));
             part = part + 1;
-            if (part < 3) { check_Version(i < n && b[i] == 46); i = i + 1; };
+            if (part < 3) { p6(i < n && b[i] == 46); i = i + 1; };
         };
         if (i == n) return;
         let mut prerelease = b[i] == 45;
-        check_Version(prerelease || b[i] == 43); i = i + 1;
+        p6(prerelease || b[i] == 43); i = i + 1;
         loop {
             let start = i; let mut numeric = true;
             while (i < n && b[i] != 46 && b[i] != 43) {
-                check_Version(alpha(b[i]) || digit(b[i]) || b[i] == 45);
-                if (!digit(b[i])) numeric = false;
+                p6(p0(b[i]) || p1(b[i]) || b[i] == 45);
+                if (!p1(b[i])) numeric = false;
                 i = i + 1;
             };
-            check_Version(i > start);
-            if (prerelease && numeric) check_Version(i - start == 1 || b[start] != 48);
+            p6(i > start);
+            if (prerelease && numeric) p6(i - start == 1 || b[start] != 48);
             if (i == n) break;
-            if (b[i] == 43) { check_Version(prerelease); prerelease = false; };
+            if (b[i] == 43) { p6(prerelease); prerelease = false; };
             i = i + 1;
         };
     }
     // Share each named abort branch without changing its module or error code.
-    fun check_Manifest(condition: bool) {
+    /// check_Manifest: compact private symbol to bound published bytecode storage.
+    fun p5(condition: bool) {
         if (!condition) abort EManifest
     }
-    fun check_Version(condition: bool) {
+    /// check_Version: compact private symbol to bound published bytecode storage.
+    fun p6(condition: bool) {
         if (!condition) abort EVersion
     }
 }

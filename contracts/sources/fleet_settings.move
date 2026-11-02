@@ -129,13 +129,13 @@ module sui_edge::fleet_settings {
         archive_interval_ms: u64,
         archive_retention_epochs: u32,
     ): Settings {
-        check_OutOfBounds(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS);
-        check_OutOfBounds(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
+        p0(check_interval_ms >= MIN_CHECK_INTERVAL_MS && check_interval_ms <= MAX_CHECK_INTERVAL_MS);
+        p0(rollout_check_interval_ms == 0 || (rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= MAX_ROLLOUT_CHECK_INTERVAL_MS
             && rollout_check_interval_ms <= check_interval_ms));
-        check_OutOfBounds(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS);
-        check_OutOfBounds(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS);
-        check_OutOfBounds(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
+        p0(health_interval_ms >= MIN_HEALTH_INTERVAL_MS && health_interval_ms <= MAX_HEALTH_INTERVAL_MS);
+        p0(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS && archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS);
+        p0(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS
             && archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS);
         Settings {
             version: VERSION, check_interval_ms, rollout_check_interval_ms, health_interval_ms,
@@ -176,7 +176,8 @@ module sui_edge::fleet_settings {
         current.version = version;
     }
     // Share each named abort branch without changing its module or error code.
-    fun check_OutOfBounds(condition: bool) {
+    /// check_OutOfBounds: compact private symbol to bound published bytecode storage.
+    fun p0(condition: bool) {
         if (!condition) abort EOutOfBounds
     }
 }
