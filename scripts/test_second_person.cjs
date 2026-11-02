@@ -37,7 +37,7 @@ assert.equal(approvals.configureTx(C,consent).getData().commands[0].MoveCall.fun
  client.listDynamicFields=async()=> ++page%2 ? {dynamicFields:[],hasNextPage:true,cursor:'next'} : {dynamicFields:[{name:{type:`${m.call_package_id}::security_policy::FactorKey`,bcs:Uint8Array.of(0)}}],hasNextPage:false};
  client.getDynamicField=async input=>{
  const type=input.name.type.split('::').at(-1);
- if(type==='FactorKey' && input.parentId===C)return {dynamicField:{value:{type:malformed?'vector<u8>':'vector<0x2::object::ID>',bcs:bcs.vector(bcs.Address).serialize([R]).toBytes()}}};
+ if(type==='FactorKey' && input.parentId===C)return {dynamicField:{value:{type:malformed?'vector<u8>':`vector<${'0x'+'0'.repeat(63)+'2'}::object::ID>`,bcs:bcs.vector(bcs.Address).serialize([R]).toBytes()}}};
  if(type==='FactorKey' && input.parentId===R)return {dynamicField:{value:{type:`${m.call_package_id}::security_policy::FactorConfiguration`,bcs:wire.security_policy_FactorConfigurationBcs.serialize({binding:Array.from(bytes)}).toBytes()}}};
  return {dynamicField:{value:{type:`${m.call_package_id}::security_policy::Policy`,bcs:wire.security_policy_PolicyBcs.serialize({schema:'1',generation:'8',requirements:[0,0,0,0,4,0,0],transaction:[],attested:0}).toBytes()}}};
  };

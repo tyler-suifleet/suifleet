@@ -55,7 +55,8 @@ export async function fetchRequests(client: SuiGrpcClient, customer: string) {
   }
   if (!exists) return [];
   const { dynamicField } = await client.getDynamicField({ parentId: customer, name: { type: key, bcs: bcs.u8().serialize(0).toBytes() } });
-  if (normalizeTypeTag(dynamicField.value.type) !== normalizeTypeTag("vector<0x2::object::ID>")) throw Error("Unexpected pending index type");
+  const indexType = normalizeTypeTag(dynamicField.value.type).replace(/0x[0-9a-fA-F]+(?=::)/g, address => normalizeSuiAddress(address));
+  if (indexType !== `vector<${normalizeStructTag("0x2::object::ID")}>`) throw Error("Unexpected pending index type");
   const ids = bcs.vector(bcs.Address).parse(dynamicField.value.bcs);
   return Promise.all(ids.map(async id => {
     const content = await typedObject(client, id, "security_policy::Action");
