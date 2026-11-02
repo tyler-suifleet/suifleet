@@ -128,7 +128,7 @@ def run(args):
             live.attack("intermediate package cannot alter administrators", "--move-call", f"{previous}::customer::set_credential",
                         f"@{c}", f"@{live.operator}", "true", "true", module="customer", function="assert_member", code=0,
                         budget=min(20_000_000, live.ledger.remaining))
-        live.attack("unimplemented factor cannot activate", "--move-call", f"{head}::customer::set_security", f"@{c}", "vector[1u8,0u8,0u8,0u8,0u8,0u8,0u8]",
+        live.attack("unimplemented factor cannot activate", "--move-call", f"{head}::customer::set_security", f"@{c}", "vector[2u8,0u8,0u8,0u8,0u8,0u8,0u8]",
                     module="security_policy", function="update", code=2, budget=min(20_000_000, live.ledger.remaining))
         transaction("current all-off administration", "--move-call", f"{head}::customer::rename_fleet", f"@{c}", f"@{f}", '"SF196 verified fleet"')
         result = transaction("create disposable catalog", "--move-call", f"{head}::component_catalog::create_catalog")
