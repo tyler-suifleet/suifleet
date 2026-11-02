@@ -272,12 +272,8 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): DeploymentRecord {
-        p0(&recipe_sha256);
-        let creator = ctx.sender();
-        let mut record = p1(creator, component_name, version, recipe_blob_id, artifact_sha256,
-            target_groups, target_devices, clock, ctx);
-        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
-        record
+        new_customer_deployment(ctx.sender(), component_name, version, recipe_blob_id,
+            artifact_sha256, recipe_sha256, target_groups, target_devices, clock, ctx)
     }
 
     public fun share_deployment(record: DeploymentRecord) {
@@ -298,17 +294,16 @@ module sui_edge::deployment_manager {
         clock: &Clock,
         ctx: &mut TxContext,
     ): ID {
-        p0(&recipe_sha256);
-        let mut record = p1(operator, component_name, version, recipe_blob_id, artifact_sha256,
-            target_groups, vector[], clock, ctx);
-        df::add(&mut record.id, RecipeDigestKey {}, recipe_sha256);
+        let mut record = new_customer_deployment(operator, component_name, version, recipe_blob_id,
+            artifact_sha256, recipe_sha256, target_groups, vector[], clock, ctx);
         df::add(&mut record.id, DelegateKey {}, ctx.sender());
         let id = object::id(&record);
         transfer::share_object(record);
         id
     }
 
-    /// Caller has validated the complete managed fleet target inventory.
+    /// Shared verified constructor. Managed callers additionally validate their
+    /// complete fleet target inventory before supplying its object authority.
     public(package) fun new_customer_deployment(creator: address, component_name: String,
         version: String, recipe_blob_id: String, artifact_sha256: String,
         recipe_sha256: String, groups: vector<ID>, devices: vector<ID>,

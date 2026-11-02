@@ -93,21 +93,7 @@ module sui_edge::device_group {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let group = DeviceGroup {
-            id: object::new(ctx),
-            name,
-            description,
-            admin: ctx.sender(),
-            device_ids: vector[],
-            created_at: clock.timestamp_ms(),
-            schema_version: SCHEMA_VERSION,
-        };
-        event::emit(GroupCreated {
-            group_id: object::id(&group),
-            name: group.name,
-            admin: ctx.sender(),
-        });
-        transfer::share_object(group);
+        share_managed(new_managed(name, description, ctx.sender(), clock, ctx));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -131,16 +117,11 @@ module sui_edge::device_group {
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
-    public entry fun delete_group(mut group: DeviceGroup, ctx: &TxContext) {
+    public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
         p0(ctx.sender() == group.admin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
-        if (is_indexed(&group)) {
-            let _: GroupIndex = df::remove(&mut group.id, IndexKey {});
-        };
-        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;
-        event::emit(GroupDeleted { group_id: id.to_inner(), admin });
-        id.delete();
+        delete_managed(group);
     }
 
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
@@ -175,8 +156,8 @@ module sui_edge::device_group {
         group.admin = recipient;
     }
 
-    /// Managed groups use an object address as admin. No wallet can sign as
-    /// that address, sealing legacy add/remove/handover entry points.
+    /// Construct a group with the supplied admin. Managed callers use an object
+    /// address: no wallet can sign as it through legacy add/remove/handover.
     public(package) fun new_managed(name: String, description: String, admin: address,
         clock: &Clock, ctx: &mut TxContext): DeviceGroup {
         let group = DeviceGroup { id: object::new(ctx), name, description, admin,

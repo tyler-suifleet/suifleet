@@ -108,8 +108,7 @@ module sui_edge::component_catalog {
 
     /// Transaction-local catalog record, composable with desired-state revisions.
     public fun new_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
+        new_for_customer(value, ctx.sender(), groups, devices, clock, ctx)
     }
 
     /// Bindings can only be installed by this module from a frozen version.
@@ -119,14 +118,12 @@ module sui_edge::component_catalog {
     }
 
     public fun create_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        deployment_manager::create_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
+        deployment_manager::share_deployment(new_deployment(value, groups, devices, clock, ctx));
     }
     /// Publish with admission paused atomically, so operators can configure a
     /// schedule before any device is eligible to start.
     public fun create_deployment_paused(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        let mut record = deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
+        let mut record = new_deployment(value, groups, devices, clock, ctx);
         deployment_manager::set_control(&mut record, 1, (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), ctx);
         deployment_manager::share_deployment(record);
     }
