@@ -190,3 +190,101 @@ CodeQL and genuine native public-testnet effects remain unverified. The claim
 stays reserved and PR draft until actual required acceptance is ready. Missing
 machine active-address is not the blocker to this CI route. Independent feature
 review remains required; no approval, Review readiness or merge is claimed.
+
+## Native payment and interrupted-setup repair, fourth recovery
+
+Source repair: `fa483aa9f04425057ae3acfd669d5f47613787d5`.
+
+Codex / gpt-6.1-sol (no finer runtime build exposed), same claim/session/branch.
+Inspected artifact **13114533516** and the failed-job log from
+[protected run 41383243081](https://github.com/tyler-suifleet/suifleet/actions/runs/41383243081),
+head `059dafaa`. Package reuse passed at **121,060,916 MIST**. Native
+possession proofs and wallet enrollments both succeeded. Policy preparation
+then exited before recording a digest; upgrade-security conservatively retained
+its 20,000,000-MIST unknown reservation and finished at **1,167,696,523 /
+1,500,000,000 MIST**. The historical subprocess stderr was captured privately
+by Python but **not exposed in the log or effects artifact**; it cannot honestly
+be reconstructed as an observed historical message. See the sanitized
+[receipt](sf198-native-protected-failure.json).
+
+Independent read-only gRPC effects confirmed enrollment, funding and final device
+sweep. The operator's remaining coin (28,241,408 MIST) came from that final sweep;
+its address balance was 2,985,633,898 MIST. A read-only differential using the
+same policy/customer and a 30,000,000-MIST construction budget reproduced old
+stderr `fixture gas coin unavailable`; the repaired builder produced unsigned
+bytes. This changes no on-chain policy and proves no public acceptance. The
+original failing policy budget was 20,000,000 MIST, not the differential's 30M.
+
+The fixture now resolves native address-balance payment with a chain-bound
+`ValidDuring` expiration and random nonce, or bounded/paginated coin payments.
+It retains exact budget/sender/sponsor checks and offline final serialization:
+full gRPC simulation would stop expected refusals before validators execute.
+Preparation failures expose only an allowlisted diagnostic, with no retry or
+release of unknown reservations. Missing-factor failures must match
+`security_policy::check` abort 1, rather than merely returning failed effects.
+
+The next protected run would also have failed by enrolling the same keys again.
+Setup now reads the existing factor binding, validates its BCS shape and
+administrator/key identities, and reuses proved enrollments. Unexpected bindings
+fail closed. No key rotation, fixture replacement, state clearing, publication,
+spending-limit change, workflow-authority change or automatic retry is added.
+Contract bytes are unchanged; reuse the existing exact protected package pair.
+
+Verification commands (run from this worktree):
+
+- `node scripts/test_passkey_payment.cjs`: wallet/sponsor, coinless address balance,
+  replay binding, fixed budget, no simulation, fragmented/paginated coins and
+  insufficient/malformed gas negatives.
+- `node scripts/test_passkey_fixture.cjs` and `node scripts/test_passkey_factor.cjs`:
+  private-file/identity/secret-safe failure and SDK native signing/tamper suites.
+- `PYTHONPATH=scripts/tests:scripts python3 -m unittest test_live_passkey`:
+  **5 pass**, retained identity/uncertainty, deficit grants, existing BCS bindings,
+  corruption and subprocess redaction without retries.
+- Network-none `make test-testnet`, with the same image/PyYAML/pinned transaction
+  CLI mounts documented above: **23 + 177 + 67 + 5 tests pass**, plus Node
+  authenticated-cache and independent-receipt suites.
+- Node/Python syntax and `git diff --check` pass.
+
+The local regression uses the following exact container invocation; the
+`chain_facts` binary is the existing local build, not a new daemon change:
+
+```bash
+docker run --rm --network none --user "$(id -u):$(id -g)" \
+  -v "$PWD:/workspace" \
+  -v /home/tyler/dev/codex/src/suifleet/.git:/home/tyler/dev/codex/src/suifleet/.git:ro \
+  -v /home/tyler/.move:/home/dev/.move \
+  -v /tmp/sf198-base:/base:ro \
+  -v /tmp/sf196-network-183/sui:/opt/sui-network/sui:ro \
+  -v /tmp/sf196-edge-target/debug/examples/chain_facts:/opt/chain_facts:ro \
+  -e SUIFLEET_CHAIN_FACTS=/opt/chain_facts \
+  -v /usr/lib/python3/dist-packages/yaml:/deps/yaml:ro -e PYTHONPATH=/deps \
+  -w /workspace suifleet-dev:latest \
+  python3 scripts/test_security_policy_localnet.py \
+  --runner scripts/live_passkey_factor.py --base /base/contracts \
+  --evidence docs/validation/sf198-address-balance-localnet.json
+```
+
+Final result: **PASS, 23 effects-checked transactions**, allowance used
+**1,714,804,025 / 1,800,000,000 MIST**, including repeated conservative grants.
+The [actual receipt](sf198-address-balance-localnet.json) records exact digests,
+per-transaction costs, existing-object upgrade/type origins, two reused enrolled
+identities, successful coinless policy setup with `ValidDuring`, allowed action,
+wallet-only and removed-key `security_policy::check` abort 1, old-package refusal,
+backup recovery, surviving-key action, disable and final removal. The cached
+adapter reused this exact local pair; it published no additional package.
+
+Initial local attempts failed for missing facts-binary/git/framework-cache mounts,
+a deliberately oversized self-transfer, a coinless-payment assertion before
+adding address funds, and the CLI's base64 binding representation. A further
+attempt passed the resumed native sequence but exhausted the unchanged allowance
+while starting a redundant second full sequence. The final harness instead
+performs enrollment, interrupts, and resumes through the actual cached adapter
+once; it keeps all feature cases and the original 1.8-SUI local ceiling. No failed
+attempt is represented as a passing run.
+
+Public native allowed/refused/recovery effects and independent final acceptance
+remain outstanding. PR #451 stays draft and this reservation stays Blocked;
+new-head hosted CI is requested by push and must be collected by the existing
+coordinator, without worker polling. No protected state was decrypted or public
+transaction submitted. Deferred manual/hardware/provider/mainnet checks remain
+unrun in #32/#159.
