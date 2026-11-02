@@ -147,6 +147,59 @@ def write_outcomes(output, outcomes):
         raise RuntimeError('incomplete ordinary acceptance: ' + (', '.join(failed) or 'no runs'))
 
 
+def retained_grant(value):
+    amount = int(value)
+    if not upgrade.DEVICE_MINIMUM <= amount <= upgrade.DEVICE_MAX_REUSE:
+        raise argparse.ArgumentTypeError('grant must be within the production identity reuse bounds')
+    return amount
+
+
+def seed_retained_identity(options, root, output, amount):
+    """Prepare a disposable prior signing identity, outside the measured run.
+
+    The ordinary production ledger must charge its ENTIRE retained balance.
+    This is local test setup, never a public funding tool or allowance credit.
+    State crosses the same authenticated encryption boundary as a CI fixture.
+    """
+    live = live_common.Live(options['wallet'], 'localnet', amount + 10_000_000)
+    live.preflight()
+    key = root / 'retained-device.key'
+    address = subprocess.check_output([str(upgrade.DAEMON), '--provision', str(key)], text=True).strip()
+    made = live.transaction('prepare prior retained identity (outside ordinary ledger)',
+        '--split-coins', 'gas', f'[{amount}]', '--assign', 'prior',
+        '--transfer-objects', '[prior]', f'@{address}', budget=10_000_000, funding=amount)
+    assert live.balance(address) == amount
+    state = upgrade.load_state(options['state'], live.chain, live.operator)
+    state['fixtures']['local-prior-signing-identity'] = dict(
+        device_key=key.read_text().strip(), device_address=address)
+    upgrade.save_state(options['state'], state)
+    # A fresh random local secret, never a protected CI credential. Plaintext,
+    # secret and ciphertext all remain in the private temporary runtime tree.
+    secret = root / 'cache-secret'
+    secret.write_bytes(os.urandom(32))
+    secret.chmod(0o600)
+    encrypted = root / 'prior-state.enc'
+    subprocess.run(['node', '-e', r"""
+const fs = require('fs'), assert = require('node:assert/strict');
+const {seal, open} = require('./scripts/testnet_cache.cjs');
+const [state, secret, encrypted] = process.argv.slice(1);
+const data = fs.readFileSync(state), key = fs.readFileSync(secret).toString('hex');
+const sealed = seal(data, key);
+assert(!sealed.includes(data));
+fs.writeFileSync(encrypted, sealed, {mode:0o600});
+fs.unlinkSync(state);
+fs.writeFileSync(state, open(fs.readFileSync(encrypted), key), {mode:0o600});
+assert.deepEqual(fs.readFileSync(state), data);
+""", options['state'], str(secret), str(encrypted)], check=True)
+    tx = live.evidence['transactions'][0]
+    tx['gas_used'] = made['effects']['gasUsed']
+    live.evidence.update(success=True, allowance_used_mist=live.ledger.used,
+        max_spend_mist=live.ledger.limit, device_address=address, retained_grant_mist=amount,
+        ciphertext_sha256=hashlib.sha256(encrypted.read_bytes()).hexdigest(),
+        scope='Disposable prior-identity preparation; entire grant charged again by ordinary acceptance')
+    (output / 'prior-identity.json').write_text(json.dumps(live.evidence, indent=2) + '\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-ref', required=True)
@@ -154,6 +207,8 @@ def main():
     parser.add_argument('--next-head-ref', help='exercise same-lane identity reuse across a second exact package pair')
     parser.add_argument('--evidence-dir', required=True)
     parser.add_argument('--compact-lifecycle', action='store_true')
+    parser.add_argument('--retained-device-grant-mist', type=retained_grant,
+                        help='prepare an authenticated local retained identity, then charge its full balance in fresh acceptance')
     parser.add_argument('--with-security', action='store_true',
                         help='also execute fresh/cached upgrade-security suites against this checkout HEAD')
     parser.add_argument('--with-temporal', action='store_true',
@@ -219,6 +274,8 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
                 max_spend_mist=1_600_000_000, required_balance_mist=None, state=str(root / 'state.json'),
                 faucet_tool=None, build_sui='sui', network_sui=sui_toolchain.NETWORK_DEFAULT,
                 transaction_gas_budget=60_000_000, compact_lifecycle=args.compact_lifecycle, fresh=False, walrus='local', retire_rollout_audit=False)
+            if args.retained_device_grant_mist is not None:
+                seed_retained_identity(options, root, output, args.retained_device_grant_mist)
             outcomes = []
             for pair, head in enumerate(heads):
                 subprocess.run(['git', '-C', str(clone), 'checkout', '--quiet', '--detach', head], check=True)
