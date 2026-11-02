@@ -38,6 +38,55 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 fresh-fixture cost blocker (2026-11-01)
+
+The [sanitized public effects](validation/sf221-cost-investigation.json) retain
+the five actual transaction digests, gas budgets and net gas costs from
+[run 41388382430](https://github.com/tyler-suifleet/suifleet/actions/runs/41388382430)
+and [run 41368161262](https://github.com/tyler-suifleet/suifleet/actions/runs/41368161262).
+These are historical failures, not acceptance of a new revision.
+
+| Run | Publish net MIST | Upgrade net MIST | Other setup net MIST | Allowance left MIST |
+|---|---:|---:|---:|---:|
+| 41388382430 | 772,926,000 | 783,726,563 | 18,406,119 | 24,941,318 |
+| 41368161262 | 772,926,000 | 785,902,163 | 18,406,119 | 22,765,718 |
+
+Both used the unchanged 1,600,000,000-MIST ceiling. The first wallet started
+with 3,859,853,660 MIST after its single faucet request and ended with
+2,284,794,978 MIST. Its net wallet debit and allowance used were both
+1,575,058,682 MIST. Wallet solvency therefore did not imply remaining run
+allowance. The attempted 30,000,000-MIST device transfer plus a full
+10,000,000-MIST gas reservation was refused before submission; neither is an
+actual fee or an additional unknown transaction in those receipts.
+
+Identity reuse was investigated independently of package caching. The encrypted
+lane state already retains device keys in completed fixtures and in-progress
+publications, so a future migration could select an existing signing identity
+without reusing its package objects. However, the entire available device gas
+must still be charged as a grant. Reusing an identity with 30,000,000 MIST fails
+at that grant in both measured positions. Even a synthetic 10,000,000-MIST
+balance leaves less than the required ordinary 200,000,000-MIST deployment
+reservation. Reuse can avoid a transfer transaction fee; it cannot erase the
+grant, replenish the allowance or prove deployment costs fit. No identity
+migration or reduced transaction budget is activated by this investigation.
+
+Exact compiled base/head fixture reuse avoids both publication costs, but cannot
+substitute for a genuinely new pair. The older cached-run estimate elsewhere in
+this document is historical; no current cached or fresh acceptance run was
+performed for SF-221. Offline replays reproduce the observed refusal and preserve
+cached grants, unknown funding reservations and the one-faucet rule. They do not
+measure a smaller safe deployment budget or establish successful chain effects.
+
+SF-221 remains blocked on a demonstrated safe reduction that fits the complete
+fresh suite under the existing ceiling. Next: measure the required deployment
+transaction gas/storage on the retained exact fixture through protected CI, then
+evaluate an explicitly verified smaller reservation and reduced funding target
+against the complete suite. If those effects cannot fit, reduce actual package
+storage/setup costs through a separately reviewed compatible design. Do not
+republish identical packages, increase ceilings, discard uncertainty or weaken
+coverage to obtain a green result. New source acceptance must use the existing
+protected CI lane; this read-only investigation used no wallet or machine bypass.
+
 Testnet SUI comes from the faucet's proof-of-work endpoint, which needs **Sui CLI ≥ 1.82.1**:
 
 ```bash
