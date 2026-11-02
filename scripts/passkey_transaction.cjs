@@ -9,8 +9,10 @@ const { Transaction } = req('@mysten/sui/transactions');
 (async () => {
  const input = JSON.parse(fs.readFileSync(0,'utf8'));
  let keys;
- if (fs.existsSync(input.keys)) keys = JSON.parse(fs.readFileSync(input.keys,'utf8'));
- else {
+ try {
+  keys = JSON.parse(fs.readFileSync(input.keys,'utf8'));
+ } catch (error) {
+  if (error.code !== 'ENOENT') throw error;
   keys = Array.from({length:2}, () => crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{type:'pkcs8',format:'pem'},publicKeyEncoding:{type:'spki',format:'der'}})).map(k=>({privateKey:k.privateKey, publicKey:crypto.ECDH.convertKey(k.publicKey.subarray(-65),'prime256v1',undefined,undefined,'compressed').toString('base64')}));
   fs.writeFileSync(input.keys,JSON.stringify(keys),{mode:0o600,flag:'wx'});
  }
