@@ -38,6 +38,37 @@ The user created two dedicated **testnet-only** accounts on 2026-10-14 and autho
 
 ## Funding
 
+### SF-221 batch 501: confirmed public allowance blocker (2026-11-02)
+
+[Protected run 41521400618](https://github.com/tyler-suifleet/suifleet/actions/runs/41521400618)
+failed on combined candidate `b2d43d90b533c91c361c3aec39d44ac4d1fa3af2`,
+pinned base `df5d6d8005801034a75d4ce4180dcf713d82efd8`.
+The [sanitized actual effects receipt](validation/sf221-batch501-funding-failure.json)
+preserves all eight submitted operator digests, three independent device report
+effects, origin IDs and the failed cleanup. This is a combined-candidate failure;
+it is not a new execution of source head `94f34bad`.
+
+The operator started with **3,379,683,350 MIST**, including one successful faucet
+credit, but the non-replenishing **1,600,000,000 MIST** run allowance reached
+**1,590,323,209**. Its **9,676,791** remainder cannot reserve the next full
+**10,000,000** deployment transaction (short by **323,209**). Cleanup also refused
+its full reservation. Neither refused operation submitted a transaction. The
+ledger includes the entire **14,981,196** authenticated retained device grant;
+operator balance loss alone is **1,575,342,013**, not the allowance charge.
+Base publication cost **789,200,400**, versus the previous local **785,258,894**.
+Thus the local success below does not establish public acceptance. A faucet or
+larger wallet balance cannot repair this allowance failure.
+
+**SF-221 remains blocked; no validated cost repair is delivered by this receipt.**
+A disposable pinned-compiler experiment narrowed error constants and saved only
+631 bytes (87,860 to 87,229). Its unchanged Move tests fail because
+`expected_failure` requires `u64` error constants. It was not shipped; no
+upgrade/proof or fresh/cached acceptance was run for this failed experiment.
+The next implementation must validate a further compatible reduction against the
+composed tree and larger eligible retained grants, then pass protected public CI.
+Keep all ceilings, full reservations, security coverage and uncertainty records.
+Physical/mainnet/manual-wallet/provider acceptance remains unrun in #32/#159.
+
 ### SF-221 compact integer recovery: actual local fresh success (2026-11-02)
 
 The [complete source and effects receipt](validation/sf221-small-integer-costs.json)
