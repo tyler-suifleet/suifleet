@@ -407,7 +407,7 @@ def reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr=None):
     if project:
         projects = {project}
     for name in sorted(projects):
-        local = {key: row for (p, key), row in by_ticket.items() if p == name and row['status'] != 'done'}
+        local = {key: row for (p, key), row in by_ticket.items() if p == name and row['status'] not in ('done', 'closed')}
         counts = {}
         for row in local.values():
             counts[row['status']] = counts.get(row['status'], 0) + 1
@@ -606,7 +606,13 @@ def batch_receipts(db):
             row['members'] = [{'pr': m['pr'], 'head': m['head']} for m in members]
             row['id'] = safe_text(row['id'], 48)
             rows.append(row)
-        return {'state': 'ok', 'rows': rows}
+        shared=[]
+        if db.execute("SELECT 1 FROM sqlite_master WHERE name='shared_acceptance_status'").fetchone():
+            for raw in db.execute('SELECT project,owner_ticket,state,job,diagnostic,updated FROM shared_acceptance_status'):
+                item=dict(raw)
+                shared.append({k:safe_text(item[k],160) for k in ('project','owner_ticket','state','diagnostic')}
+                              | {'job':item['job'],'updated':item['updated']})
+        return {'state': 'ok', 'rows': rows, 'shared_repairs': shared}
     except (sqlite3.DatabaseError, ValueError, TypeError, KeyError):
         return {'state': 'unavailable', 'detail': 'batch receipts unreadable', 'rows': []}
 
@@ -838,6 +844,12 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
         except (ValueError, TypeError):
             row['spec'], row['remote'] = {}, {}
             model['warnings'].append(f"Ticket {short_key(row['key'])} has an unreadable specification")
+        if row['remote'].get('state') == 'closed' and row['status'] != 'done':
+            if row['status'] == 'backlog' and not row.get('token'):
+                # Presentation only: cancellation is not implementation completion.
+                row['status'] = 'closed'
+            else:
+                model['warnings'].append(f"Ticket {short_key(row['key'])} is closed on GitHub but retains local ownership/status {row['status']}")
         by_ticket[(row['project'], short_key(row['key']))] = row
     for name, stamp in refresh.items():
         if wanted(name):
@@ -1204,6 +1216,7 @@ def collect(paths=None, project=None, now=None, proc='/proc', cache=None):
                                           backoff_reason='quarantine backoff' if pause else None))
     model['inventory'] = reconcile_inventory(paths, config, by_ticket, now, project, ticket_pr)
     model['queue'] = queue
+    model['shared_repairs'] = [r for r in batches.get('shared_repairs',[]) if wanted(r['project'])]
     pipeline_snapshots = visible_pipeline_snapshots(pr_snapshot, paths, config, now, project)
     model['pipeline'] = derive_pipeline(pipeline_snapshots, jobs, by_ticket, model['workers'], batches, cache, now,
         batch_projects={p['id'] for p in config.get('projects', []) if p.get('integration_batch', {}).get('enabled') is True})
@@ -1360,14 +1373,21 @@ def render(model, width=100, delta=None, interval=None):
                                     f"PR #{a['pr']}" if a.get('pr') else '') if x)
         lines.append(fit(f"  {head}{when}: " + ' — '.join(x for x in (a.get('title'), a['summary']) if x), width))
 
-    lines += ['', 'LOCAL TICKET HISTORY (completed tickets excluded from open totals above)']
+    if model.get('shared_repairs'):
+        lines += ['', 'SHARED ACCEPTANCE REPAIRS']
+        for repair in model['shared_repairs']:
+            label=repair['state'].replace('_',' ')
+            job=f" · job {repair['job']}" if repair.get('job') else ''
+            lines.append(fit(f"  {repair['project']} {repair['owner_ticket']}: {label}{job} — {repair['diagnostic']}",width))
+
+    lines += ['', 'LOCAL TICKET HISTORY (completed and closed tickets excluded from open totals above)']
     if model['sources'].get('tickets', {}).get('state') != 'ok':
         lines.append('  Unknown: ticket store unavailable (not an empty queue).')
     elif not model['queue']:
         lines.append('  Empty: no tickets for this project filter.')
     for project_id, counts in sorted(model['queue'].items()):
-        order = ['backlog', 'in_progress', 'review', 'blocked', 'done']
-        parts = [f"{counts[s]} {s.replace('_', ' ')}" for s in order if s in counts]
+        order = ['backlog', 'in_progress', 'review', 'blocked', 'done', 'closed']
+        parts = [f"{counts[s]} {('closed without implementation' if s == 'closed' else s.replace('_', ' '))}" for s in order if s in counts]
         parts += [f'{v} {k}' for k, v in sorted(counts.items()) if k not in order]
         lines.append(fit(f'  {project_id}: ' + ' · '.join(parts), width))
 

@@ -803,10 +803,11 @@ Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 ## Organization security framework (SF-196)
 
 The [approved design and exact child API](SECOND_FACTOR_DESIGN.md) define seven
-protected action classes and four optional mechanisms. The framework currently
-advertises availability **zero**: all-off administration works, but no mechanism
-can be activated until its verifier/enrollment implementation lands in
-SF-198/199/200/201. The settings page shows that distinction explicitly.
+protected action classes and four optional mechanisms. The deployed package determines mechanism availability. SF-201 adds availability
+bit **1** for native multisig; passkey, second-person and delay bits remain
+unavailable until their verifiers land. All-off administration remains the default.
+An older framework package still rejects all nonzero activation. The settings
+workbench requires the upgraded call package and verified deployment manifest.
 
 Current customer authority is version **197**. Migration through
 `customer::initialize_security` retires version 1 and the published intermediate
@@ -918,3 +919,73 @@ keep its existing dedicated keystore binding and leave the shared config intact.
 The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
 including exploratory failures and limits; it is not proof of a manual extension
 wallet walkthrough or a live deployment of this frontend.
+
+
+## Native multisig administrators (SF-201)
+
+Use **Settings → Organization security → Multisig administrator**. This is an
+optional per-organization policy; it does not change sign-in or device authority.
+The protocol uses Sui native multisig authentication, rather than a server holding
+keys. See [Mysten's multisig SDK documentation](https://sdk.mystenlabs.com/sui/cryptography/signers/multisig).
+
+1. Obtain each member's **public** Sui key, including its scheme byte, in base64.
+   Enter the ordered `keys`, corresponding positive `weights` (1–255) and
+   `threshold` (1–65535, at most the sum of weights). At most ten distinct members
+   are supported. Ed25519, secp256k1, secp256r1 and passkey public keys are supported.
+   Member order, weights and threshold determine the address. Review the derived
+   address and custody independence. A threshold that one member's weight meets
+   provides no additional independent signer requirement.
+2. From a current ordinary administrator, register that address as an administrator
+   while policy is off, using the registration button. Fund the multisig address
+   with SUI for gas separately. Enrollment is **not** completed by registration.
+   Existing fleets must have their custody reconciliation/seals completed first.
+3. Build quorum enrollment. Export the public bundle to each signer; inspect the
+   decoded transaction, organization, network, gas and commands independently.
+   Each connected member wallet can sign without execution. Slush/extension/hardware
+   wallets must expose `sui:signTransaction`; otherwise import the external tool's
+   serialized partial signature for the **same exact bytes**. No SuiFleet signing
+   or coordination server is involved. Wallets that rewrite bytes are refused.
+4. Import partials into the same bundle and submit. The console rejects wrong keys,
+   duplicates, changed bytes and insufficient weight, verifies the deployment again,
+   and checks execution effects plus node confirmation. Enrollment itself requires
+   a native quorum transaction from the derived address, proving the configured
+   factor works. Read enrolled members to verify the authenticated stored binding.
+5. Choose seven action masks in the displayed action-class order (1 for multisig,
+   0 for off; combinations with other mechanisms require their actual verifiers).
+   Build/submit policy preparation with the quorum. Read the confirmed
+   `security_policy::ActionCreated.action_id` from transaction events, paste it,
+   then build/submit policy execution. The latter atomically approves and consumes
+   the exact action. Preparation expires after one hour. Current policy, not the
+   proposed weaker policy, authorizes execution. Every other enabled factor remains
+   required. This workbench does not manufacture other mechanisms' proofs.
+6. For other protected operations, use the operation-specific secured SDK builder,
+   prepare its canonical action, and include `multisig_admin::approve` before its
+   secured execution (or obtain a separate quorum approval transaction). The
+   advanced workbench resolves/exports SDK Transaction JSON and supports signatures
+   for any such PTB. Ordinary legacy controls fail closed under protection; a
+   raw capability loan cannot substitute for the secured operation. Bundle metadata
+   is untrusted; review actual commands, not an organization label alone.
+
+Recovery uses surviving quorum members. Authorize an exact policy change using
+current protection, register/prove replacement custody, then restore protection
+and revoke obsolete credentials. `enroll_secured` also supports replacement while
+current factors remain active: its action belongs to the new, already registered
+administrator, with approval from the current configured quorum and every other
+required factor. Current generations, organization IDs, configured addresses and
+expiry are checked before attestation; revoked credentials and stale actions fail.
+Losing all possible quorums can permanently lock administration. There is no
+email/support reset or implicit downgrade. Cancellation retains SF-196's current
+administrator rules. Native multisig addresses are immutable; changing keys means
+a new address and authenticated reconfiguration, not editing an existing address.
+
+A rejected submission may have a digest with failed effects. A transport failure
+may conceal successful execution: reconcile the displayed digest on the verified
+node before retrying. The same exact signed transaction has one digest. Gas coins
+and referenced objects can become stale while collecting signatures; rebuild and
+collect fresh signatures after any byte change. Public bundles contain transaction
+contents and signatures; distribute them only as intentionally public authorization.
+
+Validation and limits are recorded in [SF-201 evidence](validation/sf201-multisig.md).
+Manual Slush, extension-wallet, hardware/passkey-member sessions remain **unrun**
+in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); production and
+mainnet acceptance remain in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).

@@ -28,7 +28,7 @@ class BatchReviewRepairs(unittest.TestCase):
     def test_singleton_finding_retires_candidate_and_binds_original_source_context(self):
         f,candidate,review=self.fixture();f.tick();batch=f.row()
         self.assertEqual(batch['status'],'failed');self.assertEqual(f.candidate_prs[batch['pr']]['state'],'CLOSED')
-        self.assertEqual(f.launched,[])
+        self.assertEqual(len(f.launched),1)  # Only the initial review, launched during CI.
         source=f.source_prs[1];context=f.controller.repair_context(f.project,source)['_batch_review_failure']
         self.assertEqual(context['review_id'],888);self.assertEqual(context['source_head'],source['headRefOid'])
         self.assertIn('Reproduced enrollment',context['findings']);self.assertNotIn('_ci_repair',context)
