@@ -944,8 +944,17 @@ and **real native Sui signature validation**, not an actual hardware authenticat
 For a disposable `--network none` node, use
 `scripts/test_security_policy_localnet.py --runner scripts/live_passkey_factor.py
 --base /path/to/pre-passkey/contracts --evidence /path/to/evidence.json`.
-Public testnet additionally requires the dedicated wallet, the global testnet
-lock, verified package/UpgradeCap lineage and its non-replenishing spend ceiling.
+The protected automatic testnet security suite also runs the native cases using
+its existing ledger and the package gate's exact cached base/head pair. It
+reverifies the UpgradeCap owner/latest head/version and passkey type origin;
+this adapter never publishes another package. Fixture keys and uncertain
+mutations persist only through the existing authenticated encrypted CI state.
+An uncertain mutation stops reuse until reconciliation. Funding grants and
+failed effects consume the unchanged allowance; a fresh expensive fixture can
+exhaust it before the feature checks, which is a failed run, not acceptance.
+Public machine runs additionally require the existing dedicated wallet and the
+global testnet mutation lock. The standalone runner remains local-only; do not
+create another operator wallet to work around a missing identity.
 Manual real-wallet/hardware-authenticator, physical, provider and mainnet checks
 remain unrun under [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
 and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
