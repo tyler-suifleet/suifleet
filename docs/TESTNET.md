@@ -782,3 +782,24 @@ common/audit suites pass 67 + 23 tests; the authenticated cache, independent
 receipt-effects and audit Node suites pass. The first Docker offline attempt
 lacked PyYAML and failed five environment imports; after mounting the host's
 installed module read-only, all 191 passed. No application failure was ignored.
+
+Same-claim follow-up tested a second concrete source/storage candidate on the
+exact combined `7335545` source using the pinned compiler: replacing 54 static
+`BCS(String::utf8(bytes))` operation tags with `BCS(bytes)` preserves the encoded
+BCS value, but saves only **162 bytes** (93,673 → 93,511). The compiler digest
+changes; this unshipped experiment is **not** the historical head fixture and was
+not substituted for acceptance. [Compiler results](validation/sf221-bcs-storage-experiment.json)
+retain both digests. Together with the earlier 650-byte private-name experiment,
+these small source candidates do not establish the required reduction.
+
+Replaying the actual combined effects confirms a **93,121,037-MIST** fresh
+ordinary deficit before future temporal work. Even erasing all computation fees
+and device grants, while retaining current transaction grouping and clamping
+refund transactions to zero, leaves **1,640,251,037 MIST** of positive net storage.
+This rules out a funding/reservation/computation-only repair of that grouping.
+It is not a proof against all compatible source refactors or regrouping cleanup
+with creation: within-transaction rebates may reduce net effects, while a refund
+from a previous transaction must never replenish the allowance. A safe complete
+reduction remains unresolved. Ordinary/security/browser effects above remain the
+actual combined-candidate evidence; temporal pruning acceptance remains pending.
+No public rerun or new acceptance claim follows from this compiler experiment.

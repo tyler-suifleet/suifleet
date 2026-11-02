@@ -62,6 +62,33 @@ class FreshCostTests(unittest.TestCase):
                     gas=tx['gas_budget_mist'], funding=tx['funding_mist'], require_full=True)
             self.assertEqual(ledger.used, run['allowance_used_mist'])
 
+    def test_combined_fresh_and_retained_effects_do_not_establish_fresh_acceptance(self):
+        path = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-combined-batch-costs.json'
+        runs = {r['phase']: r for r in json.loads(path.read_text())['runs']}
+        fresh, retained = runs['pair-0-fresh'], runs['pair-0-retained']
+        self.assertFalse(fresh['success'])
+        self.assertTrue(retained['success'])
+        self.assertEqual((fresh['base'], fresh['head']), (retained['base'], retained['head']))
+        # Both ledgers must replay their own actual reservations and effects.
+        # Separate cached success must never certify the failed fresh ledger.
+        for run in (fresh, retained):
+            ledger = Budget(run['max_spend_mist'], [])
+            for tx in run['transactions']:
+                ledger.execute(None, tx['label'], lambda _, tx=tx: dict(
+                    digest=tx['digest'], effects=dict(status=dict(status=tx['status']), gasUsed=tx['gas_used'])),
+                    gas=tx['gas_budget_mist'], funding=tx['funding_mist'], require_full=True)
+            self.assertEqual(ledger.used, run['allowance_used_mist'])
+        total = fresh['allowance_used_mist'] + retained['allowance_used_mist']
+        self.assertEqual(total - fresh['max_spend_mist'], 93_121_037)
+        # A deliberately optimistic fee-only replay cannot repair this pair:
+        # erase *all* computation and funding, but retain the existing grouping
+        # and non-replenishing refund rule. This is not a bound on regrouping
+        # cleanup with creation or on different compatible source code.
+        storage = sum(max(0, int(t['gas_used']['storageCost']) - int(t['gas_used']['storageRebate']))
+                      for r in (fresh, retained) for t in r['transactions'])
+        self.assertEqual(storage, 1_640_251_037)
+        self.assertGreater(storage, fresh['max_spend_mist'])
+
     def ledgers(self):
         receipt = Path(__file__).resolve().parents[2] / 'docs/validation/sf221-cost-investigation.json'
         for run in json.loads(receipt.read_text())['runs']:
