@@ -7,7 +7,7 @@ A harmless, versioned OTA payload that proves which artifact actually ran on a d
 | `app.sh.in` | Template for the application artifact (POSIX `sh`). Its `install`, `run` and `health` subcommands are invoked by the updater. |
 | `suifleet-test-updater` | One-shot updater, configured as the daemon's `apply.command` on test devices. It runs with busybox. |
 | `../../../scripts/test_component.py` | Deterministic artifact and recipe generator. |
-| `../../../suifleet-edge/meta-suifleet/recipes-edge/suifleet-test-component` | Yocto recipe that installs the updater as `/usr/bin/suifleet-test-updater` in test images. |
+| `../../../suifleet-edge/meta-suifleet-integration/recipes-edge/suifleet-test-component` | Yocto recipe that installs the updater as `/usr/bin/suifleet-test-updater` in test images. |
 
 ## Build artifacts and recipes
 

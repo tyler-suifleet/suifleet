@@ -217,20 +217,30 @@ def inside(args):
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    test_ota.SHIM = Path("/workspace/suifleet-edge/target/debug/examples/grpc_sim_shim")
+    test_ota.SHIM = Path(os.environ.get("SUIFLEET_TEST_SHIM", "/workspace/suifleet-edge/target/debug/examples/grpc_sim_shim"))
     shim, rpc_url = start_grpc(f"http://127.0.0.1:{server.server_port}")
     url = f"http://127.0.0.1:{server.server_port}"
     files = Path("/workspace/suifleet-edge/meta-suifleet/recipes-edge/suifleet/files")
 
-    # Users and files as the recipe installs them.
-    sh("useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet")
-    sh("useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet-signer")
-    sh("install", "-m", "0755", "/workspace/suifleet-edge/target/debug/suifleet", "/usr/bin/suifleet")
-    sh("install", "-D", "-m", "0755", str(files / "suifleet-provision"), "/usr/libexec/suifleet-provision")
+    # Optional real Debian package setup: use its binary/accounts/units as
+    # installed, never replace them with a manually installed test payload.
+    package = os.environ.get("SUIFLEET_TEST_DEB")
     units = {}
-    for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
-        units[unit] = hashlib.sha256((files / unit).read_bytes()).hexdigest()
-        sh("install", "-m", "0644", str(files / unit), f"/etc/systemd/system/{unit}")
+    if package:
+        sh("apt-get", "install", "-y", package)
+        for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
+            installed = Path("/lib/systemd/system") / unit
+            assert installed.read_bytes() == (files / unit).read_bytes()
+            units[unit] = hashlib.sha256(installed.read_bytes()).hexdigest()
+    else:
+        sh("useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet")
+        sh("useradd", "--system", "--no-create-home", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "--user-group", "suifleet-signer")
+        sh("install", "-m", "0755", "/workspace/suifleet-edge/target/debug/suifleet", "/usr/bin/suifleet")
+        sh("install", "-D", "-m", "0755", str(files / "suifleet-provision"), "/usr/libexec/suifleet-provision")
+        units = {}
+        for unit in ("suifleet.service", "suifleet-provision.service", "suifleet-signer.service", "suifleet-signer.socket"):
+            units[unit] = hashlib.sha256((files / unit).read_bytes()).hexdigest()
+            sh("install", "-m", "0644", str(files / unit), f"/etc/systemd/system/{unit}")
     etc = Path("/etc/suifleet")
     etc.mkdir(mode=0o750, exist_ok=True)
     sh("chown", "root:suifleet", str(etc))
@@ -298,6 +308,8 @@ def inside(args):
         assert key_owner() == "suifleet", key_owner()
         deploy("0x900", "legacy", {})
         wait(lambda: reported("0x900"), "the legacy daemon could not report after the package update")
+        wait(lambda: outcome("0x900").get("reported") is True,
+             "the legacy report was accepted but not durably journaled")
         legacy = outcome("0x900")
         assert legacy.get("status") in (1, 2), legacy
         check("legacy: with an unchanged config.toml (keypair_path) and no signer.toml, provisioning leaves the key with "
@@ -454,6 +466,28 @@ def inside(args):
               "main process running that executable (a full daemon) is not recorded by the root recorder ('not running the "
               "base binary'), and its otherwise valid report request is refused; the queued report is signed only "
               "after the base daemon runs again")
+        if package:
+            # Upgrade the installed package while both real services run.
+            # Maintainer scripts must stop them, keep identity/config/state,
+            # and wait for the operator to explicitly start the new code.
+            preserved = {path: path.read_bytes() for path in
+                         (key, etc / "config.toml", etc / "signer.toml", etc / "deployment.json")}
+            sh("dpkg-deb", "-R", package, "/tmp/live-upgrade")
+            control = Path("/tmp/live-upgrade/DEBIAN/control")
+            text = control.read_text()
+            version = next(line[9:] for line in text.splitlines() if line.startswith("Version: "))
+            control.write_text(text.replace("Version: " + version, "Version: " + version + ".1"))
+            sh("dpkg-deb", "--root-owner-group", "--build", "/tmp/live-upgrade", "/tmp/live-upgrade.deb")
+            sh("apt-get", "install", "-y", "/tmp/live-upgrade.deb")
+            for unit in ("suifleet", "suifleet-signer.service", "suifleet-signer.socket"):
+                assert sh("systemctl", "show", "-p", "ActiveState", "--value", unit) == "inactive", unit
+            assert all(path.read_bytes() == value for path, value in preserved.items())
+            assert outcome("0x907"), "upgrade lost the deployment journal"
+            sh("systemctl", "start", "suifleet-signer.socket", "suifleet")
+            deploy("0x908", "after-package-upgrade", {})
+            wait(lambda: reported("0x908"), "no signed report after package upgrade and explicit start")
+            check("real live-package upgrade stopped daemon/signer/socket without auto-restart; "
+                  "identity/configuration/journal preserved; explicitly restarted services signed a new report")
     finally:
         sh("systemctl", "stop", "suifleet", "suifleet-signer.service", "suifleet-signer.socket", check=False)
         shim.kill()

@@ -33,7 +33,7 @@ Do not install unverified binaries.
 |---|---|---|
 | Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending ([SF-031](https://github.com/tyler-suifleet/suifleet/issues/32)) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
-| Debian / Ubuntu | [Debian and Ubuntu](#debian-and-ubuntu) | No public `.deb` or apt repository yet |
+| Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
@@ -98,9 +98,13 @@ Service control, logs and limits are in [MACOS_RUNTIME.md](MACOS_RUNTIME.md).
 
 There is no published `.deb` download or apt repository yet. Do not run an
 invented `apt install suifleet` command or fetch packages from unofficial mirrors.
-For evaluation on a systemd host, follow [Generic Linux](#generic-linux) below,
-using a reviewed source checkout or an authenticated operator-supplied bundle.
-The separate signing service and runtime identity protections still apply.
+Local-file packages can be built for amd64 and arm64. See
+[Debian packaging](DEBIAN_PACKAGING.md) for build, authenticated-bundle installation
+and configuration instructions. Packages require systemd and Linux 6.5 or later;
+Debian 12 needs a suitable newer/backports kernel, while Ubuntu 24.04 has a
+suitable kernel. Obtain a verified bundle from your operator or use a reviewed
+source checkout. The separate signing service and runtime identity protections
+still apply. [Generic Linux](#generic-linux) remains a manual evaluation option.
 Package publication will provide architecture, supported distribution versions,
 checksums and signature-verification instructions before a download is offered.
 
