@@ -54,8 +54,8 @@ sets its authority version to 201, beyond legacy version 1 and the merged
 security-policy versions 197/199. Old package credential, entitlement and managed
 fleet entry points reject it. The current package preserves the existing security
 policy and recognizes version 201 for customer operations; manual
-`set_entitlement` rejects the persistent subscription binding. Only the sealed subscription account advances a version-2 paid
-entitlement. Existing customers are not automatically migrated. `SubscriptionKey`,
+`set_entitlement` rejects the persistent subscription binding. Only the sealed
+subscription account advances a version-201 paid entitlement. Existing customers are not automatically migrated. `SubscriptionKey`,
 `Offer`, `Account` and events have their introduction-upgrade origins in the new
 all-or-none manifest origin group `subscription`.
 
@@ -102,10 +102,37 @@ base and performs a genuine compatible upgrade over an existing Customer before
 checking collection, refund state and rejected old-package entry points. Its SUI
 fixture is not evidence of Circle USDC on public testnet.
 
-The dedicated agent had no canonical testnet USDC during the initial read-only
-preflight. Circle's public Sui faucet requires reCAPTCHA. The required public USDC
-deposit/collect/cancel effects and gas remain unrun until that wallet is funded;
-no substitute token counts as USDC acceptance. The ticket must retain that gate.
+Public Testnet acceptance completed on 2026-11-03 after the user funded the
+canonical Circle USDC coin. The [deployment manifest](validation/sf181-testnet-manifest.json)
+pins the test fixture's subscription origins, canonical USDC and the SF-185
+Testnet treasury. The [receipt](validation/sf181-testnet.json) records all seven
+transaction effects, independent gRPC event/account reads and exact gas:
+
+- Open: 108,000 USDC base units; surplus deposit: 1,000 units.
+- First period: 9,000 units transferred to the manifest treasury.
+- Cancellation: 100,000 units returned to the dedicated agent; account cancelled,
+  remaining periods and balance both zero. The net test fee is 0.009 USDC;
+  this small fixture quote is not a production tariff.
+- Total gas: 827,574,483 MIST against the retained 1,000,000,000 MIST ceiling.
+  This includes the initial setup's `InsufficientGas` failure (1,000,178 MIST).
+  A free dry run established the larger setup budget before the successful retry;
+  the same publication and allowance were retained. Incoming USDC did not
+  replenish the allowance. No faucet request was made.
+
+`python3 scripts/live_subscription.py --help` documents the explicit wallet,
+canonical coin, retained private state, evidence and manifest arguments. Machine
+mutations require the shared lease and pinned CLIs; the customer's wallet YAML
+is copied privately only to normalize its container keystore path, without
+copying keys or modifying the original. Run
+`node scripts/verify_subscription_testnet.cjs MANIFEST EVIDENCE` for independent,
+read-only gRPC effects, signed gas and typed deposit/collection/refund checks.
+The package and empty account remain reusable test fixtures; original application
+objects were not selected or changed. The wallet lease was released after
+cancellation. The local upgrade receipt now uses merged main `cae74617` as its
+base, preserving the merged security policy while sealing subscription authority
+at version 201. Configured security factors still block unauthenticated
+cancellation; registry authority cannot override the subscription entitlement.
+
 Physical, mainnet, production-provider and manual-wallet acceptance remain unrun
 in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).

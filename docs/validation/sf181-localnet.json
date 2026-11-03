@@ -1,58 +1,58 @@
 {
-  "base": "5331a8cb",
-  "contracts_tree": "020af715c11b818e2167d600749ba9c9788599e0",
+  "base": "cae74617",
+  "contracts_tree": "4f30615c472593c9fef87153361d7ee4f00fe21d",
   "transactions": [
     {
       "label": "publish current base",
-      "digest": "Eg3tYMMPdRwoiY87oH8JCXDSeqbv2TEzp6SXzGcSFvvT",
+      "digest": "3oZAPgATrMQw6pzwJjH6mdZM5rxZiuMQcxxJLUZEPzWq",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "6050000",
-        "storageCost": "600612800",
+        "computationCost": "7530000",
+        "storageCost": "751442400",
         "storageRebate": "195624000",
         "nonRefundableStorageFee": "1976000"
       }
     },
     {
       "label": "create Customer before upgrade",
-      "digest": "AE1V4mphrpALKYj1L9utZ8hhnVrrvD1ekswG56aSM4Z3",
+      "digest": "F1PzipKexo3wZAZfu4jk212iEjZkjPatJsG5ZEvU1yU2",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "1210000",
-        "storageCost": "20854400",
+        "computationCost": "1520000",
+        "storageCost": "25323200",
         "storageRebate": "2738736",
         "nonRefundableStorageFee": "27664"
       }
     },
     {
       "label": "compatible additive upgrade",
-      "digest": "Gf3wtECYjKkVsf24UqXKjSSFnbRcsNCJb6mjN7pwVXBc",
+      "digest": "8RwCXc6nZPSceTRCQ4n4Cx48xno2NEnUhq256xcR3pim",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "7140000",
-        "storageCost": "629606800",
+        "computationCost": "8910000",
+        "storageCost": "780231200",
         "storageRebate": "2595780",
         "nonRefundableStorageFee": "26220"
       }
     },
     {
       "label": "immutable annual offer",
-      "digest": "81Niqtdg1zPfGA81jRTYdq6zZ364ZiGvwG1daRbitigu",
+      "digest": "FRWJkdYPpfXWQperEfSxEzMzLTf8ArGQCTLwDf8jYwVt",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "1250000",
+        "computationCost": "1550000",
         "storageCost": "3602400",
         "storageRebate": "978120",
         "nonRefundableStorageFee": "9880"
@@ -60,13 +60,13 @@
     },
     {
       "label": "prepay existing Customer",
-      "digest": "6CnFaLNquZiqdaKBMtmMc5gfJ1Q6FXMQnifD9mFjga7e",
+      "digest": "3qk3Jnyiffi1GGhfqvAg5n4gjyThB7F3tjkWbMr27ePH",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "1270000",
+        "computationCost": "1580000",
         "storageCost": "9196000",
         "storageRebate": "3852288",
         "nonRefundableStorageFee": "38912"
@@ -74,13 +74,13 @@
     },
     {
       "label": "collect first period",
-      "digest": "94BYgtBtTkhj8Jss2hDERULP16y7k19jkEzA2UdmvP4w",
+      "digest": "3NgYZLPa5xchp3nKbxKj1Y49t4wwTfU2qHQPKHxpg9Nv",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "1260000",
+        "computationCost": "1560000",
         "storageCost": "7820400",
         "storageRebate": "6764076",
         "nonRefundableStorageFee": "68324"
@@ -88,17 +88,17 @@
     },
     {
       "label": "double collection rejected",
-      "digest": "G4HtAdfzv8abk8zR2m3hdhve8SBhASfuq3jzfyUb3Eqe",
+      "digest": "74SYok57vSMrZZ2eCwoRtAQDY5jXef4SBBVq9fYKXDpP",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 2, in '0x169cd37c9f980c08ae7c6e12db3852be261b5de7277bb40c280a39254b8eaa8c::subscription::collect' (instruction 57)",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145::subscription::collect' (instruction 57)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "2",
             "location": {
-              "package": "0x169cd37c9f980c08ae7c6e12db3852be261b5de7277bb40c280a39254b8eaa8c",
+              "package": "0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145",
               "module": "subscription",
               "function": 3,
               "instruction": 57,
@@ -108,7 +108,7 @@
         }
       },
       "gas": {
-        "computationCost": "1260000",
+        "computationCost": "1560000",
         "storageCost": "6832400",
         "storageRebate": "6764076",
         "nonRefundableStorageFee": "68324"
@@ -116,27 +116,27 @@
     },
     {
       "label": "old package set_entitlement rejected after opt-in",
-      "digest": "JA8vTV7UoDgvpuYWhYwiY9jX1kr8HmTGBUaq85ZNHJgU",
+      "digest": "J1u5TxGFta64jXfTPAzDa7X3GVKaRPtKqDqkBP1sZ1MM",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 1, in '0x51b6c763671be529c57c27edc046dbc59edd8e9afa76302c7c48638e88b5f926::customer::set_entitlement' (instruction 26)",
+          "message": "MoveAbort in 1st command, abort code: 1, in '0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b::customer::pe' (instruction 4)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "1",
             "location": {
-              "package": "0x51b6c763671be529c57c27edc046dbc59edd8e9afa76302c7c48638e88b5f926",
+              "package": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
               "module": "customer",
-              "function": 2,
-              "instruction": 26,
-              "functionName": "set_entitlement"
+              "function": 161,
+              "instruction": 4,
+              "functionName": "pe"
             }
           }
         }
       },
       "gas": {
-        "computationCost": "1190000",
+        "computationCost": "1490000",
         "storageCost": "3891200",
         "storageRebate": "3852288",
         "nonRefundableStorageFee": "38912"
@@ -144,27 +144,27 @@
     },
     {
       "label": "old package set_credential rejected after opt-in",
-      "digest": "9ZFoXHmJsXYudx2Q9p68dgWzkxB8NMfkHUdgswtfGMmK",
+      "digest": "AcyVQEPm6nf4dJUB4nAejLvTS6ZKFWwgXCxicHSPLZnZ",
       "status": {
         "success": false,
         "error": {
           "$kind": "MoveAbort",
-          "message": "MoveAbort in 1st command, abort code: 0, in '0x51b6c763671be529c57c27edc046dbc59edd8e9afa76302c7c48638e88b5f926::customer::assert_member' (instruction 28)",
+          "message": "MoveAbort in 1st command, abort code: 0, in '0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b::customer::assert_member' (instruction 37)",
           "command": 0,
           "MoveAbort": {
             "abortCode": "0",
             "location": {
-              "package": "0x51b6c763671be529c57c27edc046dbc59edd8e9afa76302c7c48638e88b5f926",
+              "package": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
               "module": "customer",
-              "function": 70,
-              "instruction": 28,
+              "function": 95,
+              "instruction": 37,
               "functionName": "assert_member"
             }
           }
         }
       },
       "gas": {
-        "computationCost": "1190000",
+        "computationCost": "1490000",
         "storageCost": "3891200",
         "storageRebate": "3852288",
         "nonRefundableStorageFee": "38912"
@@ -172,13 +172,13 @@
     },
     {
       "label": "cancel and return unearned prepay",
-      "digest": "5nD6Wa58V1NYVzWh1hsVaM13hnoYmvkEYtf3tbnPPB4i",
+      "digest": "Btktu2sUQNTQkaiUJzECtr3AkaEQCqGo9cWatyexNXS1",
       "status": {
         "success": true,
         "error": null
       },
       "gas": {
-        "computationCost": "1260000",
+        "computationCost": "1570000",
         "storageCost": "4917200",
         "storageRebate": "3889908",
         "nonRefundableStorageFee": "39292"
@@ -190,13 +190,13 @@
   ],
   "wrong_coin_rejected": true,
   "objects": {
-    "old": "0x51b6c763671be529c57c27edc046dbc59edd8e9afa76302c7c48638e88b5f926",
-    "current": "0x169cd37c9f980c08ae7c6e12db3852be261b5de7277bb40c280a39254b8eaa8c",
-    "registry": "0xa30a5919a30f62231aa8d6dc0f492cc9cdb26033c3cbbdb9865187c9a70d8a5a",
-    "customer": "0xe50e8c86d4c859f0d3cff6d90b958d0af9864af9f0be8d60d4be89afce61e9c3",
-    "upgradeCap": "0x122ffa6466baf81d4e19feaaf4902ad5b3824a8a728828731ef6d650b7512ffe",
-    "offer": "0xa9193c2ff4cbb3148614c7cd12b91e2bdfff79b6d2ed2edbbd4d4c24e3c62305",
-    "account": "0x66707759f77c8ddbe3a9812b8bd8397f4b7a6043a63535cefe01a393c287d5ef",
-    "treasury": "0x0ea95b0ffdd11ff08c7eb7f0d77fc2ff7529fc84883887ab8d88c135c5be64b6"
+    "old": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
+    "current": "0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145",
+    "registry": "0x01454e28c2ccc43cf604a6fe6b9dfffb3b9061cb680e70880c7c8dae81d90669",
+    "customer": "0x1456e483757599acaceea21ff6d99a6152c4c05720ccd0f14c2da7948f10fcf3",
+    "upgradeCap": "0xe32fef9d2cca3f9280bf88cd237f02d1202bf69022087ec78b3950ffe1666c83",
+    "offer": "0xb5262eeca034df98a4f479953b900b5f3651e625dd65cd275b868930a0fd9536",
+    "account": "0x1d97d6f833eae7a4257fdf956ec8f8e8ea01246a946865073362cd2610b21dde",
+    "treasury": "0xf364963292ced69ab26d08d009b4b9249618da2686c7919a5d5a257f66d515c8"
   }
 }
