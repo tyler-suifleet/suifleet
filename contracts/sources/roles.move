@@ -16,11 +16,9 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::roles {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
+    // Named u64 constants share the bytecode constant pool without changing types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
 
     use std::string::String;
     use sui::clock::Clock;
@@ -35,8 +33,10 @@ module sui_edge::roles {
     const ENotGroupAdmin: u64 = 0;
     const ENoGroups: u64 = 1;
     const ERoleRevoked: u64 = 2;
+    const BRoleRevoked: u8 = 2;
     const EOutsideScope: u64 = 3;
     const ENotOperator: u64 = 4;
+    const BNotOperator: u8 = 4;
     const ENoTargets: u64 = 5;
 
     // ── State ─────────────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ module sui_edge::roles {
 
     public fun grant(builder: RoleBuilder, registry: &mut DeviceRegistry, delegate: address, ctx: &mut TxContext) {
         let RoleBuilder { operator, groups } = builder;
-        assert!(ctx.sender() == operator, ENotOperator);
+        q(ctx.sender() == operator, BNotOperator);
         assert!(!groups.is_empty(), ENoGroups);
         let role = DeployerRole { id: object::new(ctx), operator, groups };
         let role_id = object::id(&role);
@@ -105,9 +105,9 @@ module sui_edge::roles {
     #[allow(lint(prefer_mut_tx_context))]
     public fun revoke(registry: &mut DeviceRegistry, role_id: ID, ctx: &TxContext) {
         let key = RoleKey { role_id };
-        assert!(df::exists(device_registry::uid(registry), key), ERoleRevoked);
+        q(df::exists(device_registry::uid(registry), key), BRoleRevoked);
         let operator: address = *df::borrow(device_registry::uid(registry), key);
-        assert!(ctx.sender() == operator, ENotOperator);
+        q(ctx.sender() == operator, BNotOperator);
         let _: address = df::remove(device_registry::uid_mut(registry), key);
         event::emit(RoleRevoked { role_id, operator });
     }
@@ -128,12 +128,12 @@ module sui_edge::roles {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        assert!(is_active(registry, role), ERoleRevoked);
+        q(is_active(registry, role), BRoleRevoked);
         assert!(!target_groups.is_empty(), ENoTargets);
-        let mut i = (SMALL_0 as u64);
+        let mut i = SMALL_0;
         while (i < target_groups.length()) {
             assert!(role.groups.contains(&target_groups[i]), EOutsideScope);
-            i = i + (SMALL_1 as u64);
+            i = i + SMALL_1;
         };
         let deployment_id = deployment_manager::create_delegated(role.operator, component_name, version,
             recipe_blob_id, artifact_sha256, recipe_sha256, target_groups, clock, ctx);
@@ -149,4 +149,13 @@ module sui_edge::roles {
     }
     public fun role_operator(role: &DeployerRole): address { role.operator }
     public fun role_groups(role: &DeployerRole): &vector<ID> { &role.groups }
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, code: u8) {
+        if (!condition) {
+            if (code == BNotOperator) abort ENotOperator;
+            abort ERoleRevoked
+        }
+    }
 }

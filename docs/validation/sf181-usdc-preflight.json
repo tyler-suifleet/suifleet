@@ -1,0 +1,53 @@
+{
+  "observed_at_utc": "2026-10-30T12:35:34.726875+00:00",
+  "network": "testnet",
+  "chain_identifier": "4c78adac",
+  "coin_type": "0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC",
+  "metadata": {
+    "coinMetadata": {
+      "id": "0xce3bcf36c28c6fcea2b307f52f441ac297d14797d6a4da106fdf423162d7149d",
+      "decimals": 6,
+      "name": "USDC",
+      "symbol": "USDC",
+      "description": "USDC is a US dollar-backed stablecoin issued by Circle. USDC is designed to provide a faster, safer, and more efficient way to send, spend, and exchange money around the world.",
+      "iconUrl": "https://www.circle.com/hubfs/Brand/USDC/USDC_icon_32x32.png"
+    }
+  },
+  "agent": {
+    "address": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+    "coins": {
+      "objects": [],
+      "cursor": null,
+      "hasNextPage": false
+    }
+  },
+  "dedicated_ci_wallets": [
+    {
+      "owner": "0x99894c1ae83e8179dd05f3f419f3967c24508159fc5ddaf232af67fdf0c2dcac",
+      "objects": [],
+      "cursor": null,
+      "hasNextPage": false
+    },
+    {
+      "owner": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+      "objects": [],
+      "cursor": null,
+      "hasNextPage": false
+    },
+    {
+      "owner": "0xea997324bbc7762fae14aeaa4111e448d1617e935d997eae37b8cc3a7ae0c6b4",
+      "objects": [],
+      "cursor": null,
+      "hasNextPage": false
+    }
+  ],
+  "result": "blocked_no_testnet_usdc",
+  "mutations": [],
+  "gas_spent_mist": 0,
+  "source": "https://developers.circle.com/stablecoins/usdc-contract-addresses",
+  "faucet": "https://faucet.circle.com/",
+  "limits": [
+    "Read-only gRPC preflight, not deposit/collect/cancel acceptance.",
+    "Public faucet requires reCAPTCHA; no bypass attempted."
+  ]
+}

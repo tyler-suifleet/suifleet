@@ -58,7 +58,7 @@ let revoked=false, wrongCustomer=false;
 const client=manifestClient(m), original=client.getObject;
 client.listOwnedObjects=async()=>({objects:[{objectId:id("0x11"),content:wire.customer_MembershipBcs.serialize({id:id("0x11"),customer_id:C}).toBytes()}],hasNextPage:false});
 client.getObject=async request=>{
-  if(request.objectId===C)return {object:{objectId:C,type:type("Customer"),content:wire.customer_CustomerBcs.serialize({id:C,version:1,registry_id:m.shared_objects.registry.id,name:"Customer",credentials:{contents:revoked?[]:[{key:A,value:true}]},administrators:1,fleets:[F,G],default_fleet:F,active_devices:1,device_limit:2,allowance:10,used:6,period:1,charge_type:[]}).toBytes()}};
+  if(request.objectId===C)return {object:{objectId:C,type:type("Customer"),content:wire.customer_CustomerBcs.serialize({id:C,version:201,registry_id:m.shared_objects.registry.id,name:"Customer",credentials:{contents:revoked?[]:[{key:A,value:true}]},administrators:1,fleets:[F,G],default_fleet:F,active_devices:1,device_limit:2,allowance:10,used:6,period:1,charge_type:[]}).toBytes()}};
   if([F,G].includes(request.objectId))return {object:{objectId:request.objectId,type:type("Fleet"),content:wire.customer_FleetBcs.serialize({id:request.objectId,version:1,customer_id:wrongCustomer?B:C,name:"Production",budget_id:request.objectId===G?id("0xb1"):BUD,devices:request.objectId===F?[id("0xd")]:[],pending_devices:0,groups:[],deployments:[],policies:{contents:[]},enrollment_policies:[]}).toBytes()}};
   return original(request);
 };
