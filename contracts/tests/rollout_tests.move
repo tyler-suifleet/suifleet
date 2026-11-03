@@ -17,6 +17,19 @@ module sui_edge::rollout_tests {
         actual_state == state && actual_cohort == cohort
     }
     #[test]
+    fun security_snapshot_tracks_admin_decisions_not_device_outcomes() {
+        let mut s = ts::begin(ADMIN); let mut c = clock::create_for_testing(ts::ctx(&mut s));
+        clock::set_for_testing(&mut c, 1); let mut d = setup(&mut s, &c, 4, 4, 1, 10000);
+        let a = id(@0x1);
+        dm::advance_rollout(&mut d, vector[a], vector[], vector[], &c, ts::ctx(&mut s));
+        let snapshot = dm::security_snapshot(&d);
+        dm::rollout_receipt_for_testing(&mut d, a, 1);
+        assert!(snapshot == dm::security_snapshot(&d));
+        dm::control_rollout(&mut d, 1, vector[], string::utf8(b"pause"), &c, ts::ctx(&mut s));
+        assert!(snapshot != dm::security_snapshot(&d));
+        dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
+    }
+    #[test]
     fun multi_device_rate_concurrency_bake_restart_and_health() {
         let mut s = ts::begin(ADMIN);
         let mut c = clock::create_for_testing(ts::ctx(&mut s)); clock::set_for_testing(&mut c, 1);

@@ -14,6 +14,7 @@
     "@mysten/seal": "1.5.0",
     "@mysten/sui": "2.36.0",
     "@mysten/walrus": "1.2.35",
+    "@noble/hashes": "2.4.0",
     "@tanstack/react-query": "^5.0.0",
     "next": "16.4.1",
     "react": "19.3.1",
