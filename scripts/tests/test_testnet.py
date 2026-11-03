@@ -870,6 +870,45 @@ class PublicEnvironmentTests(unittest.TestCase):
         self.assertNotIn('SUIFLEET_TESTNET_KEY', probe)
 
 class BytecodeFixtureTests(unittest.TestCase):
+    def test_sf198_prepared_fixture_needs_next_run_not_faucet_or_republication(self):
+        import live_package_upgrade as live
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Exact five settled effects and original allowance from protected run
+        # 41374657219; later ceiling changes must not rewrite this receipt.
+        historical_allowance = 1_600_000_000
+        used = sum((772_926_000, 8_425_378, 1_243_578, 784_577_363, 8_737_163))
+        self.assertEqual(used, 1_575_909_482)
+        with self.assertRaisesRegex(Spent, 'retain and reuse'):
+            live.report_funding_plan(historical_allowance - used, 0,
+                                     PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.failure_class(Spent('allowance exhausted')), 'source')
+        self.assertEqual(live.failure_class(live.FundingShortfall('balance low')), 'funding')
+        # The merged cost fix lowers the device target to 10M. Cached fixtures
+        # still reserve their entire balance and each full transaction budget.
+        top_up, required = live.report_funding_plan(PACKAGE_UPGRADE_CEILING, 9_000_000,
+                                                   PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(top_up, 1_000_000)
+        self.assertEqual(required, 260_000_000)
+        self.assertEqual(live.report_funding_plan(required, 9_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=True), (top_up, required))
+        with self.assertRaises(Spent):
+            live.report_funding_plan(required - 1, 9_000_000, PACKAGE_TRANSACTION_GAS, needs_inbox=True)
+        self.assertEqual(live.report_funding_plan(220_000_000, 30_000_000, PACKAGE_TRANSACTION_GAS,
+                                                needs_inbox=False), (0, 210_000_000))
+
+    def test_merged_compact_path_reserves_each_call_without_summing_recycled_storage(self):
+        import live_package_upgrade as live
+        # Exact larger-candidate SF221 receipt, before deficit funding.
+        remaining = 1_600_000_000 - 1_557_359_389
+        self.assertEqual(live.report_funding_plan(remaining, 0, 60_000_000,
+                         needs_inbox=False, compact=True), (10_000_000, 35_000_000))
+        with self.assertRaises(Spent):
+            live.report_funding_plan(34_999_999, 0, 60_000_000,
+                                     needs_inbox=False, compact=True)
+        # Cached gas is still charged, not silently spent as free funding.
+        self.assertEqual(live.report_funding_plan(45_000_000, 30_000_000, 60_000_000,
+                         needs_inbox=False, compact=True), (0, 45_000_000))
+
     def test_pair_compiler_framework_and_verified_digest_are_required_for_migration(self):
         import copy, live_package_upgrade as live
         tools={'build':{'version':'pinned compiler'},'network':{'sha256':'pinned network'}}

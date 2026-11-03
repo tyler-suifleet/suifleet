@@ -57,6 +57,21 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "new_deployment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::component_catalog::ComponentVersion",
+          "vector<sui::object::ID>",
+          "vector<sui::object::ID>",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": [
+          "sui_edge::deployment_manager::DeploymentRecord"
+        ]
+      },
       "publish_version": {
         "visibility": "Public",
         "entry": false,
@@ -133,21 +148,6 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "&sui::vec_map::VecMap<std::string::String,sui::object::ID>"
-        ]
-      },
-      "new_deployment": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::component_catalog::ComponentVersion",
-          "vector<sui::object::ID>",
-          "vector<sui::object::ID>",
-          "&sui::clock::Clock",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": [
-          "sui_edge::deployment_manager::DeploymentRecord"
         ]
       }
     },
@@ -354,6 +354,21 @@ export const MOVE_ABI = {
           "vector<address>",
           "sui_edge::security_policy::Action",
           "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "add_many_to_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "&sui_edge::device_registry::DeviceRegistry",
+          "vector<sui::object::ID>",
+          "std::option::Option<std::string::String>",
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
@@ -832,6 +847,19 @@ export const MOVE_ABI = {
         "parameters": [
           "&sui_edge::customer::Customer",
           "sui_edge::security_policy::Action",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&sui_edge::customer::Fleet",
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
@@ -1350,6 +1378,15 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "max_group_batch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [],
+        "returns": [
+          "u64"
+        ]
+      },
       "new_catalog_deployment": {
         "visibility": "Public",
         "entry": false,
@@ -1791,6 +1828,19 @@ export const MOVE_ABI = {
           "sui::object::ID",
           "sui_edge::security_policy::Action",
           "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove_many_from_group": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::customer::Fleet",
+          "&mut sui_edge::device_group::DeviceGroup",
+          "vector<sui::object::ID>",
           "&mut sui::tx_context::TxContext"
         ],
         "returns": []
@@ -2331,56 +2381,6 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
-      "add_many_to_group": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::customer::Customer",
-          "&mut sui_edge::customer::Fleet",
-          "&mut sui_edge::device_group::DeviceGroup",
-          "&sui_edge::device_registry::DeviceRegistry",
-          "vector<sui::object::ID>",
-          "std::option::Option<std::string::String>",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": []
-      },
-      "clear_decision_audit": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::customer::Customer",
-          "&sui_edge::customer::Fleet",
-          "&mut sui_edge::deployment_manager::DeploymentRecord",
-          "u64",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": []
-      },
-      "max_group_batch": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [],
-        "returns": [
-          "u64"
-        ]
-      },
-      "remove_many_from_group": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::customer::Customer",
-          "&mut sui_edge::customer::Fleet",
-          "&mut sui_edge::device_group::DeviceGroup",
-          "vector<sui::object::ID>",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": []
-      },
       "configure_security_delays": {
         "visibility": "Public",
         "entry": false,
@@ -2799,6 +2799,31 @@ export const MOVE_ABI = {
           ]
         ]
       },
+      "GroupBatchApplied": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "fleet_id",
+            "sui::object::ID"
+          ],
+          [
+            "group_id",
+            "sui::object::ID"
+          ],
+          [
+            "added",
+            "bool"
+          ],
+          [
+            "count",
+            "u64"
+          ]
+        ]
+      },
       "GroupCountKey": {
         "abilities": [
           "Copy",
@@ -2892,31 +2917,6 @@ export const MOVE_ABI = {
           ]
         ]
       },
-      "GroupBatchApplied": {
-        "abilities": [
-          "Copy",
-          "Drop"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "fleet_id",
-            "sui::object::ID"
-          ],
-          [
-            "group_id",
-            "sui::object::ID"
-          ],
-          [
-            "added",
-            "bool"
-          ],
-          [
-            "count",
-            "u64"
-          ]
-        ]
-      },
       "SecondPersonConfiguration": {
         "abilities": [
           "Copy",
@@ -3001,6 +3001,17 @@ export const MOVE_ABI = {
           "&sui_edge::deployment_manager::DeploymentRecord",
           "&mut sui_edge::deployment_manager::ReceiptShard",
           "u64"
+        ],
+        "returns": []
+      },
+      "clear_decision_audit": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::deployment_manager::DeploymentRecord",
+          "u64",
+          "&mut sui::tx_context::TxContext"
         ],
         "returns": []
       },
@@ -3622,17 +3633,6 @@ export const MOVE_ABI = {
         "returns": [
           "&vector<sui::object::ID>"
         ]
-      },
-      "clear_decision_audit": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&mut sui_edge::deployment_manager::DeploymentRecord",
-          "u64",
-          "&mut sui::tx_context::TxContext"
-        ],
-        "returns": []
       }
     },
     "structs": {
@@ -3699,6 +3699,72 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "DecisionCleanupKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DecisionKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "revision",
+            "u64"
+          ]
+        ]
+      },
+      "DecisionRecord": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "deployment_id",
+            "sui::object::ID"
+          ],
+          [
+            "revision",
+            "u64"
+          ],
+          [
+            "cohort",
+            "u64"
+          ],
+          [
+            "state",
+            "u8"
+          ],
+          [
+            "reason",
+            "std::string::String"
+          ],
+          [
+            "at_ms",
+            "u64"
+          ],
+          [
+            "admitted",
+            "vector<sui::object::ID>"
           ]
         ]
       },
@@ -4295,72 +4361,6 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
-          ]
-        ]
-      },
-      "DecisionCleanupKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "dummy_field",
-            "bool"
-          ]
-        ]
-      },
-      "DecisionKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "revision",
-            "u64"
-          ]
-        ]
-      },
-      "DecisionRecord": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "deployment_id",
-            "sui::object::ID"
-          ],
-          [
-            "revision",
-            "u64"
-          ],
-          [
-            "cohort",
-            "u64"
-          ],
-          [
-            "state",
-            "u8"
-          ],
-          [
-            "reason",
-            "std::string::String"
-          ],
-          [
-            "at_ms",
-            "u64"
-          ],
-          [
-            "admitted",
-            "vector<sui::object::ID>"
           ]
         ]
       }
@@ -5040,6 +5040,17 @@ export const MOVE_ABI = {
           "sui_edge::device_registry::DeviceOwnerCap"
         ]
       },
+      "arch": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::device_registry::Device"
+        ],
+        "returns": [
+          "std::string::String"
+        ]
+      },
       "assert_admin": {
         "visibility": "Public",
         "entry": false,
@@ -5280,17 +5291,6 @@ export const MOVE_ABI = {
           "&sui::tx_context::TxContext"
         ],
         "returns": []
-      },
-      "arch": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::device_registry::Device"
-        ],
-        "returns": [
-          "std::string::String"
-        ]
       }
     },
     "structs": {
@@ -7695,6 +7695,129 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      }
+    }
+  },
+  "passkey_factor": {
+    "functions": {
+      "enroll": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "sui_edge::passkey_factor::Enrollment",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "key_address": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "vector<u8>"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "keys": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer"
+        ],
+        "returns": [
+          "vector<address>"
+        ]
+      },
+      "prove_enrollment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "address",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "address",
+          "address",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "Enrollment": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
+          ],
+          [
+            "generation",
+            "u64"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ProofCreated": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "proof_id",
+            "sui::object::ID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
           ]
         ]
       }
