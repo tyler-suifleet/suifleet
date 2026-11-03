@@ -1,5 +1,18 @@
 /// Immutable authenticated component recipes; manifest order defines precedence.
 module sui_edge::component_catalog {
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_3: u8 = 3;
+    const SMALL_4: u8 = 4;
+    const SMALL_10: u8 = 10;
+    const SMALL_16: u8 = 16;
+    const SMALL_64: u8 = 64;
+    const SMALL_128: u8 = 128;
+
     use std::string::{Self, String};
     use sui::clock::Clock;
     use sui::event;
@@ -68,25 +81,24 @@ module sui_edge::component_catalog {
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
-        assert!(n > 0 && n <= 16 && platform_arch.length() == n && recipe_blob_ids.length() == n
-            && recipe_sha256s.length() == n && artifact_sha256s.length() == n, EManifest);
-        let mut i = 0;
+        p5(n > (SMALL_0 as u64)); p5(n <= (SMALL_16 as u64)); p5(platform_arch.length() == n); p5(recipe_blob_ids.length() == n); p5(recipe_sha256s.length() == n); p5(artifact_sha256s.length() == n);
+        let mut i = (SMALL_0 as u64);
         while (i < n) {
-            assert!(valid_os(&platform_os[i]) && valid_arch(&platform_arch[i]), EManifest);
-            validate_token(&recipe_blob_ids[i], 128);
+            p5(p3(&platform_os[i])); p5(p4(&platform_arch[i]));
+            p2(&recipe_blob_ids[i], (SMALL_128 as u64));
             validate_hash(&recipe_sha256s[i]); validate_hash(&artifact_sha256s[i]);
-            let mut j = 0;
+            let mut j = (SMALL_0 as u64);
             while (j < i) {
                 assert!(platform_os[i] != platform_os[j] || platform_arch[i] != platform_arch[j], EDuplicate);
-                j = j + 1;
+                j = j + (SMALL_1 as u64);
             };
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let mut key = component_name;
         key.append(string::utf8(b"@")); key.append(version);
         assert!(!catalog.versions.contains(&key), EDuplicate);
         let value = ComponentVersion { id: object::new(ctx), catalog_id: object::id(catalog),
-            publisher: authority, component_name, version, schema_version: 1, created_at: clock.timestamp_ms(),
+            publisher: authority, component_name, version, schema_version: (SMALL_1 as u64), created_at: clock.timestamp_ms(),
             platform_os, platform_arch, recipe_blob_ids, recipe_sha256s, artifact_sha256s };
         catalog.versions.insert(key, object::id(&value));
         event::emit(VersionPublished { catalog_id: object::id(catalog), version_id: object::id(&value),
@@ -96,8 +108,7 @@ module sui_edge::component_catalog {
 
     /// Transaction-local catalog record, composable with desired-state revisions.
     public fun new_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
+        new_for_customer(value, ctx.sender(), groups, devices, clock, ctx)
     }
 
     /// Bindings can only be installed by this module from a frozen version.
@@ -107,21 +118,19 @@ module sui_edge::component_catalog {
     }
 
     public fun create_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        deployment_manager::create_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
+        deployment_manager::share_deployment(new_deployment(value, groups, devices, clock, ctx));
     }
     /// Publish with admission paused atomically, so operators can configure a
     /// schedule before any device is eligible to start.
     public fun create_deployment_paused(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
-        let mut record = deployment_manager::new_catalog_deployment(value.component_name, value.version, groups, devices,
-            CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx);
-        deployment_manager::set_control(&mut record, 1, 0, 0, 0, 0, 0, ctx);
+        let mut record = new_deployment(value, groups, devices, clock, ctx);
+        deployment_manager::set_control(&mut record, 1, (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), (SMALL_0 as u64), ctx);
         deployment_manager::share_deployment(record);
     }
     #[allow(lint(prefer_mut_tx_context))]
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
-        if (deployment_manager::receipt_schema(&deployment) == 2 &&
-            deployment_manager::receipts_version(&deployment) == 4) {
+        if (deployment_manager::receipt_schema(&deployment) == (SMALL_2 as u64) &&
+            deployment_manager::receipts_version(&deployment) == (SMALL_4 as u64)) {
             deployment_manager::remove_catalog_binding<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
         } else {
             deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
@@ -133,7 +142,7 @@ module sui_edge::component_catalog {
             d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, ctx);
     }
     public(package) fun remove_for_customer(record: &mut DeploymentRecord, authority: address) {
-        if (deployment_manager::receipts_version(record) == 4) {
+        if (deployment_manager::receipts_version(record) == (SMALL_4 as u64)) {
             deployment_manager::remove_catalog_binding_as<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {}, authority);
         } else {
             deployment_manager::remove_catalog_binding_as<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
@@ -150,58 +159,74 @@ module sui_edge::component_catalog {
     public fun version_publisher(value: &ComponentVersion): address { value.publisher }
     public fun publisher(catalog: &ComponentCatalog): address { catalog.publisher }
 
-    fun alpha(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
-    fun digit(b: u8): bool { b >= 48 && b <= 57 }
-    fun validate_token(s: &String, max: u64) {
-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= max, EManifest);
-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95, EManifest));
+    /// alpha: compact private symbol to bound published bytecode storage.
+    fun p0(b: u8): bool { (b >= 65 && b <= 90) || (b >= 97 && b <= 122) }
+    /// digit: compact private symbol to bound published bytecode storage.
+    fun p1(b: u8): bool { b >= 48 && b <= 57 }
+    /// validate_token: compact private symbol to bound published bytecode storage.
+    fun p2(s: &String, max: u64) {
+        let b = s.as_bytes(); p5(b.length() > (SMALL_0 as u64)); p5(b.length() <= max);
+        b.do_ref!(|c| p5(p0(*c) || p1(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
-        let b = s.as_bytes(); assert!(b.length() > 0 && b.length() <= 128, EIdentity);
-        b.do_ref!(|c| assert!(alpha(*c) || digit(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
+        let b = s.as_bytes(); assert!(b.length() > (SMALL_0 as u64) && b.length() <= (SMALL_128 as u64), EIdentity);
+        b.do_ref!(|c| assert!(p0(*c) || p1(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
     }
     public fun validate_hash(s: &String) {
-        let b = s.as_bytes(); assert!(b.length() == 64, EManifest);
-        b.do_ref!(|c| assert!(digit(*c) || (*c >= 97 && *c <= 102), EManifest));
+        let b = s.as_bytes(); p5(b.length() == (SMALL_64 as u64));
+        b.do_ref!(|c| p5(p1(*c) || (*c >= 97 && *c <= 102)));
     }
-    fun valid_os(s: &String): bool {
+    /// valid_os: compact private symbol to bound published bytecode storage.
+    fun p3(s: &String): bool {
         *s == string::utf8(b"linux") || *s == string::utf8(b"macos") || *s == string::utf8(b"*")
     }
     /// Rust's `std::env::consts::ARCH` names; `x86` is 32-bit i686 (SF-076).
-    fun valid_arch(s: &String): bool {
+    /// valid_arch: compact private symbol to bound published bytecode storage.
+    fun p4(s: &String): bool {
         *s == string::utf8(b"x86_64") || *s == string::utf8(b"aarch64") || *s == string::utf8(b"arm")
             || *s == string::utf8(b"x86") || *s == string::utf8(b"*")
     }
     /// SemVer 2.0 with bounded u64 core numbers, <=128 ASCII bytes.
     public fun validate_version(s: &String) {
-        let b = s.as_bytes(); let n = b.length(); assert!(n > 0 && n <= 128, EVersion);
-        let mut i = 0; let mut part = 0u64;
-        while (part < 3) {
-            let start = i; let mut number: u64 = 0;
-            while (i < n && digit(b[i])) {
+        let b = s.as_bytes(); let n = b.length(); p6(n > (SMALL_0 as u64)); p6(n <= (SMALL_128 as u64));
+        let mut i = (SMALL_0 as u64); let mut part = (SMALL_0 as u64);
+        while (part < (SMALL_3 as u64)) {
+            let start = i; let mut number: u64 = (SMALL_0 as u64);
+            while (i < n && p1(b[i])) {
                 let d = (b[i] - 48) as u64;
-                assert!(number <= (18446744073709551615 - d) / 10, EVersion);
-                number = number * 10 + d; i = i + 1;
+                p6(number <= (18446744073709551615 - d) / (SMALL_10 as u64));
+                number = number * (SMALL_10 as u64) + d; i = i + (SMALL_1 as u64);
             };
-            assert!(i > start && (i - start == 1 || b[start] != 48), EVersion);
-            part = part + 1;
-            if (part < 3) { assert!(i < n && b[i] == 46, EVersion); i = i + 1; };
+            p6(i > start); if (!(i - start == (SMALL_1 as u64))) { p6(b[start] != 48); };
+            part = part + (SMALL_1 as u64);
+            if (part < (SMALL_3 as u64)) { p6(i < n); p6(b[i] == 46); i = i + (SMALL_1 as u64); };
         };
         if (i == n) return;
         let mut prerelease = b[i] == 45;
-        assert!(prerelease || b[i] == 43, EVersion); i = i + 1;
+        if (!(prerelease)) { p6(b[i] == 43); }; i = i + (SMALL_1 as u64);
         loop {
             let start = i; let mut numeric = true;
             while (i < n && b[i] != 46 && b[i] != 43) {
-                assert!(alpha(b[i]) || digit(b[i]) || b[i] == 45, EVersion);
-                if (!digit(b[i])) numeric = false;
-                i = i + 1;
+                if (!(p0(b[i]))) { if (!(p1(b[i]))) { p6(b[i] == 45); }; };
+                if (!p1(b[i])) numeric = false;
+                i = i + (SMALL_1 as u64);
             };
-            assert!(i > start, EVersion);
-            if (prerelease && numeric) assert!(i - start == 1 || b[start] != 48, EVersion);
+            p6(i > start);
+            if (prerelease && numeric) if (!(i - start == (SMALL_1 as u64))) { p6(b[start] != 48); };
             if (i == n) break;
-            if (b[i] == 43) { assert!(prerelease, EVersion); prerelease = false; };
-            i = i + 1;
+            if (b[i] == 43) { p6(prerelease); prerelease = false; };
+            i = i + (SMALL_1 as u64);
         };
+    }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
+    // Share each named abort branch without changing its module or error code.
+    /// check_Manifest: compact private symbol to bound published bytecode storage.
+    fun p5(condition: bool) {
+        if (!condition) abort EManifest
+    }
+    /// check_Version: compact private symbol to bound published bytecode storage.
+    fun p6(condition: bool) {
+        if (!condition) abort EVersion
     }
 }
