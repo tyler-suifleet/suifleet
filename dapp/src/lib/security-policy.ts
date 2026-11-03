@@ -12,8 +12,9 @@ export const SECURITY_FACTORS = [
   { bit: 4, name: "Second-person approval", description: "Require approval from another authorized credential. The proposer cannot approve their own request.", ticket: "SF-199" },
   { bit: 8, name: "Delay and cancellation", description: "Wait through an on-chain cancellation window before executing. A current administrator can cancel.", ticket: "SF-200" },
 ] as const;
-// Native multisig and passkey verifiers; enrollment is checked on chain.
-export const AVAILABLE_SECURITY_FACTORS = 3;
+// Only implemented verifiers are available; enrollment is checked on chain.
+export const APPROVAL_ORIGINS = ["customer::SecondPersonConfiguration"] as const;
+export const AVAILABLE_SECURITY_FACTORS = 1 | (MANIFEST?.type_origins["passkey_factor::Enrollment"] ? 2 : 0) | (MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0);
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {
@@ -31,7 +32,7 @@ export async function fetchOrganizationSecurity(client: SuiGrpcClient, customerI
   const { customer_CustomerBcs } = await import("./fleet-protocol");
   const customer = customer_CustomerBcs.parse(object.content);
   if (customer.version === "1" || customer.version === "196") return undefined;
-  if (customer.version !== "197") throw Error("Unsupported organization authority version");
+  if (!["197", "199"].includes(customer.version)) throw Error("Unsupported organization authority version");
   const field = await client.getDynamicField({ parentId: customerId, name: {
     type: moveType("security_policy::PolicyKey"), bcs: security_policy_PolicyKeyBcs.serialize({ dummy_field: false }).toBytes(),
   } });

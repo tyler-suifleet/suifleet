@@ -125,4 +125,79 @@ module sui_edge::passkey_factor_tests {
         ts::return_shared(c); ts::return_shared(f); s.end();
     }
 
+    fun sealed_authority(): Scenario {
+        let mut s = setup();
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        let arguments = std::bcs::to_bytes(&vector[
+            std::bcs::to_bytes(&utf8(b"configure_second_person")), std::bcs::to_bytes(&c)]);
+        customer::propose_approval(&mut c, arguments, 1000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
+        let mut c = s.take_shared<Customer>(); let action = s.take_shared<security_policy::Action>();
+        customer::cancel_disclosed_security_action(&mut c, action, s.ctx());
+        assert!(std::bcs::to_bytes(&c)[32] == 199);
+        ts::return_shared(c); s.next_tx(@0xA); s
+    }
+    #[test]
+    fun passkey_enrollment_and_recovery_after_second_person_seals_authority() {
+        let mut s = sealed_authority(); enable(&mut s);
+        sponsor(&mut s, factor::key_address(public_key()));
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Sealed passkey action"), s.ctx());
+        customer::set_security(&mut c, vector[0,0,0,0,0,0,0], s.ctx());
+        factor::remove(&mut c, @0xA, factor::key_address(public_key()), s.ctx());
+        assert!(factor::keys(&c).is_empty());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun sealed_authority_still_requires_native_passkey() {
+        let mut s = sealed_authority(); enable(&mut s);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Wallet alone"), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun native_passkey_cannot_replace_required_second_person_approval() {
+        let mut s = sealed_authority(); enable(&mut s);
+        let mut c = s.take_shared<Customer>();
+        customer::set_security_requirements_for_testing(&mut c, vector[6,6,6,6,6,6,6]);
+        ts::return_shared(c); s.next_tx(@0xA);
+        sponsor(&mut s, factor::key_address(public_key()));
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Missing independent approval"), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+
+    fun combined_action(): Scenario {
+        let mut s = sealed_authority(); enroll(&mut s);
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        customer::set_security_requirements_for_testing(&mut c, vector[6,6,6,6,6,6,6]);
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")),
+            std::bcs::to_bytes(&c), std::bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])];
+        let intent = security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments));
+        customer::prepare_security_action(&c, intent, 1000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
+        // Kernel regression: package attestation models the independent verifier.
+        // Its distinct-administrator checks are covered by second_person_tests.
+        let mut action = s.take_shared<security_policy::Action>();
+        security_policy::attest(&mut action, 4);
+        ts::return_shared(action); s.next_tx(@0xA); s
+    }
+    #[test]
+    fun native_passkey_and_independent_attestation_combine() {
+        let mut s = combined_action(); sponsor(&mut s, factor::key_address(public_key()));
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        let action = s.take_shared<security_policy::Action>();
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], action, &clock, s.ctx());
+        assert!(security_policy::requirements(&customer::security(&c)) == vector[0,0,0,0,0,0,0]);
+        ts::return_shared(c); ts::return_shared(clock); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun independent_attestation_cannot_replace_native_passkey() {
+        let mut s = combined_action();
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        let action = s.take_shared<security_policy::Action>();
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], action, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.end();
+    }
+
 }

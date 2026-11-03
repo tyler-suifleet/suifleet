@@ -140,7 +140,7 @@ module sui_edge::customer {
             transfer::transfer(Membership { id: object::new(ctx), customer_id: object::id(customer) }, wallet);
         };
         assert!(customer.administrators > (SMALL_0 as u64), ELastAdmin);
-        if (customer.version == (SMALL_197 as u64)) {
+        if (security_authority(customer)) {
             security_policy::invalidate(&mut customer.id);
             if (revokes_administrator) enrollment::invalidate_authority(&mut customer.id);
         };
@@ -151,7 +151,7 @@ module sui_edge::customer {
     /// Periods advance monotonically; changing credentials/fleets cannot reset usage.
     public fun set_entitlement(customer: &mut Customer, registry: &DeviceRegistry,
         device_limit: u64, allowance: u64, period: u64, ctx: &mut TxContext) {
-        if (!(customer.version == (SMALL_1 as u64))) { pe(customer.version == (SMALL_197 as u64)); }; pe(customer.registry_id == object::id(registry));
+        if (!(customer.version == (SMALL_1 as u64))) { pe(security_authority(customer)); }; pe(customer.registry_id == object::id(registry));
         device_registry::assert_admin(registry, ctx);
         assert!(period >= customer.period, EPeriod);
         pf(device_limit >= customer.active_devices);
@@ -182,7 +182,7 @@ module sui_edge::customer {
         p8(&name);
         pe(fleet_budget::registry_id(budget) == customer.registry_id);
         let count = fleet_budget::device_count(budget);
-        if (customer.version == (SMALL_197 as u64) && count > (SMALL_0 as u64)) security_policy::assert_unprotected(&customer.id);
+        if (security_authority(customer) && count > (SMALL_0 as u64)) security_policy::assert_unprotected(&customer.id);
         pf(count <= customer.device_limit - customer.active_devices);
         customer.active_devices = customer.active_devices + count;
         fleet_budget::adopt_managed(budget, &cap);
@@ -191,7 +191,7 @@ module sui_edge::customer {
         let fleet_id = object::id(&fleet);
         dof::add(&mut fleet.id, BudgetKey {}, cap);
         customer.fleets.push_back(fleet_id);
-        if (customer.version == (SMALL_197 as u64) && count == (SMALL_0 as u64)) df::add(&mut customer.id, FleetSecurityKey { fleet_id }, true);
+        if (security_authority(customer) && count == (SMALL_0 as u64)) df::add(&mut customer.id, FleetSecurityKey { fleet_id }, true);
         if (customer.default_fleet.is_none()) customer.default_fleet = option::some(fleet_id);
         event::emit(FleetCreated { customer_id: object::id(customer), fleet_id, name: fleet.name, budget_id: fleet.budget_id });
         transfer::share_object(fleet);
@@ -204,7 +204,7 @@ module sui_edge::customer {
         id: UID, customer_id: ID, generation: u64, recipient: address, expires_ms: u64,
     }
     public fun confirm_handover(customer: &Customer, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        pe(customer.version == (SMALL_197 as u64)); pe(expires_ms > clock.timestamp_ms()); pe(expires_ms - clock.timestamp_ms() <= (SMALL_604800000 as u64));
+        pe(security_authority(customer)); pe(expires_ms > clock.timestamp_ms()); pe(expires_ms - clock.timestamp_ms() <= (SMALL_604800000 as u64));
         transfer::share_object(HandoverConsent { id: object::new(ctx), customer_id: object::id(customer),
             generation: security_policy::generation(&security(customer)), recipient: ctx.sender(), expires_ms });
     }
@@ -213,7 +213,7 @@ module sui_edge::customer {
     public fun handover(customer: &mut Customer, consent: HandoverConsent, clock: &Clock, ctx: &mut TxContext) {
         assert_admin(customer, ctx);
         let HandoverConsent { id, customer_id, generation, recipient, expires_ms } = consent;
-        pe(customer_id == object::id(customer)); pe(customer.version == (SMALL_197 as u64)); pe(generation == security_policy::generation(&security(customer))); pe(clock.timestamp_ms() < expires_ms); pe(recipient != ctx.sender());
+        pe(customer_id == object::id(customer)); pe(security_authority(customer)); pe(generation == security_policy::generation(&security(customer))); pe(clock.timestamp_ms() < expires_ms); pe(recipient != ctx.sender());
         customer.credentials = vec_map::empty();
         customer.credentials.insert(recipient, true);
         customer.administrators = (SMALL_1 as u64);
@@ -252,7 +252,7 @@ module sui_edge::customer {
     public fun borrow_budget_cap(customer: &Customer, fleet: &mut Fleet, ctx: &mut TxContext): (BudgetOwnerCap, BudgetLoan) {
         assert_admin(customer, ctx);
         // Generic external authority must never inherit an intent-bound grant.
-        if (customer.version == (SMALL_197 as u64)) security_policy::check_capability_loan(&customer.id, ctx);
+        if (security_authority(customer)) security_policy::check_capability_loan(&customer.id, ctx);
         assert_fleet(customer, fleet);
         pe(fleet.pending_devices == (SMALL_0 as u64));
         let cap = dof::remove(&mut fleet.id, BudgetKey {});
@@ -353,7 +353,7 @@ module sui_edge::customer {
     public fun add_claims(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &mut TxContext) {
         p0(customer, fleet, policy); p7(customer, (SMALL_2 as u64), ctx);
         enrollment::add_claims_as(policy, claims, object::id(fleet).to_address());
-        if (customer.version == (SMALL_197 as u64)) enrollment::bind_security_generation(policy, enrollment::authority_generation(&customer.id));
+        if (security_authority(customer)) enrollment::bind_security_generation(policy, enrollment::authority_generation(&customer.id));
     }
     public fun revoke_claim(customer: &Customer, fleet: &Fleet, policy: &mut EnrollmentPolicy, claim: address, ctx: &mut TxContext) {
         p0(customer, fleet, policy); p7(customer, (SMALL_2 as u64), ctx);
@@ -368,7 +368,7 @@ module sui_edge::customer {
         p0(customer, fleet, policy);
         // Claims delegated under an earlier policy cannot enroll after a
         // enrollment-authority revocation without renewed current authorization.
-        if (customer.version == (SMALL_197 as u64)) pe(enrollment::security_generation(policy) == enrollment::authority_generation(&customer.id));
+        if (security_authority(customer)) pe(enrollment::security_generation(policy) == enrollment::authority_generation(&customer.id));
         let cap = enrollment::enroll_managed(policy, registry, name, arch, clock, ctx);
         enroll_checked(customer, fleet, budget, registry, cap, (SMALL_0 as u64), (SMALL_0 as u64), clock, ctx);
     }
@@ -422,7 +422,7 @@ module sui_edge::customer {
         df::add(&mut fleet.id, GroupCountKey { device_id }, (SMALL_0 as u64));
         fleet.devices.push_back(device_id);
         fleet.pending_devices = fleet.pending_devices - (SMALL_1 as u64);
-        if (customer.version == (SMALL_197 as u64) && fleet.pending_devices == (SMALL_0 as u64) && !df::exists(&customer.id, FleetSecurityKey { fleet_id: object::id(fleet) })) {
+        if (security_authority(customer) && fleet.pending_devices == (SMALL_0 as u64) && !df::exists(&customer.id, FleetSecurityKey { fleet_id: object::id(fleet) })) {
             df::add(&mut customer.id, FleetSecurityKey { fleet_id: object::id(fleet) }, true);
         };
         event::emit(DeviceAssigned { customer_id: object::id(customer), fleet_id: object::id(fleet), device_id });
@@ -441,7 +441,7 @@ module sui_edge::customer {
         let cap = dof::borrow(&fleet.id, BudgetKey {});
         fleet_budget::remove_managed(budget, cap, account);
         fleet.pending_devices = fleet.pending_devices - (SMALL_1 as u64);
-        if (customer.version == (SMALL_197 as u64) && fleet.pending_devices == (SMALL_0 as u64) && !df::exists(&customer.id, FleetSecurityKey { fleet_id: object::id(fleet) })) {
+        if (security_authority(customer) && fleet.pending_devices == (SMALL_0 as u64) && !df::exists(&customer.id, FleetSecurityKey { fleet_id: object::id(fleet) })) {
             df::add(&mut customer.id, FleetSecurityKey { fleet_id: object::id(fleet) }, true);
         };
         customer.active_devices = customer.active_devices - (SMALL_1 as u64);
@@ -821,8 +821,8 @@ module sui_edge::customer {
     /// A non-store, non-publicly-constructible witness then keeps devices from
     /// exhausting the customer ledger by calling its charge function directly.
     public fun configure_charging<W: drop>(customer: &mut Customer, registry: &DeviceRegistry, _witness: W, ctx: &mut TxContext) {
-        if (!(customer.version == (SMALL_1 as u64))) { pe(customer.version == (SMALL_197 as u64)); }; pe(object::id(registry) == customer.registry_id);
-        if (customer.version == (SMALL_197 as u64)) assert_admin(customer, ctx);
+        if (!(customer.version == (SMALL_1 as u64))) { pe(security_authority(customer)); }; pe(object::id(registry) == customer.registry_id);
+        if (security_authority(customer)) assert_admin(customer, ctx);
         device_registry::assert_admin(registry, ctx);
         let name = std::type_name::with_original_ids<W>().into_string().into_bytes();
         if (!(customer.charge_type.is_empty())) { pe(customer.charge_type == name); };
@@ -831,9 +831,10 @@ module sui_edge::customer {
 
     /// Opt in atomically. All-off defaults preserve ordinary current-client use;
     /// old packages can no longer authorize this customer after the version seal.
+    fun security_authority(customer: &Customer): bool { customer.version == 197 || customer.version == 199 }
     public fun initialize_security(customer: &mut Customer, ctx: &mut TxContext) {
         pd(customer.credentials.contains(&ctx.sender())); pd(*customer.credentials.get(&ctx.sender()));
-        if (customer.version == (SMALL_197 as u64)) { assert_admin(customer, ctx); return };
+        if (security_authority(customer)) { assert_admin(customer, ctx); return };
         if (customer.version == (SMALL_196 as u64)) {
             // Retire the already-published intermediate framework as well as
             // version 1. Its older wrappers must never authorize this state.
@@ -847,14 +848,14 @@ module sui_edge::customer {
         customer.version = (SMALL_197 as u64);
     }
     public fun security(customer: &Customer): Policy {
-        pe(customer.version == (SMALL_197 as u64));
+        pe(security_authority(customer));
         security_policy::read(&customer.id)
     }
     /// Existing fleets must prove complete capability reconciliation before a
     /// nonzero policy can be activated. No claim is made for pending old caps.
     public fun seal_security_fleet(customer: &mut Customer, fleet: &Fleet, ctx: &mut TxContext) {
         pc(customer, fleet, ctx);
-        pe(customer.version == (SMALL_197 as u64)); pe(fleet.pending_devices == (SMALL_0 as u64));
+        pe(security_authority(customer)); pe(fleet.pending_devices == (SMALL_0 as u64));
         let key = FleetSecurityKey { fleet_id: object::id(fleet) };
         if (!df::exists(&customer.id, key)) df::add(&mut customer.id, key, true);
     }
@@ -863,7 +864,7 @@ module sui_edge::customer {
         fleet.pending_devices == (SMALL_0 as u64) && df::exists(&customer.id, FleetSecurityKey { fleet_id: object::id(fleet) })
     }
     public fun set_security(customer: &mut Customer, requirements: vector<u8>, ctx: &mut TxContext) {
-        pe(customer.version == (SMALL_197 as u64));
+        pe(security_authority(customer));
         assert_admin(customer, ctx);
         let mut protected = false;
         let mut i = (SMALL_0 as u64);
@@ -897,9 +898,14 @@ module sui_edge::customer {
         assert_security_administrator(customer, ctx);
         security_policy::cancel(&customer.id, action);
     }
+    public fun pending_security_actions(customer: &Customer): vector<ID> { security_policy::pending(&customer.id) }
+    public fun cancel_disclosed_security_action(customer: &mut Customer, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        security_policy::cancel_disclosed(&mut customer.id, action);
+    }
     public(package) fun assert_security_administrator(customer: &Customer, ctx: &mut TxContext) {
         assert_member(customer, ctx);
-        pd(customer.version == (SMALL_197 as u64)); pd(*customer.credentials.get(&ctx.sender()));
+        pd(security_authority(customer)); pd(*customer.credentials.get(&ctx.sender()));
     }
     /// Trusted child verifiers use these package-only hooks after independently
     /// authenticating the new factor. Public callers cannot construct a grant.
@@ -915,11 +921,11 @@ module sui_edge::customer {
         enrollment::invalidate_authority(&mut customer.id);
     }
     public(package) fun assert_security_administrator_address(customer: &Customer, administrator: address) {
-        assert!(customer.version == 197 && customer.credentials.contains(&administrator)
+        assert!(security_authority(customer) && customer.credentials.contains(&administrator)
             && *customer.credentials.get(&administrator), EAccess);
     }
     public fun security_factor_configuration(customer: &Customer, factor: u8): vector<u8> {
-        pe(customer.version == (SMALL_197 as u64));
+        pe(security_authority(customer));
         security_policy::factor_configuration(&customer.id, factor)
     }
 
@@ -927,18 +933,18 @@ module sui_edge::customer {
     fun p7(customer: &Customer, action: u64, ctx: &mut TxContext) {
         assert_member(customer, ctx);
         pd(*customer.credentials.get(&ctx.sender()));
-        if (customer.version == (SMALL_197 as u64)) security_policy::check(&customer.id, action, ctx);
+        if (security_authority(customer)) security_policy::check(&customer.id, action, ctx);
     }
     public fun assert_member(customer: &Customer, ctx: &mut TxContext) {
-        assert!((customer.version == (SMALL_1 as u64) || customer.version == (SMALL_197 as u64)) && customer.credentials.contains(&ctx.sender()), EAccess);
+        assert!((customer.version == (SMALL_1 as u64) || security_authority(customer)) && customer.credentials.contains(&ctx.sender()), EAccess);
     }
     public fun assert_admin(customer: &Customer, ctx: &mut TxContext) {
         assert_member(customer, ctx);
         pd(*customer.credentials.get(&ctx.sender()));
-        if (customer.version == (SMALL_197 as u64)) security_policy::check_all(&customer.id, ctx);
+        if (security_authority(customer)) security_policy::check_all(&customer.id, ctx);
     }
     public fun assert_fleet(customer: &Customer, fleet: &Fleet) {
-        if (!(customer.version == (SMALL_1 as u64))) { pe(customer.version == (SMALL_197 as u64)); }; pe(fleet.version == (SMALL_1 as u64)); pe(fleet.customer_id == object::id(customer)); pe(customer.fleets.contains(&object::id(fleet)));
+        if (!(customer.version == (SMALL_1 as u64))) { pe(security_authority(customer)); }; pe(fleet.version == (SMALL_1 as u64)); pe(fleet.customer_id == object::id(customer)); pe(customer.fleets.contains(&object::id(fleet)));
     }
     /// assert_name: compact private symbol to bound published bytecode storage.
     fun p8(name: &String) { assert!(name.length() > (SMALL_0 as u64) && name.length() <= (SMALL_80 as u64), EName); }
@@ -1402,5 +1408,50 @@ module sui_edge::customer {
         let mut arguments = vector[bcs::to_bytes(&tag), bcs::to_bytes(customer)];
         arguments.append(tail);
         security_policy::begin_scoped(&mut customer.id, action, arguments, class, false, clock, ctx);
+    }
+    const ESecondPerson: u64 = 9;
+    /// Introduction-origin marker and versioned factor binding. Enrollment uses
+    /// the same informed proposal/approval protocol as protected operations.
+    public struct SecondPersonConfiguration has copy, drop, store { schema: u8 }
+    public fun configure_second_person(customer: &mut Customer, action: Action, clock: &Clock, ctx: &mut TxContext) {
+        assert!((security_policy::attestations(&action) & 4) == 4, ESecondPerson);
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"configure_second_person")), bcs::to_bytes(customer)];
+        begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        configure_security_factor(customer, 4, bcs::to_bytes(&SecondPersonConfiguration { schema: 1 }), ctx);
+        finish_security_action(customer);
+    }
+    public fun propose_approval(customer: &mut Customer, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        // Seal before any disclosed Action exists, including enrollment. Old
+        // immutable cancellation/execution cannot maintain the pending index.
+        let arguments_bcs = if (customer.version == 197) {
+            assert!(arguments_bcs.length() <= 16384, ESecondPerson);
+            let mut encoded = sui::bcs::new(arguments_bcs);
+            let mut arguments = encoded.peel_vec!(|bytes| bytes.peel_vec_u8());
+            assert!(encoded.into_remainder_bytes().is_empty() && arguments.length() >= 2
+                && arguments[1] == bcs::to_bytes(customer), ESecondPerson);
+            customer.version = 199;
+            // Preserve exact execution binding after the atomic version change.
+            *arguments.borrow_mut(1) = bcs::to_bytes(customer);
+            bcs::to_bytes(&arguments)
+        } else { arguments_bcs };
+        security_policy::prepare_disclosed(&mut customer.id, arguments_bcs, expires_ms, clock, ctx);
+    }
+    public fun approve_action(customer: &Customer, action: &mut Action, clock: &Clock, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        assert!(security_policy::customer_id(action) == object::id(customer)
+            && security_policy::action_generation(action) == security_policy::generation(&security(customer))
+            && security_policy::proposer(action) != ctx.sender() && clock.timestamp_ms() < security_policy::expires_ms(action), ESecondPerson);
+        let binding = security_factor_configuration(customer, 4);
+        // Before enrollment, approval proves the independent signer works.
+        // No nonzero policy can be enabled without a configured verifier.
+        assert!(binding.is_empty() || binding == vector[1], ESecondPerson);
+        assert!(security_policy::intent(action) == security_policy::action_intent(object::id(customer), security_policy::disclosed_arguments(action)), ESecondPerson);
+        security_policy::attest(action, 4);
+    }
+    public fun reject_action(customer: &mut Customer, action: Action, ctx: &mut TxContext) {
+        assert_security_administrator(customer, ctx);
+        assert!(security_policy::proposer(&action) != ctx.sender(), ESecondPerson);
+        cancel_disclosed_security_action(customer, action, ctx);
     }
 }

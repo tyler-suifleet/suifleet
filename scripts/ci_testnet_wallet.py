@@ -11,7 +11,9 @@ ADDRESS = configured_address()
 # A fresh SF-125 inbox base->head fixture costs about 0.85 SUI (run 40092917058).
 # After SF-136 the base alone costs ~0.55 SUI (localnet 532,828,600 MIST) and an
 # unchanged head upgrade about as much: ~1.2 SUI with setup and full PTB budgets.
-PACKAGE_UPGRADE_CEILING = 1_600_000_000
+# User-authorized 2026-11-02: fixed headroom for measured fresh fixtures.
+# This is a maximum allowance, not an expected fee or a replenishing balance.
+PACKAGE_UPGRADE_CEILING = 2_000_000_000
 # Run 41276436449 settled 1,430,017,981 MIST before inbox setup: a
 # blanket 200M PTB reservation could not fit. The three-deployment batch
 # measured 42,002,565 MIST in run 40246935467. Explicitly reserve 60M for
@@ -20,7 +22,7 @@ PACKAGE_UPGRADE_CEILING = 1_600_000_000
 # deployment budgets and an 11M atomic audit; every chosen budget is fully reserved.
 PACKAGE_TRANSACTION_GAS = 60_000_000
 # SF-010 suites after the package-upgrade gate, each with its own strict
-# allowance (run ceiling: 1.6 + 1.5 + 0.15 SUI). They spend real gas, so
+# allowance (run ceiling: 2.0 + 1.5 + 0.15 SUI). They spend real gas, so
 # they run only when the head changes what they test, or on a manual
 # dispatch (the `wallet` live gate); scheduled main runs skip them. A fresh
 # upgrade-security pair publishes the same ~0.55 + ~0.55 SUI of packages and
