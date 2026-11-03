@@ -1,9 +1,7 @@
-// Where operators get, install and configure the device client (SF-169).
-// Repository documentation until the SF-172 documentation site exists;
-// scripts/test_device_client_links.cjs checks every link and command here.
-
-export const DOCS_BASE = "https://github.com/tyler-suifleet/suifleet/blob/main/docs/";
-export const GUIDE_FILE = "INSTALL_DEVICE_CLIENT.md";
+// Public documentation paths are stable across source repository moves.
+// Override at build time when serving the curated docs on another origin/path.
+export const DOCS_BASE = (process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE || "https://docs.suifleet.io/").replace(/\/?$/, "/");
+export const GUIDE_FILE = "device-client/";
 
 /** Guide sections, by heading anchor. */
 export const GUIDE_SECTIONS = {
@@ -11,6 +9,7 @@ export const GUIDE_SECTIONS = {
   yocto: "yocto-image-and-recipe",
   macos: "macos-package",
   linux: "generic-linux",
+  debian: "debian-and-ubuntu",
   address: "find-the-device-address",
   manifest: "network-manifest-deploymentjson",
   signer: "signing-service-configuration-signertoml",
@@ -41,5 +40,6 @@ export const COMMANDS = {
 export const PLATFORMS: { section: GuideSection; label: string; note: string }[] = [
   { section: "yocto", label: "Raspberry Pi / Yocto image", note: "meta-suifleet layer; key generated at first boot" },
   { section: "macos", label: "macOS (Apple silicon)", note: "LaunchDaemon installer; prints the address" },
+  { section: "debian", label: "Debian / Ubuntu", note: "package availability and Linux installation steps" },
   { section: "linux", label: "Other Linux with systemd", note: "same files as the Yocto recipe, installed by hand" },
 ];
