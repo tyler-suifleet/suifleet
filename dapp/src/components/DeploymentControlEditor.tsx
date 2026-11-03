@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import { controlReason, type DeploymentControl } from "@/lib/deployment-control";
+import { RecurringEditor } from "./RecurringWindowEditor";
+import type { RecurringWindow, WeeklySlot } from "@/lib/recurring-window";
 
 /** Pause, cancel and schedule/notice editor for one deployment. */
-export function ControlEditor({ control, canEdit, pending, onSave }: {
-  control: DeploymentControl; canEdit: boolean; pending: boolean; onSave: (c: DeploymentControl) => void;
+export function ControlEditor({ control, recurring = null, recurringSupported = false, canEdit, pending, onSave, onRecurring }: {
+  control: DeploymentControl; recurring?: RecurringWindow | null; recurringSupported?: boolean; canEdit: boolean; pending: boolean;
+  onSave: (c: DeploymentControl) => void; onRecurring?: (r: { timezone: string; slots: WeeklySlot[] } | null) => void;
 }) {
   const [draft, setDraft] = useState(control);
   const [editing, setEditing] = useState(false);
@@ -14,7 +17,7 @@ export function ControlEditor({ control, canEdit, pending, onSave }: {
   };
   const dateFields = [["not_before_ms", "Not before"], ["expires_ms", "Expires"], ["window_start_ms", "Window start"], ["window_end_ms", "Window end"]] as const;
   return <div className="py-3 text-xs space-y-2 text-gray-700">
-    <p role="status">{controlReason(control)}</p>
+    <p role="status">{controlReason(control, Date.now(), recurring)}</p>
     <p>Cancellation/pause/expiry stop admission. An admitted apply finishes; they never roll it back. Device deferral reasons and advance notices are recorded in its journal/log.</p>
     <p>Extending an expired schedule cannot reopen admission on devices that already observed expiry. Create a new deployment to reach the whole fleet.</p>
     <p>Not before: {displayTime(control.not_before_ms)} · Expires: {displayTime(control.expires_ms)} · Window: {displayTime(control.window_start_ms)} – {displayTime(control.window_end_ms)} · Notice: {Number(control.notice_ms) / 1000}s</p>
@@ -33,6 +36,8 @@ export function ControlEditor({ control, canEdit, pending, onSave }: {
         onChange={(e) => setDraft({ ...draft, notice_ms: String(Number(e.target.value) * 1000) })} /></label>
       <button disabled={pending} type="submit">Save schedule</button>
     </form>}
+    <RecurringEditor control={control} recurring={recurring} supported={recurringSupported}
+      canEdit={canEdit && control.state !== 2 && !!onRecurring} pending={pending} onSave={(r) => onRecurring?.(r)} />
   </div>;
 }
 function displayTime(value: string) {

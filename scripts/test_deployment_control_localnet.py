@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SF-018 compatible upgrade and existing-record controls on disposable local Sui.
+"""SF-018/SF-174 compatible upgrade and existing-record controls on disposable local Sui.
 Run in a network-none dev container with an indexed node/faucet. No user wallet.
 """
 import argparse
@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from test_desired_state_localnet import base_contracts, wait_for
@@ -50,7 +51,7 @@ def run(rpc, faucet):
         def tx(*args): return success(client("ptb", *args, "--gas-budget", "100000000"))
         staging = root / "base"; staging.mkdir(); base = base_contracts(staging)
         package = root / "package"; shutil.copytree(staging / "contracts",package,ignore=shutil.ignore_patterns("build","Published.toml"))
-        common = ["--build-env","testnet","--pubfile-path",root / "Pub.toml","--gas-budget","400000000","--silence-warnings"]
+        common = ["--build-env","testnet","--pubfile-path",root / "Pub.toml","--gas-budget","2000000000","--silence-warnings"]
         first = success(client("test-publish",package,*common)); old=published(first); cap=created(first,"::package::UpgradeCap")
         registry = created(first, "::device_registry::DeviceRegistry")
         key = root / "device.key"; key.write_text("07" * 32); key.chmod(0o600)
@@ -72,13 +73,28 @@ def run(rpc, faucet):
         shutil.rmtree(package); shutil.copytree(ROOT / "contracts",package,ignore=shutil.ignore_patterns("build","Published.toml"))
         upgraded=success(client("test-upgrade",package,"--upgrade-capability",cap,*common)); new=published(upgraded)
         facts=dm.chain_facts(rpc,new,cap); origins=dm.origins(facts["objects"][dm.object_id(new)])
-        assert origins["deployment_manager::ControlKey"] == dm.object_id(new)
+        # Each type keeps the origin of the package that introduced it; the
+        # merge-base package may already contain SF-018 controls.
+        base_source = (staging / "contracts/sources/deployment_manager.move").read_text()
+        control_origin = old if "struct ControlKey" in base_source else new
+        assert origins["deployment_manager::ControlKey"] == dm.object_id(control_origin)
+        assert "struct RecurringWindowKey" not in base_source, "base must predate SF-174"
         assert origins["deployment_manager::DeploymentRecord"] == dm.object_id(old)
+        assert all(origins[n] == dm.object_id(new) for n in dm.RECURRING_WINDOW_TYPES), "recurring window types must originate in the upgrade"
         def read():
-            result=dm.rpc(rpc,"suix_getDynamicFieldObject",[record,{"type":f"{new}::deployment_manager::ControlKey","value":{"dummy_field":False}}])
+            result=dm.rpc(rpc,"suix_getDynamicFieldObject",[record,{"type":f"{control_origin}::deployment_manager::ControlKey","value":{"dummy_field":False}}])
             return result["data"]["content"]["fields"]["value"]["fields"]
         def set_control(state):
             return tx("--move-call",f"{new}::deployment_manager::set_control",f"@{record}",str(state),"0","9999999999999","1000","9999999999998","5000")
+        def set_recurring(start_minute, duration):
+            # Every day, UTC; the pre-upgrade record gains the additive field.
+            return tx("--move-call",f"{new}::deployment_manager::set_recurring_window",f"@{record}",'"UTC"',"vector[127u8]",
+                f"vector[{start_minute % 1440}u16]",f"vector[{duration}u16]")
+        def recurring():
+            result=dm.rpc(rpc,"suix_getDynamicFieldObject",[record,{"type":f"{new}::deployment_manager::RecurringWindowKey","value":{"dummy_field":False}}])
+            return result["data"]["content"]["fields"]["value"]["fields"]
+        def minute(ms): return (ms // 60000) % 1440
+        def now(): return int(time.time() * 1000)
         set_control(1); assert int(read()["state"]) == 1
         # The actual daemon must parse the new-origin control over gRPC, retain
         # the one-shot event while paused, then apply/report after resume.
@@ -101,7 +117,16 @@ def run(rpc, faucet):
             try:
                 wait_for(lambda: state().get("deferred",{}).get(record,{}).get("reason") == "paused", "real-chain pause not observed", process)
                 assert not applied.exists()
-                set_control(0); assert int(read()["state"]) == 0 and int(read()["revision"]) == 2
+                # SF-174 on the existing record: a closed recurring window
+                # bumps the Control revision and the daemon defers after resume.
+                later = now() + 3_600_000
+                set_recurring(minute(later), 10)
+                assert recurring()["timezone"] == "UTC" and int(read()["revision"]) == 2
+                set_control(0); assert int(read()["state"]) == 0 and int(read()["revision"]) == 3
+                wait_for(lambda: state().get("deferred",{}).get(record,{}).get("reason") == "outside recurring maintenance window",
+                    "real-chain recurring window not enforced", process)
+                assert state()["deferred"][record]["next_window_ms"] == later - later % 60000 and not applied.exists()
+                set_recurring(minute(now()) - 1, 30); assert int(read()["revision"]) == 4
                 wait_for(lambda: state().get("deployments",{}).get(record,{}).get("reported"), "real-chain resumed apply/report did not finish", process)
                 assert applied.exists() and state()["deployments"][record]["status"] == 1
                 def receipt_state():
@@ -122,11 +147,11 @@ def run(rpc, faucet):
 
         # An old entry point may still report statuses; it cannot alter new-origin controls.
         tx("--move-call",f"{old}::deployment_manager::migrate",f"@{record}")
-        assert int(read()["revision"]) == 2
+        assert int(read()["revision"]) == 4 and recurring()["timezone"] == "UTC"
         set_control(2); assert int(read()["state"]) == 2
         tx("--move-call",f"{new}::deployment_manager::delete_deployment",f"@{record}")
         print(json.dumps({"result":"PASS", "base":base,"old_package":old,"new_package":new,"record":record,"digests":digests,
-            "checks":["compatible upgrade","existing record pause/resume/cancel","actual gRPC daemon pause and resumed apply/report","per-type origins","old package preserves controls","controlled record cleanup"]},indent=2))
+            "checks":["compatible upgrade","existing record pause/resume/cancel","actual gRPC daemon pause and resumed apply/report","existing-record recurring window deferral and admission","per-type origins","old package preserves controls","controlled record cleanup"]},indent=2))
 
 if __name__ == "__main__":
     p=argparse.ArgumentParser();p.add_argument("--rpc",default="http://127.0.0.1:9000");p.add_argument("--faucet",default="http://127.0.0.1:9123");a=p.parse_args();run(a.rpc,a.faucet)

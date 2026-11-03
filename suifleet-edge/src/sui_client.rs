@@ -1570,6 +1570,20 @@ impl SuiClient {
         }
     }
 
+    /// The SF-174 recurring window, or None before the upgrade introducing it
+    /// (such a package cannot have written one) or when the creator set none.
+    pub async fn deployment_recurring_window(&self, deployment: &str) -> anyhow::Result<Option<crate::control::Recurring>> {
+        if !protocol::RECURRING_WINDOW_TYPES.iter().all(|name| self.manifest().type_origins.contains_key(*name)) {
+            return Ok(None);
+        }
+        match self.dynamic_field(deployment, protocol::deployment_manager::RecurringWindowKey::MOVE_TYPE).await? {
+            None => Ok(None),
+            Some(value) => Ok(Some(serde_json::from_value(
+                value.get("fields").cloned().unwrap_or(value)
+            )?)),
+        }
+    }
+
     pub(crate) async fn has_receipt_shards(&self, deployment: &str) -> anyhow::Result<bool> {
         if !self.manifest().type_origins.contains_key("deployment_manager::ReceiptShardKey") { return Ok(false); }
         Ok(self.dynamic_field(deployment, "deployment_manager::ReceiptShardKey").await?.is_some())
