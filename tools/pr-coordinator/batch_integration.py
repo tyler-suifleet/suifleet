@@ -46,6 +46,9 @@ class BatchController:
         self.db.execute('''CREATE TABLE IF NOT EXISTS batch_funding_recoveries (
             project TEXT,batch_id TEXT,manifest TEXT,error_hash TEXT,receipt TEXT,created REAL,
             PRIMARY KEY(project,batch_id))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_infrastructure_retries (
+            project TEXT,batch_id TEXT,manifest TEXT,error_hash TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,batch_id))''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batch_conflicts (
             project TEXT,pr INTEGER,head TEXT,base TEXT,batch_id TEXT,context TEXT,
             PRIMARY KEY(project,pr,head,base))''')
@@ -618,13 +621,13 @@ class BatchController:
                         and batch['base'] == pr.get('baseRefOid')):
                     checks = error['checks']
                     # These rows were classified from the exact candidate/base
-                    # by failed_checks before persistence. Funding cannot be
-                    # repaired on an unchanged member's source branch. Retain
+                    # by failed_checks before persistence. Provider failures cannot
+                    # be repaired on an unchanged member's source branch. Retain
                     # the failed candidate/selection fence and all acceptance
                     # gates, but do not dispatch another owner repair for it.
                     if checks and all(check.get('name') == 'testnet/package-upgrade'
                                       and check.get('workflowName') == 'Automatic testnet'
-                                      and check.get('classification') == 'funding'
+                                      and check.get('classification') in ('funding', 'infrastructure')
                                       for check in checks):
                         break
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
@@ -686,6 +689,8 @@ class BatchController:
                 continue
             recovery = self.db.execute('SELECT manifest,error_hash FROM batch_funding_recoveries WHERE project=? AND batch_id=?',
                                        (project['id'],row['id'])).fetchone()
+            recovery = recovery or self.db.execute('SELECT manifest,error_hash FROM batch_infrastructure_retries WHERE project=? AND batch_id=?',
+                                       (project['id'],row['id'])).fetchone()
             original = json.loads(row['members'])
             exact_sources = all(any(all(candidate.get(k) == member.get(k) for k in
                 ('pr','head','owner','source_receipt','source_feedback')) for candidate in candidates) for member in original)
@@ -705,6 +710,106 @@ class BatchController:
         while selected and tuple((m['pr'],m['head']) for m in selected) in failed:
             selected = selected[:len(selected)//2]
         return selected
+
+    @staticmethod
+    def infrastructure_only(error):
+        checks = error.get('checks', [])
+        return (error.get('kind') == 'candidate_checks_failed' and bool(checks)
+                and all(c.get('name') == 'testnet/package-upgrade'
+                        and c.get('workflowName') == 'Automatic testnet'
+                        and c.get('classification') == 'infrastructure' for c in checks))
+
+    def infrastructure_receipt(self, project, batch, error):
+        """Authenticate a narrow, zero-spend GitHub outage; never trust class alone."""
+        from coordinator import preparation_job_logs
+        checks = error['checks']
+        match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                             + r'/actions/runs/([0-9]+)', checks[0].get('detailsUrl', ''))
+        if not match or len(checks) != 1:
+            raise RuntimeError('infrastructure retry needs one authenticated run')
+        path = f"repos/{project['repository']}/actions/runs/{match[1]}"
+        read = lambda endpoint: json.loads(self.c.gh(project, ['api', endpoint]))
+        run = read(path)
+        if (run.get('event') != 'workflow_run' or run.get('head_branch') != 'main'
+                or run.get('path') != '.github/workflows/testnet.yml'
+                or run.get('head_repository', {}).get('full_name') != project['repository']
+                or run.get('repository', {}).get('full_name') != project['repository']
+                or run.get('status') != 'completed' or run.get('conclusion') != 'failure'
+                or type(run.get('run_attempt')) is not int or run['run_attempt'] < 1):
+            raise RuntimeError('infrastructure run identity unavailable')
+        jobs = read(path + f"/attempts/{run['run_attempt']}/jobs?per_page=100")
+        entries = jobs.get('jobs', [])
+        validation = [j for j in entries if j.get('name') == 'validate']
+        if jobs.get('total_count') != len(entries) or len(validation) != 1:
+            raise RuntimeError('incomplete infrastructure job evidence')
+        job = validation[0]
+        steps = job.get('steps', [])
+        def step(name, conclusion):
+            found = [s for s in steps if s.get('name') == name]
+            return len(found) == 1 and found[0].get('conclusion') == conclusion
+        if (job.get('conclusion') != 'failure'
+                or not step('Recheck head and base immediately before spending', 'failure')
+                or not step('Run bounded testnet acceptance', 'skipped')):
+            raise RuntimeError('infrastructure failure is not proven before spending')
+        logs = preparation_job_logs(lambda args: self.c.gh(project, args),
+                                    f"repos/{project['repository']}/actions/jobs/{job['id']}/logs")
+        # The exact candidate's failed status was independently authenticated by
+        # failed_checks. Step identities prove no signing step ran; logs must
+        # show the transient provider error, not a product/permission denial.
+        if 'No server is currently available to service your request' not in logs:
+            raise RuntimeError('not a recognized transient GitHub outage')
+        if read(path) != run:
+            raise RuntimeError('infrastructure run changed during verification')
+        return dict(run=int(match[1]), attempt=run['run_attempt'], job=job['id'],
+                    logs_sha256=hashlib.sha256(logs.encode()).hexdigest())
+
+    def recover_infrastructure(self, project, candidates, base):
+        """One retry per exact source set/base, after five minutes, under this daemon."""
+        rows = self.rows(project)
+        for batch in reversed(rows):
+            if batch['status'] != 'failed' or batch['base'] != base:
+                continue
+            error = json.loads(batch.get('error') or '{}')
+            if not self.infrastructure_only(error):
+                continue
+            members = json.loads(batch['members'])
+            pins = lambda ms: [(m['pr'], m['head']) for m in ms]
+            related = [r for r in rows if r['base'] == base and pins(json.loads(r['members'])) == pins(members)]
+            if related[-1]['id'] != batch['id'] or any(r['status'] not in TERMINAL or r.get('publish_intent') for r in related):
+                continue
+            if any(self.db.execute('SELECT 1 FROM batch_infrastructure_retries WHERE project=? AND batch_id=?',
+                                   (project['id'], r['id'])).fetchone() for r in related):
+                continue  # Exhausted: preserve failed evidence and selection fence.
+            if self.clock() < batch['updated'] + 300 or not members:
+                continue
+            if not all(any(all(c.get(k) == m.get(k) for k in
+                    ('pr','head','owner','source_receipt','source_feedback')) for c in candidates) for m in members):
+                continue
+            numbers = [batch['pr'], *[m['pr'] for m in members]]
+            if any(self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND status IN "
+                    "('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                    (project['id'], n)).fetchone() for n in numbers):
+                continue
+            self.validate_members(project, batch)
+            candidate = self.candidate(project, batch)
+            from coordinator import failed_checks
+            if (candidate.get('state') not in ('OPEN', 'CLOSED') or candidate.get('isDraft')
+                    or candidate.get('headRefOid') != batch['head']
+                    or candidate.get('baseRefOid') != base
+                    or failed_checks(candidate) != error['checks']):
+                continue
+            try:
+                receipt = self.infrastructure_receipt(project, batch, error)
+            except (RuntimeError, subprocess.CalledProcessError, ValueError, KeyError):
+                # Unavailable or nonqualifying provider evidence keeps this
+                # failure fenced without stopping unrelated candidate progress.
+                continue
+            self.validate_members(project, batch)
+            if self.main(project) != base or self.candidate(project, batch) != candidate:
+                raise RuntimeError('infrastructure candidate changed during verification')
+            self.db.execute('INSERT INTO batch_infrastructure_retries VALUES(?,?,?,?,?,?)',
+                (project['id'], batch['id'], batch['manifest_digest'],
+                 hashlib.sha256(batch['error'].encode()).hexdigest(), canonical(receipt), self.clock()))
 
     def fail_candidate(self, project, batch, failures):
         self.invalidate(project, batch, 'combined candidate checks failed')
@@ -748,6 +853,7 @@ class BatchController:
         available = [m for m in candidates if m['pr'] not in reserved]
         if len(active) < limit and available and not uncertain:
             base, batch_id = self.main(project), uuid.uuid4().hex
+            self.recover_infrastructure(project, available, base)
             selected = self.select(project, available, base, maximum)
             if selected:
                 directory = str(self.c.state/project['id']/'batches'/batch_id)
