@@ -759,6 +759,9 @@ Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 ## Organization security framework (SF-196)
 
 The [approved design and exact child API](SECOND_FACTOR_DESIGN.md) define seven
+protected action classes and four optional mechanisms. Native multisig (bit **1**)
+and delay (bit **8**) are available in the combined package. All factors default off;
+passkey and second-person factors remain unavailable. See the mechanism procedures below.
 protected action classes and four optional mechanisms. The combined package supports
 native multisig (bit **1**) and second-person approval (bit **4**); passkey and delay
 remain unavailable until their verifiers land.
@@ -967,6 +970,88 @@ and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
 
 Actual SF-199 commands, effects, initial failures, aggregate spending and deferred
 acceptance are recorded in [the SF-199 evidence](validation/sf199-second-person.md).
+
+## Organization delay and cancellation (SF-200)
+
+When SF-199 and SF-200 are deployed together, factor bits 1, 4 and 8 are
+available; passkey remains unavailable. Console settings queues use the disclosed,
+indexed approval route, so a second administrator can approve the same action
+that waits through its cancellation window. Approval never skips timing, and
+maturity never supplies approval. Current administrators cancel through the
+mutable disclosed-action route, which also removes the pending index entry.
+Policy and delay-setting changes can execute through either console section;
+chain checks still enforce all currently enabled factors. Previously queued
+SF-199 full-object intents must be canceled and proposed again using stable
+Customer/Fleet IDs. The first proposal still seals legacy authority at 199;
+sealing does not alter those IDs or weaken current-generation checks.
+
+
+Delay is optional per organization and per action class. Each of the seven
+classes accepts **1,000–518,400,000 ms** (one second through six days, inclusive).
+Queue expiry remains at most seven days after creation; choose an expiry beyond
+the required delay. An expired, canceled, invalidated or changed action must be
+queued again. No scheduler executes it automatically.
+
+In Administration → Security, save the seven delay values, then select the
+classes to protect. Activation requires reconciled/sealed fleets. The initial
+all-off configuration applies immediately under current administrator authority.
+Subsequent settings edits are queued: inspect the requested changes, wait for the
+countdown, then explicitly execute with the proposing administrator. Any current
+administrator may cancel immediately, including an administrator other than the
+proposer. Canceling consumes the shared action nonce. Early execution aborts and
+leaves the original queue timestamp intact. Removing an administrator or changing
+policy/source authority invalidates outstanding authorizations.
+
+Settings/recovery changes require the longest delay among all currently protected
+classes. Ordinary secured operations enforce their own class and every additional
+class they invoke. Lowering a delay or turning it off waits through the **old**
+window. Immediate deployment pause and cancellation are the only implemented
+delay exceptions; pause preserves targets/schedule and still requires other
+enabled factors. Resume, deployment creation, withdrawals, credential changes,
+policy weakening and handover have no emergency bypass. There is no support reset.
+
+API clients queue exact canonical argument bytes with
+`customer::queue_security_action(customer, arguments_bcs, expires_ms, clock)`.
+The new queue stores bounded public argument bytes (64 KiB maximum) for inspection;
+never include credentials or confidential data. Existing
+`prepare_security_action` remains compatible and also receives a chain timestamp
+when called through the new package. Calls to its older bytecode create no trusted
+timestamp and cannot execute delay-protected operations through the new kernel.
+Use the existing operation-specific `*_secured` wrapper to consume the action.
+`configure_security_delays_secured` binds the customer object ID and seven new
+delays, under the current union of requirements. All secured wrappers encode the
+Customer reference as its BCS object ID; device usage and active-device counters
+do not invalidate a queued recovery. Credential/policy generation changes still
+invalidate pending actions. Device/tenant-mutable Fleet, DeviceRegistry, FleetBudget, GasAccount,
+FleetStorage, DeploymentRecord and EnrollmentPolicy references also
+bind object IDs. Group/enrollment security revisions and deployment control,
+targets and administrator rollout revision remain bound; device outcomes are
+read at execution rather than pinned. DeviceGroup/AccessPolicy/catalog administrator-only
+contents and immutable release values remain bound in full. Execution rechecks
+current authority, custody and membership. Previously queued intents encoding
+full mutable object bytes or the full rollout snapshot must be canceled and
+queued again; clients must use this revised encoding. The console provides direct
+queue/execute controls for security settings and lists all discovered queued
+actions for countdown/cancellation; other API-originated operations execute through
+the originating client. Browser countdowns are advisory; Sui Clock enforces timing.
+History pruning/discovery limitations remain visible through the console history
+warning; available history is not proof that no older queue exists.
+
+Regenerate the deployment manifest after upgrading: the additive `security_delay`
+origin group is separate from the existing framework origins. Existing Policy,
+Action and Customer layouts/origins are preserved. Never relabel old origins as
+the newest call package. Package upgrades do not migrate authority or disable old
+entry points. The isolated upgrade test explicitly exercises old-package direct
+writes and old-package queues against an existing v197 customer.
+
+Validation: `node scripts/test_security_delay.cjs`, core Move tests, and
+`scripts/live_security_delay.py` exercise setup, direct/early refusal, cancellation,
+mature recovery and restored administration with effects and a spending ledger.
+For a disposable network-none chain use
+`python3 scripts/test_security_policy_localnet.py --suite live_security_delay --base EXPORTED_BASE/contracts --evidence RECEIPT.json`.
+Public runs require the dedicated testnet wallet and shared-wallet lock as in
+[TESTNET.md](TESTNET.md); never use the default wallet. Human/extension-wallet,
+physical, provider and actual-mainnet acceptance remains unrun in #32/#159.
 
 ## Native multisig administrators (SF-201)
 

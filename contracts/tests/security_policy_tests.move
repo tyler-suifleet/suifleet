@@ -54,9 +54,10 @@ module sui_edge::security_policy_tests {
     fun kernel(s: &mut ts::Scenario, mask: u8): UID {
         let mut uid = object::new(s.ctx());
         policy::initialize(&mut uid);
+        policy::configure_delays(&mut uid, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
         policy::set_for_testing(&mut uid, vector[mask,mask,mask,mask,mask,mask,mask]);
         let clock = clock::create_for_testing(s.ctx());
-        policy::prepare(&uid, policy::action_intent(uid.to_inner(), bcs::to_bytes(&intent())), 100, &clock, s.ctx());
+        policy::prepare(&uid, policy::action_intent(uid.to_inner(), bcs::to_bytes(&intent())), 10000, &clock, s.ctx());
         clock.destroy_for_testing();
         s.next_tx(@0xA);
         uid
@@ -75,11 +76,12 @@ module sui_edge::security_policy_tests {
             let mut a = s.take_shared<Action>();
             let mut factor = 1;
             while (factor <= 8) { if ((mask & factor) != 0) policy::attest(&mut a, factor); factor = factor * 2; };
-            let clock = clock::create_for_testing(s.ctx());
+            let mut clock = clock::create_for_testing(s.ctx());
+            clock.increment_for_testing(1000);
             policy::begin(&mut uid, a, intent(), &clock, s.ctx());
             policy::check_all(&uid, s.ctx());
             policy::finish(&mut uid);
-            assert!(policy::generation(&policy::read(&uid)) == 1);
+            assert!(policy::generation(&policy::read(&uid)) == 2);
             clock.destroy_for_testing(); clean(uid); s.end();
             mask = mask + 1;
         };
@@ -88,8 +90,9 @@ module sui_edge::security_policy_tests {
     fun missing_factor_cannot_execute() {
         let mut s = ts::begin(@0xA); let mut uid = kernel(&mut s, 15);
         let mut a = s.take_shared<Action>();
-        policy::attest(&mut a, 1); policy::attest(&mut a, 2); policy::attest(&mut a, 4);
-        let clock = clock::create_for_testing(s.ctx());
+        policy::attest(&mut a, 1); policy::attest(&mut a, 2);
+        let mut clock = clock::create_for_testing(s.ctx());
+        clock.increment_for_testing(1000);
         policy::begin(&mut uid, a, intent(), &clock, s.ctx());
         clock.destroy_for_testing(); clean(uid); s.end();
     }
@@ -173,7 +176,7 @@ module sui_edge::security_policy_tests {
         policy::begin_scoped(&mut uid, a, intent(), 1, true, &clock, s.ctx());
         clock.destroy_for_testing(); clean(uid); s.end();
     }
-    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    #[test, expected_failure(abort_code = 3, location = sui_edge::security_policy)]
     fun resume_requires_delay() {
         let mut s = ts::begin(@0xA); let mut uid = kernel(&mut s, 0);
         policy::set_for_testing(&mut uid, vector[0,8,0,0,0,0,0]);
@@ -274,7 +277,7 @@ module sui_edge::security_policy_tests {
     #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
     fun arbitrary_source_cannot_open_storage_grant() {
         let mut s = setup(); let c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
-        customer::prepare_security_action(&c, policy::action_intent(object::id(&c), bcs::to_bytes(&intent())), 100, &clock, s.ctx());
+        customer::prepare_security_action(&c, policy::action_intent(object::id(&c), bcs::to_bytes(&intent())), 10000, &clock, s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
         let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<customer::Fleet>(); let clock = s.take_shared<Clock>();
         let action = s.take_shared<Action>();

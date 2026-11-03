@@ -2381,6 +2381,43 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "configure_security_delays": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "vector<u64>",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "configure_security_delays_secured": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "vector<u64>",
+          "sui_edge::security_policy::Action",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "queue_security_action": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "approve_action": {
         "visibility": "Public",
         "entry": false,
@@ -8630,6 +8667,126 @@ export const MOVE_ABI = {
         ]
       },
       "PolicyKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "ActionArguments": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "bytes",
+            "vector<u8>"
+          ]
+        ]
+      },
+      "ArgumentsKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DelayGrant": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "elapsed_ms",
+            "u64"
+          ],
+          [
+            "transaction",
+            "vector<u8>"
+          ],
+          [
+            "pause",
+            "bool"
+          ]
+        ]
+      },
+      "DelayGrantKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DelayKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "Delays": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "milliseconds",
+            "vector<u64>"
+          ]
+        ]
+      },
+      "QueuedAt": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "milliseconds",
+            "u64"
+          ]
+        ]
+      },
+      "QueuedAtKey": {
         "abilities": [
           "Copy",
           "Drop",
