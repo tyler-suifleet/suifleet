@@ -382,3 +382,94 @@ No dependency_wait or false dependency is introduced. Manual wallet/hardware,
 Pi/provider/mainnet remain unrun in #32/#159. No resources remain held. All new
 commits retain Tyler Bush as author and committer. The worker pushes once and
 exits without watching hosted CI or starting another worker.
+
+## Merged SF-221 engineering recovery, 2026-11-02
+
+Codex / gpt-6.1-sol (no finer runtime build exposed), original SF-198 session,
+claim, branch and PR #451 retained. Entry had no dirty or staged work. Merge
+100f75fe incorporates actual published main
+5b20af564124a2922315df139d748e3a9a2a0582 (PR #465), including its native
+multisig integration. This supersedes the earlier instruction to wait for
+SF-221 source. SF-228 retains its separately owned budget/funding work.
+
+Conflict resolution preserves the merged compact Move guards, narrow literals,
+shared secured wrappers and intent encoding, native multisig enrollment/UI/tests,
+and funded identity reuse. Available factors are now the union 3 in Move and
+TypeScript; the verifiers combine with AND. Passkey sponsor/admin bindings,
+possession proof, current-factor rotation and last-key refusal remain intact.
+The reviewer's suggested registered-second-administrator negative is now a
+committed Move regression; it aborts in security_policy with code 1. Expired
+enrollment cleanup remains a nonblocking storage-hygiene observation, not a new
+implementation commitment or a repaired feature.
+
+A concrete integration defect remained in the retained SF-198 preflight: it
+summed old lifecycle reservations before the merged compact lifecycle could
+recycle predecessor storage. For the measured SF-221 larger-candidate fresh
+receipt, 42,640,611 MIST remains before funding. The old 260M gate would refuse
+despite the compact path's initial 35M requirement (10M deficit + 10M funding
+budget + 15M first deployment budget). The compact preflight now uses that
+selected initial reservation; every later call independently reserves its
+**entire configured budget before signing**, without assuming any rebate.
+Noncompact behavior is retained. This does not guarantee the remaining calls
+fit, raise a limit, reset a ledger or release an unknown reservation. Cached
+device gas is charged and recorded as preexisting_device_grant_mist. Regression
+covers this exact historical boundary, one-MIST-below refusal and cached 30M
+gas requiring 45M. Actual measured receipt replay separately verifies fresh and
+cached ledgers, failed fresh versus successful cached outcomes, retained
+identities, full reservations, unknown outcomes and non-replenishing faucet/
+rebate behavior. No identical public package was republished.
+
+Fresh local commands use the Docker invocation in the address-balance section
+above, substituting the private cache mount
+/tmp/sf198-private-move:/home/dev/.move and INSIDE_DEV_CONTAINER=1.
+All containers have --network none and the pinned 1.81.1 compiler / 1.83.0
+transaction CLI; PyYAML and chain_facts mounts are unchanged.
+
+- make test-testnet: PASS, 27 rollout + 211 testnet + 67 shared-live + 5
+  passkey Python tests, plus authenticated-cache and independent-effects Node
+  suites. The pinned installed-toolchain check ran. Fresh/cached SF-221 receipt
+  replay and the new compact preflight boundary are offline, not new public
+  cost measurements.
+- make test-contracts: PASS, root 370/370, storage 79/79, data 60/60.
+- make check-interfaces: PASS, compiled ABI/layouts, generated interfaces and
+  its frontend protocol/recipe regressions.
+- make test-customer-fleets: PASS, passkey SDK signing/tamper/binding/recovery,
+  private fixture permissions/identity preservation, coinless payment,
+  multisig SDK and real Chromium component tests, fleet/browser regressions
+  and offline wallet bundle smoke.
+- make dapp-typecheck and make dapp-build: PASS, TypeScript and Next.js
+  16.4.1 static production export.
+- python3 scripts/test_security_policy_localnet.py --runner
+  scripts/live_passkey_factor.py --base /base/contracts --evidence
+  docs/validation/sf198-cost-merged-localnet.json: PASS, actual compatible
+  existing-object upgrade and native cached-adapter interrupted-enrollment
+  recovery, 23 effects-checked transactions. The
+  [receipt](sf198-cost-merged-localnet.json) records every digest, origin and
+  fee: 1,607,767,047 MIST net spent; conservative allowance used
+  **1,675,894,825 / 1,800,000,000 MIST**, including grants. Setup, allowed,
+  wallet-only refusal, old-package refusal, removed-key refusal, backup
+  recovery, surviving-key action, disable and final removal all executed.
+  Both cached enrolled keys were reused and policy preparation used coinless
+  address-balance payment. This is disposable local-chain evidence only.
+- git diff --check: PASS. Local mutation resource released after node exit.
+
+Initial attempts failed on two stale assertions (30M versus merged 10M funding
+target; passkey bit 2 incorrectly used as an unavailable verifier). Updated
+those expectations and the isolated framework's unavailable-factor probe to
+bit 4; final suites pass. Removed the obsolete static-label-count assertion
+because the actual merged cost fix encodes those labels through shared BCS
+helpers; ABI checks, secured-operation tests and the real compatible upgrade
+exercise the resulting bytes. No failure was ignored.
+
+The retained PR is ready for fresh independent source review and coordinator
+acceptance. Push requests normal exact-head/current-base ordinary/security CI
+and protected public native setup/allowed/refused/recovery, with real effects
+and spending evidence. Those checks are **pending/unproved**, not waived or
+passed. No hosted CI was watched/polled and no machine public mutation,
+faucet, signing-state decryption, network lease, allowance increase, cache
+reset, new public identity, model worker, new issue or merge was performed. Preserve
+cached packages/identities and all unknown reservations when scheduling the
+protected lane; do not use SF-228's active lease. The coordinator must enforce
+fresh independent source/final review and CI/security/testnet merge gates.
+Manual wallet/authenticator, Pi, production provider and actual mainnet checks
+remain explicitly unrun in #32/#159.
