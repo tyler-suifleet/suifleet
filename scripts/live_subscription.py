@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import deployment_manifest as dm
 from live_common import Live, ROOT, WALRUS_TESTNET, stage
+from check_move_package_size import check_package_size
+from sui_toolchain import compile_package
 
 AGENT = '0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965'
 USDC = '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC'
@@ -87,6 +89,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix='subscription-testnet-') as directory:
         package_dir = Path(directory) / 'contracts'
         stage(ROOT / 'contracts', package_dir)
+        package_size = check_package_size(compile_package(live.build_sui, package_dir))
+        live.evidence['package_size_bytes'] = package_size
         def pending(identity):
             state['pending_publication'] = identity
             save()

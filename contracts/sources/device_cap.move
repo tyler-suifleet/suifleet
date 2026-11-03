@@ -60,4 +60,7 @@ module sui_edge::device_cap {
     }
 
     public fun device_id(cap: &DeviceCap): ID { cap.device_id }
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
 }
