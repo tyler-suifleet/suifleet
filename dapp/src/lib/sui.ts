@@ -3,7 +3,8 @@ import { readShardedReceipts, readReceiptDirectory, buildReceiptMaintenanceTx } 
 import type { NamedFleet } from "./customer-fleets";
 import { batchFields } from './batch-fields';
 import { incrementalEvents as allEvents } from "./event-history";
-import { readDeploymentControl, type DeploymentControl } from "./deployment-control";
+import { readDeploymentControl, readRecurringWindow, type DeploymentControl } from "./deployment-control";
+import type { RecurringWindow } from "./recurring-window";
 import { calls } from "./fleet-protocol";
 import { SUPPORTED_DEPLOYMENT_SCHEMA_VERSIONS } from "./protocol-version";
 import { requireManifest, moveType, verifyDeployment } from "./deployment-manifest";
@@ -61,6 +62,7 @@ export interface DeviceGroup {
 
 export interface DeploymentEvent {
   control: DeploymentControl;
+  recurring: RecurringWindow | null;
   deploymentId: string;
   schemaVersion: string;
   componentName: string;
@@ -438,7 +440,7 @@ export async function fetchDeploymentEvents(client: SuiGrpcClient, owner?: strin
       return group && group.admin === record.creator ? [...group.device_ids, ...indexed.get(id) ?? []] : [];
     })])];
     const { verified, statuses } = await readReceipts(client, event.deployment_id);
-    return { control: await readDeploymentControl(client, event.deployment_id), deploymentId: event.deployment_id, receiptCleanup: directories.get(event.deployment_id)?.retiring, schemaVersion: directories.get(event.deployment_id)?.original_schema ?? record.schema_version, componentName: record.component_name, version: record.version,
+    return { control: await readDeploymentControl(client, event.deployment_id), recurring: await readRecurringWindow(client, event.deployment_id), deploymentId: event.deployment_id, receiptCleanup: directories.get(event.deployment_id)?.retiring, schemaVersion: directories.get(event.deployment_id)?.original_schema ?? record.schema_version, componentName: record.component_name, version: record.version,
       recipeBlobId: record.recipe_blob_id, artifactSha256: record.artifact_sha256,
       targetGroups: event.target_groups, targetDevices: event.target_devices,
       creator: record.creator, timestampMs: Number(record.created_at), statuses, receiptsVerified: verified,

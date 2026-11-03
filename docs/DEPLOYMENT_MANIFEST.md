@@ -120,6 +120,12 @@ introduction origins. Resolved manifests containing it require dApp >=0.1.1 and
 edge >=0.2.2 within their existing major compatibility ranges. Existing manifests
 without the group retain v2 behavior; see [sharded receipts](SHARDED_RECEIPTS.md).
 
+The optional all-or-none `recurring_window` type group (`RecurringWindowKey`,
+`RecurringWindow`, `WeeklySlot`; SF-174) enables recurring weekly maintenance
+windows. Daemons before 0.2.3 ignore the field, so resolved manifests containing
+it require edge >=0.2.3. Without it, clients neither read nor write the field; see
+[OPERATIONS.md](OPERATIONS.md#recurring-weekly-maintenance-windows-sf-174).
+
 Treasury payment configuration and user-only multisig/SuiNS operations are documented in [TREASURY.md](TREASURY.md). `resolve --treasury-payee ADDRESS` and publication `--treasury-payee ADDRESS` pin a reviewed address; publication preserves the previous payee when omitted, including recovery. Missing payees preserve legacy nonpayment use, while the frontend payment guard fails closed.
 
 The optional `group_batch` type group (`customer::GroupBatchApplied`, SF-171)
