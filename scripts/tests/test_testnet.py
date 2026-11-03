@@ -853,11 +853,13 @@ class BytecodeFixtureTests(unittest.TestCase):
     def test_sf198_prepared_fixture_needs_next_run_not_faucet_or_republication(self):
         import live_package_upgrade as live
         from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
-        # Exact five settled effects from protected run 41374657219.
+        # Exact five settled effects and original allowance from protected run
+        # 41374657219; later ceiling changes must not rewrite this receipt.
+        historical_allowance = 1_600_000_000
         used = sum((772_926_000, 8_425_378, 1_243_578, 784_577_363, 8_737_163))
         self.assertEqual(used, 1_575_909_482)
         with self.assertRaisesRegex(Spent, 'retain and reuse'):
-            live.report_funding_plan(PACKAGE_UPGRADE_CEILING - used, 0,
+            live.report_funding_plan(historical_allowance - used, 0,
                                      PACKAGE_TRANSACTION_GAS, needs_inbox=True)
         self.assertEqual(live.failure_class(Spent('allowance exhausted')), 'source')
         self.assertEqual(live.failure_class(live.FundingShortfall('balance low')), 'funding')
