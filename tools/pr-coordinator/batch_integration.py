@@ -181,8 +181,107 @@ class BatchController:
                 outstanding.append(review)
         return outstanding
 
+    def annotate_stale_base(self, project, pr):
+        """Read-only exception for a proven pre-submission stale-contract rejection.
+
+        This authorizes collection only. Never clears a check, repair, claim,
+        fixture, spend receipt or final candidate acceptance requirement.
+        """
+        from coordinator import failed_checks, testnet_failure, source_feedback
+        pr.pop('_stale_base_contracts', None)
+        failure = testnet_failure(pr)
+        if (pr.get('_review_mode') != 'source' or not failure
+                or failure.get('classification') != 'source'
+                or failed_checks(pr) != [failure]
+                or pr.get('_batch_failure') or pr.get('_batch_conflict') or pr.get('_batch_review_failure')):
+            return
+        active = self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND kind='fix' "
+                                "AND status IN ('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                                (project['id'], pr['number'])).fetchone()
+        if active:
+            return
+        try:
+            head, base = pr['headRefOid'], pr['baseRefOid']
+            prefix = f"repos/{project['repository']}"
+            read = lambda path: json.loads(self.c.gh(project, ['api', path]))
+            comparison = self.c.immutable_read(project, f'{prefix}/compare/{base}...{head}')
+            ancestor = comparison['merge_base_commit']['sha']
+            if not all(SHA.fullmatch(x) for x in (head, base, ancestor)) or ancestor == base:
+                return
+            def contracts(revision):
+                tree = self.c.immutable_read(project, f'{prefix}/git/trees/{revision}')
+                entries = [e for e in tree['tree'] if e['path'] == 'contracts' and e['type'] == 'tree']
+                if tree.get('truncated') or len(entries) != 1 or not SHA.fullmatch(entries[0]['sha']):
+                    raise RuntimeError('contract tree unavailable')
+                return entries[0]['sha']
+            original, source, current = map(contracts, (ancestor, head, base))
+            if source != original or current == original:
+                return
+            match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                                 + r'/actions/runs/([1-9][0-9]*)', failure['detailsUrl'])
+            if not match:
+                return
+            run_id = match[1]
+            path = f'{prefix}/actions/runs/{run_id}'
+            run = read(path)
+            if (str(run.get('id')) != run_id or run.get('event') != 'workflow_run'
+                    or run.get('head_branch') != 'main' or run.get('head_sha') != base
+                    or run.get('name') != 'Automatic testnet' or run.get('path') != '.github/workflows/testnet.yml'
+                    or run.get('repository', {}).get('full_name') != project['repository']
+                    or run.get('head_repository', {}).get('full_name') != project['repository']
+                    or run.get('status') != 'completed' or run.get('conclusion') != 'failure'
+                    or type(run.get('run_attempt')) is not int or run['run_attempt'] < 1):
+                return
+            with tempfile.TemporaryDirectory(prefix='stale-base-effects-') as directory:
+                self.c.gh(project, ['run', 'download', run_id, '-R', project['repository'],
+                                   '-n', 'testnet-effects-' + head, '-D', directory])
+                files = list(Path(directory).iterdir())
+                if (len(files) != 1 or files[0].name != 'package-upgrade.json' or files[0].is_symlink()
+                        or not files[0].is_file() or files[0].stat().st_size > 1_000_000):
+                    return
+                raw = files[0].read_bytes()
+                evidence = json.loads(raw)
+            transactions = evidence.get('transactions', [])
+            error = evidence.get('error', '')
+            if (evidence.get('head') != head or evidence.get('base') != base
+                    or evidence.get('network') != 'testnet' or evidence.get('chain') != '4c78adac'
+                    or evidence.get('success') is not False or evidence.get('failure_class') != 'source'
+                    or evidence.get('funding', {}).get('held_mist') != 0
+                    or evidence.get('reconciliations') != [] or evidence.get('cleanup_error')
+                    or not transactions or transactions[-1].get('label') != 'upgrade to head'
+                    or transactions[-1].get('status') != 'not_submitted' or transactions[-1].get('digest')
+                    or not error.startswith('test-upgrade could not build a transaction:')
+                    or 'error[EUC01001]: missing public declaration' not in error
+                    or "this package requires changes to be compatible" not in error):
+                return
+            used = 0
+            allowed = ['publish base', 'register device + issue cap (base)', 'add device to group (base)']
+            if len(transactions) != 4:
+                return
+            for transaction, label in zip(transactions[:-1], allowed):
+                gas = transaction.get('gas_mist')
+                if (transaction.get('label') != label or transaction.get('status') != 'success'
+                        or not transaction.get('digest') or type(gas) is not int or gas < 0):
+                    return
+                used += gas
+                if transaction.get('allowance_used_mist') != used:
+                    return
+            if (type(evidence.get('max_spend_mist')) is not int or not 0 <= used <= evidence['max_spend_mist']
+                    or evidence.get('allowance_used_mist') != used
+                    or transactions[-1].get('allowance_used_mist') != used or read(path) != run):
+                return
+            pr['_stale_base_contracts'] = dict(head=head, base=base, ancestor=ancestor,
+                source_tree=source, base_tree=current, source_feedback=source_feedback(pr),
+                status_hash=hashlib.sha256(json.dumps(pr['_testnet_status'], sort_keys=True).encode()).hexdigest(), run=int(run_id), attempt=run['run_attempt'],
+                evidence_sha256=hashlib.sha256(raw).hexdigest(), allowance_used_mist=used)
+        except Exception:
+            # Missing, ambiguous, changed or unavailable evidence is no exception.
+            return
+
     def source(self, project, pr, owner):
-        from coordinator import source_check_failures
+        from coordinator import source_check_failures, verified_stale_base
+        if pr.get('_stale_base_contracts') and not verified_stale_base(pr):
+            return None
         # Concrete source failures need their existing owner before collection.
         # Pending checks may still be validated on the combined candidate.
         if source_check_failures(pr):
@@ -213,7 +312,8 @@ class BatchController:
                     source_receipt=receipt, source_feedback=source_feedback(pr),
                     owner={key: owner.get(key) for key in ('key', 'agent', 'model', 'session', 'branch')}
                     | {'claim_hash': hashlib.sha256(owner['token'].encode()).hexdigest()},
-                    acceptance=owner.get('spec', {}).get('acceptance', []), title=pr.get('title', ''))
+                    acceptance=owner.get('spec', {}).get('acceptance', []), title=pr.get('title', ''),
+                    stale_base_contracts=pr.get('_stale_base_contracts'))
 
     def verify_manifest(self, project, batch):
         if not batch.get('head'):
@@ -246,7 +346,8 @@ class BatchController:
                     or hashlib.sha256((owner.get('token') or '').encode()).hexdigest() != member['owner']['claim_hash']):
                 raise BatchInvalidated('batch member ownership, head or feedback changed')
             fresh = self.source(project, pr, owner)
-            if not fresh or fresh['source_receipt'] != member['source_receipt']:
+            if (not fresh or fresh['source_receipt'] != member['source_receipt']
+                    or fresh.get('stale_base_contracts') != member.get('stale_base_contracts')):
                 raise BatchInvalidated('batch source review or acceptance changed')
             # source() revalidates the non-expiring Review claim and dependencies.
         if self.main(project) != batch['base']:
