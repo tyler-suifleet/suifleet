@@ -275,8 +275,11 @@ Standalone wallet-owned objects remain outside managed organization custody.
   handover protection. Policy changes, administrator changes, source changes and
   whole-organization handover conservatively require the current union of classes.
 - `set_recurring_window_secured`/`clear_recurring_window_secured` use the deploy
-  class. After the deployment snapshot they also append BCS of the current
-  `Option<RecurringWindow>`, so an approval cannot outlive a schedule change.
+  class and bind Customer, Fleet and DeploymentRecord by object ID, like
+  `set_control_secured`, so device usage charges and enrollment cannot
+  invalidate an approval. After the deployment snapshot they also append BCS of
+  the current `Option<RecurringWindow>`, so an approval cannot outlive a
+  schedule change.
 - `pause_deployment_secured` changes only paused state and control revision. It
   preserves schedule/targets and skips only delay; other factors remain required.
   Resume uses the full deployment requirements. Cancellation requires a current
