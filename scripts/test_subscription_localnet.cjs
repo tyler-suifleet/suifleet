@@ -16,14 +16,16 @@ const { requestSuiFromFaucetV2 } = appRequire('@mysten/sui/faucet');
   try {
     const base = path.join(temporary, 'base');
     await fs.mkdir(base);
-    execFileSync('tar', ['-x', '-C', base], { input: execFileSync('git', ['archive', 'cae74617', 'contracts'], { maxBuffer: 25e6 }) });
+    execFileSync('tar', ['-x', '-C', base], { input: execFileSync('git', ['archive', '0341a1ef1f79c96c36015c7486faf486acaee6f2', 'contracts'], { maxBuffer: 25e6 }) });
     const env = { ...process.env, SUI_CONFIG_DIR: path.join(temporary, 'config') };
     await fs.mkdir(env.SUI_CONFIG_DIR);
     const keystore = path.join(env.SUI_CONFIG_DIR, 'empty.keystore');
     await fs.writeFile(keystore, '[]');
     await fs.writeFile(path.join(env.SUI_CONFIG_DIR, 'client.yaml'), `keystore:\n  File: ${keystore}\nenvs:\n- alias: testnet\n  rpc: http://127.0.0.1:9000\nactive_env: testnet\nactive_address: null\n`);
     function compile(directory) {
-      const output = execFileSync('sui', ['move', 'build', '--path', directory, '--build-env', 'testnet', '--no-tree-shaking', '--dump-bytecode-as-base64'], { env, encoding: 'utf8', maxBuffer: 25e6, stdio: ['ignore', 'pipe', 'pipe'] });
+      let output;
+      try { output = execFileSync('sui', ['move', 'build', '--path', directory, '--build-env', 'testnet', '--no-tree-shaking', '--dump-bytecode-as-base64'], { env, encoding: 'utf8', maxBuffer: 25e6, stdio: ['ignore', 'pipe', 'pipe'] }); }
+      catch (error) { throw Error(`disposable Move compilation: ${String(error.stderr).slice(-3000)}`); }
       return JSON.parse(output.slice(output.indexOf('{')));
     }
     const client = new SuiGrpcClient({ network: 'localnet', baseUrl: 'http://127.0.0.1:9000' });
@@ -35,7 +37,10 @@ const { requestSuiFromFaucetV2 } = appRequire('@mysten/sui/faucet');
         catch (error) { if (retry === 9) throw Error(`disposable faucet: ${error.message}`); await new Promise(resolve => setTimeout(resolve, 500)); }
       }
     }
-    const evidence = { base: 'cae74617', contracts_tree: execFileSync('git', ['rev-parse', 'HEAD:contracts'], { encoding: 'utf8' }).trim(), transactions: [], limits: ['Disposable localnet SUI; no real USDC, public network, manual wallet, provider or physical acceptance.'] };
+    const sourcePaths = ['contracts/Move.lock', 'contracts/Move.toml', ...(await fs.readdir('contracts/sources')).filter(name => name.endsWith('.move')).map(name => `contracts/sources/${name}`)].sort();
+    const sourceHash = require('node:crypto').createHash('sha256');
+    for (const filename of sourcePaths) sourceHash.update(await fs.readFile(filename));
+    const evidence = { base: '0341a1ef1f79c96c36015c7486faf486acaee6f2', contracts_fingerprint: sourceHash.digest('hex'), transactions: [], limits: ['Disposable localnet SUI; no real USDC, public network, manual wallet, provider or physical acceptance.'] };
     async function execute(label, tx, failure) {
       tx.setGasBudget(label.includes('publish') || label.includes('upgrade') ? 2_000_000_000 : 100_000_000);
       if (failure) {
