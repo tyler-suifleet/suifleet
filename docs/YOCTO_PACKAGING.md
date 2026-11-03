@@ -17,8 +17,11 @@ the deterministic export and outstanding authorized public-source/repository/ind
 publication. No standalone repository or Layer Index listing is available yet.
 Pi image/access policy, test component and core-recipe workarounds now live in
 `suifleet-edge/meta-suifleet-integration`; both pinned kas profiles include it.
+Manually maintained BBLAYERS configurations using the Pi image, test component
+or core-recipe workarounds must add the companion integration directory too.
 The generic software layer has no core recipe appends or BSP dependency.
-Source, Cargo and codec pins remain unchanged.
+Source, Cargo and codec pins remain unchanged. Current export, recipe build and
+layer-check evidence is in [standalone readiness validation](YOCTO_STANDALONE_VALIDATION.md).
 
 ## Pinned build inputs
 
