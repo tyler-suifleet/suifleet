@@ -396,3 +396,60 @@ protected automatic public-testnet acceptance and fresh independent review befor
 merge. No public-wallet mutation, main merge, new issue, hardware or production
 operation occurred. Manual wallet/Pi/mainnet/provider checks remain explicitly
 unrun in SF-031/#32 and SF-087/#159 (hosting in SF-042/#62).
+
+## Pinned-base conflict repair, 2026-11-02
+
+The coordinator reported an actual conflict with candidate base
+`5b20af564124a2922315df139d748e3a9a2a0582`, with no sibling members.
+Merged only that pinned revision into the owner branch, resolving customer and
+security_policy conflicts. This is a conflict repair, not a freshness rebase or
+an independent merge to main. The pinned base's compact guards, narrow constants,
+fleet/customer argument-prefix helpers and multisig availability remain intact;
+SF-199 retains version-199 authority, atomic pre-enrollment sealing, disclosed
+actions and pending-index cleanup. Public signatures/layouts and type origins
+remain unchanged. Availability is 5 (multisig + second person).
+
+The live harness now expects the exact `security_policy::p0` abort (code 1)
+introduced by the base's private guard factoring. It still requires failed
+on-chain effects and the exact module/function/code; no refusal is waived.
+
+Fresh checks on the resolution:
+
+- `/tmp/sf199-tools/sui move test --path contracts`: 373/373 passed.
+- `node scripts/test_second_person.cjs`, `node scripts/test_security_policy.cjs`,
+  `node scripts/test_multisig_admin.cjs`, `node scripts/test_dashboard_stats.cjs`: passed.
+- `cd dapp && ./node_modules/.bin/tsc --noEmit`: passed.
+- Network-none pinned image `./node_modules/.bin/next build` in dapp: passed, static export.
+- Network-none pinned image with warm Move cache:
+  `python3 scripts/generate_interfaces.py --check`: 16 compiled modules match;
+  `python3 scripts/check_contract_interfaces.py`: 1,292 references / 18 modules, zero drift.
+- `python3 -m py_compile scripts/live_second_person.py`: passed.
+
+Setup/regression failures are recorded honestly: the first interface checker
+container omitted its Move cache; the corrected cached invocation passed. The
+host lacks sui, so the security checker runs in the pinned image. Its first run
+found an unused SMALL_32 constant after conflict resolution; using the base's
+existing compact policy guard fixes that warning without suppressing lint. The
+first full localnet run stopped at the renamed guard expectation after a
+successful upgrade; the next run passed all 26 transactions. The final receipt
+below is regenerated after the lint repair, rather than relabeling older bytecode.
+
+Hosted CI and mandatory protected public-testnet candidate acceptance remain
+coordinator gates; this worker does not poll them. Fresh independent review is
+still required. No public-chain funds, production/hardware operations, new
+issues or other workers. Deferred manual wallet/Pi/mainnet/provider checks remain
+unrun in #32/#159, with hosting in #62.
+
+Final repaired-tree isolated acceptance: network-none pinned image
+`python3 scripts/test_second_person_localnet.py --base /base/contracts --evidence
+docs/validation/sf199-pinned-base-localnet.json` passed all 26 effects-checked
+transactions. Upgrade `3gyTSJjkNczrREbu7HgS1SDWjWuXRhGCsz7zc8SSo9ng` succeeded.
+Bytecode digest: `bytecode-v1:7184c41509f8a2fa5fbb62e543e0dea648dcb7b376e409423b544111929f8d86`.
+Net local gas: 1,564,030,412 MIST; allowance charged: 1,602,599,799 MIST.
+[Receipt](sf199-pinned-base-localnet.json) records the precommit run-start HEAD;
+its bytecode digest binds this resolution, not the old source head. These are
+disposable-chain funds, not public testnet spending.
+
+Pinned image `python3 scripts/check_move_security.py`: passed, including
+warnings-as-errors build, unsuppressed baseline, negative compiler fixtures,
+unit suites and bypass-mutation regressions. `git diff --check`: passed.
