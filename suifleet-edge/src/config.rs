@@ -441,6 +441,7 @@ impl DeploymentManifest {
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
             ("receipt shards", crate::protocol::SHARD_TYPES),
             ("customer", crate::protocol::CUSTOMER_TYPES),
+            ("recurring window", crate::protocol::RECURRING_WINDOW_TYPES),
         ] {
             let count = group.iter().filter(|name| self.type_origins.contains_key(**name)).count();
             anyhow::ensure!(count == 0 || count == group.len(), "partial {label} type origins");
@@ -487,6 +488,7 @@ impl DeploymentManifest {
             .chain(crate::protocol::SETTINGS_TYPES)
             .chain(crate::protocol::SHARD_TYPES)
             .chain(crate::protocol::CUSTOMER_TYPES)
+            .chain(crate::protocol::RECURRING_WINDOW_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
     }
     pub fn move_type(&self, name: &str) -> String {
@@ -1119,6 +1121,18 @@ mod tests {
         assert!(manifest.validate().is_err());
         manifest.type_origins.remove(crate::protocol::ROLLOUT_HEALTH_TYPES[1]);
         manifest.validate().unwrap();
+    }
+
+    #[test]
+    fn recurring_window_origins_are_optional_but_all_or_none() {
+        let mut manifest = fixture();
+        for name in crate::protocol::RECURRING_WINDOW_TYPES {
+            manifest.type_origins.insert((*name).into(), "0x5".into());
+        }
+        manifest.validate().unwrap();
+        assert_eq!(manifest.move_type("deployment_manager::RecurringWindowKey"), "0x5::deployment_manager::RecurringWindowKey");
+        manifest.type_origins.remove(crate::protocol::RECURRING_WINDOW_TYPES[2]);
+        assert!(manifest.validate().unwrap_err().to_string().contains("partial recurring window"));
     }
 
     #[test]
