@@ -212,6 +212,49 @@ def run(binary):
                 assert count() == 9 and not outcome("0x511") and not outcome("0x512")
                 print("PASS: deleted and newly managed one-shot deferrals are pruned without apply")
 
+                # SF-174 recurring weekly windows (every day, UTC minutes, so
+                # the wall clock decides). Setting one bumps the Control
+                # revision exactly as set_recurring_window does on chain.
+                def recurring(id, timezone, start_minute, duration, days=127):
+                    previous = sim.recurring.get(id) or {}
+                    sim.recurring[id] = {"revision": str(int(previous.get("revision", "0")) + 1), "timezone": timezone,
+                        "slots": [{"days": days, "start_minute": start_minute % 1440, "duration_minutes": duration}]}
+                    if id in sim.controls: control(id, **{k: v for k, v in sim.controls[id].items() if k not in ("revision",)})
+                def minute(ms): return (ms // 60000) % 1440
+                later = now() + 3_600_000
+                recurring("0x520", "UTC", minute(later), 10); add("0x520")
+                wait(lambda: deferred("0x520", "outside recurring maintenance window"), "closed recurring window admitted")
+                entry = state()["deferred"]["0x520"]
+                assert entry["next_window_ms"] == later - later % 60000, entry
+                assert entry["recurring"]["timezone"] == "UTC" and entry["tzdb"].startswith("20"), entry
+                assert count() == 9 and not outcome("0x520")
+                # Opens at the next minute boundary at least 20 s from now.
+                opening = (now() + 80_000) // 60000 * 60000
+                recurring("0x521", "UTC", minute(opening), 5); add("0x521")
+                wait(lambda: deferred("0x521", "outside recurring maintenance window"), "future opening not deferred")
+                assert state()["deferred"]["0x521"]["next_window_ms"] == opening
+                # Up to 80 s away: wait past wait()'s default 25 s, then admit.
+                wait_for(lambda: now() >= opening - 2000 or outcome("0x521"), "opening never neared", process, timeout=120)
+                assert not outcome("0x521") and count() == 9, "admitted before its recurring window opened"
+                wait_for(lambda: outcome("0x521") == 1, "recurring window opening never admitted", process, timeout=30)
+                assert now() >= opening and count() == 10
+                print("PASS: recurring window defers with its next UTC opening and tzdb, then admits once it opens")
+
+                notified = entry["notified_ms"]
+                control("0x520", notice_ms=2500); recurring("0x520", "UTC", minute(now()) - 1, 30)
+                wait(lambda: deferred("0x520", "advance notice"), "recurring edit did not restart notice")
+                assert state()["deferred"]["0x520"]["notified_ms"] > notified and not outcome("0x520")
+                wait(lambda: outcome("0x520") == 1, "edited recurring window not admitted after notice")
+                assert count() == 11
+                print("PASS: editing a recurring window restarts advance notice before admission")
+
+                recurring("0x522", "Mars/Olympus_Mons", minute(now()) - 1, 30); add("0x522")
+                recurring("0x523", "device-local", minute(now()) - 1, 30); add("0x523")
+                wait(lambda: deferred("0x522", "unknown timezone") and deferred("0x523", "device-local timezone not supported"),
+                    "unknown or reserved zone not deferred")
+                settle(); assert count() == 11 and not outcome("0x522") and not outcome("0x523") and not sim.errors, sim.errors
+                print("PASS: unknown and reserved device-local zones fail closed without apply")
+
 
             except Exception:
                 log.flush(); print((root / "daemon.log").read_text()[-16000:], file=sys.stderr); raise
