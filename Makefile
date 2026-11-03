@@ -780,6 +780,7 @@ test-fleet-settings:
 	$(RUN) node scripts/test_fleet_settings.cjs
 	$(RUN) node scripts/test_fleet_settings_cost.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_fleet_settings_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_organization_security_browser.cjs
 
 # Deploy component page in a real browser: upload progress/retry, duplicate clicks
 # and same-file re-selection after validation alerts (SF-194).

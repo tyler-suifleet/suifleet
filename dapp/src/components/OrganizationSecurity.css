@@ -1,0 +1,57 @@
+.organization-security {
+  color: #475569;
+  font-size: .875rem;
+  line-height: 1.65;
+  min-width: 0;
+}
+.organization-security :is(input, textarea, select) { font: inherit; }
+.organization-security :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: .625rem;
+  color: #0f172a;
+  padding: .625rem .75rem;
+  max-width: 100%;
+}
+.organization-security textarea { min-height: 6rem; font-family: ui-monospace, monospace; font-size: .75rem; }
+.organization-security :is(input, textarea, select, button, summary):focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+.organization-security :is(input[type="checkbox"], input[type="radio"]) {
+  accent-color: #2563eb;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+.organization-security button {
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: .625rem;
+  color: #1e40af;
+  font-size: .8125rem;
+  font-weight: 600;
+  min-height: 2.5rem;
+  padding: .5rem .875rem;
+  text-align: left;
+  white-space: normal;
+}
+.organization-security button:hover:not(:disabled) { background: #eff6ff; border-color: #93c5fd; }
+.organization-security button:disabled { cursor: not-allowed; opacity: .5; }
+.organization-security label { color: #334155; font-size: .8125rem; font-weight: 500; }
+.organization-security label :is(input:not([type="checkbox"]):not([type="radio"]), textarea, select) { margin-top: .375rem; }
+.organization-security :is(h2, h3, legend) { color: #0f172a; font-weight: 600; }
+.organization-security :is(h3, legend) { font-size: .9375rem; }
+.organization-security summary { color: #0f172a; cursor: pointer; font-weight: 600; }
+.organization-security pre { max-width: 100%; background: #f8fafc; border-radius: .75rem; padding: 1rem; font-size: .75rem; }
+.organization-security [role="alert"] { border-radius: .75rem; background: #fff7ed; color: #9a3412; padding: .875rem 1rem; overflow-wrap: anywhere; }
+.organization-security [role="status"] { overflow-wrap: anywhere; }
+.organization-security :is(p, li) { overflow-wrap: anywhere; }
+.organization-security fieldset { min-width: 0; }
+.organization-security-setup { background: #fff; border: 1px solid #e2e8f0; border-radius: 1rem; box-shadow: 0 1px 2px #0f172a05; }
+.organization-security-setup > summary { padding: 1.25rem; }
+.organization-security-setup[open] > summary { border-bottom: 1px solid #f1f5f9; }
+.organization-security-setup-body { padding: 1.25rem; }
+.organization-security-setup-body > section { border: 0; border-radius: 0; padding: 0; }
+.organization-security-setup-body > section > :is(p, div, fieldset, label, button, details) { margin-bottom: 1rem; }
+.organization-security-setup-body > section > details { border: 1px solid #e2e8f0; border-radius: .75rem; padding: 1rem; }
