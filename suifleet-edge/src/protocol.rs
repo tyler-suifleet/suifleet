@@ -173,6 +173,8 @@ pub mod customer {
     pub const CONFIGURE_ENROLLMENT: &str = "configure_enrollment";
     pub const CONFIGURE_ENROLLMENT_SECURED: &str = "configure_enrollment_secured";
     pub const CONFIGURE_SECOND_PERSON: &str = "configure_second_person";
+    pub const CONFIGURE_SECURITY_DELAYS: &str = "configure_security_delays";
+    pub const CONFIGURE_SECURITY_DELAYS_SECURED: &str = "configure_security_delays_secured";
     pub const CONFIRM_HANDOVER: &str = "confirm_handover";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
     pub const CONTROL_ROLLOUT_SECURED: &str = "control_rollout_secured";
@@ -223,6 +225,7 @@ pub mod customer {
     pub const PROPOSE_APPROVAL: &str = "propose_approval";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISH_VERSION_SECURED: &str = "publish_version_secured";
+    pub const QUEUE_SECURITY_ACTION: &str = "queue_security_action";
     pub const REASSIGN_DEVICE: &str = "reassign_device";
     pub const REGISTER_DEVICE: &str = "register_device";
     pub const REGISTER_DEVICE_SECURED: &str = "register_device_secured";
@@ -1581,6 +1584,11 @@ pub mod security_policy {
     }
     impl Action { pub const MOVE_TYPE: &'static str = "security_policy::Action"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ActionArguments {
+        pub bytes: Vec<u8>,
+    }
+    impl ActionArguments { pub const MOVE_TYPE: &'static str = "security_policy::ActionArguments"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct ActionCreated {
         pub action_id: [u8; 32],
         pub customer_id: [u8; 32],
@@ -1590,6 +1598,33 @@ pub mod security_policy {
         pub expires_ms: u64,
     }
     impl ActionCreated { pub const MOVE_TYPE: &'static str = "security_policy::ActionCreated"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ArgumentsKey {
+        pub dummy_field: bool,
+    }
+    impl ArgumentsKey { pub const MOVE_TYPE: &'static str = "security_policy::ArgumentsKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrant {
+        pub elapsed_ms: u64,
+        pub transaction: Vec<u8>,
+        pub pause: bool,
+    }
+    impl DelayGrant { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrant"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrantKey {
+        pub dummy_field: bool,
+    }
+    impl DelayGrantKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrantKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayKey {
+        pub dummy_field: bool,
+    }
+    impl DelayKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Delays {
+        pub milliseconds: Vec<u64>,
+    }
+    impl Delays { pub const MOVE_TYPE: &'static str = "security_policy::Delays"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct FactorConfiguration {
         pub binding: Vec<u8>,
@@ -1621,6 +1656,16 @@ pub mod security_policy {
         pub dummy_field: bool,
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct QueuedAt {
+        pub milliseconds: u64,
+    }
+    impl QueuedAt { pub const MOVE_TYPE: &'static str = "security_policy::QueuedAt"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct QueuedAtKey {
+        pub dummy_field: bool,
+    }
+    impl QueuedAtKey { pub const MOVE_TYPE: &'static str = "security_policy::QueuedAtKey"; }
 }
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeploymentCreatedEvent {

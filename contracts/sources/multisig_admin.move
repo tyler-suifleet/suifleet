@@ -57,12 +57,12 @@ module sui_edge::multisig_admin {
 
     /// Convenience producer for the exact existing policy-change wrapper.
     public fun prepare_policy_change(customer: &Customer, requirements: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&b"set_security"), bcs::to_bytes(customer), bcs::to_bytes(&requirements)];
+        let arguments = vector[bcs::to_bytes(&b"set_security"), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&requirements)];
         customer::prepare_security_action(customer, security_policy::action_intent(object::id(customer), bcs::to_bytes(&arguments)), expires_ms, clock, ctx);
     }
 
     public fun enroll_secured(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, action: Action, clock: &Clock, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&b"enroll_multisig"), bcs::to_bytes(customer), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
+        let arguments = vector[bcs::to_bytes(&b"enroll_multisig"), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
         customer::begin_security_action(customer, action, arguments, (SMALL_7 as u64), false, clock, ctx);
         enroll(customer, keys, weights, threshold, ctx);
         customer::finish_security_action(customer);

@@ -42,6 +42,39 @@ module sui_edge::customer_tests {
     }
 
     #[test]
+    fun delayed_revocation_survives_unrelated_registration() {
+        let mut s = setup(); let fid = fleet(&mut s);
+        allow_devices(&mut s, 1);
+        let did = register(&mut s, fid, @0xD1);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let r = s.take_shared<DeviceRegistry>();
+        customer::configure_security_delays(&mut c, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
+        customer::set_security(&mut c, vector[0,0,0,0,0,0,8], s.ctx());
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let args = vector[std::bcs::to_bytes(&utf8(b"set_device_revoked")),
+            std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&fid), std::bcs::to_bytes(&object::id(&r)),
+            std::bcs::to_bytes(&did), std::bcs::to_bytes(&true)];
+        customer::queue_security_action(&c, std::bcs::to_bytes(&args), 10000, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(r);
+        // An unrelated tenant can change the global count without any organization authority.
+        s.next_tx(OTHER);
+        let mut r = s.take_shared<DeviceRegistry>(); let before = device_registry::device_count(&r);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let device = device_registry::register_device(&mut r, utf8(b"Unrelated"), OTHER, utf8(b"x86_64"), &clock, s.ctx());
+        transfer::public_transfer(device, OTHER);
+        assert!(device_registry::device_count(&r) == before + 1);
+        sui::clock::destroy_for_testing(clock); ts::return_shared(r);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut r = s.take_shared<DeviceRegistry>(); let action = s.take_shared<sui_edge::security_policy::Action>();
+        let mut clock = sui::clock::create_for_testing(s.ctx()); sui::clock::set_for_testing(&mut clock, 1000);
+        customer::set_device_revoked_secured(&mut c, &f, &mut r, did, true, action, &clock, s.ctx());
+        assert!(!device_registry::is_active_signer(&r, did, @0xD1));
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); s.end();
+    }
+
+    #[test]
     fun default_retry_and_two_fleets_with_identical_aliases() {
         let mut s = setup();
         let first = fleet(&mut s);
@@ -258,7 +291,7 @@ module sui_edge::customer_tests {
         let c = s.take_shared<Customer>();
         let clock = sui::clock::create_for_testing(s.ctx());
         let requirements = vector[0u8,0,0,0,0,0,0];
-        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&c), std::bcs::to_bytes(&requirements)];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
         customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
         let mut c = s.take_shared<Customer>(); let action = s.take_shared<sui_edge::security_policy::Action>();
@@ -292,7 +325,7 @@ module sui_edge::customer_tests {
         let mut c = s.take_shared<Customer>();
         customer::set_security_requirements_for_testing(&mut c, vector[1,0,0,0,0,0,0]);
         let requirements = vector[0u8,0,0,0,0,0,0];
-        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&c), std::bcs::to_bytes(&requirements)];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
         let clock = sui::clock::create_for_testing(s.ctx());
         customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);

@@ -102,6 +102,20 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
 
+    def test_optional_security_delay_origins_are_separate_and_verified(self):
+        manifest = fixture()
+        manifest["type_origins"].update({n: dm.object_id("0x4") for n in dm.SECURITY_TYPES})
+        dm.verify(manifest, chain(manifest))
+        manifest["type_origins"][dm.SECURITY_DELAY_TYPES[0]] = dm.object_id("0x5")
+        with self.assertRaisesRegex(ValueError, "partial security delay"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n: dm.object_id("0x5") for n in dm.SECURITY_DELAY_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.SECURITY_DELAY_TYPES[-1]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+
     def test_optional_fleet_budget_origin_group(self):
         manifest = fixture()
         manifest["type_origins"][dm.BUDGET_TYPES[0]] = dm.object_id("0x4")

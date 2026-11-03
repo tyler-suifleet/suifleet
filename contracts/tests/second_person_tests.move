@@ -23,7 +23,7 @@ module sui_edge::second_person_tests {
     fun setup(): Scenario {
         let mut s = unenrolled();
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
-        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]);
+        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&sui::object::id(&c))]);
         customer::propose_approval(&mut c, bytes, 1000, &clock, s.ctx());
         // The very first request seals authority, before any independent consent.
         let expected = bcs::to_bytes(&c);
@@ -34,12 +34,13 @@ module sui_edge::second_person_tests {
         ts::return_shared(action); ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>(); let action = s.take_shared<Action>();
         customer::configure_second_person(&mut c, action, &clock, s.ctx());
+        customer::configure_security_delays(&mut c, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
         customer::set_security(&mut c, vector[0,0,0,0,4,0,0], s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA); s
     }
     fun arguments(c: &Customer): vector<vector<u8>> {
         // Exact existing secured policy wrapper schema.
-        vector[bcs::to_bytes(&utf8(b"set_security")), bcs::to_bytes(c), bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])]
+        vector[bcs::to_bytes(&utf8(b"set_security")), bcs::to_bytes(&sui::object::id(c)), bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])]
     }
     fun propose(s: &mut Scenario) {
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
@@ -57,11 +58,11 @@ module sui_edge::second_person_tests {
     fun first_request_cancel_keeps_old_authority_sealed() {
         let mut s = unenrolled();
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
-        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]);
+        let bytes = bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&sui::object::id(&c))]);
         customer::propose_approval(&mut c, bytes, 1000, &clock, s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
         let mut c = s.take_shared<Customer>(); let a = s.take_shared<Action>();
-        assert!(policy::disclosed_arguments(&a) == bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&c)]));
+        assert!(policy::disclosed_arguments(&a) == bcs::to_bytes(&vector[bcs::to_bytes(&utf8(b"configure_second_person")), bcs::to_bytes(&sui::object::id(&c))]));
         customer::cancel_disclosed_security_action(&mut c, a, s.ctx());
         assert!(customer::pending_security_actions(&c).is_empty());
         assert!(bcs::to_bytes(&c)[32] == 199);
@@ -156,6 +157,46 @@ module sui_edge::second_person_tests {
         let mut s = setup(); propose(&mut s);
         let c = s.take_shared<Customer>(); let a = s.take_shared<Action>();
         customer::cancel_security_action(&c, a, s.ctx()); abort 99
+    }
+
+    fun combined(): Scenario {
+        let mut s = setup(); propose(&mut s); approve(&mut s);
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>(); let a = s.take_shared<Action>();
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], a, &clock, s.ctx());
+        customer::set_security(&mut c, vector[0,0,0,0,12,0,0], s.ctx());
+        let bytes = bcs::to_bytes(&arguments(&c));
+        customer::propose_approval(&mut c, bytes, 5000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xB); s
+    }
+    #[test]
+    fun combined_approval_delay_executes_and_cleans_index() {
+        let mut s = combined(); approve(&mut s);
+        let mut c = s.take_shared<Customer>(); let mut clock = s.take_shared<Clock>(); let a = s.take_shared<Action>();
+        clock.set_for_testing(1000);
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], a, &clock, s.ctx());
+        assert!(customer::pending_security_actions(&c).is_empty());
+        ts::return_shared(c); ts::return_shared(clock); s.end();
+    }
+    #[test, expected_failure(abort_code = 3, location = sui_edge::security_policy)]
+    fun combined_approval_cannot_skip_delay() {
+        let mut s = combined(); approve(&mut s);
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>(); let a = s.take_shared<Action>();
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], a, &clock, s.ctx()); abort 99
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun combined_mature_delay_cannot_skip_approval() {
+        let mut s = combined(); s.next_tx(@0xA);
+        let mut c = s.take_shared<Customer>(); let mut clock = s.take_shared<Clock>(); let a = s.take_shared<Action>();
+        clock.set_for_testing(1000);
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], a, &clock, s.ctx()); abort 99
+    }
+    #[test]
+    fun combined_cancel_removes_disclosure_and_timestamp() {
+        let mut s = combined();
+        let mut c = s.take_shared<Customer>(); let a = s.take_shared<Action>();
+        customer::cancel_disclosed_security_action(&mut c, a, s.ctx());
+        assert!(customer::pending_security_actions(&c).is_empty());
+        ts::return_shared(c); s.end();
     }
 
 }

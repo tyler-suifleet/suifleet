@@ -123,6 +123,7 @@ test-component:
 test-yocto-packaging:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_inspect_pi_image.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_runtime_packaging.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
 
 dapp-typecheck:
 	$(MAKE) test-testnet
@@ -834,6 +835,7 @@ test-customer-fleets:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) node scripts/test_security_policy.cjs
+	$(RUN) node scripts/test_security_delay.cjs
 	$(RUN) node scripts/test_second_person.cjs
 	$(RUN) node scripts/test_multisig_admin.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_multisig_admin_browser.cjs

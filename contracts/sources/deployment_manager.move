@@ -108,11 +108,11 @@ module sui_edge::deployment_manager {
     ) {
         set_control_as(deployment, state, not_before_ms, expires_ms, window_start_ms, window_end_ms, notice_ms, ctx.sender());
     }
-    /// Dynamic state must be reviewed as well as the stable object layout.
+    /// Bind administrator decisions, not device-reported outcomes or health.
     public(package) fun security_snapshot(d: &DeploymentRecord): vector<u8> {
         let mut parts = vector[std::bcs::to_bytes(&control(d)),
             std::bcs::to_bytes(target_groups(d)), std::bcs::to_bytes(target_devices(d))];
-        if (df::exists(&d.id, RolloutKey {})) parts.push_back(std::bcs::to_bytes(&rollout(d)));
+        if (df::exists(&d.id, RolloutKey {})) parts.push_back(std::bcs::to_bytes(&rollout(d).revision));
         std::bcs::to_bytes(&parts)
     }
     public(package) fun pause_as(deployment: &mut DeploymentRecord, authority: address) {
