@@ -46,7 +46,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head>
         <title>SuiFleet</title>
-        <link rel="icon" href="/favicon.ico" sizes="32x32" />
+        <link rel="icon" href="/favicon.svg?v=400d0317ed09" type="image/svg+xml" sizes="any" />
+        <link rel="alternate icon" href="/favicon.ico?v=400d0317ed09" sizes="16x16 32x32 48x48 64x64" />
         <meta name="description" content="Decentralized edge fleet management on Sui" />
         <meta property="og:title" content="SuiFleet console" />
         <meta property="og:description" content="Manage edge fleets on Sui. Public testnet preview." />
@@ -62,15 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {/* Top bar */}
               <div className="bg-white text-slate-900 min-h-16 flex items-center px-4 md:px-6 gap-3 shrink-0 z-20 border-b border-slate-200">
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded bg-[#4DA2FF] flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
-                      <circle cx="8" cy="4.5" r="2.2" fill="white" />
-                      <circle cx="3" cy="12" r="2" fill="white" />
-                      <circle cx="13" cy="12" r="2" fill="white" />
-                      <line x1="8" y1="6.7" x2="3.8" y2="10.2" stroke="white" strokeWidth="1.2" />
-                      <line x1="8" y1="6.7" x2="12.2" y2="10.2" stroke="white" strokeWidth="1.2" />
-                    </svg>
-                  </div>
+                  <img src="/suifleet-mark.svg" alt="" width="42" height="26" className="h-[26px] w-[42px] shrink-0" />
                   <span className="font-semibold text-sm tracking-tight">SuiFleet</span>
                 </div>
                 <span className="hidden sm:inline text-slate-300 text-xs">|</span>
