@@ -1,19 +1,19 @@
     #[mode(spec), ext(spec(prove, target = p4))]
     fun new_receipts_security_spec(): Receipts {
         let receipts = p4();
-        prover::prover::ensures(receipts.version == LEGACY_RECEIPTS_VERSION);
+        prover::prover::ensures(receipts.version == (LEGACY_RECEIPTS_VERSION as u64));
         prover::prover::ensures(receipts.statuses.is_empty());
         receipts
     }
 
-    #[mode(spec), ext(spec(prove, target = receipts_mut))]
+    #[mode(spec), ext(spec(prove, target = z2))]
     fun receipts_mut_security_spec(deployment: &mut DeploymentRecord): &mut Receipts {
         let present = df::exists(&deployment.id, ReceiptsKey {});
         prover::prover::asserts(!present || df::exists_with_type<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}));
         let old_version = if (present) df::borrow<ReceiptsKey, Receipts>(&deployment.id, ReceiptsKey {}).version else 0;
-        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else LEGACY_RECEIPTS_VERSION;
+        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) 3 else (LEGACY_RECEIPTS_VERSION as u64);
         prover::prover::asserts(old_version <= target_version);
-        let result = receipts_mut(deployment);
+        let result = z2(deployment);
         prover::prover::ensures(result.version == target_version);
         if (!present || old_version < target_version) prover::prover::ensures(result.statuses.is_empty());
         result

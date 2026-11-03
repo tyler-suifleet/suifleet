@@ -29,6 +29,7 @@
 /// `Settings.version` lets a later upgrade stop older versions overwriting a
 /// newer record.
 module sui_edge::fleet_settings {
+    // Include version/limit constants in compact loads; public u64 values stay unchanged.
     // Widen named narrow literals at use sites to avoid repeated LdU64.
     // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
@@ -41,23 +42,23 @@ module sui_edge::fleet_settings {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const VERSION: u64 = 1;
+    const VERSION: u8 = 1;
 
     /// Defaults, from the 2026-10-23 business-plan proposal.
-    const DEFAULT_CHECK_INTERVAL_MS: u64 = 1_800_000; // 30 minutes
-    const DEFAULT_ROLLOUT_CHECK_INTERVAL_MS: u64 = 60_000; // 60 seconds
-    const DEFAULT_HEALTH_INTERVAL_MS: u64 = 86_400_000; // daily
-    const DEFAULT_ARCHIVE_INTERVAL_MS: u64 = 604_800_000; // weekly
+    const DEFAULT_CHECK_INTERVAL_MS: u32 = 1_800_000; // 30 minutes
+    const DEFAULT_ROLLOUT_CHECK_INTERVAL_MS: u16 = 60_000; // 60 seconds
+    const DEFAULT_HEALTH_INTERVAL_MS: u32 = 86_400_000; // daily
+    const DEFAULT_ARCHIVE_INTERVAL_MS: u32 = 604_800_000; // weekly
     const DEFAULT_ARCHIVE_RETENTION_EPOCHS: u32 = 3; // 6 weeks of 2-week Mainnet epochs
 
-    const MIN_CHECK_INTERVAL_MS: u64 = 300_000; // 5 minutes
-    const MAX_CHECK_INTERVAL_MS: u64 = 21_600_000; // 6 hours
-    const MIN_ROLLOUT_CHECK_INTERVAL_MS: u64 = 30_000;
-    const MAX_ROLLOUT_CHECK_INTERVAL_MS: u64 = 600_000; // 10 minutes
-    const MIN_HEALTH_INTERVAL_MS: u64 = 60_000;
-    const MAX_HEALTH_INTERVAL_MS: u64 = 86_400_000;
-    const MIN_ARCHIVE_INTERVAL_MS: u64 = 3_600_000;
-    const MAX_ARCHIVE_INTERVAL_MS: u64 = 604_800_000;
+    const MIN_CHECK_INTERVAL_MS: u32 = 300_000; // 5 minutes
+    const MAX_CHECK_INTERVAL_MS: u32 = 21_600_000; // 6 hours
+    const MIN_ROLLOUT_CHECK_INTERVAL_MS: u16 = 30_000;
+    const MAX_ROLLOUT_CHECK_INTERVAL_MS: u32 = 600_000; // 10 minutes
+    const MIN_HEALTH_INTERVAL_MS: u16 = 60_000;
+    const MAX_HEALTH_INTERVAL_MS: u32 = 86_400_000;
+    const MIN_ARCHIVE_INTERVAL_MS: u32 = 3_600_000;
+    const MAX_ARCHIVE_INTERVAL_MS: u32 = 604_800_000;
     const MIN_ARCHIVE_RETENTION_EPOCHS: u32 = 1;
     /// Walrus's maximum storage purchase ahead.
     const MAX_ARCHIVE_RETENTION_EPOCHS: u32 = 53;
@@ -111,7 +112,7 @@ module sui_edge::fleet_settings {
         let uid = fleet_budget::uid_mut(budget);
         let previous = if (df::exists(uid, SettingsKey {})) {
             let current: &mut Settings = df::borrow_mut(uid, SettingsKey {});
-            assert!(current.version <= VERSION, ENewerVersion);
+            assert!(current.version <= (VERSION as u64), ENewerVersion);
             let previous = *current;
             *current = settings;
             option::some(previous)
@@ -134,20 +135,20 @@ module sui_edge::fleet_settings {
         archive_interval_ms: u64,
         archive_retention_epochs: u32,
     ): Settings {
-        p0(check_interval_ms >= MIN_CHECK_INTERVAL_MS); p0(check_interval_ms <= MAX_CHECK_INTERVAL_MS);
-        if (!(rollout_check_interval_ms == (SMALL_0 as u64))) { p0(rollout_check_interval_ms >= MIN_ROLLOUT_CHECK_INTERVAL_MS); p0(rollout_check_interval_ms <= MAX_ROLLOUT_CHECK_INTERVAL_MS); p0(rollout_check_interval_ms <= check_interval_ms); };
-        p0(health_interval_ms >= MIN_HEALTH_INTERVAL_MS); p0(health_interval_ms <= MAX_HEALTH_INTERVAL_MS);
-        p0(archive_interval_ms >= MIN_ARCHIVE_INTERVAL_MS); p0(archive_interval_ms <= MAX_ARCHIVE_INTERVAL_MS);
+        p0(check_interval_ms >= (MIN_CHECK_INTERVAL_MS as u64)); p0(check_interval_ms <= (MAX_CHECK_INTERVAL_MS as u64));
+        if (!(rollout_check_interval_ms == (SMALL_0 as u64))) { p0(rollout_check_interval_ms >= (MIN_ROLLOUT_CHECK_INTERVAL_MS as u64)); p0(rollout_check_interval_ms <= (MAX_ROLLOUT_CHECK_INTERVAL_MS as u64)); p0(rollout_check_interval_ms <= check_interval_ms); };
+        p0(health_interval_ms >= (MIN_HEALTH_INTERVAL_MS as u64)); p0(health_interval_ms <= (MAX_HEALTH_INTERVAL_MS as u64));
+        p0(archive_interval_ms >= (MIN_ARCHIVE_INTERVAL_MS as u64)); p0(archive_interval_ms <= (MAX_ARCHIVE_INTERVAL_MS as u64));
         p0(archive_retention_epochs >= MIN_ARCHIVE_RETENTION_EPOCHS); p0(archive_retention_epochs <= MAX_ARCHIVE_RETENTION_EPOCHS);
         Settings {
-            version: VERSION, check_interval_ms, rollout_check_interval_ms, health_interval_ms,
+            version: (VERSION as u64), check_interval_ms, rollout_check_interval_ms, health_interval_ms,
             archive_interval_ms, archive_retention_epochs,
         }
     }
 
     public fun defaults(): Settings {
-        new(DEFAULT_CHECK_INTERVAL_MS, DEFAULT_ROLLOUT_CHECK_INTERVAL_MS, DEFAULT_HEALTH_INTERVAL_MS,
-            DEFAULT_ARCHIVE_INTERVAL_MS, DEFAULT_ARCHIVE_RETENTION_EPOCHS)
+        new((DEFAULT_CHECK_INTERVAL_MS as u64), (DEFAULT_ROLLOUT_CHECK_INTERVAL_MS as u64), (DEFAULT_HEALTH_INTERVAL_MS as u64),
+            (DEFAULT_ARCHIVE_INTERVAL_MS as u64), DEFAULT_ARCHIVE_RETENTION_EPOCHS)
     }
 
     // ── Reads ─────────────────────────────────────────────────────────────────
