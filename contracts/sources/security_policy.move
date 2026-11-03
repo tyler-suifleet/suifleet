@@ -23,8 +23,8 @@ module sui_edge::security_policy {
     const EFactor: u64 = 1;
     const EUnavailable: u64 = 2;
     const ACTIONS: u64 = 7;
-    // Native multisig and delay are implemented; other factors remain fail-closed.
-    const AVAILABLE: u8 = 9;
+    // Native multisig, second-person and delay; passkey remains unavailable.
+    const AVAILABLE: u8 = 13;
 
     // Separate fields preserve the published Policy and Action layouts/origins.
     public struct DelayKey has copy, drop, store {}
@@ -167,6 +167,35 @@ module sui_edge::security_policy {
         id: UID, customer_id: ID, generation: u64, proposer: address,
         intent: vector<u8>, expires_ms: u64, attested: u8,
     }
+    // Reserved factor 0 is not configurable. On Customer it indexes pending
+    // Action IDs; on Action it holds the disclosed public argument bytes.
+    public(package) fun pending(uid: &UID): vector<ID> {
+        if (df::exists(uid, FactorKey { factor: 0 })) *df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }) else vector[]
+    }
+    fun unindex(uid: &mut UID, id: ID) {
+        if (df::exists(uid, FactorKey { factor: 0 })) {
+            let ids = df::borrow_mut<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 });
+            let (found, i) = ids.index_of(&id);
+            if (found) { ids.remove(i); };
+        };
+    }
+    public fun disclosed_arguments(a: &Action): vector<u8> {
+        df::borrow<FactorKey, FactorConfiguration>(&a.id, FactorKey { factor: 0 }).binding
+    }
+    public fun attestations(a: &Action): u8 { a.attested }
+    fun remove_arguments(uid: &mut UID) {
+        if (df::exists(uid, FactorKey { factor: 0 })) { df::remove<FactorKey, FactorConfiguration>(uid, FactorKey { factor: 0 }); };
+    }
+    public(package) fun prepare_disclosed(uid: &mut UID, arguments_bcs: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert!(!arguments_bcs.is_empty() && arguments_bcs.length() <= 16384, EPolicy);
+        if (!df::exists(uid, FactorKey { factor: 0 })) df::add(uid, FactorKey { factor: 0 }, vector<ID>[]);
+        assert!(df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).length() < 64, EPolicy);
+        let mut a = new_action(uid, action_intent(uid.to_inner(), arguments_bcs), expires_ms, clock, ctx);
+        df::add(&mut a.id, FactorKey { factor: 0 }, FactorConfiguration { binding: arguments_bcs });
+        let id = object::id(&a);
+        transfer::share_object(a);
+        df::borrow_mut<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).push_back(id);
+    }
     public struct ActionCreated has copy, drop {
         action_id: ID, customer_id: ID, generation: u64, proposer: address,
         intent: vector<u8>, expires_ms: u64,
@@ -254,7 +283,7 @@ module sui_edge::security_policy {
         if (df::exists(uid, DelayGrantKey {})) { df::remove<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {}); };
         df::add(uid, DelayGrantKey {}, DelayGrant { elapsed_ms, transaction: *ctx.digest(), pause });
         remove_timestamp(&mut a.id);
-        let Action { id, customer_id, generation, proposer, intent, expires_ms, attested } = a;
+        let Action { mut id, customer_id, generation, proposer, intent, expires_ms, attested } = a;
         // Timing is rechecked at consumption, never a persistent attestation.
         let attested = attested | 8;
         assert!(customer_id == uid.to_inner() && proposer == ctx.sender(), EPolicy);
@@ -266,14 +295,26 @@ module sui_edge::security_policy {
         assert!((attested & required) == required, EFactor);
         p.transaction = *ctx.digest();
         p.attested = attested;
+        unindex(uid, id.to_inner());
+        remove_arguments(&mut id);
+        remove_timestamp(&mut id);
         id.delete();
     }
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }
+    public(package) fun cancel_disclosed(uid: &mut UID, a: Action) {
+        unindex(uid, object::id(&a));
+        cancel_internal(uid.to_inner(), a);
+    }
     public(package) fun cancel(uid: &UID, a: Action) {
-        let mut a = a;
-        remove_timestamp(&mut a.id);
-        let Action { id, customer_id, generation: _, proposer: _, intent: _, expires_ms: _, attested: _ } = a;
-        p1(customer_id == uid.to_inner());
+        // The legacy immutable route cannot maintain the live pending index.
+        assert!(!df::exists(&a.id, FactorKey { factor: 0 }), EPolicy);
+        cancel_internal(uid.to_inner(), a);
+    }
+    fun cancel_internal(customer: ID, a: Action) {
+        let Action { mut id, customer_id, generation: _, proposer: _, intent: _, expires_ms: _, attested: _ } = a;
+        assert!(customer_id == customer, EPolicy);
+        remove_arguments(&mut id);
+        remove_timestamp(&mut id);
         id.delete();
     }
     public(package) fun read(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }

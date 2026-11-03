@@ -266,6 +266,12 @@ pub mod customer {
     pub const CONFIGURE_SECURITY_DELAYS: &str = "configure_security_delays";
     pub const CONFIGURE_SECURITY_DELAYS_SECURED: &str = "configure_security_delays_secured";
     pub const QUEUE_SECURITY_ACTION: &str = "queue_security_action";
+    pub const APPROVE_ACTION: &str = "approve_action";
+    pub const CANCEL_DISCLOSED_SECURITY_ACTION: &str = "cancel_disclosed_security_action";
+    pub const CONFIGURE_SECOND_PERSON: &str = "configure_second_person";
+    pub const PENDING_SECURITY_ACTIONS: &str = "pending_security_actions";
+    pub const PROPOSE_APPROVAL: &str = "propose_approval";
+    pub const REJECT_ACTION: &str = "reject_action";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct AssignmentKey {
         pub device_id: [u8; 32],
@@ -406,6 +412,11 @@ pub mod customer {
         pub count: u64,
     }
     impl GroupBatchApplied { pub const MOVE_TYPE: &'static str = "customer::GroupBatchApplied"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct SecondPersonConfiguration {
+        pub schema: u8,
+    }
+    impl SecondPersonConfiguration { pub const MOVE_TYPE: &'static str = "customer::SecondPersonConfiguration"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -1522,6 +1533,8 @@ pub mod security_policy {
     pub const INTENT: &str = "intent";
     pub const PROPOSER: &str = "proposer";
     pub const REQUIREMENTS: &str = "requirements";
+    pub const ATTESTATIONS: &str = "attestations";
+    pub const DISCLOSED_ARGUMENTS: &str = "disclosed_arguments";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Action {
         pub id: [u8; 32],

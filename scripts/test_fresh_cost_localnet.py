@@ -90,7 +90,7 @@ def measure_temporal(options, output, root):
     """
     import rollout_audit_acceptance as audit
     import testnet_reconcile as reconciler
-    live = live_common.Live(options['wallet'], 'localnet', 1_600_000_000)
+    live = live_common.Live(options['wallet'], 'localnet', options['max_spend_mist'])
     live.preflight()
     state_path = Path(options['state'])
     state = upgrade.load_state(state_path, live.chain, live.operator)
@@ -207,6 +207,8 @@ def main():
     parser.add_argument('--next-head-ref', help='exercise same-lane identity reuse across a second exact package pair')
     parser.add_argument('--evidence-dir', required=True)
     parser.add_argument('--compact-lifecycle', action='store_true')
+    parser.add_argument('--max-spend-mist', type=int, default=2_000_000_000,
+                        help='fixed per-package-run allowance; use1600000000 to reproduce historical cost trials')
     parser.add_argument('--retained-device-grant-mist', type=retained_grant,
                         help='prepare an authenticated local retained identity, then charge its full balance in fresh acceptance')
     parser.add_argument('--with-security', action='store_true',
@@ -271,7 +273,7 @@ await requestSuiFromFaucetV2({host:'http://127.0.0.1:9123',recipient:k.toSuiAddr
 """
             subprocess.run(['node', '-e', setup, str(root)], check=True)
             options = dict(wallet=str(root / 'client.yaml'), network='localnet', base_ref=args.base_ref,
-                max_spend_mist=1_600_000_000, required_balance_mist=None, state=str(root / 'state.json'),
+                max_spend_mist=args.max_spend_mist, required_balance_mist=None, state=str(root / 'state.json'),
                 faucet_tool=None, build_sui='sui', network_sui=sui_toolchain.NETWORK_DEFAULT,
                 transaction_gas_budget=60_000_000, compact_lifecycle=args.compact_lifecycle, fresh=False, walrus='local', retire_rollout_audit=False)
             if args.retained_device_grant_mist is not None:

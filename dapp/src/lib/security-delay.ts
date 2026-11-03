@@ -7,6 +7,7 @@ import { blake2b } from "@noble/hashes/blake2.js";
 import { MANIFEST, SECURITY_DELAY_TYPES, moveType, verifyDeployment } from "./deployment-manifest";
 import { PACKAGE_ID } from "./constants";
 import { incrementalEvents } from "./event-history";
+import { secondPersonSupported } from "./second-person";
 import * as wire from "./fleet-protocol";
 
 export const MIN_DELAY_MS = 1000;
@@ -39,13 +40,13 @@ export function securityIntent(customer: string, argumentsBcs: Uint8Array): numb
   return Array.from(blake2b(vectors.serialize([bcs.string().serialize(typeName).toBytes(), bcs.Address.serialize(customer).toBytes(), argumentsBcs]).toBytes(), { dkLen: 32 }));
 }
 export function buildQueueSecurityTx(customer: string, argumentsBcs: Uint8Array, expires: bigint) {
-  requireDelay(); if (argumentsBcs.length > 65536) throw Error("Action arguments exceed 64 KiB");
+  requireDelay(); if (argumentsBcs.length > (secondPersonSupported() ? 16384 : 65536)) throw Error(`Action arguments exceed ${secondPersonSupported() ? 16 : 64} KiB`);
   const tx = new Transaction();
-  tx.moveCall({ target: `${PACKAGE_ID}::customer::queue_security_action`, arguments: [tx.object(customer), tx.pure.vector("u8", Array.from(argumentsBcs)), tx.pure.u64(expires), tx.object("0x6")] });
+  tx.moveCall({ target: `${PACKAGE_ID}::customer::${secondPersonSupported() ? "propose_approval" : "queue_security_action"}`, arguments: [tx.object(customer), tx.pure.vector("u8", Array.from(argumentsBcs)), tx.pure.u64(expires), tx.object("0x6")] });
   return tx;
 }
 export function buildCancelSecurityTx(customer: string, action: string) {
-  const tx = new Transaction(); tx.moveCall({ target: `${PACKAGE_ID}::customer::cancel_security_action`, arguments: [tx.object(customer), tx.object(action)] }); return tx;
+  const tx = new Transaction(); tx.moveCall({ target: `${PACKAGE_ID}::customer::${secondPersonSupported() ? "cancel_disclosed_security_action" : "cancel_security_action"}`, arguments: [tx.object(customer), tx.object(action)] }); return tx;
 }
 export function buildExecuteSecurityEditTx(customer: string, action: string, edit: SecurityEdit) {
   requireDelay(); const tx = new Transaction();
@@ -97,9 +98,15 @@ export async function fetchQueuedSecurityActions(client: SuiGrpcClient, customer
       const payload = await optionalField(client, a.id, "security_policy::ArgumentsKey");
       let edit: SecurityEdit | undefined;
       let stateChanged = false;
-      if (payload) {
-        if (normalizeStructTag(payload.type) !== normalizeStructTag(moveType("security_policy::ActionArguments"))) throw Error("Unexpected action arguments type");
-        const bytes = Uint8Array.from(wire.security_policy_ActionArgumentsBcs.parse(payload.bcs).bytes);
+      let disclosed: { type: string; bcs: Uint8Array } | undefined;
+      if (!payload && secondPersonSupported()) {
+        try { disclosed = (await client.getDynamicField({ parentId: a.id, name: { type: moveType("security_policy::FactorKey"), bcs: bcs.u8().serialize(0).toBytes() } })).dynamicField.value; }
+        catch (error) { if (!(error instanceof ObjectError && error.reason === "notFound")) throw error; }
+        if (disclosed && normalizeStructTag(disclosed.type) !== normalizeStructTag(moveType("security_policy::FactorConfiguration"))) throw Error("Unexpected disclosed arguments type");
+      }
+      if (payload || disclosed) {
+        if (payload && normalizeStructTag(payload.type) !== normalizeStructTag(moveType("security_policy::ActionArguments"))) throw Error("Unexpected action arguments type");
+        const bytes = Uint8Array.from(payload ? wire.security_policy_ActionArgumentsBcs.parse(payload.bcs).bytes : wire.security_policy_FactorConfigurationBcs.parse(disclosed!.bcs).binding);
         if (securityIntent(customer, bytes).some((v, i) => v !== a.intent[i])) throw Error("Queued action intent mismatch");
         try {
         const args = vectors.parse(bytes);

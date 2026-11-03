@@ -205,9 +205,10 @@ each mechanism ticket retains its own tests and acceptance:
 
 The shared framework is independently useful: it establishes policy authority,
 source/custody boundaries, canonical single-use actions and the settings view.
-It does **not** implement the four mechanisms. The deployed availability mask is
-zero; nonzero activation fails on chain until a child supplies its actual verifier,
-authenticated enrollment, UI and acceptance. Unavailable options are visibly
+The framework baseline did **not** implement the four mechanisms and advertised
+availability zero. SF-199 adds second-person approval (bit 4), informed enrollment,
+console requests and actual effects evidence; other bits remain unavailable until
+their own verifier, authenticated enrollment, UI and acceptance land. Unavailable options are visibly
 disabled. Test-only attestations are not production evidence.
 
 Authority version **197** excludes both legacy version 1 and the already-published
@@ -218,7 +219,7 @@ must not remain authoritative after later factors activate. Existing layouts and
 public signatures remain compatible. Never infer migration from a missing field.
 Coordinate the core/client/producer upgrade before migration; stale producer
 bytecode is deliberately excluded, not automatically migrated. The daemon accepts
-legacy 1/current 197 custody; the console also discovers 196
+legacy 1/current 197 and SF-199-sealed 199 custody; the console also discovers 196
 so it can identify the required migration, without presenting it as current policy.
 
 Every fleet needs a custody seal before nonzero activation. New empty fleets are
@@ -350,12 +351,22 @@ unrun in #32/#159. The child mechanisms and their activation/enrollment UI are
 still their respective tickets; this framework must not be advertised as four
 completed second-factor mechanisms.
 
+SF-199 enrollment uses a disclosed `configure_second_person` action approved by
+a different current administrator before the proposer executes it. It seals the
+customer at authority 199, so old 197 bytecode cannot cancel a new indexed request
+without maintaining its index. The verifier lives in the customer module to fit
+Sui's package-size cap; existing Customer/Action layouts remain unchanged. The new
+`customer::SecondPersonConfiguration` type retains its own introduction origin.
+See [the operator flow](OPERATIONS.md#second-person-approval-sf-199) and
+[actual validation](validation/sf199-second-person.md). All other factor bits must
+be preserved when integrating sibling mechanisms; their combined package must be
+measured and tested rather than assuming independent package-size success composes.
 
 ## SF-200 delay implementation
 
 The historical framework-only availability-zero statement above describes SF-196.
-SF-200 enables bit 8 alongside SF-201 native multisig bit 1. Passkey and
-second-person mechanisms remain unavailable on this source.
+SF-200 enables bit 8 alongside SF-201 native multisig bit 1 and SF-199
+second-person bit 4. Passkey remains unavailable.
 Delay is per class, optional and off by default, from one second to six days.
 The Sui Clock timestamp is immutable queue metadata under the Action UID, without
 changing its published layout. Execution recomputes the exact intent and checks
@@ -376,8 +387,8 @@ and [SF-200 evidence](validation/sf200-delay.md).
 
 ## SF-201 native multisig implementation
 
-SF-201 makes bit 1 available alongside SF-200 delay bit 8; passkey and
-second-person bits retain their fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
+SF-201 makes bit 1 available alongside SF-200 delay bit 8 and SF-199
+second-person bit 4; passkey remains unavailable. `multisig_admin::administrator` implements native Sui address
 derivation for flagged Ed25519, secp256k1, secp256r1 and passkey keys. Enrollment
 requires an already registered administrator sending from that derived native
 multisig address. Its bounded binding is BCS address, vector of flagged public
