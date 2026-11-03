@@ -6,7 +6,7 @@ import { toHex, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
-import { fetchOrganizationSecurity, SECURITY_ACTIONS } from "@/lib/security-policy";
+import { fetchOrganizationSecurity, SECURITY_ACTIONS, SECURITY_FACTORS } from "@/lib/security-policy";
 import { decisionTx, executePolicyTx, fetchRequests, policyValues, secondPersonSupported } from "@/lib/second-person";
 
 export function SecondPersonApprovals() {
@@ -33,7 +33,7 @@ export function SecondPersonApprovals() {
       return <article key={request.id} className="rounded border p-3 space-y-2 break-all"><h3>{request.operation}</h3>
         <p>Request {request.id}. Proposed by {request.proposer}. Expires {new Date(Number(request.expires)).toISOString()}. {stale ? "Stale: propose again." : expired ? "Expired." : request.approved ? "Approved by another credential." : "Awaiting another administrator."}</p>
         {enrollment && <p>Configure second-person approval for this organization. All different current administrators are eligible; policy requirements remain unchanged until saved.</p>}
-        {values && <ul>{values.map((value, i) => <li key={i}>{SECURITY_ACTIONS[i]}: {value & 4 ? "Second-person approval" : "Off"}</li>)}</ul>}
+        {values && <ul>{values.map((value, i) => <li key={i}>{SECURITY_ACTIONS[i]}: {value === 0 ? "Off" : SECURITY_FACTORS.filter(f => (value & f.bit) !== 0).map(f => f.name).join(" + ")}</li>)}</ul>}
         <details><summary>Exact action arguments (hex)</summary>{request.arguments.map((arg, i) => <p key={i}>Argument {i}: {toHex(Uint8Array.from(arg))}</p>)}</details>
         {fleet.administrator && <div className="flex flex-wrap gap-3">
           {!mine && <><button disabled={mutation.isPending || expired || stale || request.approved} onClick={() => act(() => decisionTx(fleet.customerId, request.id, "approve"))}>Approve exact action</button><button disabled={mutation.isPending} onClick={() => act(() => decisionTx(fleet.customerId, request.id, "reject"))}>Reject</button></>}

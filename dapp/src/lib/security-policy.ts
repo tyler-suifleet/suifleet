@@ -14,7 +14,7 @@ export const SECURITY_FACTORS = [
 ] as const;
 // Only implemented verifiers are available; enrollment is checked on chain.
 export const APPROVAL_ORIGINS = ["customer::SecondPersonConfiguration"] as const;
-export const AVAILABLE_SECURITY_FACTORS = 1 | (MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0);
+export const AVAILABLE_SECURITY_FACTORS = 1 | (MANIFEST?.type_origins["passkey_factor::Enrollment"] ? 2 : 0) | (MANIFEST && APPROVAL_ORIGINS.every(t => t in MANIFEST!.type_origins) ? 4 : 0);
 export function securitySupported() { return !!MANIFEST && SECURITY_TYPES.every(t => t in MANIFEST!.type_origins); }
 export interface OrganizationSecurity { generation: bigint; requirements: number[] }
 export function validateSecurityRequirements(values: readonly number[], available = AVAILABLE_SECURITY_FACTORS): number[] {

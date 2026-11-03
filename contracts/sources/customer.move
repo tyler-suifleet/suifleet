@@ -252,7 +252,7 @@ module sui_edge::customer {
     public fun borrow_budget_cap(customer: &Customer, fleet: &mut Fleet, ctx: &mut TxContext): (BudgetOwnerCap, BudgetLoan) {
         assert_admin(customer, ctx);
         // Generic external authority must never inherit an intent-bound grant.
-        if (security_authority(customer)) security_policy::assert_unprotected(&customer.id);
+        if (security_authority(customer)) security_policy::check_capability_loan(&customer.id, ctx);
         assert_fleet(customer, fleet);
         pe(fleet.pending_devices == (SMALL_0 as u64));
         let cap = dof::remove(&mut fleet.id, BudgetKey {});
@@ -919,6 +919,10 @@ module sui_edge::customer {
         assert_security_administrator(customer, ctx);
         security_policy::configure_factor(&mut customer.id, factor, binding, ctx);
         enrollment::invalidate_authority(&mut customer.id);
+    }
+    public(package) fun assert_security_administrator_address(customer: &Customer, administrator: address) {
+        assert!(security_authority(customer) && customer.credentials.contains(&administrator)
+            && *customer.credentials.get(&administrator), EAccess);
     }
     public fun security_factor_configuration(customer: &Customer, factor: u8): vector<u8> {
         pe(security_authority(customer));

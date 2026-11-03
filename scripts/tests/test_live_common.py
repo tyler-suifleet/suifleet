@@ -319,6 +319,32 @@ class ReadThrottleTests(unittest.TestCase):
                 self.assertEqual([call.args[0] for call in sleep.call_args_list], [5, 10, 20, 40])
                 self.assertTrue(all(call == ran.call_args for call in ran.call_args_list))
 
+    def test_package_unsigned_ptb_build_retries_throttle_before_signing(self):
+        command = ["ptb", "--move-call", "0x1::audit::record",
+                   "--gas-budget", "35000000", "--serialize-unsigned-transaction"]
+        success = CompletedProcess([], 0, "unsigned-bytes", "")
+        with patch.object(live_common.subprocess, "run", side_effect=[self.failure, success]) as ran, patch.object(live_common.time, "sleep") as sleep:
+            result = live_package_upgrade.package_client("sui", "wallet.yaml", *command, json_output=False, check=False)
+        self.assertIs(result, success)
+        self.assertEqual(ran.call_count, 2)
+        self.assertEqual(ran.call_args_list[0], ran.call_args_list[1])
+        sleep.assert_called_once_with(5)
+
+    def test_unsigned_ptb_build_stops_at_existing_bound(self):
+        command = ["ptb", "--serialize-unsigned-transaction"]
+        with patch.object(live_common.subprocess, "run", return_value=self.failure) as ran, patch.object(live_common.time, "sleep") as sleep:
+            self.assertIs(live_common.run_client_command(command, command), self.failure)
+        self.assertEqual(ran.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
+
+    def test_unsigned_build_other_errors_are_not_retried(self):
+        command = ["ptb", "--serialize-unsigned-transaction"]
+        failure = CompletedProcess([], 1, "", "incompatible Move call")
+        with patch.object(live_common.subprocess, "run", return_value=failure) as ran, patch.object(live_common.time, "sleep") as sleep:
+            self.assertIs(live_common.run_client_command(command, command), failure)
+        self.assertEqual(ran.call_count, 1)
+        sleep.assert_not_called()
+
     def test_persistent_throttling_fails_at_bound(self):
         client = self.client()
         with patch.object(live_common.subprocess, "run", return_value=self.failure) as ran, patch.object(live_common.time, "sleep") as sleep:
@@ -328,7 +354,7 @@ class ReadThrottleTests(unittest.TestCase):
         self.assertEqual(sleep.call_count, 4)
 
     def test_mutations_and_other_errors_are_never_replayed(self):
-        for command, failure in (("ptb", self.failure), ("serialized-tx", self.failure), ("publish", self.failure), ("faucet", self.failure), ("unknown", self.failure), ("object", CompletedProcess([], 1, "", "not found"))):
+        for command, failure in (("ptb", self.failure), ("execute-signed-tx", self.failure), ("serialized-tx", self.failure), ("publish", self.failure), ("faucet", self.failure), ("unknown", self.failure), ("object", CompletedProcess([], 1, "", "not found"))):
             with self.subTest(command=command, diagnostic=failure.stderr):
                 client = self.client()
                 with patch.object(live_common.subprocess, "run", return_value=failure) as ran, patch.object(live_common.time, "sleep") as sleep:

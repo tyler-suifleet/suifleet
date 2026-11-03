@@ -344,6 +344,30 @@ unrun in #32/#159. The child mechanisms and their activation/enrollment UI are
 still their respective tickets; this framework must not be advertised as four
 completed second-factor mechanisms.
 
+### SF-198 native sponsorship
+
+Implementation awaiting independent source review and required public-testnet
+acceptance in SF-198/#397. The package-size repair and isolated native feature
+effects passed; shared acceptance-cost repair remains in SF-221/#463. This
+section describes the implementation, not completed public acceptance.
+
+SF-198 uses Sui's native verified passkey **gas sponsor** plus the existing
+administrator wallet sender. Both sign the same TransactionData bytes. The
+passkey factor is authenticated from `TxContext::sponsor`, not a transferable
+Action attestation or browser-reported signature type. Its address is
+Blake2b-256(`0x06 || compressed P-256 public key`). Native enrollment transactions
+prove possession before a currently authorized administrator installs the key.
+Bindings use BCS `vector<address>` alternating administrator/passkey addresses;
+all existing factor requirements authorize changes. Empty bindings cannot enable
+protection. Native sponsorship satisfies only bit 2; native multisig approval supplies bit 1.
+Second-person approval supplies bit 4; delay remains unavailable. The transaction signature makes generic
+capability loans safe for passkey-only requirements: all cap uses are covered by
+the exact signed PTB. Intent-based attestations and other requirement bits still
+cannot authorize these generic loans. See the operational enrollment and recovery
+procedure above in [OPERATIONS.md](OPERATIONS.md#optional-passkey-co-signature-sf-198).
+
+### SF-199 independent approval
+
 SF-199 enrollment uses a disclosed `configure_second_person` action approved by
 a different current administrator before the proposer executes it. It seals the
 customer at authority 199, so old 197 bytecode cannot cancel a new indexed request
@@ -357,8 +381,8 @@ measured and tested rather than assuming independent package-size success compos
 
 ## SF-201 native multisig implementation
 
-SF-201 makes bit 1 available alongside SF-199 bit 4; passkey and delay
-retain their fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
+SF-201 makes bit 1 available alongside SF-198 bit 2 and SF-199 bit 4; delay
+retains its fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
 derivation for flagged Ed25519, secp256k1, secp256r1 and passkey keys. Enrollment
 requires an already registered administrator sending from that derived native
 multisig address. Its bounded binding is BCS address, vector of flagged public
