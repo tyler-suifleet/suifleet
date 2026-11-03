@@ -1551,3 +1551,43 @@ dependency, lease, provider-backoff and competing-repair fences before launch.
 The dispatcher supervises the original claim and branch. Successful or
 unreconciled results cannot use this route. Install only a reviewed merged
 runtime containing the repair before invoking the new flag.
+
+### Funding preflight recovery after the shared owner completes (SF-234)
+
+A completed shared repair owner does not resolve a later funding incident. With
+`shared_acceptance_repair` configured, the sole coordinator can authorize a fresh
+singleton candidate after a one-hour cooling period. It uses the existing
+`max_attempts` bound (1..5, default 3) per unchanged source selection and main
+base. This is an additive authorization in `batch_funding_recoveries`, retaining
+the original failed batch, manifest, check snapshot and authenticated effects
+receipt. No claim, failed row, retry counter or encrypted fixture is reset.
+
+The original candidate must still be closed at its exact branch/head/base with
+exactly the recorded funding checks. Its run must be a completed failed
+Automatic testnet workflow in the same repository. The coordinator downloads the
+head-named effects artifact from that run and accepts only a single
+`package-upgrade.json` proving testnet chain `4c78adac`, zero submitted
+transactions, zero allowance used, no held uncertain reservation, and one
+successful faucet credit leaving a real reserve shortfall. Missing, ambiguous,
+changed, spent or uncertain evidence requires investigation. Historical cache
+and transaction evidence remains untouched. Review ownership, source receipts,
+feedback, dependencies and stopped process/helper fences are rechecked; active
+or uncertain candidate/source jobs prevent recovery.
+
+A fresh candidate follows normal collection, protected CI wallet serialization,
+unchanged pool selection, one faucet request per run, non-replenishing allowances,
+full reserve checks and independent exact-candidate review. Recovery never
+selects another account to find funds, raises a ceiling, reopens a stale PR,
+reruns a failed mutation or treats funding evidence as acceptance. Additional
+faucet credits can close the measured shortfall over bounded runs; insufficient
+funding still fails before setup. Each later failure requires its own receipt
+and cooling period. `funding_wait` includes an absolute next-check time and the
+resume condition. Exhausting the configured bound reports a block: the operator
+must verify the dedicated balance against the unchanged suite reserve and
+arrange an explicit reviewed recovery, rather than clear the failure fence or
+repeat runs forever. A changed main base uses normal fresh collection.
+
+Install this route only through the existing merged-only installer and record
+installed revision/readiness and the next coordinator check after installation.
+Keep batch mode enabled; this route needs no temporary suspension. Local tests
+do not establish installed behavior or public-testnet success.
