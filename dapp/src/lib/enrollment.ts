@@ -611,7 +611,7 @@ export function buildClaimsTx(policyId: string, register: string[], fund: { clai
     else calls.enrollment_add_claims(tx, PACKAGE_ID, policyId, register);
   }
   if (fund.length) {
-    const funding = tx.add(coinWithBalance({ balance: fund.reduce((total, f) => total + f.mist, BigInt(0)), useGasCoin: false }));
+    const funding = tx.add(coinWithBalance({ balance: fund.reduce((total, f) => total + f.mist, BigInt(0)) }));
     const coins = tx.splitCoins(funding, fund.map((f) => tx.pure.u64(f.mist)));
     fund.forEach((f, i) => tx.transferObjects([coins[i]], tx.pure.address(f.claim)));
   }

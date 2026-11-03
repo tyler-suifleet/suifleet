@@ -108,6 +108,21 @@ export function approvalDecisionsOnly(transaction: Transaction) {
   });
 }
 
+// Keep SDK gas-backed intents for wallet-paid transactions. At the sponsorship
+// boundary, copy the PTB and select sender-owned SUI for application funding.
+// Direct GasCoin arguments cannot be safely rewritten and remain refused.
+export function withSponsorFunding(transaction: Transaction): Transaction {
+  const data = transaction.getData();
+  for (const command of data.commands) {
+    if (command.$Intent?.name === 'CoinWithBalance' && command.$Intent.data.type === 'gas') {
+      command.$Intent.data.type = normalizeSuiAddress('0x2') + '::sui::SUI';
+    }
+  }
+  const sponsored = Transaction.from(JSON.stringify(data, (_key, value) => typeof value === 'bigint' ? String(value) : value));
+  assertSponsorSafe(sponsored);
+  return sponsored;
+}
+
 // Sponsorship changes tx.gas ownership. Never let application value come from
 // the passkey's payment coin, including unresolved SDK gas-balance intents.
 export function assertSponsorSafe(transaction: Transaction) {

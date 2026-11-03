@@ -44,8 +44,8 @@ Object.defineProperty(global,'navigator',{configurable:true,value:{credentials:{
   budget.buildCreateBudgetTx(123n,budget.DEFAULT_LIMITS,1n,A),
   load('lib/enrollment.ts').buildClaimsTx(C,[],[{claim:A,mist:123n}]),
   load('lib/retention.ts').buildFundRetentionTx({packageId:m.call_package_id,walrus:{walType:'0x2::wal::WAL'}},C,1n,123n),
- ]) p.assertSponsorSafe(tx);
- const deposit=budget.buildDepositTx(C,A,123n);
+ ]) p.assertSponsorSafe(p.withSponsorFunding(tx));
+ const deposit=p.withSponsorFunding(budget.buildDepositTx(C,A,123n));
  deposit.setSender(A);deposit.setGasOwner(sponsor);
  p.assertSponsorSafe(deposit);
  const owners=[];
@@ -56,9 +56,50 @@ Object.defineProperty(global,'navigator',{configurable:true,value:{credentials:{
  assert(owners.length>0);assert(owners.every(owner=>owner===A));
  p.assertSponsorSafe(deposit);
  assert(deposit.getData().inputs.some(i=>i.Object?.ImmOrOwnedObject?.objectId.endsWith('0123')));
+ // Full SDK build includes gas selection, which intent-only serialization
+ // misses. Zero address balance must work with one or several wallet coins.
+ const {coreClientResolveTransactionPlugin}=await import(require('node:path').resolve('dapp/node_modules/@mysten/sui/dist/client/core-resolver.mjs'));
+ for (const count of [1,3]) for (const sponsored of [false,true]) {
+  const queries=[];
+  const coins=Array.from({length:count},(_,i)=>({objectId:'0x'+(0x123+i).toString(16).padStart(64,'0'),version:'1',digest:'11111111111111111111111111111111',balance:'10000000000'}));
+  const sponsorCoin={...coins[0],objectId:'0x'+'999'.padStart(64,'0')};
+  const client={core:{
+   resolveTransactionPlugin:()=>coreClientResolveTransactionPlugin,
+   getCurrentSystemState:async()=>({systemState:{referenceGasPrice:'1000',epoch:'1'}}),
+   getChainIdentifier:async()=>({chainIdentifier:'4c78adac'}),
+   getBalance:async({owner})=>{queries.push(['balance',owner]);return {balance:{addressBalance:'0',balance:'30000000000',coinBalance:'30000000000'}};},
+   listCoins:async({owner})=>{queries.push(['coins',owner]);return {objects:owner===sponsor?[sponsorCoin]:coins,hasNextPage:false};},
+   getObjects:async({objectIds})=>({objects:objectIds.map(objectId=>({objectId,version:'1',digest:coins[0].digest,owner:{$kind:'Shared',Shared:{initialSharedVersion:'1'}},type:'0x2::x::Y'}))}),
+   getMoveFunction:async()=>({function:{parameters:[
+    {reference:'mutable',body:{$kind:'datatype',datatype:{typeName:'0x2::x::Y',typeParameters:[]}}},
+    {reference:'immutable',body:{$kind:'datatype',datatype:{typeName:'0x2::x::Z',typeParameters:[]}}},
+    {reference:null,body:{$kind:'datatype',datatype:{typeName:'0x2::coin::Coin',typeParameters:[]}}},
+   ]}}),
+  }};
+  const original=budget.buildDepositTx(C,C,1000000n);
+  const tx=sponsored?p.withSponsorFunding(original):original;
+  // Conversion must not alter the caller's wallet-paid transaction.
+  assert.equal(original.getData().commands[0].$Intent.data.type,'gas');
+  tx.setSender(A);if(sponsored)tx.setGasOwner(sponsor);
+  tx.setGasBudget(10000000);tx.setGasPrice(1000);
+  await tx.build({client});
+  const data=tx.getData();
+  assert.deepEqual(data.gasData.payment.map(c=>c.objectId),sponsored?[sponsorCoin.objectId]:coins.map(c=>c.objectId));
+  if(sponsored){
+   p.assertSponsorSafe(tx);
+   assert(data.inputs.some(i=>i.Object?.ImmOrOwnedObject?.objectId===coins[0].objectId));
+   assert(!data.inputs.some(i=>i.Object?.ImmOrOwnedObject?.objectId===sponsorCoin.objectId));
+   assert(queries.some(([kind,owner])=>kind==='coins'&&owner===A));
+  } else {
+   assert(data.commands.some(c=>c.SplitCoins?.coin.GasCoin));
+   assert(!data.inputs.some(i=>i.Object?.ImmOrOwnedObject));
+   assert(queries.every(([,owner])=>owner===A));
+  }
+ }
  const unsafe=new Transaction();
  unsafe.splitCoins(unsafe.gas,[unsafe.pure.u64(123)]);
  assert.throws(()=>p.assertSponsorSafe(unsafe),/wallet-owned funding coins/);
+ assert.throws(()=>p.withSponsorFunding(unsafe),/wallet-owned funding coins/);
  const intent=new Transaction();
  intent.add(appRequire('@mysten/sui/transactions').coinWithBalance({balance:123n}));
  assert.throws(()=>p.assertSponsorSafe(intent),/wallet-owned funding coins/);

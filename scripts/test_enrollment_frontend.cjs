@@ -198,8 +198,8 @@ const commands = (tx) => tx.getData().commands;
   const steps = e.plan(many, e.entryStatuses(many, pSnap), pSnap);
   assert.deepEqual(steps.map((s) => [s.kind, s.entries.length]), [["claims", 250], ["claims", 250], ["claims", 100]]);
   const first = commands(steps[0].build());
-  assert.equal(first.length, 253); // Includes sender-owned funding intent.
-  assert.equal(first[1].$Intent.data.type.endsWith("::sui::SUI"), true);
+  assert.equal(first.length, 253); // Includes wallet gas-backed funding intent.
+  assert.equal(first[1].$Intent.data.type, "gas");
   assert.equal(first[2].SplitCoins.coin.$kind, "Result");
   assert.ok(first.length <= 1024);
   const added = first[0].MoveCall;
