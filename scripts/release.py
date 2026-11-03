@@ -34,7 +34,7 @@ import tempfile
 
 # Supported release targets and their pinned cross linkers (docker/release.Dockerfile).
 # i686 is 32-bit Linux x86 (SF-076, docs/LINUX_X86.md).
-LINKERS = {"aarch64-unknown-linux-gnu": "aarch64-linux-gnu-gcc", "i686-unknown-linux-gnu": "i686-linux-gnu-gcc"}
+LINKERS = {"x86_64-unknown-linux-gnu": "gcc", "aarch64-unknown-linux-gnu": "aarch64-linux-gnu-gcc", "i686-unknown-linux-gnu": "i686-linux-gnu-gcc"}
 TARGET = "aarch64-unknown-linux-gnu"
 NAMESPACE = "https://github.com/tyler-suifleet/suifleet/releases"
 
@@ -146,8 +146,17 @@ def container_build(args):
         "cargo_lock_sha256": sha256(edge / "Cargo.lock"),
         "builder_image": os.environ.get("RELEASE_BUILDER_IMAGE", "unknown"),
         "binary_sha256": sha256(binary),
+        "dpkg_deb": run("dpkg-deb", "--version", capture=True).splitlines()[0],
         "source": "git archive of the commit; no working-tree files",
     })
+    artifacts = [tarball, sbom, provenance]
+    if TARGET in ("x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"):
+        from build_deb import build as build_deb
+        architecture = {"x86_64-unknown-linux-gnu": "amd64", "aarch64-unknown-linux-gnu": "arm64"}[TARGET]
+        deb = build_deb(binary, out, f"{version}-1+git{commit[:12]}", architecture, epoch)
+        checksum = out / (deb.name + ".sha256")
+        checksum.write_text(sha256(deb) + "  " + deb.name + "\n")
+        artifacts += [deb, checksum]
     write_json(out / "release.json", {
         "schema": 1,
         "name": "suifleet",
@@ -155,7 +164,7 @@ def container_build(args):
         "commit": commit,
         "target": TARGET,
         "files": [{"path": p.name, "sha256": sha256(p), "size": p.stat().st_size}
-                  for p in (tarball, sbom, provenance)],
+                  for p in artifacts],
     })
 
 

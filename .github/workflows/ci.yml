@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      - name: Offline Debian package builder tests
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_deb_packaging.py -v
+
       - name: Offline security gate tests
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_security_audit.py -v
 
