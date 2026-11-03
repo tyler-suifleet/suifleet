@@ -324,6 +324,8 @@ def run(args):
             daemon.wait(timeout=60)
             daemon = None
             live.evidence["receipts"] = {"d0": {dm.object_id(device): 1}, "d2": {dm.object_id(device): 1}}
+            from live_passkey_factor import cached_acceptance
+            cached_acceptance(live, state_path)
             passed = True
         finally:
             if daemon:

@@ -1,0 +1,105 @@
+{
+  "run": "https://github.com/tyler-suifleet/suifleet/actions/runs/41383243081",
+  "artifact_id": 13114533516,
+  "head": "059dafaa7ac4f65a69bfb1ad07b59c244397966b",
+  "chain": "4c78adac",
+  "operator": "0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec",
+  "package_allowance_used_mist": 121060916,
+  "security_allowance_used_mist": 1167696523,
+  "native_transactions": [
+    {
+      "label": "create cached passkey organization",
+      "gas_budget_mist": 100000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Con56SBj99fD3ASyuimbM6HWDCM8Wzex2dgKVnnoGg6E",
+      "gas_mist": 23610178,
+      "allowance_used_mist": 1071749136
+    },
+    {
+      "label": "initialize cached passkey authority",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "CsseFXNCPfUknQJLibHbkPpHbmyo2BCdLz4sxohFcdrC",
+      "gas_mist": 1000296,
+      "allowance_used_mist": 1072749432
+    },
+    {
+      "label": "fund passkey 0",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 30000000,
+      "status": "success",
+      "digest": "9PeSBE9V2rfTktKavpsmRMDord62gkqrnCfCFfPWiMMc",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 1104737432
+    },
+    {
+      "label": "native possession proof 0",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "FryDzXyz2JVW4k7EacXoigWTEiEXWdmMfAbL8MFscK3U",
+      "gas_mist": 3226899,
+      "allowance_used_mist": 1107964331
+    },
+    {
+      "label": "wallet enrolls passkey 0",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "Cqc46E8DXEcyPRXg8mmdrvt85ekq5ieYTqMNq7J1DqQ1",
+      "gas_mist": 3516361,
+      "allowance_used_mist": 1111480692
+    },
+    {
+      "label": "fund passkey 1",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 30000000,
+      "status": "success",
+      "digest": "EFMwEGE2YjL82a6cdep8QDsKJq7morUKv8rHX1BGfLLK",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 1143468692
+    },
+    {
+      "label": "native possession proof 1",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "2FBrfHdNqcRTtLrjBBXEAaXjvBBn7pg312RHJaVMzufy",
+      "gas_mist": 3226899,
+      "allowance_used_mist": 1146695591
+    },
+    {
+      "label": "wallet enrolls passkey 1",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "BfdWoThnzxZRPAf4vTAGUMphxm8zJqWEDMWz6qE1kw1X",
+      "gas_mist": 0,
+      "allowance_used_mist": 1146695591
+    },
+    {
+      "label": "enable native passkey protection",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "unknown",
+      "allowance_used_mist": 1166695591
+    }
+  ],
+  "limits": "Historical artifact effects, not a new native public-testnet acceptance. Policy preparation stderr was not exposed by CalledProcessError; unknown reservation preserved. Independently fetched funding/enrollment/sweep effects only.",
+  "read_only_differential": {
+    "budget_mist": 30000000,
+    "coin_balance_mist": 28241408,
+    "address_balance_mist": 2985633898,
+    "total_balance_mist": 3013875306,
+    "old_builder": {
+      "exit": 1,
+      "sanitized_stderr": "fixture gas coin unavailable"
+    },
+    "repaired_builder": {
+      "exit": 0
+    },
+    "limits": "Current public read-only state; budget 30M reproduces missing sufficient coin, not original 20M historical stderr. No policy transaction signed or submitted."
+  }
+}
