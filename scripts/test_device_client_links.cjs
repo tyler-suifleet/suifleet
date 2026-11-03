@@ -1,7 +1,6 @@
-// SF-169: the console's "Install the device client" links resolve to repository
-// documentation, the guide's own links resolve, the commands shown in-app exist
+// The console links resolve to rendered public documentation; commands shown in-app exist
 // in the daemon, and Get started, Devices and Enrollment all show the help.
-// Offline by default; --online also fetches every console URL (after merge to main).
+// Offline by default; --online checks served pages and anchors after publication.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -12,56 +11,29 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 const client = loader()('lib/device-client.ts');
 const { DOCS_BASE, GUIDE_FILE, GUIDE_SECTIONS, COMMANDS, ADDRESS_LINE, PLATFORMS, guideUrl } = client;
 
-// GitHub heading anchors: lowercase, drop punctuation, spaces to hyphens, numbered duplicates.
-function anchors(markdown) {
-  const seen = new Map(), result = new Set();
-  let fence = false;
-  for (const line of markdown.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) { fence = !fence; continue; }
-    const heading = !fence && /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
-    if (!heading) continue;
-    const base = heading[1].replace(/`/g, '').toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').trim().replace(/\s/g, '-');
-    const count = seen.get(base) ?? 0;
-    seen.set(base, count + 1);
-    result.add(count ? `${base}-${count}` : base);
-  }
-  return result;
-}
-assert.deepEqual([...anchors('# A (b.c)\n```\n# not\n```\n## A (b.c)\n## `x` y')], ['a-bc', 'a-bc-1', 'x-y']);
-
-// 1. Every console URL names an existing repository doc and heading.
-const repository = 'https://github.com/tyler-suifleet/suifleet/blob/main/';
-assert.ok(DOCS_BASE.startsWith(repository), DOCS_BASE);
+// Public slugs are curated independently of source filenames. The docs Python
+// regression checks these sections against actual rendered HTML.
+const pages = JSON.parse(read('site/docs/pages.json')).pages;
+const page = pages.find((page) => `${page.slug}/` === GUIDE_FILE);
+assert.equal(page?.source, 'docs/INSTALL_DEVICE_CLIENT.md');
 const docPath = (url) => {
-  assert.ok(url.startsWith(repository), `${url} is not repository documentation`);
-  const [file, anchor] = url.slice(repository.length).split('#');
-  assert.ok(fs.existsSync(path.join(root, file)), `${url}: ${file} does not exist`);
-  if (anchor) assert.ok(anchors(read(file)).has(anchor), `${url}: no heading #${anchor} in ${file}`);
+  assert.ok(url.startsWith(DOCS_BASE), `${url}: not the configured public docs root`);
+  const [file, anchor] = url.slice(DOCS_BASE.length).split('#');
+  assert.equal(file, GUIDE_FILE);
+  if (anchor) assert.ok(Object.values(GUIDE_SECTIONS).includes(anchor), url);
   return file;
 };
 const urls = [guideUrl(), ...Object.keys(GUIDE_SECTIONS).map((section) => guideUrl(section))];
-for (const url of urls) assert.equal(docPath(url), `docs/${GUIDE_FILE}`);
+for (const url of urls) docPath(url);
 for (const platform of PLATFORMS) assert.ok(Object.hasOwn(GUIDE_SECTIONS, platform.section));
-for (const section of ['yocto', 'macos', 'linux', 'address', 'manifest', 'signer', 'config', 'enroll']) assert.ok(Object.hasOwn(GUIDE_SECTIONS, section), section);
-console.log(`PASS: ${urls.length} console guide links resolve to repository docs and headings`);
+const previous = process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE;
+process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE = 'https://customer.example/help';
+assert.equal(loader()('lib/device-client.ts').guideUrl('debian'), 'https://customer.example/help/device-client/#debian-and-ubuntu');
+if (previous === undefined) delete process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE;
+else process.env.NEXT_PUBLIC_DEVICE_DOCS_BASE = previous;
+console.log(`PASS: ${urls.length} console links resolve to curated public docs; custom docs roots supported`);
 
-// 2. The guide's own relative links and anchors resolve.
-const guidePath = `docs/${GUIDE_FILE}`, guide = read(guidePath);
-let checked = 0;
-for (const [, target] of guide.matchAll(/\]\(([^)\s]+)\)/g)) {
-  if (/^https?:/.test(target)) {
-    assert.match(target, /^https:\/\/github\.com\/tyler-suifleet\/suifleet\/issues\/\d+$/, `unexpected external link ${target}`);
-    continue;
-  }
-  const [file, anchor] = target.split('#');
-  const resolved = file ? path.relative(root, path.resolve(root, 'docs', file)) : guidePath;
-  assert.ok(fs.existsSync(path.join(root, resolved)), `${guidePath}: ${target} does not exist`);
-  if (anchor) assert.ok(anchors(read(resolved)).has(anchor), `${guidePath}: no heading #${anchor} in ${resolved}`);
-  checked++;
-}
-assert.ok(checked >= 15, `only ${checked} relative links checked`);
-console.log(`PASS: ${checked} relative links and anchors inside the guide resolve`);
-
+const guidePath = 'docs/INSTALL_DEVICE_CLIENT.md', guide = read(guidePath);
 // 3. Commands and the printed address line match the client and its installers.
 const usage = /"usage: suifleet \[([^"]+)\]"/.exec(read('suifleet-edge/src/linux_main.rs'));
 assert.ok(usage, 'daemon usage string not found');
@@ -109,7 +81,7 @@ for (const variant of ['address', 'enroll']) {
   const html = decode(render(manifest, variant));
   const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((match) => match[1]);
   assert.ok(hrefs.includes(guideUrl()), `${variant}: no guide link`);
-  for (const section of ['yocto', 'macos', 'linux', 'manifest']) assert.ok(hrefs.includes(guideUrl(section)), `${variant}: no ${section} link`);
+  for (const section of ['yocto', 'macos', 'linux', 'debian', 'manifest']) assert.ok(hrefs.includes(guideUrl(section)), `${variant}: no ${section} link`);
   for (const href of hrefs) docPath(href);
   assert.ok(html.includes('Install the device client'));
   assert.ok(html.includes('Download deployment.json'));
@@ -130,7 +102,11 @@ async function online() {
   for (const url of new Set(urls.map((url) => url.split('#')[0]))) {
     const response = await fetch(url, { method: 'GET', redirect: 'follow' });
     assert.equal(response.status, 200, `${url}: HTTP ${response.status}`);
+    const html = await response.text();
+    for (const anchor of Object.values(GUIDE_SECTIONS)) {
+      assert.ok(html.includes(`id="${anchor}"`), `${url}: missing served anchor ${anchor}`);
+    }
   }
-  console.log('PASS: published guide URLs return HTTP 200');
+  console.log('PASS: published guide URLs return HTTP 200 with all app-linked anchors');
 }
 if (process.argv.includes('--online')) online().catch((error) => { console.error(error); process.exit(1); });

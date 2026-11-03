@@ -176,6 +176,40 @@ class TrustTests(unittest.TestCase):
             ledger.execute(refused, 'retry', ['ptb'], gas=PACKAGE_TRANSACTION_GAS, require_full=True)
         refused.assert_not_called()
 
+    def test_sf196_fresh_pair_exceeded_former_ceiling_and_cached_reuse_fits(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Settled effects from run 41368161262 (base 02bca2dd, after SF-196):
+        # under the former 1.6 SUI limit the fresh pair left 22,765,718 MIST, so
+        # the device top-up (10M gas + 30M funding) was refused before signing.
+        setup = (772_926_000, 8_425_378, 1_243_578, 785_902_163, 8_737_163)
+        self.assertEqual(sum(setup), 1_577_234_282)
+        fresh = Budget(1_600_000_000, [])  # Retain the historical refusal proof.
+        fresh.grant(sum(setup))
+        refused = Mock()
+        with self.assertRaises(Spent):
+            fresh.execute(refused, 'top up device gas', ['ptb'], gas=10_000_000,
+                          funding=30_000_000, require_full=True)
+        refused.assert_not_called()
+        # The user-authorized allowance admits that top-up after the same pair.
+        current = Budget(PACKAGE_UPGRADE_CEILING, [])
+        current.grant(sum(setup))
+        self.assertGreaterEqual(current.remaining, 120_073_015 + PACKAGE_TRANSACTION_GAS)
+        # That fixture was cached before the top-up, so a later run with the same
+        # bytecode pair reuses it: the rest of the gate (reservations and settled
+        # costs from run 41359600334) fits even the former allowance, with headroom
+        # for a final unknown full PTB reservation.
+        reused = Budget(1_600_000_000, [])
+        steps = ((10_000_000, 30_000_000, 1_000_099), (PACKAGE_TRANSACTION_GAS, 0, 9_588_562),
+                 (PACKAGE_TRANSACTION_GAS, 0, 42_002_565), (PACKAGE_TRANSACTION_GAS, 0, 13_494_400),
+                 (20_000_000, 0, 19_718_800), (20_000_000, 0, 4_268_589))
+        for gas, funding, cost in steps:
+            def submit(*args, cost=cost):
+                return dict(digest='offline', effects=dict(status=dict(status='success'),
+                    gasUsed=dict(computationCost=str(cost), storageCost='0', storageRebate='0')))
+            reused.execute(submit, 'step', ['ptb'], gas=gas, funding=funding, require_full=True)
+        self.assertEqual(reused.used, 120_073_015)
+        self.assertGreater(reused.remaining, 1_000_000_000 + PACKAGE_TRANSACTION_GAS)
+
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
         self.assertEqual(transaction_gas_budget(40_000_000), 40_000_000)

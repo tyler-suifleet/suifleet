@@ -35,7 +35,12 @@ class Overlap(unittest.TestCase):
         f = self.fixture(); f.tick(); first = f.row(); f.tick(); second = f.row()
         f.green(); f.approve(); f.tick()
         self.assertEqual(f.git('rev-parse', 'main', cwd=f.remote), second['head'])
-        self.assertEqual(f.reconciled, [2])
+        # Candidate creation order is independent of source member numbering.
+        expected = [member['pr'] for member in json.loads(second['members'])]
+        self.assertTrue(expected)
+        self.assertTrue(set(expected).isdisjoint(
+            member['pr'] for member in json.loads(first['members'])))
+        self.assertEqual(f.reconciled, expected)
         self.assertNotEqual(first['head'], second['head'])
         f.tick()
         stale = next(r for r in f.controller.rows(f.project) if r['id'] == first['id'])

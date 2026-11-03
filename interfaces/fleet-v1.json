@@ -664,6 +664,18 @@
           ],
           "returns": []
         },
+        "approve_action": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
         "assert_admin": {
           "visibility": "Public",
           "entry": false,
@@ -847,6 +859,17 @@
             "sui_edge::customer::BudgetLoan"
           ]
         },
+        "cancel_disclosed_security_action": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "sui_edge::security_policy::Action",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
         "cancel_security_action": {
           "visibility": "Public",
           "entry": false,
@@ -867,6 +890,32 @@
             "&sui_edge::customer::Fleet",
             "&mut sui_edge::deployment_manager::DeploymentRecord",
             "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "clear_recurring_window": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "clear_recurring_window_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
             "&mut sui::tx_context::TxContext"
           ],
           "returns": []
@@ -966,6 +1015,42 @@
             "u64",
             "u64",
             "bool",
+            "sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "configure_second_person": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "configure_security_delays": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "vector<u64>",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "configure_security_delays_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "vector<u64>",
             "sui_edge::security_policy::Action",
             "&sui::clock::Clock",
             "&mut sui::tx_context::TxContext"
@@ -1542,6 +1627,17 @@
             "u64"
           ]
         },
+        "pending_security_actions": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "vector<sui::object::ID>"
+          ]
+        },
         "policy_account": {
           "visibility": "Public",
           "entry": false,
@@ -1647,6 +1743,19 @@
           ],
           "returns": []
         },
+        "propose_approval": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "vector<u8>",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
         "publish_version": {
           "visibility": "Public",
           "entry": false,
@@ -1682,6 +1791,19 @@
             "vector<std::string::String>",
             "&sui::clock::Clock",
             "sui_edge::security_policy::Action",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "queue_security_action": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "vector<u8>",
+            "u64",
+            "&sui::clock::Clock",
             "&mut sui::tx_context::TxContext"
           ],
           "returns": []
@@ -1773,6 +1895,17 @@
             "u64",
             "u64",
             "&sui::clock::Clock",
+            "sui_edge::security_policy::Action",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "reject_action": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
             "sui_edge::security_policy::Action",
             "&mut sui::tx_context::TxContext"
           ],
@@ -2323,6 +2456,40 @@
           ],
           "returns": []
         },
+        "set_recurring_window": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "std::string::String",
+            "vector<u8>",
+            "vector<u16>",
+            "vector<u16>",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_recurring_window_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::customer::Fleet",
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "std::string::String",
+            "vector<u8>",
+            "vector<u16>",
+            "vector<u16>",
+            "sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
         "set_security": {
           "visibility": "Public",
           "entry": false,
@@ -2383,163 +2550,6 @@
             "u64",
             "address",
             "&sui::clock::Clock",
-            "sui_edge::security_policy::Action",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "add_many_to_group": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&mut sui_edge::customer::Fleet",
-            "&mut sui_edge::device_group::DeviceGroup",
-            "&sui_edge::device_registry::DeviceRegistry",
-            "vector<sui::object::ID>",
-            "std::option::Option<std::string::String>",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "clear_decision_audit": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&sui_edge::customer::Fleet",
-            "&mut sui_edge::deployment_manager::DeploymentRecord",
-            "u64",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "max_group_batch": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [],
-          "returns": [
-            "u64"
-          ]
-        },
-        "remove_many_from_group": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&mut sui_edge::customer::Fleet",
-            "&mut sui_edge::device_group::DeviceGroup",
-            "vector<sui::object::ID>",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "configure_security_delays": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<u64>",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "configure_security_delays_secured": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<u64>",
-            "sui_edge::security_policy::Action",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "queue_security_action": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "vector<u8>",
-            "u64",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "approve_action": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&mut sui_edge::security_policy::Action",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "cancel_disclosed_security_action": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "sui_edge::security_policy::Action",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "configure_second_person": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "sui_edge::security_policy::Action",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "pending_security_actions": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer"
-          ],
-          "returns": [
-            "vector<sui::object::ID>"
-          ]
-        },
-        "propose_approval": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<u8>",
-            "u64",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "reject_action": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
             "sui_edge::security_policy::Action",
             "&mut sui::tx_context::TxContext"
           ],
@@ -2974,31 +2984,6 @@
             ]
           ]
         },
-        "GroupBatchApplied": {
-          "abilities": [
-            "Copy",
-            "Drop"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "fleet_id",
-              "sui::object::ID"
-            ],
-            [
-              "group_id",
-              "sui::object::ID"
-            ],
-            [
-              "added",
-              "bool"
-            ],
-            [
-              "count",
-              "u64"
-            ]
-          ]
-        },
         "SecondPersonConfiguration": {
           "abilities": [
             "Copy",
@@ -3093,6 +3078,16 @@
           "parameters": [
             "&mut sui_edge::deployment_manager::DeploymentRecord",
             "u64",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "clear_recurring_window": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
             "&mut sui::tx_context::TxContext"
           ],
           "returns": []
@@ -3450,6 +3445,32 @@
             "&std::string::String"
           ]
         },
+        "recurring_window": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::DeploymentRecord"
+          ],
+          "returns": [
+            "std::option::Option<sui_edge::deployment_manager::RecurringWindow>"
+          ]
+        },
+        "recurring_window_fields": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::deployment_manager::RecurringWindow"
+          ],
+          "returns": [
+            "u64",
+            "std::string::String",
+            "vector<u8>",
+            "vector<u16>",
+            "vector<u16>"
+          ]
+        },
         "report_rollout_health": {
           "visibility": "Public",
           "entry": false,
@@ -3642,6 +3663,20 @@
             "u64",
             "u64",
             "&sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "set_recurring_window": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::deployment_manager::DeploymentRecord",
+            "std::string::String",
+            "vector<u8>",
+            "vector<u16>",
+            "vector<u16>",
+            "&mut sui::tx_context::TxContext"
           ],
           "returns": []
         },
@@ -4185,6 +4220,42 @@
             ]
           ]
         },
+        "RecurringWindow": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "revision",
+              "u64"
+            ],
+            [
+              "timezone",
+              "std::string::String"
+            ],
+            [
+              "slots",
+              "vector<sui_edge::deployment_manager::WeeklySlot>"
+            ]
+          ]
+        },
+        "RecurringWindowKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
         "Rollout": {
           "abilities": [
             "Copy",
@@ -4443,6 +4514,28 @@
             [
               "dummy_field",
               "bool"
+            ]
+          ]
+        },
+        "WeeklySlot": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "days",
+              "u8"
+            ],
+            [
+              "start_minute",
+              "u16"
+            ],
+            [
+              "duration_minutes",
+              "u16"
             ]
           ]
         }
@@ -7782,6 +7875,80 @@
         }
       }
     },
+    "multisig_admin": {
+      "functions": {
+        "administrator": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&vector<vector<u8>>",
+            "&vector<u8>",
+            "u16"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "approve": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "&mut sui_edge::security_policy::Action",
+            "vector<vector<u8>>",
+            "vector<u8>",
+            "u16",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enroll": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "vector<vector<u8>>",
+            "vector<u8>",
+            "u16",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "enroll_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "vector<vector<u8>>",
+            "vector<u8>",
+            "u16",
+            "sui_edge::security_policy::Action",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "prepare_policy_change": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "vector<u8>",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {}
+    },
     "passkey_factor": {
       "functions": {
         "enroll": {
@@ -9006,80 +9173,6 @@
           ]
         }
       }
-    },
-    "multisig_admin": {
-      "functions": {
-        "administrator": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&vector<vector<u8>>",
-            "&vector<u8>",
-            "u16"
-          ],
-          "returns": [
-            "address"
-          ]
-        },
-        "approve": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "&mut sui_edge::security_policy::Action",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "enroll": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "enroll_secured": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&mut sui_edge::customer::Customer",
-            "vector<vector<u8>>",
-            "vector<u8>",
-            "u16",
-            "sui_edge::security_policy::Action",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        },
-        "prepare_policy_change": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::customer::Customer",
-            "vector<u8>",
-            "u64",
-            "&sui::clock::Clock",
-            "&mut sui::tx_context::TxContext"
-          ],
-          "returns": []
-        }
-      },
-      "structs": {}
     }
   },
   "required_type_origins": [
@@ -9132,43 +9225,6 @@
       "component_catalog::CatalogBindingKey",
       "component_catalog::CatalogBinding"
     ],
-    "fleet_handover": [
-      "fleet_handover::Handover"
-    ],
-    "seal_policy": [
-      "seal_policy::AccessPolicy",
-      "seal_policy::AccessAdminCap",
-      "seal_policy::PolicyCreated",
-      "seal_policy::AccessChanged",
-      "seal_policy::KeyEpochRotated",
-      "seal_policy::PolicyMigrated"
-    ],
-    "fleet_budget": [
-      "fleet_budget::FleetBudget",
-      "fleet_budget::BudgetOwnerCap",
-      "fleet_budget::Limits",
-      "fleet_budget::DeviceKey",
-      "fleet_budget::GasAccount",
-      "fleet_budget::BudgetCreated",
-      "fleet_budget::Deposited",
-      "fleet_budget::Withdrawn",
-      "fleet_budget::DeviceFunded",
-      "fleet_budget::ReserveChanged",
-      "fleet_budget::GasDrawn",
-      "fleet_budget::BudgetLow",
-      "fleet_budget::DeviceStateChanged",
-      "fleet_budget::BudgetPaused",
-      "fleet_budget::BudgetConfigured"
-    ],
-    "rollout_health": [
-      "deployment_manager::RolloutHealthKey",
-      "deployment_manager::RolloutHealth"
-    ],
-    "fleet_settings": [
-      "fleet_settings::SettingsKey",
-      "fleet_settings::Settings",
-      "fleet_settings::FleetSettingsChanged"
-    ],
     "customer": [
       "customer::Customer",
       "customer::Fleet",
@@ -9187,6 +9243,26 @@
       "customer::PolicyKey",
       "deployment_manager::CustomerFleetKey"
     ],
+    "fleet_budget": [
+      "fleet_budget::FleetBudget",
+      "fleet_budget::BudgetOwnerCap",
+      "fleet_budget::Limits",
+      "fleet_budget::DeviceKey",
+      "fleet_budget::GasAccount",
+      "fleet_budget::BudgetCreated",
+      "fleet_budget::Deposited",
+      "fleet_budget::Withdrawn",
+      "fleet_budget::DeviceFunded",
+      "fleet_budget::ReserveChanged",
+      "fleet_budget::GasDrawn",
+      "fleet_budget::BudgetLow",
+      "fleet_budget::DeviceStateChanged",
+      "fleet_budget::BudgetPaused",
+      "fleet_budget::BudgetConfigured"
+    ],
+    "fleet_handover": [
+      "fleet_handover::Handover"
+    ],
     "fleet_inbox": [
       "fleet_inbox::DeviceInbox",
       "fleet_inbox::InboxKey",
@@ -9199,6 +9275,18 @@
       "device_group::GroupIndex",
       "device_group::GroupIndexed"
     ],
+    "fleet_settings": [
+      "fleet_settings::SettingsKey",
+      "fleet_settings::Settings",
+      "fleet_settings::FleetSettingsChanged"
+    ],
+    "group_batch": [
+      "customer::GroupBatchApplied"
+    ],
+    "passkey_factor": [
+      "passkey_factor::Enrollment",
+      "passkey_factor::ProofCreated"
+    ],
     "receipt_shards": [
       "deployment_manager::ReceiptShardKey",
       "deployment_manager::ReceiptDirectory",
@@ -9209,6 +9297,41 @@
       "component_catalog::ShardedCatalogBindingKey",
       "deployment_manager::ReceiptLayoutChanged",
       "deployment_manager::ShardedTargetGroupsKey"
+    ],
+    "recurring_window": [
+      "deployment_manager::RecurringWindowKey",
+      "deployment_manager::RecurringWindow",
+      "deployment_manager::WeeklySlot"
+    ],
+    "rollout_audit": [
+      "deployment_manager::DecisionKey",
+      "deployment_manager::DecisionRecord",
+      "deployment_manager::DecisionCleanupKey"
+    ],
+    "rollout_health": [
+      "deployment_manager::RolloutHealthKey",
+      "deployment_manager::RolloutHealth"
+    ],
+    "seal_policy": [
+      "seal_policy::AccessPolicy",
+      "seal_policy::AccessAdminCap",
+      "seal_policy::PolicyCreated",
+      "seal_policy::AccessChanged",
+      "seal_policy::KeyEpochRotated",
+      "seal_policy::PolicyMigrated"
+    ],
+    "second_person": [
+      "customer::SecondPersonConfiguration"
+    ],
+    "security_delay": [
+      "security_policy::DelayKey",
+      "security_policy::Delays",
+      "security_policy::QueuedAtKey",
+      "security_policy::QueuedAt",
+      "security_policy::DelayGrantKey",
+      "security_policy::DelayGrant",
+      "security_policy::ArgumentsKey",
+      "security_policy::ActionArguments"
     ],
     "security_policy": [
       "security_policy::PolicyKey",
@@ -9223,31 +9346,6 @@
       "security_policy::FactorConfiguration",
       "customer::HandoverCompleted",
       "customer::FleetSecurityKey"
-    ],
-    "group_batch": [
-      "customer::GroupBatchApplied"
-    ],
-    "rollout_audit": [
-      "deployment_manager::DecisionKey",
-      "deployment_manager::DecisionRecord",
-      "deployment_manager::DecisionCleanupKey"
-    ],
-    "passkey_factor": [
-      "passkey_factor::Enrollment",
-      "passkey_factor::ProofCreated"
-    ],
-    "security_delay": [
-      "security_policy::DelayKey",
-      "security_policy::Delays",
-      "security_policy::QueuedAtKey",
-      "security_policy::QueuedAt",
-      "security_policy::DelayGrantKey",
-      "security_policy::DelayGrant",
-      "security_policy::ArgumentsKey",
-      "security_policy::ActionArguments"
-    ],
-    "second_person": [
-      "customer::SecondPersonConfiguration"
     ]
   },
   "supported_deployment_schema_versions": [

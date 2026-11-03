@@ -336,6 +336,7 @@ def generate(catalog, recipe):
           f'export const ROLLOUT_HEALTH_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_health"])} as const;',
           f'export const SETTINGS_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_settings"])} as const;',
           f'export const SHARD_TYPES = {json.dumps(catalog["optional_type_origins"]["receipt_shards"])} as const;',
+          f'export const RECURRING_WINDOW_TYPES = {json.dumps(catalog["optional_type_origins"]["recurring_window"])} as const;',
           '/** SF-130 per-fleet cost settings: defaults and inclusive bounds, in Move field units. */',
           f'export const FLEET_SETTINGS = {json.dumps(catalog["fleet_settings"])} as const;',
           f'export const STATUS = {json.dumps(catalog["statuses"])} as const;',
@@ -360,6 +361,7 @@ def generate(catalog, recipe):
             'pub const ROLLOUT_HEALTH_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["rollout_health"]) + '];',
             'pub const SETTINGS_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_settings"]) + '];',
             'pub const SHARD_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["receipt_shards"]) + '];',
+            'pub const RECURRING_WINDOW_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["recurring_window"]) + '];',
             *settings_rust(catalog["fleet_settings"]),
             f'pub const RECIPE_VERSION: &str = {json.dumps(recipe["properties"]["schemaVersion"]["enum"][0])};',
             'pub const RECIPE_VERSIONS: &[&str] = &[' + ', '.join(json.dumps(v) for v in recipe["properties"]["schemaVersion"]["enum"]) + '];',
@@ -403,6 +405,8 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "vector<u64>":
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
+                elif base == "vector<u16>":
+                    types += [f"{arg}: number[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u16()).serialize({arg}))"]
                 elif base == "vector<vector<u8>>":
                     types += [f"{arg}: number[][]"]; arguments += [f"tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize({arg}))"]
                 elif base == "u16":

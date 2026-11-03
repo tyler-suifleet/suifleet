@@ -43,6 +43,12 @@ class BatchController:
             project TEXT,batch_id TEXT,pr INTEGER,head TEXT,account TEXT,body_hash TEXT,body TEXT,
             status TEXT,review_id INTEGER,review_node TEXT,created REAL,updated REAL,error TEXT,
             PRIMARY KEY(project,batch_id,pr))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_funding_recoveries (
+            project TEXT,batch_id TEXT,manifest TEXT,error_hash TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,batch_id))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_infrastructure_retries (
+            project TEXT,batch_id TEXT,manifest TEXT,error_hash TEXT,receipt TEXT,created REAL,
+            PRIMARY KEY(project,batch_id))''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS integration_batch_conflicts (
             project TEXT,pr INTEGER,head TEXT,base TEXT,batch_id TEXT,context TEXT,
             PRIMARY KEY(project,pr,head,base))''')
@@ -615,13 +621,13 @@ class BatchController:
                         and batch['base'] == pr.get('baseRefOid')):
                     checks = error['checks']
                     # These rows were classified from the exact candidate/base
-                    # by failed_checks before persistence. Funding cannot be
-                    # repaired on an unchanged member's source branch. Retain
+                    # by failed_checks before persistence. Provider failures cannot
+                    # be repaired on an unchanged member's source branch. Retain
                     # the failed candidate/selection fence and all acceptance
                     # gates, but do not dispatch another owner repair for it.
                     if checks and all(check.get('name') == 'testnet/package-upgrade'
                                       and check.get('workflowName') == 'Automatic testnet'
-                                      and check.get('classification') == 'funding'
+                                      and check.get('classification') in ('funding', 'infrastructure')
                                       for check in checks):
                         break
                     result['_batch_failure'] = dict(candidate_pr=batch['pr'], candidate_head=batch['head'],
@@ -681,6 +687,16 @@ class BatchController:
                     continue
             except (TypeError, ValueError):
                 continue
+            recovery = self.db.execute('SELECT manifest,error_hash FROM batch_funding_recoveries WHERE project=? AND batch_id=?',
+                                       (project['id'],row['id'])).fetchone()
+            recovery = recovery or self.db.execute('SELECT manifest,error_hash FROM batch_infrastructure_retries WHERE project=? AND batch_id=?',
+                                       (project['id'],row['id'])).fetchone()
+            original = json.loads(row['members'])
+            exact_sources = all(any(all(candidate.get(k) == member.get(k) for k in
+                ('pr','head','owner','source_receipt','source_feedback')) for candidate in candidates) for member in original)
+            if (recovery and exact_sources and tuple(recovery) ==
+                    (row['manifest_digest'],hashlib.sha256(row['error'].encode()).hexdigest())):
+                continue  # Explicit durable authorization; the failed row is never reset.
             failed.append(tuple((m['pr'],m['head']) for m in json.loads(row['members'])))
         pool = [m for m in candidates if ((m['pr'],m['head']),) not in failed]
         # One acceptance reviewer must be independent of every member author.
@@ -694,6 +710,106 @@ class BatchController:
         while selected and tuple((m['pr'],m['head']) for m in selected) in failed:
             selected = selected[:len(selected)//2]
         return selected
+
+    @staticmethod
+    def infrastructure_only(error):
+        checks = error.get('checks', [])
+        return (error.get('kind') == 'candidate_checks_failed' and bool(checks)
+                and all(c.get('name') == 'testnet/package-upgrade'
+                        and c.get('workflowName') == 'Automatic testnet'
+                        and c.get('classification') == 'infrastructure' for c in checks))
+
+    def infrastructure_receipt(self, project, batch, error):
+        """Authenticate a narrow, zero-spend GitHub outage; never trust class alone."""
+        from coordinator import preparation_job_logs
+        checks = error['checks']
+        match = re.fullmatch(r'https://github\.com/' + re.escape(project['repository'])
+                             + r'/actions/runs/([0-9]+)', checks[0].get('detailsUrl', ''))
+        if not match or len(checks) != 1:
+            raise RuntimeError('infrastructure retry needs one authenticated run')
+        path = f"repos/{project['repository']}/actions/runs/{match[1]}"
+        read = lambda endpoint: json.loads(self.c.gh(project, ['api', endpoint]))
+        run = read(path)
+        if (run.get('event') != 'workflow_run' or run.get('head_branch') != 'main'
+                or run.get('path') != '.github/workflows/testnet.yml'
+                or run.get('head_repository', {}).get('full_name') != project['repository']
+                or run.get('repository', {}).get('full_name') != project['repository']
+                or run.get('status') != 'completed' or run.get('conclusion') != 'failure'
+                or type(run.get('run_attempt')) is not int or run['run_attempt'] < 1):
+            raise RuntimeError('infrastructure run identity unavailable')
+        jobs = read(path + f"/attempts/{run['run_attempt']}/jobs?per_page=100")
+        entries = jobs.get('jobs', [])
+        validation = [j for j in entries if j.get('name') == 'validate']
+        if jobs.get('total_count') != len(entries) or len(validation) != 1:
+            raise RuntimeError('incomplete infrastructure job evidence')
+        job = validation[0]
+        steps = job.get('steps', [])
+        def step(name, conclusion):
+            found = [s for s in steps if s.get('name') == name]
+            return len(found) == 1 and found[0].get('conclusion') == conclusion
+        if (job.get('conclusion') != 'failure'
+                or not step('Recheck head and base immediately before spending', 'failure')
+                or not step('Run bounded testnet acceptance', 'skipped')):
+            raise RuntimeError('infrastructure failure is not proven before spending')
+        logs = preparation_job_logs(lambda args: self.c.gh(project, args),
+                                    f"repos/{project['repository']}/actions/jobs/{job['id']}/logs")
+        # The exact candidate's failed status was independently authenticated by
+        # failed_checks. Step identities prove no signing step ran; logs must
+        # show the transient provider error, not a product/permission denial.
+        if 'No server is currently available to service your request' not in logs:
+            raise RuntimeError('not a recognized transient GitHub outage')
+        if read(path) != run:
+            raise RuntimeError('infrastructure run changed during verification')
+        return dict(run=int(match[1]), attempt=run['run_attempt'], job=job['id'],
+                    logs_sha256=hashlib.sha256(logs.encode()).hexdigest())
+
+    def recover_infrastructure(self, project, candidates, base):
+        """One retry per exact source set/base, after five minutes, under this daemon."""
+        rows = self.rows(project)
+        for batch in reversed(rows):
+            if batch['status'] != 'failed' or batch['base'] != base:
+                continue
+            error = json.loads(batch.get('error') or '{}')
+            if not self.infrastructure_only(error):
+                continue
+            members = json.loads(batch['members'])
+            pins = lambda ms: [(m['pr'], m['head']) for m in ms]
+            related = [r for r in rows if r['base'] == base and pins(json.loads(r['members'])) == pins(members)]
+            if related[-1]['id'] != batch['id'] or any(r['status'] not in TERMINAL or r.get('publish_intent') for r in related):
+                continue
+            if any(self.db.execute('SELECT 1 FROM batch_infrastructure_retries WHERE project=? AND batch_id=?',
+                                   (project['id'], r['id'])).fetchone() for r in related):
+                continue  # Exhausted: preserve failed evidence and selection fence.
+            if self.clock() < batch['updated'] + 300 or not members:
+                continue
+            if not all(any(all(c.get(k) == m.get(k) for k in
+                    ('pr','head','owner','source_receipt','source_feedback')) for c in candidates) for m in members):
+                continue
+            numbers = [batch['pr'], *[m['pr'] for m in members]]
+            if any(self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND status IN "
+                    "('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                    (project['id'], n)).fetchone() for n in numbers):
+                continue
+            self.validate_members(project, batch)
+            candidate = self.candidate(project, batch)
+            from coordinator import failed_checks
+            if (candidate.get('state') not in ('OPEN', 'CLOSED') or candidate.get('isDraft')
+                    or candidate.get('headRefOid') != batch['head']
+                    or candidate.get('baseRefOid') != base
+                    or failed_checks(candidate) != error['checks']):
+                continue
+            try:
+                receipt = self.infrastructure_receipt(project, batch, error)
+            except (RuntimeError, subprocess.CalledProcessError, ValueError, KeyError):
+                # Unavailable or nonqualifying provider evidence keeps this
+                # failure fenced without stopping unrelated candidate progress.
+                continue
+            self.validate_members(project, batch)
+            if self.main(project) != base or self.candidate(project, batch) != candidate:
+                raise RuntimeError('infrastructure candidate changed during verification')
+            self.db.execute('INSERT INTO batch_infrastructure_retries VALUES(?,?,?,?,?,?)',
+                (project['id'], batch['id'], batch['manifest_digest'],
+                 hashlib.sha256(batch['error'].encode()).hexdigest(), canonical(receipt), self.clock()))
 
     def fail_candidate(self, project, batch, failures):
         self.invalidate(project, batch, 'combined candidate checks failed')
@@ -737,6 +853,7 @@ class BatchController:
         available = [m for m in candidates if m['pr'] not in reserved]
         if len(active) < limit and available and not uncertain:
             base, batch_id = self.main(project), uuid.uuid4().hex
+            self.recover_infrastructure(project, available, base)
             selected = self.select(project, available, base, maximum)
             if selected:
                 directory = str(self.c.state/project['id']/'batches'/batch_id)
@@ -1040,6 +1157,141 @@ class SharedAcceptanceRepair:
                 (project['id'],result['owner'],result['state'],result.get('job'),result.get('diagnostic',''),self.c.batches.clock()))
         return result
 
+    def funding_receipt(self, project, batch, checks):
+        """Authenticated read of the exact failed run; never execute artifact code."""
+        urls = {c.get('detailsUrl') for c in checks}
+        if len(urls) != 1:
+            raise RuntimeError('ambiguous funding run')
+        match = re.fullmatch(r'https://github.com/'+re.escape(project['repository'])+r'/actions/runs/([1-9][0-9]*)(?:/job/[1-9][0-9]*)?', urls.pop() or '')
+        if not match:
+            raise RuntimeError('funding run identity missing')
+        run_id = match[1]
+        run = json.loads(self.c.gh(project,['api',f"repos/{project['repository']}/actions/runs/{run_id}"]))
+        if (str(run.get('id')) != run_id or run.get('head_branch') != 'main'
+                or run.get('event') not in ('workflow_run','workflow_dispatch')
+                or (run.get('head_repository') or {}).get('full_name') != project['repository']
+                or type(run.get('run_attempt')) is not int or run['run_attempt'] < 1
+                or run.get('status') != 'completed' or run.get('conclusion') != 'failure'
+                or run.get('name') != 'Automatic testnet'
+                or run.get('path') != '.github/workflows/testnet.yml'
+                or (run.get('repository') or {}).get('full_name') != project['repository']):
+            raise RuntimeError('funding run is active or provenance changed')
+        with tempfile.TemporaryDirectory(prefix='funding-effects-') as directory:
+            self.c.gh(project,['run','download',run_id,'-R',project['repository'],
+                               '-n','testnet-effects-'+batch['head'],'-D',directory])
+            files = list(Path(directory).iterdir())
+            # Preflight must precede every suite. Extra suite evidence could
+            # contain submitted or uncertain work and cannot authorize replay.
+            if len(files) != 1 or files[0].name != 'package-upgrade.json' or files[0].is_symlink():
+                raise RuntimeError('funding effects missing or contain additional suite work')
+            if not files[0].is_file() or files[0].stat().st_size > 1_000_000:
+                raise RuntimeError('funding receipt too large or not a file')
+            raw = files[0].read_bytes()
+            evidence = json.loads(raw)
+        funding, faucet = evidence.get('funding',{}), evidence.get('faucet',{})
+        before = funding.get('address_mist',-1) + funding.get('coin_mist',-1)
+        after, required = faucet.get('balance_after_mist'), funding.get('required_mist')
+        if (evidence.get('network') != 'testnet' or evidence.get('failure_class') != 'funding'
+                or evidence.get('toolchain',{}).get('compatibility',{}).get('chain') != '4c78adac'
+                or evidence.get('success') is not False
+                or evidence.get('transactions') != [] or evidence.get('allowance_used_mist') != 0
+                or type(evidence.get('max_spend_mist')) is not int or evidence['max_spend_mist'] <= 0
+                or type(funding.get('held_mist')) is not int or funding['held_mist'] != 0
+                or type(required) is not int or required <= 0 or type(after) is not int or not 0 <= after < required
+                or faucet.get('attempts') != 1 or faucet.get('cli_returncode') != 0
+                or faucet.get('balance_before_mist') != before or before < 0
+                or faucet.get('balance_change_mist') != after-before or after <= before
+                or faucet.get('success') is not False):
+            raise RuntimeError('not a zero-submission funding-only shortfall receipt')
+        # No held uncertain reservation qualifies. Historical state is never
+        # changed; a normal retry still restores its encrypted cache.
+        fresh = json.loads(self.c.gh(project,['api',f"repos/{project['repository']}/actions/runs/{run_id}"]))
+        if fresh != run:
+            raise RuntimeError('funding run changed during artifact read')
+        return dict(run=run_id,attempt=run.get('run_attempt'),sha256=hashlib.sha256(raw).hexdigest(),
+                    evidence=evidence)
+
+    def recover_funding(self, project, key, maximum):
+        """One delayed fresh candidate per proven preflight, at most maximum retries.
+
+        Runs use normal protected wallet serialization and the existing single
+        faucet allowance. No operator wallet, rerun API or mutation replay here.
+        """
+        b = self.c.batches
+        def status(state, diagnostic):
+            return dict(owner=key,state=state,diagnostic=diagnostic)
+        if not b.enabled(project):
+            return status('held','funding recovery requires restored enabled batch mode')
+        rows = b.rows(project)
+        current_base = None
+        for batch in reversed(rows):
+            if batch['status'] != 'failed':
+                continue
+            error = json.loads(batch.get('error') or '{}')
+            checks = error.get('checks',[])
+            members = json.loads(batch['members'])
+            if (error.get('kind') != 'candidate_checks_failed' or not checks or len(members) != 1
+                    or not all(c.get('name') == 'testnet/package-upgrade' and c.get('workflowName') == 'Automatic testnet'
+                               and c.get('classification') == 'funding' for c in checks)):
+                continue
+            if self.db.execute('SELECT 1 FROM batch_funding_recoveries WHERE project=? AND batch_id=?',
+                               (project['id'],batch['id'])).fetchone():
+                continue
+            # Old bases cannot be revived. A new main base already makes the
+            # original selection eligible through normal batch collection.
+            if current_base is None:
+                current_base = b.main(project)
+            if current_base != batch['base']:
+                continue
+            related = [r for r in rows if r['base'] == batch['base'] and
+                       [(m['pr'],m['head']) for m in json.loads(r['members'])] ==
+                       [(m['pr'],m['head']) for m in members]]
+            if any(r['status'] not in TERMINAL or r.get('publish_intent') for r in related):
+                return status('held','funding candidate active or publication uncertain')
+            if related[-1]['id'] != batch['id']:
+                continue
+            attempts = sum(bool(self.db.execute('SELECT 1 FROM batch_funding_recoveries WHERE project=? AND batch_id=?',
+                           (project['id'],r['id'])).fetchone()) for r in related)
+            if attempts >= maximum:
+                return status('blocked','funding retry bound exhausted; operator must verify dedicated balance/reserve before a reviewed recovery')
+            next_check = batch['updated'] + 3600
+            if b.clock() < next_check:
+                return status('funding_wait',f'next check at {next_check:.0f}; resume only after exact funding receipt and ownership revalidation')
+            for number in [batch['pr'], *[m['pr'] for m in members]]:
+                if self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND status IN "
+                        "('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                        (project['id'],number)).fetchone():
+                    return status('held','funding recovery worker active or uncertain')
+            b.validate_members(project,batch)
+            for member in members:
+                pr = self.c.pr(project,member['pr'])
+                self.c.local_infrastructure.fenced(project,pr,b.owner(project,member))
+            candidate = b.candidate(project,batch)
+            from coordinator import failed_checks
+            if (candidate.get('state') != 'CLOSED' or candidate.get('headRefName') != batch['branch']
+                    or failed_checks(candidate) != checks):
+                raise RuntimeError('closed funding candidate/check identity changed')
+            if self.db.execute("SELECT 1 FROM jobs WHERE project=? AND pr=? AND status IN "
+                    "('reserved','running','orphaned','quarantined','quota_wait','quota_launch')",
+                    (project['id'],batch['pr'])).fetchone():
+                raise RuntimeError('funding candidate worker active or uncertain')
+            receipt = self.funding_receipt(project,batch,checks)
+            # Revalidate after authenticated provider reads; never reuse an
+            # approval of an earlier source/base/claim snapshot.
+            b.validate_members(project,batch)
+            for member in members:
+                self.c.local_infrastructure.fenced(project,self.c.pr(project,member['pr']),b.owner(project,member))
+            if b.candidate(project,batch) != candidate:
+                raise RuntimeError('funding candidate changed during receipt read')
+            current = json.loads(self.c.ticket(project,'show',key))
+            if current.get('status') != 'done' or current.get('publish_pending'):
+                raise RuntimeError('completed shared owner changed during funding recovery')
+            self.db.execute('INSERT INTO batch_funding_recoveries VALUES(?,?,?,?,?,?)',
+                (project['id'],batch['id'],batch['manifest_digest'],hashlib.sha256(batch['error'].encode()).hexdigest(),
+                 canonical(receipt),b.clock()))
+            return status('awaiting_validation','funding-only retry authorized; fresh candidate requires all normal CI/testnet/review gates')
+        return status('resolved','shared code owner Done; no current unrecovered funding candidate')
+
     def route(self, project):
         config=project.get('shared_acceptance_repair')
         if config is None: return None
@@ -1051,9 +1303,9 @@ class SharedAcceptanceRepair:
         key=config['ticket']; maximum=config.get('max_attempts',3)
         owner=json.loads(self.c.ticket(project,'show',key))
         if owner['status']=='done':
-            self.db.execute("UPDATE shared_acceptance_repairs SET state='resolved',updated=? WHERE project=? AND owner_ticket=?",
-                            (self.c.batches.clock(),project['id'],key))
-            return dict(owner=key,state='resolved')
+            if owner.get('publish_pending'):
+                return dict(owner=key,state='held',diagnostic='completed shared ownership publication pending')
+            return self.recover_funding(project, key, maximum)
         if owner.get('agent') not in ('Codex','Claude') or not owner.get('token'):
             return dict(owner=key,state='blocked',diagnostic='shared repair owner has no implementation claim')
         if owner.get('status')!='review' or owner.get('expired') or owner.get('publish_pending'):
