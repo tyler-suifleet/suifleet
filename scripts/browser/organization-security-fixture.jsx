@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { OrganizationSecurity } from "@/components/OrganizationSecurity";
 export * from "../../dapp/src/lib/security-policy";
 export * from "../../dapp/src/lib/security-delay";
+export * from "../../dapp/src/lib/second-person";
 const scenario = new URLSearchParams(location.search).get("scenario") ?? "configured";
 const fleet = { customerId: "0x" + "c".repeat(64), customerName: "Northstar Manufacturing", administrator: true };
 const account = { address: "0x" + "a".repeat(64), chains: ["sui:localnet"] };
@@ -23,5 +24,13 @@ export const fetchOrganizationSecurity = async () => {
   return { generation: BigInt(3), requirements: ["off", "no-delays"].includes(scenario) ? [0,0,0,0,0,0,0] : [9,8,0,0,0,0,0] };
 };
 export const fetchSecurityDelays = async () => scenario === "no-delays" ? undefined : Array(7).fill(60000);
-export const fetchQueuedSecurityActions = async () => [];
+export const fetchQueuedSecurityActions = async () => scenario === "pending" ? [{
+  id: "0x" + "d".repeat(64), proposer: account.address, expires: BigInt(Date.now() + 600000),
+  readyAt: BigInt(Date.now() - 1000), stale: false, edit: { operation: "set_security", values: [0,0,0,0,0,0,0] },
+}] : [];
+export const secondPersonSupported = () => scenario !== "unsupported";
+export const fetchRequests = async () => scenario === "pending" ? [{
+  id: "0x" + "e".repeat(64), proposer: "0x" + "b".repeat(64), expires: BigInt(Date.now() + 600000),
+  generation: BigInt(3), approved: false, operation: "set_security", arguments: [],
+}] : [];
 createRoot(document.getElementById("root")).render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><main className="mx-auto max-w-4xl p-5"><OrganizationSecurity /></main></QueryClientProvider>);

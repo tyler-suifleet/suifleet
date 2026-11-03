@@ -84,29 +84,33 @@ export function OrganizationSecurity() {
     <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
       <h3>Keep a recovery path</h3><p className="mt-1">Losing required signers or credentials can permanently lock administration. Set up independent recovery access before enabling protections. There is no email or support reset.</p>
     </div>
+    <section aria-label="Security changes awaiting review" className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50/60 p-5">
+      <h3>Security changes awaiting review</h3>
+      <p>Any current administrator can cancel a queued action immediately. Pausing a deployment skips the delay; resuming uses the full policy. Execution uses the network clock; the countdown below uses your browser clock and is an estimate.</p>
+      <ul className="space-y-3" aria-label="Queued security actions">{queue.data?.map(action => <li className="rounded-xl border border-slate-200 bg-slate-50 p-4" key={action.id}>
+        <h3>{action.edit?.operation === "set_security" ? "Change security requirements" : action.edit ? "Change cancellation delays" : "Protected action"}</h3>
+        <p className="mt-2">{delayStatus(action, now)}. Expires {new Date(Number(action.expires)).toLocaleString()}.</p>
+        <details className="mt-3"><summary>Request details</summary><p>Request: {action.id}. Proposed by {action.proposer}.</p></details>
+        {action.edit && <p>Requested changes: {action.edit.values.map((v, i) => `${SECURITY_ACTIONS[i]}: ${action.edit!.operation === "configure_security_delays" ? `${v / 1000} seconds` : v === 0 ? "Off" : SECURITY_FACTORS.filter(f => (v & f.bit) !== 0).map(f => presentations[f.bit].name).join(" + ")}`).join("; ")}.</p>}
+        <div className="mt-3 flex flex-wrap gap-2">{fleet.administrator && <button disabled={mutation.isPending} onClick={() => run(buildCancelSecurityTx(fleet.customerId, action.id))}>Cancel action</button>}
+        {fleet.administrator && action.edit && action.proposer === account?.address && <button disabled={mutation.isPending || action.stale || action.readyAt === undefined || now < action.readyAt || now >= action.expires} onClick={() => run(buildExecuteSecurityEditTx(fleet.customerId, action.id, action.edit!))}>Execute action</button>}</div>
+        {!action.edit && <p>This action can be canceled here. Submit execution through the client that queued it.</p>}
+      </li>)}</ul>
+      {queue.isSuccess && queue.data.length === 0 && <p className="rounded-xl bg-slate-50 p-4">No queued actions found in available history.</p>}
+      <SecondPersonApprovals />
+    </section>
     <details id="security-delays" className={styles.setup}>
-      <summary>Delay and cancellation settings<span className="mt-1 block text-xs font-normal text-slate-500">Set review windows and manage queued changes</span></summary>
+      <summary>Delay and cancellation settings<span className="mt-1 block text-xs font-normal text-slate-500">Configure review windows for sensitive changes</span></summary>
       <div className={`${styles.setupBody} space-y-5`}>
         {!delaySupported() && <p>Delay and cancellation settings are unavailable on this deployment.</p>}
         {policy.data && timing.isSuccess && fleet.administrator && <DelaySettings key={`${fleet.customerId}:${policy.data.generation}`} requirements={policy.data.requirements} delays={timing.data ?? undefined} busy={mutation.isPending} submit={submit}/>}
-        <p>Any current administrator can cancel a queued action immediately. Pausing a deployment skips the delay; resuming uses the full policy. Execution uses the network clock; the countdown below uses your browser clock and is an estimate.</p>
-        <ul className="space-y-3" aria-label="Queued security actions">{queue.data?.map(action => <li className="rounded-xl border border-slate-200 bg-slate-50 p-4" key={action.id}>
-          <h3>{action.edit?.operation === "set_security" ? "Change security requirements" : action.edit ? "Change cancellation delays" : "Protected action"}</h3>
-          <p className="mt-2">{delayStatus(action, now)}. Expires {new Date(Number(action.expires)).toLocaleString()}.</p>
-          <details className="mt-3"><summary>Request details</summary><p>Request: {action.id}. Proposed by {action.proposer}.</p></details>
-          {action.edit && <p>Requested changes: {action.edit.values.map((v, i) => `${SECURITY_ACTIONS[i]}: ${action.edit!.operation === "configure_security_delays" ? `${v / 1000} seconds` : v === 0 ? "Off" : SECURITY_FACTORS.filter(f => (v & f.bit) !== 0).map(f => presentations[f.bit].name).join(" + ")}`).join("; ")}.</p>}
-          <div className="mt-3 flex flex-wrap gap-2">{fleet.administrator && <button disabled={mutation.isPending} onClick={() => run(buildCancelSecurityTx(fleet.customerId, action.id))}>Cancel action</button>}
-          {fleet.administrator && action.edit && action.proposer === account?.address && <button disabled={mutation.isPending || action.stale || action.readyAt === undefined || now < action.readyAt || now >= action.expires} onClick={() => run(buildExecuteSecurityEditTx(fleet.customerId, action.id, action.edit!))}>Execute action</button>}</div>
-          {!action.edit && <p>This action can be canceled here. Submit execution through the client that queued it.</p>}
-        </li>)}</ul>
-        {queue.isSuccess && queue.data.length === 0 && <p className="rounded-xl bg-slate-50 p-4">No queued actions found in available history.</p>}
       </div>
     </details>
     <details id="security-second-person" className={styles.setup}>
-      <summary>Second-person approval<span className="mt-1 block text-xs font-normal text-slate-500">Configure independent approval and review pending requests</span></summary>
+      <summary>Second-person approval<span className="mt-1 block text-xs font-normal text-slate-500">Configure independent approval</span></summary>
       <div className={`${styles.setupBody} space-y-6`}>
         {(AVAILABLE_SECURITY_FACTORS & 4) === 0 && <p>Second-person approval settings are unavailable on this deployment.</p>}
-        <SecondPersonSetup key={fleet.customerId} /><SecondPersonApprovals />
+        <SecondPersonSetup key={fleet.customerId} />
       </div>
     </details>
     <details id="security-multisig" className={styles.setup}>
