@@ -18,8 +18,9 @@ a77b8bad90de12eb1cfc2ac62dff0e4ae5c1aa1f --output <distinct-output>` produced
 identical 22-member tar.gz files, SHA-256
 `fdc74be3198d23b5ce6c353b113abc84adb036ceb758ac20d87eaf8c2a55403d`.
 All 21 file digests were independently checked against export-provenance.json.
-This layer snapshot has the same layer files as the final implementation;
-subsequent commits update evidence and the relocated test-component guide.
+This hash identifies the historical layer snapshot at that revision; subsequent
+commits update evidence, the relocated test-component guide and exported
+README/RELEASE validation qualifications. It is not the final export hash.
 The archive is a local readiness artifact, not a published download.
 
 Both kas profiles expanded with kas 4.7 using:
@@ -65,6 +66,16 @@ not permission to use the optional Yocto Project Compatible branding.
 Builds use the full core/toolchain/layer pins from the two committed kas profiles,
 existing external build directories, umask 022 and the current checkout's software
 plus integration layers in BBLAYERS. No upstream layer source was modified.
+These successful builds therefore include the integration layer's Scarthgap
+OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap
+target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
+fixes, and AArch64 glibc usrmerge loader/linker-script guard. The standalone
+export contains none of these appends. No recipe task-execution build from the
+extracted export without the integration layer was run on either series. Its
+yocto-check-layer passes above do not establish that build path. Standalone
+consumers must supply equivalent distro fixes/guards and validate them, or accept
+unvalidated status and possible build failures.
+
 Codec inputs are the verified artifacts already present at
 `/home/tyler/dev/codex/yocto-sf120/build/suifleet-walrus-codec/2d231cadf3c0c8e58b48dc9f48dd7890faaafa1f`.
 

@@ -5,6 +5,24 @@ authorization to create/publish a public repository and submit to the index.
 Do not ship an export as customer-installable until the source prerequisites below
 are publicly fetchable without credentials and their checks have passed.
 
+## Standalone build validation prerequisite
+
+The recorded successful recipe builds used both the software layer and the core
+repository's meta-suifleet-integration layer. That layer supplied Scarthgap
+OpenSSL install serialization (`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap
+target-toolchain relink fixes, Wrynose xzmore Bash interpreter/runtime-dependency
+fixes, and the AArch64 glibc usrmerge loader/linker-script guard. None of these
+core-recipe appends is included in the standalone export.
+
+Standalone consumers must supply equivalent distro fixes/guards and validate
+the resulting builds, or accept unvalidated status and possible build failures.
+The extracted export passed yocto-check-layer on both pinned series, but that
+is not a recipe task-execution build. Before advertising standalone build
+support, build `suifleet`, `suifleet-node` and `suifleet-walrus-codec` from the
+extracted export without meta-suifleet-integration on both pinned series,
+recording any separately supplied distro fixes and package QA results. Do not
+add the integration layer blindly: it also contains board/access/test policy.
+
 ## Source availability and synchronization
 
 The current daemon recipe still fetches the core Git repository at immutable

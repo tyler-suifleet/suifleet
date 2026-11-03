@@ -19,12 +19,14 @@ core repository's `kas/packaging.yml` and `kas/packaging-wrynose.yml`.
 Scarthgap requires the pinned meta-lts-mixins scarthgap/rust toolchain;
 Wrynose uses core Rust. Rust >= 1.90 is checked by the recipe. Dependencies are
 OE-Core (`core`) and meta-openembedded/meta-oe (`openembedded-layer`). Systemd,
-usrmerge and a writable persistent root are the validated image configuration.
+usrmerge and a writable persistent root were used in the validated integrated
+builds described below.
 The archive runtime's prebuilt Node recipe supports Linux AArch64/glibc only.
 There are no standalone release branches yet; series compatibility is not proof
 that a same-named remote branch exists. No other release/architecture is claimed.
 
-Add this directory to BBLAYERS and build `bitbake suifleet`. Optional archive
+After supplying the distro fixes below, add this directory to BBLAYERS and run
+`bitbake suifleet`; this standalone task-execution path remains unvalidated. Optional archive
 packages are `suifleet-node` and `suifleet-walrus-codec`; the codec requires five
 prebuilt, checksum-pinned files at SUIFLEET_WALRUS_CODEC_DIR **before parsing**.
 See RELEASE.md for source/artifact publication prerequisites.
@@ -33,6 +35,17 @@ The separate, core-repository `meta-suifleet-integration` contains Pi image/acce
 policy, test components and core-recipe build workarounds. Existing kas profiles
 include both layers. Generic consumers should select their own BSP/distro and
 must not add the integration layer without reviewing its policy.
+
+All recorded recipe builds on both pinned series included that integration
+layer. They applied Scarthgap OpenSSL install serialization
+(`PARALLEL_MAKEINST = "-j1"`), Wrynose libcap target-toolchain relink fixes,
+Wrynose xzmore Bash interpreter/runtime-dependency fixes, and the AArch64
+glibc usrmerge loader/linker-script guard. These are not in this export.
+Standalone consumers must supply equivalent distro fixes/guards and validate
+their builds, or accept an unvalidated configuration that may fail. The extracted
+export alone passed yocto-check-layer on both series; no recipe task-execution
+build without the integration layer has been validated. See RELEASE.md before
+claiming standalone build support.
 
 Builds contain examples only: no device keys, enrollment configuration, signer
 PINs or journals. Provision identities at runtime. Preserve /etc/suifleet and
