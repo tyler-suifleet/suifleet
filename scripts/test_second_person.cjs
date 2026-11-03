@@ -59,6 +59,15 @@ assert.equal(approvals.configureTx(C,consent).getData().commands[0].MoveCall.fun
  assert.equal((await approvals.executePolicyTx(client,C,combinedRequest)).getData().commands[0].MoveCall.function,'set_security_secured');
  requirements=[2,2,2,2,2,2,2];
  assert.equal((await approvals.policyChangeTx(client,C,combined)).getData().commands[0].MoveCall.function,'set_security');
+ // Reducing any protected action requires its approval, even if action 4 does not.
+ requirements=[4,0,0,0,0,0,0];
+ assert.equal((await approvals.policyChangeTx(client,C,[0,0,0,0,0,0,0])).getData().commands[0].MoveCall.function,'propose_approval');
+ // Removing passkeys also needs approval on a combined-factor reduced action.
+ requirements=[6,2,2,2,2,2,2];
+ assert.equal((await approvals.policyChangeTx(client,C,requirements.map(v=>v & ~2))).getData().commands[0].MoveCall.function,'propose_approval');
+ // Keeping/strengthening approval-only actions does not require their approval.
+ requirements=[4,0,0,0,0,0,0];
+ assert.equal((await approvals.policyChangeTx(client,C,[6,2,2,2,2,2,2])).getData().commands[0].MoveCall.function,'set_security');
  requirements=[0,0,0,0,4,0,0];
 
  await assert.rejects(approvals.executePolicyTx(client,C,{...request,generation:7n}),/missing or stale/);

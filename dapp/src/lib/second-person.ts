@@ -111,7 +111,12 @@ export function approvalRequirements(current: number[], selected: number[]) {
 export async function policyChangeTx(client: SuiGrpcClient, customer: string, requirements: number[]) {
   const policy = await fetchOrganizationSecurity(client, customer);
   if (!policy) throw Error("Migrate the organization first");
-  return (policy.requirements[4] & 4) !== 0
-    ? proposePolicyTx(client, customer, requirements, BigInt(Date.now() + 86400000))
-    : buildSecurityPolicyTx(customer, requirements);
+  const values = validateSecurityRequirements(requirements);
+  // Match security_policy::update: action 4 plus every weakened action
+  // must satisfy its current factors, including independent approval.
+  const needsApproval = policy.requirements.some((current, i) =>
+    (current & 4) !== 0 && (i === 4 || (current & values[i]) !== current));
+  return needsApproval
+    ? proposePolicyTx(client, customer, values, BigInt(Date.now() + 86400000))
+    : buildSecurityPolicyTx(customer, values);
 }
