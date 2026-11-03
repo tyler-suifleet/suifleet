@@ -39,13 +39,13 @@ module sui_edge::seal_policy {
     // ── Constants ─────────────────────────────────────────────────────────────
 
     /// Policy code version; approvals require `AccessPolicy.version == VERSION`.
-    const VERSION: u64 = 1;
+    const VERSION: u8 = 1;
     /// Bytes of policy ID and key epoch before the nonce.
-    const PREFIX_LENGTH: u64 = 40;
-    const MIN_NONCE: u64 = 16;
-    const MAX_NONCE: u64 = 64;
+    const PREFIX_LENGTH: u8 = 40;
+    const MIN_NONCE: u8 = 16;
+    const MAX_NONCE: u8 = 64;
     /// Bound on each scope list, which approvals scan.
-    const MAX_ENTRIES: u64 = 256;
+    const MAX_ENTRIES: u16 = 256;
 
     const SCOPE_ACCOUNT: u8 = 0;
     const SCOPE_DEVICE: u8 = 1;
@@ -117,7 +117,7 @@ module sui_edge::seal_policy {
     public fun create_policy(name: String, ctx: &mut TxContext): AccessAdminCap {
         let policy = AccessPolicy {
             id: object::new(ctx),
-            version: VERSION,
+            version: (VERSION as u64),
             name,
             key_epoch: (SMALL_0 as u64),
             accounts: vector[],
@@ -195,9 +195,9 @@ module sui_edge::seal_policy {
     /// Move the policy to this code's version; older code then refuses it.
     public fun migrate(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
         assert!(cap.policy_id == object::id(policy), EWrongCap);
-        assert!(policy.version < VERSION, ENotNewer);
-        policy.version = VERSION;
-        event::emit(PolicyMigrated { policy_id: object::id(policy), version: VERSION });
+        assert!(policy.version < (VERSION as u64), ENotNewer);
+        policy.version = (VERSION as u64);
+        event::emit(PolicyMigrated { policy_id: object::id(policy), version: (VERSION as u64) });
     }
 
     // ── Seal approvals (evaluated by key servers; side-effect free) ───────────
@@ -259,12 +259,12 @@ module sui_edge::seal_policy {
 
     /// Whether `id` is a current identity of this policy, under this code version.
     public fun identity_matches(policy: &AccessPolicy, id: &vector<u8>): bool {
-        assert!(policy.version == VERSION, EWrongVersion);
+        assert!(policy.version == (VERSION as u64), EWrongVersion);
         let length = id.length();
-        if (length < PREFIX_LENGTH + MIN_NONCE || length > PREFIX_LENGTH + MAX_NONCE) return false;
+        if (length < (PREFIX_LENGTH as u64) + (MIN_NONCE as u64) || length > (PREFIX_LENGTH as u64) + (MAX_NONCE as u64)) return false;
         let prefix = identity_prefix(policy);
         let mut i = (SMALL_0 as u64);
-        while (i < PREFIX_LENGTH) {
+        while (i < (PREFIX_LENGTH as u64)) {
             if (prefix[i] != id[i]) return false;
             i = i + (SMALL_1 as u64);
         };
@@ -278,19 +278,19 @@ module sui_edge::seal_policy {
     public fun devices(policy: &AccessPolicy): &vector<ID> { &policy.devices }
     public fun groups(policy: &AccessPolicy): &vector<ID> { &policy.groups }
     public fun cap_policy_id(cap: &AccessAdminCap): ID { cap.policy_id }
-    public fun code_version(): u64 { VERSION }
+    public fun code_version(): u64 { (VERSION as u64) }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
     /// check_admin: compact private symbol to bound published bytecode storage.
     fun p0(policy: &AccessPolicy, cap: &AccessAdminCap) {
         assert!(cap.policy_id == object::id(policy), EWrongCap);
-        assert!(policy.version == VERSION, EWrongVersion);
+        assert!(policy.version == (VERSION as u64), EWrongVersion);
     }
 
     fun add<T: copy + drop>(list: &mut vector<T>, item: T) {
         assert!(!list.contains(&item), EAlreadyGranted);
-        assert!(list.length() < MAX_ENTRIES, ETooMany);
+        assert!(list.length() < (MAX_ENTRIES as u64), ETooMany);
         list.push_back(item);
     }
 

@@ -93,7 +93,7 @@ module sui_edge::desired_state {
     }
 
     public(package) fun begin_as(group: &DeviceGroup, admin: address): RevisionPlan {
-        assert!(device_group::admin(group) == admin, ENotAdmin);
+        g0(device_group::admin(group) == admin);
         let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             (state.revision, state.components)
@@ -136,7 +136,7 @@ module sui_edge::desired_state {
     public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
         assert!(device_group::group_id(group) == group_id, EWrongGroup);
-        assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
+        g0(authority == admin); g0(device_group::admin(group) == admin);
         assert!(revision(group) == base_revision, EStaleRevision);
         let state = DesiredState { revision: base_revision + (SMALL_1 as u64), components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();
@@ -249,4 +249,7 @@ module sui_edge::desired_state {
     }
 
     public fun plan_components(plan: &RevisionPlan): &VecMap<String, ID> { &plan.components }
+
+    /// Shared ENotAdmin guard; preserve evaluation order and abort code.
+    fun g0(condition: bool) { if (!condition) abort ENotAdmin }
 }

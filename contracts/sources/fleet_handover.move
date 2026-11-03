@@ -54,7 +54,7 @@ module sui_edge::fleet_handover {
         p2(recipient != ctx.sender()); p2(recipient != @0x0);
         let n = objects.length();
         p1(n > (SMALL_0 as u64)); p1(n <= (SMALL_512 as u64)); p1(kinds.length() == n);
-        assert!(expires_ms > clock.timestamp_ms(), EExpired);
+        g0(expires_ms > clock.timestamp_ms());
         let mut completed = vector[];
         let mut i = (SMALL_0 as u64);
         while (i < n) {
@@ -74,9 +74,9 @@ module sui_edge::fleet_handover {
     /// The recipient signs the transaction, including a native Sui multisig
     /// sender. Confirmation cannot be inferred from a source signature.
     public fun confirm(h: &mut Handover, clock: &Clock, ctx: &TxContext) {
-        assert!(ctx.sender() == h.recipient, EParty);
-        assert!(h.state == 0, EState);
-        assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
+        p2(ctx.sender() == h.recipient);
+        p3(h.state == 0);
+        g0(clock.timestamp_ms() < h.expires_ms);
         h.state = 1;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
     }
@@ -92,7 +92,7 @@ module sui_edge::fleet_handover {
     fun p0(h: &mut Handover, id: ID, kind: u64, clock: &Clock, ctx: &TxContext) {
         p2(ctx.sender() == h.source);
         p3(h.state == 1);
-        assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
+        g0(clock.timestamp_ms() < h.expires_ms);
         let (found, i) = h.objects.index_of(&id);
         p1(found);
         p1(h.kinds[i] == kind); p1(!h.completed[i]);
@@ -155,4 +155,7 @@ module sui_edge::fleet_handover {
     fun p3(condition: bool) {
         if (!condition) abort EState
     }
+
+    /// Shared EExpired guard; preserve evaluation order and abort code.
+    fun g0(condition: bool) { if (!condition) abort EExpired }
 }

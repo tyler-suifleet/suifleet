@@ -1,4 +1,5 @@
 module sui_edge::device_registry {
+    // Include version/limit constants in compact loads; public u64 values stay unchanged.
     // Widen named narrow literals at use sites to avoid repeated LdU64.
     // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
@@ -14,7 +15,7 @@ module sui_edge::device_registry {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const SCHEMA_VERSION: u64 = 1;
+    const SCHEMA_VERSION: u8 = 1;
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -114,7 +115,7 @@ module sui_edge::device_registry {
             id: object::new(ctx),
             admin: ctx.sender(),
             device_count: (SMALL_0 as u64),
-            schema_version: SCHEMA_VERSION,
+            schema_version: (SCHEMA_VERSION as u64),
         };
         event::emit(RegistryCreated {
             registry_id: object::id(&registry),
@@ -145,7 +146,7 @@ module sui_edge::device_registry {
             arch,
             meta: vec_map::empty(),
             registered_at: clock.timestamp_ms(),
-            schema_version: SCHEMA_VERSION,
+            schema_version: (SCHEMA_VERSION as u64),
         };
 
         event::emit(DeviceRegistered {

@@ -9,6 +9,20 @@ module sui_edge::passkey_factor_tests {
     use sui_edge::security_policy;
 
     fun public_key(): vector<u8> { x"036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296" }
+    // Compact guards must still refuse before indexing or subtracting.
+    #[test, expected_failure(abort_code = 0, location = sui_edge::passkey_factor)]
+    fun empty_key_preserves_binding_error() {
+        factor::key_address(vector[]);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::passkey_factor)]
+    fun past_expiry_preserves_binding_error() {
+        let mut s = setup();
+        s.next_tx(factor::key_address(public_key()));
+        let c = s.take_shared<Customer>(); let mut clock = s.take_shared<Clock>();
+        clock.increment_for_testing(2000);
+        factor::prove_enrollment(&c, @0xA, public_key(), 1000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.end();
+    }
     fun setup(): Scenario {
         let mut s = ts::begin(@0xA);
         device_registry::init_for_testing(s.ctx());

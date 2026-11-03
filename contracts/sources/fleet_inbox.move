@@ -37,11 +37,11 @@ module sui_edge::fleet_inbox {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const INBOX_VERSION: u64 = 1;
+    const INBOX_VERSION: u8 = 1;
     /// Components remembered per head; the oldest entry is evicted beyond it.
-    const MAX_COMPONENTS: u64 = 64;
+    const MAX_COMPONENTS: u8 = 64;
     /// Groups listed per inbox.
-    const MAX_GROUPS: u64 = 64;
+    const MAX_GROUPS: u8 = 64;
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ module sui_edge::fleet_inbox {
         let device_id = device_registry::owner_cap_device_id(cap);
         p1(registry, cap, device_id);
         let id = derived_object::claim(device_registry::uid_mut(registry), InboxKey { device_id });
-        let inbox = DeviceInbox { id, device_id, version: INBOX_VERSION, head: p0(), groups: vector[] };
+        let inbox = DeviceInbox { id, device_id, version: (INBOX_VERSION as u64), head: p0(), groups: vector[] };
         event::emit(InboxCreated { inbox_id: object::id(&inbox), device_id });
         inbox
     }
@@ -240,7 +240,7 @@ module sui_edge::fleet_inbox {
         if (head.components.contains(&name)) {
             *head.components.get_mut(&name) = deployment_id;
         } else {
-            if (head.components.length() >= MAX_COMPONENTS) {
+            if (head.components.length() >= (MAX_COMPONENTS as u64)) {
                 let (_, _) = head.components.remove_entry_by_idx((SMALL_0 as u64));
             };
             head.components.insert(name, deployment_id);
@@ -256,7 +256,7 @@ module sui_edge::fleet_inbox {
     /// list_group: compact private symbol to bound published bytecode storage.
     fun p3(inbox: &mut DeviceInbox, group_id: ID) {
         if (!inbox.groups.contains(&group_id)) {
-            assert!(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
+            assert!(inbox.groups.length() < (MAX_GROUPS as u64), ETooManyGroups);
             inbox.groups.push_back(group_id);
         };
     }

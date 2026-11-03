@@ -1,6 +1,11 @@
 /// Native Sui passkey authentication is verified by validators. The passkey
 /// sponsors the exact wallet transaction; both signatures are mandatory.
 module sui_edge::passkey_factor {
+    const SMALL_0: u8 = 0;
+    const SMALL_2: u8 = 2;
+    const SMALL_1: u8 = 1;
+    const SMALL_33: u8 = 33;
+    const SMALL_64: u8 = 64;
     use sui::address;
     use sui::bcs;
     use sui::clock::Clock;
@@ -21,7 +26,7 @@ module sui_edge::passkey_factor {
     }
 
     public fun key_address(public_key: vector<u8>): address {
-        assert!(public_key.length() == 33 && (public_key[0] == 2 || public_key[0] == 3), EKey);
+        g0(public_key.length() == (SMALL_33 as u64)); g0((public_key[(SMALL_0 as u64)] == 2 || public_key[(SMALL_0 as u64)] == 3));
         let mut bytes = vector[6];
         bytes.append(public_key);
         address::from_bytes(hash::blake2b256(&bytes))
@@ -33,8 +38,8 @@ module sui_edge::passkey_factor {
         public_key: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
         customer::assert_security_administrator_address(customer, administrator);
         let key = key_address(public_key);
-        assert!(ctx.sender() == key && key != administrator, EKey);
-        assert!(expires_ms > clock.timestamp_ms() && expires_ms - clock.timestamp_ms() <= 600000, EBinding);
+        g0(ctx.sender() == key); g0(key != administrator);
+        g1(expires_ms > clock.timestamp_ms()); g1(expires_ms - clock.timestamp_ms() <= 600000);
         let id = object::new(ctx);
         sui::event::emit(ProofCreated { proof_id: id.to_inner(), customer: object::id(customer), administrator, key });
         transfer::share_object(Enrollment { id, customer: object::id(customer),
@@ -47,49 +52,47 @@ module sui_edge::passkey_factor {
         if (bytes.is_empty()) return vector[];
         let mut reader = bcs::new(bytes);
         let keys = reader.peel_vec_address();
-        assert!(reader.into_remainder_bytes().is_empty() && keys.length() % 2 == 0, EBinding);
+        g1(reader.into_remainder_bytes().is_empty()); g1(keys.length() % (SMALL_2 as u64) == 0);
         keys
     }
 
-    fun install(customer: &mut Customer, proof: Enrollment, clock: &Clock, ctx: &mut TxContext) {
+
+    public fun enroll(customer: &mut Customer, proof: Enrollment, clock: &Clock, ctx: &mut TxContext) {
         let Enrollment { id, customer: owner, administrator, key, generation, expires_ms } = proof;
-        assert!(owner == object::id(customer) && generation == policy::generation(&customer::security(customer))
-            && clock.timestamp_ms() < expires_ms, EBinding);
+        g1(owner == object::id(customer)); g1(generation == policy::generation(&customer::security(customer))); g1(clock.timestamp_ms() < expires_ms);
         customer::assert_security_administrator_address(customer, administrator);
         let mut entries = keys(customer);
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < entries.length()) {
-            assert!(entries[i + 1] != key, EKey);
-            i = i + 2;
+            g0(entries[i + 1] != key);
+            i = i + (SMALL_2 as u64);
         };
-        assert!(entries.length() < 64, EKey);
+        g0(entries.length() < (SMALL_64 as u64));
         entries.push_back(administrator); entries.push_back(key);
         customer::configure_security_factor(customer, FACTOR, bcs::to_bytes(&entries), ctx);
         id.delete();
     }
-
-    public fun enroll(customer: &mut Customer, proof: Enrollment, clock: &Clock, ctx: &mut TxContext) {
-        install(customer, proof, clock, ctx);
-    }
-    fun remove_key(customer: &mut Customer, administrator: address, key: address, ctx: &mut TxContext) {
+    public fun remove(customer: &mut Customer, administrator: address, key: address, ctx: &mut TxContext) {
         customer::assert_admin(customer, ctx);
         let mut entries = keys(customer);
         let mut found = false;
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < entries.length()) {
             if (entries[i] == administrator && entries[i + 1] == key) {
                 entries.remove(i); entries.remove(i); found = true;
-            } else i = i + 2;
+            } else i = i + (SMALL_2 as u64);
         };
-        assert!(found, EKey);
+        g0(found);
         if (entries.is_empty()) {
             let requirements = policy::requirements(&customer::security(customer));
-            let mut j = 0;
-            while (j < requirements.length()) { assert!((requirements[j] & FACTOR) == 0, ERecovery); j = j + 1; };
+            let mut j = (SMALL_0 as u64);
+            while (j < requirements.length()) { assert!((requirements[j] & FACTOR) == 0, ERecovery); j = j + (SMALL_1 as u64); };
         };
         customer::configure_security_factor(customer, FACTOR, if (entries.is_empty()) vector[] else bcs::to_bytes(&entries), ctx);
     }
-    public fun remove(customer: &mut Customer, administrator: address, key: address, ctx: &mut TxContext) {
-        remove_key(customer, administrator, key, ctx);
-    }
+
+    /// Shared EKey guard; preserve evaluation order and abort code.
+    fun g0(condition: bool) { if (!condition) abort EKey }
+    /// Shared EBinding guard; preserve evaluation order and abort code.
+    fun g1(condition: bool) { if (!condition) abort EBinding }
 }

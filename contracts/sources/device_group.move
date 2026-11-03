@@ -13,7 +13,7 @@ module sui_edge::device_group {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const SCHEMA_VERSION: u64 = 1;
+    const SCHEMA_VERSION: u8 = 1;
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ module sui_edge::device_group {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        p0(ctx.sender() == group.admin);
         remove_managed(group, device_id);
     }
 
@@ -161,7 +161,7 @@ module sui_edge::device_group {
     public(package) fun new_managed(name: String, description: String, admin: address,
         clock: &Clock, ctx: &mut TxContext): DeviceGroup {
         let group = DeviceGroup { id: object::new(ctx), name, description, admin,
-            device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: SCHEMA_VERSION };
+            device_ids: vector[], created_at: clock.timestamp_ms(), schema_version: (SCHEMA_VERSION as u64) };
         event::emit(GroupCreated { group_id: object::id(&group), name: group.name, admin });
         group
     }
