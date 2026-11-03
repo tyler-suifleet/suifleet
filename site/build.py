@@ -17,6 +17,7 @@ Page sources may use these tokens:
                     recorded video manifest site/media/guide/videos.json.
 """
 import argparse
+import base64
 import hashlib
 import html
 import json
@@ -63,47 +64,49 @@ def videos_by_step():
     return {v["step"]: v for v in manifest.get("videos", [])}, manifest
 
 
+def guide_integrity():
+    """The one permitted guide script is bound to its exact reviewed bytes."""
+    return "sha256-" + base64.b64encode(hashlib.sha256((SRC / "assets/guide.js").read_bytes()).digest()).decode("ascii")
+
+
+def guide_script_url():
+    return "/assets/guide.js?v=" + hashlib.sha256((SRC / "assets/guide.js").read_bytes()).hexdigest()[:12]
+
+
 def render_guide(config):
     steps = load_json(GUIDE / "steps.json")["steps"]
     videos, manifest = videos_by_step()
-    out = ['<ol class="guide-index">']
-    out += [f'<li><a href="#{s["id"]}">{html.escape(s["title"])}</a></li>' for s in steps]
-    out.append("</ol>")
-    for number, step in enumerate(steps, 1):
-        route = step["console_route"]
-        out.append(f'<section class="guide-step" id="{step["id"]}">')
-        out.append(f'<h2><span class="step-number">{number}</span> {html.escape(step["title"])}</h2>')
-        out.append(f'<p>{html.escape(step["summary"])}</p>')
+    out = []
+    for step in steps:
+        title = html.escape(step["title"])
+        out.append(f'<section class="guide-stage" id="{step["id"]}" data-title="{title}">')
         video = videos.get(step["id"])
+        out.append('<figure class="guide-media">')
         if video:
             for key in ("file", "poster", "fallback"):
                 name = video.get(key)
                 if name and Path(name).name != name:
                     raise BuildError(f"unsafe guide media filename: {name}")
             poster = f' poster="/media/guide/{video["poster"]}"' if video.get("poster") else ""
-            fallback = (f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else "")
-            out.append(f'<figure class="screencast"><video controls preload="none" width="{video["width"]}" height="{video["height"]}"{poster}>'
+            fallback = f'<source src="/media/guide/{video["fallback"]}" type="video/mp4">' if video.get("fallback") else ""
+            out.append(f'<video data-console-commit="{html.escape(video.get("console_commit", manifest["console_commit"]))}" controls playsinline preload="none" aria-label="{title} walkthrough" width="{video["width"]}" height="{video["height"]}"{poster}>'
                        f'<source src="/media/guide/{video["file"]}" type="video/webm">{fallback}'
-                       f'Your browser cannot play this WebM screencast. <a href="/media/guide/{video["file"]}">Download it</a>.</video>'
-                       f'<figcaption>{html.escape(video["caption"])} Recorded on Sui {html.escape(manifest["network"])} '
-                       f'from console build <code>{html.escape(video.get("console_commit", manifest["console_commit"])[:12])}</code> on {html.escape(manifest["recorded"])}.</figcaption></figure>')
+                       'Your browser cannot play this recording.</video>')
+            out.append(f'<div data-video-error hidden role="status"><p>Video unavailable. Follow the steps or <a href="/media/guide/{video.get("fallback", video["file"])}">download it</a>.</p></div>')
+            out.append(f'<figcaption><span>Testnet recording · {html.escape(manifest["recorded"])}</span><a href="/media/guide/{video.get("fallback", video["file"])}" download>Download video</a></figcaption>')
         else:
-            out.append('<p class="pending-video">Screencast not yet recorded for this step.</p>')
-        out.append('<details class="transcript"><summary>Transcript and instructions</summary>')
-        if step.get("before"):
-            out.append("<h3>Before you start</h3><ul>")
-            out += [f"<li>{html.escape(item)}</li>" for item in step["before"]]
-            out.append("</ul>")
-        out.append("<h3>Steps</h3><ol>")
-        out += [f"<li>{html.escape(item)}</li>" for item in step["actions"]]
-        out.append("</ol>")
-        out.append(f'<p class="result"><strong>Result:</strong> {html.escape(step["result"])}</p>')
-        links = [f'<a class="button" href="{config["app_url"]}{route}">Open {html.escape(step["console_label"])} in the console</a>']
-        links += [f'<a href="{repo_url(config, d["path"])}">{html.escape(d["label"])}</a>' for d in step.get("docs", [])]
-        out.append('<p class="step-links">' + " ".join(links) + "</p>")
-        out.append("</details></section>")
+            out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
+        out.append('</figure><article class="guide-instruction-card">')
+        out.append(f'<h2 tabindex="-1">{title}</h2><h3 data-guide-label>Overview</h3><div class="guide-copy"><p>{html.escape(step["summary"])}</p></div>')
+        out.append(f'<div class="guide-instruction-meta"><div class="guide-instruction-paging"><button type="button" aria-label="Previous instruction" data-guide-prev-part>‹</button><span data-guide-part aria-live="polite"></span><button type="button" aria-label="Next instruction" data-guide-forward>›</button></div><a href="{config["app_url"]}{step["console_route"]}" target="_blank" rel="noopener">Open {html.escape(step["console_label"])} ↗</a></div></article>')
+        instructions = [("Overview", step["summary"])]
+        instructions += [("Before you start", text) for text in step.get("before", [])]
+        instructions += [(f'Task {i} of {len(step["actions"])}', text) for i, text in enumerate(step["actions"], 1)]
+        instructions += [("Expected result", step["result"])]
+        out.append('<ol class="guide-instructions">')
+        out += [f'<li data-guide-instruction data-label="{html.escape(label)}">{html.escape(text)}</li>' for label, text in instructions]
+        out.append('</ol></section>')
     return "\n".join(out)
-
 
 def expand(text, config, source):
     def replace(match):
@@ -114,6 +117,9 @@ def expand(text, config, source):
             return config["app_url"] + arg.lstrip("/")
         if name == "repo" and arg is not None:
             return repo_url(config, arg)
+        if name == "guide_options" and arg is None:
+            steps = load_json(GUIDE / "steps.json")["steps"]
+            return "".join(f'<option value="{step["id"]}">{index}. {html.escape(step["title"])}</option>' for index, step in enumerate(steps, 1)) + '<option value="complete">Walkthrough complete</option>'
         if name == "guide_steps" and arg is None:
             return render_guide(config)
         raise BuildError(f"{source}: unknown token {match.group(0)}")
@@ -148,6 +154,13 @@ def build(out):
                   "canonical": canonical, "nav": nav, "app_url": config["app_url"],
                   "repo_url": config["repo_url"], "content": content.strip()}
         rendered = re.sub(r"\{\{(page_title|description|canonical|nav|app_url|repo_url|content)\}\}", lambda m: values[m.group(1)], layout)
+        style_version = hashlib.sha256((SRC / "assets/style.css").read_bytes()).hexdigest()[:12]
+        rendered = rendered.replace('href="/assets/style.css"', f'href="/assets/style.css?v={style_version}"')
+        if page["path"] == "/guide/":
+            integrity = guide_integrity()
+            rendered = rendered.replace("<body>", '<body class="guide-page">')
+            rendered = rendered.replace("base-uri 'none'; form-action 'none'", f"base-uri 'none'; form-action 'none'; script-src '{integrity}'")
+            rendered = rendered.replace("</body>", f'<script src="{guide_script_url()}" integrity="{integrity}" defer></script>\n</body>')
         target = output_path(out, page["path"])
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(rendered, encoding="utf-8", newline="\n")
@@ -160,7 +173,12 @@ def build(out):
                 if video.get(key):
                     shutil.copyfile(MEDIA / "guide" / video[key], out / "media" / "guide" / video[key])
     for name in ("_headers", "robots.txt"):
-        shutil.copyfile(SRC / name, out / name)
+        if name == "_headers":
+            headers = (SRC / name).read_text(encoding="utf-8")
+            headers = headers.replace("default-src 'none';", f"default-src 'none'; script-src '{guide_integrity()}';")
+            (out / name).write_text(headers, encoding="utf-8")
+        else:
+            shutil.copyfile(SRC / name, out / name)
     urls = "".join(f"<url><loc>{escape(config['origin'] + page['path'])}</loc></url>"
                    for page in config["pages"] if page["path"] != "/404.html")
     (out / "sitemap.xml").write_text(
