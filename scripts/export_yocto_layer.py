@@ -39,7 +39,10 @@ def export(repo, revision, output):
             info = tarfile.TarInfo('meta-suifleet/' + name)
             info.size, info.mode, info.mtime = len(data), mode, 0
             archive.addfile(info, io.BytesIO(data))
-    data = gzip.compress(raw.getvalue(), mtime=0)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(fileobj=compressed, mode='wb', filename='', mtime=0) as stream:
+        stream.write(raw.getvalue())
+    data = compressed.getvalue()
     # Exclusive creation prevents accidental replacement of a release artifact.
     with Path(output).open('xb') as target:
         target.write(data)

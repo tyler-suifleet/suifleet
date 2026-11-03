@@ -41,7 +41,7 @@ firmware recovery; the daemon does not establish healthy boot.
 
 ## Contributions
 
-Until standalone publication, open changes against the existing SuiFleet
+Send patches through pull requests. Until standalone publication, open changes against the existing SuiFleet
 repository and reference its existing issue. Never include credentials or live
 state. Keep source revision, crate include, lock digest and codec provenance in
 sync; retain signing/identity boundaries and package QA. Supply exact recipe
