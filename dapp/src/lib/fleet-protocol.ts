@@ -30,6 +30,7 @@ export const customer_HandoverConsentBcs = bcs.struct("HandoverConsent", { id: b
 export const customer_MembershipBcs = bcs.struct("Membership", { id: bcs.Address, customer_id: bcs.Address });
 export const customer_PolicyKeyBcs = bcs.struct("PolicyKey", { policy_id: bcs.Address });
 export const customer_SecondPersonConfigurationBcs = bcs.struct("SecondPersonConfiguration", { schema: bcs.u8() });
+export const customer_SubscriptionKeyBcs = bcs.struct("SubscriptionKey", { dummy_field: bcs.bool() });
 export const deployment_manager_ControlBcs = bcs.struct("Control", { revision: bcs.u64(), state: bcs.u8(), not_before_ms: bcs.u64(), expires_ms: bcs.u64(), window_start_ms: bcs.u64(), window_end_ms: bcs.u64(), notice_ms: bcs.u64() });
 export const deployment_manager_ControlKeyBcs = bcs.struct("ControlKey", { dummy_field: bcs.bool() });
 export const deployment_manager_CustomerFleetKeyBcs = bcs.struct("CustomerFleetKey", { dummy_field: bcs.bool() });
@@ -157,6 +158,12 @@ export const security_policy_PolicyChangedBcs = bcs.struct("PolicyChanged", { cu
 export const security_policy_PolicyKeyBcs = bcs.struct("PolicyKey", { dummy_field: bcs.bool() });
 export const security_policy_QueuedAtBcs = bcs.struct("QueuedAt", { milliseconds: bcs.u64() });
 export const security_policy_QueuedAtKeyBcs = bcs.struct("QueuedAtKey", { dummy_field: bcs.bool() });
+export const subscription_AccountBcs = bcs.struct("Account", { id: bcs.Address, customer_id: bcs.Address, registry_id: bcs.Address, treasury: bcs.Address, balance: bcs.struct("Balance", { value: bcs.u64() }), tier: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), fee: bcs.u64(), remaining: bcs.u64(), period_ms: bcs.u64(), next_due_ms: bcs.u64(), term_end_ms: bcs.u64(), cancelled: bcs.bool() });
+export const subscription_CollectedBcs = bcs.struct("Collected", { account_id: bcs.Address, amount: bcs.u64(), through_ms: bcs.u64() });
+export const subscription_DepositedBcs = bcs.struct("Deposited", { account_id: bcs.Address, amount: bcs.u64() });
+export const subscription_OfferBcs = bcs.struct("Offer", { id: bcs.Address, registry_id: bcs.Address, treasury: bcs.Address, tier: bcs.u64(), device_limit: bcs.u64(), allowance: bcs.u64(), fee: bcs.u64(), periods: bcs.u64(), period_ms: bcs.u64(), published_at_ms: bcs.u64(), expires_at_ms: bcs.u64() });
+export const subscription_PlanChangedBcs = bcs.struct("PlanChanged", { account_id: bcs.Address, offer_id: bcs.Address, tier: bcs.u64(), fee: bcs.u64(), periods: bcs.u64() });
+export const subscription_RefundedBcs = bcs.struct("Refunded", { account_id: bcs.Address, recipient: bcs.Address, amount: bcs.u64() });
 export const calls = {
   component_catalog_begin_sharded_receipts: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::component_catalog::begin_sharded_receipts`, arguments: [tx.object(a0)] }),
   component_catalog_create_catalog: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::component_catalog::create_catalog`, arguments: [] }),
@@ -598,6 +605,7 @@ export const TYPES = {
   customer_Membership: "customer::Membership",
   customer_PolicyKey: "customer::PolicyKey",
   customer_SecondPersonConfiguration: "customer::SecondPersonConfiguration",
+  customer_SubscriptionKey: "customer::SubscriptionKey",
   deployment_manager_Control: "deployment_manager::Control",
   deployment_manager_ControlKey: "deployment_manager::ControlKey",
   deployment_manager_CustomerFleetKey: "deployment_manager::CustomerFleetKey",
@@ -725,4 +733,10 @@ export const TYPES = {
   security_policy_PolicyKey: "security_policy::PolicyKey",
   security_policy_QueuedAt: "security_policy::QueuedAt",
   security_policy_QueuedAtKey: "security_policy::QueuedAtKey",
+  subscription_Account: "subscription::Account",
+  subscription_Collected: "subscription::Collected",
+  subscription_Deposited: "subscription::Deposited",
+  subscription_Offer: "subscription::Offer",
+  subscription_PlanChanged: "subscription::PlanChanged",
+  subscription_Refunded: "subscription::Refunded",
 } as const;

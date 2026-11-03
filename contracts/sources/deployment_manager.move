@@ -1,19 +1,18 @@
 module sui_edge::deployment_manager {
-    const SMALL_256: u16 = 256;
-    const SMALL_10000: u16 = 10000;
-    const SMALL_512: u16 = 512;
-    const SMALL_604800000: u32 = 604800000;
+    const SMALL_256: u64 = 256;
+    const SMALL_10000: u64 = 10000;
+    const SMALL_512: u64 = 512;
+    const SMALL_604800000: u64 = 604800000;
 
-    // Widen named narrow literals at use sites to avoid repeated LdU64.
-    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
-    const SMALL_2: u8 = 2;
-    const SMALL_3: u8 = 3;
-    const SMALL_4: u8 = 4;
-    const SMALL_31: u8 = 31;
-    const SMALL_64: u8 = 64;
+    // Named u64 constants share the bytecode constant pool, including error values,
+    // and avoid repeated immediate loads or casts without changing numeric types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
+    const SMALL_2: u64 = 2;
+    const SMALL_3: u64 = 3;
+    const SMALL_4: u64 = 4;
+    const SMALL_31: u64 = 31;
+    const SMALL_64: u64 = 64;
 
     use std::string::String;
     use std::bcs;
@@ -43,17 +42,25 @@ module sui_edge::deployment_manager {
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const EInvalidStatus: u64 = 0;
+    const BInvalidStatus: u8 = 0;
     const ENoTargets: u64 = 1;
     const ENotCreator: u64 = 2;
+    const BNotCreator: u8 = 2;
     const ENotTargeted: u64 = 3;
+    const BNotTargeted: u8 = 3;
     const EInvalidRecipeHash: u64 = 4;
+    const BInvalidRecipeHash: u8 = 4;
     const EPackageOutdated: u64 = 5;
+    const BPackageOutdated: u8 = 5;
     const ENoReceipts: u64 = 6;
+    const BNoReceipts: u8 = 6;
     const EUseVerifiedReport: u64 = 7;
     const EStaleReceipts: u64 = 8;
     const EInvalidControlState: u64 = 9;
     const EInvalidSchedule: u64 = 10;
+    const BInvalidSchedule: u8 = 10;
     const ECancelled: u64 = 11;
+    const BCancelled: u8 = 11;
 
     // ── Dynamic field keys ────────────────────────────────────────────────────
     //
@@ -116,27 +123,27 @@ module sui_edge::deployment_manager {
         std::bcs::to_bytes(&parts)
     }
     public(package) fun pause_as(deployment: &mut DeploymentRecord, authority: address) {
-        pj(deployment.creator == authority);
+        q(deployment.creator == authority, BNotCreator);
         let mut c = control(deployment);
-        assert!(c.state != 2, ECancelled);
+        q(c.state != 2, BCancelled);
         c.state = 1;
-        c.revision = c.revision + (SMALL_1 as u64);
+        c.revision = c.revision + SMALL_1;
         if (df::exists(&deployment.id, ControlKey {})) {
             *df::borrow_mut<ControlKey, Control>(&mut deployment.id, ControlKey {}) = c;
         } else df::add(&mut deployment.id, ControlKey {}, c);
     }
     public(package) fun set_control_as(deployment: &mut DeploymentRecord, state: u8,
         not_before_ms: u64, expires_ms: u64, window_start_ms: u64, window_end_ms: u64, notice_ms: u64, authority: address) {
-        pj(authority == deployment.creator);
+        q(authority == deployment.creator, BNotCreator);
         assert!(state <= 2, EInvalidControlState);
-        if (!(expires_ms == (SMALL_0 as u64))) { ph(expires_ms > not_before_ms); };
-        if (!((window_start_ms == (SMALL_0 as u64) && window_end_ms == (SMALL_0 as u64)))) { ph(window_end_ms > window_start_ms); };
-        ph(notice_ms <= (SMALL_604800000 as u64)); // at most seven days
+        if (!(expires_ms == SMALL_0)) { q(expires_ms > not_before_ms, BInvalidSchedule); };
+        if (!((window_start_ms == SMALL_0 && window_end_ms == SMALL_0))) { q(window_end_ms > window_start_ms, BInvalidSchedule); };
+        q(notice_ms <= SMALL_604800000, BInvalidSchedule); // at most seven days
         let revision = if (df::exists(&deployment.id, ControlKey {})) {
             let previous: Control = df::remove(&mut deployment.id, ControlKey {});
-            assert!(previous.state != 2, ECancelled);
-            previous.revision + (SMALL_1 as u64)
-        } else { (SMALL_1 as u64) };
+            q(previous.state != 2, BCancelled);
+            previous.revision + SMALL_1
+        } else { SMALL_1 };
         df::add(&mut deployment.id, ControlKey {}, Control {
             revision, state, not_before_ms, expires_ms,
             window_start_ms, window_end_ms, notice_ms,
@@ -153,8 +160,8 @@ module sui_edge::deployment_manager {
         if (df::exists(&deployment.id, ControlKey {})) {
             *df::borrow(&deployment.id, ControlKey {})
         } else {
-            Control { revision: (SMALL_0 as u64), state: 0, not_before_ms: (SMALL_0 as u64), expires_ms: (SMALL_0 as u64),
-                window_start_ms: (SMALL_0 as u64), window_end_ms: (SMALL_0 as u64), notice_ms: (SMALL_0 as u64) }
+            Control { revision: SMALL_0, state: 0, not_before_ms: SMALL_0, expires_ms: SMALL_0,
+                window_start_ms: SMALL_0, window_end_ms: SMALL_0, notice_ms: SMALL_0 }
         }
     }
 
@@ -165,6 +172,7 @@ module sui_edge::deployment_manager {
     /// daemons ignore it, so manifests carrying these types raise the minimum
     /// edge version.
     const EInvalidRecurringWindow: u64 = 18;
+    const BInvalidRecurringWindow: u8 = 18;
     const MAX_WEEKLY_SLOTS: u64 = 8;
     const MAX_TIMEZONE_BYTES: u64 = 64;
     public struct RecurringWindowKey has copy, drop, store {}
@@ -188,21 +196,19 @@ module sui_edge::deployment_manager {
     }
     public(package) fun set_recurring_window_as(deployment: &mut DeploymentRecord, timezone: String,
         days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
-        assert_timezone(&timezone);
+        q(authority == deployment.creator, BNotCreator);
+        h1(&timezone);
         let count = days.length();
-        assert!(count > 0 && count <= MAX_WEEKLY_SLOTS && start_minutes.length() == count &&
-            duration_minutes.length() == count, EInvalidRecurringWindow);
-        let mut slots = vector[];
-        let mut i = 0;
+        q(count > SMALL_0, BInvalidRecurringWindow); q(count <= MAX_WEEKLY_SLOTS, BInvalidRecurringWindow); q(start_minutes.length() == count, BInvalidRecurringWindow); q(duration_minutes.length() == count, BInvalidRecurringWindow);
+        let mut slots = v0();
+        let mut i = SMALL_0;
         while (i < count) {
             let slot = WeeklySlot { days: days[i], start_minute: start_minutes[i], duration_minutes: duration_minutes[i] };
-            assert!(slot.days > 0 && slot.days < 128 && slot.start_minute < 1440 &&
-                slot.duration_minutes > 0 && slot.duration_minutes <= 1440, EInvalidRecurringWindow);
+            q(slot.days > 0, BInvalidRecurringWindow); q(slot.days < 128, BInvalidRecurringWindow); q(slot.start_minute < 1440, BInvalidRecurringWindow); q(slot.duration_minutes > 0, BInvalidRecurringWindow); q(slot.duration_minutes <= 1440, BInvalidRecurringWindow);
             slots.push_back(slot);
-            i = i + 1;
+            i = i + SMALL_1;
         };
-        let revision = bump_control(deployment);
+        let revision = h0(deployment);
         if (df::exists(&deployment.id, RecurringWindowKey {})) {
             let _: RecurringWindow = df::remove(&mut deployment.id, RecurringWindowKey {});
         };
@@ -212,9 +218,9 @@ module sui_edge::deployment_manager {
         clear_recurring_window_as(deployment, ctx.sender());
     }
     public(package) fun clear_recurring_window_as(deployment: &mut DeploymentRecord, authority: address) {
-        assert!(authority == deployment.creator, ENotCreator);
-        assert!(df::exists(&deployment.id, RecurringWindowKey {}), EInvalidRecurringWindow);
-        bump_control(deployment);
+        q(authority == deployment.creator, BNotCreator);
+        q(df::exists(&deployment.id, RecurringWindowKey {}), BInvalidRecurringWindow);
+        h0(deployment);
         let _: RecurringWindow = df::remove(&mut deployment.id, RecurringWindowKey {});
     }
     public fun recurring_window(deployment: &DeploymentRecord): Option<RecurringWindow> {
@@ -224,39 +230,44 @@ module sui_edge::deployment_manager {
     }
     /// (revision, timezone, days, start minutes, durations) in slot order.
     public fun recurring_window_fields(window: &RecurringWindow): (u64, String, vector<u8>, vector<u16>, vector<u16>) {
-        let (mut days, mut starts, mut durations) = (vector[], vector[], vector[]);
-        window.slots.do_ref!(|slot| {
+        let (mut days, mut starts, mut durations) = (v0(), v0(), v0());
+        let mut i = SMALL_0;
+        while (i < window.slots.length()) {
+            let slot = &window.slots[i];
             days.push_back(slot.days); starts.push_back(slot.start_minute); durations.push_back(slot.duration_minutes);
-        });
+            i = i + SMALL_1;
+        };
         (window.revision, window.timezone, days, starts, durations)
     }
     /// Revision of the replaced or newly created Control; an absent Control
     /// becomes an explicit immediate one, which devices treat identically.
-    fun bump_control(deployment: &mut DeploymentRecord): u64 {
+    /// Private helper: bump_control.
+    fun h0(deployment: &mut DeploymentRecord): u64 {
         let mut control = if (df::exists(&deployment.id, ControlKey {})) {
             df::remove(&mut deployment.id, ControlKey {})
         } else {
-            Control { revision: 0, state: 0, not_before_ms: 0, expires_ms: 0,
-                window_start_ms: 0, window_end_ms: 0, notice_ms: 0 }
+            Control { revision: SMALL_0, state: 0, not_before_ms: SMALL_0, expires_ms: SMALL_0,
+                window_start_ms: SMALL_0, window_end_ms: SMALL_0, notice_ms: SMALL_0 }
         };
-        assert!(control.state != 2, ECancelled);
-        control.revision = control.revision + 1;
+        q(control.state != 2, BCancelled);
+        control.revision = control.revision + SMALL_1;
         let revision = control.revision;
         df::add(&mut deployment.id, ControlKey {}, control);
         revision
     }
     /// IANA names use ASCII letters, digits and `/ _ - +` and never begin
     /// with `/`; anything else (including `.`) is rejected.
-    fun assert_timezone(timezone: &String) {
+    /// Private helper: assert_timezone.
+    fun h1(timezone: &String) {
         let bytes = timezone.as_bytes();
         let n = bytes.length();
-        assert!(n > 0 && n <= MAX_TIMEZONE_BYTES && bytes[0] != 47, EInvalidRecurringWindow);
-        let mut i = 0;
+        q(n > SMALL_0, BInvalidRecurringWindow); q(n <= MAX_TIMEZONE_BYTES, BInvalidRecurringWindow); q(bytes[0] != 47, BInvalidRecurringWindow);
+        let mut i = SMALL_0;
         while (i < n) {
             let b = bytes[i];
-            assert!((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) ||
-                b == 47 || b == 95 || b == 45 || b == 43, EInvalidRecurringWindow);
-            i = i + 1;
+            q((b >= 65 && b <= 90) || (b >= 97 && b <= 122) || (b >= 48 && b <= 57) ||
+                b == 47 || b == 95 || b == 45 || b == 43, BInvalidRecurringWindow);
+            i = i + SMALL_1;
         };
     }
 
@@ -397,7 +408,7 @@ module sui_edge::deployment_manager {
         ctx: &mut TxContext,
     ): ID {
         let mut record = new_customer_deployment(operator, component_name, version, recipe_blob_id,
-            artifact_sha256, recipe_sha256, target_groups, vector[], clock, ctx);
+            artifact_sha256, recipe_sha256, target_groups, v0(), clock, ctx);
         df::add(&mut record.id, DelegateKey {}, ctx.sender());
         let id = object::id(&record);
         transfer::share_object(record);
@@ -420,12 +431,12 @@ module sui_edge::deployment_manager {
     /// assert_recipe_hash: compact private symbol to bound published bytecode storage.
     fun p0(recipe_sha256: &String) {
         let bytes = recipe_sha256.as_bytes();
-        assert!(bytes.length() == (SMALL_64 as u64), EInvalidRecipeHash);
-        let mut i = (SMALL_0 as u64);
+        q(bytes.length() == SMALL_64, BInvalidRecipeHash);
+        let mut i = SMALL_0;
         while (i < bytes.length()) {
             let byte = bytes[i];
-            assert!((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), EInvalidRecipeHash);
-            i = i + (SMALL_1 as u64);
+            q((byte >= 48 && byte <= 57) || (byte >= 97 && byte <= 102), BInvalidRecipeHash);
+            i = i + SMALL_1;
         };
     }
 
@@ -447,7 +458,7 @@ module sui_edge::deployment_manager {
         key: K, value: V, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let mut record = p1(creator, name, version, std::string::utf8(b""),
             std::string::utf8(b""), groups, devices, clock, ctx);
-        record.schema_version = (SMALL_2 as u64);
+        record.schema_version = SMALL_2;
         df::add(&mut record.id, key, value);
         record
     }
@@ -458,7 +469,7 @@ module sui_edge::deployment_manager {
         remove_catalog_binding_as<K, V>(deployment, key, ctx.sender());
     }
     public(package) fun remove_catalog_binding_as<K: copy + drop + store, V: store + drop>(deployment: &mut DeploymentRecord, key: K, authority: address) {
-        pj(authority == deployment.creator);
+        q(authority == deployment.creator, BNotCreator);
         let _: V = df::remove(&mut deployment.id, key);
         if (df::exists(&deployment.id, ReceiptShardKey {})) {
             let directory: &mut ReceiptDirectory = df::borrow_mut(&mut deployment.id, ReceiptShardKey {});
@@ -546,7 +557,7 @@ module sui_edge::deployment_manager {
         device_cap::assert_active(cap, registry, ctx);
         let device_id = device_cap::device_id(cap);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetDevicesKey {});
-        pk(targets.contains(&device_id));
+        q(targets.contains(&device_id), BNotTargeted);
         p2(deployment, cap, status, ctx);
     }
 
@@ -562,9 +573,9 @@ module sui_edge::deployment_manager {
     ) {
         device_cap::assert_active(cap, registry, ctx);
         let targets: &vector<ID> = df::borrow(&deployment.id, TargetGroupsKey {});
-        pk(targets.contains(&device_group::group_id(group)));
-        pk(device_group::admin(group) == deployment.creator);
-        pk(device_group::contains_device(group, device_cap::device_id(cap)));
+        q(targets.contains(&device_group::group_id(group)), BNotTargeted);
+        q(device_group::admin(group) == deployment.creator, BNotTargeted);
+        q(device_group::contains_device(group, device_cap::device_id(cap)), BNotTargeted);
         p2(deployment, cap, status, ctx);
     }
 
@@ -575,29 +586,29 @@ module sui_edge::deployment_manager {
     /// records with the new package's `migrate` so older entry points can no
     /// longer write them.
     public fun migrate(deployment: &mut DeploymentRecord) {
-        receipts_mut(deployment);
+        h2(deployment);
     }
 
     /// record_status: compact private symbol to bound published bytecode storage.
     fun p2(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        pl(!df::exists(&deployment.id, CustomerFleetKey {}));
+        q(!df::exists(&deployment.id, CustomerFleetKey {}), BPackageOutdated);
         p3(deployment, cap, status, ctx);
     }
     public(package) fun record_customer_status(deployment: &mut DeploymentRecord, fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        pk(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id);
+        q(*df::borrow<CustomerFleetKey, ID>(&deployment.id, CustomerFleetKey {}) == fleet_id, BNotTargeted);
         p3(deployment, cap, status, ctx);
     }
     /// record_status_internal: compact private symbol to bound published bytecode storage.
     fun p3(deployment: &mut DeploymentRecord, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        if (!(status == STATUS_APPLIED)) { pi(status == STATUS_FAILED); };
+        if (!(status == STATUS_APPLIED)) { q(status == STATUS_FAILED, BInvalidStatus); };
 
         let device_id = device_cap::device_id(cap);
-        if (deployment.schema_version == (SMALL_3 as u64)) {
+        if (deployment.schema_version == SMALL_3) {
             pc(deployment, device_id, status);
         };
         // Legacy StatusesKey entries are never copied: old entry points may
         // have forged them. They stay on the record as unverified history.
-        let statuses = &mut receipts_mut(deployment).statuses;
+        let statuses = &mut h2(deployment).statuses;
 
         if (statuses.contains(&device_id)) {
             *statuses.get_mut(&device_id) = status;
@@ -614,10 +625,10 @@ module sui_edge::deployment_manager {
     }
 
     public(package) fun bind_customer(deployment: &mut DeploymentRecord, fleet_id: ID) {
-        pl(!df::exists(&deployment.id, ReceiptShardKey {}));
+        q(!df::exists(&deployment.id, ReceiptShardKey {}), BPackageOutdated);
         // Preserve already-authoritative historical receipts at the cutover.
-        let receipts = receipts_mut(deployment);
-        receipts.version = (SMALL_3 as u64);
+        let receipts = h2(deployment);
+        receipts.version = SMALL_3;
         df::add(&mut deployment.id, CustomerFleetKey {}, fleet_id);
     }
     /// 1 plain, 2 catalog-bound, 3 staged rollout, 4 sharded receipts. Use
@@ -632,13 +643,14 @@ module sui_edge::deployment_manager {
     /// Records created before receipts existed get them lazily; a record
     /// already migrated by a newer package aborts here. Statuses from an older
     /// authority version are dropped: devices must report again.
-    fun receipts_mut(deployment: &mut DeploymentRecord): &mut Receipts {
+    /// Private helper: receipts_mut.
+    fun h2(deployment: &mut DeploymentRecord): &mut Receipts {
         if (!df::exists(&deployment.id, ReceiptsKey {})) {
             df::add(&mut deployment.id, ReceiptsKey {}, p4());
         };
-        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) (SMALL_3 as u64) else LEGACY_RECEIPTS_VERSION;
+        let target_version = if (df::exists(&deployment.id, CustomerFleetKey {})) SMALL_3 else LEGACY_RECEIPTS_VERSION;
         let receipts: &mut Receipts = df::borrow_mut(&mut deployment.id, ReceiptsKey {});
-        assert!(receipts.version <= target_version, EPackageOutdated);
+        q(receipts.version <= target_version, BPackageOutdated);
         if (receipts.version < target_version) {
             receipts.statuses = vec_map::empty();
             receipts.version = target_version;
@@ -651,9 +663,9 @@ module sui_edge::deployment_manager {
         p5(deployment, ctx.sender());
     }
     public(package) fun delete_for_customer(mut deployment: DeploymentRecord, authority: address) {
-        pj(authority == deployment.creator);
+        q(authority == deployment.creator, BNotCreator);
         pa(&mut deployment);
-        if (deployment.schema_version == (SMALL_3 as u64)) {
+        if (deployment.schema_version == SMALL_3) {
             pe(&mut deployment, authority);
             let _: Rollout = df::remove(&mut deployment.id, RolloutKey {});
             if (df::exists(&deployment.id, RolloutHealthKey {})) {
@@ -666,11 +678,11 @@ module sui_edge::deployment_manager {
     }
     /// delete_as: compact private symbol to bound published bytecode storage.
     fun p5(mut deployment: DeploymentRecord, authority: address) {
-        pj(authority == deployment.creator);
+        q(authority == deployment.creator, BNotCreator);
 
         pa(&mut deployment);
         // Catalog records require their defining module to remove the binding first.
-        pl(deployment.schema_version == SCHEMA_VERSION);
+        q(deployment.schema_version == SCHEMA_VERSION, BPackageOutdated);
         if (df::exists(&deployment.id, ControlKey {})) {
             let _: Control = df::remove(&mut deployment.id, ControlKey {});
         };
@@ -704,11 +716,11 @@ module sui_edge::deployment_manager {
     /// Authority changes in place so every still-callable package checks the
     /// recipient as creator. Preserve payload, targets, receipts and controls.
     public(package) fun handover(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
-        pj(ctx.sender() == d.creator);
+        q(ctx.sender() == d.creator, BNotCreator);
         // Catalog-bound records resolve dependencies through the original
         // publisher index. Supersede them under a recipient-owned catalog;
         // changing only creator would retain the old publisher as an authority.
-        pl(receipt_schema(d) != (SMALL_2 as u64));
+        q(receipt_schema(d) != SMALL_2, BPackageOutdated);
         d.creator = recipient;
     }
 
@@ -716,8 +728,8 @@ module sui_edge::deployment_manager {
     // localnet harness also executes the actual published base bytecode.
     #[test_only]
     public(package) fun legacy_handover_for_testing(d: &mut DeploymentRecord, recipient: address, ctx: &TxContext) {
-        pj(ctx.sender() == d.creator);
-        pl(d.schema_version != (SMALL_2 as u64));
+        q(ctx.sender() == d.creator, BNotCreator);
+        q(d.schema_version != SMALL_2, BPackageOutdated);
         d.creator = recipient;
     }
 
@@ -741,9 +753,13 @@ module sui_edge::deployment_manager {
         migration_cursor: u64, migrated: bool,
     }
     const EShard: u64 = 14;
+    const BShard: u8 = 14;
     const EBarrier: u64 = 15;
+    const BBarrier: u8 = 15;
     const EChunk: u64 = 16;
+    const BChunk: u8 = 16;
     const ECleanup: u64 = 17;
+    const BCleanup: u8 = 17;
     const SHARD_COUNT: u64 = 16;
     const RECEIPTS_VERSION: u64 = 4;
     const CHUNK_LIMIT: u64 = 64;
@@ -751,7 +767,7 @@ module sui_edge::deployment_manager {
     // 120k receipts therefore need no large shared-object payload.
     public fun receipt_shard_index(device: ID): u64 {
         let bytes = bcs::to_bytes(&device);
-        (bytes[(SMALL_31 as u64)] as u64) % SHARD_COUNT
+        (bytes[SMALL_31] as u64) % SHARD_COUNT
     }
     public fun receipt_directory(d: &DeploymentRecord): &ReceiptDirectory {
         df::borrow(&d.id, ReceiptShardKey {})
@@ -766,31 +782,31 @@ module sui_edge::deployment_manager {
         begin_sharded_receipts_as(d, ctx.sender(), ctx);
     }
     public(package) fun begin_sharded_receipts_as(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
-        pj(authority == d.creator);
+        q(authority == d.creator, BNotCreator);
         if (df::exists(&d.id, ReceiptShardKey {})) return;
         // Catalog bindings need relocating by their defining module first; an
         // old catalog delete could otherwise remove a binding and reset schema.
-        if (!(d.schema_version == (SMALL_1 as u64))) { pl(d.schema_version == (SMALL_3 as u64)); };
-        receipts_mut(d);
+        if (!(d.schema_version == SMALL_1)) { q(d.schema_version == SMALL_3, BPackageOutdated); };
+        h2(d);
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
         receipts.version = RECEIPTS_VERSION;
         let empty = receipts.statuses.is_empty();
-        let mut roots = vector[]; let mut index = (SMALL_0 as u64);
+        let mut roots = v0(); let mut index = SMALL_0;
         while (index < SHARD_COUNT) {
             let root = ReceiptShard { id: object::new(ctx), deployment: object::id(d),
-                index, count: (SMALL_0 as u64), migration_cursor: (SMALL_0 as u64), migrated: empty };
+                index, count: SMALL_0, migration_cursor: SMALL_0, migrated: empty };
             roots.push_back(object::id(&root));
-            transfer::share_object(root); index = index + (SMALL_1 as u64);
+            transfer::share_object(root); index = index + SMALL_1;
         };
         let original_schema = d.schema_version;
-        d.schema_version = (SMALL_4 as u64);
+        d.schema_version = SMALL_4;
         // Earliest packages have no schema check in delete_deployment. Their
         // unconditional removal of TargetGroupsKey must abort, preventing them
         // from deleting the parent and orphaning the new shared roots.
         let groups: vector<ID> = df::remove(&mut d.id, TargetGroupsKey {});
         df::add(&mut d.id, ShardedTargetGroupsKey {}, groups);
         df::add(&mut d.id, ReceiptShardKey {}, ReceiptDirectory {
-            roots, original_schema, migrated: if (empty) SHARD_COUNT else (SMALL_0 as u64), ready: empty, retiring: false, remaining: SHARD_COUNT,
+            roots, original_schema, migrated: if (empty) SHARD_COUNT else SMALL_0, ready: empty, retiring: false, remaining: SHARD_COUNT,
         });
         event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
     }
@@ -804,50 +820,50 @@ module sui_edge::deployment_manager {
     public(package) fun begin_catalog_receipts_as<K: copy + drop + store, N: copy + drop + store, V: store>(
         d: &mut DeploymentRecord, old_key: K, new_key: N, authority: address, ctx: &mut TxContext,
     ) {
-        pj(authority == d.creator);
+        q(authority == d.creator, BNotCreator);
         if (df::exists(&d.id, ReceiptShardKey {})) return;
-        pl(d.schema_version == (SMALL_2 as u64));
+        q(d.schema_version == SMALL_2, BPackageOutdated);
         let binding: V = df::remove(&mut d.id, old_key);
         df::add(&mut d.id, new_key, binding);
-        d.schema_version = (SMALL_1 as u64);
+        d.schema_version = SMALL_1;
         begin_sharded_receipts_as(d, authority, ctx);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
-        directory.original_schema = (SMALL_2 as u64);
+        directory.original_schema = SMALL_2;
         // Previously published handover checks the inline schema, not this
         // directory. Preserve its catalog rejection across every old package.
-        d.schema_version = (SMALL_2 as u64);
+        d.schema_version = SMALL_2;
     }
     /// assert_bound: compact private symbol to bound published bytecode storage.
     fun p6(d: &DeploymentRecord, shard: &ReceiptShard) {
-        pl(receipts_version(d) == RECEIPTS_VERSION);
+        q(receipts_version(d) == RECEIPTS_VERSION, BPackageOutdated);
         let directory = receipt_directory(d);
-        po(shard.deployment == object::id(d)); po(shard.index < SHARD_COUNT); po(directory.roots[shard.index] == object::id(shard));
+        q(shard.deployment == object::id(d), BShard); q(shard.index < SHARD_COUNT, BShard); q(directory.roots[shard.index] == object::id(shard), BShard);
     }
     /// At most 64 old entries inspected per call. The v2 snapshot is frozen;
     /// replaying a finished root is idempotent. Finish makes all roots visible
     /// together, never a partial authoritative fleet view.
     public fun migrate_receipt_chunk(d: &mut DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
-        pf(limit > (SMALL_0 as u64)); pf(limit <= CHUNK_LIMIT);
+        q(limit > SMALL_0, BChunk); q(limit <= CHUNK_LIMIT, BChunk);
         p6(d, shard);
-        pg(!receipt_directory(d).retiring);
+        q(!receipt_directory(d).retiring, BCleanup);
         if (shard.migrated) return;
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         let end = std::u64::min(shard.migration_cursor + limit, receipts.statuses.length());
         while (shard.migration_cursor < end) {
             let (device, status) = receipts.statuses.get_entry_by_idx(shard.migration_cursor);
             if (receipt_shard_index(*device) == shard.index) { p8(shard, *device, *status, false); };
-            shard.migration_cursor = shard.migration_cursor + (SMALL_1 as u64);
+            shard.migration_cursor = shard.migration_cursor + SMALL_1;
         };
         if (end == receipts.statuses.length()) {
             shard.migrated = true;
             let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
-            directory.migrated = directory.migrated + (SMALL_1 as u64);
+            directory.migrated = directory.migrated + SMALL_1;
         };
     }
     public fun finish_receipt_migration(d: &mut DeploymentRecord) {
-        pl(receipts_version(d) == RECEIPTS_VERSION);
+        q(receipts_version(d) == RECEIPTS_VERSION, BPackageOutdated);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
-        assert!(!directory.retiring && directory.migrated == SHARD_COUNT, EBarrier);
+        q(!directory.retiring, BBarrier); q(directory.migrated == SHARD_COUNT, BBarrier);
         directory.ready = true;
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
         receipts.statuses = vec_map::empty();
@@ -857,11 +873,11 @@ module sui_edge::deployment_manager {
     fun p7(d: &DeploymentRecord, shard: &ReceiptShard) {
         p6(d, shard);
         let directory = receipt_directory(d);
-        assert!(directory.ready && !directory.retiring, EBarrier);
+        q(directory.ready, BBarrier); q(!directory.retiring, BBarrier);
     }
     public fun receipt_status_v3(d: &DeploymentRecord, shard: &ReceiptShard, device: ID): Option<u8> {
         p7(d, shard);
-        po(receipt_shard_index(device) == shard.index);
+        q(receipt_shard_index(device) == shard.index, BShard);
         let key = ReceiptKey { device };
         if (df::exists(&shard.id, key)) {
             let receipt: &ShardedReceipt = df::borrow(&shard.id, key);
@@ -870,19 +886,19 @@ module sui_edge::deployment_manager {
     }
     public fun receipt_page_v3(d: &DeploymentRecord, shard: &ReceiptShard, start: u64, limit: u64): (vector<ID>, vector<u8>, u64) {
         p7(d, shard);
-        pf(limit > (SMALL_0 as u64)); pf(limit <= CHUNK_LIMIT); pf(start <= shard.count);
+        q(limit > SMALL_0, BChunk); q(limit <= CHUNK_LIMIT, BChunk); q(start <= shard.count, BChunk);
         let end = std::u64::min(start + limit, shard.count);
-        let mut devices = vector[]; let mut statuses = vector[]; let mut i = start;
+        let mut devices = v0(); let mut statuses = v0(); let mut i = start;
         while (i < end) {
             let device: ID = *df::borrow(&shard.id, ReceiptIndexKey { index: i });
             let receipt: &ShardedReceipt = df::borrow(&shard.id, ReceiptKey { device });
-            devices.push_back(device); statuses.push_back(receipt.status); i = i + (SMALL_1 as u64);
+            devices.push_back(device); statuses.push_back(receipt.status); i = i + SMALL_1;
         };
         (devices, statuses, end)
     }
     /// put_receipt: compact private symbol to bound published bytecode storage.
     fun p8(shard: &mut ReceiptShard, device: ID, status: u8, live: bool) {
-        if (!(status == STATUS_APPLIED)) { pi(status == STATUS_FAILED); };
+        if (!(status == STATUS_APPLIED)) { q(status == STATUS_FAILED, BInvalidStatus); };
         let key = ReceiptKey { device };
         if (df::exists(&shard.id, key)) {
             let receipt: &mut ShardedReceipt = df::borrow_mut(&mut shard.id, key);
@@ -891,49 +907,49 @@ module sui_edge::deployment_manager {
         } else {
             df::add(&mut shard.id, key, ShardedReceipt { status, failed: live && status == STATUS_FAILED, reported_v3: live });
             df::add(&mut shard.id, ReceiptIndexKey { index: shard.count }, device);
-            shard.count = shard.count + (SMALL_1 as u64);
+            shard.count = shard.count + SMALL_1;
         };
     }
     /// record_sharded: compact private symbol to bound published bytecode storage.
     fun p9(d: &DeploymentRecord, shard: &mut ReceiptShard, cap: &DeviceCap, status: u8, ctx: &TxContext) {
         p7(d, shard);
         let device = device_cap::device_id(cap);
-        po(receipt_shard_index(device) == shard.index);
-        if (receipt_schema(d) == (SMALL_3 as u64)) {
+        q(receipt_shard_index(device) == shard.index, BShard);
+        if (receipt_schema(d) == SMALL_3) {
             let r = rollout(d); let (found, i) = r.members.index_of(&device);
-            pk(found); pk(r.admitted_at[i] != (SMALL_0 as u64)); pk(!r.skipped[i]);
+            q(found, BNotTargeted); q(r.admitted_at[i] != SMALL_0, BNotTargeted); q(!r.skipped[i], BNotTargeted);
         };
         p8(shard, device, status, true);
         event::emit(DeviceStatusReported { deployment_id: object::id(d), device_id: device, status, reporter: ctx.sender() });
     }
     public fun report_status_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
         cap: &DeviceCap, status: u8, ctx: &mut TxContext) {
-        pl(!df::exists(&d.id, CustomerFleetKey {}));
+        q(!df::exists(&d.id, CustomerFleetKey {}), BPackageOutdated);
         device_cap::assert_active(cap, registry, ctx);
-        pk(target_devices(d).contains(&device_cap::device_id(cap)));
+        q(target_devices(d).contains(&device_cap::device_id(cap)), BNotTargeted);
         p9(d, shard, cap, status, ctx);
     }
     public fun report_status_for_group_v3(d: &DeploymentRecord, shard: &mut ReceiptShard, registry: &DeviceRegistry,
         cap: &DeviceCap, group: &DeviceGroup, status: u8, ctx: &mut TxContext) {
-        pl(!df::exists(&d.id, CustomerFleetKey {}));
+        q(!df::exists(&d.id, CustomerFleetKey {}), BPackageOutdated);
         device_cap::assert_active(cap, registry, ctx);
-        pk(target_groups(d).contains(&device_group::group_id(group))); pk(device_group::admin(group) == d.creator); pk(device_group::contains_device(group, device_cap::device_id(cap)));
+        q(target_groups(d).contains(&device_group::group_id(group)), BNotTargeted); q(device_group::admin(group) == d.creator, BNotTargeted); q(device_group::contains_device(group, device_cap::device_id(cap)), BNotTargeted);
         p9(d, shard, cap, status, ctx);
     }
     public(package) fun record_customer_status_v4(d: &DeploymentRecord, shard: &mut ReceiptShard,
         fleet_id: ID, cap: &DeviceCap, status: u8, ctx: &TxContext) {
-        pk(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id);
+        q(*df::borrow<CustomerFleetKey, ID>(&d.id, CustomerFleetKey {}) == fleet_id, BNotTargeted);
         p9(d, shard, cap, status, ctx);
     }
     /// Coordinator copies only chain-authoritative shard outcomes. Reporting
     /// never mutates the deployment; sticky failures survive report overwrites.
     public fun sync_rollout_receipts(d: &mut DeploymentRecord, shard: &ReceiptShard, devices: vector<ID>) {
         p7(d, shard);
-        pf(devices.length() <= CHUNK_LIMIT);
-        let mut i = (SMALL_0 as u64);
+        q(devices.length() <= CHUNK_LIMIT, BChunk);
+        let mut i = SMALL_0;
         while (i < devices.length()) {
             let device = devices[i];
-            po(receipt_shard_index(device) == shard.index);
+            q(receipt_shard_index(device) == shard.index, BShard);
             if (df::exists(&shard.id, ReceiptKey { device })) {
                 let receipt: ShardedReceipt = *df::borrow(&shard.id, ReceiptKey { device });
                 // Pre-rollout v2 packages can write receipts without a grant.
@@ -942,45 +958,45 @@ module sui_edge::deployment_manager {
                     pc(d, device, if (receipt.failed) STATUS_FAILED else receipt.status);
                 };
             };
-            i = i + (SMALL_1 as u64);
+            i = i + SMALL_1;
         };
     }
     public fun begin_receipt_cleanup(d: &mut DeploymentRecord, ctx: &mut TxContext) {
         begin_receipt_cleanup_as(d, ctx.sender());
     }
     public(package) fun begin_receipt_cleanup_as(d: &mut DeploymentRecord, authority: address) {
-        pj(authority == d.creator);
-        pl(receipts_version(d) == RECEIPTS_VERSION);
+        q(authority == d.creator, BNotCreator);
+        q(receipts_version(d) == RECEIPTS_VERSION, BPackageOutdated);
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         directory.retiring = true; directory.ready = false;
         event::emit(ReceiptLayoutChanged { deployment_id: object::id(d) });
     }
     public fun cleanup_receipt_chunk(d: &DeploymentRecord, shard: &mut ReceiptShard, limit: u64) {
         p6(d, shard);
-        pg(receipt_directory(d).retiring);
-        pf(limit > (SMALL_0 as u64)); pf(limit <= CHUNK_LIMIT);
-        let mut n = (SMALL_0 as u64);
-        while (shard.count > (SMALL_0 as u64) && n < limit) {
-            shard.count = shard.count - (SMALL_1 as u64);
+        q(receipt_directory(d).retiring, BCleanup);
+        q(limit > SMALL_0, BChunk); q(limit <= CHUNK_LIMIT, BChunk);
+        let mut n = SMALL_0;
+        while (shard.count > SMALL_0 && n < limit) {
+            shard.count = shard.count - SMALL_1;
             let device: ID = df::remove(&mut shard.id, ReceiptIndexKey { index: shard.count });
-            let _: ShardedReceipt = df::remove(&mut shard.id, ReceiptKey { device }); n = n + (SMALL_1 as u64);
+            let _: ShardedReceipt = df::remove(&mut shard.id, ReceiptKey { device }); n = n + SMALL_1;
         };
     }
     public fun retire_receipt_shard(d: &mut DeploymentRecord, shard: ReceiptShard) {
         p6(d, &shard);
-        pg(receipt_directory(d).retiring); pg(shard.count == (SMALL_0 as u64));
+        q(receipt_directory(d).retiring, BCleanup); q(shard.count == SMALL_0, BCleanup);
         let ReceiptShard { id, deployment: _, index, count: _, migration_cursor: _, migrated: _ } = shard;
         let directory: &mut ReceiptDirectory = df::borrow_mut(&mut d.id, ReceiptShardKey {});
         *(&mut directory.roots[index]) = @0x0.to_id();
-        directory.remaining = directory.remaining - (SMALL_1 as u64);
+        directory.remaining = directory.remaining - SMALL_1;
         id.delete();
     }
     /// finish_receipt_cleanup: compact private symbol to bound published bytecode storage.
     fun pa(d: &mut DeploymentRecord) {
         if (!df::exists(&d.id, ReceiptShardKey {})) return;
-        pl(receipts_version(d) == RECEIPTS_VERSION);
+        q(receipts_version(d) == RECEIPTS_VERSION, BPackageOutdated);
         let directory: &ReceiptDirectory = df::borrow(&d.id, ReceiptShardKey {});
-        pg(directory.retiring); pg(directory.remaining == (SMALL_0 as u64));
+        q(directory.retiring, BCleanup); q(directory.remaining == SMALL_0, BCleanup);
         let ReceiptDirectory { roots: _, original_schema, migrated: _, ready: _, retiring: _, remaining: _ } = df::remove(&mut d.id, ReceiptShardKey {});
         d.schema_version = original_schema;
         let groups: vector<ID> = df::remove(&mut d.id, ShardedTargetGroupsKey {});
@@ -1013,7 +1029,7 @@ module sui_edge::deployment_manager {
     /// (still writable by older packages until migrated) are not evidence.
     /// legacy_receipts_version: compact private symbol to bound published bytecode storage.
     fun pb(d: &DeploymentRecord): u64 {
-        if (df::exists(&d.id, CustomerFleetKey {})) (SMALL_3 as u64) else LEGACY_RECEIPTS_VERSION
+        if (df::exists(&d.id, CustomerFleetKey {})) SMALL_3 else LEGACY_RECEIPTS_VERSION
     }
     public fun has_current_receipts(d: &DeploymentRecord): bool {
         has_receipts(d) && receipts_version(d) == pb(d)
@@ -1021,15 +1037,15 @@ module sui_edge::deployment_manager {
 
     /// Authoritative statuses: only reports from an active device identity.
     public fun receipt_statuses(d: &DeploymentRecord): &VecMap<ID, u8> {
-        assert!(has_receipts(d), ENoReceipts);
+        q(has_receipts(d), BNoReceipts);
         assert!(has_current_receipts(d), EStaleReceipts);
-        pl(receipts_version(d) == pb(d));
+        q(receipts_version(d) == pb(d), BPackageOutdated);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         &receipts.statuses
     }
 
     public fun receipt_status(d: &DeploymentRecord, device_id: ID): Option<u8> {
-        if (!(!has_receipts(d))) { pl(receipts_version(d) <= pb(d)); };
+        if (!(!has_receipts(d))) { q(receipts_version(d) <= pb(d), BPackageOutdated); };
         if (!has_current_receipts(d)) return option::none();
         let statuses = receipt_statuses(d);
         if (statuses.contains(&device_id)) option::some(*statuses.get(&device_id))
@@ -1037,7 +1053,7 @@ module sui_edge::deployment_manager {
     }
 
     public fun receipts_version(d: &DeploymentRecord): u64 {
-        assert!(has_receipts(d), ENoReceipts);
+        q(has_receipts(d), BNoReceipts);
         let receipts: &Receipts = df::borrow(&d.id, ReceiptsKey {});
         receipts.version
     }
@@ -1052,7 +1068,7 @@ module sui_edge::deployment_manager {
             version: std::string::utf8(b"0"),
             recipe_blob_id: std::string::utf8(b"blob"),
             artifact_sha256: std::string::utf8(b"sha"),
-            created_at: (SMALL_0 as u64),
+            created_at: SMALL_0,
             schema_version: SCHEMA_VERSION,
         };
         df::add(&mut record.id, TargetGroupsKey {},  vector<ID>[]);
@@ -1079,7 +1095,7 @@ module sui_edge::deployment_manager {
     #[test_only]
     public fun old_package_report_for_testing(d: &mut DeploymentRecord, device_id: ID, status: u8) {
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
-        pl(receipts.version < LEGACY_RECEIPTS_VERSION);
+        q(receipts.version < LEGACY_RECEIPTS_VERSION, BPackageOutdated);
         if (receipts.statuses.contains(&device_id)) {
             *receipts.statuses.get_mut(&device_id) = status;
         } else {
@@ -1091,7 +1107,7 @@ module sui_edge::deployment_manager {
     #[test_only]
     public fun pre_rollout_report_for_testing(d: &mut DeploymentRecord, device: ID, status: u8) {
         let receipts: &mut Receipts = df::borrow_mut(&mut d.id, ReceiptsKey {});
-        pl(receipts.version == LEGACY_RECEIPTS_VERSION);
+        q(receipts.version == LEGACY_RECEIPTS_VERSION, BPackageOutdated);
         receipts.statuses.insert(device, status);
     }
 
@@ -1159,10 +1175,10 @@ module sui_edge::deployment_manager {
         let device = device_cap::device_id(cap);
         let r = rollout(d);
         let (found, i) = r.members.index_of(&device);
-        pk(found); pk(r.admitted_at[i] != (SMALL_0 as u64)); pk(r.outcomes[i] != 0); pk(!r.skipped[i]);
-        pn(clock.timestamp_ms() >= r.admitted_at[i]);
+        q(found, BNotTargeted); q(r.admitted_at[i] != SMALL_0, BNotTargeted); q(r.outcomes[i] != 0, BNotTargeted); q(!r.skipped[i], BNotTargeted);
+        q(clock.timestamp_ms() >= r.admitted_at[i], BRolloutState);
         if (!df::exists(&d.id, RolloutHealthKey {})) {
-            df::add(&mut d.id, RolloutHealthKey {}, RolloutHealth { devices: vector[], healthy: vector[], at_ms: vector[], signers: vector[] });
+            df::add(&mut d.id, RolloutHealthKey {}, RolloutHealth { devices: v0(), healthy: v0(), at_ms: v0(), signers: v0() });
         };
         let h: &mut RolloutHealth = df::borrow_mut(&mut d.id, RolloutHealthKey {});
         // Idempotent retry after uncertain execution; never overwrite a sample.
@@ -1187,13 +1203,15 @@ module sui_edge::deployment_manager {
         reason: String, at_ms: u64, admitted: vector<ID>,
     }
     const ERolloutPolicy: u64 = 12;
+    const BRolloutPolicy: u8 = 12;
     const ERolloutState: u64 = 13;
+    const BRolloutState: u8 = 13;
 
     public fun rollout_policy(concurrency: u64, rate_count: u64, rate_window_ms: u64,
         bake_ms: u64, minimum_samples: u64, failure_bps: u64, offline_timeout_ms: u64,
     ): RolloutPolicy {
-        pm(concurrency > (SMALL_0 as u64)); pm(concurrency <= (SMALL_512 as u64)); pm(rate_count > (SMALL_0 as u64)); pm(rate_count <= (SMALL_512 as u64));
-        pm(rate_window_ms > (SMALL_0 as u64)); pm(rate_window_ms <= (SMALL_604800000 as u64)); pm(bake_ms <= (SMALL_604800000 as u64)); pm(minimum_samples > (SMALL_0 as u64)); pm(minimum_samples <= (SMALL_512 as u64)); pm(failure_bps > (SMALL_0 as u64)); pm(failure_bps <= (SMALL_10000 as u64)); pm(offline_timeout_ms > (SMALL_0 as u64)); pm(offline_timeout_ms <= (SMALL_604800000 as u64));
+        q(concurrency > SMALL_0, BRolloutPolicy); q(concurrency <= SMALL_512, BRolloutPolicy); q(rate_count > SMALL_0, BRolloutPolicy); q(rate_count <= SMALL_512, BRolloutPolicy);
+        q(rate_window_ms > SMALL_0, BRolloutPolicy); q(rate_window_ms <= SMALL_604800000, BRolloutPolicy); q(bake_ms <= SMALL_604800000, BRolloutPolicy); q(minimum_samples > SMALL_0, BRolloutPolicy); q(minimum_samples <= SMALL_512, BRolloutPolicy); q(failure_bps > SMALL_0, BRolloutPolicy); q(failure_bps <= SMALL_10000, BRolloutPolicy); q(offline_timeout_ms > SMALL_0, BRolloutPolicy); q(offline_timeout_ms <= SMALL_604800000, BRolloutPolicy);
         RolloutPolicy { concurrency, rate_count, rate_window_ms, bake_ms, minimum_samples,
             failure_bps, offline_timeout_ms }
     }
@@ -1214,35 +1232,35 @@ module sui_edge::deployment_manager {
         target_groups: vector<ID>, members: vector<ID>, cohorts: vector<u64>,
         policy: RolloutPolicy, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
         let n = members.length();
-        pm(n > (SMALL_0 as u64)); pm(n <= (SMALL_512 as u64)); pm(cohorts.length() == n); pm(cohorts[(SMALL_0 as u64)] == (SMALL_0 as u64));
-        let mut i = (SMALL_0 as u64); let mut count = (SMALL_0 as u64); let mut current = (SMALL_0 as u64);
+        q(n > SMALL_0, BRolloutPolicy); q(n <= SMALL_512, BRolloutPolicy); q(cohorts.length() == n, BRolloutPolicy); q(cohorts[SMALL_0] == SMALL_0, BRolloutPolicy);
+        let mut i = SMALL_0; let mut count = SMALL_0; let mut current = SMALL_0;
         while (i < n) {
-            let mut j = (SMALL_0 as u64);
-            while (j < i) { pm(members[j] != members[i]); j = j + (SMALL_1 as u64); };
+            let mut j = SMALL_0;
+            while (j < i) { q(members[j] != members[i], BRolloutPolicy); j = j + SMALL_1; };
             if (cohorts[i] != current) {
-                pm(cohorts[i] == current + (SMALL_1 as u64)); pm(count >= policy.minimum_samples);
-                current = cohorts[i]; count = (SMALL_0 as u64);
+                q(cohorts[i] == current + SMALL_1, BRolloutPolicy); q(count >= policy.minimum_samples, BRolloutPolicy);
+                current = cohorts[i]; count = SMALL_0;
             };
-            count = count + (SMALL_1 as u64); i = i + (SMALL_1 as u64);
+            count = count + SMALL_1; i = i + SMALL_1;
         };
-        pm(count >= policy.minimum_samples);
+        q(count >= policy.minimum_samples, BRolloutPolicy);
         // Direct targets bind the snapshot even if there are no groups. The
         // operator check in the daemon remains mandatory for every member.
         let mut d = new_customer_deployment(authority, component_name, version, recipe_blob_id, artifact_sha256,
             recipe_sha256, target_groups, members, clock, ctx);
-        d.schema_version = (SMALL_3 as u64);
-        let mut admitted_at = vector[]; let mut outcomes = vector[]; let mut skipped = vector[];
-        i = (SMALL_0 as u64);
-        while (i < n) { admitted_at.push_back((SMALL_0 as u64)); outcomes.push_back(0); skipped.push_back(false); i = i + (SMALL_1 as u64); };
-        let r = Rollout { policy, members, cohorts, admitted_at, outcomes, skipped, cohort: (SMALL_0 as u64),
-            state: 0, bake_started_ms: (SMALL_0 as u64), progress_ms: clock.timestamp_ms(), revision: (SMALL_0 as u64) };
+        d.schema_version = SMALL_3;
+        let mut admitted_at = v0(); let mut outcomes = v0(); let mut skipped = v0();
+        i = SMALL_0;
+        while (i < n) { admitted_at.push_back(SMALL_0); outcomes.push_back(0); skipped.push_back(false); i = i + SMALL_1; };
+        let r = Rollout { policy, members, cohorts, admitted_at, outcomes, skipped, cohort: SMALL_0,
+            state: 0, bake_started_ms: SMALL_0, progress_ms: clock.timestamp_ms(), revision: SMALL_0 };
         df::add(&mut d.id, RolloutKey {}, r);
-        pd(&mut d, std::string::utf8(b"created; no members admitted"), vector[], clock);
+        pd(&mut d, std::string::utf8(b"created; no members admitted"), v0(), clock);
         d
     }
 
     public fun rollout(d: &DeploymentRecord): Rollout {
-        pn(receipt_schema(d) == (SMALL_3 as u64));
+        q(receipt_schema(d) == SMALL_3, BRolloutState);
         *df::borrow(&d.id, RolloutKey {})
     }
     public fun rollout_progress(d: &DeploymentRecord): (u8, u64) {
@@ -1260,17 +1278,17 @@ module sui_edge::deployment_manager {
     // Paused/aborted inflight work may truthfully finish; failure stays sticky.
     /// record_rollout_outcome: compact private symbol to bound published bytecode storage.
     fun pc(d: &mut DeploymentRecord, device: ID, status: u8) {
-        if (!(status == STATUS_APPLIED)) { pi(status == STATUS_FAILED); };
+        if (!(status == STATUS_APPLIED)) { q(status == STATUS_FAILED, BInvalidStatus); };
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
         let (found, i) = r.members.index_of(&device);
-        pk(found); pk(r.admitted_at[i] != (SMALL_0 as u64)); pk(!r.skipped[i]);
+        q(found, BNotTargeted); q(r.admitted_at[i] != SMALL_0, BNotTargeted); q(!r.skipped[i], BNotTargeted);
         if (r.outcomes[i] != STATUS_FAILED) { *(&mut r.outcomes[i]) = status; };
     }
 
     public fun rollout_eligible(d: &DeploymentRecord, device: ID): bool {
         let r = rollout(d);
         let (found, i) = r.members.index_of(&device);
-        found && r.admitted_at[i] != (SMALL_0 as u64) && r.outcomes[i] == 0 && !r.skipped[i] && r.state == 0
+        found && r.admitted_at[i] != SMALL_0 && r.outcomes[i] == 0 && !r.skipped[i] && r.state == 0
     }
 
     /// Serverless tick: health is read from active-device signed post-outcome
@@ -1284,20 +1302,20 @@ module sui_edge::deployment_manager {
     public(package) fun advance_rollout_onchain_as(d: &mut DeploymentRecord, registry: &DeviceRegistry,
         candidates: vector<ID>, clock: &Clock, authority: address) {
         let r = rollout(d);
-        let mut healthy = vector[]; let mut unhealthy = vector[];
+        let mut healthy = v0(); let mut unhealthy = v0();
         if (df::exists(&d.id, RolloutHealthKey {})) {
             let h: &RolloutHealth = df::borrow(&d.id, RolloutHealthKey {});
-            let mut i = (SMALL_0 as u64);
+            let mut i = SMALL_0;
             while (i < h.devices.length()) {
                 let device = h.devices[i];
                 let (found, j) = r.members.index_of(&device);
-                if (found && r.admitted_at[j] != (SMALL_0 as u64) && h.at_ms[i] >= r.admitted_at[j]) {
+                if (found && r.admitted_at[j] != SMALL_0 && h.at_ms[i] >= r.admitted_at[j]) {
                     if (!h.healthy[i]) { unhealthy.push_back(device); }
                     else if (device_registry::is_active_signer(registry, device, h.signers[i])) {
                         healthy.push_back(device);
                     };
                 };
-                i = i + (SMALL_1 as u64);
+                i = i + SMALL_1;
             };
         };
         advance_rollout_as(d, candidates, healthy, unhealthy, clock, authority);
@@ -1314,60 +1332,60 @@ module sui_edge::deployment_manager {
         advance_rollout_as(d, online, healthy, unhealthy, clock, ctx.sender());
     }
     public(package) fun advance_rollout_as(d: &mut DeploymentRecord, online: vector<ID>, healthy: vector<ID>, unhealthy: vector<ID>, clock: &Clock, authority: address) {
-        pj(authority == d.creator);
-        pn(receipt_schema(d) == (SMALL_3 as u64));
+        q(authority == d.creator, BNotCreator);
+        q(receipt_schema(d) == SMALL_3, BRolloutState);
         let control = control(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
-        pn(r.state == 0);
+        q(r.state == 0, BRolloutState);
         let now = clock.timestamp_ms();
-        pn(now > (SMALL_0 as u64)); pn(now >= r.progress_ms);
-        let mut samples = (SMALL_0 as u64); let mut failures = (SMALL_0 as u64); let mut inflight = (SMALL_0 as u64);
-        let mut recent = (SMALL_0 as u64); let mut all_done = true; let mut all_healthy = true;
-        let mut cohort_samples = (SMALL_0 as u64); let mut i = (SMALL_0 as u64);
+        q(now > SMALL_0, BRolloutState); q(now >= r.progress_ms, BRolloutState);
+        let mut samples = SMALL_0; let mut failures = SMALL_0; let mut inflight = SMALL_0;
+        let mut recent = SMALL_0; let mut all_done = true; let mut all_healthy = true;
+        let mut cohort_samples = SMALL_0; let mut i = SMALL_0;
         while (i < r.members.length()) {
             let id = r.members[i];
-            if (r.admitted_at[i] != (SMALL_0 as u64)) {
+            if (r.admitted_at[i] != SMALL_0) {
                 // A verified health regression is sticky, including when a
                 // device later overwrites its ordinary deployment receipt.
                 if (r.outcomes[i] == STATUS_APPLIED && unhealthy.contains(&id)) {
                     *(&mut r.outcomes[i]) = STATUS_FAILED; r.progress_ms = now;
                 };
                 if (r.outcomes[i] != 0) {
-                    samples = samples + (SMALL_1 as u64);
-                    if (r.outcomes[i] == STATUS_FAILED) { failures = failures + (SMALL_1 as u64); };
-                } else { inflight = inflight + (SMALL_1 as u64); };
-                if (now - r.admitted_at[i] < r.policy.rate_window_ms) { recent = recent + (SMALL_1 as u64); };
+                    samples = samples + SMALL_1;
+                    if (r.outcomes[i] == STATUS_FAILED) { failures = failures + SMALL_1; };
+                } else { inflight = inflight + SMALL_1; };
+                if (now - r.admitted_at[i] < r.policy.rate_window_ms) { recent = recent + SMALL_1; };
             };
             if (r.cohorts[i] == r.cohort && !r.skipped[i]) {
-                if (r.outcomes[i] == 0) { all_done = false; } else { cohort_samples = cohort_samples + (SMALL_1 as u64); };
+                if (r.outcomes[i] == 0) { all_done = false; } else { cohort_samples = cohort_samples + SMALL_1; };
                 if (r.outcomes[i] == STATUS_APPLIED && !healthy.contains(&id)) { all_healthy = false; };
             };
-            i = i + (SMALL_1 as u64);
+            i = i + SMALL_1;
         };
         let mut reason = std::string::utf8(b"waiting for receipts, health or rate capacity");
-        let mut admitted = vector[];
-        if (samples >= r.policy.minimum_samples && failures * (SMALL_10000 as u64) >= samples * r.policy.failure_bps) {
+        let mut admitted = v0();
+        if (samples >= r.policy.minimum_samples && failures * SMALL_10000 >= samples * r.policy.failure_bps) {
             r.state = 2; reason = std::string::utf8(b"failure threshold reached; permanently aborted");
-        } else if (control.state != 0 || (control.expires_ms != (SMALL_0 as u64) && now >= control.expires_ms)) {
+        } else if (control.state != 0 || (control.expires_ms != SMALL_0 && now >= control.expires_ms)) {
             reason = std::string::utf8(b"deployment paused, cancelled or expired; no new grants");
         } else if (all_done && cohort_samples >= r.policy.minimum_samples && all_healthy) {
-            if (r.bake_started_ms == (SMALL_0 as u64)) { r.bake_started_ms = now; r.progress_ms = now; };
+            if (r.bake_started_ms == SMALL_0) { r.bake_started_ms = now; r.progress_ms = now; };
             if (now - r.bake_started_ms >= r.policy.bake_ms) {
-                if (r.cohort == r.cohorts[r.cohorts.length() - (SMALL_1 as u64)]) { r.state = 3; reason = std::string::utf8(b"rollout complete"); }
-                else { r.cohort = r.cohort + (SMALL_1 as u64); r.bake_started_ms = (SMALL_0 as u64); r.progress_ms = now;
+                if (r.cohort == r.cohorts[r.cohorts.length() - SMALL_1]) { r.state = 3; reason = std::string::utf8(b"rollout complete"); }
+                else { r.cohort = r.cohort + SMALL_1; r.bake_started_ms = SMALL_0; r.progress_ms = now;
                     reason = std::string::utf8(b"bake and health gate passed; next cohort"); };
             } else { reason = std::string::utf8(b"baking completed cohort"); };
         } else {
             // Fresh health must be present at every tick during the bake.
-            r.bake_started_ms = (SMALL_0 as u64);
-            i = (SMALL_0 as u64);
+            r.bake_started_ms = SMALL_0;
+            i = SMALL_0;
             while (i < r.members.length() && inflight < r.policy.concurrency && recent < r.policy.rate_count) {
                 let id = r.members[i];
-                if (r.cohorts[i] == r.cohort && !r.skipped[i] && r.admitted_at[i] == (SMALL_0 as u64) && online.contains(&id)) {
-                    *(&mut r.admitted_at[i]) = now; inflight = inflight + (SMALL_1 as u64); recent = recent + (SMALL_1 as u64);
+                if (r.cohorts[i] == r.cohort && !r.skipped[i] && r.admitted_at[i] == SMALL_0 && online.contains(&id)) {
+                    *(&mut r.admitted_at[i]) = now; inflight = inflight + SMALL_1; recent = recent + SMALL_1;
                     admitted.push_back(id); r.progress_ms = now;
                 };
-                i = i + (SMALL_1 as u64);
+                i = i + SMALL_1;
             };
             if (!admitted.is_empty()) { reason = std::string::utf8(b"admitted cohort members"); }
             else if (now - r.progress_ms >= r.policy.offline_timeout_ms) {
@@ -1385,31 +1403,31 @@ module sui_edge::deployment_manager {
         control_rollout_as(d, state, skip, reason, clock, ctx.sender());
     }
     public(package) fun control_rollout_as(d: &mut DeploymentRecord, state: u8, skip: vector<ID>, reason: String, clock: &Clock, authority: address) {
-        pj(authority == d.creator);
-        pm(reason.length() > (SMALL_0 as u64)); pm(reason.length() <= (SMALL_256 as u64)); pm(state <= 2);
+        q(authority == d.creator, BNotCreator);
+        q(reason.length() > SMALL_0, BRolloutPolicy); q(reason.length() <= SMALL_256, BRolloutPolicy); q(state <= 2, BRolloutPolicy);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
-        pn(r.state < 2);
-        let mut i = (SMALL_0 as u64);
+        q(r.state < 2, BRolloutState);
+        let mut i = SMALL_0;
         while (i < skip.length()) {
             let (found, index) = r.members.index_of(&skip[i]);
-            pn(found); pn(r.admitted_at[index] == (SMALL_0 as u64));
-            *(&mut r.skipped[index]) = true; i = i + (SMALL_1 as u64);
+            q(found, BRolloutState); q(r.admitted_at[index] == SMALL_0, BRolloutState);
+            *(&mut r.skipped[index]) = true; i = i + SMALL_1;
         };
-        r.state = state; r.bake_started_ms = (SMALL_0 as u64); r.progress_ms = clock.timestamp_ms();
-        pd(d, reason, vector[], clock);
+        r.state = state; r.bake_started_ms = SMALL_0; r.progress_ms = clock.timestamp_ms();
+        pd(d, reason, v0(), clock);
     }
 
     /// audit_rollout: compact private symbol to bound published bytecode storage.
     fun pd(d: &mut DeploymentRecord, reason: String, admitted: vector<ID>, clock: &Clock) {
-        pn(!df::exists(&d.id, DecisionCleanupKey {}));
+        q(!df::exists(&d.id, DecisionCleanupKey {}), BRolloutState);
         let id = object::id(d);
         let r: &mut Rollout = df::borrow_mut(&mut d.id, RolloutKey {});
-        r.revision = r.revision + (SMALL_1 as u64);
+        r.revision = r.revision + SMALL_1;
         let revision = r.revision;
         let cohort = r.cohort;
         let state = r.state;
         // Every caller bounds reasons to 256 bytes and grants to 512 members.
-        pm(reason.length() <= (SMALL_256 as u64)); pm(admitted.length() <= (SMALL_512 as u64));
+        q(reason.length() <= SMALL_256, BRolloutPolicy); q(admitted.length() <= SMALL_512, BRolloutPolicy);
         df::add(&mut d.id, DecisionKey { revision }, DecisionRecord {
             deployment_id: id, revision, cohort, state, reason, at_ms: clock.timestamp_ms(), admitted,
         });
@@ -1425,29 +1443,29 @@ module sui_edge::deployment_manager {
         clear_decision_audit_as(d, limit, ctx.sender());
     }
     public(package) fun clear_decision_audit_as(d: &mut DeploymentRecord, limit: u64, authority: address) {
-        pj(authority == d.creator);
-        pm(limit > (SMALL_0 as u64)); pm(limit <= (SMALL_64 as u64));
+        q(authority == d.creator, BNotCreator);
+        q(limit > SMALL_0, BRolloutPolicy); q(limit <= SMALL_64, BRolloutPolicy);
         if (!df::exists(&d.id, DecisionCleanupKey {})) {
             let revision = rollout(d).revision;
             df::add(&mut d.id, DecisionCleanupKey {}, revision);
         };
         let mut revision = *df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {});
-        let mut count = (SMALL_0 as u64);
-        while (revision > (SMALL_0 as u64) && count < limit) {
+        let mut count = SMALL_0;
+        while (revision > SMALL_0 && count < limit) {
             let key = DecisionKey { revision };
             if (df::exists(&d.id, key)) {
                 let _: DecisionRecord = df::remove(&mut d.id, key);
             };
-            revision = revision - (SMALL_1 as u64);
-            count = count + (SMALL_1 as u64);
+            revision = revision - SMALL_1;
+            count = count + SMALL_1;
         };
         *df::borrow_mut<DecisionCleanupKey, u64>(&mut d.id, DecisionCleanupKey {}) = revision;
     }
 
     /// finish_decision_audit: compact private symbol to bound published bytecode storage.
     fun pe(d: &mut DeploymentRecord, authority: address) {
-        clear_decision_audit_as(d, (SMALL_64 as u64), authority);
-        pn(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == (SMALL_0 as u64));
+        clear_decision_audit_as(d, SMALL_64, authority);
+        q(*df::borrow<DecisionCleanupKey, u64>(&d.id, DecisionCleanupKey {}) == SMALL_0, BRolloutState);
         let _: u64 = df::remove(&mut d.id, DecisionCleanupKey {});
     }
 
@@ -1462,8 +1480,8 @@ module sui_edge::deployment_manager {
     }
 
     public fun delete_rollout(mut d: DeploymentRecord, ctx: &TxContext) {
-        pj(ctx.sender() == d.creator);
-        pn(receipt_schema(&d) == (SMALL_3 as u64));
+        q(ctx.sender() == d.creator, BNotCreator);
+        q(receipt_schema(&d) == SMALL_3, BRolloutState);
         pa(&mut d);
         pe(&mut d, ctx.sender());
         let _: Rollout = df::remove(&mut d.id, RolloutKey {});
@@ -1477,44 +1495,29 @@ module sui_edge::deployment_manager {
     // Separate guard calls retain short-circuit order and the same abort site/code.
     // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
-    /// check_Chunk: compact private symbol to bound published bytecode storage.
-    fun pf(condition: bool) {
-        if (!condition) abort EChunk
-    }
-    /// check_Cleanup: compact private symbol to bound published bytecode storage.
-    fun pg(condition: bool) {
-        if (!condition) abort ECleanup
-    }
-    /// check_InvalidSchedule: compact private symbol to bound published bytecode storage.
-    fun ph(condition: bool) {
-        if (!condition) abort EInvalidSchedule
-    }
-    /// check_InvalidStatus: compact private symbol to bound published bytecode storage.
-    fun pi(condition: bool) {
-        if (!condition) abort EInvalidStatus
-    }
-    /// check_NotCreator: compact private symbol to bound published bytecode storage.
-    fun pj(condition: bool) {
-        if (!condition) abort ENotCreator
-    }
-    /// check_NotTargeted: compact private symbol to bound published bytecode storage.
-    fun pk(condition: bool) {
-        if (!condition) abort ENotTargeted
-    }
-    /// check_PackageOutdated: compact private symbol to bound published bytecode storage.
-    fun pl(condition: bool) {
-        if (!condition) abort EPackageOutdated
-    }
-    /// check_RolloutPolicy: compact private symbol to bound published bytecode storage.
-    fun pm(condition: bool) {
-        if (!condition) abort ERolloutPolicy
-    }
-    /// check_RolloutState: compact private symbol to bound published bytecode storage.
-    fun pn(condition: bool) {
-        if (!condition) abort ERolloutState
-    }
-    /// check_Shard: compact private symbol to bound published bytecode storage.
-    fun po(condition: bool) {
-        if (!condition) abort EShard
+
+    // Share vector construction bytecode; element order and encoding are unchanged.
+    fun v0<T>(): vector<T> { vector[] }
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, code: u8) {
+        if (!condition) {
+            if (code == BRolloutPolicy) abort ERolloutPolicy;
+            if (code == BNotTargeted) abort ENotTargeted;
+            if (code == BPackageOutdated) abort EPackageOutdated;
+            if (code == BNotCreator) abort ENotCreator;
+            if (code == BInvalidRecurringWindow) abort EInvalidRecurringWindow;
+            if (code == BRolloutState) abort ERolloutState;
+            if (code == BChunk) abort EChunk;
+            if (code == BShard) abort EShard;
+            if (code == BCleanup) abort ECleanup;
+            if (code == BBarrier) abort EBarrier;
+            if (code == BCancelled) abort ECancelled;
+            if (code == BInvalidSchedule) abort EInvalidSchedule;
+            if (code == BInvalidStatus) abort EInvalidStatus;
+            if (code == BInvalidRecipeHash) abort EInvalidRecipeHash;
+            abort ENoReceipts
+        }
     }
 }
