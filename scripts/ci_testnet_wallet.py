@@ -16,6 +16,8 @@ PACKAGE_UPGRADE_CEILING = 1_600_000_000
 # blanket 200M PTB reservation could not fit. The three-deployment batch
 # measured 42,002,565 MIST in run 40246935467. Explicitly reserve 60M for
 # ordinary package-gate PTBs; publication budgets and run ceilings stay fixed.
+# The explicit compact lifecycle profile uses 15M first/10M successor
+# deployment budgets and an 11M atomic audit; every chosen budget is fully reserved.
 PACKAGE_TRANSACTION_GAS = 60_000_000
 # SF-010 suites after the package-upgrade gate, each with its own strict
 # allowance (run ceiling: 1.6 + 1.5 + 0.15 SUI). They spend real gas, so
@@ -102,7 +104,7 @@ active_address: '{configured_address()}'
         code = run(['python3', 'scripts/live_package_upgrade.py', '--wallet', str(wallet),
                     '--base-ref', base, '--state', state, '--evidence', 'evidence/package-upgrade.json',
                     '--max-spend-mist', str(PACKAGE_UPGRADE_CEILING),
-                    '--transaction-gas-budget', str(PACKAGE_TRANSACTION_GAS),
+                    '--transaction-gas-budget', str(PACKAGE_TRANSACTION_GAS), '--compact-lifecycle',
                     '--required-balance-mist', str(required_balance(selected)),
                     '--faucet-tool', os.environ.get('SUIFLEET_FAUCET_TOOL', '/opt/sui-network/sui')],
                    check=False).returncode

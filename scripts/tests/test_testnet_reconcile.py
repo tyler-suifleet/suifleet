@@ -473,8 +473,7 @@ class RunFlow(unittest.TestCase):
                                max_spend_mist=800000000, required_balance_mist=required, build_sui='/compiler',
                                network_sui='/network', faucet_tool='/network' if faucet else None, base_ref='b' * 40,
                                walrus='simulated', state=str(root / 'state.json'), fresh=False)
-        walrus = SimpleNamespace(aggregator='http://offline.invalid', publisher='http://offline.invalid',
-                                 mode='simulated', close=Mock())
+        walrus = SimpleNamespace(publisher='http://offline.invalid', aggregator='http://offline.invalid', mode='simulated', close=Mock())
         patches = [patch.object(live.subprocess, 'run', side_effect=command),
                    patch.object(live.subprocess, 'check_output', return_value='b' * 40),
                    patch.object(live.toolchain, 'check_tools', return_value=tools),
@@ -830,6 +829,7 @@ class RunFlow(unittest.TestCase):
             args, key, patches, commands = self.harness(root, self.upgrade_state(marker), upgrade=True)
             patches[1] = patch.object(live.subprocess, 'check_output', side_effect=output)
             extra = [patch.object(live.reconciler, 'Chain', return_value=chain),
+                     patch.object(live.dm, 'resolve', return_value={'type_origins': {}}),
                      patch.object(live.dm, 'chain_facts', side_effect=chain_facts),
                      patch.object(live, 'owner_of', side_effect=lambda client, oid: ADDRESS if oid == CAP else 'shared'),
                      patch.object(live.toolchain, 'write_pubfile'),

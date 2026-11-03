@@ -1538,3 +1538,16 @@ or successful chain effects. Existing active-worker verification remains.
 Empty collecting candidates are retired to release their slots. Changed heads,
 source feedback, dependencies, live helpers, ambiguous publication, real security
 failures and spending/unknown-outcome controls retain their existing fences.
+
+
+Explicit recovery of a stopped repair that returned a published structured
+`blocked` verdict requires `recovery_control.py --blocked-engineering-repair`
+and a concrete `--reason`. This flag is an operator assertion that authorized
+code repairs can proceed; do not use it for product, credential, hardware or
+permission blockers. It does not make the source Review or its draft Ready.
+The command verifies matching database/disk blocked results, original model,
+exit-zero and PID/start receipts, then repeats the existing claim, helper,
+dependency, lease, provider-backoff and competing-repair fences before launch.
+The dispatcher supervises the original claim and branch. Successful or
+unreconciled results cannot use this route. Install only a reviewed merged
+runtime containing the repair before invoking the new flag.

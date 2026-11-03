@@ -112,4 +112,17 @@ module sui_edge::passkey_factor_tests {
         let c = s.take_shared<Customer>(); customer::assert_admin(&c, s.ctx());
         ts::return_shared(c); s.end();
     }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun enrolled_administrator_cannot_use_another_administrators_passkey() {
+        let mut s = setup();
+        let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, @0xB, true, true, s.ctx());
+        ts::return_shared(c); s.next_tx(@0xA);
+        enable(&mut s);
+        s.next_tx(@0xB); sponsor(&mut s, factor::key_address(public_key()));
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Wrong administrator binding"), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+
 }

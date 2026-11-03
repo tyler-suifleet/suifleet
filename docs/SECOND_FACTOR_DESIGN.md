@@ -358,9 +358,31 @@ Blake2b-256(`0x06 || compressed P-256 public key`). Native enrollment transactio
 prove possession before a currently authorized administrator installs the key.
 Bindings use BCS `vector<address>` alternating administrator/passkey addresses;
 all existing factor requirements authorize changes. Empty bindings cannot enable
-protection. Native sponsorship satisfies only bit 2; the other mechanisms remain
-unavailable pending their owners. The transaction signature makes generic
+protection. Native sponsorship satisfies only bit 2; native multisig approval supplies bit 1.
+Other mechanisms remain unavailable pending their owners. The transaction signature makes generic
 capability loans safe for passkey-only requirements: all cap uses are covered by
 the exact signed PTB. Intent-based attestations and other requirement bits still
 cannot authorize these generic loans. See the operational enrollment and recovery
 procedure above in [OPERATIONS.md](OPERATIONS.md#optional-passkey-co-signature-sf-198).
+
+## SF-201 native multisig implementation
+
+SF-201 makes bit 1 available alongside the SF-198 passkey bit 2; the other
+two bits retain their fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
+derivation for flagged Ed25519, secp256k1, secp256r1 and passkey keys. Enrollment
+requires an already registered administrator sending from that derived native
+multisig address. Its bounded binding is BCS address, vector of flagged public
+keys, vector of weights, u16 threshold (in that order). Sui transaction
+verification authenticates the threshold before Move executes. No address label
+or client assertion substitutes for that proof.
+
+`approve` checks current administrator authority, exact enrolled configuration,
+Action organization/generation and expiry, then package-attests bit 1. An action's
+immutable intent/proposer and its operation-specific consumer retain the SF-196
+argument/domain/expiry/single-use checks. Approval may precede execution in the
+same PTB or be a separate quorum transaction. Replacement uses the current union
+of requirements through `enroll_secured`; enabling/weakening/recovery uses the
+existing policy wrapper. Native quorum members are not distinct organization
+approvers for any future second-person factor. See [operations](OPERATIONS.md#native-multisig-administrators-sf-201)
+and [validation](validation/sf201-multisig.md) for the serverless bundle workflow
+and explicitly deferred manual-wallet/hardware acceptance.

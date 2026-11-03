@@ -27,7 +27,8 @@ class SharedRepairs(unittest.TestCase):
         f.issue_number=lambda project,owner: 1
         original_gh=f.gh
         def gh(project,args):
-            if args[:2]==['pr','list']:return json.dumps([dict(number=1,headRefName='work/1')])
+            if args[:2]==['pr','list']:return json.dumps([{k:v for k,v in f.source_prs[1].items() if k in
+                ('number','headRefName','headRefOid','baseRefName','isDraft','isCrossRepository','state')}])
             return original_gh(project,args)
         f.gh=gh
         def launch(project,pr,owner,kind):
@@ -37,8 +38,74 @@ class SharedRepairs(unittest.TestCase):
         f.launched=[];f.launch=launch
         return f,SharedAcceptanceRepair(f),batch
 
+    def test_inactive_claims_skip_all_source_reads(self):
+        for change in ({'status':'blocked'}, {'status':'in_progress'}, {'expired':True},
+                       {'publish_pending':True}, {'token':None}):
+            with self.subTest(change=change):
+                f,r,b=self.fixture();f.owners[0].update(change)
+                f.gh=Mock(side_effect=AssertionError('source read'))
+                f.pr=Mock(side_effect=AssertionError('full hydration'))
+                self.assertEqual(r.tick(f.project)['state'],'blocked')
+                f.pr.assert_not_called();f.gh.assert_not_called()
+
+    def test_cheap_holds_never_hydrate_ci(self):
+        for case in ('draft','missing_draft','foreign','bad_head','active','unknown_job',
+                     'candidate','no_failure','retained','capacity','exhausted'):
+            with self.subTest(case=case):
+                f,r,b=self.fixture()
+                if case=='draft':f.source_prs[1]['isDraft']=True
+                elif case=='missing_draft':f.source_prs[1].pop('isDraft')
+                elif case=='foreign':f.source_prs[1]['isCrossRepository']=True
+                elif case=='bad_head':f.source_prs[1]['headRefOid']='bad'
+                elif case in ('active','unknown_job'):
+                    f.db.execute('INSERT INTO jobs VALUES(1,?,?,?,?,?,?)',
+                        ('test',1,'fix','running' if case=='active' else 'orphaned',b['head'],'proof'))
+                elif case=='candidate':f.controller.update(b,status='awaiting_ci')
+                elif case=='no_failure':f.controller.update(b,error='{}')
+                elif case in ('retained','capacity'):
+                    r.tick(f.project)
+                    f.db.execute("UPDATE jobs SET status='done'")
+                    if case=='capacity':f.db.execute("UPDATE shared_acceptance_repairs SET job=NULL,state='held'")
+                elif case=='exhausted':
+                    for n in range(3):r.record(f.project,str(n),'T-1',f.heads[0],b['base'],None,'held','old')
+                f.pr=Mock(side_effect=AssertionError('full hydration'))
+                result=r.tick(f.project)
+                self.assertIn(result['state'],('blocked','owner_busy','awaiting_validation','held'))
+                f.pr.assert_not_called()
+
+    def test_ambiguous_or_missing_sources_skip_hydration(self):
+        for sources in ([], [dict(number=1),dict(number=2)], [None], [{}]):
+            with self.subTest(sources=sources):
+                f,r,b=self.fixture();f.gh=lambda *args:json.dumps(sources)
+                f.pr=Mock(side_effect=AssertionError('full hydration'))
+                self.assertEqual(r.tick(f.project)['state'],'blocked')
+                f.pr.assert_not_called();self.assertEqual(f.launched,[])
+
+    def test_hydration_must_match_cheap_source_and_fresh_claim(self):
+        for field,value in (('headRefOid','a'*40),('isDraft',True),('isCrossRepository',True),
+                            ('baseRefName','other'),('state','CLOSED'),('number',2),('isDraft',None)):
+            with self.subTest(field=field,value=value):
+                f,r,b=self.fixture();original=f.pr
+                def moved(project,number):
+                    pr=original(project,number);pr[field]=value;return pr
+                f.pr=Mock(side_effect=moved)
+                self.assertEqual(r.tick(f.project)['state'],'held')
+                f.pr.assert_called_once();self.assertEqual(f.launched,[])
+        f,r,b=self.fixture();original=f.pr
+        def revoked(project,number):
+            pr=original(project,number);f.owners[0]['status']='blocked';return pr
+        f.pr=revoked
+        def assert_current(project,owner):
+            current=json.loads(f.ticket(project,'show',owner['key']))
+            if current['status']!='review' or current['token']!=owner['token']:
+                raise RuntimeError('review ownership changed')
+        f.assert_review_owner=assert_current
+        with self.assertRaises(RuntimeError):r.tick(f.project)
+        self.assertEqual(f.launched,[])
+
     def test_one_real_shared_owner_despite_multiple_victims(self):
-        f,r,b=self.fixture();result=r.tick(f.project)
+        f,r,b=self.fixture();f.pr=Mock(wraps=f.pr);result=r.tick(f.project)
+        f.pr.assert_called_once_with(f.project,1)
         self.assertEqual(result['state'],'repair_owned');self.assertEqual(len(f.launched),1)
         pr,owner,kind=f.launched[0]
         self.assertEqual((owner['key'],kind),('T-1','fix'))

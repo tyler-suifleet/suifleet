@@ -1,0 +1,2362 @@
+{
+  "schema_version": 1,
+  "purpose": "Actual compatible source reduction and real temporal cost measurement; fresh acceptance still fails",
+  "source": {
+    "candidate_bytes": 90590,
+    "candidate_digest": "76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76",
+    "preserved_abort_functions": [
+      "component_catalog::publish_version",
+      "customer::add_many_to_group",
+      "customer::approve_action",
+      "customer::assert_member",
+      "customer::enroll_checked",
+      "customer::report_status",
+      "customer::set_control",
+      "deployment_manager::receipts_mut",
+      "device_cap::assert_active",
+      "device_cap::assert_signer",
+      "device_group::add_managed",
+      "device_group::remove_device",
+      "fleet_budget::assert_may_draw",
+      "fleet_budget::assert_owner",
+      "fleet_budget::draw_gas",
+      "fleet_budget::remove_device",
+      "fleet_handover::confirm",
+      "security_policy::begin_scoped_bytes",
+      "security_policy::check",
+      "security_policy::update"
+    ],
+    "base_combined": "7335545137acf5e773aac554eac027d787b3009d",
+    "original_bytes": 93673,
+    "previous_factored_bytes": 93296,
+    "scoped_bytes": 93159,
+    "saved_vs_previous_bytes": 2706,
+    "saved_vs_original_bytes": 3083,
+    "patch_order": [
+      "docs/validation/sf221-factoring-candidate.patch.b64",
+      "docs/validation/sf221-assertion-candidate.patch.b64"
+    ]
+  },
+  "candidate_commit": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+  "source_patch_sha256": "6178933039586cc85bf9e608878391b2faeab7e2a88a7ac39ef0cd763e154e0a",
+  "overlay_sha256": {
+    "scripts/live_package_upgrade.py": "ece0af2c75ad8b4c52a5b64fcf4a4aa3b1e88f94f0944c2a73c06ca85a761451",
+    "scripts/test_fresh_cost_localnet.py": "7f9218adb770184881da1ec0035ee22a2b63831d2c02fa7e6076d59d9019bf33",
+    "scripts/rollout_audit_acceptance.py": "48008cdc912dbb4b121b42f4ff445b9baf7e122fbfb6ccb77211415ad9a8a5c5"
+  },
+  "builds_sha256": {
+    "suifleet-edge/target/debug/suifleet": "cf9699440bcaf1d34cc81f1e6ed3517fda73f7c62e596f70e86dc68311edbf91",
+    "suifleet-edge/target/debug/examples/chain_facts": "28943a38d086fa17f4beb5e35f5e4caa4df264bd8ba03cb72984940e0cabb72f"
+  },
+  "network_isolation": "Docker --network none; only lo; disposable keys and faucet; no public writes",
+  "compiler": "sui 1.81.1-e04cf9aa915c",
+  "network_cli": "sui 1.83.0-16d2dc1e05ed",
+  "command": "python3 -u scripts/test_fresh_cost_localnet.py --base-ref cf65ea175435d1b6e111b988d51d9654a63c9db2 --head-ref HEAD --with-security --with-temporal --evidence-dir /workspace/effects",
+  "move_tests": {
+    "passed": 363,
+    "failed": 0
+  },
+  "harness_exit_code": 0,
+  "acceptance_complete": false,
+  "ordinary_accounting": {
+    "fresh_used_mist": 1589955488,
+    "cached_used_mist": 109484749,
+    "cached_inferred_preexisting_grant_mist": 30000000,
+    "fresh_plus_cached_excluding_duplicate_grant_mist": 1669440237,
+    "remaining_deficit_mist": 69440237,
+    "saving_vs_previous_factoring_mist": 20785600,
+    "note": "Cost diagnostic over separate runs, not an executed fresh success or a reset/replenishment of any ledger. Raw old receipts did not itemize the cached grant; 30M inferred from its allowance gap and same-fixture successful fresh funding, with no fresh runtime transactions."
+  },
+  "limits": [
+    "Source candidate retained as an incremental patch outside production because reduction remains insufficient.",
+    "Known acceptance-script abort sites preserved; other assertion failures use the private helper in the same module with the same code.",
+    "Temporal proof and retirement are real local effects; they do not establish public testnet pruning acceptance.",
+    "Retirement charge zero still requires the unchanged 20M reservation. Rebates never replenish any allowance.",
+    "New production receipt fields itemize device identity and preexisting grant; these historical candidate receipts predate that trace-only change.",
+    "Hosted checks pending/unpolled. No public mutations or altered ceilings, unknown-outcome fences or encrypted fixture state."
+  ],
+  "runs": [
+    {
+      "started": "2026-11-02T09:26:50Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "publish base",
+          "gas_budget_mist": 850000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EFBmXgaLbqHM6R7JEsGE6rTuCYrM9PnYiRzYdpQSF2GR",
+          "gas_mist": 768984494,
+          "allowance_used_mist": 768984494,
+          "gas_used": {
+            "computationCost": "7350000",
+            "storageCost": "766574000",
+            "storageRebate": "4939506",
+            "nonRefundableStorageFee": "494"
+          }
+        },
+        {
+          "label": "register device + issue cap (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BLQgN7XzBGKdFPCp9WKyUxTz7ZWESZsv3hPJ37wZGxBt",
+          "gas_mist": 8425477,
+          "allowance_used_mist": 777409971,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "10191600",
+            "storageRebate": "2766123",
+            "nonRefundableStorageFee": "277"
+          }
+        },
+        {
+          "label": "add device to group (base)",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7xZ1EpJUSE4N7oP8wYog7Q3WsRswkgjRUqV7Q3dyEbX2",
+          "gas_mist": 1243677,
+          "allowance_used_mist": 778653648,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "5016000",
+            "storageRebate": "4772323",
+            "nonRefundableStorageFee": "477"
+          }
+        },
+        {
+          "label": "upgrade to head",
+          "gas_budget_mist": 821346352,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "58XMgNZ7JQsVa2PwazTwCpubCFyLxzoTG6p1xXGtgUV5",
+          "gas_mist": 761988262,
+          "allowance_used_mist": 1540641910,
+          "gas_used": {
+            "computationCost": "7270000",
+            "storageCost": "757340000",
+            "storageRebate": "2621738",
+            "nonRefundableStorageFee": "262"
+          }
+        },
+        {
+          "label": "activate identity + index group + create inbox (head)",
+          "gas_budget_mist": 59358090,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "FjyLU7NE9pG8TUyoKFAQNrEpBiUyGfbTKR7DgLZeSxN3",
+          "gas_mist": 17325479,
+          "allowance_used_mist": 1557967389,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "23119200",
+            "storageRebate": "6793721",
+            "nonRefundableStorageFee": "679"
+          }
+        },
+        {
+          "label": "top up device gas",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 30000000,
+          "status": "success",
+          "digest": "83YMJ26Ta28wKy9642zSc1MUy4xNzyGh9oRqXqHzdtHw",
+          "gas_mist": 1988099,
+          "allowance_used_mist": 1589955488,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "1976000",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        }
+      ],
+      "checks": [
+        "verified/reused base package 0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e; no identical package is republished",
+        "head package 0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2 (package version 2); manifest verified over gRPC",
+        "pre-upgrade group indexed in place; device inbox at its derived address lists the group"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 0,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        },
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        }
+      },
+      "funding": {
+        "required_mist": 1600000000,
+        "held_mist": 0,
+        "address_mist": 0,
+        "coin_mist": 1000000000000
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "base": "cf65ea175435d1b6e111b988d51d9654a63c9db2",
+      "start_balance_mist": 1000000000000,
+      "walrus": "local",
+      "reconciliations": [],
+      "base_package": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+      "head_package": "0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2",
+      "registry": "0xebfc4a272145152b60a20eefff704093e74cce09471a871740c9a50207e7930b",
+      "upgrade_cap": "0x751f198844760de2d08ead67fd7a0fb841f531cfcfd7fa4cfac0ddf824888b30",
+      "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::Device": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::DeviceGroup": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_cap::DeviceCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_cap::DeviceAddressKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeploymentRecord": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeploymentCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeviceStatusUpdated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::TargetGroupsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::TargetDevicesKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::StatusesKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RecipeDigestKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Receipts": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeviceStatusReported": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::IdentityKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::Identity": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::DeviceIdentityChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::CustodyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::DeviceOwnerCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DelegateKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::EnrollmentPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::DeviceEnrolled": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::DeployerRole": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::RoleKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::RoleGranted": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::DeviceAddedToGroup": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ManagedKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredState": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredStateChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ControlKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Control": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Rollout": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutDecision": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ComponentCatalog": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ComponentVersion": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::VersionPublished": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogBindingKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogBinding": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessAdminCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::PolicyCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::KeyEpochRotated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::PolicyMigrated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_handover::Handover": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::FleetBudget": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetOwnerCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Limits": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::GasAccount": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Deposited": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Withdrawn": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceFunded": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::ReserveChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::GasDrawn": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetLow": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceStateChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetPaused": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetConfigured": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutHealthKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutHealth": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::SettingsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::Settings": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::FleetSettingsChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::DeviceInbox": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::InboxKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::HeadKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::Head": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::InboxCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::Announced": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::MemberKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::IndexKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupIndex": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupIndexed": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Customer": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Fleet": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Membership": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CustomerKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::BudgetKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::AssignmentKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::GroupCountKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CustomerCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::FleetCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CredentialChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceAssigned": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceReleased": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::ManagedKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::PolicyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::CustomerFleetKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::PolicyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::Policy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::Action": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::PolicyChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::ActionCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::HandoverConsent": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::SecurityRevisionKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::SecurityGenerationKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::FactorKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::FactorConfiguration": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::HandoverCompleted": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::FleetSecurityKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::SecondPersonConfiguration": "0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2",
+        "deployment_manager::ReceiptShardKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptDirectory": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptIndexKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ShardedReceipt": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptShard": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ShardedCatalogBindingKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptLayoutChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ShardedTargetGroupsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionRecord": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionCleanupKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::GroupBatchApplied": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e"
+      },
+      "success": false,
+      "allowance_used_mist": 1589955488,
+      "max_spend_mist": 1600000000,
+      "end_balance_mist": 998410044512,
+      "spent_mist": 1589955488,
+      "finished": "2026-11-02T09:27:04Z",
+      "phase": "pair-0-fresh"
+    },
+    {
+      "started": "2026-11-02T09:27:05Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "create 3 deployments via head",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GJeUvuqj6whG2tTaicZ63f3HBZyTutzEAdjkpnyGVNSh",
+          "gas_mist": 42002663,
+          "allowance_used_mist": 72002663,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "47636800",
+            "storageRebate": "6634137",
+            "nonRefundableStorageFee": "663"
+          }
+        },
+        {
+          "label": "create 1 deployment via base",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6EgXJ4qgh81cvcbYt7ftydKAq9SGJQ4ur7jXNA7kmJVz",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 85497162,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "13482400",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        },
+        {
+          "label": "delete 4 deployments",
+          "gas_budget_mist": 60000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5WaD5v6i7QFeQe1mfoZVFW7WvjX2hcw72ScgsvwBVavS",
+          "gas_mist": 0,
+          "allowance_used_mist": 85497162,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "988000",
+            "storageRebate": "51963603",
+            "nonRefundableStorageFee": "5197"
+          }
+        },
+        {
+          "label": "create durable decision audit rollout",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BVCJ2FAk6d99vys752vfNmNP4N6TkmJmLPzzuqR32mJ4",
+          "gas_mist": 19718899,
+          "allowance_used_mist": 105216061,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "19706800",
+            "storageRebate": "987901",
+            "nonRefundableStorageFee": "99"
+          }
+        },
+        {
+          "label": "admit durable audit cohort",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4TLNnfKAgDBxt4FyJ3Fms2NKoA7tbYXAq39MCfTbB4DR",
+          "gas_mist": 4268688,
+          "allowance_used_mist": 109484749,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "10146000",
+            "storageRebate": "6877312",
+            "nonRefundableStorageFee": "688"
+          }
+        }
+      ],
+      "checks": [
+        "reused fixture bytecode-v1:\u2026: base 0x4fd4bf0492\u2026, head 0xe61baa5dc8\u2026 (re-verified on chain; no package storage spent)",
+        "head package 0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2 (package version 2); manifest verified over gRPC",
+        "pre-upgrade group indexed in place; device inbox at its derived address lists the group",
+        "head-package deployment to the device: applied, receipt Applied on chain",
+        "head-package deployment to the pre-upgrade group: applied via report_status_for_group",
+        "deployment created through the OLD package's entry point: applied and receipted (mixed versions)",
+        "injected health failure reported Failed on chain",
+        "head-package deployments announced to the device inbox and the indexed group's head; group report authorized by the member index",
+        "deployments deleted (storage rebate)"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 1,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        },
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        }
+      },
+      "funding": {
+        "required_mist": 1600000000,
+        "held_mist": 0,
+        "address_mist": 0,
+        "coin_mist": 998410044512
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "base": "cf65ea175435d1b6e111b988d51d9654a63c9db2",
+      "start_balance_mist": 998410044512,
+      "walrus": "local",
+      "fixture_provenance": {
+        "base_commit": "cf65ea175435d1b6e111b988d51d9654a63c9db2",
+        "head_commit": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+        "build_cli": "sui 1.81.1-e04cf9aa915c",
+        "network_cli": "sui 1.83.0-16d2dc1e05ed",
+        "network_cli_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+        "protocol_version": 140,
+        "framework": {
+          "base": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          },
+          "head": {
+            "MoveStdlib": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/move-stdlib\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "Sui": "{ git = \"https://github.com/MystenLabs/sui.git\", subdir = \"crates/sui-framework/packages/sui-framework\", rev = \"73dd2c2ba6f9fdb21d7ffde2b50a3f2f0ac39bc1\" }",
+            "sui_edge": "{ root = true }"
+          }
+        },
+        "verified_transactions": {
+          "base": {
+            "kind": "publish",
+            "modules": 15,
+            "digest": "043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411"
+          },
+          "upgrade": {
+            "kind": "upgrade",
+            "modules": 15,
+            "policy": "00",
+            "digest": "76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76"
+          }
+        }
+      },
+      "base_package": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+      "head_package": "0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2",
+      "registry": "0xebfc4a272145152b60a20eefff704093e74cce09471a871740c9a50207e7930b",
+      "upgrade_cap": "0x751f198844760de2d08ead67fd7a0fb841f531cfcfd7fa4cfac0ddf824888b30",
+      "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::Device": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::DeviceGroup": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_cap::DeviceCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_cap::DeviceAddressKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeploymentRecord": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeploymentCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeviceStatusUpdated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::TargetGroupsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::TargetDevicesKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::StatusesKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RecipeDigestKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Receipts": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DeviceStatusReported": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::IdentityKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::Identity": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::DeviceIdentityChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::CustodyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_registry::DeviceOwnerCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DelegateKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::EnrollmentPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::DeviceEnrolled": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::DeployerRole": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::RoleKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "roles::RoleGranted": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::DeviceAddedToGroup": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ManagedKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredState": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "desired_state::DesiredStateChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ControlKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Control": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::Rollout": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutDecision": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ComponentCatalog": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ComponentVersion": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::VersionPublished": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogBindingKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::CatalogBinding": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessPolicy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessAdminCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::PolicyCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::AccessChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::KeyEpochRotated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "seal_policy::PolicyMigrated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_handover::Handover": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::FleetBudget": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetOwnerCap": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Limits": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::GasAccount": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Deposited": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::Withdrawn": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceFunded": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::ReserveChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::GasDrawn": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetLow": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::DeviceStateChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetPaused": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_budget::BudgetConfigured": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutHealthKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::RolloutHealth": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::SettingsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::Settings": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_settings::FleetSettingsChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::DeviceInbox": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::InboxKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::HeadKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::Head": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::InboxCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "fleet_inbox::Announced": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::MemberKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::IndexKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupIndex": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "device_group::GroupIndexed": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Customer": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Fleet": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::Membership": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CustomerKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::BudgetKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::AssignmentKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::GroupCountKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CustomerCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::FleetCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::CredentialChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceAssigned": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::DeviceReleased": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::ManagedKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::PolicyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::CustomerFleetKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::PolicyKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::Policy": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::Action": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::PolicyChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::ActionCreated": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::HandoverConsent": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::SecurityRevisionKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "enrollment::SecurityGenerationKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::FactorKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "security_policy::FactorConfiguration": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::HandoverCompleted": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::FleetSecurityKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::SecondPersonConfiguration": "0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2",
+        "deployment_manager::ReceiptShardKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptDirectory": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptIndexKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ShardedReceipt": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptShard": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "component_catalog::ShardedCatalogBindingKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ReceiptLayoutChanged": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::ShardedTargetGroupsKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionRecord": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "deployment_manager::DecisionCleanupKey": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e",
+        "customer::GroupBatchApplied": "0x4fd4bf0492c24c1c188baf0a2108598a4227b23eb7e634c104d32fc42f73d08e"
+      },
+      "receipts": {
+        "0xb68c12c6c850de23dbdcb2142b9b6d2e6713b2a5e18a1e0642317d4ac4d496fb": {
+          "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e": 1
+        },
+        "0x0b29f30bcdbe632cd3b260de23557558375e2ad33e6380c26c5156c2fd3b5eba": {
+          "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e": 1
+        },
+        "0x70642ff95a8aa813db9728c7b8d72f6b8ad48fb58e0ff34fd50ca9cd55173b15": {
+          "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e": 1
+        },
+        "0xf8b343d108354389a4ef1e6aac85d8d1897f6e79c6494f819588555dfd004bfe": {
+          "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e": 2
+        }
+      },
+      "rollout_audit_pending": {
+        "status": "pending",
+        "acceptance_complete": false,
+        "record": "0x42673f0c1ca3bbd5e748e94d3329274d4b6f6f2d9ae1209ba65f35de475b1fbd",
+        "checkpoint": "379",
+        "admission_digest": "4TLNnfKAgDBxt4FyJ3Fms2NKoA7tbYXAq39MCfTbB4DR",
+        "retained": true
+      },
+      "success": true,
+      "allowance_used_mist": 109484749,
+      "max_spend_mist": 1600000000,
+      "end_balance_mist": 998380535366,
+      "spent_mist": 29509146,
+      "finished": "2026-11-02T09:28:08Z",
+      "phase": "pair-0-retained"
+    },
+    {
+      "started": "2026-11-02T09:28:09Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "publish base (pre-identity)",
+          "gas_budget_mist": 850000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8XEKkV2mMAQDnrJeQD6Bse4z2jGWdq4MsVUCTYWyjZ8v",
+          "gas_mist": 67629299,
+          "allowance_used_mist": 67629299
+        },
+        {
+          "label": "register legacy device + bound cap + group (base)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 40000000,
+          "status": "success",
+          "digest": "8FHMZBxWsCDkFTsQjyoJbTF5oL2ECLBqxuCA2YiqgG84",
+          "gas_mist": 12970277,
+          "allowance_used_mist": 120599576
+        },
+        {
+          "label": "add legacy device to group (base)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "CY3BSens86T5YHBBtbZJhBHvnxkZdZ2Z1VCw66Eq6yhm",
+          "gas_mist": 1243669,
+          "allowance_used_mist": 121843245
+        },
+        {
+          "label": "deployment via base",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "PNGgu3mzCRJP2Tz9qkrPEyXvK4AFscjoMnHYHdA3vsh",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 135337744
+        },
+        {
+          "label": "legacy device reports Applied via base",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7btiNK8JFmY11g2hAWM6nDDeviubQdJvfy6SHa6FV8jU",
+          "gas_mist": 1251567,
+          "allowance_used_mist": 1251567
+        },
+        {
+          "label": "upgrade to head",
+          "gas_budget_mist": 1364662256,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "E2yRzaEQftRzqdXbqLV9hoP1sqLCgiLZUqSxgsb5a2oq",
+          "gas_mist": 761978262,
+          "allowance_used_mist": 897316006
+        },
+        {
+          "label": "deployment via head",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "JCXg5vKQbcYudJeWYojrt4KforBBiP8NHVLhcdgncePr",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 910810505
+        },
+        {
+          "label": "old package report on a new record",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "xkKGAB7bVuWdFw6SCKKDHC7FxSx9LqVxbGpjX3s6aZv",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 2252097,
+          "abort": [
+            "deployment_manager",
+            "receipts_mut",
+            "5"
+          ]
+        },
+        {
+          "label": "superseded report signature in the new package",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "CEo1PpRMdz58YAwy6qbs8YrMpykgfjAurkDBFDEUCFMu",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 3252627,
+          "abort": [
+            "deployment_manager",
+            "report_status",
+            "7"
+          ]
+        },
+        {
+          "label": "verified report before the legacy device is activated",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "4vRQgcQMNm5xqwua72aa9uvKQ6s3z2wnHuAPZES4iuvg",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 4253157,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "operator reports with a cap it minted for the device",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "JHzEXAjDpGAa6c2Nvvkk6ALs7LtnLg9WuBhmBNHnDDk",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 911811035,
+          "abort": [
+            "device_cap",
+            "assert_signer",
+            "0"
+          ]
+        },
+        {
+          "label": "activate the legacy device (head)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7PciVa5AXJZaMFgYVrVCV5fgNVPC5SRkXRC5RpqPeY13",
+          "gas_mist": 8737263,
+          "allowance_used_mist": 920548298
+        },
+        {
+          "label": "deployment via head (after activation)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6wk2vvnyTThtfFwVZ2SgNTjm5sdqWx8y9BKEDmLvreF9",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 934042797
+        },
+        {
+          "label": "begin populated v3 migration",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "CY8JLFKSDLRV61ZAFRPHxGzRsd9BhfkBdunDfgB2dZPc",
+          "gas_mist": 37214855,
+          "allowance_used_mist": 971257652
+        },
+        {
+          "label": "migrate v2 receipt in bounded chunks",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6h3rY8X61yGZFB98rL5T954YKXUNNHmk2KhM4r35RhBB",
+          "gas_mist": 5845450,
+          "allowance_used_mist": 977103102
+        },
+        {
+          "label": "old package report after v3 migration",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "5m2ihE8y5kHS4Q1xd383TM8dBRKejn2TpQrthd7Y9p1P",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 5253687,
+          "abort": [
+            "deployment_manager",
+            "receipts_mut",
+            "5"
+          ]
+        },
+        {
+          "label": "create desired catalog",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7QcqF2hPTWPmLfCasU7jcACzz9hDhbVNtzRm5jWZbsef",
+          "gas_mist": 2694899,
+          "allowance_used_mist": 979798001
+        },
+        {
+          "label": "publish desired catalog version",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5kbRm6kFd43gTcyp4fdzGs3eRKMyDhocbiBwQ2vrYohe",
+          "gas_mist": 6229068,
+          "allowance_used_mist": 986027069
+        },
+        {
+          "label": "commit catalog desired revision",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BfZN1bjHbCDYe6fBg7yfv9hHvDqNM7obDid3UNXVJzCD",
+          "gas_mist": 17279507,
+          "allowance_used_mist": 1003306576
+        },
+        {
+          "label": "publish desired catalog version",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "DRNjDwEnj4NtTarxdzFCQKqnpEEiv7G8vR1KRQYphu7b",
+          "gas_mist": 6229111,
+          "allowance_used_mist": 1009535687
+        },
+        {
+          "label": "commit catalog desired revision",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "ABw8KB1RCQCsYubi5dvfurqhHoLnKahRVqqQCXgTX8Rm",
+          "gas_mist": 14520983,
+          "allowance_used_mist": 1024056670
+        },
+        {
+          "label": "revoke the device (head)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7Xp6bqqesV6ZDJKJ5iZo2fdVbNQMpJLrhn9JDP4JNBRh",
+          "gas_mist": 1000741,
+          "allowance_used_mist": 1025057411
+        },
+        {
+          "label": "verified report after revocation",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "588QrS7cZ1ThBRQysnZPufAy7v8Ku2iBAoGAzWbJWKGp",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 6254217,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "v3 report after revocation",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "5TNLQhXqDmebkZaMDUrx1TfVxDaMWTTvywQHSa91vRxw",
+          "gas_mist": 1000442,
+          "allowance_used_mist": 7254659,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "retire catalog desired records",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Fhvdc2vb5hN6asbb1mouB7Zzc6jx54Y3jXqQSBLQ1jHN",
+          "gas_mist": 0,
+          "allowance_used_mist": 1025057411
+        },
+        {
+          "label": "begin sharded cleanup",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "47wqA6RJaYqsPSd7vE2bhqzBtCYcjFNM4EJheNW6S6v3",
+          "gas_mist": 1001021,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EBwGdzhp9UDjfZStb9q8fkjFAHuqZ72HmhNmoApwbbsN",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EiaFmBzqhjf4eTBsDSqMqg2mshxGyxhhtBfoTWufoVb4",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "z8rdMQcNgP3Sk1tAncw5CXjcccXncnt8T5xkaQ16Dtu",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "drain receipt chunk",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Ak9gYnDwpekeTj4RWhriJC7hccFXgghjNjADRAnQsg9S",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Euf22FDtW8XiLVP1irMJVMeY1MRK1ce5QccviQJveSC4",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "FnEoQghRDDAgQuPkp7P6bG7HDwVPj8rH49okM2EHS2Nw",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Cky155R8jTMRRN5nC5EdE2jxPF6JAsdnpJjrVfpt31Qx",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AT1fipYfothPo25XZ8KVGVi2Q5ohrLewJMGJGndJKAgG",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "2DKhp2St8RTDrSVV4EWXZKKNd4cTQb5GXDAcJLNi9XYa",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7vXZAy2GzgRJCq3ThAoKan3ywqrC4euxnp3kyCWDwA2V",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5XQ3TZBNaBCTBQ9tKV2T8z9hsdWETUyAA1nVKw6Rre7m",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HEdoxVaeRgqxMmdChjf4ePdduM2yfsVmCTKD3dV6uqzg",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "9DfXQqt9EYGqVT3NYyhQ6EdTcZ1mcbJ6Uha75GM4PL8F",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4TjGMk3qRXzJ9W1CRgKs275uwhtRMpGMmbdxUbyipGTy",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "EffgyqZKoFKuyUZGaGYwjUJD13haqf48RGNhdjDaNRaU",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "A1kLk1AN4ENEgRXSeDhoMNPffs8ppyih59sq6fko4eit",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "G8bukJfDYrU7FTX5dzxWnLdQiirGxWfGbaEq3gjGVZUB",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "delete head deployments",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BADoskcgLWRvUtxfQmMfdd9RDnYDS6QWFfLnENDvwSmF",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "delete base deployment",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "BEi4Pippy47Y2HoZA2AjjCAnpkVYf3VUsNkFEiS2k4WU",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "delete the legacy group and deregister the device",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "FU1Ls2kS6VWH1jKzqqoMbWuCoaMKSeirvNiUXcdhppy1",
+          "gas_mist": 0,
+          "allowance_used_mist": 1026058432
+        },
+        {
+          "label": "sweep the device key",
+          "gas_budget_mist": 3000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7UPCPicaNWsxkcz52wyQEJzaAs5cAeodP2x7zkoYWgto",
+          "gas_mist": 1000099,
+          "allowance_used_mist": 8254758
+        }
+      ],
+      "checks": [
+        "base 0x9e7dfe24cf\u2026: legacy device, bound cap, group and a receipted deployment created with it",
+        "upgraded in place to 0x973face1ee\u2026; identity types originate in the upgrade, existing types in the base",
+        "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+        "activated legacy device: the real daemon applied the new deployment (artifact from local stand-in); its existing bound cap reported Applied",
+        "populated v2 receipt preserved; old-package write rejected; real daemon durable retry reports v3 with new provenance and no updater replay",
+        "real daemon converged on latest multi-platform catalog desired version; superseded version skipped; effects, platform selection and on-chain receipt verified",
+        "after revocation the device's reports abort and its receipt is unchanged"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 8,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "start_balance_mist": 998380535366,
+      "max_spend_mist": 1500000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "base": "14b351b9389c058117297343ced34f262db6f3c3",
+      "walrus": "local",
+      "verified_package_transactions": {
+        "publish base (pre-identity)": {
+          "kind": "publish",
+          "modules": 4,
+          "digest": "a901942151403499088dd343c6c0fb7363c1fbcead664c81fe2dca4edc59ad83"
+        },
+        "upgrade to head": {
+          "kind": "upgrade",
+          "modules": 15,
+          "policy": "00",
+          "digest": "76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76"
+        }
+      },
+      "legacy_state": "created before the upgrade",
+      "base_package": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+      "head_package": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+      "registry": "0xe266c4dfd659f82b33265e584309dbbc70a1cdb97350b78bbe33590bff06800b",
+      "upgrade_cap": "0x7ce8f1b6b96066bd1d4c13f6862d95ca7a54d33b4cf38d1bb0515a1f409ded18",
+      "fixture": "bytecode-v1:a901942151403499088dd343c6c0fb7363c1fbcead664c81fe2dca4edc59ad83..bytecode-v1:76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_registry::Device": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_group::DeviceGroup": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_group::GroupCreated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_cap::DeviceCap": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_cap::DeviceAddressKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeploymentRecord": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeploymentCreated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeviceStatusUpdated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::TargetGroupsKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::TargetDevicesKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::StatusesKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::RecipeDigestKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::ReceiptsKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::Receipts": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeviceStatusReported": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_registry::IdentityKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::Identity": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::DeviceIdentityChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::CustodyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::DeviceOwnerCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DelegateKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::EnrollmentPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::DeviceEnrolled": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::DeployerRole": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::RoleKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::RoleGranted": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::DeviceAddedToGroup": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::ManagedKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredState": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredStateChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ControlKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::Control": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::Rollout": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutDecision": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ComponentCatalog": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ComponentVersion": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::VersionPublished": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogBindingKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogBinding": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessAdminCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::PolicyCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::KeyEpochRotated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::PolicyMigrated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_handover::Handover": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::FleetBudget": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetOwnerCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Limits": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::GasAccount": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Deposited": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Withdrawn": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceFunded": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::ReserveChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::GasDrawn": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetLow": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceStateChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetPaused": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetConfigured": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutHealthKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutHealth": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::SettingsKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::Settings": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::FleetSettingsChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::DeviceInbox": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::InboxKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::HeadKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::Head": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::InboxCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::Announced": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::MemberKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::IndexKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::GroupIndex": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::GroupIndexed": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Customer": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Fleet": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Membership": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CustomerKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::BudgetKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::AssignmentKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::GroupCountKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CustomerCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::FleetCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CredentialChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceAssigned": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceReleased": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::ManagedKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::PolicyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::CustomerFleetKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::PolicyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::Policy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::Action": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::PolicyChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::ActionCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::HandoverConsent": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::SecurityRevisionKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::SecurityGenerationKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::FactorKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::FactorConfiguration": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::HandoverCompleted": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::FleetSecurityKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::SecondPersonConfiguration": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptShardKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptDirectory": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptIndexKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ShardedReceipt": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptShard": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ShardedCatalogBindingKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptLayoutChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ShardedTargetGroupsKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionRecord": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionCleanupKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::GroupBatchApplied": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407"
+      },
+      "catalog_desired": {
+        "records": [
+          "0x83ae2224d47f2418aed22b5e830b8b0ca6fb3e3b5856b714509951d1f655e6f2",
+          "0xd5f589ce471052bf0ecd94fc1194ad010c9d0eb8c965b3aed30f78081ffd0356"
+        ],
+        "latest": "0xd5f589ce471052bf0ecd94fc1194ad010c9d0eb8c965b3aed30f78081ffd0356",
+        "receipt": {
+          "0x5ef318a2a84ed082a07cd7e8a89a53096db364b4735c07df0b44884fa1181923": 1
+        },
+        "versions_applied": [
+          "2.0.0",
+          "4.0.0"
+        ]
+      },
+      "receipts": {
+        "d0": {
+          "0x5ef318a2a84ed082a07cd7e8a89a53096db364b4735c07df0b44884fa1181923": 1
+        },
+        "d2": {
+          "0x5ef318a2a84ed082a07cd7e8a89a53096db364b4735c07df0b44884fa1181923": 1
+        }
+      },
+      "device_sweep_mist": 29241577,
+      "end_balance_mist": 997474017240,
+      "spent_mist": 906518126,
+      "allowance_used_mist": 1026058432,
+      "finished": "2026-11-02T09:29:16Z",
+      "phase": "security-fresh"
+    },
+    {
+      "started": "2026-11-02T09:29:16Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "register legacy device + bound cap + group (base)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 40000000,
+          "status": "success",
+          "digest": "bgbFZYjDAPM6BUfMpoWRgrLJTen9Smvtyi9QRyDtFW6",
+          "gas_mist": 11982375,
+          "allowance_used_mist": 51982375
+        },
+        {
+          "label": "add legacy device to group (base)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Cv44QCU7WQwNqWPPmEHvUrWMBNJCu92wZD6FPwjvr2kB",
+          "gas_mist": 1243669,
+          "allowance_used_mist": 53226044
+        },
+        {
+          "label": "deployment via base",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8KdmXRA4etzfBeVXrAyxoCYLfnjimEJsi8utjh8dXKen",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 66720543
+        },
+        {
+          "label": "legacy device reports Applied via base",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "xgUsZivMBtfwSgh3s2Eo3wr7VRUR5donpap1MQ6GSW1",
+          "gas_mist": 1251567,
+          "allowance_used_mist": 1251567
+        },
+        {
+          "label": "deployment via head",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Big1QdsdiVJVgD9ndaL5hdnBgxwgPkeBhjWUWyEfEwm",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 80215042
+        },
+        {
+          "label": "old package report on a new record",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "9hoQjLSEPRVoBwoPHnxSG9o1jAUcsToKVsFRZKAmSDz5",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 2252097,
+          "abort": [
+            "deployment_manager",
+            "receipts_mut",
+            "5"
+          ]
+        },
+        {
+          "label": "superseded report signature in the new package",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "4Ks47zK9b6wN17tvyrqs5EvPC2Ze6mp8q5fwG2JnEmoW",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 3252627,
+          "abort": [
+            "deployment_manager",
+            "report_status",
+            "7"
+          ]
+        },
+        {
+          "label": "verified report before the legacy device is activated",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "GBu4JzN9yg1cAtBXYzw3NvMUnc34Ly2PZM5jaVA8xrtx",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 4253157,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "operator reports with a cap it minted for the device",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "4K2PzJ9NbyufB9y72U9QLXgVSzMBcpABSzVvhqWNXX9q",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 81215572,
+          "abort": [
+            "device_cap",
+            "assert_signer",
+            "0"
+          ]
+        },
+        {
+          "label": "activate the legacy device (head)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6qqeGEyC2pGBakX23Qi7S8j5tz786uXpZTLNd3dKJHm",
+          "gas_mist": 8737263,
+          "allowance_used_mist": 89952835
+        },
+        {
+          "label": "deployment via head (after activation)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "B6J4ezHuXYCsg22bgN5phvxSNALAHyUgRrLKpX2nhWLy",
+          "gas_mist": 13494499,
+          "allowance_used_mist": 103447334
+        },
+        {
+          "label": "begin populated v3 migration",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "FmnjSvyFFQEuCUXjcBUr99Wf9WvTf9GrH29gQerWA2S7",
+          "gas_mist": 37214855,
+          "allowance_used_mist": 140662189
+        },
+        {
+          "label": "migrate v2 receipt in bounded chunks",
+          "gas_budget_mist": 50000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "7LLHgH4Hmk5rjce5R2eTJQqtbcvNeTvsp934MtTRXPUr",
+          "gas_mist": 5845450,
+          "allowance_used_mist": 146507639
+        },
+        {
+          "label": "old package report after v3 migration",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "HGFBT9r7xGWZ8xjLoUooWwjqeNgNuVgvtgaLsD4hzGuc",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 5253687,
+          "abort": [
+            "deployment_manager",
+            "receipts_mut",
+            "5"
+          ]
+        },
+        {
+          "label": "create desired catalog",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8TaSoJ3rpPSv44yscNMqFHVm3kay7cVK6bvecaQWNpWN",
+          "gas_mist": 2694899,
+          "allowance_used_mist": 149202538
+        },
+        {
+          "label": "publish desired catalog version",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AAPdNVBn2Qt5GGdazhA7GKUxtHUoZrG6iGP2r5Ec2nLS",
+          "gas_mist": 6229068,
+          "allowance_used_mist": 155431606
+        },
+        {
+          "label": "commit catalog desired revision",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "ChpnzpfEcnvHQ38eu4NTWFUcDqNPjNDnPH4L3FGFh2qf",
+          "gas_mist": 17279507,
+          "allowance_used_mist": 172711113
+        },
+        {
+          "label": "publish desired catalog version",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GUFc9tpJKba7FpZREuJi2e8iemk7tv32isZZVYs5MoxA",
+          "gas_mist": 6229111,
+          "allowance_used_mist": 178940224
+        },
+        {
+          "label": "commit catalog desired revision",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Ho3MNAgYHKYSeY1rMUw2b2atct5i94pebxSRhXG3GBix",
+          "gas_mist": 14520983,
+          "allowance_used_mist": 193461207
+        },
+        {
+          "label": "revoke the device (head)",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "4n68G9JCj61naKY6hsoKdaokxjsnrzTeQV5cLu2PB3KD",
+          "gas_mist": 1000741,
+          "allowance_used_mist": 194461948
+        },
+        {
+          "label": "verified report after revocation",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "4HVPF8XKR7kVo4s7HmGGMcsWT2fVDdW5ARd7wnJyPp7D",
+          "gas_mist": 1000530,
+          "allowance_used_mist": 6254217,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "v3 report after revocation",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 0,
+          "status": "failure",
+          "digest": "3zEvVWEDcC9GGNrPpwVmxhoKpHChjrtLYPm5Cf3dVWnC",
+          "gas_mist": 1000442,
+          "allowance_used_mist": 7254659,
+          "abort": [
+            "device_cap",
+            "assert_active",
+            "2"
+          ]
+        },
+        {
+          "label": "retire catalog desired records",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "F1rTYiRTQJGQKxsYoMfUGSLT4xs5QHcoisyPenhpH16f",
+          "gas_mist": 0,
+          "allowance_used_mist": 194461948
+        },
+        {
+          "label": "begin sharded cleanup",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "2QMLfsSJ6Bk6D8idnQu9Es9PpwbhgpmGgShHtGjoCNgz",
+          "gas_mist": 1001021,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GnhoyB2zqZ1DD2pfGGeCqKCEyAadK7JG2Msp4v5KUSMN",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "FUEKKSTWZDqwn4hhDy9qJsFjDZeQfBmjf5T2BxK2RXoT",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "drain receipt chunk",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8papundKvjLR3Wu9qWTwPoJJPVaVY5jjzmURbteq8w4T",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Eem9zGZxq6Fo4tj64njgLcXsnWBtXkqpR7ipWwT3PF8M",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "GHFCT6N9FHwzW3WJcGbaMhTdUWRRA7oL5urppbM1p2Zw",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Fi3cG6JH97PkBwgHsFEukdnkyZmy6yrxbay7Ak2bAG4y",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "SjmXw9Mhff2Cu8PEUqFhkptbDS5AgJdVs4jz6hgyeKk",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "CFRxW53aoWKtc7ipWoPDrhE1Cx2AjfveDJHG2pUngdEQ",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "6DGKJpUwaLff7G5KRCC9huERawxojN8uDmvqLoB8bDnr",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "3GxQp4DXkGo8Twn1U3wyRddVP7NQXAW1LiMREAFvFoXu",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5HkBRTtbwSyrfr9TDjNiLHs8P9Gztb89vsBpwm1ZvGoL",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "CyvSE168kwAxQwfvtsF9xpohRhNdtidFkxQop8Dmmg9S",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HusrXcFeJEpEdfnnJ2tnizQQozMdAtmxQ1RPJZ74WSk9",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "HFfbDpuzRW8AtPevqZKcut1c8LmcxuPEf7H6sFf9ubjr",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "8T5WVhamynEX7hzZ7QJN9ANpqeyWzayrFhpo6Km1XzQi",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AH2575jkRUYcLR11PMxDv2gHj3hpu6iQHH4rwSoLFBCz",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "retire receipt root",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "5MRgBAR66pWtpXAFJA2vJeNsLR2PdZ7cMdVt1mMQez2A",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "delete head deployments",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "J1tyqcjQGHYZN4KeNCyaKNLxzeBvwhvBupAqBnqBwSQP",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "delete base deployment",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "AvuK8oA1MvSYWuo4YJMYC4hXUVDhB1mTNhoH5DrYJNhh",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "delete the legacy group and deregister the device",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "38MkKcBVxk6KCjq4utLTo7PpxjujU6EJkXHLuqeJqMDj",
+          "gas_mist": 0,
+          "allowance_used_mist": 195462969
+        },
+        {
+          "label": "sweep the device key",
+          "gas_budget_mist": 3000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "kqhhUH3N9kEiGwfoFXHXG8fJC4kyuQkT5anWvf24cLJ",
+          "gas_mist": 1000099,
+          "allowance_used_mist": 8254758
+        }
+      ],
+      "checks": [
+        "reused fixture bytecode-v1:\u2026: base 0x9e7dfe24cf\u2026, head 0x973face1ee\u2026 (UpgradeCap version 2 still points at head; re-verified on chain; no package storage spent)",
+        "base 0x9e7dfe24cf\u2026's entry points, after the upgrade: legacy device, bound cap, group and a receipted deployment created with them",
+        "upgraded in place to 0x973face1ee\u2026; identity types originate in the upgrade, existing types in the base",
+        "old-package, superseded, pre-activation and impersonation reports all abort on chain; no receipt written",
+        "activated legacy device: the real daemon applied the new deployment (artifact from local stand-in); its existing bound cap reported Applied",
+        "populated v2 receipt preserved; old-package write rejected; real daemon durable retry reports v3 with new provenance and no updater replay",
+        "real daemon converged on latest multi-platform catalog desired version; superseded version skipped; effects, platform selection and on-chain receipt verified",
+        "after revocation the device's reports abort and its receipt is unchanged"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 14,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "start_balance_mist": 997474017240,
+      "max_spend_mist": 1500000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "base": "14b351b9389c058117297343ced34f262db6f3c3",
+      "walrus": "local",
+      "legacy_state": "created through the base package after the cached upgrade",
+      "base_package": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+      "head_package": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+      "registry": "0xe266c4dfd659f82b33265e584309dbbc70a1cdb97350b78bbe33590bff06800b",
+      "upgrade_cap": "0x7ce8f1b6b96066bd1d4c13f6862d95ca7a54d33b4cf38d1bb0515a1f409ded18",
+      "fixture": "bytecode-v1:a901942151403499088dd343c6c0fb7363c1fbcead664c81fe2dca4edc59ad83..bytecode-v1:76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76@1.81.1-e04cf9aa915c",
+      "type_origins": {
+        "device_registry::DeviceRegistry": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_registry::Device": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_group::DeviceGroup": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_group::GroupCreated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_cap::DeviceCap": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_cap::DeviceAddressKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeploymentRecord": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeploymentCreated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeviceStatusUpdated": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::TargetGroupsKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::TargetDevicesKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::StatusesKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::RecipeDigestKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::ReceiptsKey": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::Receipts": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::DeviceStatusReported": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "device_registry::IdentityKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::Identity": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::DeviceIdentityChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::CustodyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_registry::DeviceOwnerCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DelegateKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::EnrollmentPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::DeviceEnrolled": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::DeployerRole": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::RoleKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "roles::RoleGranted": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::DeviceAddedToGroup": "0x9e7dfe24cfe6fb07b393fee304a7e8a39172f28fbdac82814d09e2cc581bac91",
+        "deployment_manager::ManagedKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredState": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "desired_state::DesiredStateChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ControlKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::Control": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::Rollout": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutDecision": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ComponentCatalog": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ComponentVersion": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::VersionPublished": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogBindingKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::CatalogBinding": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessPolicy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessAdminCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::PolicyCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::AccessChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::KeyEpochRotated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "seal_policy::PolicyMigrated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_handover::Handover": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::FleetBudget": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetOwnerCap": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Limits": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::GasAccount": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Deposited": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::Withdrawn": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceFunded": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::ReserveChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::GasDrawn": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetLow": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::DeviceStateChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetPaused": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_budget::BudgetConfigured": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutHealthKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::RolloutHealth": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::SettingsKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::Settings": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_settings::FleetSettingsChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::DeviceInbox": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::InboxKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::HeadKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::Head": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::InboxCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "fleet_inbox::Announced": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::MemberKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::IndexKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::GroupIndex": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "device_group::GroupIndexed": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Customer": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Fleet": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::Membership": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CustomerKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::BudgetKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::AssignmentKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::GroupCountKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CustomerCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::FleetCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::CredentialChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceAssigned": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::DeviceReleased": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::ManagedKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::PolicyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::CustomerFleetKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::PolicyKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::Policy": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::Action": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::PolicyChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::ActionCreated": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::HandoverConsent": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::SecurityRevisionKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "enrollment::SecurityGenerationKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::FactorKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "security_policy::FactorConfiguration": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::HandoverCompleted": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::FleetSecurityKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::SecondPersonConfiguration": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptShardKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptDirectory": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptIndexKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ShardedReceipt": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptShard": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "component_catalog::ShardedCatalogBindingKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ReceiptLayoutChanged": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::ShardedTargetGroupsKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionRecord": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "deployment_manager::DecisionCleanupKey": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407",
+        "customer::GroupBatchApplied": "0x973face1ee8e549b577e2ef25864c507e32968375127d760fac533e3adab6407"
+      },
+      "catalog_desired": {
+        "records": [
+          "0x186184c86ecf6e0241e0ba2ccfbd3c181fe3d22f93fb57995c70bbbf20e35176",
+          "0xcbaa7eb39756077596dd9afab1ae5124c4cc2f69219613000550414fcf33a692"
+        ],
+        "latest": "0xcbaa7eb39756077596dd9afab1ae5124c4cc2f69219613000550414fcf33a692",
+        "receipt": {
+          "0x631e1cd6ac1ffba36b5ad2d982a21531e708b9cf4175c717289c5266101d29c2": 1
+        },
+        "versions_applied": [
+          "2.0.0",
+          "4.0.0"
+        ]
+      },
+      "receipts": {
+        "d0": {
+          "0x631e1cd6ac1ffba36b5ad2d982a21531e708b9cf4175c717289c5266101d29c2": 1
+        },
+        "d2": {
+          "0x631e1cd6ac1ffba36b5ad2d982a21531e708b9cf4175c717289c5266101d29c2": 1
+        }
+      },
+      "device_sweep_mist": 29241577,
+      "end_balance_mist": 997398094577,
+      "spent_mist": 75922663,
+      "allowance_used_mist": 195462969,
+      "finished": "2026-11-02T09:30:18Z",
+      "phase": "security-retained"
+    },
+    {
+      "started": "2026-11-02T09:30:41Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "delete durable decision audit rollout",
+          "gas_budget_mist": 20000000,
+          "funding_mist": 0,
+          "status": "success",
+          "digest": "Aq9MHwNFQnGnc1U4f2AciFDKnugwSjawhAKC2VrU3zYH",
+          "gas_mist": 0,
+          "allowance_used_mist": 0,
+          "gas_used": {
+            "computationCost": "1000000",
+            "storageCost": "988000",
+            "storageRebate": "23960404",
+            "nonRefundableStorageFee": "2396"
+          }
+        }
+      ],
+      "checks": [
+        "SF164 full current-state audit read after actual fullnode retention floor passed the decision checkpoint; event reads forbidden"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 23,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "start_balance_mist": 997375453269,
+      "max_spend_mist": 1600000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "rollout_audit": {
+        "record": "0x42673f0c1ca3bbd5e748e94d3329274d4b6f6f2d9ae1209ba65f35de475b1fbd",
+        "checkpoint": "379",
+        "admission_digest": "4TLNnfKAgDBxt4FyJ3Fms2NKoA7tbYXAq39MCfTbB4DR",
+        "lowest": "1112",
+        "audit": {
+          "decisions": [
+            {
+              "revision": "2",
+              "cohort": "0",
+              "state": "Active",
+              "reason": "admitted cohort members",
+              "atMs": "1793611687038",
+              "admitted": [
+                "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e"
+              ]
+            },
+            {
+              "revision": "1",
+              "cohort": "0",
+              "state": "Active",
+              "reason": "created; no members admitted",
+              "atMs": "1793611685595",
+              "admitted": []
+            }
+          ],
+          "complete": true,
+          "missing": [],
+          "pruned": false
+        }
+      },
+      "success": true,
+      "allowance_used_mist": 0,
+      "retained_audits": [
+        {
+          "fixture": "bytecode-v1:043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411..bytecode-v1:76aa886fbabecf263c19eb6d57bd2f1f5a243d275c627042c834ac27cc3a0a76@1.81.1-e04cf9aa915c",
+          "record": "0x42673f0c1ca3bbd5e748e94d3329274d4b6f6f2d9ae1209ba65f35de475b1fbd",
+          "checkpoint": "379",
+          "proof": {
+            "lowest": "1112",
+            "audit": {
+              "decisions": [
+                {
+                  "revision": "2",
+                  "cohort": "0",
+                  "state": "Active",
+                  "reason": "admitted cohort members",
+                  "atMs": "1793611687038",
+                  "admitted": [
+                    "0xc38ca73397654555456169fc2a7b61f2d624209a06a0568b1dbe69fd43adad6e"
+                  ]
+                },
+                {
+                  "revision": "1",
+                  "cohort": "0",
+                  "state": "Active",
+                  "reason": "created; no members admitted",
+                  "atMs": "1793611685595",
+                  "admitted": []
+                }
+              ],
+              "complete": true,
+              "missing": [],
+              "pruned": false
+            }
+          },
+          "cleanup_digest": "Aq9MHwNFQnGnc1U4f2AciFDKnugwSjawhAKC2VrU3zYH"
+        }
+      ],
+      "end_balance_mist": 997397425673,
+      "phase": "temporal"
+    },
+    {
+      "started": "2026-11-02T09:30:18Z",
+      "network": "localnet",
+      "transactions": [
+        {
+          "label": "fund the browser test key",
+          "gas_budget_mist": 10000000,
+          "funding_mist": 100000000,
+          "status": "success",
+          "digest": "EYtngnNMDi4ivACB254ENK9D6Yozqe8SY6TU33tYn1Lm",
+          "gas_mist": 1000198,
+          "allowance_used_mist": 101000198
+        }
+      ],
+      "checks": [
+        "browser run complete; 0.0784 SUI swept back from the test key"
+      ],
+      "toolchain": {
+        "build": {
+          "role": "build",
+          "release": "testnet-v1.81.1",
+          "version": "sui 1.81.1-e04cf9aa915c",
+          "max_protocol": 138,
+          "path": "/usr/local/bin/sui"
+        },
+        "network": {
+          "role": "network",
+          "release": "testnet-v1.83.0",
+          "version": "sui 1.83.0-16d2dc1e05ed",
+          "max_protocol": 140,
+          "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+          "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+          "path": "/opt/sui-network/sui",
+          "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+        },
+        "compatibility": {
+          "chain": "b635bf6a",
+          "epoch": 21,
+          "protocol_version": 140,
+          "network_cli_max_protocol": 140,
+          "build_cli_max_protocol": 138,
+          "build_cli_offline": true
+        }
+      },
+      "chain": "b635bf6a",
+      "rpc": "http://127.0.0.1:9000",
+      "operator": "0xd4996ed05d348756549a7576a27035532009e721f0edca56134559f92b254e95",
+      "start_balance_mist": 997398094577,
+      "max_spend_mist": 150000000,
+      "sui": {
+        "build": "sui 1.81.1-e04cf9aa915c",
+        "network": "sui 1.83.0-16d2dc1e05ed"
+      },
+      "head": "1212bc515d555ea7810d5bd93ebde7a6a3f94d0f",
+      "package": "0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2",
+      "registry": "0xebfc4a272145152b60a20eefff704093e74cce09471a871740c9a50207e7930b",
+      "walrus_publisher": "http://127.0.0.1:43059",
+      "browser": {
+        "checks": [
+          "connected through the dApp Kit connect UI as 0x613a4d5c88\u2026 on localnet",
+          "wallet rejection surfaces as an error; nothing executed",
+          "fresh registration: device registered, cap issued and activated (owner cap held by the wallet), listed by fetchDevices",
+          "group created and the activated device added (borrowed from custody and returned)",
+          "recipe and artifact uploaded to Walrus localnet by the dApp; verified deployment listed with its resolved device; blobs probed available",
+          "a transaction that would abort is refused by simulation before signing; nothing executed",
+          "a transaction executed and aborted on chain (f57xcqjsbv\u2026) is reported as failed by the hook",
+          "an account without the manifest's chain is refused before signing",
+          "cleanup through the dApp (deployment, membership, group, device) and test key swept back"
+        ],
+        "transactions": [
+          {
+            "label": "wallet rejection",
+            "status": "refused",
+            "error": "User rejected signing"
+          },
+          {
+            "label": "register + issue cap + activate device",
+            "digest": "2Yegt1EtE9TAMpZLDo5qVp2L5sMzkQGHdFvQyuPiwZmB",
+            "status": "success"
+          },
+          {
+            "label": "create group",
+            "digest": "8BuQLBGRC9qazsm7Nz6Rdd2KU2Y5PGTUv26UGYqfUiFY",
+            "status": "success"
+          },
+          {
+            "label": "add device to group",
+            "digest": "A89X3nuHP59TB4JPFFSCQhLBKkoxpSEPzudpkokHJP4t",
+            "status": "success"
+          },
+          {
+            "label": "create verified deployment (group + device)",
+            "digest": "9vicMWafPPudwRvajGr4bBdPmnFhPqp8DQ7BvuJNJAqL",
+            "status": "success"
+          },
+          {
+            "label": "abort caught by simulation (device already in group)",
+            "status": "refused",
+            "error": "Transaction resolution failed: MoveAbort in 2nd command, abort code: 1, in '0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2::device_group::add_managed' (instruction 10)"
+          },
+          {
+            "label": "on-chain abort (device already in group)",
+            "status": "refused",
+            "error": "MoveAbort in 2nd command, abort code: 1, in '0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2::device_group::add_managed' (instruction 10)",
+            "digest": "f57xcqjsbvC9Dh6qEve9PzNQ1KcyLRA7uG1K4AgAz8E",
+            "chain_status": {
+              "success": false,
+              "error": "MoveAbort in 2nd command, abort code: 1, in '0xe61baa5dc840f84b976cb9ddbec8606f33263700ba3bc5c4ea4a846ec1427fc2::device_group::add_managed' (instruction 10)"
+            }
+          },
+          {
+            "label": "unsupported account chain",
+            "status": "refused",
+            "error": "Wallet account does not support sui:localnet"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "HmwSzcTaQiVHVtMeorb3Xrq5khnuZAmwkik6LV11TNup",
+            "status": "success"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "6Bubq32yLuEL652oJsHDUQm3NTJh4q1BdWJ8ruV3MD4N",
+            "status": "success"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "72SeCYAuyoYMuKofAMFGrXXyJ8TMMZuXmZsipDU7Ki2h",
+            "status": "success"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "u4TSxFJwd7CNTwMSvVZwhHLmjAHm84Aa6Jqf9asy5h7",
+            "status": "success"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "D6Ad4CL2EeULaWoAVEjhjb1eC68x7wtWeDVp7i7XPtR7",
+            "status": "success"
+          },
+          {
+            "label": "delete deployment step",
+            "digest": "7J2W2zY4SHphvy4qgWeLGEiwNtuPeo2nK8SuQzD2vdRs",
+            "status": "success"
+          },
+          {
+            "label": "remove device from group",
+            "digest": "4KGLBAQB2N7k7v54G3V6aoRedn8CMZ5qcZsNUBySK3Zo",
+            "status": "success"
+          },
+          {
+            "label": "delete group",
+            "digest": "7Rudjzbr1VB9hMWD4aQRJ5S45sGfeKLi9qnmD3keCA5",
+            "status": "success"
+          },
+          {
+            "label": "deregister device",
+            "digest": "HBozR8Zf4thKwLEB6jhpRRbvr8xqNztifjdAkr5bckTp",
+            "status": "success"
+          }
+        ],
+        "blobs": [
+          {
+            "artifact": "eidxA8IiNZBVsgQQpkXgK05giMeQOv4hVCtk-4I5cD0",
+            "recipe": "27b4-B-yjPD402jaZyE7sD4MB0VsOPl00hKwPBf9vFY"
+          }
+        ],
+        "sweep": "Eq7H3eEUsMccAN87FrrPQPj1ZBWfdwiJiH1dWXGm4Ht"
+      },
+      "python_sweep_mist": 0,
+      "returned_mist": 78358890,
+      "end_balance_mist": 997375453269,
+      "spent_mist": 22641308,
+      "allowance_used_mist": 101000198,
+      "finished": "2026-11-02T09:30:40Z",
+      "phase": "wallet"
+    }
+  ]
+}
