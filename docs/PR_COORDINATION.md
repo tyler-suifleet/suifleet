@@ -1591,3 +1591,36 @@ Install this route only through the existing merged-only installer and record
 installed revision/readiness and the next coordinator check after installation.
 Keep batch mode enabled; this route needs no temporary suspension. Local tests
 do not establish installed behavior or public-testnet success.
+
+### Verified stale-base contract rejection (SF-238)
+
+A stable source with unchanged `contracts` relative to its common ancestor may
+enter combined-candidate validation after a protected base-to-source upgrade
+rejects declarations added by newer main. This is a collection exception, never
+a green testnet result. The trusted coordinator authenticates the exact failed
+main controller run and head-named effects artifact, exact source/base and
+contract Git trees. It accepts only the observed bounded setup sequence with
+successful accounted setup effects followed by `upgrade to head` explicitly
+`not_submitted` and the compiler's missing-public-declaration compatibility
+rejection. Unknown outcomes, held reservations, reconciliations, additional suite
+artifacts, genuine source contract changes and active/uncertain repairs fail
+closed. Status class or reviewer prose alone cannot grant this route.
+
+The receipt pins source feedback, status, run attempt, artifact hash, ancestor,
+contract trees and prior allowance use in the batch manifest. Head/base/feedback
+or evidence changes invalidate that receipt. Original claims, source branches,
+failed checks, repair history, fixture and spending evidence remain intact; no
+manual-origin PID receipt is reconstructed and no ownership recovery is needed.
+The existing failed-group fence bounds candidate selection. The sole coordinator
+builds against current main, retaining its contracts, and requires fresh combined
+source review plus actual ordinary/security/protected-testnet acceptance before
+feature integration. Other source failures retain normal repair routing.
+
+SF-238 covers the reported #558 failure (787,813,756 MIST; three submitted setup
+transactions and a fourth, not-submitted upgrade ledger entry). Offline tests do
+not establish deployment or testnet success. After merged-only runtime activation,
+the operator must verify #558 enters candidate validation, record the installed
+revision/readiness and retain any real combined findings. Implementation workers
+hand off without merging, installing, replaying wallet work or polling hosted CI.
+The 2026-11-01 local infrastructure integration authorization applies to this
+contained coordinator repair and its actual main-combined offline validation.
