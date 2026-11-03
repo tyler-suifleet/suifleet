@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchOrganizationSecurity } from "@/lib/security-policy";
-import { approvalDecisionsOnly, enrolledSigner } from "@/lib/passkey-factor";
+import { approvalDecisionsOnly, assertSponsorSafe, enrolledSigner } from "@/lib/passkey-factor";
 import { fromBase64, toBase64 } from "@mysten/sui/utils";
 import { Transaction as SuiTransaction } from "@mysten/sui/transactions";
 import { checkDeviceCapacity } from "@/lib/customer-entitlements";
@@ -74,9 +74,11 @@ export function useFleetTransaction() {
       const requiresPasskey = !approvalDecisionsOnly(transaction) && policy && policy.requirements.some(v => (v & 2) !== 0) && transaction.getData().commands.some(command => !!command.MoveCall);
       const submit = async () => {
         if (!requiresPasskey || !captured.fleet) return wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
+        assertSponsorSafe(transaction);
         const signer = await enrolledSigner(client, captured.fleet.customerId, address);
         transaction.setSender(address); transaction.setGasOwner(signer.toSuiAddress());
         const bytes = await transaction.build({ client });
+        assertSponsorSafe(SuiTransaction.from(bytes));
         const signed = await wallet.signTransaction({ transaction: SuiTransaction.from(bytes), account: currentAccount, network: manifest.network });
         if (signed.bytes !== toBase64(bytes)) throw Error("Wallet changed the transaction; passkey signing refused");
         const passkey = await signer.signTransaction(bytes);

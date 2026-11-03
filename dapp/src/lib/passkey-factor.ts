@@ -107,3 +107,17 @@ export function approvalDecisionsOnly(transaction: Transaction) {
       call.module === 'customer' && ['approve_action', 'reject_action', 'cancel_disclosed_security_action'].includes(call.function);
   });
 }
+
+// Sponsorship changes tx.gas ownership. Never let application value come from
+// the passkey's payment coin, including unresolved SDK gas-balance intents.
+export function assertSponsorSafe(transaction: Transaction) {
+  const commands = transaction.getData().commands;
+  const usesGas = (value: unknown): boolean => {
+    if (!value || typeof value !== 'object') return false;
+    if ('$kind' in value && value.$kind === 'GasCoin') return true;
+    return Object.values(value).some(usesGas);
+  };
+  if (usesGas(commands) || commands.some(c => c.$Intent?.data.type === 'gas')) {
+    throw Error('Passkey sponsorship requires wallet-owned funding coins. Rebuild this transaction without GasCoin before signing.');
+  }
+}

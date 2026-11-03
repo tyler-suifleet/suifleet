@@ -82,7 +82,7 @@ export function buildAuthorizeRenewalTx(c: StorageConfig, storage: string, budge
 export function buildFundRetentionTx(c: StorageConfig, storage: string, wal: bigint, gas: bigint) {
   const tx = new Transaction();
   const walCoin = tx.add(coinWithBalance({ type: c.walrus.walType, balance: wal }));
-  const [gasCoin] = tx.splitCoins(tx.gas, [tx.pure.u64(gas)]);
+  const gasCoin = tx.add(coinWithBalance({ balance: gas, useGasCoin: false }));
   tx.moveCall({ target: `${c.packageId}::fleet_storage::fund_retention`, arguments: [tx.object(storage), walCoin, gasCoin] });
   return tx;
 }

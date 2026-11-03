@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict'), fs=require('node:fs'), crypto=require('node:crypto');
 const {loader,appRequire,manifestClient}=require('./frontend_test_utils.cjs');
 const catalog=JSON.parse(fs.readFileSync('interfaces/fleet-v1.json')),m=JSON.parse(fs.readFileSync('manifests/fixture.localnet.json'));
-for(const names of [catalog.optional_type_origins.security_policy,catalog.optional_type_origins.customer,catalog.optional_type_origins.passkey_factor]) for(const n of names)m.type_origins[n]=m.call_package_id;
+for(const names of [catalog.optional_type_origins.security_policy,catalog.optional_type_origins.customer,catalog.optional_type_origins.passkey_factor,catalog.optional_type_origins.fleet_budget]) for(const n of names)m.type_origins[n]=m.call_package_id;
 process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST=JSON.stringify(m);
 const load=loader(),p=load('lib/passkey-factor.ts'),wire=load('lib/fleet-protocol.ts');
 const {bcs}=appRequire('@mysten/sui/bcs'),{PasskeyPublicKey}=appRequire('@mysten/sui/keypairs/passkey'),{ObjectError}=appRequire('@mysten/sui/client');
@@ -36,6 +36,32 @@ Object.defineProperty(global,'navigator',{configurable:true,value:{credentials:{
   assert.equal(p.approvalDecisionsOnly(tx),false);
  }
  assert.equal(p.approvalDecisionsOnly(new Transaction()),false);
+
+ // Real deposit builder + SDK intent resolution: sponsor gas never funds value.
+ const budget=load('lib/fleet-budget.ts');
+ const sponsor='0x'+'b'.padStart(64,'0');
+ for (const tx of [
+  budget.buildCreateBudgetTx(123n,budget.DEFAULT_LIMITS,1n,A),
+  load('lib/enrollment.ts').buildClaimsTx(C,[],[{claim:A,mist:123n}]),
+  load('lib/retention.ts').buildFundRetentionTx({packageId:m.call_package_id,walrus:{walType:'0x2::wal::WAL'}},C,1n,123n),
+ ]) p.assertSponsorSafe(tx);
+ const deposit=budget.buildDepositTx(C,A,123n);
+ deposit.setSender(A);deposit.setGasOwner(sponsor);
+ p.assertSponsorSafe(deposit);
+ const owners=[];
+ await deposit.toJSON({client:{core:{
+  getBalance:async({owner})=>{owners.push(owner);return {balance:{addressBalance:'0',balance:'1000',coinBalance:'1000'}};},
+  listCoins:async({owner})=>{owners.push(owner);return {objects:[{objectId:'0x123',version:'1',digest:'11111111111111111111111111111111',balance:'1000'}],hasNextPage:false};},
+ }}});
+ assert(owners.length>0);assert(owners.every(owner=>owner===A));
+ p.assertSponsorSafe(deposit);
+ assert(deposit.getData().inputs.some(i=>i.Object?.ImmOrOwnedObject?.objectId.endsWith('0123')));
+ const unsafe=new Transaction();
+ unsafe.splitCoins(unsafe.gas,[unsafe.pure.u64(123)]);
+ assert.throws(()=>p.assertSponsorSafe(unsafe),/wallet-owned funding coins/);
+ const intent=new Transaction();
+ intent.add(appRequire('@mysten/sui/transactions').coinWithBalance({balance:123n}));
+ assert.throws(()=>p.assertSponsorSafe(intent),/wallet-owned funding coins/);
  const key=await p.createPasskey();assert.equal(p.savedPasskeys().length,1);
  const signer=p.passkeySigner(key),bytes=new Uint8Array([1,2,3]);
  const signed=await signer.signTransaction(bytes);

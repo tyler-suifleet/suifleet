@@ -89,7 +89,7 @@ function limitsArg(tx: Transaction, limits: Limits) {
 export function buildCreateBudgetTx(depositMist: bigint, limits: Limits, lowBalanceMist: bigint, sender: string): Transaction {
   requireBudget();
   const tx = new Transaction();
-  const [deposit] = tx.splitCoins(tx.gas, [tx.pure.u64(depositMist)]);
+  const deposit = tx.add(coinWithBalance({ balance: depositMist, useGasCoin: false }));
   const [cap] = calls.fleet_budget_create(tx, PACKAGE_ID, REGISTRY_ID, deposit, limitsArg(tx, limits), lowBalanceMist);
   tx.transferObjects([cap], tx.pure.address(sender));
   return tx;
@@ -99,7 +99,7 @@ export function buildDepositTx(budgetId: string, capId: string, amountMist: bigi
   requireBudget();
   if (amountMist <= BigInt(0)) throw new Error("Deposit a positive amount");
   const tx = new Transaction();
-  const [coin] = tx.splitCoins(tx.gas, [tx.pure.u64(amountMist)]);
+  const coin = tx.add(coinWithBalance({ balance: amountMist, useGasCoin: false }));
   calls.fleet_budget_deposit(tx, PACKAGE_ID, budgetId, capId, coin);
   return tx;
 }
@@ -581,7 +581,7 @@ export function buildSwapAndDepositWalTx(config: StorageConfig, exchangeId: stri
   if (!config.walrus.exchange.objects.some((id) => normalizeSuiAddress(id) === normalizeSuiAddress(exchangeId))) throw new Error("Not a pinned exchange");
   if (suiMist <= BigInt(0) || minWal <= BigInt(0)) throw new Error("Swap a positive amount with a positive minimum");
   const tx = new Transaction();
-  const [sui] = tx.splitCoins(tx.gas, [tx.pure.u64(suiMist)]);
+  const sui = tx.add(coinWithBalance({ balance: suiMist, useGasCoin: false }));
   const [wal] = tx.moveCall({ target: `${config.walrus.exchange.package}::wal_exchange::exchange_all_for_wal`, arguments: [tx.object(exchangeId), sui] });
   tx.moveCall({ target: `${config.packageId}::fleet_storage::deposit_wal_at_least`,
     arguments: [tx.object(storageId), tx.object(budgetId), tx.object(capId), wal, tx.pure.u64(minWal)] });
