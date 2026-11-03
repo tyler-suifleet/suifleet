@@ -7942,6 +7942,129 @@ export const MOVE_ABI = {
     },
     "structs": {}
   },
+  "passkey_factor": {
+    "functions": {
+      "enroll": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "sui_edge::passkey_factor::Enrollment",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "key_address": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "vector<u8>"
+        ],
+        "returns": [
+          "address"
+        ]
+      },
+      "keys": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer"
+        ],
+        "returns": [
+          "vector<address>"
+        ]
+      },
+      "prove_enrollment": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "address",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "remove": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "address",
+          "address",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      }
+    },
+    "structs": {
+      "Enrollment": {
+        "abilities": [
+          "Key"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "id",
+            "sui::object::UID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
+          ],
+          [
+            "generation",
+            "u64"
+          ],
+          [
+            "expires_ms",
+            "u64"
+          ]
+        ]
+      },
+      "ProofCreated": {
+        "abilities": [
+          "Copy",
+          "Drop"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "proof_id",
+            "sui::object::ID"
+          ],
+          [
+            "customer",
+            "sui::object::ID"
+          ],
+          [
+            "administrator",
+            "address"
+          ],
+          [
+            "key",
+            "address"
+          ]
+        ]
+      }
+    }
+  },
   "roles": {
     "functions": {
       "allow_group": {
@@ -8661,17 +8784,6 @@ export const MOVE_ABI = {
           "vector<u8>"
         ]
       },
-      "attestations": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::security_policy::Action"
-        ],
-        "returns": [
-          "u8"
-        ]
-      },
       "available": {
         "visibility": "Public",
         "entry": false,
@@ -8690,17 +8802,6 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "sui::object::ID"
-        ]
-      },
-      "disclosed_arguments": {
-        "visibility": "Public",
-        "entry": false,
-        "type_parameters": [],
-        "parameters": [
-          "&sui_edge::security_policy::Action"
-        ],
-        "returns": [
-          "vector<u8>"
         ]
       },
       "expires_ms": {
@@ -8757,6 +8858,28 @@ export const MOVE_ABI = {
         "returns": [
           "vector<u8>"
         ]
+      },
+      "attestations": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::security_policy::Action"
+        ],
+        "returns": [
+          "u8"
+        ]
+      },
+      "disclosed_arguments": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::security_policy::Action"
+        ],
+        "returns": [
+          "vector<u8>"
+        ]
       }
     },
     "structs": {
@@ -8796,20 +8919,6 @@ export const MOVE_ABI = {
           ]
         ]
       },
-      "ActionArguments": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "bytes",
-            "vector<u8>"
-          ]
-        ]
-      },
       "ActionCreated": {
         "abilities": [
           "Copy",
@@ -8840,84 +8949,6 @@ export const MOVE_ABI = {
           [
             "expires_ms",
             "u64"
-          ]
-        ]
-      },
-      "ArgumentsKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "dummy_field",
-            "bool"
-          ]
-        ]
-      },
-      "DelayGrant": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "elapsed_ms",
-            "u64"
-          ],
-          [
-            "transaction",
-            "vector<u8>"
-          ],
-          [
-            "pause",
-            "bool"
-          ]
-        ]
-      },
-      "DelayGrantKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "dummy_field",
-            "bool"
-          ]
-        ]
-      },
-      "DelayKey": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "dummy_field",
-            "bool"
-          ]
-        ]
-      },
-      "Delays": {
-        "abilities": [
-          "Copy",
-          "Drop",
-          "Store"
-        ],
-        "type_parameters": [],
-        "fields": [
-          [
-            "milliseconds",
-            "vector<u64>"
           ]
         ]
       },
@@ -9011,6 +9042,98 @@ export const MOVE_ABI = {
           [
             "dummy_field",
             "bool"
+          ]
+        ]
+      },
+      "ActionArguments": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "bytes",
+            "vector<u8>"
+          ]
+        ]
+      },
+      "ArgumentsKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DelayGrant": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "elapsed_ms",
+            "u64"
+          ],
+          [
+            "transaction",
+            "vector<u8>"
+          ],
+          [
+            "pause",
+            "bool"
+          ]
+        ]
+      },
+      "DelayGrantKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "DelayKey": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "dummy_field",
+            "bool"
+          ]
+        ]
+      },
+      "Delays": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "milliseconds",
+            "vector<u64>"
           ]
         ]
       },

@@ -23,8 +23,8 @@ module sui_edge::security_policy {
     const EFactor: u64 = 1;
     const EUnavailable: u64 = 2;
     const ACTIONS: u64 = 7;
-    // Native multisig, second-person and delay; passkey remains unavailable.
-    const AVAILABLE: u8 = 13;
+    // Native multisig, passkey sponsorship, independent approval and delay.
+    const AVAILABLE: u8 = 15;
 
     // Separate fields preserve the published Policy and Action layouts/origins.
     public struct DelayKey has copy, drop, store {}
@@ -78,9 +78,11 @@ module sui_edge::security_policy {
     public(package) fun configure_factor(uid: &mut UID, factor: u8, binding: vector<u8>, ctx: &TxContext) {
         if (!(factor == 1)) { if (!(factor == 2)) { if (!(factor == 4)) { p0(factor == 8); }; }; };
         check_all(uid, ctx);
-        p1(!binding.is_empty()); p1(binding.length() <= (SMALL_4096 as u64));
+        p1(binding.length() <= (SMALL_4096 as u64));
         let key = FactorKey { factor };
-        if (df::exists(uid, key)) {
+        if (binding.is_empty()) {
+            if (df::exists(uid, key)) { df::remove<FactorKey, FactorConfiguration>(uid, key); };
+        } else if (df::exists(uid, key)) {
             *df::borrow_mut<FactorKey, FactorConfiguration>(uid, key) = FactorConfiguration { binding };
         } else df::add(uid, key, FactorConfiguration { binding });
         invalidate(uid);
@@ -104,7 +106,8 @@ module sui_edge::security_policy {
         let p = df::borrow<PolicyKey, Policy>(uid, PolicyKey {});
         p1(p.schema == (SMALL_1 as u64)); p1(action < ACTIONS);
         let needed = p.requirements[action];
-        if (!(needed == 0)) { p0(p.transaction == *ctx.digest()); p0((p.attested & needed) == needed); };
+        let authenticated = passkey_attestation(uid, ctx);
+        assert!((authenticated & needed) == needed || (p.transaction == *ctx.digest() && ((p.attested | authenticated) & needed) == needed), EFactor);
         if ((needed & 8) != 0) {
             assert!(df::exists(uid, DelayGrantKey {}), EDelay);
             let grant = df::borrow<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {});
@@ -113,12 +116,41 @@ module sui_edge::security_policy {
                 && ((grant.pause && action == 1) || grant.elapsed_ms >= durations[action]), EDelay);
         };
     }
+    /// Sui validates both sender and sponsor signatures over the exact same
+    /// transaction. An enrolled 0x06-derived sponsor therefore proves the extra
+    /// passkey factor without trusting browser flags or accepting replayable proofs.
+    fun passkey_attestation(uid: &UID, ctx: &TxContext): u8 {
+        let sponsor = ctx.sponsor();
+        if (sponsor.is_none() || *sponsor.borrow() == ctx.sender()) return 0;
+        let binding = factor_configuration(uid, 2);
+        if (binding.is_empty()) return 0;
+        let mut reader = sui::bcs::new(binding);
+        let entries = reader.peel_vec_address();
+        assert!(reader.into_remainder_bytes().is_empty() && entries.length() % 2 == 0, EPolicy);
+        let mut i = 0;
+        while (i < entries.length()) {
+            if (entries[i] == ctx.sender() && entries[i + 1] == *sponsor.borrow()) return 2;
+            i = i + 2;
+        };
+        0
+    }
     /// Capability lending cannot be authorized by a wrapper grant: a caller
     /// could otherwise substitute any operation while holding the capability.
     public(package) fun assert_unprotected(uid: &UID) {
         let p = read(uid);
         let mut i = (SMALL_0 as u64);
         while (i < ACTIONS) { p0(p.requirements[i] == 0); i = i + (SMALL_1 as u64); };
+    }
+    /// Native passkey sponsorship signs the whole PTB, including every use of
+    /// a lent cap. Queued/partial action attestations cannot authorize this loan.
+    public(package) fun check_capability_loan(uid: &UID, ctx: &TxContext) {
+        let p = read(uid);
+        let authenticated = passkey_attestation(uid, ctx);
+        let mut i = 0;
+        while (i < ACTIONS) {
+            assert!((p.requirements[i] & authenticated) == p.requirements[i], EFactor);
+            i = i + 1;
+        };
     }
     public(package) fun check_all(uid: &UID, ctx: &TxContext) {
         let mut i = (SMALL_0 as u64);
@@ -289,10 +321,11 @@ module sui_edge::security_policy {
         assert!(customer_id == uid.to_inner() && proposer == ctx.sender(), EPolicy);
         assert!(clock.timestamp_ms() < expires_ms, EPolicy);
         assert!(intent == action_intent(uid.to_inner(), arguments_bcs), EPolicy);
+        let authenticated = passkey_attestation(uid, ctx);
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         assert!(p.schema == (SMALL_1 as u64) && p.generation == generation, EPolicy);
         if (pause) required = required & 7;
-        assert!((attested & required) == required, EFactor);
+        assert!(((attested | authenticated) & required) == required, EFactor);
         p.transaction = *ctx.digest();
         p.attested = attested;
         unindex(uid, id.to_inner());

@@ -130,6 +130,8 @@ export const fleet_inbox_InboxKeyBcs = bcs.struct("InboxKey", { device_id: bcs.A
 export const fleet_settings_SettingsBcs = bcs.struct("Settings", { version: bcs.u64(), check_interval_ms: bcs.u64(), rollout_check_interval_ms: bcs.u64(), health_interval_ms: bcs.u64(), archive_interval_ms: bcs.u64(), archive_retention_epochs: bcs.u32() });
 export const fleet_settings_FleetSettingsChangedBcs = bcs.struct("FleetSettingsChanged", { budget_id: bcs.Address, changed_by: bcs.Address, at_ms: bcs.u64(), previous: bcs.option(fleet_settings_SettingsBcs), settings: fleet_settings_SettingsBcs });
 export const fleet_settings_SettingsKeyBcs = bcs.struct("SettingsKey", { dummy_field: bcs.bool() });
+export const passkey_factor_EnrollmentBcs = bcs.struct("Enrollment", { id: bcs.Address, customer: bcs.Address, administrator: bcs.Address, key: bcs.Address, generation: bcs.u64(), expires_ms: bcs.u64() });
+export const passkey_factor_ProofCreatedBcs = bcs.struct("ProofCreated", { proof_id: bcs.Address, customer: bcs.Address, administrator: bcs.Address, key: bcs.Address });
 export const roles_DelegatedDeploymentBcs = bcs.struct("DelegatedDeployment", { deployment_id: bcs.Address, role_id: bcs.Address, operator: bcs.Address, delegate: bcs.Address });
 export const roles_DeployerRoleBcs = bcs.struct("DeployerRole", { id: bcs.Address, operator: bcs.Address, groups: bcs.vector(bcs.Address) });
 export const roles_RoleBuilderBcs = bcs.struct("RoleBuilder", { operator: bcs.Address, groups: bcs.vector(bcs.Address) });
@@ -143,18 +145,18 @@ export const seal_policy_KeyEpochRotatedBcs = bcs.struct("KeyEpochRotated", { po
 export const seal_policy_PolicyCreatedBcs = bcs.struct("PolicyCreated", { policy_id: bcs.Address, cap_id: bcs.Address, name: bcs.string(), creator: bcs.Address });
 export const seal_policy_PolicyMigratedBcs = bcs.struct("PolicyMigrated", { policy_id: bcs.Address, version: bcs.u64() });
 export const security_policy_ActionBcs = bcs.struct("Action", { id: bcs.Address, customer_id: bcs.Address, generation: bcs.u64(), proposer: bcs.Address, intent: bcs.vector(bcs.u8()), expires_ms: bcs.u64(), attested: bcs.u8() });
-export const security_policy_ActionArgumentsBcs = bcs.struct("ActionArguments", { bytes: bcs.vector(bcs.u8()) });
 export const security_policy_ActionCreatedBcs = bcs.struct("ActionCreated", { action_id: bcs.Address, customer_id: bcs.Address, generation: bcs.u64(), proposer: bcs.Address, intent: bcs.vector(bcs.u8()), expires_ms: bcs.u64() });
-export const security_policy_ArgumentsKeyBcs = bcs.struct("ArgumentsKey", { dummy_field: bcs.bool() });
-export const security_policy_DelayGrantBcs = bcs.struct("DelayGrant", { elapsed_ms: bcs.u64(), transaction: bcs.vector(bcs.u8()), pause: bcs.bool() });
-export const security_policy_DelayGrantKeyBcs = bcs.struct("DelayGrantKey", { dummy_field: bcs.bool() });
-export const security_policy_DelayKeyBcs = bcs.struct("DelayKey", { dummy_field: bcs.bool() });
-export const security_policy_DelaysBcs = bcs.struct("Delays", { milliseconds: bcs.vector(bcs.u64()) });
 export const security_policy_FactorConfigurationBcs = bcs.struct("FactorConfiguration", { binding: bcs.vector(bcs.u8()) });
 export const security_policy_FactorKeyBcs = bcs.struct("FactorKey", { factor: bcs.u8() });
 export const security_policy_PolicyBcs = bcs.struct("Policy", { schema: bcs.u64(), generation: bcs.u64(), requirements: bcs.vector(bcs.u8()), transaction: bcs.vector(bcs.u8()), attested: bcs.u8() });
 export const security_policy_PolicyChangedBcs = bcs.struct("PolicyChanged", { customer_id: bcs.Address, generation: bcs.u64(), requirements: bcs.vector(bcs.u8()) });
 export const security_policy_PolicyKeyBcs = bcs.struct("PolicyKey", { dummy_field: bcs.bool() });
+export const security_policy_ActionArgumentsBcs = bcs.struct("ActionArguments", { bytes: bcs.vector(bcs.u8()) });
+export const security_policy_ArgumentsKeyBcs = bcs.struct("ArgumentsKey", { dummy_field: bcs.bool() });
+export const security_policy_DelayGrantBcs = bcs.struct("DelayGrant", { elapsed_ms: bcs.u64(), transaction: bcs.vector(bcs.u8()), pause: bcs.bool() });
+export const security_policy_DelayGrantKeyBcs = bcs.struct("DelayGrantKey", { dummy_field: bcs.bool() });
+export const security_policy_DelayKeyBcs = bcs.struct("DelayKey", { dummy_field: bcs.bool() });
+export const security_policy_DelaysBcs = bcs.struct("Delays", { milliseconds: bcs.vector(bcs.u64()) });
 export const security_policy_QueuedAtBcs = bcs.struct("QueuedAt", { milliseconds: bcs.u64() });
 export const security_policy_QueuedAtKeyBcs = bcs.struct("QueuedAtKey", { dummy_field: bcs.bool() });
 export const calls = {
@@ -527,6 +529,11 @@ export const calls = {
   multisig_admin_enroll: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number[][], a2: Uint8Array | number[], a3: number) => tx.moveCall({ target: `${packageId}::multisig_admin::enroll`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize(a1)), tx.pure.vector("u8", a2), tx.pure.u16(a3)] }),
   multisig_admin_enroll_secured: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: number[][], a2: Uint8Array | number[], a3: number, a4: Parameters<Transaction["object"]>[0], a5: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::multisig_admin::enroll_secured`, arguments: [tx.object(a0), tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize(a1)), tx.pure.vector("u8", a2), tx.pure.u16(a3), tx.object(a4), tx.object(a5)] }),
   multisig_admin_prepare_policy_change: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Uint8Array | number[], a2: number | bigint | string, a3: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::multisig_admin::prepare_policy_change`, arguments: [tx.object(a0), tx.pure.vector("u8", a1), tx.pure.u64(a2), tx.object(a3)] }),
+  passkey_factor_enroll: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::enroll`, arguments: [tx.object(a0), tx.object(a1), tx.object(a2)] }),
+  passkey_factor_key_address: (tx: Transaction, packageId: string, a0: Uint8Array | number[]) => tx.moveCall({ target: `${packageId}::passkey_factor::key_address`, arguments: [tx.pure.vector("u8", a0)] }),
+  passkey_factor_keys: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::keys`, arguments: [tx.object(a0)] }),
+  passkey_factor_prove_enrollment: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: Uint8Array | number[], a3: number | bigint | string, a4: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::passkey_factor::prove_enrollment`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.vector("u8", a2), tx.pure.u64(a3), tx.object(a4)] }),
+  passkey_factor_remove: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: string, a2: string) => tx.moveCall({ target: `${packageId}::passkey_factor::remove`, arguments: [tx.object(a0), tx.pure.address(a1), tx.pure.address(a2)] }),
   roles_allow_group: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::roles::allow_group`, arguments: [tx.object(a0), tx.object(a1)] }),
   roles_create_deployment_as: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string, a3: string, a4: string, a5: string, a6: string, a7: string[], a8: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::roles::create_deployment_as`, arguments: [tx.object(a0), tx.object(a1), tx.pure.string(a2), tx.pure.string(a3), tx.pure.string(a4), tx.pure.string(a5), tx.pure.string(a6), tx.pure(bcs.vector(bcs.Address).serialize(a7)), tx.object(a8)] }),
   roles_grant: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0], a1: Parameters<Transaction["object"]>[0], a2: string) => tx.moveCall({ target: `${packageId}::roles::grant`, arguments: [tx.object(a0), tx.object(a1), tx.pure.address(a2)] }),
@@ -560,15 +567,15 @@ export const calls = {
   security_policy_action_count: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::security_policy::action_count`, arguments: [] }),
   security_policy_action_generation: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::action_generation`, arguments: [tx.object(a0)] }),
   security_policy_action_intent: (tx: Transaction, packageId: string, a0: string, a1: Uint8Array | number[]) => tx.moveCall({ target: `${packageId}::security_policy::action_intent`, arguments: [tx.pure.address(a0), tx.pure.vector("u8", a1)] }),
-  security_policy_attestations: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::attestations`, arguments: [tx.object(a0)] }),
   security_policy_available: (tx: Transaction, packageId: string) => tx.moveCall({ target: `${packageId}::security_policy::available`, arguments: [] }),
   security_policy_customer_id: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::customer_id`, arguments: [tx.object(a0)] }),
-  security_policy_disclosed_arguments: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::disclosed_arguments`, arguments: [tx.object(a0)] }),
   security_policy_expires_ms: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::expires_ms`, arguments: [tx.object(a0)] }),
   security_policy_generation: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::generation`, arguments: [tx.object(a0)] }),
   security_policy_intent: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::intent`, arguments: [tx.object(a0)] }),
   security_policy_proposer: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::proposer`, arguments: [tx.object(a0)] }),
   security_policy_requirements: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::requirements`, arguments: [tx.object(a0)] }),
+  security_policy_attestations: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::attestations`, arguments: [tx.object(a0)] }),
+  security_policy_disclosed_arguments: (tx: Transaction, packageId: string, a0: Parameters<Transaction["object"]>[0]) => tx.moveCall({ target: `${packageId}::security_policy::disclosed_arguments`, arguments: [tx.object(a0)] }),
 };
 export const TYPES = {
   component_catalog_CatalogBinding: "component_catalog::CatalogBinding",
@@ -698,6 +705,8 @@ export const TYPES = {
   fleet_settings_Settings: "fleet_settings::Settings",
   fleet_settings_FleetSettingsChanged: "fleet_settings::FleetSettingsChanged",
   fleet_settings_SettingsKey: "fleet_settings::SettingsKey",
+  passkey_factor_Enrollment: "passkey_factor::Enrollment",
+  passkey_factor_ProofCreated: "passkey_factor::ProofCreated",
   roles_DelegatedDeployment: "roles::DelegatedDeployment",
   roles_DeployerRole: "roles::DeployerRole",
   roles_RoleBuilder: "roles::RoleBuilder",
@@ -711,18 +720,18 @@ export const TYPES = {
   seal_policy_PolicyCreated: "seal_policy::PolicyCreated",
   seal_policy_PolicyMigrated: "seal_policy::PolicyMigrated",
   security_policy_Action: "security_policy::Action",
-  security_policy_ActionArguments: "security_policy::ActionArguments",
   security_policy_ActionCreated: "security_policy::ActionCreated",
-  security_policy_ArgumentsKey: "security_policy::ArgumentsKey",
-  security_policy_DelayGrant: "security_policy::DelayGrant",
-  security_policy_DelayGrantKey: "security_policy::DelayGrantKey",
-  security_policy_DelayKey: "security_policy::DelayKey",
-  security_policy_Delays: "security_policy::Delays",
   security_policy_FactorConfiguration: "security_policy::FactorConfiguration",
   security_policy_FactorKey: "security_policy::FactorKey",
   security_policy_Policy: "security_policy::Policy",
   security_policy_PolicyChanged: "security_policy::PolicyChanged",
   security_policy_PolicyKey: "security_policy::PolicyKey",
+  security_policy_ActionArguments: "security_policy::ActionArguments",
+  security_policy_ArgumentsKey: "security_policy::ArgumentsKey",
+  security_policy_DelayGrant: "security_policy::DelayGrant",
+  security_policy_DelayGrantKey: "security_policy::DelayGrantKey",
+  security_policy_DelayKey: "security_policy::DelayKey",
+  security_policy_Delays: "security_policy::Delays",
   security_policy_QueuedAt: "security_policy::QueuedAt",
   security_policy_QueuedAtKey: "security_policy::QueuedAtKey",
 } as const;
