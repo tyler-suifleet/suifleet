@@ -1,4 +1,5 @@
 "use client";
+import { policyChangeTx } from "@/lib/second-person";
 import { PasskeySettings } from "./PasskeySettings";
 import { passkeySupported } from "@/lib/passkey-factor";
 import { SecondPersonSetup } from "./SecondPersonSetup";
@@ -25,7 +26,7 @@ export function OrganizationSecurity() {
     {policy.isSuccess && !policy.data && <p>This organization has legacy authority. It has not migrated to the security framework. A missing policy does not mean protections are configured off.</p>}
     {policy.data && <><p>Verified policy generation: {policy.data.generation.toString()}.</p><ul>{SECURITY_ACTIONS.map((name, i) => <li key={name}>{name}: {policy.data!.requirements[i] === 0 ? "All protections off" : SECURITY_FACTORS.filter(f => (policy.data!.requirements[i] & f.bit) !== 0).map(f => f.name).join(" + ")}</li>)}</ul></>}
     <PasskeySettings />
-    {policy.data && fleet.administrator && passkeySupported() && <button disabled={mutation.isPending} onClick={async () => { try { setError(""); const values = policy.data!.requirements.map(v => policy.data!.requirements.some(r => (r & 2) !== 0) ? v & ~2 : v | 2); await mutation.mutateAsync({ transaction: buildSecurityPolicyTx(fleet.customerId, values) }); await policy.refetch(); } catch (e) { setError(e instanceof Error ? e.message : "Passkey policy update failed"); } }}>Toggle passkey protection for all actions</button>}
+    {policy.data && fleet.administrator && passkeySupported() && <button disabled={mutation.isPending} onClick={async () => { try { setError(""); const values = policy.data!.requirements.map(v => policy.data!.requirements.some(r => (r & 2) !== 0) ? v & ~2 : v | 2); await mutation.mutateAsync({ transaction: await policyChangeTx(client, fleet.customerId, values) }); await policy.refetch(); } catch (e) { setError(e instanceof Error ? e.message : "Passkey policy update failed"); } }}>Save or request passkey protection change for all actions</button>}
     {SECURITY_FACTORS.map(f => <label key={f.bit} className="block rounded border p-3"><input type="checkbox" disabled checked={!!policy.data?.requirements.some(v => (v & f.bit) !== 0)} readOnly/> <strong>{f.name}</strong><p>{f.description}</p>{(AVAILABLE_SECURITY_FACTORS & f.bit) === 0 && <p>Not available yet: requires {f.ticket} and verified enrollment. It cannot be enabled by this framework alone.</p>}</label>)}
     <SecondPersonSetup key={fleet.customerId} />
     <SecondPersonApprovals />

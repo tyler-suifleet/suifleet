@@ -23,6 +23,19 @@ Object.defineProperty(global,'navigator',{configurable:true,value:{credentials:{
 }}});
 (async()=>{
  assert(p.passkeySupported());
+
+ const {Transaction}=appRequire('@mysten/sui/transactions');
+ for (const name of ['approve_action','reject_action','cancel_disclosed_security_action']) {
+  const tx=new Transaction();tx.moveCall({target:m.call_package_id+'::customer::'+name,arguments:[]});
+  assert.equal(p.approvalDecisionsOnly(tx),true);
+  tx.moveCall({target:m.call_package_id+'::customer::set_security',arguments:[]});
+  assert.equal(p.approvalDecisionsOnly(tx),false);
+ }
+ for (const target of ['0xdead::customer::approve_action',m.call_package_id+'::other::approve_action',m.call_package_id+'::customer::propose_approval']) {
+  const tx=new Transaction();tx.moveCall({target,arguments:[]});
+  assert.equal(p.approvalDecisionsOnly(tx),false);
+ }
+ assert.equal(p.approvalDecisionsOnly(new Transaction()),false);
  const key=await p.createPasskey();assert.equal(p.savedPasskeys().length,1);
  const signer=p.passkeySigner(key),bytes=new Uint8Array([1,2,3]);
  const signed=await signer.signTransaction(bytes);

@@ -1,7 +1,7 @@
 "use client";
 
 import { fetchOrganizationSecurity } from "@/lib/security-policy";
-import { enrolledSigner } from "@/lib/passkey-factor";
+import { approvalDecisionsOnly, enrolledSigner } from "@/lib/passkey-factor";
 import { fromBase64, toBase64 } from "@mysten/sui/utils";
 import { Transaction as SuiTransaction } from "@mysten/sui/transactions";
 import { checkDeviceCapacity } from "@/lib/customer-entitlements";
@@ -69,7 +69,9 @@ export function useFleetTransaction() {
       // Plain wallet coin funding has no organization Move operation and must
       // remain wallet-paid so an exhausted passkey can be topped up. Actual
       // organization authority is always enforced by Move, independently.
-      const requiresPasskey = policy && policy.requirements.some(v => (v & 2) !== 0) && transaction.getData().commands.some(command => !!command.MoveCall);
+      // Independent approval decisions need only administrator authentication;
+      // executing the approved action still requires its configured factors.
+      const requiresPasskey = !approvalDecisionsOnly(transaction) && policy && policy.requirements.some(v => (v & 2) !== 0) && transaction.getData().commands.some(command => !!command.MoveCall);
       const submit = async () => {
         if (!requiresPasskey || !captured.fleet) return wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
         const signer = await enrolledSigner(client, captured.fleet.customerId, address);

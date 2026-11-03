@@ -6,7 +6,7 @@ import { APPROVAL_TYPES } from "./protocol-version";
 import { MANIFEST, moveType, verifyDeployment } from "./deployment-manifest";
 import { PACKAGE_ID } from "./constants";
 import { customer_CustomerBcs, security_policy_ActionBcs, security_policy_FactorConfigurationBcs } from "./fleet-protocol";
-import { fetchOrganizationSecurity, validateSecurityRequirements } from "./security-policy";
+import { buildSecurityPolicyTx, fetchOrganizationSecurity, validateSecurityRequirements } from "./security-policy";
 
 const vectors = bcs.vector(bcs.vector(bcs.u8()));
 export const secondPersonSupported = () => !!MANIFEST && APPROVAL_TYPES.every(t => t in MANIFEST!.type_origins);
@@ -78,7 +78,7 @@ export async function proposeEnrollmentTx(client: SuiGrpcClient, customer: strin
 }
 export async function proposePolicyTx(client: SuiGrpcClient, customer: string, requirements: number[], expires: bigint) {
   await verifyDeployment(client);
-  const values = validateSecurityRequirements(requirements, 4);
+  const values = validateSecurityRequirements(requirements);
   const content = await typedObject(client, customer, "customer::Customer");
   const bytes = vectors.serialize([Array.from(bcs.string().serialize("set_security").toBytes()), Array.from(content), Array.from(bcs.vector(bcs.u8()).serialize(values).toBytes())]).toBytes();
   return txCall("customer::propose_approval", tx => [tx.object(customer), tx.pure.vector("u8", bytes), tx.pure.u64(expires), tx.object("0x6")]);
@@ -87,7 +87,7 @@ export function policyValues(request: ApprovalRequest): number[] | undefined {
   if (request.operation !== "set_security" || request.arguments.length !== 3) return undefined;
   const snapshot = customer_CustomerBcs.parse(Uint8Array.from(request.arguments[1]));
   if (!["197", "199"].includes(snapshot.version)) throw Error("Unsupported proposed organization version");
-  return validateSecurityRequirements(bcs.vector(bcs.u8()).parse(Uint8Array.from(request.arguments[2])), 4);
+  return validateSecurityRequirements(bcs.vector(bcs.u8()).parse(Uint8Array.from(request.arguments[2])));
 }
 export async function executePolicyTx(client: SuiGrpcClient, customer: string, request: ApprovalRequest) {
   await verifyDeployment(client);
@@ -100,4 +100,18 @@ export async function executePolicyTx(client: SuiGrpcClient, customer: string, r
   if (current.length !== request.arguments[1].length || current.some((b, i) => b !== request.arguments[1][i])) throw Error("Organization changed; propose again");
   if (enrollment) return configureTx(customer, request.id);
   return txCall("customer::set_security_secured", tx => [tx.object(customer), tx.pure.vector("u8", values!), tx.object(request.id), tx.object("0x6")]);
+}
+
+// Each factor editor owns only its bit; retain every other current requirement.
+export function approvalRequirements(current: number[], selected: number[]) {
+  const values = validateSecurityRequirements(current);
+  validateSecurityRequirements(selected);
+  return values.map((v, i) => (v & ~4) | (selected[i] & 4));
+}
+export async function policyChangeTx(client: SuiGrpcClient, customer: string, requirements: number[]) {
+  const policy = await fetchOrganizationSecurity(client, customer);
+  if (!policy) throw Error("Migrate the organization first");
+  return (policy.requirements[4] & 4) !== 0
+    ? proposePolicyTx(client, customer, requirements, BigInt(Date.now() + 86400000))
+    : buildSecurityPolicyTx(customer, requirements);
 }

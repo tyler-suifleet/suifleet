@@ -96,3 +96,14 @@ export function enrollPasskeyTx(customer: string, proof: string) {
 export function removePasskeyTx(customer: string, administrator: string, key: string) {
   const tx = new Transaction(); tx.moveCall({ target: `${PACKAGE_ID}::passkey_factor::remove`, arguments: [tx.object(customer), tx.pure.address(administrator), tx.pure.address(key)] }); return tx;
 }
+
+// These calls authenticate administrators but do not execute protected actions.
+// Exempt only a PTB consisting entirely of current-package approval decisions.
+export function approvalDecisionsOnly(transaction: Transaction) {
+  const commands = transaction.getData().commands;
+  return commands.length > 0 && commands.every(command => {
+    const call = command.MoveCall;
+    return !!call && normalizeSuiAddress(call.package) === normalizeSuiAddress(PACKAGE_ID) &&
+      call.module === 'customer' && ['approve_action', 'reject_action', 'cancel_disclosed_security_action'].includes(call.function);
+  });
+}
