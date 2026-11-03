@@ -1,5 +1,9 @@
 "use client";
 
+import { fetchOrganizationSecurity } from "@/lib/security-policy";
+import { approvalDecisionsOnly, enrolledSigner } from "@/lib/passkey-factor";
+import { fromBase64, toBase64 } from "@mysten/sui/utils";
+import { Transaction as SuiTransaction } from "@mysten/sui/transactions";
 import { checkDeviceCapacity } from "@/lib/customer-entitlements";
 import { getSession, isEnokiWallet } from "@mysten/enoki";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -61,7 +65,29 @@ export function useFleetTransaction() {
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network changed; retry the transaction");
       if (captured.supported && (latest.current.identity !== captured.identity || (captured.fleet && localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id))) throw Error("Fleet selection changed; retry the transaction");
       onProgress?.("wallet");
-      const result = await wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network }).catch((error: unknown) => {
+      const policy = captured.fleet && await fetchOrganizationSecurity(client, captured.fleet.customerId);
+      // Plain wallet coin funding has no organization Move operation and must
+      // remain wallet-paid so an exhausted passkey can be topped up. Actual
+      // organization authority is always enforced by Move, independently.
+      // Independent approval decisions need only administrator authentication;
+      // executing the approved action still requires its configured factors.
+      const requiresPasskey = !approvalDecisionsOnly(transaction) && policy && policy.requirements.some(v => (v & 2) !== 0) && transaction.getData().commands.some(command => !!command.MoveCall);
+      const submit = async () => {
+        if (!requiresPasskey || !captured.fleet) return wallet.signAndExecuteTransaction({ transaction, account: currentAccount, network: manifest.network });
+        const signer = await enrolledSigner(client, captured.fleet.customerId, address);
+        transaction.setSender(address); transaction.setGasOwner(signer.toSuiAddress());
+        const bytes = await transaction.build({ client });
+        const signed = await wallet.signTransaction({ transaction: SuiTransaction.from(bytes), account: currentAccount, network: manifest.network });
+        if (signed.bytes !== toBase64(bytes)) throw Error("Wallet changed the transaction; passkey signing refused");
+        const passkey = await signer.signTransaction(bytes);
+        if (passkey.bytes !== signed.bytes) throw Error("Passkey transaction mismatch");
+        const now = wallet.stores.$connection.get().account;
+        if (!now || now.address !== address || JSON.stringify([...new Set(now.chains)].sort()) !== chains || wallet.stores.$currentNetwork.get() !== manifest.network || latest.current.identity !== captured.identity) throw Error("Wallet, network or fleet changed while signing");
+        await verifyDeployment(client);
+        if (wallet.stores.$connection.get().account?.address !== address || wallet.stores.$currentNetwork.get() !== manifest.network || latest.current.identity !== captured.identity || (localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id)) throw Error("Wallet, network or fleet changed before submission");
+        return client.executeTransaction({ transaction: fromBase64(signed.bytes), signatures: [signed.signature, passkey.signature], include: { effects: true, events: true } });
+      };
+      const result = await submit().catch((error: unknown) => {
         // A transport error can hide an executed transaction. Only explicit
         // wallet rejection permits the caller to retry automatically.
         const rejected = error as { code?: number; name?: string; message?: string } | null;
