@@ -547,6 +547,7 @@ test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_passkey.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
 	$(RUN) node scripts/test_testnet_receipt_effects.cjs
 
@@ -835,6 +836,9 @@ test-customer-fleets:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) node scripts/test_security_policy.cjs
+	$(RUN) node scripts/test_passkey_factor.cjs
+	$(RUN) node scripts/test_passkey_fixture.cjs
+	$(RUN) node scripts/test_passkey_payment.cjs
 	$(RUN) node scripts/test_security_delay.cjs
 	$(RUN) node scripts/test_second_person.cjs
 	$(RUN) node scripts/test_multisig_admin.cjs

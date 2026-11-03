@@ -10,6 +10,7 @@ pub const CATALOG_TYPES: &[&str] = &["component_catalog::ComponentCatalog", "com
 pub const SEAL_POLICY_TYPES: &[&str] = &["seal_policy::AccessPolicy", "seal_policy::AccessAdminCap", "seal_policy::PolicyCreated", "seal_policy::AccessChanged", "seal_policy::KeyEpochRotated", "seal_policy::PolicyMigrated"];
 pub const BUDGET_TYPES: &[&str] = &["fleet_budget::FleetBudget", "fleet_budget::BudgetOwnerCap", "fleet_budget::Limits", "fleet_budget::DeviceKey", "fleet_budget::GasAccount", "fleet_budget::BudgetCreated", "fleet_budget::Deposited", "fleet_budget::Withdrawn", "fleet_budget::DeviceFunded", "fleet_budget::ReserveChanged", "fleet_budget::GasDrawn", "fleet_budget::BudgetLow", "fleet_budget::DeviceStateChanged", "fleet_budget::BudgetPaused", "fleet_budget::BudgetConfigured"];
 pub const SECURITY_TYPES: &[&str] = &["security_policy::PolicyKey", "security_policy::Policy", "security_policy::Action", "security_policy::PolicyChanged", "security_policy::ActionCreated", "customer::HandoverConsent", "enrollment::SecurityRevisionKey", "enrollment::SecurityGenerationKey", "security_policy::FactorKey", "security_policy::FactorConfiguration", "customer::HandoverCompleted", "customer::FleetSecurityKey"];
+pub const PASSKEY_TYPES: &[&str] = &["passkey_factor::Enrollment", "passkey_factor::ProofCreated"];
 pub const CUSTOMER_TYPES: &[&str] = &["customer::Customer", "customer::Fleet", "customer::Membership", "customer::CustomerKey", "customer::BudgetKey", "customer::DeviceKey", "customer::AssignmentKey", "customer::GroupCountKey", "customer::CustomerCreated", "customer::FleetCreated", "customer::CredentialChanged", "customer::DeviceAssigned", "customer::DeviceReleased", "enrollment::ManagedKey", "customer::PolicyKey", "deployment_manager::CustomerFleetKey"];
 pub const INBOX_TYPES: &[&str] = &["fleet_inbox::DeviceInbox", "fleet_inbox::InboxKey", "fleet_inbox::HeadKey", "fleet_inbox::Head", "fleet_inbox::InboxCreated", "fleet_inbox::Announced", "device_group::MemberKey", "device_group::IndexKey", "device_group::GroupIndex", "device_group::GroupIndexed"];
 pub const ROLLOUT_HEALTH_TYPES: &[&str] = &["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"];
@@ -1428,6 +1429,33 @@ pub mod multisig_admin {
     pub const ENROLL_SECURED: &str = "enroll_secured";
     pub const PREPARE_POLICY_CHANGE: &str = "prepare_policy_change";
 }
+pub mod passkey_factor {
+    use super::*;
+    pub const MODULE: &str = "passkey_factor";
+    pub const ENROLL: &str = "enroll";
+    pub const KEY_ADDRESS: &str = "key_address";
+    pub const KEYS: &str = "keys";
+    pub const PROVE_ENROLLMENT: &str = "prove_enrollment";
+    pub const REMOVE: &str = "remove";
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Enrollment {
+        pub id: [u8; 32],
+        pub customer: [u8; 32],
+        pub administrator: [u8; 32],
+        pub key: [u8; 32],
+        pub generation: u64,
+        pub expires_ms: u64,
+    }
+    impl Enrollment { pub const MOVE_TYPE: &'static str = "passkey_factor::Enrollment"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ProofCreated {
+        pub proof_id: [u8; 32],
+        pub customer: [u8; 32],
+        pub administrator: [u8; 32],
+        pub key: [u8; 32],
+    }
+    impl ProofCreated { pub const MOVE_TYPE: &'static str = "passkey_factor::ProofCreated"; }
+}
 pub mod roles {
     use super::*;
     pub const MODULE: &str = "roles";
@@ -1563,15 +1591,15 @@ pub mod security_policy {
     pub const ACTION_COUNT: &str = "action_count";
     pub const ACTION_GENERATION: &str = "action_generation";
     pub const ACTION_INTENT: &str = "action_intent";
-    pub const ATTESTATIONS: &str = "attestations";
     pub const AVAILABLE: &str = "available";
     pub const CUSTOMER_ID: &str = "customer_id";
-    pub const DISCLOSED_ARGUMENTS: &str = "disclosed_arguments";
     pub const EXPIRES_MS: &str = "expires_ms";
     pub const GENERATION: &str = "generation";
     pub const INTENT: &str = "intent";
     pub const PROPOSER: &str = "proposer";
     pub const REQUIREMENTS: &str = "requirements";
+    pub const ATTESTATIONS: &str = "attestations";
+    pub const DISCLOSED_ARGUMENTS: &str = "disclosed_arguments";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Action {
         pub id: [u8; 32],
@@ -1584,11 +1612,6 @@ pub mod security_policy {
     }
     impl Action { pub const MOVE_TYPE: &'static str = "security_policy::Action"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct ActionArguments {
-        pub bytes: Vec<u8>,
-    }
-    impl ActionArguments { pub const MOVE_TYPE: &'static str = "security_policy::ActionArguments"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct ActionCreated {
         pub action_id: [u8; 32],
         pub customer_id: [u8; 32],
@@ -1598,33 +1621,6 @@ pub mod security_policy {
         pub expires_ms: u64,
     }
     impl ActionCreated { pub const MOVE_TYPE: &'static str = "security_policy::ActionCreated"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct ArgumentsKey {
-        pub dummy_field: bool,
-    }
-    impl ArgumentsKey { pub const MOVE_TYPE: &'static str = "security_policy::ArgumentsKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DelayGrant {
-        pub elapsed_ms: u64,
-        pub transaction: Vec<u8>,
-        pub pause: bool,
-    }
-    impl DelayGrant { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrant"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DelayGrantKey {
-        pub dummy_field: bool,
-    }
-    impl DelayGrantKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrantKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct DelayKey {
-        pub dummy_field: bool,
-    }
-    impl DelayKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayKey"; }
-    #[derive(Debug, Clone, Deserialize, Serialize)]
-    pub struct Delays {
-        pub milliseconds: Vec<u64>,
-    }
-    impl Delays { pub const MOVE_TYPE: &'static str = "security_policy::Delays"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct FactorConfiguration {
         pub binding: Vec<u8>,
@@ -1656,6 +1652,38 @@ pub mod security_policy {
         pub dummy_field: bool,
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ActionArguments {
+        pub bytes: Vec<u8>,
+    }
+    impl ActionArguments { pub const MOVE_TYPE: &'static str = "security_policy::ActionArguments"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ArgumentsKey {
+        pub dummy_field: bool,
+    }
+    impl ArgumentsKey { pub const MOVE_TYPE: &'static str = "security_policy::ArgumentsKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrant {
+        pub elapsed_ms: u64,
+        pub transaction: Vec<u8>,
+        pub pause: bool,
+    }
+    impl DelayGrant { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrant"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrantKey {
+        pub dummy_field: bool,
+    }
+    impl DelayGrantKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrantKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayKey {
+        pub dummy_field: bool,
+    }
+    impl DelayKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Delays {
+        pub milliseconds: Vec<u64>,
+    }
+    impl Delays { pub const MOVE_TYPE: &'static str = "security_policy::Delays"; }
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct QueuedAt {
         pub milliseconds: u64,
