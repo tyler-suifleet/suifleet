@@ -38,6 +38,8 @@
     return pages;
   }
   function render(updateLocation = false) {
+    const active = document.activeElement;
+    const wasComplete = !complete.hidden;
     stages.forEach((stage, index) => {
       stage.hidden = finished || index !== stageIndex;
       if (stage.hidden) stage.querySelectorAll("video").forEach(video => video.pause());
@@ -65,6 +67,11 @@
       next.textContent = stageIndex === stages.length - 1 ? "Finish guide ✓" : "Next stage →";
     }
     back.disabled = !finished && stageIndex === 0;
+    // Disabled or newly hidden controls cannot retain keyboard focus.
+    if (finished && !wasComplete) complete.focus();
+    else if (active && root.contains(active) && (active.disabled || active.closest("[hidden]"))) {
+      (finished ? complete : stages[stageIndex].querySelector("h2")).focus();
+    }
     if (updateLocation) history.pushState(null, "", finished ? "#complete" : `#${stages[stageIndex].id}/${instruction}/${part}`);
   }
   back.addEventListener("click", () => {
@@ -101,6 +108,8 @@
   root.querySelectorAll("video").forEach(video => video.addEventListener("error", () => {
     video.hidden = true; video.closest("figure").querySelector("[data-video-error]").hidden = false;
   }));
+  root.querySelectorAll(".guide-instructions").forEach(list => { list.hidden = true; });
+  document.body.classList.add("guide-ready");
   select.disabled = false; next.disabled = false; readLocation(); render();
   document.fonts.ready.then(() => render());
 })();

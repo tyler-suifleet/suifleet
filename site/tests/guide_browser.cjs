@@ -33,6 +33,53 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   assert.ok(await page.locator('#fund [data-video-error]').evaluate(e=>{const a=e.getBoundingClientRect(),b=e.closest('figure').getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom}),`video error clipped at${width}x${height}`);
   assert.deepEqual(errors,[],`browser errors at${width}x${height}`);assert.deepEqual(external,[]);console.log(`PASS guide${width}x${height}: ${count} screens, all${expected.size} instructions, no page/text overflow, controls visible, back/next/jump/history/deep link`);await page.close();
  }
+ // Keyboard-only navigation must retain focus at disabled-control boundaries.
+ const keyboard=await browser.newPage({viewport:{width:1280,height:720}});
+ await keyboard.goto(origin+'/guide/',{waitUntil:'networkidle'});
+ async function tabTo(selector) {
+  for(let i=0;i<100;i++) {
+   if(await keyboard.locator(selector).evaluate(e=>e===document.activeElement))return;
+   await keyboard.keyboard.press('Tab');
+  }
+  assert.fail(`keyboard could not reach ${selector}`);
+ }
+ await tabTo('[data-guide-next]');await keyboard.keyboard.press('Enter');
+ await tabTo('[data-guide-back]');await keyboard.keyboard.press('Enter');
+ assert.equal(await keyboard.locator('#sign-in h2').evaluate(e=>e===document.activeElement),true,'Back to stage 1 focuses heading');
+ let turns=0;
+ while(!await keyboard.locator('#sign-in [data-guide-forward]').isDisabled()) {
+  await tabTo('#sign-in [data-guide-forward]');await keyboard.keyboard.press('Enter');
+  assert.ok(++turns<200);
+ }
+ assert.equal(await keyboard.locator('#sign-in h2').evaluate(e=>e===document.activeElement),true,'last instruction focuses heading');
+ turns=0;
+ while(!await keyboard.locator('#sign-in [data-guide-prev-part]').isDisabled()) {
+  await tabTo('#sign-in [data-guide-prev-part]');await keyboard.keyboard.press('Enter');
+  assert.ok(++turns<200);
+ }
+ assert.equal(await keyboard.locator('#sign-in h2').evaluate(e=>e===document.activeElement),true,'first instruction focuses heading');
+ for(let i=0;i<steps.length;i++){await tabTo('[data-guide-next]');await keyboard.keyboard.press('Enter');}
+ assert.equal(await keyboard.locator('[data-guide-complete]').evaluate(e=>e===document.activeElement),true,'Finish focuses completion');
+ await tabTo('[data-guide-next]');await keyboard.keyboard.press('Enter');
+ assert.equal(await keyboard.locator('#sign-in').isVisible(),true);
+ console.log('PASS keyboard Tab/Enter: Back, both instruction boundaries, Finish and restart');await keyboard.close();
+ // Exercise both JavaScript-disabled and failed-script delivery (noscript does not cover the latter).
+ for(const javaScriptEnabled of [false,true]) {
+  const fallback=await browser.newPage({javaScriptEnabled,viewport:{width:390,height:844}});
+  if(javaScriptEnabled)await fallback.route('**/assets/guide.js*',route=>route.abort());
+  await fallback.goto(origin+'/guide/',{waitUntil:'networkidle'});
+  assert.equal(await fallback.locator('.guide-stage:visible').count(),steps.length);
+  const items=await fallback.locator('[data-guide-instruction]').allTextContents();
+  assert.deepEqual(items.map(t=>t.replace(/\s+/g,' ').trim()),[...expected.values()]);
+  for(const item of await fallback.locator('[data-guide-instruction]').all()) {
+   assert.equal(await item.isVisible(),true);
+   assert.ok(await item.evaluate(e=>{const r=e.getBoundingClientRect();return r.height>0&&r.left>=0&&r.right<=innerWidth}),'fallback text fits phone width');
+  }
+  await fallback.locator('[data-guide-instruction]').last().scrollIntoViewIfNeeded();
+  assert.ok(await fallback.locator('[data-guide-instruction]').last().evaluate(e=>e.getBoundingClientRect().bottom<=innerHeight),'last result reachable');
+  console.log(`PASS static fallback: all ${items.length} instructions reachable, JavaScript ${javaScriptEnabled?'blocked':'disabled'}`);
+  await fallback.close();
+ }
  const page=await browser.newPage();await page.goto(origin+'/guide/',{waitUntil:'networkidle'});const video=page.locator('#sign-in video');
  await video.evaluate(async v=>{v.load();await v.play()});await page.waitForFunction(()=>document.querySelector('#sign-in video').currentTime>0);assert.equal(await video.evaluate(v=>v.error),null);
  await page.getByLabel('Guide stage').selectOption('fund');assert.equal(await video.evaluate(v=>v.paused),true,'leaving a stage pauses its video');

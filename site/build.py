@@ -77,10 +77,9 @@ def render_guide(config):
     steps = load_json(GUIDE / "steps.json")["steps"]
     videos, manifest = videos_by_step()
     out = []
-    for number, step in enumerate(steps, 1):
-        hidden = " hidden" if number != 1 else ""
+    for step in steps:
         title = html.escape(step["title"])
-        out.append(f'<section class="guide-stage" id="{step["id"]}" data-title="{title}"{hidden}>')
+        out.append(f'<section class="guide-stage" id="{step["id"]}" data-title="{title}">')
         video = videos.get(step["id"])
         out.append('<figure class="guide-media">')
         if video:
@@ -98,13 +97,13 @@ def render_guide(config):
         else:
             out.append('<p data-video-error>Video not yet available. Follow the written instructions.</p>')
         out.append('</figure><article class="guide-instruction-card">')
-        out.append(f'<h2>{title}</h2><h3 data-guide-label>Overview</h3><div class="guide-copy"><p>{html.escape(step["summary"])}</p></div>')
+        out.append(f'<h2 tabindex="-1">{title}</h2><h3 data-guide-label>Overview</h3><div class="guide-copy"><p>{html.escape(step["summary"])}</p></div>')
         out.append(f'<div class="guide-instruction-meta"><div class="guide-instruction-paging"><button type="button" aria-label="Previous instruction" data-guide-prev-part>‹</button><span data-guide-part aria-live="polite"></span><button type="button" aria-label="Next instruction" data-guide-forward>›</button></div><a href="{config["app_url"]}{step["console_route"]}" target="_blank" rel="noopener">Open {html.escape(step["console_label"])} ↗</a></div></article>')
         instructions = [("Overview", step["summary"])]
         instructions += [("Before you start", text) for text in step.get("before", [])]
         instructions += [(f'Task {i} of {len(step["actions"])}', text) for i, text in enumerate(step["actions"], 1)]
         instructions += [("Expected result", step["result"])]
-        out.append('<ol hidden class="guide-instructions">')
+        out.append('<ol class="guide-instructions">')
         out += [f'<li data-guide-instruction data-label="{html.escape(label)}">{html.escape(text)}</li>' for label, text in instructions]
         out.append('</ol></section>')
     return "\n".join(out)

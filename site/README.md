@@ -116,3 +116,11 @@ The existing recordings are October 27 testnet console captures, with source
 build and transaction provenance in `site/media/guide/videos.json`; they are not
 new human-narrated recordings. The local preview must be refreshed from the full
 site build, including `media/guide`, rather than a historical design snapshot.
+
+The guide progressively enhances a readable static list of all nine stages. If
+JavaScript is disabled or the guide script is blocked/missing, instructions remain
+available in normal document flow (scrolling is allowed in this fallback). The
+browser regression also checks these delivery failures and Tab/Enter navigation
+at instruction/stage boundaries and completion. Interactive rendering remains
+viewport-sized; Safari/Firefox interactive behavior is not claimed by the
+Chromium regression.

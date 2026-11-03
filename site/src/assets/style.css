@@ -1884,3 +1884,19 @@ td.num,th.num {
 
 .guide-media video[hidden] { display:none; }
 .guide-media [data-video-error] p { margin:0; }
+
+/* A blocked/missing script leaves a readable static guide, including every task. */
+.guide-page:not(.guide-ready) { height:auto; overflow:visible; display:block; }
+.guide-page:not(.guide-ready) .guide-player { height:auto; display:block; }
+.guide-page:not(.guide-ready) .guide-stage { height:auto; display:block; margin:24px 0; }
+.guide-page:not(.guide-ready) .guide-media video { height:auto; max-height:60vh; }
+.guide-page:not(.guide-ready) .guide-instruction-card { display:block; }
+.guide-page:not(.guide-ready) .guide-instruction-card h3,
+.guide-page:not(.guide-ready) .guide-copy,
+.guide-page:not(.guide-ready) .guide-instruction-meta,
+.guide-page:not(.guide-ready) .guide-controls,
+.guide-page:not(.guide-ready) .guide-stage-picker,
+.guide-page:not(.guide-ready) .guide-progress { display:none; }
+.guide-page:not(.guide-ready) .guide-instructions { padding:16px 32px; background:white; overflow-wrap:anywhere; }
+.guide-page:not(.guide-ready) .guide-instructions li { margin:12px 0; }
+.guide-instructions[hidden] { display:none; }
