@@ -76,7 +76,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
 CLOCK = "@0x6"
 CHAINS = {"testnet": "4c78adac"}
-DEVICE_FUNDING = 30_000_000  # MIST of report gas per top-up.
+DEVICE_FUNDING = 10_000_000  # Four sequential reports; measured locally below 6M total.
+DEVICE_MAX_REUSE = 30_000_000  # Keep previously funded identities eligible; charge the full grant.
 
 
 DEVICE_MINIMUM = 10_000_000  # Top the device up below this.
@@ -139,6 +140,32 @@ def deployment_call(package, version, *, walrus, run_id, new, inboxes, inbox, re
     return ptb + ["--move-call", f"{package}::deployment_manager::share_deployment", name]
 
 
+def activation_plan(package, registry, device, group, operator, origins, pending=None):
+    """Combine head-only setup, retaining the exact legacy operation on recovery.
+
+    The pre-upgrade membership transaction stays before the upgrade. The new
+    owner cap can be borrowed to create the inbox before its PTB transfer.
+    """
+    legacy = 'activate identity in registry custody'
+    batched_label = 'activate identity + index group + create inbox (head)'
+    supported = all(name in origins for name in dm.INBOX_TYPES)
+    label = reconciler.normal_pending(pending)['label'] if pending else (batched_label if supported else legacy)
+    if label not in (legacy, batched_label) or (label == batched_label and not supported):
+        raise reconciler.Uncertain('pending activation does not match the verified head APIs')
+    calls = [f'{package}::device_registry::activate_device']
+    ptb = ['--move-call', calls[0], f'@{registry}', f'@{device}', '--assign', 'owner']
+    batched = label == batched_label
+    if batched:
+        calls += [f'{package}::device_group::index_members', f'{package}::fleet_inbox::new_inbox',
+                  f'{package}::fleet_inbox::follow_group', f'{package}::fleet_inbox::share_inbox']
+        ptb += ['--move-call', calls[1], f'@{group}', '10',
+                '--move-call', calls[2], f'@{registry}', 'owner', '--assign', 'inbox',
+                '--move-call', calls[3], 'inbox', f'@{group}',
+                '--move-call', calls[4], 'inbox']
+    ptb += ['--transfer-objects', '[owner]', f'@{operator}']
+    return label, calls, ptb, batched
+
+
 def gas_pools(gas):
     """(address balance, coin total). Gas selection draws one pool, never their sum."""
     coins = gas.get("gasCoins", []) if isinstance(gas, dict) else gas
@@ -170,6 +197,45 @@ def failure_class(error):
     if any(marker in text for marker in TRANSIENT_MARKERS):
         return "infrastructure"
     return "source"
+
+
+
+def completed_deployment_cases(cases, *, head, call, transaction, created, settled,
+                               receipts, proof, cleanup, evidence, read_version, compact=False):
+    """Recycle only a predecessor whose receipt and independent effects passed.
+
+    A failed/unknown create+delete leaves the predecessor in bounded cleanup;
+    successful effects replace it with the successor before any further reads.
+    """
+    by_version = {}
+    previous = None
+    evidence["receipts"] = {}
+    evidence["report_transactions"] = []
+    for package, version, options, status in cases:
+        arguments = call(package, version, **options)
+        if previous:
+            arguments += ["--move-call", f"{head}::deployment_manager::delete_deployment", f"@{previous}"]
+        budgets = {'budget': 10_000_000 if previous else 15_000_000} if compact else {}
+        made = transaction(f"create deployment {version}" + (" + delete completed predecessor" if previous else " via base"), *arguments, **budgets)
+        record_ids = created(made, "::deployment_manager::DeploymentRecord")
+        if len(record_ids) != 1:
+            raise RuntimeError('deployment case did not create exactly one record')
+        if previous:
+            cleanup.remove(previous)
+        record = record_ids[0]
+        cleanup.append(record)
+        if read_version(record) != version:
+            raise RuntimeError('created deployment version differs from requested case')
+        by_version[version] = record
+        settled(record, status)
+        evidence["receipts"][record] = receipts(record)
+        if proof:
+            result = proof(record)
+            if len(result) != 1:
+                raise RuntimeError('deployment case needs one independent receipt proof')
+            evidence["report_transactions"].extend(result)
+        previous = record
+    return by_version
 
 
 def receipt_effects(manifest, deployments):
@@ -431,6 +497,29 @@ def balance_of(client, address):
     return sum(int(c.get("mistBalance", 0)) for c in coins) + (int(gas.get("addressMistBalance") or 0) if isinstance(gas, dict) else 0)
 
 
+def funded_identity(state, balance):
+    """Reuse only a funded identity from this authenticated operator/lane state.
+
+    Package pairs/objects and pending mutations remain independent. The caller
+    verifies the key's derived address before registration and still grants its
+    entire balance to the new run. Prefer the smallest sufficient grant; never
+    consume an unrelated wallet or silently accept a failed balance read.
+    """
+    candidates = {}
+    for fixture in state['fixtures'].values():
+        address, key = fixture.get('device_address'), fixture.get('device_key')
+        if address and key:
+            if address in candidates and candidates[address] != key:
+                raise RuntimeError('cached device identity has conflicting keys')
+            candidates[address] = key
+    funded = [(balance(address), address, key) for address, key in candidates.items()]
+    eligible = [item for item in funded if DEVICE_MINIMUM <= item[0] <= DEVICE_MAX_REUSE]
+    if not eligible:
+        return None
+    _, address, key = min(eligible)
+    return dict(device_address=address, device_key=key)
+
+
 def plain(value):
     """Move JSON with or without JSON-RPC-style {"fields": ...} wrappers."""
     if isinstance(value, dict):
@@ -532,7 +621,10 @@ def package_client(network_sui, wallet, *command, json_output=True, check=True, 
 
 
 def run(args):
+    compact = getattr(args, "compact_lifecycle", False)
     ptb_budget = transaction_gas_budget(getattr(args, "transaction_gas_budget", 200_000_000))
+    if compact and ptb_budget < 15_000_000:
+        raise ValueError("compact lifecycle needs an explicit ordinary gas cap of at least 15000000 MIST")
     os.umask(0o077)
     evidence = {"started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "network": args.network,
                 "transactions": [], "checks": []}
@@ -625,6 +717,7 @@ def run(args):
     def transaction(label, *ptb, budget=None, funding=0):
         # Fresh publication can consume most of the run ceiling. Never submit
         # an ordinary PTB with its configured gas budget silently reduced.
+        # Compact lifecycle calls explicitly select their documented budgets.
         return mutate(label, ['ptb', *ptb], gas=ptb_budget if budget is None else budget, funding=funding, require_full=True)
 
     def created(result, suffix):
@@ -807,8 +900,13 @@ def run(args):
                 toolchain.write_pubfile(pubfile, chain, package_dir, old, upgrade_cap)
                 check(f"verified/reused base package {old}; no identical package is republished")
                 if "device_key" not in publication:
-                    address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
-                    save_publication(device_key=key.read_text().strip(), device_address=address)
+                    identity = funded_identity(state, lambda address: balance_of(client, address))
+                    if identity:
+                        save_publication(**identity)
+                        check('reused funded report identity from the authenticated same-lane state; exact package pair unchanged')
+                    else:
+                        address = subprocess.check_output([str(DAEMON), "--provision", str(key)], text=True).strip()
+                        save_publication(device_key=key.read_text().strip(), device_address=address)
                 key.write_text(publication["device_key"] + "\n"); key.chmod(0o600)
                 device_address = publication["device_address"]
                 assert dm.object_id(subprocess.check_output([str(DAEMON), "--derive-address", str(key)], text=True).strip()) == dm.object_id(device_address)
@@ -852,14 +950,24 @@ def run(args):
                     verify_publication(dict(publication, head_package=new), rpc_url, operator, client)
                     save_publication(head_package=new)
                 if "owner_cap" not in publication:
-                    activated = setup_ptb("activate identity in registry custody", [f"{new}::device_registry::activate_device"],
-                        "--move-call", f"{new}::device_registry::activate_device", f"@{registry}", f"@{device}",
-                        "--assign", "owner", "--transfer-objects", "[owner]", f"@{operator}")
-                    save_publication(owner_cap=created(activated, "::device_registry::DeviceOwnerCap")[0])
+                    activation_manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new,
+                        upgrade_cap=upgrade_cap, registry=registry, network=args.network,
+                        publisher=walrus.publisher, aggregator=aggregator))
+                    label, calls, ptb, batched = activation_plan(new, registry, device, group, operator,
+                        activation_manifest['type_origins'], publication.get('pending_operation'))
+                    activated = setup_ptb(label, calls, *ptb)
+                    values = dict(owner_cap=created(activated, "::device_registry::DeviceOwnerCap")[0])
+                    if batched:
+                        expected = dm.inbox_id(registry, activation_manifest['type_origins']['fleet_inbox::InboxKey'], device)
+                        assert created(activated, "::fleet_inbox::DeviceInbox") == [expected]
+                        values['inbox'] = expected
+                    save_publication(**values)
                 fixture = dict(owner_cap=publication["owner_cap"], base_package=old, head_package=new, registry=registry, upgrade_cap=upgrade_cap,
                                device=device, device_cap=device_cap, group=group, device_address=device_address,
                                device_key=publication["device_key"], created=evidence["started"],
                                provenance=provenance(tools, compatibility, evidence["toolchain"]["framework"], built, base, head))
+                if publication.get('inbox'):
+                    fixture['inbox'] = publication['inbox']
                 state["fixtures"][key_name] = fixture
                 state["publications"].pop(key_name)
                 save_state(state_path, state)
@@ -867,10 +975,13 @@ def run(args):
             device, cap, group, device_address = (fixture[k] for k in ("device", "device_cap", "group", "device_address"))
             # Report gas: top up only when low.
             device_gas = balance_of(client, device_address)
+            evidence.update(device=device, device_address=device_address,
+                            preexisting_device_grant_mist=device_gas)
             ledger.grant(device_gas)  # Include all pre-existing device gas in the ceiling.
             if device_gas < DEVICE_MINIMUM:
-                transaction("top up device gas", "--split-coins", "gas", f"[{DEVICE_FUNDING}]", "--assign", "fee",
-                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=DEVICE_FUNDING)
+                funding = DEVICE_FUNDING - device_gas
+                transaction("top up device gas", "--split-coins", "gas", f"[{funding}]", "--assign", "fee",
+                            "--transfer-objects", "[fee]", f"@{device_address}", budget=10_000_000, funding=funding)
 
             # 3. Manifest over gRPC.
             manifest = dm.resolve(SimpleNamespace(chain_identifier=chain, rpc=rpc_url, package=new, upgrade_cap=upgrade_cap,
@@ -950,30 +1061,27 @@ def run(args):
                 path = components / component.DEFAULT_COMPONENT / "history.jsonl"
                 return [json.loads(line)["version"] for line in path.read_text().splitlines()] if path.exists() else []
 
-            # Batched to save computation fees. One transaction cannot call two
-            # versions of a package (InvalidLinkage), so the old package's
-            # entry point gets its own.
-            # The base entry must exercise legacy event discovery even when
-            # identical bytecode reuses the head package ID. Otherwise its later
-            # announcement supersedes the failed deployment in the inbox head.
-            by_version = {}
-            for label, arguments in (
-                ("create 3 deployments via head", [*call(new, "1.0.0", devices=[device]), *call(new, "2.0.0", groups=[group]),
-                                                   *call(new, "4.0.0", devices=[device], fail="health")]),
-                ("create 1 deployment via base", call(old, "3.0.0", devices=[device], announce=False))):
-                for record_id in created(transaction(label, *arguments), "::deployment_manager::DeploymentRecord"):
-                    cleanup.append(record_id)
-                    cleanup_package = new
-                    by_version[plain(client("object", record_id)["content"])["version"]] = record_id
+            # Each case completes and is independently read before the next
+            # transaction can delete it. Only head entry points share a PTB;
+            # calling two versions of one package would be InvalidLinkage.
+            cases = [
+                (old, "3.0.0", dict(devices=[device], announce=False), 1),
+                (new, "1.0.0", dict(devices=[device]), 1),
+                (new, "2.0.0", dict(groups=[group]), 1),
+                (new, "4.0.0", dict(devices=[device], fail="health"), 2),
+            ]
+            cleanup_package = new
+            by_version = completed_deployment_cases(cases, head=new, call=call,
+                transaction=transaction, created=created, settled=settled, receipts=receipts,
+                proof=(lambda record: receipt_effects(root / 'release/deployment.json', [record]))
+                      if args.network == 'testnet' else None,
+                cleanup=cleanup, evidence=evidence,
+                read_version=lambda record: plain(client("object", record)["content"])["version"], compact=compact)
             direct, via_group, via_old, failed = (by_version[v] for v in ("1.0.0", "2.0.0", "3.0.0", "4.0.0"))
-            settled(direct, 1)
             check("head-package deployment to the device: applied, receipt Applied on chain")
-            settled(via_group, 1)
             check("head-package deployment to the pre-upgrade group: applied via report_status_for_group")
-            settled(via_old, 1)
             check("deployment created through the OLD package's entry point: applied and receipted (mixed versions)" if old != new
                   else "deployment through the base package (no upgrade in this run): applied and receipted")
-            settled(failed, 2)
             check("injected health failure reported Failed on chain")
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
             if inboxes:
@@ -985,37 +1093,48 @@ def run(args):
                 assert latest.get(dm.object_id(group)) == {dm.object_id(via_group)}, heads
                 check("head-package deployments announced to the device inbox and the indexed group's head; "
                       "group report authorized by the member index")
-            evidence["receipts"] = {d: receipts(d) for d in (direct, via_group, via_old, failed)}
             if args.network == 'testnet':
-                evidence['report_transactions'] = receipt_effects(
-                    root / 'release/deployment.json', (direct, via_group, via_old, failed))
                 assert len(evidence['report_transactions']) == 4
                 check('independent gRPC reader confirmed all four receipt-writing transaction effects')
             process.send_signal(signal.SIGINT)
             process.wait(timeout=60)
             process = None
 
-            # 6. Cleanup in one transaction: storage rebate.
-            deletes = []
-            for deployment in (direct, via_group, via_old, failed):
-                deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
-            transaction("delete 4 deployments", *deletes)
-            cleanup.clear()
-            check("deployments deleted (storage rebate)")
-            # Temporal audit acceptance must never prevent daemon, receipt or
-            # cleanup regressions from running. Pending is evidence, not a pass.
-            # Reuse the verified upgraded package and the same bounded ledger.
+            # Transfer only the final proven deployment to the durable audit
+            # journal. Its deletion shares audit creation's storage charge.
             from rollout_audit_acceptance import run_scheduled as audit_acceptance, checkpointed_step
             audit_fixture = fixture.setdefault('rollout_audit', {})
+            recycle = (cleanup[0] if len(cleanup) == 1
+                and 'deployment_manager::DecisionKey' in manifest['type_origins']
+                and not audit_fixture.get('record')
+                and not audit_fixture.get('creation_cleanup')
+                and not audit_fixture.get('pending_operation') else None)
+            if not recycle:
+                deletes = []
+                for deployment in cleanup:
+                    deletes += ["--move-call", f"{new}::deployment_manager::delete_deployment", f"@{deployment}"]
+                transaction("delete final completed deployment", *deletes)
+                cleanup.clear()
+
+            def save_audit():
+                save_state(state_path, state)
+                # The persisted journal, including unknown outcomes, now owns
+                # this object. Abort cleanup must never invalidate its bytes.
+                owned = audit_fixture.get('creation_cleanup')
+                if owned in cleanup:
+                    cleanup.remove(owned)
+
             def audit_step(label, ptb, calls):
                 return checkpointed_step(state_path, state, audit_fixture, label, ptb, calls,
                     client=client, sign=sign, mutate=mutate, ledger=ledger,
                     operator=operator, chain=reconciler.Chain(rpc_url),
-                    checkpoint=checkpoint_setup, record_other=other_execution)
+                    checkpoint=checkpoint_setup, record_other=other_execution,
+                    gas=11_000_000 if compact and label.startswith('create and admit') else 20_000_000)
             audit_acceptance(audit_step, client, manifest, device, evidence, root,
-                fixture=audit_fixture, save=lambda: save_state(state_path, state),
+                fixture=audit_fixture, save=save_audit, creation_cleanup=recycle, compact=compact,
                 operator=operator, fixture_key=key_name,
                 retire=getattr(args, 'retire_rollout_audit', False))
+            check("deployments deleted (storage rebate)")
 
     finally:
         if process and process.poll() is None:
@@ -1062,6 +1181,8 @@ if __name__ == "__main__":
                         help="pinned transaction CLI (Dockerfile SUI_NETWORK_VERSION)")
     parser.add_argument("--transaction-gas-budget", type=int, default=200_000_000,
                         help="lower ordinary PTB gas budgets for available gas funding pools (2000000..200000000 MIST); the run ceiling still applies")
+    parser.add_argument("--compact-lifecycle", action="store_true",
+                        help="explicit 15M first/10M successor deployment budgets and 11M atomic audit budget; full reservations remain enforced")
     parser.add_argument("--fresh", action="store_true", help="request a fresh fixture; refused if matching verified bytecode already exists")
     parser.add_argument("--retire-rollout-audit", action="store_true",
                         help="delete the retained audit only after real post-pruning proof; retires its automatic reuse")

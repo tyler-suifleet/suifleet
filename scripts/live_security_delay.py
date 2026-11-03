@@ -19,6 +19,18 @@ from live_common import Live, CLOCK
 from live_package_upgrade import contracts_digest
 
 
+def policy_failure_function(package):
+    """Pin the exact abort site to the compiled source, including older bases."""
+    source = (Path(package) / 'sources/security_policy.move').read_text()
+    if 'p0(p.transaction == *ctx.digest()); p0((p.attested & needed) == needed);' in source:
+        if 'fun p0(condition: bool)' not in source or 'if (!condition) abort EFactor' not in source:
+            raise ValueError('unrecognized factored policy guard')
+        return 'p0'
+    if 'assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);' in source:
+        return 'check'
+    raise ValueError('unrecognized policy authority guard')
+
+
 def record_net_gas(live):
     """Record signed net gas separately from the non-replenishing ledger charge."""
     for entry in live.evidence['transactions']:
@@ -35,6 +47,8 @@ def record_net_gas(live):
 def run(args):
     if args.network == 'testnet' and not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
         raise RuntimeError('requires network:suifleet-testnet lock')
+    head_failure = policy_failure_function('contracts')
+    base_failure = policy_failure_function(args.base) if args.base else None
     live = Live(args.wallet, args.network, args.max_spend_mist)
     live.preflight(auto_fund=args.auto_fund)
     path = Path(args.state)
@@ -119,8 +133,8 @@ def run(args):
             tx('cancel retained nonce from interrupted acceptance', '--move-call',f'{head}::customer::cancel_security_action','@'+customer,'@'+retained)
             fixture['retained_actions'].remove(retained); save()
         if args.base:
-            live.attack('old package direct policy weakening refused', '--move-call', f'{base}::customer::set_security', '@'+customer, vector([0]*7), module='security_policy', function='check', code=1, budget=20_000_000)
-        live.attack('direct policy weakening refused', '--move-call', f'{head}::customer::set_security', '@'+customer, vector([0]*7), module='security_policy', function='check', code=1, budget=20_000_000)
+            live.attack('old package direct policy weakening refused', '--move-call', f'{base}::customer::set_security', '@'+customer, vector([0]*7), module='security_policy', function=base_failure, code=1, budget=20_000_000)
+        live.attack('direct policy weakening refused', '--move-call', f'{head}::customer::set_security', '@'+customer, vector([0]*7), module='security_policy', function=head_failure, code=1, budget=20_000_000)
         def queue(label):
             raw = subprocess.check_output(['node','scripts/security_delay_fixture.cjs',live.rpc_url,customer,origins['customer::Customer'],'set_security',json.dumps([0]*7)],text=True)
             expiry = int(live.object('0x6')['content']['timestamp_ms']) + 600000

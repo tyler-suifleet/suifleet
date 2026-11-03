@@ -35,7 +35,7 @@
         deregister_device(registry, device, ctx);
         prover::prover::ensures(!existed || spec_typed_identity(registry, id));
         if (spec_typed_identity(registry, id)) {
-            prover::prover::ensures(identity_of(registry, id).revoked);
+            prover::prover::ensures(p1(registry, id).revoked);
         };
     }
     #[mode(spec), ext(spec(prove, target = deregister_activated_device, no_opaque))]
@@ -47,6 +47,6 @@
         prover::prover::ensures(!is_custodied(registry, id));
         prover::prover::ensures(spec_typed_identity(registry, id));
         if (spec_typed_identity(registry, id)) {
-            prover::prover::ensures(identity_of(registry, id).revoked);
+            prover::prover::ensures(p1(registry, id).revoked);
         };
     }

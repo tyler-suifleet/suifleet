@@ -22,13 +22,26 @@ async function verifyRetainedFixture(client, load, input) {
   assert.equal(stored.revision, String(input.revision), 'retained audit revision changed');
   assert.deepEqual(stored.members, [input.device], 'retained audit membership changed');
 }
-module.exports = { afterPruning, verifyRetainedFixture };
+function auditNetwork(manifest, { disposable = fs.existsSync('/.dockerenv'), interfaces = fs.readdirSync('/sys/class/net') } = {}) {
+  if (manifest.network === 'localnet') {
+    assert.equal(disposable, true, 'local audit requires disposable Docker');
+    assert.deepEqual([...interfaces].sort(), ['lo'], 'local audit requires --network none');
+    const rpc = new URL(manifest.rpc_url);
+    assert.equal(rpc.protocol, 'http:');
+    assert.ok(['127.0.0.1', 'localhost', '[::1]'].includes(rpc.hostname), 'local audit requires loopback');
+    return 'localnet';
+  }
+  assert.equal(manifest.network, 'testnet');
+  assert.equal(manifest.chain_identifier, '4c78adac');
+  return 'testnet';
+}
+module.exports = { afterPruning, verifyRetainedFixture, auditNetwork };
 if (require.main === module) (async () => {
   const input = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-  assert.equal(input.manifest.chain_identifier, '4c78adac');
+  const network = auditNetwork(input.manifest);
   process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST = JSON.stringify(input.manifest);
   const { SuiGrpcClient } = appRequire('@mysten/sui/grpc');
-  const client = new SuiGrpcClient({ network: 'testnet', baseUrl: input.manifest.rpc_url });
+  const client = new SuiGrpcClient({ network, baseUrl: input.manifest.rpc_url });
   const load = loader(); await load('lib/deployment-manifest.ts').verifyDeployment(client);
   await verifyRetainedFixture(client, load, input);
   const progress = load('lib/rollout-progress.ts');
