@@ -8,6 +8,12 @@
       "group": "Operators"
     },
     {
+      "source": "docs/INSTALL_DEVICE_CLIENT.md",
+      "slug": "device-client",
+      "title": "Device client setup and enrollment",
+      "group": "Operators"
+    },
+    {
       "source": "docs/ENROLLMENT.md",
       "slug": "enrollment",
       "title": "Enrollment and provisioning media",

@@ -70,3 +70,13 @@ access must read the built install guide and follow its public source links,
 and the operator must verify external links and domain routing. Browser QA is
 not a substitute for that independent usability review. Physical, provider,
 real-wallet and mainnet acceptance remain separately tracked in #32 and #159.
+
+The detailed `/device-client/` guide is curated alongside `/install/`. Console
+links use `NEXT_PUBLIC_DEVICE_DOCS_BASE` (default `https://docs.suifleet.io/`);
+set it at console build time to the deployed docs root, including any path prefix.
+`node scripts/test_device_client_links.cjs` checks app rendering and configured
+roots; the Python docs suite checks every app section against rendered HTML.
+SF-230/SF-231 own standalone layer and Debian package publication. Until those
+are published, the guide explicitly offers no layer clone URL or package download.
+Verify the new public path after authorized docs publication; local build checks
+do not establish live DNS, TLS or served-page availability.
