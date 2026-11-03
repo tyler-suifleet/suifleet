@@ -248,10 +248,12 @@ class BatchController:
                     or evidence.get('success') is not False or evidence.get('failure_class') != 'source'
                     or evidence.get('funding', {}).get('held_mist') != 0
                     or evidence.get('reconciliations') != [] or evidence.get('cleanup_error')
+                    or evidence.get('quarantine')
                     or not transactions or transactions[-1].get('label') != 'upgrade to head'
                     or transactions[-1].get('status') != 'not_submitted' or transactions[-1].get('digest')
                     or not error.startswith('test-upgrade could not build a transaction:')
                     or 'error[EUC01001]: missing public declaration' not in error
+                    or set(re.findall(r'error\[([A-Z0-9]+)\]', error)) != {'EUC01001'}
                     or "this package requires changes to be compatible" not in error):
                 return
             used = 0

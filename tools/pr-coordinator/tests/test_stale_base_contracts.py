@@ -71,6 +71,8 @@ class StaleBaseTests(unittest.TestCase):
             lambda f,p,r,e,t: e.update(base='f'*40),
             lambda f,p,r,e,t: e.update(chain='other'),
             lambda f,p,r,e,t: e.update(error='ambiguous build failure'),
+            lambda f,p,r,e,t: e.update(error=e['error'] + ' error[E99999]: another failure'),
+            lambda f,p,r,e,t: e.update(quarantine={'unresolved':True}),
             lambda f,p,r,e,t: e.update(failure_class='uncertain'),
             lambda f,p,r,e,t: e['funding'].update(held_mist=1),
             lambda f,p,r,e,t: e['transactions'][-1].update(status='success', digest='submitted'),
