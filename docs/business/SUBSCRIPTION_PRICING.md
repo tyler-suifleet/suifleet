@@ -408,3 +408,13 @@ sets fees in MIST through the validator gas-price survey with no USD peg.
 Public pricing is generated from the console price table and this policy. See
 [public pricing regeneration](PUBLIC_PRICING.md) for the source files, regeneration
 commands and required freshness/build checks.
+
+## Crypto collection decision (2026-10-27)
+
+The payment methods are crypto plus card; the crypto subscription is prepaid in
+USDC (primary) or explicitly accepted SUI. [The account specification](../SUBSCRIPTIONS.md)
+records immutable coin-unit quotes, fixed paid terms, 10% annual prepay discount,
+30-day renewal notice, cancellation settlement and full refund of unstarted
+periods. The calculator sizes the USD quote; it does not select a live exchange
+rate, change an on-chain price or purchase a hedge. No production tariff, card
+processor or external acceptance is implied.
