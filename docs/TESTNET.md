@@ -7,6 +7,21 @@ Its Mainnet reads and sponsored Testnet storage observations are separate;
 neither is a complete production invoice. Gas allowances below are spending
 controls and must not be reported as consumed fees.
 
+## Current fixed allowance (2026-11-02)
+
+The user authorized a **2.0 SUI package-upgrade allowance per run** (formerly 1.6).
+Upgrade-security retains 1.5 SUI and browser-wallet acceptance 0.15 SUI; a run selecting
+all three suites requires **3.65 SUI before setup**. Standalone package validation
+and the disposable local cost harness default to 2.0 SUI; use the local harness's
+`--max-spend-mist 1600000000` to reproduce the
+historical 1.6 SUI measurements. Existing evidence files are unchanged.
+
+This is a finite predeclared ceiling, not a consumed fee. Failed/unknown
+transactions and device grants remain charged; credits and storage refunds do
+not replenish allowances. The single automatic faucet attempt per validation run
+and protected testnet-only controls remain. Separately authorized bulk faucet
+maintenance targets 10 SUI in the dedicated agent and each of the three CI lanes.
+
 ## Accounts
 
 For the landing guide's scripted console recordings, use
