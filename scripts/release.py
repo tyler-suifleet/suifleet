@@ -2,7 +2,7 @@
 """Reproducible SuiFleet daemon release bundles (SF-039).
 
     release.py build --out dist [--ref HEAD] [--image suifleet-release:local] [--reproduce]
-                     [--target aarch64-unknown-linux-gnu|i686-unknown-linux-gnu]
+                     [--target x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|i686-unknown-linux-gnu]
 
 On the host: exports exactly the committed tree of REF with `git archive` (so
 uncommitted files can never leak into a release), then builds inside the
@@ -11,7 +11,8 @@ pinned release image (docker/release.Dockerfile). The bundle contains:
   suifleet-<version>-<commit12>-<target>.tar.gz   the daemon (normalized tar/gzip)
   sbom.spdx.json                                   SPDX 2.3, locked target dependency graph
   provenance.json                                  commit, toolchain, lockfile, builder image
-  release.json                                     names and SHA-256s of the three files above
+  suifleet_<version>-1+git<commit12>_<arch>.deb     amd64/arm64 package and .sha256 file
+  release.json                                     names and SHA-256s of every artifact above
 
 Sign release.json with `cargo run --example sign_release` and verify on a
 device with `suifleet --verify-release BUNDLE TRUST_FILE` (docs/RELEASES.md).

@@ -10,8 +10,8 @@ SF-039 gives every SuiFleet daemon release three properties:
 | File | Contents |
 |---|---|
 | `suifleet-<version>-<commit12>-aarch64-unknown-linux-gnu.tar.gz` | `suifleet/bin/suifleet`, `LICENSE`, `config.example.toml`. Sorted entries, fixed mtime (the commit time), `root:root`, gzip without name or timestamp. |
-| `sbom.spdx.json` | SPDX 2.3: the daemon (with its binary's SHA-256) and every package in its normal dependency graph for aarch64, exactly as `cargo tree -e normal --target aarch64-unknown-linux-gnu` resolves it. Each package has its Cargo.lock SHA-256, declared license and purl. Build-script-only dependencies are not linked into the binary and are not listed. |
-| `provenance.json` | Commit, `SOURCE_DATE_EPOCH`, target, `rustc -vV`, cargo and linker versions, `Cargo.lock` SHA-256, builder image ID and binary SHA-256 |
+| `sbom.spdx.json` | SPDX 2.3: the daemon (with its binary's SHA-256) and every package in its normal dependency graph for the selected target, exactly as `cargo tree -e normal --target TARGET` resolves it. Each package has its Cargo.lock SHA-256, declared license and purl. Build-script-only dependencies are not linked into the binary and are not listed. |
+| `provenance.json` | Commit, `SOURCE_DATE_EPOCH`, target, `rustc -vV`, cargo and linker versions, `Cargo.lock` SHA-256, builder image ID, Debian archive backend version and binary SHA-256 |
 | `release.json` | Name, version, commit, target, and the size and SHA-256 of the artifacts above (including Debian packages/checksums when present). This is what gets signed. |
 | `release.sig.json` | One or more `{key_id, signature}`: ed25519 over `suifleet-release-v1\n` followed by the bytes of `release.json` |
 
