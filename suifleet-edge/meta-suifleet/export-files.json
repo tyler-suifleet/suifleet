@@ -2,6 +2,7 @@
   "COPYING.MIT",
   "README.md",
   "RELEASE.md",
+  "SECURITY.md",
   "conf/layer.conf",
   "export-files.json",
   "recipes-devtools/suifleet-node/suifleet-node_22.22.2.bb",
