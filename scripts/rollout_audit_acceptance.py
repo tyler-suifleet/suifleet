@@ -18,7 +18,7 @@ class RetentionPending(RuntimeError):
 
 def checkpointed_step(state_path, state, fixture, label, ptb, calls, *, client,
                       sign, mutate, ledger, operator, chain, checkpoint=None,
-                      record_other=None):
+                      record_other=None, gas=20_000_000):
     """Reconcile retained verified bytes before any further submission."""
     from live_package_upgrade import checkpoint_setup, other_execution, save_state
     # The executable caller may be __main__; preserve its exception identities.
@@ -49,7 +49,7 @@ def checkpointed_step(state_path, state, fixture, label, ptb, calls, *, client,
     return checkpoint(state_path, state, fixture, label,
         lambda persist: mutate(label, toolchain.ptb_submitter(client, ptb,
             sender=operator, calls=calls, sign=sign, persist=persist),
-            gas=20_000_000, require_full=True), ledger)
+            gas=gas, require_full=True), ledger)
 
 
 def run_scheduled(*args, **kwargs):
@@ -67,7 +67,7 @@ def run_scheduled(*args, **kwargs):
 
 
 def run(step, client, manifest, device, evidence, root, *, fixture=None, save=None,
-        operator=None, fixture_key=None, retire=False):
+        operator=None, fixture_key=None, retire=False, creation_cleanup=None, compact=False):
     if 'deployment_manager::DecisionKey' not in manifest.get('type_origins', {}):
         return
     if fixture is None or save is None or not operator or not fixture_key:
@@ -85,6 +85,12 @@ def run(step, client, manifest, device, evidence, root, *, fixture=None, save=No
     if fixture.get('retired'):
         raise RuntimeError('audit fixture already retired; no automatic recreation')
 
+    if creation_cleanup is not None:
+        if fixture.get('record') or fixture.get('pending_operation') or fixture.get('creation_cleanup'):
+            raise RuntimeError('audit creation cleanup already has durable ownership')
+        fixture['creation_cleanup'] = creation_cleanup
+        save()  # Ownership persists before signing, including reserve refusals.
+
     def perform(name, ptb, calls):
         result = step(name, ptb, calls)
         if result.get('effects', {}).get('status', {}).get('status') != 'success' or not result.get('digest'):
@@ -94,17 +100,31 @@ def run(step, client, manifest, device, evidence, root, *, fixture=None, save=No
     if not fixture.get('record'):
         calls = [f'{package}::deployment_manager::{name}' for name in
                  ['rollout_policy', 'new_rollout_verified', 'share_deployment']]
-        made = perform('create durable decision audit rollout', [
+        pending = fixture.get('pending_operation') or {}
+        atomic = (pending.get('label', '').startswith('create and admit') if pending else compact)
+        ptb = [
             '--move-call', calls[0], '1', '1', '1', '0', '1', '10000', '3600000', '--assign', 'policy',
             '--move-call', calls[1], '"audit-only"', '"1"', '"not-executed"',
             json.dumps('a' * 64), json.dumps('b' * 64), 'vector[]', f'vector[@{device}]',
             'vector[0u64]', 'policy', '@0x6', '--assign', 'record',
-            '--move-call', calls[2], 'record'], calls)
+            ]
+        if atomic:
+            calls.insert(2, f'{package}::deployment_manager::advance_rollout_onchain')
+            ptb += ['--move-call', calls[2], 'record', f"@{binding['registry']}", f'vector[@{device}]', '@0x6']
+        ptb += ['--move-call', calls[-1], 'record']
+        label = 'create and admit durable decision audit rollout' if atomic else 'create durable decision audit rollout'
+        if fixture.get('creation_cleanup'):
+            calls.append(f'{package}::deployment_manager::delete_deployment')
+            ptb += ['--move-call', calls[-1], f"@{fixture['creation_cleanup']}"]
+            label += ' + delete completed deployment'
+        made = perform(label, ptb, calls)
         records = [c['objectId'] for c in made['objectChanges'] if c['type'] == 'created'
                    and c['objectType'] == f"{manifest['type_origins']['deployment_manager::DeploymentRecord']}::deployment_manager::DeploymentRecord"]
         if len(records) != 1:
             raise RuntimeError('audit creation did not return exactly one correctly originated record')
         fixture.update(record=records[0], creation_digest=made['digest'])
+        if atomic:
+            fixture['admission_digest'] = made['digest']
         save()
     record = fixture['record']
     if not fixture.get('admission_digest'):

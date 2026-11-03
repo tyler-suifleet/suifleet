@@ -1,0 +1,24 @@
+{
+  "before_bytes": 91636,
+  "after_bytes": 88562,
+  "saved_bytes": 3074,
+  "before_digest": "043ed77b248edac210044b9d51198e6b117641fbed4ad9a3e985bf2508ca9411",
+  "after_digest": "54a907ea7c43263cad78478d3d5b7672d172f4aa49305a62cc4414ff5016f4aa",
+  "source_sha256": {
+    "contracts/sources/component_catalog.move": "360b2adc05001e4d3fcb7679a98e2bcd2bd0d2c821bb0005307b88e064d6f062",
+    "contracts/sources/customer.move": "a08d025dbfecbfd0b0edb668a94dc9e791d4f4c03c1658305d7c22ab25bf624f",
+    "contracts/sources/deployment_manager.move": "a8f07e55a4c48f45a4ca4bcf33907b89fd6d1577063cff0ba0aab6b574046d20",
+    "contracts/sources/desired_state.move": "1bbcbd406b418c80c0c11ee0a62d608db5be97c2ea125d4441ddf4b908b12b0b",
+    "contracts/sources/device_cap.move": "55ee303999cfc1a1c1cea8744bd6cd1036a764c859d981396a61cc75f14dfc4e",
+    "contracts/sources/device_group.move": "dd944771c257efc89f059cc0f168b812d310504045e8aa0c228b330520d2dffa",
+    "contracts/sources/device_registry.move": "7f8a1d48e96a08a084c63f431578a994fd433f1b51cb6af7d4ce0ec0667690bc",
+    "contracts/sources/enrollment.move": "e64011a17134c1adebd0a11a22f49e723927294d0afad5e4182422ccd6f3acf8",
+    "contracts/sources/fleet_budget.move": "66ddd6da1313b43b49d7a0a7c60851b371cfdb015da4df71fa8206bae44a8aa6",
+    "contracts/sources/fleet_handover.move": "0ac29fe4dc81fa09dbc14e5f478f96c6d69c04d9d16a3fb03df8e9c6943dcfc7",
+    "contracts/sources/fleet_inbox.move": "f11aef65210124f7dc3c3114670cda153d4138393e0d4db271dc1ffcaa8c15ea",
+    "contracts/sources/fleet_settings.move": "de53ddd848c75775dcbc3d72a1bb2161ab1cda4db723f1dc54a6e49e54288c1f",
+    "contracts/sources/roles.move": "4cc18bcb0f0f48f795c640e65dcadd1f97a9d5d28ff91aa51a89545ea07a584b",
+    "contracts/sources/seal_policy.move": "a6293645624e4aaf5ad234b6fb9914f383af5097b37cafc09af3ee287f845348",
+    "contracts/sources/security_policy.move": "4c82b4a49dc5d00342a742eec940da9967982f1358b847761e4d8beb2ef50568"
+  }
+}

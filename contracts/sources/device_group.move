@@ -1,4 +1,10 @@
 module sui_edge::device_group {
+    // Widen named u8 literals at use sites: the pinned compiler emits compact
+    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::dynamic_field as df;
@@ -87,21 +93,7 @@ module sui_edge::device_group {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        let group = DeviceGroup {
-            id: object::new(ctx),
-            name,
-            description,
-            admin: ctx.sender(),
-            device_ids: vector[],
-            created_at: clock.timestamp_ms(),
-            schema_version: SCHEMA_VERSION,
-        };
-        event::emit(GroupCreated {
-            group_id: object::id(&group),
-            name: group.name,
-            admin: ctx.sender(),
-        });
-        transfer::share_object(group);
+        share_managed(new_managed(name, description, ctx.sender(), clock, ctx));
     }
 
     #[allow(lint(prefer_mut_tx_context))]
@@ -110,7 +102,7 @@ module sui_edge::device_group {
         device: &Device,
         ctx: &TxContext,
     ) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        p0(ctx.sender() == group.admin);
         add_managed(group, device_registry::device_id(device));
     }
 
@@ -125,36 +117,31 @@ module sui_edge::device_group {
     }
 
     #[allow(lint(prefer_mut_tx_context, public_entry))]
-    public entry fun delete_group(mut group: DeviceGroup, ctx: &TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+    public entry fun delete_group(group: DeviceGroup, ctx: &TxContext) {
+        p0(ctx.sender() == group.admin);
         // Remaining MemberKey fields are orphaned with the group; remove
         // members first to reclaim their storage.
-        if (is_indexed(&group)) {
-            let _: GroupIndex = df::remove(&mut group.id, IndexKey {});
-        };
-        let DeviceGroup { id, name: _, description: _, admin, device_ids: _, created_at: _, schema_version: _ } = group;
-        event::emit(GroupDeleted { group_id: id.to_inner(), admin });
-        id.delete();
+        delete_managed(group);
     }
 
     /// Move up to `limit` members from `device_ids` into the MemberKey index,
     /// marking the group indexed. Admin only; repeat until `remaining` is 0.
     public fun index_members(group: &mut DeviceGroup, limit: u64, ctx: &mut TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
-        assert!(limit > 0, EInvalidLimit);
+        p0(ctx.sender() == group.admin);
+        assert!(limit > (SMALL_0 as u64), EInvalidLimit);
         if (!is_indexed(group)) {
-            df::add(&mut group.id, IndexKey {}, GroupIndex { members: 0 });
+            df::add(&mut group.id, IndexKey {}, GroupIndex { members: (SMALL_0 as u64) });
         };
-        let mut moved = 0;
+        let mut moved = (SMALL_0 as u64);
         while (moved < limit && !group.device_ids.is_empty()) {
             let device_id = group.device_ids.pop_back();
             // An older package may have re-added an indexed member.
             if (!df::exists(&group.id, MemberKey { device_id })) {
                 df::add(&mut group.id, MemberKey { device_id }, true);
                 let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-                index.members = index.members + 1;
+                index.members = index.members + (SMALL_1 as u64);
             };
-            moved = moved + 1;
+            moved = moved + (SMALL_1 as u64);
         };
         event::emit(GroupIndexed {
             group_id: object::id(group),
@@ -165,12 +152,12 @@ module sui_edge::device_group {
 
     /// Called only by the recipient-confirmed fleet handover protocol.
     public(package) fun handover(group: &mut DeviceGroup, recipient: address, ctx: &TxContext) {
-        assert!(ctx.sender() == group.admin, ENotAdmin);
+        p0(ctx.sender() == group.admin);
         group.admin = recipient;
     }
 
-    /// Managed groups use an object address as admin. No wallet can sign as
-    /// that address, sealing legacy add/remove/handover entry points.
+    /// Construct a group with the supplied admin. Managed callers use an object
+    /// address: no wallet can sign as it through legacy add/remove/handover.
     public(package) fun new_managed(name: String, description: String, admin: address,
         clock: &Clock, ctx: &mut TxContext): DeviceGroup {
         let group = DeviceGroup { id: object::new(ctx), name, description, admin,
@@ -192,7 +179,7 @@ module sui_edge::device_group {
         if (is_indexed(group)) {
             df::add(&mut group.id, MemberKey { device_id }, true);
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members + 1;
+            index.members = index.members + (SMALL_1 as u64);
         } else {
             group.device_ids.push_back(device_id);
         };
@@ -208,7 +195,7 @@ module sui_edge::device_group {
         if (indexed) {
             let _: bool = df::remove(&mut group.id, MemberKey { device_id });
             let index: &mut GroupIndex = df::borrow_mut(&mut group.id, IndexKey {});
-            index.members = index.members - 1;
+            index.members = index.members - (SMALL_1 as u64);
         };
         let (found, idx) = group.device_ids.index_of(&device_id);
         assert!(found || indexed, EDeviceNotInGroup);
@@ -243,7 +230,7 @@ module sui_edge::device_group {
         let indexed = if (is_indexed(group)) {
             let index: &GroupIndex = df::borrow(&group.id, IndexKey {});
             index.members
-        } else { 0 };
+        } else { (SMALL_0 as u64) };
         group.device_ids.length() + indexed
     }
 
@@ -256,4 +243,9 @@ module sui_edge::device_group {
     /// For package modules that keep state on a group (desired_state).
     public(package) fun uid(group: &DeviceGroup): &UID { &group.id }
     public(package) fun uid_mut(group: &mut DeviceGroup): &mut UID { &mut group.id }
+    // Share each named abort branch without changing its module or error code.
+    /// check_NotAdmin: compact private symbol to bound published bytecode storage.
+    fun p0(condition: bool) {
+        if (!condition) abort ENotAdmin
+    }
 }

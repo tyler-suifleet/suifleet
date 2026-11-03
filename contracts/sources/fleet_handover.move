@@ -1,5 +1,16 @@
 /// Explicit two-party, resumable authority handover. No key recovery.
 module sui_edge::fleet_handover {
+    const SMALL_512: u16 = 512;
+
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_3: u8 = 3;
+    const SMALL_4: u8 = 4;
+
     use sui::clock::Clock;
     use sui::event;
     use sui_edge::device_group::{Self, DeviceGroup};
@@ -40,18 +51,18 @@ module sui_edge::fleet_handover {
     public fun propose(recipient: address, objects: vector<ID>, kinds: vector<u64>,
         expires_ms: u64, clock: &Clock, ctx: &mut TxContext,
     ) {
-        assert!(recipient != ctx.sender() && recipient != @0x0, EParty);
+        p2(recipient != ctx.sender()); p2(recipient != @0x0);
         let n = objects.length();
-        assert!(n > 0 && n <= 512 && kinds.length() == n, EInventory);
+        p1(n > (SMALL_0 as u64)); p1(n <= (SMALL_512 as u64)); p1(kinds.length() == n);
         assert!(expires_ms > clock.timestamp_ms(), EExpired);
         let mut completed = vector[];
-        let mut i = 0;
+        let mut i = (SMALL_0 as u64);
         while (i < n) {
-            assert!(kinds[i] <= 4, EInventory);
-            let mut j = 0;
-            while (j < i) { assert!(objects[j] != objects[i], EInventory); j = j + 1; };
+            p1(kinds[i] <= (SMALL_4 as u64));
+            let mut j = (SMALL_0 as u64);
+            while (j < i) { p1(objects[j] != objects[i]); j = j + (SMALL_1 as u64); };
             completed.push_back(false);
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
         let h = Handover { id: object::new(ctx), source: ctx.sender(), recipient,
             objects, kinds, completed, expires_ms, state: 0 };
@@ -71,61 +82,77 @@ module sui_edge::fleet_handover {
     }
 
     public fun cancel(h: &mut Handover, ctx: &TxContext) {
-        assert!(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
-        assert!(h.state < 2, EState);
+        if (!(ctx.sender() == h.source)) { p2(ctx.sender() == h.recipient); };
+        p3(h.state < 2);
         h.state = 2;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
     }
 
-    fun step(h: &mut Handover, id: ID, kind: u64, clock: &Clock, ctx: &TxContext) {
-        assert!(ctx.sender() == h.source, EParty);
-        assert!(h.state == 1, EState);
+    /// step: compact private symbol to bound published bytecode storage.
+    fun p0(h: &mut Handover, id: ID, kind: u64, clock: &Clock, ctx: &TxContext) {
+        p2(ctx.sender() == h.source);
+        p3(h.state == 1);
         assert!(clock.timestamp_ms() < h.expires_ms, EExpired);
         let (found, i) = h.objects.index_of(&id);
-        assert!(found, EInventory);
-        assert!(h.kinds[i] == kind && !h.completed[i], EInventory);
+        p1(found);
+        p1(h.kinds[i] == kind); p1(!h.completed[i]);
         *h.completed.borrow_mut(i) = true;
         event::emit(Progress { handover_id: object::id(h), object_id: id, kind });
     }
 
     public fun device(h: &mut Handover, cap: DeviceOwnerCap, clock: &Clock, ctx: &TxContext) {
-        step(h, object::id(&cap), 0, clock, ctx);
+        p0(h, object::id(&cap), (SMALL_0 as u64), clock, ctx);
         // Owned-object input authorization proves the source owns this cap.
         transfer::public_transfer(cap, h.recipient);
     }
 
     public fun group(h: &mut Handover, group: &mut DeviceGroup, clock: &Clock, ctx: &TxContext) {
-        step(h, object::id(group), 1, clock, ctx);
+        p0(h, object::id(group), (SMALL_1 as u64), clock, ctx);
         device_group::handover(group, h.recipient, ctx);
     }
 
     public fun deployment(h: &mut Handover, record: &mut DeploymentRecord, clock: &Clock, ctx: &TxContext) {
-        step(h, object::id(record), 2, clock, ctx);
+        p0(h, object::id(record), (SMALL_2 as u64), clock, ctx);
         deployment_manager::handover(record, h.recipient, ctx);
     }
 
     public fun revoke_role(h: &mut Handover, registry: &mut DeviceRegistry,
         role_id: ID, clock: &Clock, ctx: &TxContext,
     ) {
-        step(h, role_id, 3, clock, ctx);
+        p0(h, role_id, (SMALL_3 as u64), clock, ctx);
         roles::revoke(registry, role_id, ctx);
     }
 
     public fun close_enrollment(h: &mut Handover, policy: &mut EnrollmentPolicy,
         clock: &Clock, ctx: &TxContext,
     ) {
-        step(h, object::id(policy), 4, clock, ctx);
+        p0(h, object::id(policy), (SMALL_4 as u64), clock, ctx);
         enrollment::close(policy, ctx);
     }
 
     public fun finish(h: &mut Handover, ctx: &TxContext) {
-        assert!(ctx.sender() == h.source || ctx.sender() == h.recipient, EParty);
-        assert!(h.state == 1, EState);
-        assert!(!h.completed.contains(&false), EInventory);
+        if (!(ctx.sender() == h.source)) { p2(ctx.sender() == h.recipient); };
+        p3(h.state == 1);
+        p1(!h.completed.contains(&false));
         h.state = 3;
         event::emit(StateChanged { handover_id: object::id(h), state: h.state });
     }
 
     public fun state(h: &Handover): u8 { h.state }
     public fun completed(h: &Handover): vector<bool> { h.completed }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
+    // Share each named abort branch without changing its module or error code.
+    /// check_Inventory: compact private symbol to bound published bytecode storage.
+    fun p1(condition: bool) {
+        if (!condition) abort EInventory
+    }
+    /// check_Party: compact private symbol to bound published bytecode storage.
+    fun p2(condition: bool) {
+        if (!condition) abort EParty
+    }
+    /// check_State: compact private symbol to bound published bytecode storage.
+    fun p3(condition: bool) {
+        if (!condition) abort EState
+    }
 }

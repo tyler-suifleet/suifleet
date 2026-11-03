@@ -328,6 +328,7 @@ class TrustTests(unittest.TestCase):
             code, calls = self.suite_run(root, state, {})
             self.assertEqual(code, 0)
             self.assertEqual(calls[0][calls[0].index('--transaction-gas-budget') + 1], '60000000')
+            self.assertIn('--compact-lifecycle', calls[0])
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
             for command, ceiling, evidence in ((calls[0], '1600000000', 'evidence/package-upgrade.json'),

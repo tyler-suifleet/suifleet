@@ -52,8 +52,8 @@ NEGATIVES = [
     ("receipts-clear", "deployment_manager", "receipts_mut_security_spec", "Check", "prover::prover::ensures(result.statuses.is_empty());"),
     ("role-authority", "roles", "revoke_security_spec", "Assume", "prover::prover::asserts(ctx.sender() == operator);"),
     ("role-remove", "roles", "revoke_security_spec", "Check", "prover::prover::ensures(!df::exists_with_type<RoleKey, address>"),
-    ("device-revoke", "device_registry", "revoke_device_security_spec", "Check", "prover::prover::ensures(identity_of(registry, device_id).revoked);"),
-    ("rotation-revoked", "device_registry", "rotate_device_key_security_spec", "Check", "prover::prover::ensures(identity_of(registry, device_id).revoked == revoked);"),
+    ("device-revoke", "device_registry", "revoke_device_security_spec", "Check", "prover::prover::ensures(p1(registry, device_id).revoked);"),
+    ("rotation-revoked", "device_registry", "rotate_device_key_security_spec", "Check", "prover::prover::ensures(p1(registry, device_id).revoked == revoked);"),
 ]
 
 
