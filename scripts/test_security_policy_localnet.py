@@ -22,6 +22,8 @@ import sui_toolchain as tc
 def run(args):
     if not Path("/.dockerenv").exists() or {p.name for p in Path("/sys/class/net").iterdir()} != {"lo"}:
         raise RuntimeError("requires a disposable Docker container with --network none")
+    if args.actions and (args.only_multisig or args.suite != "live_security_policy" or args.runner):
+        raise ValueError("--actions requires the default security-policy fixture")
     if args.only_multisig and not args.multisig:
         raise ValueError("--only-multisig requires --multisig evidence path")
     tools = tc.check_tools("sui", tc.NETWORK_DEFAULT)
@@ -62,7 +64,11 @@ def run(args):
                 if not args.only_multisig:
                     subprocess.run([sys.executable, args.runner or "scripts/" + args.suite + ".py", "--wallet", str(wallet), "--network", "localnet",
                                     "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence,
-                                    *(["--max-spend-mist", "3000000000"] if not args.runner and args.suite == "live_security_delay" else [])], env=env, check=True)
+                                    *(["--max-spend-mist", "3000000000"] if not args.runner else [])], env=env, check=True)
+                if args.actions:
+                    subprocess.run([sys.executable, "scripts/live_security_actions.py", "--wallet", str(wallet),
+                                    "--network", "localnet", "--fixture-receipt", args.evidence,
+                                    "--evidence", args.actions], env=env, check=True)
                 if args.multisig:
                     subprocess.run([sys.executable, "scripts/live_multisig_admin.py", "--wallet", str(wallet), "--network", "localnet",
                                     "--state", str(private / "multisig"), "--evidence", args.multisig], env=env, check=True)
@@ -80,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("--suite", choices=["live_security_policy", "live_security_delay"], default="live_security_policy")
     parser.add_argument("--base", required=True)
     parser.add_argument("--evidence", required=True)
+    parser.add_argument("--actions", help="also run canonical/tampered/cancelled Action acceptance using the policy fixture")
     parser.add_argument("--multisig", help="also execute native quorum acceptance; sanitized evidence path")
     parser.add_argument("--only-multisig", action="store_true", help="run only the native quorum fixture (requires --multisig)")
     run(parser.parse_args())
