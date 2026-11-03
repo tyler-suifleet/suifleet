@@ -3,7 +3,8 @@
 The SuiFleet device client is the `suifleet` daemon. It runs on each device,
 holds the device's own key, watches the network for deployments aimed at it and
 reports results. The console links here from Get started, Devices and
-Enrollment (SF-169).
+Enrollment. This guide is also published in the public installation hub;
+reading it does not require repository access.
 
 A device needs five things:
 
@@ -23,13 +24,16 @@ installed in that order: `deployment.json`, then `signer.toml`, then
 The client is built from this repository's `suifleet-edge` crate. **No
 prebuilt download is published yet.** The repository can produce signed,
 reproducible release bundles ([RELEASES.md](RELEASES.md)), but none have been
-released for operators to download. Build it yourself for now:
+released for operators to download. Ask your fleet operator for an authenticated
+release bundle or use the source-build paths below. Verify signed bundles using [release verification](RELEASES.md)
+and trust roots supplied through an authenticated channel before installation.
+Do not install unverified binaries.
 
 | Platform | How to get it | Status |
 |---|---|---|
 | Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending ([SF-031](https://github.com/tyler-suifleet/suifleet/issues/32)) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
-| Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian package](DEBIAN_PACKAGING.md) | Buildable local-file packages; no public APT repository/download yet |
+| Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian and Ubuntu](#debian-and-ubuntu) | Buildable local-file packages; no public APT repository/download yet |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
@@ -39,6 +43,11 @@ Never copy a device key between devices or into an image, package or
 repository. Each device generates its own at first boot or install.
 
 ## Yocto image and recipe
+
+A standalone public `meta-suifleet` repository and OpenEmbedded Layer Index
+listing are not published yet. Do not guess a clone URL. Until those destinations
+are published, obtain the pinned layer and kas profiles from your fleet operator
+or a reviewed public source checkout. The commands below run from that checkout.
 
 The `meta-suifleet` layer packages the client as the `suifleet` recipe, with
 first-boot key provisioning and systemd services. Build a Raspberry Pi 3 Model
@@ -85,7 +94,28 @@ sudo launchctl bootstrap system /Library/LaunchDaemons/org.suifleet.daemon.plist
 
 Service control, logs and limits are in [MACOS_RUNTIME.md](MACOS_RUNTIME.md).
 
+## Debian and Ubuntu
+
+There is no published `.deb` download or apt repository yet. Do not run an
+invented `apt install suifleet` command or fetch packages from unofficial mirrors.
+Local-file packages can be built for amd64 and arm64. See
+[Debian packaging](DEBIAN_PACKAGING.md) for build, authenticated-bundle installation
+and configuration instructions. Packages require systemd and Linux 6.5 or later;
+Debian 12 needs a suitable newer/backports kernel, while Ubuntu 24.04 has a
+suitable kernel. Obtain a verified bundle from your operator or use a reviewed
+source checkout. The separate signing service and runtime identity protections
+still apply. [Generic Linux](#generic-linux) remains a manual evaluation option.
+Package publication will provide architecture, supported distribution versions,
+checksums and signature-verification instructions before a download is offered.
+
 ## Generic Linux
+
+These source commands require access to the public build inputs; they are an
+optional evaluation path, not a requirement to browse the core repository to
+configure a supplied client. Obtain source from your operator or clone
+`https://github.com/tyler-suifleet/suifleet.git`, select a reviewed revision, and
+run commands from the checkout root. If build inputs are unavailable, ask the
+operator for a verified bundle rather than skipping signature checks.
 
 On another systemd-based Linux, install the same binary, accounts and units as
 the Yocto recipe. From a checkout, with Rust 1.94.0:
@@ -292,5 +322,7 @@ configuration problem.
   [SF-031](https://github.com/tyler-suifleet/suifleet/issues/32).
 - The generic Linux steps reuse the Yocto recipe's files; they have not been
   tested as a distribution package.
-- These links point to repository documentation until the documentation site
-  (SF-172) exists.
+- Public docs hosting and distribution publication are separate from this guide
+  build. An operator can configure the console’s `NEXT_PUBLIC_DEVICE_DOCS_BASE`
+  to the deployed curated docs root (default `https://docs.suifleet.io/`).
+  This setting is a documentation destination, never a package-download promise.
