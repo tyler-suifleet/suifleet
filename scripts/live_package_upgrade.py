@@ -608,6 +608,25 @@ def wait_for(condition, message, process=None, timeout=240):
     raise AssertionError(message)
 
 
+def wait_for_announced_heads(journal, expected, process=None, timeout=240):
+    """Receipt reporting can finish before the separate head poll is persisted."""
+    expected = {dm.object_id(target): {dm.object_id(record) for record in records}
+                for target, records in expected.items()}
+    observed = {}
+
+    def converged():
+        nonlocal observed
+        observed = json.loads(journal.read_text())["heads"]["seen"]
+        latest = {dm.object_id(target): {dm.object_id(record) for record in seen["components"].values()}
+                  for target, seen in observed.items()}
+        return all(latest.get(target) == records for target, records in expected.items())
+
+    try:
+        wait_for(converged, "announced deployment heads did not converge", process, timeout)
+    except AssertionError as error:
+        raise AssertionError(f"{error}; expected {expected}, observed {observed}") from error
+
+
 def transaction_gas_budget(value):
     # Operators may lower ordinary PTB budgets to fit separate address/coin
     # funding pools; this never raises the existing cap or run allowance.
@@ -1109,11 +1128,9 @@ def run(args):
             assert sorted(history()) == ["1.0.0", "2.0.0", "3.0.0", "4.0.0"], history()
             if inboxes:
                 # A head keeps the latest deployment per component; all of
-                # these share one component, announced in PTB order.
-                heads = json.loads(journal.read_text())["heads"]["seen"]
-                latest = {dm.object_id(target): {dm.object_id(d) for d in seen["components"].values()} for target, seen in heads.items()}
-                assert latest.get(dm.object_id(inbox)) == {dm.object_id(failed)}, heads
-                assert latest.get(dm.object_id(group)) == {dm.object_id(via_group)}, heads
+                # these share one component, announced in PTB order. Receipts
+                # may arrive through events before the next head poll saves.
+                wait_for_announced_heads(journal, {inbox: {failed}, group: {via_group}}, process)
                 check("head-package deployments announced to the device inbox and the indexed group's head; "
                       "group report authorized by the member index")
             if args.network == 'testnet':

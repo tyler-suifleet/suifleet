@@ -264,6 +264,9 @@ pub mod customer {
     pub const USED: &str = "used";
     pub const WITHDRAW_BUDGET: &str = "withdraw_budget";
     pub const WITHDRAW_BUDGET_SECURED: &str = "withdraw_budget_secured";
+    pub const CONFIGURE_SECURITY_DELAYS: &str = "configure_security_delays";
+    pub const CONFIGURE_SECURITY_DELAYS_SECURED: &str = "configure_security_delays_secured";
+    pub const QUEUE_SECURITY_ACTION: &str = "queue_security_action";
     pub const APPROVE_ACTION: &str = "approve_action";
     pub const CANCEL_DISCLOSED_SECURITY_ACTION: &str = "cancel_disclosed_security_action";
     pub const CONFIGURE_SECOND_PERSON: &str = "configure_second_person";
@@ -1612,6 +1615,48 @@ pub mod security_policy {
         pub dummy_field: bool,
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "security_policy::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ActionArguments {
+        pub bytes: Vec<u8>,
+    }
+    impl ActionArguments { pub const MOVE_TYPE: &'static str = "security_policy::ActionArguments"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct ArgumentsKey {
+        pub dummy_field: bool,
+    }
+    impl ArgumentsKey { pub const MOVE_TYPE: &'static str = "security_policy::ArgumentsKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrant {
+        pub elapsed_ms: u64,
+        pub transaction: Vec<u8>,
+        pub pause: bool,
+    }
+    impl DelayGrant { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrant"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayGrantKey {
+        pub dummy_field: bool,
+    }
+    impl DelayGrantKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayGrantKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct DelayKey {
+        pub dummy_field: bool,
+    }
+    impl DelayKey { pub const MOVE_TYPE: &'static str = "security_policy::DelayKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Delays {
+        pub milliseconds: Vec<u64>,
+    }
+    impl Delays { pub const MOVE_TYPE: &'static str = "security_policy::Delays"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct QueuedAt {
+        pub milliseconds: u64,
+    }
+    impl QueuedAt { pub const MOVE_TYPE: &'static str = "security_policy::QueuedAt"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct QueuedAtKey {
+        pub dummy_field: bool,
+    }
+    impl QueuedAtKey { pub const MOVE_TYPE: &'static str = "security_policy::QueuedAtKey"; }
 }
 pub mod multisig_admin {
     use super::*;

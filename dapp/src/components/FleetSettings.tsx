@@ -46,7 +46,7 @@ function NumberField({ label, value, onChange, step }: { label: string; value: n
 /** The fleet's cost settings with each option's network cost and SuiFleet price, and the deposit they need. */
 export function FleetSettingsPanel() {
   const { table, error } = loadPriceTable();
-  return <><StorageEndpoints />{!table ? <p role="alert" className="text-sm">Prices unavailable: {error}</p> : <SettingsForm table={table} />}</>;
+  return <>{!table ? <p role="alert" className="text-sm">Prices unavailable: {error}</p> : <SettingsForm table={table} />}</>;
 }
 
 /** Price-table option values for saved settings, when every saved value is one of the table's options. */
@@ -161,10 +161,9 @@ function SettingsForm({ table }: { table: PriceTable }) {
     archiveIntervalMs: "How often enabled log uploads are collected. This does not turn logging on.",
     archiveRetentionDays: "How long uploaded device data is kept before it can expire.",
   };
-  return <div className="space-y-4 text-sm">
-    {SETTING_KEYS.map((key) => <fieldset key={key} className="rounded-xl border border-slate-200 bg-white p-5 space-y-3">
-      <legend className="px-2 text-sm font-semibold text-slate-900">{TITLES[key]}{LOG_SETTING_KEYS.includes(key) && !workload.logUploads && !(workload.dataBytesPerDeviceMonth && workload.dataBytesPerDeviceMonth > 0) ? " (applies when device data uploads are on; no cost while off)" : ""}</legend>
-      <p className="text-sm text-slate-500">{descriptions[key]}</p>
+  const settingCard = (key: SettingKey) => <fieldset key={key} className="min-w-0 rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+      <legend className="px-2 text-sm font-semibold text-slate-900">{TITLES[key]}</legend>
+      <p className="text-sm leading-relaxed text-slate-500">{descriptions[key]}</p>
       <div className="grid gap-2 sm:grid-cols-3">{table.settings[key].map(o => {
         const { settings, reason } = option(key, o.value); const selected = values[key] === o.value;
         return <label key={o.value} className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 text-sm ${selected ? "border-blue-500 bg-blue-50 text-blue-950 ring-1 ring-blue-500" : "border-slate-200 bg-white"} ${!settings ? "opacity-60" : ""}`}>
@@ -194,7 +193,14 @@ function SettingsForm({ table }: { table: PriceTable }) {
           </tr>;
         })}</tbody>
       </table></div></details>
-    </fieldset>)}
+    </fieldset>;
+  return <div className="space-y-5 text-sm">
+    <div className="space-y-4">{settingCard("checkIntervalMs")}{settingCard("healthIntervalMs")}</div>
+    <details className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="reporting-advanced">
+      <summary className="cursor-pointer font-semibold text-slate-800">More reporting options<span className="mt-1 block text-xs font-normal text-slate-500">Checks during updates, log archive schedule and shared retention</span></summary>
+      <p className="mt-4 text-sm leading-relaxed text-slate-600">Archive settings apply when device data uploads are enabled. Changing these defaults does not turn uploads on.</p>
+      <div className="mt-4 space-y-4">{settingCard("rolloutCheckIntervalMs")}{settingCard("archiveIntervalMs")}{settingCard("archiveRetentionDays")}</div>
+    </details>
     <details className="rounded-xl border border-slate-200 bg-slate-50 p-5" data-testid="cost-planning"><summary className="font-semibold text-slate-800">Plan expected usage and compare costs</summary>
       <p className="my-3 text-sm text-slate-600">These are planning estimates, including proposed subscription rates. Changing these assumptions does not purchase a plan, change device counts or enable logging. Only the reporting and retention choices above are saved.</p>
     <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
@@ -254,15 +260,15 @@ function SettingsForm({ table }: { table: PriceTable }) {
 
     </details>
     <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-5 space-y-3">
-      <h2 className="font-semibold">Review and save</h2><p className="text-sm text-slate-600">Save only the device reporting and retention settings above. They are stored on Sui with your fleet budget; devices apply them at their next check. Your wallet pays the network fee for this save. No deposit or subscription payment is made.</p>
+      <h3 className="font-semibold text-slate-900">Save your changes</h3><p className="text-sm leading-relaxed text-slate-600">Devices apply these settings at their next check. Your wallet shows the network fee before you approve.</p><p className="text-xs leading-relaxed text-slate-500"><strong className="font-medium">Saving settings does not buy a subscription or add money to your budget.</strong> Settings are stored securely on the network alongside your fleet budget.</p>
     <div className="space-y-2 text-xs">
       {!account && <p>Connect a wallet to save settings.</p>}
       {saver.reason && <p>{saver.reason}</p>}
       {saved.error && <p role="alert">{formatStorageQueryError(saved.error, "Saved fleet settings")}</p>}
       {saved.data === null && <p data-testid="saved">No settings saved yet: devices keep their local configuration until you save.</p>}
       {saved.data && <details data-testid="saved"><summary>Current saved reporting and storage settings</summary><p>Saved on chain: checks every {saved.data.checkIntervalMs / 60_000} min, rollout fast checks {saved.data.rolloutCheckIntervalMs ? `every ${saved.data.rolloutCheckIntervalMs / 1000} s` : "off"}, health every {saved.data.healthIntervalMs / 3_600_000} h, archives every {saved.data.archiveIntervalMs / 3_600_000} h kept {saved.data.archiveRetentionEpochs} epoch(s){savedValues(table, saved.data) ? "" : " (not one of the listed options; choosing here replaces it)"}.</p></details>}
-      <button type="button" className="bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
-        onClick={() => void save(false)}>Save settings</button>
+      <button type="button" className="inline-flex min-h-10 items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40" disabled={!account || !saver.build || !result.settings || mutation.isPending}
+        onClick={() => void save(false)}>{mutation.isPending ? "Waiting for approval…" : "Save settings"}</button>
       {warning && shortfall && !shortfall.enough && <div role="alert" className="border border-amber-500 bg-amber-50 rounded p-2 space-y-1">
         <p>Not enough deposit for these settings: the fleet needs {formatToken(shortfall.suiMist)} more SUI{walCounted ? ` and ${formatToken(shortfall.walFrost)} more WAL` : ""} to run {months} month(s).
           Devices stop sending health reports and archives when they cannot pay network fees. You have not approved any changes yet.</p>
@@ -278,15 +284,15 @@ function SettingsForm({ table }: { table: PriceTable }) {
   </div>;
 }
 
-function StorageEndpoints() {
+export function StorageEndpoints() {
   const [publishers, setPublishers] = useState<string[]>([]);
   useEffect(() => { setPublishers(sessionEndpoints()); }, []);
   const [url, setUrl] = useState("");
   const [message, setMessage] = useState("");
-  return <section className="border rounded p-4 space-y-2"><h2>Storage endpoints</h2>
+  return <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-3 text-sm text-slate-600"><h3 className="font-semibold text-slate-900">Upload connections</h3>
     <p>Publishers receive the bytes you upload. Only add a service you trust. This override lasts for this tab session; fleet-paid storage keeps its own route.</p>
-    <label>Publisher URL<input type="url" className="border p-2 block w-full" value={url} onChange={e => setUrl(e.target.value)} /></label>
-    <button type="button" onClick={() => { try { setMessage(`Added ${addSessionPublisher(url)} for this session; it will be tried first.`); setUrl(""); setPublishers(sessionEndpoints()); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } }}>Add publisher for session</button>
+    <label>Publisher URL<input type="url" className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:border-blue-500 focus:outline-blue-500" value={url} onChange={e => setUrl(e.target.value)} /></label>
+    <button type="button" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onClick={() => { try { setMessage(`Added ${addSessionPublisher(url)} for this session; it will be tried first.`); setUrl(""); setPublishers(sessionEndpoints()); } catch (e) { setMessage(e instanceof Error ? e.message : String(e)); } }}>Add publisher for session</button>
     <ul>{publishers.map(endpoint => <li key={endpoint}>{endpoint} <button type="button" onClick={() => { try { removeSessionPublisher(endpoint); setPublishers(sessionEndpoints()); setMessage(`Removed ${endpoint}`); } catch (e) { setMessage(String(e)); } }}>Remove publisher</button></li>)}</ul>
     {message && <p role="status">{message}</p>}
   </section>;

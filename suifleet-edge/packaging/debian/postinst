@@ -1,0 +1,40 @@
+#!/bin/sh
+set -eu
+if [ "$1" = configure ]; then
+    if ! getent passwd suifleet >/dev/null; then
+        adduser --system --group --no-create-home --home /var/lib/suifleet suifleet
+    fi
+    if ! getent passwd suifleet-signer >/dev/null; then
+        adduser --system --group --no-create-home --home /nonexistent suifleet-signer
+    fi
+    for account in suifleet suifleet-signer; do
+        if [ "$(id -u "$account")" = 0 ]; then
+            echo "Refusing privileged $account account" >&2
+            exit 1
+        fi
+        gid=$(getent group "$account" | cut -d: -f3)
+        if [ -z "$gid" ] || [ "$gid" = 0 ]; then
+            echo "Refusing missing or privileged $account group" >&2
+            exit 1
+        fi
+    done
+    daemon_gid=$(getent group suifleet | cut -d: -f3)
+    signer_gid=$(getent group suifleet-signer | cut -d: -f3)
+    if [ "$(id -u suifleet)" = "$(id -u suifleet-signer)" ] || [ "$daemon_gid" = "$signer_gid" ]; then
+        echo "Daemon and signer must have separate users and groups" >&2
+        exit 1
+    fi
+    case " $(id -G suifleet) " in
+        *" $signer_gid "*) echo "Daemon must not belong to signer group" >&2; exit 1 ;;
+    esac
+    # Do not recursively chown operator data or change existing identities.
+    if [ ! -d /var/lib/suifleet ]; then
+        install -d -m 0700 -o suifleet -g suifleet /var/lib/suifleet
+    fi
+    chown root:suifleet /etc/suifleet
+    chmod 0750 /etc/suifleet
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
+    # No enable/start/restart, provisioning, enrollment or network transactions.
+fi

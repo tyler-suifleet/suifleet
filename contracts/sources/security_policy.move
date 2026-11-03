@@ -23,9 +23,43 @@ module sui_edge::security_policy {
     const EFactor: u64 = 1;
     const EUnavailable: u64 = 2;
     const ACTIONS: u64 = 7;
-    // Native multisig, passkey sponsorship and independent approval.
-    const AVAILABLE: u8 = 7;
+    // Native multisig, passkey sponsorship, independent approval and delay.
+    const AVAILABLE: u8 = 15;
 
+    // Separate fields preserve the published Policy and Action layouts/origins.
+    public struct DelayKey has copy, drop, store {}
+    public struct Delays has copy, drop, store { milliseconds: vector<u64> }
+    public struct QueuedAtKey has copy, drop, store {}
+    public struct QueuedAt has copy, drop, store { milliseconds: u64 }
+    public struct DelayGrantKey has copy, drop, store {}
+    public struct DelayGrant has copy, drop, store { elapsed_ms: u64, transaction: vector<u8>, pause: bool }
+    const EDelay: u64 = 3;
+    /// One second through six days; expiry is independently bounded to seven days.
+    public(package) fun configure_delays(uid: &mut UID, milliseconds: vector<u64>, ctx: &TxContext) {
+        assert!(milliseconds.length() == ACTIONS, EPolicy);
+        let mut i = 0;
+        while (i < ACTIONS) {
+            assert!(milliseconds[i] >= 1000 && milliseconds[i] <= 518400000, EDelay);
+            i = i + 1;
+        };
+        configure_factor(uid, 8, vector[1], ctx);
+        if (df::exists(uid, DelayKey {})) {
+            df::borrow_mut<DelayKey, Delays>(uid, DelayKey {}).milliseconds = milliseconds;
+        } else df::add(uid, DelayKey {}, Delays { milliseconds });
+    }
+    public(package) fun delays(uid: &UID): vector<u64> {
+        if (df::exists(uid, DelayKey {})) df::borrow<DelayKey, Delays>(uid, DelayKey {}).milliseconds
+        else vector[]
+    }
+    public(package) fun queued_at(a: &Action): u64 {
+        // Legacy queue entries have no trustworthy timestamp and fail closed.
+        assert!(df::exists(&a.id, QueuedAtKey {}), EDelay);
+        df::borrow<QueuedAtKey, QueuedAt>(&a.id, QueuedAtKey {}).milliseconds
+    }
+    fun remove_timestamp(uid: &mut UID) {
+        if (df::exists(uid, ArgumentsKey {})) { df::remove<ArgumentsKey, ActionArguments>(uid, ArgumentsKey {}); };
+        if (df::exists(uid, QueuedAtKey {})) { df::remove<QueuedAtKey, QueuedAt>(uid, QueuedAtKey {}); };
+    }
     public struct PolicyKey has copy, drop, store {}
     public struct Policy has copy, drop, store {
         schema: u64,
@@ -74,6 +108,13 @@ module sui_edge::security_policy {
         let needed = p.requirements[action];
         let authenticated = passkey_attestation(uid, ctx);
         assert!((authenticated & needed) == needed || (p.transaction == *ctx.digest() && ((p.attested | authenticated) & needed) == needed), EFactor);
+        if ((needed & 8) != 0) {
+            assert!(df::exists(uid, DelayGrantKey {}), EDelay);
+            let grant = df::borrow<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {});
+            let durations = delays(uid);
+            assert!(grant.transaction == *ctx.digest() && durations.length() == ACTIONS
+                && ((grant.pause && action == 1) || grant.elapsed_ms >= durations[action]), EDelay);
+        };
     }
     /// Sui validates both sender and sponsor signatures over the exact same
     /// transaction. An enrolled 0x06-derived sponsor therefore proves the extra
@@ -145,6 +186,7 @@ module sui_edge::security_policy {
     }
     /// Credential/configuration mutation invalidates every queued authorization.
     public(package) fun invalidate(uid: &mut UID) {
+        if (df::exists(uid, DelayGrantKey {})) { df::remove<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {}); };
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         p.generation = p.generation + (SMALL_1 as u64);
         p.transaction = vector[];
@@ -180,29 +222,39 @@ module sui_edge::security_policy {
         assert!(!arguments_bcs.is_empty() && arguments_bcs.length() <= 16384, EPolicy);
         if (!df::exists(uid, FactorKey { factor: 0 })) df::add(uid, FactorKey { factor: 0 }, vector<ID>[]);
         assert!(df::borrow<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).length() < 64, EPolicy);
-        let id = prepare_internal(uid, action_intent(uid.to_inner(), arguments_bcs), expires_ms, arguments_bcs, clock, ctx);
+        let mut a = new_action(uid, action_intent(uid.to_inner(), arguments_bcs), expires_ms, clock, ctx);
+        df::add(&mut a.id, FactorKey { factor: 0 }, FactorConfiguration { binding: arguments_bcs });
+        let id = object::id(&a);
+        transfer::share_object(a);
         df::borrow_mut<FactorKey, vector<ID>>(uid, FactorKey { factor: 0 }).push_back(id);
     }
     public struct ActionCreated has copy, drop {
         action_id: ID, customer_id: ID, generation: u64, proposer: address,
         intent: vector<u8>, expires_ms: u64,
     }
-    public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        let _ = prepare_internal(uid, intent, expires_ms, vector[], clock, ctx);
+    public struct ArgumentsKey has copy, drop, store {}
+    public struct ActionArguments has copy, drop, store { bytes: vector<u8> }
+    public(package) fun prepare_with_arguments(uid: &UID, bytes: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        assert!(bytes.length() <= 65536, EPolicy);
+        let intent = action_intent(uid.to_inner(), bytes);
+        let mut a = new_action(uid, intent, expires_ms, clock, ctx);
+        df::add(&mut a.id, ArgumentsKey {}, ActionArguments { bytes });
+        transfer::share_object(a);
     }
-    fun prepare_internal(uid: &UID, intent: vector<u8>, expires_ms: u64, disclosed: vector<u8>, clock: &Clock, ctx: &mut TxContext): ID {
+    public(package) fun prepare(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
+        transfer::share_object(new_action(uid, intent, expires_ms, clock, ctx));
+    }
+    fun new_action(uid: &UID, intent: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext): Action {
         p1(intent.length() == (SMALL_32 as u64));
         let now = clock.timestamp_ms();
         p1(expires_ms > now); p1(expires_ms - now <= (SMALL_604800000 as u64));
         let p = read(uid);
         let mut a = Action { id: object::new(ctx), customer_id: uid.to_inner(), generation: p.generation,
             proposer: ctx.sender(), intent, expires_ms, attested: 0 };
-        if (!disclosed.is_empty()) df::add(&mut a.id, FactorKey { factor: 0 }, FactorConfiguration { binding: disclosed });
+        df::add(&mut a.id, QueuedAtKey {}, QueuedAt { milliseconds: now });
         event::emit(ActionCreated { action_id: object::id(&a), customer_id: a.customer_id,
             generation: a.generation, proposer: a.proposer, intent, expires_ms });
-        let id = object::id(&a);
-        transfer::share_object(a);
-        id
+        a
     }
     /// Domain: introduction-package identity plus the globally unique customer
     /// object ID. Object IDs derive from chain transaction digests; neither a UI
@@ -237,26 +289,48 @@ module sui_edge::security_policy {
         begin_scoped_bytes(uid, a, bcs::to_bytes(&arguments), class, pause, clock, ctx);
     }
     public(package) fun begin_scoped_bytes(uid: &mut UID, a: Action, arguments_bcs: vector<u8>, class: u64, pause: bool, clock: &Clock, ctx: &TxContext) {
-        assert!(class <= ACTIONS && (!pause || class == 1), EPolicy);
+        assert!(class <= ACTIONS && (!pause || class == (SMALL_1 as u64)), EPolicy);
+        let mut a = a;
+        let current = read(uid);
+        let mut delay = 0;
+        let mut required = 0;
+        let durations = delays(uid);
+        let mut j = 0;
+        while (j < ACTIONS) {
+            if (class == ACTIONS || class == j) {
+                required = required | current.requirements[j];
+                if (!pause && (current.requirements[j] & 8) != 0) {
+                    assert!(durations.length() == ACTIONS, EDelay);
+                    if (durations[j] > delay) delay = durations[j];
+                };
+            };
+            j = j + 1;
+        };
+        let elapsed_ms = if (df::exists(&a.id, QueuedAtKey {})) {
+            let created = queued_at(&a);
+            assert!(clock.timestamp_ms() >= created, EDelay);
+            clock.timestamp_ms() - created
+        } else { assert!(delay == 0, EDelay); 0 };
+        assert!(elapsed_ms >= delay, EDelay);
+        if (df::exists(uid, DelayGrantKey {})) { df::remove<DelayGrantKey, DelayGrant>(uid, DelayGrantKey {}); };
+        df::add(uid, DelayGrantKey {}, DelayGrant { elapsed_ms, transaction: *ctx.digest(), pause });
+        remove_timestamp(&mut a.id);
         let Action { mut id, customer_id, generation, proposer, intent, expires_ms, attested } = a;
+        // Timing is rechecked at consumption, never a persistent attestation.
+        let attested = attested | 8;
         assert!(customer_id == uid.to_inner() && proposer == ctx.sender(), EPolicy);
         assert!(clock.timestamp_ms() < expires_ms, EPolicy);
         assert!(intent == action_intent(uid.to_inner(), arguments_bcs), EPolicy);
         let authenticated = passkey_attestation(uid, ctx);
         let p = df::borrow_mut<PolicyKey, Policy>(uid, PolicyKey {});
         assert!(p.schema == (SMALL_1 as u64) && p.generation == generation, EPolicy);
-        let mut required = 0;
-        let mut i = (SMALL_0 as u64);
-        while (i < ACTIONS) {
-            if (class == ACTIONS || class == i) required = required | p.requirements[i];
-            i = i + (SMALL_1 as u64);
-        };
         if (pause) required = required & 7;
         assert!(((attested | authenticated) & required) == required, EFactor);
         p.transaction = *ctx.digest();
-        p.attested = if (pause) attested | 8 else attested;
+        p.attested = attested;
         unindex(uid, id.to_inner());
         remove_arguments(&mut id);
+        remove_timestamp(&mut id);
         id.delete();
     }
     public(package) fun finish(uid: &mut UID) { invalidate(uid); }
@@ -273,6 +347,7 @@ module sui_edge::security_policy {
         let Action { mut id, customer_id, generation: _, proposer: _, intent: _, expires_ms: _, attested: _ } = a;
         assert!(customer_id == customer, EPolicy);
         remove_arguments(&mut id);
+        remove_timestamp(&mut id);
         id.delete();
     }
     public(package) fun read(uid: &UID): Policy { *df::borrow<PolicyKey, Policy>(uid, PolicyKey {}) }

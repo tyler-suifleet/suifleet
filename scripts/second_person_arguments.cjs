@@ -8,11 +8,11 @@ const { bcs } = appRequire('@mysten/sui/bcs');
  const c = (await client.getObject({ objectId: customer, include: { content: true } })).object;
  if (c.type !== origin + '::customer::Customer') throw Error('customer origin mismatch');
  let values;
- if (name === '--enroll') values = [bcs.string().serialize('configure_second_person').toBytes(), c.content];
+ if (name === '--enroll') values = [bcs.string().serialize('configure_second_person').toBytes(), bcs.Address.serialize(customer).toBytes()];
  else if (name) {
    const f = (await client.getObject({ objectId: fleet, include: { content: true } })).object;
    if (f.type !== origin + '::customer::Fleet') throw Error('fleet origin mismatch');
-   values = [bcs.string().serialize('rename_fleet').toBytes(), c.content, f.content, bcs.string().serialize(name).toBytes()];
- } else values = [bcs.string().serialize('set_security').toBytes(), c.content, bcs.vector(bcs.u8()).serialize([0,0,0,0,0,0,0]).toBytes()];
+   values = [bcs.string().serialize('rename_fleet').toBytes(), bcs.Address.serialize(customer).toBytes(), bcs.Address.serialize(fleet).toBytes(), bcs.string().serialize(name).toBytes()];
+ } else values = [bcs.string().serialize('set_security').toBytes(), bcs.Address.serialize(customer).toBytes(), bcs.vector(bcs.u8()).serialize([0,0,0,0,0,0,0]).toBytes()];
  process.stdout.write(JSON.stringify([...bcs.vector(bcs.vector(bcs.u8())).serialize(values).toBytes()]));
 })().catch(e => { console.error(e.message); process.exitCode = 1; });

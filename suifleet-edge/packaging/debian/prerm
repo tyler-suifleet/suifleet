@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            # Stop path/socket triggers first; do not leave old code running
+            # against new files, or let a path trigger start the daemon again.
+            systemctl stop suifleet-enrollment.path suifleet-signer.socket
+            systemctl stop suifleet.service suifleet-signer.service suifleet-provision.service
+        fi
+        ;;
+esac
+if [ "$1" = remove ]; then
+    systemctl --no-reload disable suifleet.service suifleet-enrollment.path suifleet-signer.socket suifleet-signer.service suifleet-provision.service
+fi

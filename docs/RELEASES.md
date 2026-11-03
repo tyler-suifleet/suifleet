@@ -10,9 +10,9 @@ SF-039 gives every SuiFleet daemon release three properties:
 | File | Contents |
 |---|---|
 | `suifleet-<version>-<commit12>-aarch64-unknown-linux-gnu.tar.gz` | `suifleet/bin/suifleet`, `LICENSE`, `config.example.toml`. Sorted entries, fixed mtime (the commit time), `root:root`, gzip without name or timestamp. |
-| `sbom.spdx.json` | SPDX 2.3: the daemon (with its binary's SHA-256) and every package in its normal dependency graph for aarch64, exactly as `cargo tree -e normal --target aarch64-unknown-linux-gnu` resolves it. Each package has its Cargo.lock SHA-256, declared license and purl. Build-script-only dependencies are not linked into the binary and are not listed. |
-| `provenance.json` | Commit, `SOURCE_DATE_EPOCH`, target, `rustc -vV`, cargo and linker versions, `Cargo.lock` SHA-256, builder image ID and binary SHA-256 |
-| `release.json` | Name, version, commit, target, and the size and SHA-256 of the three files above. This is what gets signed. |
+| `sbom.spdx.json` | SPDX 2.3: the daemon (with its binary's SHA-256) and every package in its normal dependency graph for the selected target, exactly as `cargo tree -e normal --target TARGET` resolves it. Each package has its Cargo.lock SHA-256, declared license and purl. Build-script-only dependencies are not linked into the binary and are not listed. |
+| `provenance.json` | Commit, `SOURCE_DATE_EPOCH`, target, `rustc -vV`, cargo and linker versions, `Cargo.lock` SHA-256, builder image ID, Debian archive backend version and binary SHA-256 |
+| `release.json` | Name, version, commit, target, and the size and SHA-256 of the artifacts above (including Debian packages/checksums when present). This is what gets signed. |
 | `release.sig.json` | One or more `{key_id, signature}`: ed25519 over `suifleet-release-v1\n` followed by the bytes of `release.json` |
 
 ## Building
@@ -28,7 +28,9 @@ make release-artifacts            # builds HEAD twice; fails unless byte-identic
 
 **Builder pins:** Ubuntu 22.04 digest; Rust 1.94.0 via a checksum-verified rustup-init 1.29.1; `gcc-aarch64-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-aarch64-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-arm64-cross` 2.35-0ubuntu1cross3. For 32-bit x86: `gcc-i686-linux-gnu` 4:11.2.0-1ubuntu1 (gcc 11.4.0-1ubuntu1~22.04.3cross1); `binutils-i686-linux-gnu` 2.38-4ubuntu2.12; `libc6-dev-i386-cross` 2.35-0ubuntu1cross3.
 
-**Targets:** `aarch64-unknown-linux-gnu` (the default, and the only one the tag workflow publishes) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
+**Debian packages (SF-231):** amd64 and arm64 bundles also contain versioned `.deb` files and SHA-256 files covered by the same signed manifest. The SBOM describes their included daemon/signer binary; distribution dependencies are declared in Debian control metadata. See [Debian build/install and data retention](DEBIAN_PACKAGING.md). The release workflow builds both targets and publishes one archive containing each complete signed bundle, avoiding ambiguous shared SBOM/manifest filenames. No signed APT repository is provided. Protected production signing remains SF-042/#62.
+
+**Targets:** `aarch64-unknown-linux-gnu` (the default), `x86_64-unknown-linux-gnu` (amd64) and `i686-unknown-linux-gnu` (32-bit x86, [LINUX_X86.md](LINUX_X86.md)): `make release-artifacts RELEASE_TARGET=i686-unknown-linux-gnu`. The target names the tarball, SBOM graph and provenance linker, and is signed in `release.json`.
 
 The daemon uses rustls for both gRPC and Walrus HTTP, so the release links no OpenSSL. Bump these pins deliberately, and record the new versions here.
 

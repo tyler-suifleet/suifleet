@@ -129,7 +129,7 @@ module sui_edge::passkey_factor_tests {
         let mut s = setup();
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
         let arguments = std::bcs::to_bytes(&vector[
-            std::bcs::to_bytes(&utf8(b"configure_second_person")), std::bcs::to_bytes(&c)]);
+            std::bcs::to_bytes(&utf8(b"configure_second_person")), std::bcs::to_bytes(&object::id(&c))]);
         customer::propose_approval(&mut c, arguments, 1000, &clock, s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
         let mut c = s.take_shared<Customer>(); let action = s.take_shared<security_policy::Action>();
@@ -172,7 +172,7 @@ module sui_edge::passkey_factor_tests {
         let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
         customer::set_security_requirements_for_testing(&mut c, vector[6,6,6,6,6,6,6]);
         let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")),
-            std::bcs::to_bytes(&c), std::bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])];
+            std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])];
         let intent = security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments));
         customer::prepare_security_action(&c, intent, 1000, &clock, s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA);
@@ -198,6 +198,41 @@ module sui_edge::passkey_factor_tests {
         let action = s.take_shared<security_policy::Action>();
         customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], action, &clock, s.ctx());
         ts::return_shared(c); ts::return_shared(clock); s.end();
+    }
+
+    fun delayed_passkey_action(): Scenario {
+        let mut s = setup(); enroll(&mut s);
+        let mut c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
+        customer::configure_security_delays(&mut c, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
+        customer::set_security_requirements_for_testing(&mut c, vector[10,10,10,10,10,10,10]);
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")),
+            std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&vector[0u8,0,0,0,0,0,0])];
+        let intent = security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments));
+        customer::prepare_security_action(&c, intent, 10000, &clock, s.ctx());
+        ts::return_shared(c); ts::return_shared(clock); s.next_tx(@0xA); s
+    }
+    fun execute_delayed_passkey(s: &mut Scenario, elapsed: u64) {
+        let mut c = s.take_shared<Customer>(); let mut clock = s.take_shared<Clock>();
+        clock.increment_for_testing(elapsed);
+        let action = s.take_shared<security_policy::Action>();
+        customer::set_security_secured(&mut c, vector[0,0,0,0,0,0,0], action, &clock, s.ctx());
+        assert!(security_policy::requirements(&customer::security(&c)) == vector[0,0,0,0,0,0,0]);
+        ts::return_shared(c); ts::return_shared(clock);
+    }
+    #[test]
+    fun native_passkey_and_elapsed_delay_combine() {
+        let mut s = delayed_passkey_action(); sponsor(&mut s, factor::key_address(public_key()));
+        execute_delayed_passkey(&mut s, 1000); s.end();
+    }
+    #[test, expected_failure(abort_code = 3, location = sui_edge::security_policy)]
+    fun native_passkey_cannot_skip_delay() {
+        let mut s = delayed_passkey_action(); sponsor(&mut s, factor::key_address(public_key()));
+        execute_delayed_passkey(&mut s, 999); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun elapsed_delay_cannot_replace_native_passkey() {
+        let mut s = delayed_passkey_action();
+        execute_delayed_passkey(&mut s, 1000); s.end();
     }
 
 }

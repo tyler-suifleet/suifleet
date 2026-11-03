@@ -73,20 +73,19 @@ export async function fetchRequests(client: SuiGrpcClient, customer: string) {
 export async function proposeEnrollmentTx(client: SuiGrpcClient, customer: string, expires: bigint) {
   await verifyDeployment(client);
   const content = await typedObject(client, customer, "customer::Customer");
-  const bytes = vectors.serialize([Array.from(bcs.string().serialize("configure_second_person").toBytes()), Array.from(content)]).toBytes();
+  const bytes = vectors.serialize([Array.from(bcs.string().serialize("configure_second_person").toBytes()), Array.from(bcs.Address.serialize(customer).toBytes())]).toBytes();
   return txCall("customer::propose_approval", tx => [tx.object(customer), tx.pure.vector("u8", bytes), tx.pure.u64(expires), tx.object("0x6")]);
 }
 export async function proposePolicyTx(client: SuiGrpcClient, customer: string, requirements: number[], expires: bigint) {
   await verifyDeployment(client);
   const values = validateSecurityRequirements(requirements);
   const content = await typedObject(client, customer, "customer::Customer");
-  const bytes = vectors.serialize([Array.from(bcs.string().serialize("set_security").toBytes()), Array.from(content), Array.from(bcs.vector(bcs.u8()).serialize(values).toBytes())]).toBytes();
+  const bytes = vectors.serialize([Array.from(bcs.string().serialize("set_security").toBytes()), Array.from(bcs.Address.serialize(customer).toBytes()), Array.from(bcs.vector(bcs.u8()).serialize(values).toBytes())]).toBytes();
   return txCall("customer::propose_approval", tx => [tx.object(customer), tx.pure.vector("u8", bytes), tx.pure.u64(expires), tx.object("0x6")]);
 }
 export function policyValues(request: ApprovalRequest): number[] | undefined {
   if (request.operation !== "set_security" || request.arguments.length !== 3) return undefined;
-  const snapshot = customer_CustomerBcs.parse(Uint8Array.from(request.arguments[1]));
-  if (!["197", "199"].includes(snapshot.version)) throw Error("Unsupported proposed organization version");
+  bcs.Address.parse(Uint8Array.from(request.arguments[1]));
   return validateSecurityRequirements(bcs.vector(bcs.u8()).parse(Uint8Array.from(request.arguments[2])));
 }
 export async function executePolicyTx(client: SuiGrpcClient, customer: string, request: ApprovalRequest) {
@@ -94,12 +93,14 @@ export async function executePolicyTx(client: SuiGrpcClient, customer: string, r
   const policy = await fetchOrganizationSecurity(client, customer);
   if (!policy || request.generation !== policy.generation || !request.approved) throw Error("Approval is missing or stale");
   const enrollment = request.operation === "configure_second_person" && request.arguments.length === 2;
-  const values = enrollment ? undefined : policyValues(request);
+  const delay = request.operation === "configure_security_delays" && request.arguments.length === 3;
+  const values = delay ? bcs.vector(bcs.u64()).parse(Uint8Array.from(request.arguments[2])) : enrollment ? undefined : policyValues(request);
   if (!enrollment && !values) throw Error("Use the exact secured operation builder for this proposal");
-  const current = await typedObject(client, customer, "customer::Customer");
+  await typedObject(client, customer, "customer::Customer");
+  const current = bcs.Address.serialize(customer).toBytes();
   if (current.length !== request.arguments[1].length || current.some((b, i) => b !== request.arguments[1][i])) throw Error("Organization changed; propose again");
   if (enrollment) return configureTx(customer, request.id);
-  return txCall("customer::set_security_secured", tx => [tx.object(customer), tx.pure.vector("u8", values!), tx.object(request.id), tx.object("0x6")]);
+  return txCall(delay ? "customer::configure_security_delays_secured" : "customer::set_security_secured", tx => [tx.object(customer), delay ? tx.pure(bcs.vector(bcs.u64()).serialize(values!).toBytes()) : tx.pure.vector("u8", values!.map(Number)), tx.object(request.id), tx.object("0x6")]);
 }
 
 // Each factor editor owns only its bit; retain every other current requirement.
@@ -113,10 +114,10 @@ export async function policyChangeTx(client: SuiGrpcClient, customer: string, re
   if (!policy) throw Error("Migrate the organization first");
   const values = validateSecurityRequirements(requirements);
   // Match security_policy::update: action 4 plus every weakened action
-  // must satisfy its current factors, including independent approval.
-  const needsApproval = policy.requirements.some((current, i) =>
-    (current & 4) !== 0 && (i === 4 || (current & values[i]) !== current));
-  return needsApproval
-    ? proposePolicyTx(client, customer, values, BigInt(Date.now() + 86400000))
+  // must satisfy its current factors, including independent approval and cancellation delay.
+  const needsQueue = policy.requirements.some((current, i) =>
+    (current & (4 | 8)) !== 0 && (i === 4 || (current & values[i]) !== current));
+  return needsQueue
+    ? proposePolicyTx(client, customer, values, BigInt(Date.now() + 604800000))
     : buildSecurityPolicyTx(customer, values);
 }

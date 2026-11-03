@@ -23,7 +23,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 180
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -40,11 +43,21 @@ jobs:
             -t suifleet-release:ci docker/
 
       - name: Build twice and require identical bundles
-        run: python3 scripts/release.py build --out dist --ref "$GITHUB_SHA" --image suifleet-release:ci --reproduce
+        run: python3 scripts/release.py build --out dist --target "${{ matrix.target }}" --ref "$GITHUB_SHA" --image suifleet-release:ci --reproduce
+
+      - name: Enable ARM64 package test emulation
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: docker run --privileged --rm tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 --install arm64
+
+      - name: Install, upgrade, remove and lint real Debian packages
+        run: |
+          arch=amd64
+          if [ "${{ matrix.target }}" = aarch64-unknown-linux-gnu ]; then arch=arm64; fi
+          python3 scripts/test_deb.py --packages dist --arch "$arch"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: unsigned-release
+          name: unsigned-release-${{ matrix.target }}
           path: dist/
           if-no-files-found: error
           retention-days: 14
@@ -76,7 +89,7 @@ jobs:
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: unsigned-release
+          pattern: unsigned-release-*
           path: dist
 
       - name: Runner identity
@@ -88,8 +101,10 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
           RELEASE_SIGNING_KEY_ID: ${{ vars.RELEASE_SIGNING_KEY_ID }}
         run: |
-          [ -n "$RELEASE_SIGNING_KEY" ] && [ -n "$RELEASE_SIGNING_KEY_ID" ] \
-            || { echo "::error::RELEASE_SIGNING_KEY secret / RELEASE_SIGNING_KEY_ID variable not configured"; exit 1; }
+          if [ -z "$RELEASE_SIGNING_KEY" ] || [ -z "$RELEASE_SIGNING_KEY_ID" ]; then
+            echo "::error::RELEASE_SIGNING_KEY secret / RELEASE_SIGNING_KEY_ID variable not configured"
+            exit 1
+          fi
           docker build -f docker/release.Dockerfile \
             --build-arg USER_UID=${{ steps.ids.outputs.uid }} --build-arg USER_GID=${{ steps.ids.outputs.gid }} \
             -t suifleet-release:ci docker/
@@ -98,19 +113,26 @@ jobs:
           printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key_dir/key" && chmod 600 "$key_dir/key"
           docker run --rm -v "$PWD:/workspace" -v "$key_dir:/key:ro" -w /workspace/suifleet-edge \
             -e KEY_ID="$RELEASE_SIGNING_KEY_ID" suifleet-release:ci bash -ec '
-              cargo run --locked --release --example sign_release -- sign /key/key "$KEY_ID" ../dist
-              cargo run --locked --release --bin suifleet -- --verify-release ../dist ../release/trust.toml'
+              for bundle in ../dist/unsigned-release-*; do
+                cargo run --locked --release --example sign_release -- sign /key/key "$KEY_ID" "$bundle"
+                cargo run --locked --release --bin suifleet -- --verify-release "$bundle" ../release/trust.toml
+              done'
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
-            dist/*.tar.gz
-            dist/sbom.spdx.json
-            dist/provenance.json
-            dist/release.json
+            dist/**/*.tar.gz
+            dist/**/*.deb
+            dist/**/sbom.spdx.json
+            dist/**/provenance.json
+            dist/**/release.json
 
       - name: Publish the GitHub release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --notes "Signed release; verify with suifleet --verify-release (docs/RELEASES.md)."
+        run: |
+          for target in x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            tar -C "dist/unsigned-release-$target" -czf "dist/suifleet-$GITHUB_REF_NAME-$target-release.tar.gz" .
+          done
+          gh release create "$GITHUB_REF_NAME" dist/*-release.tar.gz --title "$GITHUB_REF_NAME" --notes "Per-target signed bundles include Debian packages; extract and verify with suifleet --verify-release before installation (docs/RELEASES.md)."

@@ -60,8 +60,9 @@ def run(args):
                 for _ in range(3):
                     subprocess.run([*cli, "faucet", "--url", "http://127.0.0.1:9123/v2/gas"], capture_output=True, env=env, check=True)
                 if not args.only_multisig:
-                    subprocess.run([sys.executable, args.runner, "--wallet", str(wallet), "--network", "localnet",
-                                    "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence], env=env, check=True)
+                    subprocess.run([sys.executable, args.runner or "scripts/" + args.suite + ".py", "--wallet", str(wallet), "--network", "localnet",
+                                    "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence,
+                                    *(["--max-spend-mist", "3000000000"] if not args.runner and args.suite == "live_security_delay" else [])], env=env, check=True)
                 if args.multisig:
                     subprocess.run([sys.executable, "scripts/live_multisig_admin.py", "--wallet", str(wallet), "--network", "localnet",
                                     "--state", str(private / "multisig"), "--evidence", args.multisig], env=env, check=True)
@@ -75,7 +76,8 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runner", choices=["scripts/live_security_policy.py", "scripts/live_passkey_factor.py"], default="scripts/live_security_policy.py")
+    parser.add_argument("--runner", choices=["scripts/live_security_policy.py", "scripts/live_passkey_factor.py"])
+    parser.add_argument("--suite", choices=["live_security_policy", "live_security_delay"], default="live_security_policy")
     parser.add_argument("--base", required=True)
     parser.add_argument("--evidence", required=True)
     parser.add_argument("--multisig", help="also execute native quorum acceptance; sanitized evidence path")

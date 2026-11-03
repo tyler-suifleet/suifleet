@@ -241,13 +241,19 @@ Standalone wallet-owned objects remain outside managed organization custody.
   ability. Execution or current-administrator cancellation consumes it.
 - Canonical arguments are BCS `vector<vector<u8>>`: BCS operation-name String,
   followed by BCS of every explicit argument in declaration order, excluding
-  Action, Clock and TxContext. References use the complete current object BCS;
-  owned values use their complete BCS. This binds both IDs and current contents.
+  Action, Clock and TxContext. Customer references use BCS object ID only, so
+  ordinary device storage charges cannot invalidate administrator recovery.
+  Fleet, DeviceRegistry, FleetBudget, GasAccount, FleetStorage,
+  DeploymentRecord and EnrollmentPolicy references also use BCS object IDs.
+  Their device/tenant-mutable counters, balances, claims consumed by enrollment
+  and receipts cannot invalidate a delay. DeviceGroup, AccessPolicy and catalog
+  references retain complete BCS: their contents change only through administrator actions;
+  catalog release values and other owned values retain their complete BCS.
   Group operations append BCS desired-state revision; deployment-reference
   operations append `deployment_manager::security_snapshot` (BCS vector of
-  control, target groups/devices and optional rollout state); enrollment edits
-  append their security revision. Storage wrappers bind customer/fleet/storage/
-  budget contents, exact amounts and recipient. `remove_device_secured` includes
+  control, target groups/devices and optional administrator rollout revision);
+  enrollment edits append their security revision. Storage wrappers bind customer/fleet/storage/
+  budget identities, exact amounts and recipient. `remove_device_secured` includes
   the ultimate recipient; source enrollment includes the original witness type.
 - `security_policy::action_intent(customer_id, arguments_bcs)` computes
   Blake2b-256 of BCS `vector<vector<u8>>` containing BCS original `TypeName<Action>`,
@@ -257,8 +263,9 @@ Standalone wallet-owned objects remain outside managed organization custody.
   a caller-supplied network label has no authority.
 - An execution wrapper consumes Action, recomputes this intent, checks current
   generation/proposer/expiry and enabled requirements, executes one operation,
-  then clears its transaction-local grant before returning. Complete object BCS
-  and dynamic revisions reject stale state even if a direct all-off write did
+  then clears its transaction-local grant before returning. Explicit authority
+  revisions, administrator-controlled snapshots and current custody/membership
+  checks reject stale authority even if a direct all-off write did
   not increment the policy generation. Credential/policy/source changes and
   completed secured operations invalidate outstanding actions.
 - Ordinary operations enforce their own class. Raw recipe deployments, rollouts
@@ -360,7 +367,7 @@ prove possession before a currently authorized administrator installs the key.
 Bindings use BCS `vector<address>` alternating administrator/passkey addresses;
 all existing factor requirements authorize changes. Empty bindings cannot enable
 protection. Native sponsorship satisfies only bit 2; native multisig approval supplies bit 1.
-Second-person approval supplies bit 4; delay remains unavailable. The transaction signature makes generic
+Second-person approval supplies bit 4; SF-200 supplies delay bit 8. The transaction signature makes generic
 capability loans safe for passkey-only requirements: all cap uses are covered by
 the exact signed PTB. Intent-based attestations and other requirement bits still
 cannot authorize these generic loans. See the operational enrollment and recovery
@@ -379,10 +386,33 @@ See [the operator flow](OPERATIONS.md#second-person-approval-sf-199) and
 be preserved when integrating sibling mechanisms; their combined package must be
 measured and tested rather than assuming independent package-size success composes.
 
+## SF-200 delay implementation
+
+The historical framework-only availability-zero statement above describes SF-196.
+SF-200 enables bit 8 alongside SF-201 native multisig bit 1 and SF-199
+second-person bit 4 and SF-198 passkey bit 2.
+Delay is per class, optional and off by default, from one second to six days.
+The Sui Clock timestamp is immutable queue metadata under the Action UID, without
+changing its published layout. Execution recomputes the exact intent and checks
+policy generation, current proposer authority, expiry and timing. A private
+transaction-bound elapsed-time grant lets each secondary class check its own
+configured duration; a short primary delay cannot authorize a longer secondary
+one. Settings, source and recovery operations use the maximum current union delay.
+Timing is never a reusable attestation supplied by a caller.
+
+Current administrators cancel without a delay or execution factors. Only
+`pause_deployment_secured` skips the deployment delay, retaining other factors;
+resume, targeting, release, funds, credentials, policy and handover stay protected.
+Other proposed emergency features in the design do not introduce implemented
+bypasses. Old-package queues lack the new timestamp and fail closed even after
+time passes. Dynamic fields retain separately verified introduction origins.
+See [the operational procedure](OPERATIONS.md#organization-delay-and-cancellation-sf-200)
+and [SF-200 evidence](validation/sf200-delay.md).
+
 ## SF-201 native multisig implementation
 
-SF-201 makes bit 1 available alongside SF-198 bit 2 and SF-199 bit 4; delay
-retains its fail-closed framework behavior. `multisig_admin::administrator` implements native Sui address
+SF-201 makes bit 1 available alongside SF-198 passkey bit 2, SF-199
+second-person bit 4 and SF-200 delay bit 8. `multisig_admin::administrator` implements native Sui address
 derivation for flagged Ed25519, secp256k1, secp256r1 and passkey keys. Enrollment
 requires an already registered administrator sending from that derived native
 multisig address. Its bounded binding is BCS address, vector of flagged public
