@@ -7949,6 +7949,129 @@
       },
       "structs": {}
     },
+    "passkey_factor": {
+      "functions": {
+        "enroll": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "sui_edge::passkey_factor::Enrollment",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "key_address": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "vector<u8>"
+          ],
+          "returns": [
+            "address"
+          ]
+        },
+        "keys": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer"
+          ],
+          "returns": [
+            "vector<address>"
+          ]
+        },
+        "prove_enrollment": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::customer::Customer",
+            "address",
+            "vector<u8>",
+            "u64",
+            "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "remove": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "address",
+            "address",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        }
+      },
+      "structs": {
+        "Enrollment": {
+          "abilities": [
+            "Key"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "id",
+              "sui::object::UID"
+            ],
+            [
+              "customer",
+              "sui::object::ID"
+            ],
+            [
+              "administrator",
+              "address"
+            ],
+            [
+              "key",
+              "address"
+            ],
+            [
+              "generation",
+              "u64"
+            ],
+            [
+              "expires_ms",
+              "u64"
+            ]
+          ]
+        },
+        "ProofCreated": {
+          "abilities": [
+            "Copy",
+            "Drop"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "proof_id",
+              "sui::object::ID"
+            ],
+            [
+              "customer",
+              "sui::object::ID"
+            ],
+            [
+              "administrator",
+              "address"
+            ],
+            [
+              "key",
+              "address"
+            ]
+          ]
+        }
+      }
+    },
     "roles": {
       "functions": {
         "allow_group": {
@@ -8668,17 +8791,6 @@
             "vector<u8>"
           ]
         },
-        "attestations": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::security_policy::Action"
-          ],
-          "returns": [
-            "u8"
-          ]
-        },
         "available": {
           "visibility": "Public",
           "entry": false,
@@ -8697,17 +8809,6 @@
           ],
           "returns": [
             "sui::object::ID"
-          ]
-        },
-        "disclosed_arguments": {
-          "visibility": "Public",
-          "entry": false,
-          "type_parameters": [],
-          "parameters": [
-            "&sui_edge::security_policy::Action"
-          ],
-          "returns": [
-            "vector<u8>"
           ]
         },
         "expires_ms": {
@@ -8764,6 +8865,28 @@
           "returns": [
             "vector<u8>"
           ]
+        },
+        "attestations": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::security_policy::Action"
+          ],
+          "returns": [
+            "u8"
+          ]
+        },
+        "disclosed_arguments": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [],
+          "parameters": [
+            "&sui_edge::security_policy::Action"
+          ],
+          "returns": [
+            "vector<u8>"
+          ]
         }
       },
       "structs": {
@@ -8803,20 +8926,6 @@
             ]
           ]
         },
-        "ActionArguments": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "bytes",
-              "vector<u8>"
-            ]
-          ]
-        },
         "ActionCreated": {
           "abilities": [
             "Copy",
@@ -8847,84 +8956,6 @@
             [
               "expires_ms",
               "u64"
-            ]
-          ]
-        },
-        "ArgumentsKey": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "dummy_field",
-              "bool"
-            ]
-          ]
-        },
-        "DelayGrant": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "elapsed_ms",
-              "u64"
-            ],
-            [
-              "transaction",
-              "vector<u8>"
-            ],
-            [
-              "pause",
-              "bool"
-            ]
-          ]
-        },
-        "DelayGrantKey": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "dummy_field",
-              "bool"
-            ]
-          ]
-        },
-        "DelayKey": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "dummy_field",
-              "bool"
-            ]
-          ]
-        },
-        "Delays": {
-          "abilities": [
-            "Copy",
-            "Drop",
-            "Store"
-          ],
-          "type_parameters": [],
-          "fields": [
-            [
-              "milliseconds",
-              "vector<u64>"
             ]
           ]
         },
@@ -9021,6 +9052,98 @@
             ]
           ]
         },
+        "ActionArguments": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "bytes",
+              "vector<u8>"
+            ]
+          ]
+        },
+        "ArgumentsKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "DelayGrant": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "elapsed_ms",
+              "u64"
+            ],
+            [
+              "transaction",
+              "vector<u8>"
+            ],
+            [
+              "pause",
+              "bool"
+            ]
+          ]
+        },
+        "DelayGrantKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "DelayKey": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "dummy_field",
+              "bool"
+            ]
+          ]
+        },
+        "Delays": {
+          "abilities": [
+            "Copy",
+            "Drop",
+            "Store"
+          ],
+          "type_parameters": [],
+          "fields": [
+            [
+              "milliseconds",
+              "vector<u64>"
+            ]
+          ]
+        },
         "QueuedAt": {
           "abilities": [
             "Copy",
@@ -9102,43 +9225,6 @@
       "component_catalog::CatalogBindingKey",
       "component_catalog::CatalogBinding"
     ],
-    "fleet_handover": [
-      "fleet_handover::Handover"
-    ],
-    "seal_policy": [
-      "seal_policy::AccessPolicy",
-      "seal_policy::AccessAdminCap",
-      "seal_policy::PolicyCreated",
-      "seal_policy::AccessChanged",
-      "seal_policy::KeyEpochRotated",
-      "seal_policy::PolicyMigrated"
-    ],
-    "fleet_budget": [
-      "fleet_budget::FleetBudget",
-      "fleet_budget::BudgetOwnerCap",
-      "fleet_budget::Limits",
-      "fleet_budget::DeviceKey",
-      "fleet_budget::GasAccount",
-      "fleet_budget::BudgetCreated",
-      "fleet_budget::Deposited",
-      "fleet_budget::Withdrawn",
-      "fleet_budget::DeviceFunded",
-      "fleet_budget::ReserveChanged",
-      "fleet_budget::GasDrawn",
-      "fleet_budget::BudgetLow",
-      "fleet_budget::DeviceStateChanged",
-      "fleet_budget::BudgetPaused",
-      "fleet_budget::BudgetConfigured"
-    ],
-    "rollout_health": [
-      "deployment_manager::RolloutHealthKey",
-      "deployment_manager::RolloutHealth"
-    ],
-    "fleet_settings": [
-      "fleet_settings::SettingsKey",
-      "fleet_settings::Settings",
-      "fleet_settings::FleetSettingsChanged"
-    ],
     "customer": [
       "customer::Customer",
       "customer::Fleet",
@@ -9157,6 +9243,26 @@
       "customer::PolicyKey",
       "deployment_manager::CustomerFleetKey"
     ],
+    "fleet_budget": [
+      "fleet_budget::FleetBudget",
+      "fleet_budget::BudgetOwnerCap",
+      "fleet_budget::Limits",
+      "fleet_budget::DeviceKey",
+      "fleet_budget::GasAccount",
+      "fleet_budget::BudgetCreated",
+      "fleet_budget::Deposited",
+      "fleet_budget::Withdrawn",
+      "fleet_budget::DeviceFunded",
+      "fleet_budget::ReserveChanged",
+      "fleet_budget::GasDrawn",
+      "fleet_budget::BudgetLow",
+      "fleet_budget::DeviceStateChanged",
+      "fleet_budget::BudgetPaused",
+      "fleet_budget::BudgetConfigured"
+    ],
+    "fleet_handover": [
+      "fleet_handover::Handover"
+    ],
     "fleet_inbox": [
       "fleet_inbox::DeviceInbox",
       "fleet_inbox::InboxKey",
@@ -9169,6 +9275,18 @@
       "device_group::GroupIndex",
       "device_group::GroupIndexed"
     ],
+    "fleet_settings": [
+      "fleet_settings::SettingsKey",
+      "fleet_settings::Settings",
+      "fleet_settings::FleetSettingsChanged"
+    ],
+    "group_batch": [
+      "customer::GroupBatchApplied"
+    ],
+    "passkey_factor": [
+      "passkey_factor::Enrollment",
+      "passkey_factor::ProofCreated"
+    ],
     "receipt_shards": [
       "deployment_manager::ReceiptShardKey",
       "deployment_manager::ReceiptDirectory",
@@ -9179,6 +9297,41 @@
       "component_catalog::ShardedCatalogBindingKey",
       "deployment_manager::ReceiptLayoutChanged",
       "deployment_manager::ShardedTargetGroupsKey"
+    ],
+    "recurring_window": [
+      "deployment_manager::RecurringWindowKey",
+      "deployment_manager::RecurringWindow",
+      "deployment_manager::WeeklySlot"
+    ],
+    "rollout_audit": [
+      "deployment_manager::DecisionKey",
+      "deployment_manager::DecisionRecord",
+      "deployment_manager::DecisionCleanupKey"
+    ],
+    "rollout_health": [
+      "deployment_manager::RolloutHealthKey",
+      "deployment_manager::RolloutHealth"
+    ],
+    "seal_policy": [
+      "seal_policy::AccessPolicy",
+      "seal_policy::AccessAdminCap",
+      "seal_policy::PolicyCreated",
+      "seal_policy::AccessChanged",
+      "seal_policy::KeyEpochRotated",
+      "seal_policy::PolicyMigrated"
+    ],
+    "second_person": [
+      "customer::SecondPersonConfiguration"
+    ],
+    "security_delay": [
+      "security_policy::DelayKey",
+      "security_policy::Delays",
+      "security_policy::QueuedAtKey",
+      "security_policy::QueuedAt",
+      "security_policy::DelayGrantKey",
+      "security_policy::DelayGrant",
+      "security_policy::ArgumentsKey",
+      "security_policy::ActionArguments"
     ],
     "security_policy": [
       "security_policy::PolicyKey",
@@ -9193,32 +9346,6 @@
       "security_policy::FactorConfiguration",
       "customer::HandoverCompleted",
       "customer::FleetSecurityKey"
-    ],
-    "group_batch": [
-      "customer::GroupBatchApplied"
-    ],
-    "rollout_audit": [
-      "deployment_manager::DecisionKey",
-      "deployment_manager::DecisionRecord",
-      "deployment_manager::DecisionCleanupKey"
-    ],
-    "recurring_window": [
-      "deployment_manager::RecurringWindowKey",
-      "deployment_manager::RecurringWindow",
-      "deployment_manager::WeeklySlot"
-    ],
-    "security_delay": [
-      "security_policy::DelayKey",
-      "security_policy::Delays",
-      "security_policy::QueuedAtKey",
-      "security_policy::QueuedAt",
-      "security_policy::DelayGrantKey",
-      "security_policy::DelayGrant",
-      "security_policy::ArgumentsKey",
-      "security_policy::ActionArguments"
-    ],
-    "second_person": [
-      "customer::SecondPersonConfiguration"
     ]
   },
   "supported_deployment_schema_versions": [
