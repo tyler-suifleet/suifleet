@@ -8,9 +8,10 @@ are publicly fetchable without credentials and their checks have passed.
 ## Source availability and synchronization
 
 The current daemon recipe still fetches the core Git repository at immutable
-SRCREV; a layer export alone does not make that repository public. Before public
-layer release, either verify anonymous fetch of that exact revision or publish a
-reviewed immutable source distribution. For the independent distribution option:
+SRCREV. Anonymous access to that pinned Cargo.lock was verified on 2026-11-02 and
+matched the recipe digest; the core repository is currently public. This does not
+provide source availability independent of that repository. Before standalone
+public release, publish a reviewed immutable source distribution as follows:
 
 1. Export the complete source tree at SRCREV (including root LICENSE and the
    suifleet-edge directory), after a credential/private-state audit. Publish it
@@ -62,8 +63,9 @@ https://docs.yoctoproject.org/dev/dev-manual/layers.html .
 
 Current actual repository: https://github.com/tyler-suifleet/suifleet.git;
 current development branch: main; current subdirectory:
-suifleet-edge/meta-suifleet. Do not submit this restricted/unpublished source
-configuration as an available standalone distribution.
+suifleet-edge/meta-suifleet. This is an existing monorepo location, not a
+published standalone repository.
+Do not submit it as evidence of standalone publication.
 
 After authorized standalone publication, fill the form using verified values:
 
