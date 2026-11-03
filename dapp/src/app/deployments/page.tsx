@@ -3,7 +3,8 @@
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 
 import { useState } from "react";
-import { buildDeploymentControlTx, type DeploymentControl } from "@/lib/deployment-control";
+import { buildDeploymentControlTx, buildRecurringWindowTx, recurringSupported, type DeploymentControl } from "@/lib/deployment-control";
+import type { WeeklySlot } from "@/lib/recurring-window";
 import { ControlEditor } from "@/components/DeploymentControlEditor";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
@@ -88,6 +89,10 @@ export default function DeploymentsPage() {
                     { transaction: buildDeploymentControlTx(d.deploymentId, control, fleet) },
                     { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
                   )}
+                  onRecurring={(recurring) => signAndExecute(
+                    { transaction: buildRecurringWindowTx(d.deploymentId, recurring, fleet) },
+                    { onSuccess: () => refetch(), onError: (err) => alert(`Failed: ${err.message}`) }
+                  )}
                   onDelete={async () => {
                     if (!confirm(`Delete deployment "${d.componentName} ${d.version}"? This cannot be undone.`)) return;
                     try { signAndExecute(
@@ -117,6 +122,7 @@ function DeploymentRow({
   isPending,
   onDelete,
   onControl,
+  onRecurring,
 }: {
   d: ReturnType<typeof useDeployments>["data"] extends (infer T)[] | undefined ? T : never;
   devices: DeviceObject[];
@@ -125,6 +131,7 @@ function DeploymentRow({
   isPending: boolean;
   onDelete: () => void;
   onControl: (control: DeploymentControl) => void;
+  onRecurring: (recurring: { timezone: string; slots: WeeklySlot[] } | null) => void;
 }) {
   return (
     <>
@@ -164,7 +171,8 @@ function DeploymentRow({
       </tr>
       <tr className="bg-gray-50 border-b border-gray-200">
         <td colSpan={5} className="px-4 pb-3">
-          <ControlEditor key={`${d.deploymentId}/${d.control.revision}`} control={d.control} canEdit={canDelete} pending={isPending} onSave={onControl} />
+          <ControlEditor key={`${d.deploymentId}/${d.control.revision}`} control={d.control} recurring={d.recurring}
+            recurringSupported={recurringSupported()} canEdit={canDelete} pending={isPending} onSave={onControl} onRecurring={onRecurring} />
           <div className="text-xs text-gray-400 space-x-4">
             {d.receiptsVerified ? d.resolvedDeviceIds.map((id) => (
               <span key={id} className={`inline-flex px-2 py-1 rounded ${STATUS_COLORS[d.statuses[id] ?? 0]}`} title={id}>

@@ -33,6 +33,8 @@ REGISTRY = "0xbe"
 UPGRADE_CAP = "0xc0"
 TYPE_ORIGINS = {name: ORIGIN for name in REQUIRED_TYPES}
 TYPE_ORIGINS.update({name: PACKAGE for name in json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())["optional_type_origins"]["rollout_health"]})
+# SF-174 recurring windows: introduced by a later upgrade; absent unless set.
+TYPE_ORIGINS.update({name: PACKAGE for name in json.loads((Path(__file__).resolve().parents[1] / "interfaces/fleet-v1.json").read_text())["optional_type_origins"]["recurring_window"]})
 TYPE_ORIGINS["deployment_manager::RecipeDigestKey"] = RECIPE_ORIGIN
 TYPE_ORIGINS["device_cap::DeviceAddressKey"] = PACKAGE
 for _name in ("device_registry::IdentityKey", "device_registry::Identity", "device_registry::DeviceIdentityChanged",
@@ -115,6 +117,7 @@ class Simulator:
         self.desired = {}
         self.managed = set()
         self.controls = {}
+        self.recurring = {}
 
     def add(self, id, *, creator=OPERATOR, groups=None, direct=True, bad_hash=False, run=False, expired=False, event=None, recipe=None):
         """Publish deployment `id`. `event`/`recipe` override fields before
@@ -187,7 +190,8 @@ class Simulator:
                 parent = event["parsedJson"]["deployment_id"]
                 fields += [[parent, key(name), empty] for name in (
                     "deployment_manager::RecipeDigestKey", "deployment_manager::TargetDevicesKey",
-                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey", "deployment_manager::ControlKey")]
+                    "deployment_manager::TargetGroupsKey", "deployment_manager::ManagedKey", "deployment_manager::ControlKey",
+                    "deployment_manager::RecurringWindowKey")]
             return fields
         if method == "shim_events":
             if params[0] == f"{ORIGIN}::device_group::DeviceAddedToGroup":
@@ -223,6 +227,9 @@ class Simulator:
                 return {"data":{"content":{"fields":{"value":value}}}}
             if params[1]["type"].endswith("::deployment_manager::ControlKey"):
                 return {"data":{"content":{"fields":{"value":self.controls.get(params[0])}}}}
+            if params[1]["type"].endswith("::deployment_manager::RecurringWindowKey"):
+                assert params[1]["type"] == f"{PACKAGE}::deployment_manager::RecurringWindowKey"
+                return {"data":{"content":{"fields":{"value":self.recurring.get(params[0])}}}}
             if params[1]["type"].endswith("::deployment_manager::ManagedKey"):
                 return {"data":{"content":{"fields":{"value":True if params[0] in self.managed else None}}}}
             event = next(e["parsedJson"] for e in self.events if e["parsedJson"]["deployment_id"] == params[0])
