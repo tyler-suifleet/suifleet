@@ -6,7 +6,7 @@ import { toHex, normalizeSuiAddress } from "@mysten/sui/utils";
 import { useCurrentAccount } from "@/hooks/useCurrentAccount";
 import { useFleetSelection } from "@/hooks/useFleetSelection";
 import { useFleetTransaction } from "@/hooks/useFleetTransaction";
-import { fetchOrganizationSecurity, SECURITY_ACTIONS } from "@/lib/security-policy";
+import { fetchOrganizationSecurity, SECURITY_ACTIONS, SECURITY_FACTORS } from "@/lib/security-policy";
 import { decisionTx, executePolicyTx, fetchRequests, policyValues, secondPersonSupported } from "@/lib/second-person";
 
 export function SecondPersonApprovals() {
@@ -27,19 +27,20 @@ export function SecondPersonApprovals() {
       const mine = !!account && normalizeSuiAddress(account.address) === normalizeSuiAddress(request.proposer);
       const stale = request.generation !== query.data.policy?.generation;
       const expired = request.expires <= BigInt(Date.now());
+      const delay = request.operation === "configure_security_delays" && request.arguments.length === 3;
       const enrollment = request.operation === "configure_second_person" && request.arguments.length === 2;
       let values: number[] | undefined;
       try { values = policyValues(request); } catch { /* Still show the raw request; never execute an unsupported schema. */ }
       return <article key={request.id} className="rounded border p-3 space-y-2 break-all"><h3>{request.operation}</h3>
         <p>Request {request.id}. Proposed by {request.proposer}. Expires {new Date(Number(request.expires)).toISOString()}. {stale ? "Stale: propose again." : expired ? "Expired." : request.approved ? "Approved by another credential." : "Awaiting another administrator."}</p>
         {enrollment && <p>Configure second-person approval for this organization. All different current administrators are eligible; policy requirements remain unchanged until saved.</p>}
-        {values && <ul>{values.map((value, i) => <li key={i}>{SECURITY_ACTIONS[i]}: {value & 4 ? "Second-person approval" : "Off"}</li>)}</ul>}
+        {values && <ul>{values.map((value, i) => <li key={i}>{SECURITY_ACTIONS[i]}: {value === 0 ? "Off" : SECURITY_FACTORS.filter(f => (value & f.bit) !== 0).map(f => f.name).join(" + ")}</li>)}</ul>}
         <details><summary>Exact action arguments (hex)</summary>{request.arguments.map((arg, i) => <p key={i}>Argument {i}: {toHex(Uint8Array.from(arg))}</p>)}</details>
         {fleet.administrator && <div className="flex flex-wrap gap-3">
           {!mine && <><button disabled={mutation.isPending || expired || stale || request.approved} onClick={() => act(() => decisionTx(fleet.customerId, request.id, "approve"))}>Approve exact action</button><button disabled={mutation.isPending} onClick={() => act(() => decisionTx(fleet.customerId, request.id, "reject"))}>Reject</button></>}
           <button disabled={mutation.isPending} onClick={() => act(() => decisionTx(fleet.customerId, request.id, "cancel"))}>Cancel request</button>
-          {mine && (values || enrollment) && <button disabled={mutation.isPending || expired || stale || !request.approved} onClick={() => act(() => executePolicyTx(client, fleet.customerId, request))}>Execute approved change</button>}
-          {mine && !values && !enrollment && <p>Execute with this request ID through the exact secured operation adapter. This console supports policy-change execution.</p>}
+          {mine && (values || enrollment || delay) && <button disabled={mutation.isPending || expired || stale || !request.approved} onClick={() => act(() => executePolicyTx(client, fleet.customerId, request))}>Execute approved change</button>}
+          {mine && !values && !enrollment && !delay && <p>Execute with this request ID through the exact secured operation adapter. This console supports policy-change execution.</p>}
         </div>}
       </article>;
     })}

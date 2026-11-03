@@ -1,6 +1,5 @@
 #[test_only]
 module sui_edge::multisig_admin_tests {
-    use std::bcs;
     use std::string::utf8;
     use sui::clock::{Self, Clock};
     use sui::test_scenario::{Self as ts};
@@ -27,9 +26,7 @@ module sui_edge::multisig_admin_tests {
     }
     fun prepare(s: &mut ts::Scenario, requirements: vector<u8>) {
         let c = s.take_shared<Customer>(); let clock = s.take_shared<Clock>();
-        let args = vector[bcs::to_bytes(&utf8(b"set_security")), bcs::to_bytes(&c), bcs::to_bytes(&requirements)];
-        let intent = policy::action_intent(object::id(&c), bcs::to_bytes(&args));
-        customer::prepare_security_action(&c, intent, 1000, &clock, s.ctx()); ts::return_shared(c); ts::return_shared(clock); s.next_tx(QUORUM);
+        multisig::prepare_policy_change(&c, requirements, 1000, &clock, s.ctx()); ts::return_shared(c); ts::return_shared(clock); s.next_tx(QUORUM);
     }
     #[test] fun sdk_address_vector() { assert!(multisig::administrator(&keys(), &vector[1,1,1], 2) == QUORUM); }
     #[test, expected_failure(abort_code=0, location=sui_edge::multisig_admin)]
