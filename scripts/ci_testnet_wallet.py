@@ -11,6 +11,9 @@ ADDRESS = configured_address()
 # A fresh SF-125 inbox base->head fixture costs about 0.85 SUI (run 40092917058).
 # After SF-136 the base alone costs ~0.55 SUI (localnet 532,828,600 MIST) and an
 # unchanged head upgrade about as much: ~1.2 SUI with setup and full PTB budgets.
+# After SF-196 a fresh pair at base 02bca2dd settled 1,577,234,282 MIST
+# (publish 772,926,000 + upgrade 785,902,163; run 41368161262) and the gate's
+# remaining steps need ~0.12 SUI more, which did not fit the former 1.6 SUI.
 # User-authorized 2026-11-02: fixed headroom for measured fresh fixtures.
 # This is a maximum allowance, not an expected fee or a replenishing balance.
 PACKAGE_UPGRADE_CEILING = 2_000_000_000
