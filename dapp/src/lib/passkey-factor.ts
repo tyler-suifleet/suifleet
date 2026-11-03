@@ -3,7 +3,7 @@ import { bcs } from '@mysten/sui/bcs';
 import { BrowserPasskeyProvider, PasskeyKeypair, PasskeyPublicKey, type PasskeyProvider } from '@mysten/sui/keypairs/passkey';
 import type { SuiGrpcClient } from '@mysten/sui/grpc';
 import { Transaction } from '@mysten/sui/transactions';
-import { fromBase64, toBase64, normalizeSuiAddress, normalizeStructTag } from '@mysten/sui/utils';
+import { fromBase64, toBase64, normalizeSuiAddress, normalizeStructTag, SUI_TYPE_ARG } from '@mysten/sui/utils';
 import { MANIFEST, moveType, verifyDeployment } from './deployment-manifest';
 import { PACKAGE_ID } from './constants';
 import { security_policy_FactorKeyBcs, security_policy_FactorConfigurationBcs } from './fleet-protocol';
@@ -115,7 +115,7 @@ export function withSponsorFunding(transaction: Transaction): Transaction {
   const data = transaction.getData();
   for (const command of data.commands) {
     if (command.$Intent?.name === 'CoinWithBalance' && command.$Intent.data.type === 'gas') {
-      command.$Intent.data.type = normalizeSuiAddress('0x2') + '::sui::SUI';
+      command.$Intent.data.type = SUI_TYPE_ARG;
     }
   }
   const sponsored = Transaction.from(JSON.stringify(data, (_key, value) => typeof value === 'bigint' ? String(value) : value));
