@@ -18,6 +18,7 @@ export const AUDIT_TYPES = ["deployment_manager::DecisionKey", "deployment_manag
 export const ROLLOUT_HEALTH_TYPES = ["deployment_manager::RolloutHealthKey", "deployment_manager::RolloutHealth"] as const;
 export const SETTINGS_TYPES = ["fleet_settings::SettingsKey", "fleet_settings::Settings", "fleet_settings::FleetSettingsChanged"] as const;
 export const SHARD_TYPES = ["deployment_manager::ReceiptShardKey", "deployment_manager::ReceiptDirectory", "deployment_manager::ReceiptKey", "deployment_manager::ReceiptIndexKey", "deployment_manager::ShardedReceipt", "deployment_manager::ReceiptShard", "component_catalog::ShardedCatalogBindingKey", "deployment_manager::ReceiptLayoutChanged", "deployment_manager::ShardedTargetGroupsKey"] as const;
+export const RECURRING_WINDOW_TYPES = ["deployment_manager::RecurringWindowKey", "deployment_manager::RecurringWindow", "deployment_manager::WeeklySlot"] as const;
 /** SF-130 per-fleet cost settings: defaults and inclusive bounds, in Move field units. */
 export const FLEET_SETTINGS = {"defaults": {"check_interval_ms": 1800000, "rollout_check_interval_ms": 60000, "health_interval_ms": 86400000, "archive_interval_ms": 604800000, "archive_retention_epochs": 3}, "bounds": {"check_interval_ms": [300000, 21600000], "rollout_check_interval_ms": [30000, 600000], "health_interval_ms": [60000, 86400000], "archive_interval_ms": [3600000, 604800000], "archive_retention_epochs": [1, 53]}, "rollout_check_off": 0} as const;
 export const STATUS = {"applied": 1, "failed": 2} as const;
