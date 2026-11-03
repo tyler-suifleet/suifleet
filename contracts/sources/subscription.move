@@ -14,6 +14,11 @@ module sui_edge::subscription {
     const ENotDue: u64 = 2;
     const EFunds: u64 = 3;
     const ENotice: u64 = 4;
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+    const SMALL_2: u8 = 2;
+    const SMALL_7: u8 = 7;
+    const SMALL_12: u8 = 12;
     const MONTH_MS: u64 = 2_592_000_000;
     const ANNUAL_PERIOD_MS: u64 = 2_628_000_000;
     const NOTICE_MS: u64 = 2_592_000_000;
@@ -43,24 +48,24 @@ module sui_edge::subscription {
         device_limit: u64, allowance: u64, monthly_fee: u64, annual: bool,
         clock: &Clock, ctx: &mut TxContext) {
         device_registry::assert_admin(registry, ctx);
-        assert!(treasury != @0x0 && monthly_fee > 0 && device_limit > 0, ETerms);
+        p1(treasury != @0x0 && monthly_fee > (SMALL_0 as u64) && device_limit > (SMALL_0 as u64));
         let fee = if (annual) {
             // Round up: never silently truncate a unit from the quoted rate.
             (((monthly_fee as u128) * 9 + 9) / 10) as u64
         } else monthly_fee;
         transfer::freeze_object(Offer<T> { id: object::new(ctx), registry_id: object::id(registry),
-            treasury, tier, device_limit, allowance, fee, periods: if (annual) 12 else 1,
+            treasury, tier, device_limit, allowance, fee, periods: if (annual) (SMALL_12 as u64) else (SMALL_1 as u64),
             period_ms: if (annual) ANNUAL_PERIOD_MS else MONTH_MS, published_at_ms: clock::timestamp_ms(clock),
-            expires_at_ms: clock::timestamp_ms(clock) + 2 * NOTICE_MS });
+            expires_at_ms: clock::timestamp_ms(clock) + (SMALL_2 as u64) * NOTICE_MS });
     }
 
     public fun open<T>(customer: &mut Customer, registry: &DeviceRegistry, offer: &Offer<T>,
         payment: Coin<T>, clock: &Clock, ctx: &mut TxContext) {
         customer::assert_admin(customer, ctx);
-        assert!(offer.registry_id == object::id(registry), EBinding);
-        assert!(offer.device_limit >= customer::active_devices(customer), ETerms);
+        p0(offer.registry_id == object::id(registry));
+        p1(offer.device_limit >= customer::active_devices(customer));
         let now = clock::timestamp_ms(clock);
-        assert!(now <= offer.expires_at_ms, ETerms);
+        p1(now <= offer.expires_at_ms);
         let mut account = Account { id: object::new(ctx), customer_id: object::id(customer),
             registry_id: offer.registry_id, treasury: offer.treasury, balance: balance::zero(),
             tier: offer.tier, device_limit: offer.device_limit, allowance: offer.allowance,
@@ -68,7 +73,7 @@ module sui_edge::subscription {
             term_end_ms: now + offer.period_ms * offer.periods, cancelled: false };
         customer::bind_subscription(customer, registry, object::id(&account), now + offer.period_ms);
         deposit(&mut account, payment);
-        assert!(account.balance.value() >= account.fee * account.remaining, EFunds);
+        p3(account.balance.value() >= account.fee * account.remaining);
         emit_plan(&account, offer);
         transfer::share_object(account);
     }
@@ -83,12 +88,12 @@ module sui_edge::subscription {
     /// charge beyond the purchased term or reset an already collected period.
     public fun collect<T>(account: &mut Account<T>, customer: &mut Customer,
         clock: &Clock, ctx: &mut TxContext) {
-        assert!(object::id(customer) == account.customer_id, EBinding);
-        assert!(!account.cancelled && account.remaining > 0 && clock::timestamp_ms(clock) >= account.next_due_ms, ENotDue);
-        assert!(account.balance.value() >= account.fee, EFunds);
+        p0(object::id(customer) == account.customer_id);
+        p2(!account.cancelled && account.remaining > (SMALL_0 as u64) && clock::timestamp_ms(clock) >= account.next_due_ms);
+        p3(account.balance.value() >= account.fee);
         let through = account.next_due_ms + account.period_ms;
         customer::subscription_entitlement(customer, object::id(account), account.device_limit, account.allowance, through);
-        account.remaining = account.remaining - 1;
+        account.remaining = account.remaining - (SMALL_1 as u64);
         account.next_due_ms = through;
         transfer::public_transfer(coin::from_balance(account.balance.split(account.fee), ctx), account.treasury);
         event::emit(Collected { account_id: object::id(account), amount: account.fee, through_ms: through });
@@ -99,13 +104,13 @@ module sui_edge::subscription {
     public fun renew<T>(account: &mut Account<T>, customer: &Customer, offer: &Offer<T>,
         clock: &Clock, ctx: &mut TxContext) {
         customer::assert_admin(customer, ctx);
-        assert!(object::id(customer) == account.customer_id && offer.registry_id == account.registry_id && offer.treasury == account.treasury, EBinding);
+        p0(object::id(customer) == account.customer_id && offer.registry_id == account.registry_id && offer.treasury == account.treasury);
         let now = clock::timestamp_ms(clock);
-        assert!(account.cancelled || (now >= account.term_end_ms && account.remaining == 0), ENotDue);
-        assert!(offer.device_limit >= customer::active_devices(customer), ETerms);
-        assert!(now >= offer.published_at_ms + NOTICE_MS, ENotice);
-        assert!(now <= offer.expires_at_ms, ETerms);
-        assert!(account.balance.value() >= offer.fee * offer.periods, EFunds);
+        p2(account.cancelled || (now >= account.term_end_ms && account.remaining == (SMALL_0 as u64)));
+        p1(offer.device_limit >= customer::active_devices(customer));
+        p4(now >= offer.published_at_ms + NOTICE_MS);
+        p1(now <= offer.expires_at_ms);
+        p3(account.balance.value() >= offer.fee * offer.periods);
         account.tier = offer.tier;
         account.device_limit = offer.device_limit;
         account.allowance = offer.allowance;
@@ -124,22 +129,22 @@ module sui_edge::subscription {
     /// current customer administrator. No admin sweep or cancellation penalty.
     public fun cancel<T>(account: &mut Account<T>, customer: &mut Customer, clock: &Clock, ctx: &mut TxContext): Coin<T> {
         customer::assert_admin(customer, ctx);
-        assert!(object::id(customer) == account.customer_id, EBinding);
+        p0(object::id(customer) == account.customer_id);
         let now = clock::timestamp_ms(clock);
         let due = if (!account.cancelled && now >= account.next_due_ms) {
-            let elapsed = (now - account.next_due_ms) / account.period_ms + 1;
+            let elapsed = (now - account.next_due_ms) / account.period_ms + (SMALL_1 as u64);
             if (elapsed < account.remaining) elapsed else account.remaining
-        } else 0;
+        } else (SMALL_0 as u64);
         let earned = due * account.fee;
-        assert!(account.balance.value() >= earned, EFunds);
-        if (earned > 0) {
+        p3(account.balance.value() >= earned);
+        if (earned > (SMALL_0 as u64)) {
             let through = account.next_due_ms + due * account.period_ms;
             customer::subscription_entitlement(customer, object::id(account), account.device_limit, account.allowance, through);
             account.next_due_ms = through;
             transfer::public_transfer(coin::from_balance(account.balance.split(earned), ctx), account.treasury);
             event::emit(Collected { account_id: object::id(account), amount: earned, through_ms: account.next_due_ms });
         };
-        account.remaining = 0;
+        account.remaining = (SMALL_0 as u64);
         account.cancelled = true;
         let amount = account.balance.value();
         event::emit(Refunded { account_id: object::id(account), recipient: ctx.sender(), amount });
@@ -148,28 +153,25 @@ module sui_edge::subscription {
 
     public fun open_secured<T>(customer: &mut Customer, registry: &DeviceRegistry, offer: &Offer<T>,
         payment: Coin<T>, clock: &Clock, action: Action, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&b"subscription_open"), bcs::to_bytes(&object::id(customer)),
-            bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&object::id(offer)),
+        let arguments = vector[bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&object::id(offer)),
             bcs::to_bytes(&object::id(&payment)), bcs::to_bytes(&payment.value())];
-        customer::begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        customer::begin_intent(customer, action, b"subscription_open", arguments, (SMALL_7 as u64), false, clock, ctx);
         open(customer, registry, offer, payment, clock, ctx);
         customer::finish_security_action(customer);
     }
 
     public fun renew_secured<T>(account: &mut Account<T>, customer: &mut Customer, offer: &Offer<T>,
         clock: &Clock, action: Action, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&b"subscription_renew"), bcs::to_bytes(&object::id(customer)),
-            bcs::to_bytes(&object::id(account)), bcs::to_bytes(&object::id(offer))];
-        customer::begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        let arguments = vector[bcs::to_bytes(&object::id(account)), bcs::to_bytes(&object::id(offer))];
+        customer::begin_intent(customer, action, b"subscription_renew", arguments, (SMALL_7 as u64), false, clock, ctx);
         renew(account, customer, offer, clock, ctx);
         customer::finish_security_action(customer);
     }
 
     public fun cancel_secured<T>(account: &mut Account<T>, customer: &mut Customer,
         clock: &Clock, action: Action, ctx: &mut TxContext): Coin<T> {
-        let arguments = vector[bcs::to_bytes(&b"subscription_cancel"), bcs::to_bytes(&object::id(customer)),
-            bcs::to_bytes(&object::id(account))];
-        customer::begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        let arguments = vector[bcs::to_bytes(&object::id(account))];
+        customer::begin_intent(customer, action, b"subscription_cancel", arguments, (SMALL_7 as u64), false, clock, ctx);
         let refund = cancel(account, customer, clock, ctx);
         customer::finish_security_action(customer);
         refund
@@ -179,4 +181,9 @@ module sui_edge::subscription {
         event::emit(PlanChanged { account_id: object::id(account), offer_id: object::id(offer),
             tier: account.tier, fee: account.fee, periods: account.remaining });
     }
+    fun p0(condition: bool) { if (!condition) abort EBinding }
+    fun p1(condition: bool) { if (!condition) abort ETerms }
+    fun p2(condition: bool) { if (!condition) abort ENotDue }
+    fun p3(condition: bool) { if (!condition) abort EFunds }
+    fun p4(condition: bool) { if (!condition) abort ENotice }
 }

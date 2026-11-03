@@ -107,6 +107,13 @@ python3 scripts/check_move_security.py
 make test-subscription-localnet
 ```
 
+The secured entry points initially exceeded the 102,400-byte package limit in
+the isolated compatible upgrade. Shared module-local abort guards, narrow
+constants widened to their original integer types, and the existing package-only
+Customer intent helper keep the package publishable without changing public
+layouts or bypassing security checks. The isolated upgrade is a size regression
+gate as well as an authority/compatibility check.
+
 The last command requires the pinned dev image with network disabled, cached Move
 dependencies and locked frontend dependencies. It publishes the merged current
 base and performs a genuine compatible upgrade over an existing Customer before

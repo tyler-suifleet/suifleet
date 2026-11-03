@@ -20,6 +20,9 @@ module sui_edge::customer {
     const SMALL_80: u8 = 80;
     const SMALL_196: u8 = 196;
     const SMALL_197: u8 = 197;
+    const SMALL_199: u8 = 199;
+    const SMALL_201: u8 = 201;
+    const SMALL_16384: u16 = 16384;
 
     use std::string::String;
     use sui_edge::security_policy::{Self, Policy, Action};
@@ -169,23 +172,23 @@ module sui_edge::customer {
     }
     public struct SubscriptionKey has copy, drop, store {}
     public(package) fun bind_subscription(customer: &mut Customer, registry: &DeviceRegistry, account: ID, first_period: u64) {
-        assert!((customer.version == 1 || security_authority(customer)) && customer.registry_id == object::id(registry), EBinding);
-        assert!(!df::exists(&customer.id, SubscriptionKey {}), EBinding);
+        pe((customer.version == (SMALL_1 as u64) || security_authority(customer)) && customer.registry_id == object::id(registry));
+        pe(!df::exists(&customer.id, SubscriptionKey {}));
         // Reject an incompatible legacy grant before taking prepaid custody.
         assert!(first_period > customer.period, EPeriod);
         df::add(&mut customer.id, SubscriptionKey {}, account);
         // Seal beyond both legacy and current security authority versions so old
         // package entry points cannot administer a paid customer. Preserve policy.
-        if (customer.version == 1) security_policy::initialize(&mut customer.id);
-        customer.version = 201;
+        if (customer.version == (SMALL_1 as u64)) security_policy::initialize(&mut customer.id);
+        customer.version = (SMALL_201 as u64);
     }
     public(package) fun subscription_entitlement(customer: &mut Customer, account: ID,
         device_limit: u64, allowance: u64, period: u64) {
-        assert!(*df::borrow<SubscriptionKey, ID>(&customer.id, SubscriptionKey {}) == account, EBinding);
+        pe(*df::borrow<SubscriptionKey, ID>(&customer.id, SubscriptionKey {}) == account);
         assert!(period > customer.period, EPeriod);
-        assert!(device_limit >= customer.active_devices, ELimit);
+        pf(device_limit >= customer.active_devices);
         customer.period = period;
-        customer.used = 0;
+        customer.used = (SMALL_0 as u64);
         customer.device_limit = device_limit;
         customer.allowance = allowance;
     }
@@ -860,7 +863,7 @@ module sui_edge::customer {
 
     /// Opt in atomically. All-off defaults preserve ordinary current-client use;
     /// old packages can no longer authorize this customer after the version seal.
-    fun security_authority(customer: &Customer): bool { customer.version == 197 || customer.version == 199 || customer.version == 201 }
+    fun security_authority(customer: &Customer): bool { customer.version == (SMALL_197 as u64) || customer.version == (SMALL_199 as u64) || customer.version == (SMALL_201 as u64) }
     public fun initialize_security(customer: &mut Customer, ctx: &mut TxContext) {
         pd(customer.credentials.contains(&ctx.sender())); pd(*customer.credentials.get(&ctx.sender()));
         if (security_authority(customer)) { assert_admin(customer, ctx); return };
@@ -1439,7 +1442,7 @@ module sui_edge::customer {
     }
 
     // Bind the canonical operation and stable identity, excluding device-mutable state.
-    fun begin_intent(customer: &mut Customer, action: Action, name: vector<u8>, tail: vector<vector<u8>>,
+    public(package) fun begin_intent(customer: &mut Customer, action: Action, name: vector<u8>, tail: vector<vector<u8>>,
         class: u64, pause: bool, clock: &Clock, ctx: &mut TxContext) {
         assert_security_administrator(customer, ctx);
         let mut arguments = vector[bcs::to_bytes(&name), intent_identity(customer)];
@@ -1455,7 +1458,7 @@ module sui_edge::customer {
     public fun configure_second_person(customer: &mut Customer, action: Action, clock: &Clock, ctx: &mut TxContext) {
         assert!((security_policy::attestations(&action) & 4) == 4, ESecondPerson);
         let arguments = vector[bcs::to_bytes(&std::string::utf8(b"configure_second_person")), intent_identity(customer)];
-        begin_security_action(customer, action, arguments, 7, false, clock, ctx);
+        begin_security_action(customer, action, arguments, (SMALL_7 as u64), false, clock, ctx);
         configure_security_factor(customer, 4, bcs::to_bytes(&SecondPersonConfiguration { schema: 1 }), ctx);
         finish_security_action(customer);
     }
@@ -1463,12 +1466,12 @@ module sui_edge::customer {
         assert_security_administrator(customer, ctx);
         // Seal before any disclosed Action exists, including enrollment. Old
         // immutable cancellation/execution cannot maintain the pending index.
-        assert!(arguments_bcs.length() <= 16384, ESecondPerson);
+        assert!(arguments_bcs.length() <= (SMALL_16384 as u64), ESecondPerson);
         let mut encoded = sui::bcs::new(arguments_bcs);
         let arguments = encoded.peel_vec!(|bytes| bytes.peel_vec_u8());
-        assert!(encoded.into_remainder_bytes().is_empty() && arguments.length() >= 2
+        assert!(encoded.into_remainder_bytes().is_empty() && arguments.length() >= (SMALL_2 as u64)
             && arguments[1] == intent_identity(customer), ESecondPerson);
-        if (customer.version == 197) customer.version = 199;
+        if (customer.version == (SMALL_197 as u64)) customer.version = (SMALL_199 as u64);
         let arguments_bcs = bcs::to_bytes(&arguments);
         security_policy::prepare_disclosed(&mut customer.id, arguments_bcs, expires_ms, clock, ctx);
     }
