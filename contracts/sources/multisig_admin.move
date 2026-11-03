@@ -46,7 +46,7 @@ module sui_edge::multisig_admin {
 
     /// Convenience producer for the exact existing policy-change wrapper.
     public fun prepare_policy_change(customer: &Customer, requirements: vector<u8>, expires_ms: u64, clock: &Clock, ctx: &mut TxContext) {
-        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_security")), bcs::to_bytes(customer), bcs::to_bytes(&requirements)];
+        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_security")), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&requirements)];
         customer::prepare_security_action(customer, security_policy::action_intent(object::id(customer), bcs::to_bytes(&arguments)), expires_ms, clock, ctx);
     }
 

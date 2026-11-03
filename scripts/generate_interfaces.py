@@ -327,6 +327,7 @@ def generate(catalog, recipe):
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
           f'export const SECURITY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_policy"])} as const;',
+          f'export const SECURITY_DELAY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_delay"])} as const;',
           f'export const CUSTOMER_TYPES = {json.dumps(catalog["optional_type_origins"]["customer"])} as const;',
           f'export const INBOX_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_inbox"])} as const;',
           f'export const AUDIT_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_audit"])} as const;',
