@@ -1470,7 +1470,7 @@ impl SuiClient {
                     .await?;
                 anyhow::ensure!(
                     same_type(&customer.object_type, &self.move_type("customer::Customer"))
-                    && matches!(json_u64(&customer.fields["version"]), Some(1) | Some(197))
+                    && matches!(json_u64(&customer.fields["version"]), Some(1) | Some(197) | Some(199))
                         && matches!(customer.owner, Owner::Shared { .. })
                         && same_id(
                             customer.fields["registry_id"].as_str().unwrap_or(""),

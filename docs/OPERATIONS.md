@@ -806,13 +806,15 @@ Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 ## Organization security framework (SF-196)
 
 The [approved design and exact child API](SECOND_FACTOR_DESIGN.md) define seven
-protected action classes and four optional mechanisms. The deployed package determines mechanism availability. SF-201 adds availability
-bit **1** for native multisig; passkey, second-person and delay bits remain
-unavailable until their verifiers land. All-off administration remains the default.
-An older framework package still rejects all nonzero activation. The settings
-workbench requires the upgraded call package and verified deployment manifest.
+protected action classes and four optional mechanisms. The combined package supports
+native multisig (bit **1**) and second-person approval (bit **4**); passkey and delay
+remain unavailable until their verifiers land.
+All mechanisms default off. The console offers activation only when the verified
+manifest includes the actual `customer::SecondPersonConfiguration` introduction origin; older
+framework deployments remain all-off/unavailable in that console.
 
-Current customer authority is version **197**. Migration through
+The base framework authority is version **197**; SF-199 enrollment seals it at
+**199**, which current clients also support. Migration through
 `customer::initialize_security` retires version 1 and the published intermediate
 196 framework; it preserves existing policy state and invalidates queued actions.
 Upgrade custody-resolving clients and external producer packages to their verified
@@ -923,6 +925,95 @@ The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
 including exploratory failures and limits; it is not proof of a manual extension
 wallet walkthrough or a live deployment of this frontend.
 
+## Second-person approval (SF-199)
+
+Organizations can require another **current administrator credential** for any of
+the seven action classes in Settings → Organization security. This is an address
+boundary, not proof that two credentials belong to different humans. Use
+independently controlled credentials, preferably at least three administrators
+for recovery. Ordinary nonadministrator membership cannot approve.
+
+1. Add independent administrators before protection is enabled. Every source
+   credential change invalidates pending requests.
+2. Request verifier enrollment from Settings. This proposes the exact
+   `configure_second_person` operation, including the organization snapshot.
+3. A different current administrator reviews and approves that request on the
+   dashboard. The proposer executes it there to configure schema 1: all current
+   administrators are eligible, except the action proposer. Enrollment uses the
+   same expiring, generation-bound, single-use approval flow as other actions;
+   it cannot skip the independent credential proof.
+4. Select protected action classes and save. First activation requires reconciled,
+   sealed fleets and current authority, as in SF-196. Settings lists every resulting
+   class; unchecked classes are off. Keep the remaining factor options off until
+   their separate implementations are deployed.
+5. Under protection, the console requests a policy change instead of directly
+   weakening the policy. Another administrator sees the request on the dashboard,
+   reviews the operation and full argument bytes, and approves or rejects. Only
+   the proposer executes the approved operation. Expiry is enforced by Sui Clock,
+   not the browser countdown. Execution checks the exact arguments and generation,
+   consumes the nonce, clears its scoped grant and removes it from the pending index.
+
+`customer::propose_approval` accepts the canonical BCS argument bytes of any SF-196
+secured operation (at most 16 KiB, expiry at most seven days). Arguments are
+immutable under `security_policy::FactorKey { factor: 0 }` on the Action, as a
+`FactorConfiguration` public binding. The same reserved key on the Customer holds
+a `vector<ID>` of up to 64 pending disclosed requests. Zero is not a configurable
+factor. These reuse **existing** type origins; only SecondPersonConfiguration has a new introduction
+origin. The Action and Customer layouts are unchanged. The first disclosed proposal atomically seals customer
+authority at **199**, before enrollment approval (customers with no disclosed requests may remain 197); current clients
+accept both. Old customer code rejects authority 199, including its immutable
+cancellation route, which cannot maintain the new queue. The daemon must include
+199 custody-read support before creating the first request. The first proposal verifies
+the supplied customer snapshot and replaces only its version with the sealed 199
+snapshot in the disclosed bytes, preserving exact execution binding. This prevents an older cancel entry from
+leaving orphan IDs or unreadable requests. Pending discovery paginates
+current dynamic fields and re-reads every object; event pruning cannot erase this
+index. Errors are reported, never converted into an empty queue.
+
+The console creates and executes policy-change requests. Other operation adapters
+use their existing exact `*_secured` wrapper with the approved Action ID and exact
+canonical arguments; there is no generic arbitrary-call execution grant. Their
+requests remain visible with the full argument bytes on the dashboard. Do not
+approve an unfamiliar encoding merely because its operation label looks familiar.
+Opaque digests created through `prepare_security_action` cannot receive this factor.
+
+Any current administrator can cancel a disclosed request with
+`customer::cancel_disclosed_security_action`; a different administrator can use
+`customer::reject_action`. Cancel expired/stale requests to free the bounded queue.
+The immutable legacy cancellation API refuses disclosed requests so it cannot
+orphan index entries. Credential removal/demotion, policy edits and successful secured operations
+invalidate queued authorizations. Revoking an approver therefore also invalidates
+that approver's existing approvals. Rejected/consumed actions cannot execute again.
+
+Recovery uses another surviving administrator to approve an exact policy change
+that removes the required factor. Direct weakening and old-package entry points
+remain refused under the existing policy. Reconfiguring the verifier requires all
+currently effective factors; there is no administrator-only bypass, email reset,
+automatic expiry waiver or support override. If fewer than two independently
+controlled administrator credentials survive, recovery can remain permanently
+locked. Cancel and repropose after any changed argument or authority snapshot.
+
+Offline verification: `node scripts/test_second_person.cjs`, core Move tests and
+`scripts/test_second_person_localnet.py --base EXPORTED_FRAMEWORK_CONTRACTS
+--evidence FILE` inside a disposable `--network none` container. Build/provide the
+unchanged `chain_facts` example (`SUIFLEET_CHAIN_FACTS`) and mount readable Git
+metadata for provenance. The live counterpart is `scripts/live_second_person.py
+--wallet EXPLICIT_CLIENT_YAML --network testnet --base EXPORTED_FRAMEWORK_CONTRACTS
+--state PRIVATE_STATE --evidence FILE`; the default strict allowance is 1.8 SUI,
+including failures and disposable approver funding. `--fresh` runs only the
+mechanism on a standalone package; keep upgrade/old-package evidence separate.
+`--resume-unprotected` verifies an all-off policy before cancelling this private
+fixture’s unfinished requests. It never bypasses a required recovery factor.
+Use the dedicated wallet,
+shared mutation lease, verified CLI and run ledger from [TESTNET.md](TESTNET.md).
+Ambiguous fixture publication stays journaled and is never silently republished.
+
+Manual real-wallet, physical and mainnet/provider acceptance is explicitly unrun
+and remains in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+Actual SF-199 commands, effects, initial failures, aggregate spending and deferred
+acceptance are recorded in [the SF-199 evidence](validation/sf199-second-person.md).
 
 ## Native multisig administrators (SF-201)
 

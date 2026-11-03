@@ -147,6 +147,7 @@ pub mod customer {
     pub const ADVANCE_ROLLOUT_ONCHAIN: &str = "advance_rollout_onchain";
     pub const ADVANCE_ROLLOUT_ONCHAIN_SECURED: &str = "advance_rollout_onchain_secured";
     pub const ADVANCE_ROLLOUT_SECURED: &str = "advance_rollout_secured";
+    pub const APPROVE_ACTION: &str = "approve_action";
     pub const ASSERT_ADMIN: &str = "assert_admin";
     pub const ASSERT_FLEET: &str = "assert_fleet";
     pub const ASSERT_MEMBER: &str = "assert_member";
@@ -160,6 +161,7 @@ pub mod customer {
     pub const BIND_DEVICE_METADATA: &str = "bind_device_metadata";
     pub const BIND_DEVICE_METADATA_SECURED: &str = "bind_device_metadata_secured";
     pub const BORROW_BUDGET_CAP: &str = "borrow_budget_cap";
+    pub const CANCEL_DISCLOSED_SECURITY_ACTION: &str = "cancel_disclosed_security_action";
     pub const CANCEL_SECURITY_ACTION: &str = "cancel_security_action";
     pub const CLEAR_DECISION_AUDIT: &str = "clear_decision_audit";
     pub const CLEAR_RECURRING_WINDOW: &str = "clear_recurring_window";
@@ -170,6 +172,7 @@ pub mod customer {
     pub const CONFIGURE_CHARGING_SECURED: &str = "configure_charging_secured";
     pub const CONFIGURE_ENROLLMENT: &str = "configure_enrollment";
     pub const CONFIGURE_ENROLLMENT_SECURED: &str = "configure_enrollment_secured";
+    pub const CONFIGURE_SECOND_PERSON: &str = "configure_second_person";
     pub const CONFIRM_HANDOVER: &str = "confirm_handover";
     pub const CONTROL_ROLLOUT: &str = "control_rollout";
     pub const CONTROL_ROLLOUT_SECURED: &str = "control_rollout_secured";
@@ -209,6 +212,7 @@ pub mod customer {
     pub const NEW_ROLLOUT_SECURED: &str = "new_rollout_secured";
     pub const PAUSE_DEPLOYMENT_SECURED: &str = "pause_deployment_secured";
     pub const PENDING_DEVICES: &str = "pending_devices";
+    pub const PENDING_SECURITY_ACTIONS: &str = "pending_security_actions";
     pub const POLICY_ACCOUNT: &str = "policy_account";
     pub const POLICY_ACCOUNT_SECURED: &str = "policy_account_secured";
     pub const POLICY_DEVICE: &str = "policy_device";
@@ -216,6 +220,7 @@ pub mod customer {
     pub const POLICY_GROUP: &str = "policy_group";
     pub const POLICY_GROUP_SECURED: &str = "policy_group_secured";
     pub const PREPARE_SECURITY_ACTION: &str = "prepare_security_action";
+    pub const PROPOSE_APPROVAL: &str = "propose_approval";
     pub const PUBLISH_VERSION: &str = "publish_version";
     pub const PUBLISH_VERSION_SECURED: &str = "publish_version_secured";
     pub const REASSIGN_DEVICE: &str = "reassign_device";
@@ -223,6 +228,7 @@ pub mod customer {
     pub const REGISTER_DEVICE_SECURED: &str = "register_device_secured";
     pub const REGISTER_FUNDED_DEVICE: &str = "register_funded_device";
     pub const REGISTER_FUNDED_DEVICE_SECURED: &str = "register_funded_device_secured";
+    pub const REJECT_ACTION: &str = "reject_action";
     pub const REMOVE_DEVICE: &str = "remove_device";
     pub const REMOVE_DEVICE_SECURED: &str = "remove_device_secured";
     pub const REMOVE_FROM_GROUP: &str = "remove_from_group";
@@ -408,6 +414,11 @@ pub mod customer {
         pub policy_id: [u8; 32],
     }
     impl PolicyKey { pub const MOVE_TYPE: &'static str = "customer::PolicyKey"; }
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct SecondPersonConfiguration {
+        pub schema: u8,
+    }
+    impl SecondPersonConfiguration { pub const MOVE_TYPE: &'static str = "customer::SecondPersonConfiguration"; }
 }
 pub mod deployment_manager {
     use super::*;
@@ -1549,8 +1560,10 @@ pub mod security_policy {
     pub const ACTION_COUNT: &str = "action_count";
     pub const ACTION_GENERATION: &str = "action_generation";
     pub const ACTION_INTENT: &str = "action_intent";
+    pub const ATTESTATIONS: &str = "attestations";
     pub const AVAILABLE: &str = "available";
     pub const CUSTOMER_ID: &str = "customer_id";
+    pub const DISCLOSED_ARGUMENTS: &str = "disclosed_arguments";
     pub const EXPIRES_MS: &str = "expires_ms";
     pub const GENERATION: &str = "generation";
     pub const INTENT: &str = "intent";

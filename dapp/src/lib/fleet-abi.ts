@@ -657,6 +657,18 @@ export const MOVE_ABI = {
         ],
         "returns": []
       },
+      "approve_action": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer",
+          "&mut sui_edge::security_policy::Action",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "assert_admin": {
         "visibility": "Public",
         "entry": false,
@@ -840,6 +852,17 @@ export const MOVE_ABI = {
           "sui_edge::customer::BudgetLoan"
         ]
       },
+      "cancel_disclosed_security_action": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
+          "sui_edge::security_policy::Action",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
       "cancel_security_action": {
         "visibility": "Public",
         "entry": false,
@@ -985,6 +1008,18 @@ export const MOVE_ABI = {
           "u64",
           "u64",
           "bool",
+          "sui_edge::security_policy::Action",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "configure_second_person": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
           "sui_edge::security_policy::Action",
           "&sui::clock::Clock",
           "&mut sui::tx_context::TxContext"
@@ -1561,6 +1596,17 @@ export const MOVE_ABI = {
           "u64"
         ]
       },
+      "pending_security_actions": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::customer::Customer"
+        ],
+        "returns": [
+          "vector<sui::object::ID>"
+        ]
+      },
       "policy_account": {
         "visibility": "Public",
         "entry": false,
@@ -1659,6 +1705,19 @@ export const MOVE_ABI = {
         "type_parameters": [],
         "parameters": [
           "&sui_edge::customer::Customer",
+          "vector<u8>",
+          "u64",
+          "&sui::clock::Clock",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "propose_approval": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
           "vector<u8>",
           "u64",
           "&sui::clock::Clock",
@@ -1792,6 +1851,17 @@ export const MOVE_ABI = {
           "u64",
           "u64",
           "&sui::clock::Clock",
+          "sui_edge::security_policy::Action",
+          "&mut sui::tx_context::TxContext"
+        ],
+        "returns": []
+      },
+      "reject_action": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&mut sui_edge::customer::Customer",
           "sui_edge::security_policy::Action",
           "&mut sui::tx_context::TxContext"
         ],
@@ -2867,6 +2937,20 @@ export const MOVE_ABI = {
           [
             "policy_id",
             "sui::object::ID"
+          ]
+        ]
+      },
+      "SecondPersonConfiguration": {
+        "abilities": [
+          "Copy",
+          "Drop",
+          "Store"
+        ],
+        "type_parameters": [],
+        "fields": [
+          [
+            "schema",
+            "u8"
           ]
         ]
       }
@@ -8540,6 +8624,17 @@ export const MOVE_ABI = {
           "vector<u8>"
         ]
       },
+      "attestations": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::security_policy::Action"
+        ],
+        "returns": [
+          "u8"
+        ]
+      },
       "available": {
         "visibility": "Public",
         "entry": false,
@@ -8558,6 +8653,17 @@ export const MOVE_ABI = {
         ],
         "returns": [
           "sui::object::ID"
+        ]
+      },
+      "disclosed_arguments": {
+        "visibility": "Public",
+        "entry": false,
+        "type_parameters": [],
+        "parameters": [
+          "&sui_edge::security_policy::Action"
+        ],
+        "returns": [
+          "vector<u8>"
         ]
       },
       "expires_ms": {
