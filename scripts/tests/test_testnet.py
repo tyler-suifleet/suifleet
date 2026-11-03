@@ -125,6 +125,26 @@ class TrustTests(unittest.TestCase):
         with self.assertRaises(Spent):
             budget.execute(Mock(), 'retry', upgrade, gas=400_000_000)
 
+    def test_authorized_allowance_reserves_known_blocked_step_without_forgiving_unknown(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING
+        # Public PR477 prefix includes the whole retained device grant.
+        observed = 1_585_539_696
+        refused = Mock()
+        old = Budget(1_600_000_000, []); old.grant(observed)
+        with self.assertRaises(Spent):
+            old.execute(refused, 'base deployment', ['ptb'], gas=15_000_000, require_full=True)
+        refused.assert_not_called()
+        current = Budget(PACKAGE_UPGRADE_CEILING, []); current.grant(observed)
+        # An unknown execution still keeps its entire reservation, even under
+        # the newly authorized cap. This is not a successful live transaction.
+        unknown = Mock(side_effect=TimeoutError())
+        with self.assertRaises(TimeoutError):
+            current.execute(unknown, 'base deployment unknown', ['ptb'], gas=15_000_000, require_full=True)
+        unknown.assert_called_once()
+        self.assertEqual(current.used, observed + 15_000_000)
+        self.assertEqual(current.evidence[-1]['status'], 'unknown')
+        with self.assertRaises(Spent): current.grant(current.remaining + 1)
+
     def test_sf196_fresh_fixture_reserves_ptbs_within_unchanged_ceiling(self):
         from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
         # Exact settled charges from run 41276436449, including 30M device
@@ -133,7 +153,7 @@ class TrustTests(unittest.TestCase):
         used = sum((613_441_200, 8_425_378, 1_243_578, 767_170_563,
                     8_737_163, 1_000_099 + 30_000_000))
         self.assertEqual(used, 1_430_017_981)
-        ledger = Budget(PACKAGE_UPGRADE_CEILING, [])
+        ledger = Budget(1_600_000_000, [])  # Retain the historical refusal/unknown-outcome proof.
         ledger.grant(used)
         refused = Mock()
         with self.assertRaises(Spent):
@@ -156,28 +176,29 @@ class TrustTests(unittest.TestCase):
             ledger.execute(refused, 'retry', ['ptb'], gas=PACKAGE_TRANSACTION_GAS, require_full=True)
         refused.assert_not_called()
 
-    def test_sf196_fresh_pair_is_a_cost_conflict_not_a_ceiling_increase(self):
-        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS, SUITES, required_balance
-        # The protective limits stay unchanged (PR #426 review/operator constraint).
-        self.assertEqual(PACKAGE_UPGRADE_CEILING, 1_600_000_000)
-        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+    def test_sf196_fresh_pair_exceeded_former_ceiling_and_cached_reuse_fits(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
         # Settled effects from run 41368161262 (base 02bca2dd, after SF-196):
-        # the fresh pair left 22,765,718 MIST, so the device top-up (10M gas +
-        # 30M funding) was refused before signing.
+        # under the former 1.6 SUI limit the fresh pair left 22,765,718 MIST, so
+        # the device top-up (10M gas + 30M funding) was refused before signing.
         setup = (772_926_000, 8_425_378, 1_243_578, 785_902_163, 8_737_163)
         self.assertEqual(sum(setup), 1_577_234_282)
-        fresh = Budget(PACKAGE_UPGRADE_CEILING, [])
+        fresh = Budget(1_600_000_000, [])  # Retain the historical refusal proof.
         fresh.grant(sum(setup))
         refused = Mock()
         with self.assertRaises(Spent):
             fresh.execute(refused, 'top up device gas', ['ptb'], gas=10_000_000,
                           funding=30_000_000, require_full=True)
         refused.assert_not_called()
+        # The user-authorized allowance admits that top-up after the same pair.
+        current = Budget(PACKAGE_UPGRADE_CEILING, [])
+        current.grant(sum(setup))
+        self.assertGreaterEqual(current.remaining, 120_073_015 + PACKAGE_TRANSACTION_GAS)
         # That fixture was cached before the top-up, so a later run with the same
         # bytecode pair reuses it: the rest of the gate (reservations and settled
-        # costs from run 41359600334) fits the unchanged allowance, with headroom
+        # costs from run 41359600334) fits even the former allowance, with headroom
         # for a final unknown full PTB reservation.
-        reused = Budget(PACKAGE_UPGRADE_CEILING, [])
+        reused = Budget(1_600_000_000, [])
         steps = ((10_000_000, 30_000_000, 1_000_099), (PACKAGE_TRANSACTION_GAS, 0, 9_588_562),
                  (PACKAGE_TRANSACTION_GAS, 0, 42_002_565), (PACKAGE_TRANSACTION_GAS, 0, 13_494_400),
                  (20_000_000, 0, 19_718_800), (20_000_000, 0, 4_268_589))
@@ -364,7 +385,7 @@ class TrustTests(unittest.TestCase):
             self.assertIn('--compact-lifecycle', calls[0])
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[0], '1600000000', 'evidence/package-upgrade.json'),
+            for command, ceiling, evidence in ((calls[0], '2000000000', 'evidence/package-upgrade.json'),
                                                (calls[1], '1500000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
@@ -446,7 +467,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+        self.assertEqual(required_balance(SUITES), 3_650_000_000)
 
     def test_fresh_sf136_packages_fit_their_budgets(self):
         # A fresh base publish of current main settled 532,828,600 MIST and its
@@ -568,7 +589,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+        self.assertEqual(required_balance(SUITES), 3_650_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile
