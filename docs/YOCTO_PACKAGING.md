@@ -9,6 +9,17 @@ Operators installing a first device should follow
 [Install the device client](INSTALL_DEVICE_CLIENT.md#yocto-image-and-recipe);
 this page records the packaging details and evidence.
 
+## Standalone distribution readiness (SF-230)
+
+The [software layer README](../suifleet-edge/meta-suifleet/README.md) and
+[release/submission checklist](../suifleet-edge/meta-suifleet/RELEASE.md) describe
+the deterministic export and outstanding authorized public-source/repository/index
+publication. No standalone repository or Layer Index listing is available yet.
+Pi image/access policy, test component and core-recipe workarounds now live in
+`suifleet-edge/meta-suifleet-integration`; both pinned kas profiles include it.
+The generic software layer has no core recipe appends or BSP dependency.
+Source, Cargo and codec pins remain unchanged.
+
 ## Pinned build inputs
 
 The Scarthgap profile uses the user's selected `meta-lts-mixins` `scarthgap/rust`
@@ -101,7 +112,7 @@ Preserve the package feed, source/layer revisions, build configuration,
 `license.manifest`, image/package manifests, binary/image SHA-256 values and
 BitBake logs. `ca-certificates` is an explicit runtime dependency; the daemon uses Rustls and has no direct OpenSSL build dependency. Systemd and
 other image/native dependencies still use OpenSSL, so the observed recursive
-install serialization workaround remains in the layer. Shared-library QA stays
+install serialization workaround remains in the integration layer. Shared-library QA stays
 enabled.
 Use a writable persistent root filesystem for these initial profiles.
 Read-only-rootfs/data-partition migration is not implemented here.

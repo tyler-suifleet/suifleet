@@ -1,0 +1,22 @@
+[
+  "COPYING.MIT",
+  "README.md",
+  "RELEASE.md",
+  "conf/layer.conf",
+  "export-files.json",
+  "recipes-devtools/suifleet-node/suifleet-node_22.22.2.bb",
+  "recipes-edge/suifleet-walrus-codec/suifleet-walrus-codec_1.0.bb",
+  "recipes-edge/suifleet/files/config.toml.example",
+  "recipes-edge/suifleet/files/firmware.toml.example",
+  "recipes-edge/suifleet/files/signer.toml.example",
+  "recipes-edge/suifleet/files/suifleet-enrollment.path",
+  "recipes-edge/suifleet/files/suifleet-firmware.path",
+  "recipes-edge/suifleet/files/suifleet-firmware.service",
+  "recipes-edge/suifleet/files/suifleet-provision",
+  "recipes-edge/suifleet/files/suifleet-provision.service",
+  "recipes-edge/suifleet/files/suifleet-signer.service",
+  "recipes-edge/suifleet/files/suifleet-signer.socket",
+  "recipes-edge/suifleet/files/suifleet.service",
+  "recipes-edge/suifleet/suifleet-crates.inc",
+  "recipes-edge/suifleet/suifleet_1.0.bb"
+]
