@@ -1654,6 +1654,9 @@ pub mod subscription {
     pub const OFFER: &str = "offer";
     pub const OPEN: &str = "open";
     pub const RENEW: &str = "renew";
+    pub const CANCEL_SECURED: &str = "cancel_secured";
+    pub const OPEN_SECURED: &str = "open_secured";
+    pub const RENEW_SECURED: &str = "renew_secured";
     #[derive(Debug, Clone, Deserialize, Serialize)]
     pub struct Account {
         pub id: [u8; 32],

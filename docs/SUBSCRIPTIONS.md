@@ -32,7 +32,8 @@ It does not claim daemon scheduling or automatic service shutdown at expiry.
 
 Cancellation is authorized by a current customer administrator. It settles the
 fixed fees for every period that has already started, including periods whose
-collection has not yet been submitted, and returns the entire remaining balance
+collection has not yet been submitted, grants matching entitlement through the last
+settled boundary, and returns the entire remaining balance
 as a `Coin<T>` to that administrator's transaction. The transaction must transfer
 that coin to the customer's selected account. A started period is nonrefundable;
 unstarted periods and surplus are refundable in full, without a cancellation fee
@@ -41,11 +42,21 @@ again; deposits made after cancellation can still be refunded. Registry authorit
 has no withdrawal, sweep, fee mutation or refund-recipient override.
 
 Renewal requires explicit customer approval after the old term ends and all its
-periods are collected or cancellation has settled them. It applies a new immutable
+periods are collected, or immediately after cancellation has settled them.
+A replacement term starts at the later of now and the already-paid boundary,
+so cancellation never creates overlapping quota resets or a year-long lockout. It applies a new immutable
 offer, published at least 30 days before acceptance, without changing the payee.
 The planner's 3× SUI-cost trigger remains an operator quoting rule, not permission
 to change an account's terms. This is software enforcement of notice and fixed
 terms, not approval of a production tariff or legal contract.
+
+Protected customers use `open_secured`, `renew_secured` and `cancel_secured`.
+Their queued intents bind the operation and Customer plus registry/offer/payment
+ID and amount for opening, account/offer for renewal, and account for cancellation.
+They require every configured security class (class 7), including the longest
+configured delay, and clear the grant after execution. Plain entry points retain
+their factor checks. Cancellation now takes a mutable Customer to grant all
+settled entitlement; callers must regenerate transaction metadata.
 
 ## Upgrade and client boundary
 
@@ -102,7 +113,7 @@ base and performs a genuine compatible upgrade over an existing Customer before
 checking collection, refund state and rejected old-package entry points. Its SUI
 fixture is not evidence of Circle USDC on public testnet.
 
-Public Testnet acceptance completed on 2026-11-03 after the user funded the
+Historical pre-review Public Testnet acceptance completed on 2026-11-03 after the user funded the
 canonical Circle USDC coin. The [deployment manifest](validation/sf181-testnet-manifest.json)
 pins the test fixture's subscription origins, canonical USDC and the SF-185
 Testnet treasury. The [receipt](validation/sf181-testnet.json) records all seven
@@ -132,6 +143,10 @@ cancellation. The local upgrade receipt now uses merged main `cae74617` as its
 base, preserving the merged security policy while sealing subscription authority
 at version 201. Configured security factors still block unauthenticated
 cancellation; registry authority cannot override the subscription entitlement.
+
+Those receipts predate the feedback fixes below and do not establish exact-head
+public-Testnet acceptance for the updated cancellation and secured wrappers.
+Fresh automated candidate CI/testnet remains required.
 
 Physical, mainnet, production-provider and manual-wallet acceptance remain unrun
 in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and

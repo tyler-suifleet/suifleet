@@ -163,6 +163,10 @@ module sui_edge::customer {
     }
 
     /// Subscription custody is additive; this marker never leaves Customer.
+    #[test_only]
+    public fun subscription_entitlement_for_testing(customer: &Customer): (u64, u64, u64, u64) {
+        (customer.device_limit, customer.allowance, customer.used, customer.period)
+    }
     public struct SubscriptionKey has copy, drop, store {}
     public(package) fun bind_subscription(customer: &mut Customer, registry: &DeviceRegistry, account: ID, first_period: u64) {
         assert!((customer.version == 1 || security_authority(customer)) && customer.registry_id == object::id(registry), EBinding);

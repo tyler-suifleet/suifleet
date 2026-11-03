@@ -8910,7 +8910,7 @@
           ],
           "parameters": [
             "&mut sui_edge::subscription::Account<T>",
-            "&sui_edge::customer::Customer",
+            "&mut sui_edge::customer::Customer",
             "&sui::clock::Clock",
             "&mut sui::tx_context::TxContext"
           ],
@@ -9005,6 +9005,65 @@
             "&sui_edge::customer::Customer",
             "&sui_edge::subscription::Offer<T>",
             "&sui::clock::Clock",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "cancel_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [
+            {
+              "name": "T",
+              "constraints": []
+            }
+          ],
+          "parameters": [
+            "&mut sui_edge::subscription::Account<T>",
+            "&mut sui_edge::customer::Customer",
+            "&sui::clock::Clock",
+            "sui_edge::security_policy::Action",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": [
+            "sui::coin::Coin<T>"
+          ]
+        },
+        "open_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [
+            {
+              "name": "T",
+              "constraints": []
+            }
+          ],
+          "parameters": [
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::device_registry::DeviceRegistry",
+            "&sui_edge::subscription::Offer<T>",
+            "sui::coin::Coin<T>",
+            "&sui::clock::Clock",
+            "sui_edge::security_policy::Action",
+            "&mut sui::tx_context::TxContext"
+          ],
+          "returns": []
+        },
+        "renew_secured": {
+          "visibility": "Public",
+          "entry": false,
+          "type_parameters": [
+            {
+              "name": "T",
+              "constraints": []
+            }
+          ],
+          "parameters": [
+            "&mut sui_edge::subscription::Account<T>",
+            "&mut sui_edge::customer::Customer",
+            "&sui_edge::subscription::Offer<T>",
+            "&sui::clock::Clock",
+            "sui_edge::security_policy::Action",
             "&mut sui::tx_context::TxContext"
           ],
           "returns": []
