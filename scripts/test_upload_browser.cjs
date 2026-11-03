@@ -7,7 +7,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'suifleet-upload-browser-'));
   let server, browser;
   try {
-    const fixture = await fs.readFile(path.join(__dirname, '../manifests/fixture.localnet.json'), 'utf8');
+    const fixture = JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(__dirname, '../manifests/fixture.localnet.json'), 'utf8')), network: 'testnet', chain_identifier: '4c78adac' });
     const entry = path.join(__dirname, 'browser/upload-acceptance.jsx');
     await build({ entryPoints: [entry], outfile: path.join(directory, 'app.js'), bundle: true, platform: 'browser', jsx: 'automatic',
       alias: { '@': path.resolve(__dirname, '../dapp/src') }, nodePaths: [path.resolve(__dirname, '../dapp/node_modules')],
@@ -29,7 +29,12 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     // browser only fires change for a different value, so each selection must
     // clear the input; re-selecting must then re-run validation.
     const fileInput = page.locator('input[type=file]');
-    const selectSame = () => fileInput.setInputFiles({ name: 'same.bin', mimeType: 'application/octet-stream', buffer: Buffer.from('same artifact') });
+    const selectSame = async () => {
+      await fileInput.setInputFiles({ name: 'same.bin', mimeType: 'application/octet-stream', buffer: Buffer.from('same artifact') });
+      assert.equal(await cleared(), true);
+      // SF-165 reviews the period/price before the explicit upload action.
+      await page.getByRole('button', { name: 'Upload selected artifact' }).click();
+    };
     const cleared = () => fileInput.evaluate(input => input.value === '' && input.files.length === 0);
     const alerts = () => page.evaluate(() => window.uploadAcceptance.alerts());
     for (const expected of [1, 2]) {
@@ -41,10 +46,10 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     assert.equal(await page.evaluate(() => window.uploadAcceptance.count()), 0);
     await page.getByPlaceholder('my-app', { exact: true }).fill('same-file');
     await page.getByPlaceholder('1.0.0', { exact: true }).fill('1.0.0');
-    // Confidential delivery (the default) without Seal key servers is rejected before upload.
+    // Confidential delivery (the default) without an encryption service is rejected before upload.
     await selectSame();
     await page.waitForFunction(() => window.uploadAcceptance.alerts().length === 3);
-    assert.match((await alerts())[2], /Confidential delivery needs Seal key servers/);
+    assert.match((await alerts())[2], /encryption service is not configured; nothing was uploaded/);
     assert.equal(await cleared(), true);
     await page.getByRole('radio').nth(1).check();
     await selectSame();
@@ -70,6 +75,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.getByRole('checkbox').first().check();
     const upload = () => page.locator('input[type=file]').setInputFiles({ name: 'test.bin', mimeType: 'application/octet-stream', buffer: Buffer.from('test artifact') });
     await upload();
+    await page.getByRole("button", { name: "Upload selected artifact" }).click();
     await page.waitForFunction(() => window.uploadAcceptance.count() === 1);
     await page.evaluate(() => window.uploadAcceptance.progress(0, 5, 10));
     await page.waitForFunction(() => document.querySelector('[role=progressbar]').getAttribute('aria-valuenow') === '50');
@@ -102,7 +108,7 @@ const { build } = appRequire('esbuild'), { chromium } = appRequire('playwright')
     await page.evaluate(() => window.uploadAcceptance.finish(2));
     await page.waitForFunction(() => window.uploadAcceptance.walletCalls() === 1);
     assert.equal(await page.getByRole('button', { name: 'Deploying…', exact: true }).isDisabled(), true);
-    await page.getByRole('status').filter({ hasText: /Checking localnet/ }).waitFor();
+    await page.getByRole('status').filter({ hasText: /Checking testnet/ }).waitFor();
     await page.evaluate(() => window.uploadAcceptance.phase('wallet'));
     await page.getByRole('dialog').getByText(/Your wallet is preparing/).waitFor();
     await page.evaluate(() => window.uploadAcceptance.reject());

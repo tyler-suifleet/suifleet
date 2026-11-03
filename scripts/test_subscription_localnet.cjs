@@ -16,7 +16,7 @@ const { requestSuiFromFaucetV2 } = appRequire('@mysten/sui/faucet');
   try {
     const base = path.join(temporary, 'base');
     await fs.mkdir(base);
-    execFileSync('tar', ['-x', '-C', base], { input: execFileSync('git', ['archive', '5331a8cb', 'contracts'], { maxBuffer: 25e6 }) });
+    execFileSync('tar', ['-x', '-C', base], { input: execFileSync('git', ['archive', 'cae74617', 'contracts'], { maxBuffer: 25e6 }) });
     const env = { ...process.env, SUI_CONFIG_DIR: path.join(temporary, 'config') };
     await fs.mkdir(env.SUI_CONFIG_DIR);
     const keystore = path.join(env.SUI_CONFIG_DIR, 'empty.keystore');
@@ -35,7 +35,7 @@ const { requestSuiFromFaucetV2 } = appRequire('@mysten/sui/faucet');
         catch (error) { if (retry === 9) throw Error(`disposable faucet: ${error.message}`); await new Promise(resolve => setTimeout(resolve, 500)); }
       }
     }
-    const evidence = { base: '5331a8cb', contracts_tree: execFileSync('git', ['rev-parse', 'HEAD:contracts'], { encoding: 'utf8' }).trim(), transactions: [], limits: ['Disposable localnet SUI; no real USDC, public network, manual wallet, provider or physical acceptance.'] };
+    const evidence = { base: 'cae74617', contracts_tree: execFileSync('git', ['rev-parse', 'HEAD:contracts'], { encoding: 'utf8' }).trim(), transactions: [], limits: ['Disposable localnet SUI; no real USDC, public network, manual wallet, provider or physical acceptance.'] };
     async function execute(label, tx, failure) {
       tx.setGasBudget(label.includes('publish') || label.includes('upgrade') ? 2_000_000_000 : 100_000_000);
       if (failure) {

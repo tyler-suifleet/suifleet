@@ -16,10 +16,11 @@ export function HistoryStatusView({ message }: { message: string }) {
     <details className="history-status max-w-3xl">
       <summary className="inline-flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 font-medium hover:bg-slate-100">
         <span aria-hidden="true" className="h-2 w-2 rounded-full bg-amber-500" />
-        Data status · some history may be missing
+        Data status · {message.toLowerCase().includes("pruned by this connection") ? "history pruned by this connection" : "some history may be missing"}
       </summary>
       <div className="mt-2 space-y-3 rounded-lg border border-slate-200 bg-white p-4 text-sm leading-relaxed">
         <p>Your connection or browser storage limits the history available here. Older devices, groups or updates may be missing from lists and totals. An empty list does not confirm that no records exist.</p>
+        <p><a className="underline" href="/settings/#connection-history">Connection history explanation</a>. Stored rollout decisions are read from current chain state, independently of event retention. Complete decision history is confirmed in each rollout audit.</p>
         <p>If you expect older records, ask your fleet administrator to check the connection’s history coverage and browser storage. Complete network history requires a connection that retains older records.</p>
         <details><summary className="cursor-pointer font-medium text-slate-700">Technical details for your administrator</summary>
           <p className="mt-2 whitespace-pre-wrap break-words text-xs text-slate-500">{message}</p>

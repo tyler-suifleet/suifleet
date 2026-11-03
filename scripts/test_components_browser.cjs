@@ -8,14 +8,14 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "suifleet-components-browser-"));
   let server, browser;
   try {
-    const manifest = JSON.parse(await fs.readFile(path.join(__dirname, "../manifests/fixture.localnet.json"), "utf8"));
+    const manifest = JSON.parse(JSON.stringify({ ...JSON.parse(await fs.readFile(path.join(__dirname, "../manifests/fixture.localnet.json"), "utf8")), network: "testnet", chain_identifier: "4c78adac" }));
     for (const type of loader()("lib/protocol-version.ts").CATALOG_TYPES) manifest.type_origins[type] = manifest.call_package_id;
     const fixture = JSON.stringify(manifest);
     const entry = path.join(__dirname, "browser/components-acceptance.jsx");
     await build({ entryPoints: [entry], outfile: path.join(directory, "app.js"), bundle: true, platform: "browser", jsx: "automatic",
       alias: { "@": path.resolve(__dirname, "../dapp/src") }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")],
       plugins: [{ name: "acceptance-hooks", setup(builder) {
-        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies|useDeploymentStorage)|@\/lib\/catalog)$/ }, () => ({ path: entry }));
+        builder.onResolve({ filter: /^(@mysten\/dapp-kit-react|@\/hooks\/(useFleetTransaction|useDevices|useGroups|useAccessPolicies|useDeploymentStorage)|\.\/useFleetTransaction|@\/lib\/catalog)$/ }, () => ({ path: entry }));
       } }],
       define: { "process.env": "{}", "process.env.NODE_ENV": '"development"', "process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST": JSON.stringify(fixture), "process.env.NEXT_PUBLIC_SEAL_KEY_SERVERS": "undefined", "process.env.NEXT_PUBLIC_SEAL_THRESHOLD": "undefined", "process.env.NEXT_PUBLIC_WALRUS_EPOCHS": '"5"', "process.env.NEXT_PUBLIC_WALRUS_MAX_COST_FROST": "undefined" }, logLevel: "warning" });
     // Use compiled application Tailwind styles, so mobile overflow checks cover
@@ -157,15 +157,27 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     assert.equal(await page.getByLabel("Operating system").first().inputValue(), "macos");
     await page.getByText("Optional installer command", { exact: true }).first().click();
     await page.getByLabel("Install command", { exact: true }).first().fill("{artifact} --install");
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
-    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
-    await publish.click();
-    await page.getByRole("alert").filter({ hasText: "Confidential delivery needs Seal" }).waitFor();
-    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
-    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByLabel("Storage period (days)", { exact: true }).fill("12");
+    // Delivery is validated on the artifacts step, before review or any upload.
+    const review = page.getByRole("button", { name: "Review version", exact: true });
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "not configured; nothing was uploaded" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfigured confidential delivery must not reach review");
     await page.getByRole("radio").nth(1).check();
+    await review.click();
+    await page.getByRole("alert").filter({ hasText: "Confirm that this content may be stored publicly" }).waitFor();
+    assert.equal(await page.getByRole("heading", { name: "Review & publish" }).count(), 0, "unconfirmed public delivery must not reach review");
+    assert.equal(await page.evaluate(() => window.componentsAcceptance.count()), 0, "confidential must never fall back to public");
     await page.getByRole("checkbox").first().check();
-    await page.getByRole("button", { name: "Review version", exact: true }).click();
+    await review.click();
+    const publish = page.getByRole("button", { name: "Upload and publish version", exact: true });
+    await publish.waitFor();
+    // Returning to the artifacts step keeps the staged files visible in their pickers.
+    await page.getByRole("button", { name: "Edit platform artifacts" }).click();
+    await page.getByText("Selected: macos.bin", { exact: false }).waitFor();
+    await page.getByText("Selected: linux.bin", { exact: false }).waitFor();
+    assert.deepEqual(await page.getByLabel("Artifact", { exact: true }).evaluateAll(inputs => inputs.map(i => i.files[0]?.name)), ["macos.bin", "linux.bin"]);
+    await review.click();
     await publish.evaluate(b => { b.click(); b.click(); b.click(); });
     await page.waitForFunction(() => window.componentsAcceptance.count() === 1);
     assert.equal(await page.getByRole("button", { name: "Publishing…", exact: true }).isDisabled(), true);
@@ -180,6 +192,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     }
     await publish.click();
     for (let i = 1; i <= 4; i++) await finishUpload(i);
+    assert.deepEqual(await page.evaluate(() => window.componentsAcceptance.periods()), [12, 12, 12, 12, 12]);
     await page.getByRole("status").filter({ hasText: "Verifying fleet network" }).waitFor();
     await page.evaluate(() => window.componentsAcceptance.phase("wallet"));
     await page.getByRole("status").filter({ hasText: "Confirm version publication in your wallet" }).waitFor();

@@ -12,7 +12,7 @@ import { useFleetTransaction } from "@/hooks/useFleetTransaction";
 import { useAccessPolicies, POLICIES_ENABLED } from "@/hooks/useAccessPolicies";
 import { useDevices } from "@/hooks/useDevices";
 import { useGroups } from "@/hooks/useGroups";
-import { buildCreatePolicyTx, buildGrantTx, buildRevokeTx, buildRotateTx, type AccessPolicy, type Scope } from "@/lib/access-policy";
+import { deviceGrantReason, buildCreatePolicyTx, buildGrantTx, buildRevokeTx, buildRotateTx, type AccessPolicy, type Scope } from "@/lib/access-policy";
 import { SEAL_SETTINGS } from "@/lib/seal";
 
 /** Seal access policies (SF-022): who may decrypt confidential releases. */
@@ -107,10 +107,12 @@ function PolicyCard({ policy, pending, run }: {
   const groups = groupQuery.data ?? [];
   const [scope, setScope] = useState<Scope>("device");
   const [subject, setSubject] = useState("");
-  const recipients = scope === "device" ? devices.filter(d => d.ownerCapId) : groups;
+  const recipients = scope === "device"
+    ? devices.map(device => ({ ...device, reason: deviceGrantReason(policy, device) }))
+    : groups.map(group => ({ ...group, reason: undefined }));
   const recipientQuery = scope === "device" ? deviceQuery : groupQuery;
   const validSubject = scope === "account" ? isValidSuiAddress(subject) :
-    !recipientQuery.isPending && !recipientQuery.error && recipients.some(r => r.objectId === subject);
+    !recipientQuery.isPending && !recipientQuery.error && recipients.some(r => r.objectId === subject && !r.reason);
   const duplicate = (scope === "device" ? policy.devices : scope === "group" ? policy.groups : policy.accounts).includes(isValidSuiAddress(subject) ? normalizeSuiAddress(subject) : subject);
   const label = (s: Scope, id: string) =>
     s === "device" ? devices.find(d => d.objectId === id)?.name ?? id
@@ -147,10 +149,12 @@ function PolicyCard({ policy, pending, run }: {
               <option value="account">Account address</option>
             </select>
           </label>
-          {scope !== "account" ? <label className="min-w-0">{scope === "device" ? "Activated device" : "Group"}
-            <select aria-label={scope === "device" ? "Activated device" : "Group"} className="block border rounded px-3 py-2 max-w-full" value={subject} onChange={e => setSubject(e.target.value)} disabled={recipientQuery.isPending || !!recipientQuery.error}>
+          {scope !== "account" ? <label className="min-w-0">{scope === "device" ? "Device" : "Group"}
+            <select aria-label={scope === "device" ? "Device" : "Group"} className="block border rounded px-3 py-2 max-w-full" value={subject} onChange={e => setSubject(e.target.value)} disabled={recipientQuery.isPending || !!recipientQuery.error}>
               <option value="">Choose a {scope}…</option>
-              {recipients.map(r => <option key={r.objectId} value={r.objectId}>{r.name} ({r.objectId.slice(0, 8)}…)</option>)}
+              {recipients.map(r => <option key={r.objectId} value={r.objectId} disabled={!!r.reason}>
+                {r.name} ({r.objectId.slice(0, 8)}…){r.reason ? ` — ${r.reason}` : ""}
+              </option>)}
             </select>
           </label> : <label className="min-w-0">Account address
             <input className="block border rounded px-3 py-2 w-full" value={subject} onChange={e => setSubject(e.target.value.trim())} placeholder="0x…" spellCheck={false} />
@@ -163,7 +167,7 @@ function PolicyCard({ policy, pending, run }: {
           {recipientQuery.isPending && <p role="status">Loading {scope} choices…</p>}
           {recipientQuery.error && <div role="alert">Could not load {scope} choices. <button type="button" className="underline" onClick={() => void recipientQuery.refetch()}>Retry recipients</button></div>}
           {!recipientQuery.isPending && !recipientQuery.error && recipients.length === 0 && <p role="status">
-            {scope === "device" ? "No activated devices available. Enroll and activate a device in " : "No administered groups available. Create a group and add devices in "}
+            {scope === "device" ? "No devices available. Register a device in " : "No administered groups available. Create a group and add devices in "}
             <Link className="text-blue-700 underline" href="/devices">{scope === "device" ? "Devices" : "Devices → Device groups"}</Link> first.
           </p>}
         </>}

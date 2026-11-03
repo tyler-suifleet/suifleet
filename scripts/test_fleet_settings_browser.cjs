@@ -12,7 +12,10 @@ const { appRequire } = require("./frontend_test_utils.cjs");
 const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright");
 
 const src = path.resolve(__dirname, "../dapp/src"), fakes = path.resolve(__dirname, "browser/fleet-settings-fakes.js");
-const importers = new Set([path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
+const importers = new Set([path.join(src, "components/OrganizationSecurity.tsx"), path.join(src, "components/MultisigAdministrator.tsx"), path.join(src, "components/StreamRetention.tsx"), path.join(src, "components/FleetSettings.tsx"), path.join(src, "components/FleetBudget.tsx"), path.join(src, "hooks/useCostQuote.ts")]);
+// The full settings page includes organization security; its wallet hooks use
+// the same controlled boundary as the reporting/storage panels. Include the
+// nested multisig panel: it reads wallet/client hooks even before enrollment.
 // Account reads now enter through the hydration-safe application hook. Keep
 // this component fixture on its controlled wallet boundary, like the SDK reads.
 const faked = new Set(["@/hooks/useCurrentAccount", "@mysten/dapp-kit-react", "@mysten/walrus", "@/hooks/useDevices", "@/hooks/useFleetStorage", "@/hooks/useFleetTransaction"]);
@@ -39,11 +42,17 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
     await build({ entryPoints: [path.resolve(__dirname, "browser/fleet-settings.jsx")], bundle: true, platform: "browser", outfile: bundle, jsx: "automatic",
       banner: { js: "var process = { env: { NEXT_PUBLIC_DEPLOYMENT_MANIFEST: JSON.stringify(window.__SF_MANIFEST_OBJECT) } };" }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": src },
       define: { "process.env.NODE_ENV": '"development"' }, plugins: [fakeDependencies], logLevel: "warning" });
+    // Optional visual evidence uses the actual production stylesheet, with the same controlled wallet boundary.
+    let style = "";
+    if (process.env.FLEET_SETTINGS_SCREENSHOTS) {
+      const chunks = path.join(root, "dapp/out/_next/static/chunks");
+      for (const file of await fs.readdir(chunks)) if (file.endsWith(".css")) style += await fs.readFile(path.join(chunks, file), "utf8");
+    }
     server = http.createServer(async (req, res) => {
       const js = req.url === "/app.js";
       const manifest = new URL(req.url, "http://x").searchParams.get("scenario") === "unsupported" ? withoutSettings : withSettings;
       res.setHeader("Content-Type", js ? "text/javascript" : "text/html");
-      res.end(js ? await fs.readFile(bundle) : `<!doctype html><html><head><title>Fleet settings</title></head><body><div id="root"></div>
+      res.end(js ? await fs.readFile(bundle) : `<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Fleet settings</title><style>${style}</style></head><body><div id="root"></div>
         <script>window.__SF_MANIFEST_OBJECT = ${JSON.stringify(manifest)};</script><script src="/app.js"></script></body></html>`);
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -51,7 +60,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
     const origin = `http://127.0.0.1:${server.address().port}`;
 
     async function open(scenario) {
-      const page = await browser.newPage(), errors = [], usdRequests = [];
+      const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } }), errors = [], usdRequests = [];
       page.on("pageerror", (error) => errors.push(error.message));
       // No real third-party call: CoinGecko is answered locally, and only when the owner asks.
       await page.route("https://api.coingecko.com/**", (route) => { usdRequests.push(route.request().url());
@@ -64,7 +73,43 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const text = (id) => page.getByTestId(id).textContent();
       const cells = async (id) => (await page.getByTestId(id).locator("td").allTextContents()).map((t) => t.trim());
       const depositSui = async () => Number(/for \d+ month\(s\) of these settings([\d.]+) SUI/.exec(await text("deposit"))[1]);
-      await page.getByTestId("cost-planning").waitFor();
+      await page.getByTestId("cost-planning").waitFor().catch(async (error) => {
+        throw new Error(`${error.message}; page errors: ${JSON.stringify(errors)}; page shows: ${await body()}`);
+      });
+      if (scenario === "short" && process.env.FLEET_SETTINGS_SCREENSHOTS) {
+        await fs.mkdir(process.env.FLEET_SETTINGS_SCREENSHOTS, { recursive: true });
+        for (const width of [1440, 390]) {
+          await page.setViewportSize({ width, height: 1000 });
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, `no horizontal overflow at ${width}px`);
+          await page.screenshot({ path: path.join(process.env.FLEET_SETTINGS_SCREENSHOTS, `settings-${width}.png`), fullPage: true });
+        }
+        await page.setViewportSize({ width: 1440, height: 1000 });
+      }
+      // Settings navigation preserves form state and keeps specialist controls off the default view.
+      const sectionButton = name => page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name });
+      assert.equal(await sectionButton(/Device reporting/).getAttribute("aria-pressed"), "true");
+      await page.getByRole("region", { name: "Security settings", exact: true }).waitFor({ state: "hidden" });
+      await page.getByRole("region", { name: "Advanced settings", exact: true }).waitFor({ state: "hidden" });
+      assert.equal(await page.getByTestId("reporting-advanced").getAttribute("open"), null);
+      const initialHealth = await page.locator('input[name="healthIntervalMs"]:checked').getAttribute("id");
+      if (scenario === "short") await page.locator("#healthIntervalMs-3600000").check();
+      await sectionButton(/^Security/).click();
+      await page.getByRole("region", { name: "Multisig administrator", exact: true }).waitFor();
+      await sectionButton(/^Data retention/).focus();
+      await page.keyboard.press("Enter");
+      await page.getByRole("region", { name: "Data retention settings", exact: true }).waitFor();
+      await page.evaluate(() => { window.location.hash = "connection-history"; });
+      await page.getByRole("region", { name: "Advanced settings", exact: true }).waitFor();
+      assert.equal(await sectionButton(/^Advanced/).getAttribute("aria-pressed"), "true", "existing history links open the advanced section");
+      await page.getByRole("heading", { name: "Upload connections" }).waitFor();
+      await page.getByText("Connection history details", { exact: true }).click();
+      await page.getByText(/Public Sui connections can prune old events/).waitFor();
+      await sectionButton(/Device reporting/).click();
+      if (scenario === "short") {
+        assert.ok(await page.locator("#healthIntervalMs-3600000").isChecked(), "navigation retains the unsaved choice");
+        await page.locator(`#${initialHealth}`).check();
+      }
+      await page.getByTestId("reporting-advanced").locator("summary").first().click();
       assert.equal(await page.getByTestId("cost-planning").getAttribute("open"), null, "cost planning stays optional");
       await page.getByText("Saving settings does not buy a subscription or add money to your budget.", { exact: true }).waitFor();
       await page.getByTestId("cost-planning").locator("summary").first().click();

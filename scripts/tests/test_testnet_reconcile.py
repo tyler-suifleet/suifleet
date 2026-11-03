@@ -345,9 +345,27 @@ class Funding(unittest.TestCase):
                          'infrastructure')
         self.assertEqual(live.failure_class(AssertionError('receipt never became 1')), 'source')
 
+    def test_receipt_effects_failure_diagnostics(self):
+        for stderr, category in (
+            ('receipt-effects: transport unavailable after 3 read attempts\n', 'infrastructure'),
+            ('receipt-effects: verification failed\n', 'source'),
+            ('provider secret; 429; receipt-effects: transport unavailable after 3 read attempts', 'source'),
+        ):
+            with patch.object(live.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                    ['node'], 1, stdout='private stdout', stderr=stderr)) as run:
+                with self.assertRaises(RuntimeError) as error:
+                    live.receipt_effects(Path('/manifest.json'), ['deployment'])
+                self.assertEqual(live.failure_class(error.exception), category)
+                self.assertNotIn('secret', str(error.exception))
+                self.assertNotIn('private', str(error.exception))
+                self.assertEqual(run.call_count, 1)  # never replay the suite/mutations
+        with patch.object(live.subprocess, 'run', return_value=subprocess.CompletedProcess(
+                ['node'], 0, stdout='[{"digest":"proof"}]', stderr='')):
+            self.assertEqual(live.receipt_effects(Path('/manifest.json'), ['deployment']), [{'digest': 'proof'}])
+
     def test_ci_controller_requires_every_selected_suite_up_front(self):
         from ci_testnet_wallet import execute
-        for relevant, required in ((True, '3250000000'), (False, '1600000000')):
+        for relevant, required in ((True, '3650000000'), (False, '2000000000')):
             with tempfile.TemporaryDirectory() as root:
                 calls = []
 
@@ -358,7 +376,7 @@ class Funding(unittest.TestCase):
                                          lambda base: relevant), 0)
                 first = calls[0]
                 self.assertEqual(first[first.index('--required-balance-mist') + 1], required)
-                self.assertEqual(first[first.index('--max-spend-mist') + 1], '1600000000')
+                self.assertEqual(first[first.index('--max-spend-mist') + 1], '2000000000')
                 self.assertEqual(len(calls), 3 if relevant else 1)
 
 
@@ -426,7 +444,7 @@ class RunFlow(unittest.TestCase):
                                max_spend_mist=800000000, required_balance_mist=required, build_sui='/compiler',
                                network_sui='/network', faucet_tool='/network' if faucet else None, base_ref='b' * 40,
                                walrus='simulated', state=str(root / 'state.json'), fresh=False)
-        walrus = SimpleNamespace(aggregator='http://offline.invalid', mode='simulated', close=Mock())
+        walrus = SimpleNamespace(publisher='http://offline.invalid', aggregator='http://offline.invalid', mode='simulated', close=Mock())
         patches = [patch.object(live.subprocess, 'run', side_effect=command),
                    patch.object(live.subprocess, 'check_output', return_value='b' * 40),
                    patch.object(live.toolchain, 'check_tools', return_value=tools),
@@ -484,7 +502,7 @@ class RunFlow(unittest.TestCase):
                     patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
             evidence = json.loads((root / 'evidence.json').read_text())
             saved = json.loads((root / 'state.json').read_text())['publications'][key]
-            self.assertEqual(reservations, [live.PACKAGE_GAS])
+            self.assertEqual(reservations, [min(live.PACKAGE_GAS, args.max_spend_mist)])
             self.assertNotIn('pending_operation', saved)
             self.assertNotIn('base_package', saved)
             self.assertEqual(evidence['reconciliations'][0]['outcome'], 'failed')
@@ -636,7 +654,7 @@ class RunFlow(unittest.TestCase):
                     patch.object(live.toolchain, 'package_submitter', side_effect=submitter)])
             self.assertEqual(sent, ['BYTES'])  # The identical retained bytes, once.
             self.assertEqual(read, [digest])
-            self.assertEqual(reservations, [live.PACKAGE_GAS])
+            self.assertEqual(reservations, [min(live.PACKAGE_GAS, args.max_spend_mist - 5_010_000)])
             saved = json.loads((root / 'state.json').read_text())['publications'][key]
             self.assertNotIn('pending_operation', saved)
             evidence = json.loads((root / 'evidence.json').read_text())
@@ -782,6 +800,7 @@ class RunFlow(unittest.TestCase):
             args, key, patches, commands = self.harness(root, self.upgrade_state(marker), upgrade=True)
             patches[1] = patch.object(live.subprocess, 'check_output', side_effect=output)
             extra = [patch.object(live.reconciler, 'Chain', return_value=chain),
+                     patch.object(live.dm, 'resolve', return_value={'type_origins': {}}),
                      patch.object(live.dm, 'chain_facts', side_effect=chain_facts),
                      patch.object(live, 'owner_of', side_effect=lambda client, oid: ADDRESS if oid == CAP else 'shared'),
                      patch.object(live.toolchain, 'write_pubfile'),

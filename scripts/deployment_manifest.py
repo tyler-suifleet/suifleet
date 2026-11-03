@@ -20,10 +20,14 @@ GROUP_BATCH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["group_batch"])
 BUDGET_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_budget"])
 INBOX_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_inbox"])
 ROLLOUT_HEALTH_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_health"])
+SECURITY_DELAY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["security_delay"])
+APPROVAL_TYPES = tuple(_PROTOCOL["optional_type_origins"]["second_person"])
+SECURITY_TYPES = tuple(_PROTOCOL["optional_type_origins"]["security_policy"])
 CUSTOMER_TYPES = tuple(_PROTOCOL["optional_type_origins"]["customer"])
 SETTINGS_TYPES = tuple(_PROTOCOL["optional_type_origins"]["fleet_settings"])
 SHARD_TYPES = tuple(_PROTOCOL["optional_type_origins"]["receipt_shards"])
-OPTIONAL_GROUPS = {"subscription": SUBSCRIPTION_TYPES, "catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES, "fleet inbox": INBOX_TYPES, "customer": CUSTOMER_TYPES, "receipt shards": SHARD_TYPES}
+AUDIT_TYPES = tuple(_PROTOCOL["optional_type_origins"]["rollout_audit"])
+OPTIONAL_GROUPS = {"subscription": SUBSCRIPTION_TYPES, "second person": APPROVAL_TYPES, "security delay": SECURITY_DELAY_TYPES, "security policy": SECURITY_TYPES, "rollout audit": AUDIT_TYPES, "catalog": CATALOG_TYPES, "seal policy": SEAL_POLICY_TYPES, "fleet budget": BUDGET_TYPES, "fleet settings": SETTINGS_TYPES, "rollout health": ROLLOUT_HEALTH_TYPES, "fleet inbox": INBOX_TYPES, "customer": CUSTOMER_TYPES, "receipt shards": SHARD_TYPES}
 
 def manifest_types(manifest):
     types = REQUIRED_TYPES
@@ -151,11 +155,12 @@ def validate(manifest):
             raise ValueError("unsupported " + client + " version")
     for name in ("publisher_url", "aggregator_url"):
         endpoint(manifest["walrus"][name])
-    mirrors = manifest["walrus"].get("aggregator_urls", [])
-    if not isinstance(mirrors, list):
-        raise ValueError("aggregator_urls must be a list")
-    for url in mirrors:
-        endpoint(url)
+    for name in ("aggregator_urls", "publisher_urls"):
+        mirrors = manifest["walrus"].get(name, [])
+        if not isinstance(mirrors, list) or (name in manifest["walrus"] and not mirrors):
+            raise ValueError(name + " must be a nonempty list")
+        for url in mirrors:
+            endpoint(url)
     return manifest
 
 
@@ -256,11 +261,15 @@ def resolve(args, read=chain_facts):
     manifest = dict(schema_version=_PROTOCOL["manifest_schema_version"], protocol_version=_PROTOCOL["protocol_version"], network=args.network,
         chain_identifier=args.chain_identifier, rpc_url=args.rpc, rpc_urls=[args.rpc],
         call_package_id=package_id, upgrade_cap_id=object_id(args.upgrade_cap), package_version=str(package["version"]),
-        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + SHARD_TYPES + GROUP_BATCH_TYPES + SUBSCRIPTION_TYPES if n in table)},
+        type_origins={name: table[name] for name in REQUIRED_TYPES + tuple(n for n in CATALOG_TYPES + SEAL_POLICY_TYPES + HANDOVER_TYPES + BUDGET_TYPES + ROLLOUT_HEALTH_TYPES + SETTINGS_TYPES + INBOX_TYPES + CUSTOMER_TYPES + APPROVAL_TYPES + SECURITY_DELAY_TYPES + SECURITY_TYPES + SHARD_TYPES + AUDIT_TYPES + GROUP_BATCH_TYPES + SUBSCRIPTION_TYPES if n in table)},
         shared_objects={"registry": {"id": object_id(args.registry),
             "initial_shared_version": shared_version(registry, table["device_registry::DeviceRegistry"])}},
         supported_clients={"dapp": {"min": "0.1.1" if all(n in table for n in SHARD_TYPES) else "0.1.0" if all(n in table for n in CATALOG_TYPES) else "0.0.2", "max_exclusive": "0.2.0"}, "edge": {"min": "0.2.2" if all(n in table for n in SHARD_TYPES) else "0.2.1", "max_exclusive": "0.3.0"}},
         walrus={"publisher_url": args.publisher, "aggregator_url": args.aggregator})
+    if getattr(args, "publisher_urls", None):
+        manifest["walrus"]["publisher_urls"] = args.publisher_urls
+    elif getattr(args, "publisher_mirror", None):
+        manifest["walrus"]["publisher_urls"] = [args.publisher, *args.publisher_mirror]
     if getattr(args, "treasury_payee", None) is not None:
         manifest["treasury_payee"] = args.treasury_payee
     if getattr(args, "subscription_coins", None) is not None:
@@ -317,6 +326,7 @@ def main():
     resolve_parser = sub.add_parser("resolve")
     for name in ("rpc", "chain-identifier", "package", "upgrade-cap", "registry", "publisher", "aggregator", "network"):
         resolve_parser.add_argument("--" + name, required=True)
+    resolve_parser.add_argument("--publisher-mirror", action="append", help="additional publisher, in failover order")
     resolve_parser.add_argument("--aggregator-mirror", action="append", help="ordered device mirror, repeat for each URL; replaces legacy device endpoint")
     resolve_parser.add_argument("--subscription-coins", type=json.loads, help="reviewed coin descriptors as JSON, requires USDC and treasury payee")
     resolve_parser.add_argument("--treasury-payee", help="reviewed canonical treasury multisig address; omitted disables payments")

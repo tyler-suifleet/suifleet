@@ -418,7 +418,7 @@ The frontend reads only `NEXT_PUBLIC_DEPLOYMENT_MANIFEST`; the daemon reads the 
 
 `pnpm build` produces the static `dapp/out` export. The [SF-082 development snapshot](SERVERLESS_FLEET_DATA.md) adds a checksum-pinned site-builder and deployment-bound reproducible build helper. No Walrus Site publication/update/rollback has been validated; its backend replacement is incomplete and must remain draft. Follow the recorded preflight/authorization and acceptance requirements before publication.
 
-Install the daemon, systemd service and real config through the validated image/package workflow. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
+Install the daemon, systemd service and real config through the validated image/package workflow. [Install the device client](INSTALL_DEVICE_CLIENT.md) is the operator guide for every platform; the console links to it. The separate root first-boot provisioning service invokes `--provision`; the unprivileged daemon starts after enrollment config appears and creates its state directory. Register the printed address, record Device/DeviceCap IDs, and fund report gas. Apply success currently means updater exit code zero, not post-boot health.
 
 The Yocto layer is `suifleet-edge/meta-suifleet`. [YOCTO_PACKAGING.md](YOCTO_PACKAGING.md) describes its pinned source/crate graph, Scarthgap Rust-mixin and Wrynose build profiles and separate first-boot provisioning/enrollment services. The source pin includes the merged SF-004 gRPC migration; offline packaging/boot acceptance remains distinct from supported-network OTA acceptance. Record actual build and boot results rather than inferring them from recipe presence. SWUpdate/RAUC installation and A/B recovery are platform-owned; SuiFleet invokes configured installer commands.
 
@@ -756,6 +756,70 @@ Set staged rollout `offline_timeout_ms` **above the normal check interval plus
 worst-case download/apply/report time** (and allow for network/backoff delays).
 Do not keep the old few-second stall timeout when normal checks take 30 minutes.
 
+## Organization security framework (SF-196)
+
+The [approved design and exact child API](SECOND_FACTOR_DESIGN.md) define seven
+protected action classes and four optional mechanisms. Native multisig (bit **1**)
+and delay (bit **8**) are available in the combined package. All factors default off;
+passkey and second-person factors remain unavailable. See the mechanism procedures below.
+protected action classes and four optional mechanisms. The combined package supports
+native multisig (bit **1**) and second-person approval (bit **4**); passkey and delay
+remain unavailable until their verifiers land.
+All mechanisms default off. The console offers activation only when the verified
+manifest includes the actual `customer::SecondPersonConfiguration` introduction origin; older
+framework deployments remain all-off/unavailable in that console.
+
+The base framework authority is version **197**; SF-199 enrollment seals it at
+**199**, which current clients also support. Migration through
+`customer::initialize_security` retires version 1 and the published intermediate
+196 framework; it preserves existing policy state and invalidates queued actions.
+Upgrade custody-resolving clients and external producer packages to their verified
+compatible core dependency before migrating; old producer code must not be assumed
+to keep writing after the authority seal. Do not leave an intermediate package
+authoritative merely because it knows about policies. Retain each type's actual introduction origin in the deployment manifest.
+
+Before nonzero activation, reconcile every adopted fleet's device capabilities
+(`pending_devices == 0`) and seal it with `seal_security_fleet`. Empty new fleets
+are sealed automatically. A populated pending fleet cannot be adopted into an
+already protected organization. Adopt release catalogs into customer publisher
+custody; importing foreign releases also requires publication authorization.
+Whole-organization handover requires current factors and a separately signed,
+expiring recipient consent; it preserves the existing custody namespaces.
+
+Do not compose a generic budget-cap loan with a protected operation. Generic
+loans fail whenever any protection is enabled, including inside an action grant.
+Use exact budget withdrawal or the fleet_storage
+`withdraw_managed_{wal,storage,retention}_secured` wrappers. The enrolled storage
+producer constructs its private witness, computes the exact action arguments,
+restores custody and clears the grant before returning. Producer enrollment
+retains registry authority and requires the current customer factors. Other
+external administration requires a reviewed exact-operation adapter; no arbitrary
+witness or caller-selected action class substitutes for that adapter.
+
+[Recovery evidence](validation/sf196-framework-recovery.md) includes actual
+protocol-140 testnet effects, the failed first allowance-limited run, the staged
+fixture repair, local direct upgrades and current daemon/client reads. These
+fixtures are separate from the application deployment. They do not authorize a
+production rollout or establish the four child mechanisms as complete.
+
+## Conventional static origins (SF-176)
+
+The selected host and gated release preparation for suifleet.io,
+app.suifleet.io and docs.suifleet.io are in [STATIC_HOSTING.md](STATIC_HOSTING.md).
+No live DNS, TLS, preview, production publication or rollback rehearsal is claimed.
+The three-origin source build is integrated; actual recorded-console acceptance,
+provider provisioning and hosted preview checks remain unrun. Walrus is separate.
+
+### Conventional three-origin static release (SF-176)
+
+The [static hosting runbook](STATIC_HOSTING.md) defines the Cloudflare Pages
+provider/DNS/TLS plan. `static-site.yml` builds marketing, docs and the testnet
+console export at one revision; `collection.json` binds their sealed file lists.
+Production requires main-only dispatch, the exact collection digest, Tyler's
+issue authorization and protected environment approval. Preview credentials stay
+in a separate account. Source builds and offline restore fixtures do not establish
+live provider, DNS, TLS, recorded-wallet or hosted rollback acceptance.
+
 ## Company treasury
 
 Follow [TREASURY.md](TREASURY.md) for the proposed 2-of-3 hardware-key custody ceremony, recovery/rotation, manifest payment guard and bounded disposable testnet fixture. Production treasury keys, mainnet SuiNS target/default changes and the hardware signing ceremony are user-only final acceptance, not agent operations.
@@ -816,3 +880,244 @@ keep its existing dedicated keystore binding and leave the shared config intact.
 The [SF-187 evidence](validation/sf187-entitlements.md) records the actual run,
 including exploratory failures and limits; it is not proof of a manual extension
 wallet walkthrough or a live deployment of this frontend.
+
+## Second-person approval (SF-199)
+
+Organizations can require another **current administrator credential** for any of
+the seven action classes in Settings → Organization security. This is an address
+boundary, not proof that two credentials belong to different humans. Use
+independently controlled credentials, preferably at least three administrators
+for recovery. Ordinary nonadministrator membership cannot approve.
+
+1. Add independent administrators before protection is enabled. Every source
+   credential change invalidates pending requests.
+2. Request verifier enrollment from Settings. This proposes the exact
+   `configure_second_person` operation, including the organization snapshot.
+3. A different current administrator reviews and approves that request on the
+   dashboard. The proposer executes it there to configure schema 1: all current
+   administrators are eligible, except the action proposer. Enrollment uses the
+   same expiring, generation-bound, single-use approval flow as other actions;
+   it cannot skip the independent credential proof.
+4. Select protected action classes and save. First activation requires reconciled,
+   sealed fleets and current authority, as in SF-196. Settings lists every resulting
+   class; unchecked classes are off. Keep the remaining factor options off until
+   their separate implementations are deployed.
+5. Under protection, the console requests a policy change instead of directly
+   weakening the policy. Another administrator sees the request on the dashboard,
+   reviews the operation and full argument bytes, and approves or rejects. Only
+   the proposer executes the approved operation. Expiry is enforced by Sui Clock,
+   not the browser countdown. Execution checks the exact arguments and generation,
+   consumes the nonce, clears its scoped grant and removes it from the pending index.
+
+`customer::propose_approval` accepts the canonical BCS argument bytes of any SF-196
+secured operation (at most 16 KiB, expiry at most seven days). Arguments are
+immutable under `security_policy::FactorKey { factor: 0 }` on the Action, as a
+`FactorConfiguration` public binding. The same reserved key on the Customer holds
+a `vector<ID>` of up to 64 pending disclosed requests. Zero is not a configurable
+factor. These reuse **existing** type origins; only SecondPersonConfiguration has a new introduction
+origin. The Action and Customer layouts are unchanged. The first disclosed proposal atomically seals customer
+authority at **199**, before enrollment approval (customers with no disclosed requests may remain 197); current clients
+accept both. Old customer code rejects authority 199, including its immutable
+cancellation route, which cannot maintain the new queue. The daemon must include
+199 custody-read support before creating the first request. The first proposal verifies
+the supplied customer snapshot and replaces only its version with the sealed 199
+snapshot in the disclosed bytes, preserving exact execution binding. This prevents an older cancel entry from
+leaving orphan IDs or unreadable requests. Pending discovery paginates
+current dynamic fields and re-reads every object; event pruning cannot erase this
+index. Errors are reported, never converted into an empty queue.
+
+The console creates and executes policy-change requests. Other operation adapters
+use their existing exact `*_secured` wrapper with the approved Action ID and exact
+canonical arguments; there is no generic arbitrary-call execution grant. Their
+requests remain visible with the full argument bytes on the dashboard. Do not
+approve an unfamiliar encoding merely because its operation label looks familiar.
+Opaque digests created through `prepare_security_action` cannot receive this factor.
+
+Any current administrator can cancel a disclosed request with
+`customer::cancel_disclosed_security_action`; a different administrator can use
+`customer::reject_action`. Cancel expired/stale requests to free the bounded queue.
+The immutable legacy cancellation API refuses disclosed requests so it cannot
+orphan index entries. Credential removal/demotion, policy edits and successful secured operations
+invalidate queued authorizations. Revoking an approver therefore also invalidates
+that approver's existing approvals. Rejected/consumed actions cannot execute again.
+
+Recovery uses another surviving administrator to approve an exact policy change
+that removes the required factor. Direct weakening and old-package entry points
+remain refused under the existing policy. Reconfiguring the verifier requires all
+currently effective factors; there is no administrator-only bypass, email reset,
+automatic expiry waiver or support override. If fewer than two independently
+controlled administrator credentials survive, recovery can remain permanently
+locked. Cancel and repropose after any changed argument or authority snapshot.
+
+Offline verification: `node scripts/test_second_person.cjs`, core Move tests and
+`scripts/test_second_person_localnet.py --base EXPORTED_FRAMEWORK_CONTRACTS
+--evidence FILE` inside a disposable `--network none` container. Build/provide the
+unchanged `chain_facts` example (`SUIFLEET_CHAIN_FACTS`) and mount readable Git
+metadata for provenance. The live counterpart is `scripts/live_second_person.py
+--wallet EXPLICIT_CLIENT_YAML --network testnet --base EXPORTED_FRAMEWORK_CONTRACTS
+--state PRIVATE_STATE --evidence FILE`; the default strict allowance is 1.8 SUI,
+including failures and disposable approver funding. `--fresh` runs only the
+mechanism on a standalone package; keep upgrade/old-package evidence separate.
+`--resume-unprotected` verifies an all-off policy before cancelling this private
+fixture’s unfinished requests. It never bypasses a required recovery factor.
+Use the dedicated wallet,
+shared mutation lease, verified CLI and run ledger from [TESTNET.md](TESTNET.md).
+Ambiguous fixture publication stays journaled and is never silently republished.
+
+Manual real-wallet, physical and mainnet/provider acceptance is explicitly unrun
+and remains in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+Actual SF-199 commands, effects, initial failures, aggregate spending and deferred
+acceptance are recorded in [the SF-199 evidence](validation/sf199-second-person.md).
+
+## Organization delay and cancellation (SF-200)
+
+When SF-199 and SF-200 are deployed together, factor bits 1, 4 and 8 are
+available; passkey remains unavailable. Console settings queues use the disclosed,
+indexed approval route, so a second administrator can approve the same action
+that waits through its cancellation window. Approval never skips timing, and
+maturity never supplies approval. Current administrators cancel through the
+mutable disclosed-action route, which also removes the pending index entry.
+Policy and delay-setting changes can execute through either console section;
+chain checks still enforce all currently enabled factors. Previously queued
+SF-199 full-object intents must be canceled and proposed again using stable
+Customer/Fleet IDs. The first proposal still seals legacy authority at 199;
+sealing does not alter those IDs or weaken current-generation checks.
+
+
+Delay is optional per organization and per action class. Each of the seven
+classes accepts **1,000–518,400,000 ms** (one second through six days, inclusive).
+Queue expiry remains at most seven days after creation; choose an expiry beyond
+the required delay. An expired, canceled, invalidated or changed action must be
+queued again. No scheduler executes it automatically.
+
+In Administration → Security, save the seven delay values, then select the
+classes to protect. Activation requires reconciled/sealed fleets. The initial
+all-off configuration applies immediately under current administrator authority.
+Subsequent settings edits are queued: inspect the requested changes, wait for the
+countdown, then explicitly execute with the proposing administrator. Any current
+administrator may cancel immediately, including an administrator other than the
+proposer. Canceling consumes the shared action nonce. Early execution aborts and
+leaves the original queue timestamp intact. Removing an administrator or changing
+policy/source authority invalidates outstanding authorizations.
+
+Settings/recovery changes require the longest delay among all currently protected
+classes. Ordinary secured operations enforce their own class and every additional
+class they invoke. Lowering a delay or turning it off waits through the **old**
+window. Immediate deployment pause and cancellation are the only implemented
+delay exceptions; pause preserves targets/schedule and still requires other
+enabled factors. Resume, deployment creation, withdrawals, credential changes,
+policy weakening and handover have no emergency bypass. There is no support reset.
+
+API clients queue exact canonical argument bytes with
+`customer::queue_security_action(customer, arguments_bcs, expires_ms, clock)`.
+The new queue stores bounded public argument bytes (64 KiB maximum) for inspection;
+never include credentials or confidential data. Existing
+`prepare_security_action` remains compatible and also receives a chain timestamp
+when called through the new package. Calls to its older bytecode create no trusted
+timestamp and cannot execute delay-protected operations through the new kernel.
+Use the existing operation-specific `*_secured` wrapper to consume the action.
+`configure_security_delays_secured` binds the customer object ID and seven new
+delays, under the current union of requirements. All secured wrappers encode the
+Customer reference as its BCS object ID; device usage and active-device counters
+do not invalidate a queued recovery. Credential/policy generation changes still
+invalidate pending actions. Device/tenant-mutable Fleet, DeviceRegistry, FleetBudget, GasAccount,
+FleetStorage, DeploymentRecord and EnrollmentPolicy references also
+bind object IDs. Group/enrollment security revisions and deployment control,
+targets and administrator rollout revision remain bound; device outcomes are
+read at execution rather than pinned. DeviceGroup/AccessPolicy/catalog administrator-only
+contents and immutable release values remain bound in full. Execution rechecks
+current authority, custody and membership. Previously queued intents encoding
+full mutable object bytes or the full rollout snapshot must be canceled and
+queued again; clients must use this revised encoding. The console provides direct
+queue/execute controls for security settings and lists all discovered queued
+actions for countdown/cancellation; other API-originated operations execute through
+the originating client. Browser countdowns are advisory; Sui Clock enforces timing.
+History pruning/discovery limitations remain visible through the console history
+warning; available history is not proof that no older queue exists.
+
+Regenerate the deployment manifest after upgrading: the additive `security_delay`
+origin group is separate from the existing framework origins. Existing Policy,
+Action and Customer layouts/origins are preserved. Never relabel old origins as
+the newest call package. Package upgrades do not migrate authority or disable old
+entry points. The isolated upgrade test explicitly exercises old-package direct
+writes and old-package queues against an existing v197 customer.
+
+Validation: `node scripts/test_security_delay.cjs`, core Move tests, and
+`scripts/live_security_delay.py` exercise setup, direct/early refusal, cancellation,
+mature recovery and restored administration with effects and a spending ledger.
+For a disposable network-none chain use
+`python3 scripts/test_security_policy_localnet.py --suite live_security_delay --base EXPORTED_BASE/contracts --evidence RECEIPT.json`.
+Public runs require the dedicated testnet wallet and shared-wallet lock as in
+[TESTNET.md](TESTNET.md); never use the default wallet. Human/extension-wallet,
+physical, provider and actual-mainnet acceptance remains unrun in #32/#159.
+
+## Native multisig administrators (SF-201)
+
+Use **Settings → Organization security → Multisig administrator**. This is an
+optional per-organization policy; it does not change sign-in or device authority.
+The protocol uses Sui native multisig authentication, rather than a server holding
+keys. See [Mysten's multisig SDK documentation](https://sdk.mystenlabs.com/sui/cryptography/signers/multisig).
+
+1. Obtain each member's **public** Sui key, including its scheme byte, in base64.
+   Enter the ordered `keys`, corresponding positive `weights` (1–255) and
+   `threshold` (1–65535, at most the sum of weights). At most ten distinct members
+   are supported. Ed25519, secp256k1, secp256r1 and passkey public keys are supported.
+   Member order, weights and threshold determine the address. Review the derived
+   address and custody independence. A threshold that one member's weight meets
+   provides no additional independent signer requirement.
+2. From a current ordinary administrator, register that address as an administrator
+   while policy is off, using the registration button. Fund the multisig address
+   with SUI for gas separately. Enrollment is **not** completed by registration.
+   Existing fleets must have their custody reconciliation/seals completed first.
+3. Build quorum enrollment. Export the public bundle to each signer; inspect the
+   decoded transaction, organization, network, gas and commands independently.
+   Each connected member wallet can sign without execution. Slush/extension/hardware
+   wallets must expose `sui:signTransaction`; otherwise import the external tool's
+   serialized partial signature for the **same exact bytes**. No SuiFleet signing
+   or coordination server is involved. Wallets that rewrite bytes are refused.
+4. Import partials into the same bundle and submit. The console rejects wrong keys,
+   duplicates, changed bytes and insufficient weight, verifies the deployment again,
+   and checks execution effects plus node confirmation. Enrollment itself requires
+   a native quorum transaction from the derived address, proving the configured
+   factor works. Read enrolled members to verify the authenticated stored binding.
+5. Choose seven action masks in the displayed action-class order (1 for multisig,
+   0 for off; combinations with other mechanisms require their actual verifiers).
+   Build/submit policy preparation with the quorum. Read the confirmed
+   `security_policy::ActionCreated.action_id` from transaction events, paste it,
+   then build/submit policy execution. The latter atomically approves and consumes
+   the exact action. Preparation expires after one hour. Current policy, not the
+   proposed weaker policy, authorizes execution. Every other enabled factor remains
+   required. This workbench does not manufacture other mechanisms' proofs.
+6. For other protected operations, use the operation-specific secured SDK builder,
+   prepare its canonical action, and include `multisig_admin::approve` before its
+   secured execution (or obtain a separate quorum approval transaction). The
+   advanced workbench resolves/exports SDK Transaction JSON and supports signatures
+   for any such PTB. Ordinary legacy controls fail closed under protection; a
+   raw capability loan cannot substitute for the secured operation. Bundle metadata
+   is untrusted; review actual commands, not an organization label alone.
+
+Recovery uses surviving quorum members. Authorize an exact policy change using
+current protection, register/prove replacement custody, then restore protection
+and revoke obsolete credentials. `enroll_secured` also supports replacement while
+current factors remain active: its action belongs to the new, already registered
+administrator, with approval from the current configured quorum and every other
+required factor. Current generations, organization IDs, configured addresses and
+expiry are checked before attestation; revoked credentials and stale actions fail.
+Losing all possible quorums can permanently lock administration. There is no
+email/support reset or implicit downgrade. Cancellation retains SF-196's current
+administrator rules. Native multisig addresses are immutable; changing keys means
+a new address and authenticated reconfiguration, not editing an existing address.
+
+A rejected submission may have a digest with failed effects. A transport failure
+may conceal successful execution: reconcile the displayed digest on the verified
+node before retrying. The same exact signed transaction has one digest. Gas coins
+and referenced objects can become stale while collecting signatures; rebuild and
+collect fresh signatures after any byte change. Public bundles contain transaction
+contents and signatures; distribute them only as intentionally public authorization.
+
+Validation and limits are recorded in [SF-201 evidence](validation/sf201-multisig.md).
+Manual Slush, extension-wallet, hardware/passkey-member sessions remain **unrun**
+in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); production and
+mainnet acceptance remain in [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).

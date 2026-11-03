@@ -83,17 +83,17 @@ class TrustTests(unittest.TestCase):
 
     def test_large_package_reservation_preserves_run_ceiling_and_unknown_charge(self):
         from live_package_upgrade import PACKAGE_GAS, funding_shortfall
-        # Synthetic ledger position exercises the PR279 700M reservation
+        # Synthetic ledger position exercises the SF196 850M reservation
         # after 200M setup, and a 450M effects cost. This is accounting
         # regression evidence, not a live package-cost claim.
-        self.assertEqual(PACKAGE_GAS, 700_000_000)
+        self.assertEqual(PACKAGE_GAS, 850_000_000)
         self.assertIn('no single gas pool', funding_shortfall((450_000_000, 450_000_000), 900_000_000))
-        self.assertIsNone(funding_shortfall((700_000_000, 300_000_000), 1_000_000_000))
+        self.assertIsNone(funding_shortfall((850_000_000, 150_000_000), 1_000_000_000))
         for outcome in ('success', 'unknown'):
             ledger = Budget(1_000_000_000, [])
             ledger.grant(200_000_000)
             def submit(budget):
-                self.assertEqual(budget, PACKAGE_GAS)
+                self.assertEqual(budget, min(PACKAGE_GAS, 800_000_000))
                 if outcome == 'unknown':
                     raise RuntimeError('unknown outcome')
                 return dict(digest='offline', effects=dict(status=dict(status='success'),
@@ -101,7 +101,7 @@ class TrustTests(unittest.TestCase):
             if outcome == 'unknown':
                 with self.assertRaises(RuntimeError):
                     ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
-                self.assertEqual(ledger.used, 900_000_000)
+                self.assertEqual(ledger.used, 1_000_000_000)
             else:
                 ledger.execute(None, 'upgrade to head', submit, gas=PACKAGE_GAS)
                 self.assertEqual(ledger.used, 650_000_000)
@@ -124,6 +124,57 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(budget.used, 800_000_000)
         with self.assertRaises(Spent):
             budget.execute(Mock(), 'retry', upgrade, gas=400_000_000)
+
+    def test_authorized_allowance_reserves_known_blocked_step_without_forgiving_unknown(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING
+        # Public PR477 prefix includes the whole retained device grant.
+        observed = 1_585_539_696
+        refused = Mock()
+        old = Budget(1_600_000_000, []); old.grant(observed)
+        with self.assertRaises(Spent):
+            old.execute(refused, 'base deployment', ['ptb'], gas=15_000_000, require_full=True)
+        refused.assert_not_called()
+        current = Budget(PACKAGE_UPGRADE_CEILING, []); current.grant(observed)
+        # An unknown execution still keeps its entire reservation, even under
+        # the newly authorized cap. This is not a successful live transaction.
+        unknown = Mock(side_effect=TimeoutError())
+        with self.assertRaises(TimeoutError):
+            current.execute(unknown, 'base deployment unknown', ['ptb'], gas=15_000_000, require_full=True)
+        unknown.assert_called_once()
+        self.assertEqual(current.used, observed + 15_000_000)
+        self.assertEqual(current.evidence[-1]['status'], 'unknown')
+        with self.assertRaises(Spent): current.grant(current.remaining + 1)
+
+    def test_sf196_fresh_fixture_reserves_ptbs_within_unchanged_ceiling(self):
+        from ci_testnet_wallet import PACKAGE_UPGRADE_CEILING, PACKAGE_TRANSACTION_GAS
+        # Exact settled charges from run 41276436449, including 30M device
+        # funding. The inbox call was refused before signing; no unknown
+        # reservation is removed by this repair.
+        used = sum((613_441_200, 8_425_378, 1_243_578, 767_170_563,
+                    8_737_163, 1_000_099 + 30_000_000))
+        self.assertEqual(used, 1_430_017_981)
+        ledger = Budget(1_600_000_000, [])  # Retain the historical refusal/unknown-outcome proof.
+        ledger.grant(used)
+        refused = Mock()
+        with self.assertRaises(Spent):
+            ledger.execute(refused, 'inbox', ['ptb'], gas=200_000_000, require_full=True)
+        refused.assert_not_called()
+        # Conservative synthetic costs: inbox, three deployments, old-package
+        # deployment. The batch exceeds the historical 42,002,565-MIST cost.
+        for label, cost in (('inbox', 10_000_000), ('batch', 50_000_000), ('base', 20_000_000)):
+            def submit(*args, cost=cost):
+                self.assertEqual(args[-1], str(PACKAGE_TRANSACTION_GAS))
+                return dict(digest='offline', effects=dict(status=dict(status='success'),
+                    gasUsed=dict(computationCost=str(cost), storageCost='0', storageRebate='0')))
+            ledger.execute(submit, label, ['ptb'], gas=PACKAGE_TRANSACTION_GAS, require_full=True)
+        with self.assertRaises(TimeoutError):
+            ledger.execute(Mock(side_effect=TimeoutError()), 'cleanup', ['ptb'],
+                           gas=PACKAGE_TRANSACTION_GAS, require_full=True)
+        self.assertEqual(ledger.used, used + 80_000_000 + PACKAGE_TRANSACTION_GAS)
+        self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
+        with self.assertRaises(Spent):
+            ledger.execute(refused, 'retry', ['ptb'], gas=PACKAGE_TRANSACTION_GAS, require_full=True)
+        refused.assert_not_called()
 
     def test_lower_ptb_budget_does_not_raise_existing_transaction_cap(self):
         from live_package_upgrade import transaction_gas_budget
@@ -296,9 +347,11 @@ class TrustTests(unittest.TestCase):
             state = str(Path(root)/'state.json')
             code, calls = self.suite_run(root, state, {})
             self.assertEqual(code, 0)
+            self.assertEqual(calls[0][calls[0].index('--transaction-gas-budget') + 1], '60000000')
+            self.assertIn('--compact-lifecycle', calls[0])
             self.assertEqual([Path(c[1]).name for c in calls],
                              ['live_package_upgrade.py', 'live_upgrade_security.py', 'live_wallet_gate.py'])
-            for command, ceiling, evidence in ((calls[0], '1600000000', 'evidence/package-upgrade.json'),
+            for command, ceiling, evidence in ((calls[0], '2000000000', 'evidence/package-upgrade.json'),
                                                (calls[1], '1500000000', 'evidence/upgrade-security.json'),
                                                (calls[2], '150000000', 'evidence/wallet.json')):
                 self.assertEqual(command[command.index('--max-spend-mist') + 1], ceiling)
@@ -380,7 +433,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+        self.assertEqual(required_balance(SUITES), 3_650_000_000)
 
     def test_fresh_sf136_packages_fit_their_budgets(self):
         # A fresh base publish of current main settled 532,828,600 MIST and its
@@ -502,7 +555,7 @@ class TrustTests(unittest.TestCase):
         self.assertEqual(ledger.evidence[-1]['status'], 'unknown')
         with self.assertRaises(Spent):
             ledger.grant(ledger.remaining + 1)
-        self.assertEqual(required_balance(SUITES), 3_250_000_000)
+        self.assertEqual(required_balance(SUITES), 3_650_000_000)
 
     def test_sf010_suites_skip_when_irrelevant_or_after_package_failure(self):
         import tempfile

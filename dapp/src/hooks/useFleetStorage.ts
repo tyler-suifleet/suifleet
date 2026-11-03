@@ -47,7 +47,7 @@ export function useFleetStorage() {
     : !budget ? (budgets.isLoading ? "Loading your fleet budget…" : "Create a fleet budget on the Network budget page first.")
     : !storage.data ? (storage.isLoading ? "Loading fleet storage…" : "Create and fund fleet storage on the Network budget page first.")
     : undefined);
-  return { budget, storage: storage.data ?? undefined, config, target, reason: why, refetch: storage.refetch };
+  return { budget, loading: budgets.isLoading || storage.isLoading, budgetError: budgets.error, storage: storage.data ?? undefined, config, target, reason: why, refetch: storage.refetch };
 }
 
 /** A BlobStore that pays uploads from the fleet's prepaid storage, when the owner has one. */
@@ -61,10 +61,11 @@ export function useFleetBlobStore() {
     refetchInterval: 60_000,
     queryFn: () => fetchRetention(client, target!.storageId, origin!, target!.config.storageOrigin ?? target!.config.packageId) });
   const retention = policy.data?.policy ? { target: renewalTarget, maxFee, setTarget: setRenewalTarget, setMaxFee } : undefined;
-  if (!target) return { reason, retention };
-  if (policy.error) return { reason: formatStorageQueryError(policy.error, "Storage retention"), retention };
+  if (!target) return { reason, retention, configured: false };
+  if (origin && policy.isLoading) return { reason: "Loading retention authorization…", retention, configured: true };
+  if (policy.error) return { reason: formatStorageQueryError(policy.error, "Storage retention"), retention, configured: true };
   const store: BlobStore = (body, progress) => uploadToFleetStorage(client, { ...target,
     retention: retention ? { target: renewalTarget, maxFee: parseToken(maxFee) } : undefined }, body,
     (transaction) => mutation.mutateAsync({ transaction }), progress);
-  return { store, storage, retention };
+  return { store, storage, retention, target, configured: true };
 }

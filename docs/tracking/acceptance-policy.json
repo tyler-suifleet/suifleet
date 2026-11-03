@@ -670,6 +670,60 @@
         "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
         "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
       ]
+    },
+    "SF-165": {
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
+        "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes.",
+        "Final external acceptance requiring production Seal/key-provider accounts, actual IdP/prover/Slush/extension-wallet sessions, paid provider services or manually provisioned production credentials; track in SF-031/#32 and SF-087/#159. Retain implemented authentication/security behavior and automated fixtures/testnet evidence."
+      ],
+      "retained_gates": [
+        "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
+        "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
+        "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
+        "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
+      ],
+      "authorization": "User explicitly authorizes continuous software development and reviewed implementation merges before physical-hardware and actual-mainnet acceptance, which wait until development is complete. This is not mainnet or physical programming authorization. User instruction 2026-10-21: finish software implementation before final external acceptance. Production provider/account/credential validation and manual real-wallet acceptance are deferred to the final test phase, alongside physical/mainnet acceptance. This authorizes an implementation/acceptance split, not production credentials, mainnet writes, physical programming or bypassing software/security checks."
+    },
+    "SF-176": {
+      "authorization": "User recovery direction 2026-10-31: complete the software release path before production hosting/provider/TLS/DNS/credential, human/Pi/mainnet acceptance. Missing preview accounts alone do not block reviewed software implementation.",
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/62",
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "deferred_checks": [
+        "Actual provider account/project provisioning, three-origin hosted preview publication, external served-byte/TLS checks and hosted A-to-B-to-A rollback rehearsal; retain in SF-042/#62 and SF-087/#159. No hosted receipts exist.",
+        "Production DNS/CAA/TLS activation, protected signing/hosting credentials and explicitly authorized production publication; retain in SF-042/#62 and SF-087/#159.",
+        "Manual real-wallet screening and recorded-console acceptance in SF-031/#32; physical and mainnet/SuiNS acceptance remain unrun."
+      ],
+      "retained_gates": [
+        "All actionable source/security findings; real local marketing/docs/console static builds, reproducibility, manifest/provenance and tamper/rollback regressions.",
+        "Exact-head/current-base ordinary CI, applicable automatic testnet and fresh independent review; upstream merged interfaces required.",
+        "Production dispatch must retain explicit user authorization, approved digest/revision and protected environment review. No production credentials, publication, DNS changes or fabricated hosted receipts."
+      ]
+    },
+    "SF-201": {
+      "authorization": "User-authorized SF-201 implementation/acceptance split supplied with the 2026-11-01 task. Real Slush/extension/hardware-wallet sessions and physical/mainnet/production acceptance remain unrun; local software, isolated upgrades, automatic public testnet, source review and exact-head CI are retained gates.",
+      "deferred_checks": [
+        "Physical device flashing, boot, hardware signer, reboot, power-loss and target-specific acceptance; retain SF-031 and applicable target-image/release acceptance evidence.",
+        "Actual mainnet transactions, publication, upgrade and mainnet end-to-end acceptance; retain SF-087 and obtain explicit authorization before any future mainnet writes.",
+        "Final external acceptance requiring production Seal/key-provider accounts, actual IdP/prover/Slush/extension-wallet sessions, paid provider services or manually provisioned production credentials; track in SF-031/#32 and SF-087/#159. Retain implemented authentication/security behavior and automated fixtures/testnet evidence."
+      ],
+      "acceptance_issues": [
+        "https://github.com/tyler-suifleet/suifleet/issues/32",
+        "https://github.com/tyler-suifleet/suifleet/issues/159"
+      ],
+      "retained_gates": [
+        "All actionable source/security findings and meaningful local, simulator, isolated-chain compatibility and regression checks.",
+        "Applicable normal automatic public-testnet validation, spending controls and exact-head/current-base CI.",
+        "Fresh independent review and genuine software/API dependencies; no guessed unmerged interfaces or relabeled approvals.",
+        "Final provider/real-wallet acceptance remains explicitly unrun until the final test phase; source authentication, credential isolation, signed-session validation, software tests and applicable automatic testnet remain implementation gates."
+      ]
     }
   },
   "development_defaults": {

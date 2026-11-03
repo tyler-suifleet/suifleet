@@ -17,6 +17,19 @@ module sui_edge::rollout_tests {
         actual_state == state && actual_cohort == cohort
     }
     #[test]
+    fun security_snapshot_tracks_admin_decisions_not_device_outcomes() {
+        let mut s = ts::begin(ADMIN); let mut c = clock::create_for_testing(ts::ctx(&mut s));
+        clock::set_for_testing(&mut c, 1); let mut d = setup(&mut s, &c, 4, 4, 1, 10000);
+        let a = id(@0x1);
+        dm::advance_rollout(&mut d, vector[a], vector[], vector[], &c, ts::ctx(&mut s));
+        let snapshot = dm::security_snapshot(&d);
+        dm::rollout_receipt_for_testing(&mut d, a, 1);
+        assert!(snapshot == dm::security_snapshot(&d));
+        dm::control_rollout(&mut d, 1, vector[], string::utf8(b"pause"), &c, ts::ctx(&mut s));
+        assert!(snapshot != dm::security_snapshot(&d));
+        dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
+    }
+    #[test]
     fun multi_device_rate_concurrency_bake_restart_and_health() {
         let mut s = ts::begin(ADMIN);
         let mut c = clock::create_for_testing(ts::ctx(&mut s)); clock::set_for_testing(&mut c, 1);
@@ -123,4 +136,50 @@ module sui_edge::rollout_tests {
         dm::delete_rollout(d,ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
     }
 
+
+    #[test]
+    fun decision_history_spans_bounded_cleanup_chunks() {
+        let mut s = ts::begin(ADMIN); let mut c = clock::create_for_testing(ts::ctx(&mut s));
+        clock::set_for_testing(&mut c, 42);
+        let mut d = setup(&mut s, &c, 4, 1, 1, 10000);
+        let (revision, at_ms, state, reason, admitted) = dm::decision_for_testing(&d, 1);
+        assert!(revision == 1 && at_ms == 42 && state == 0 && admitted.is_empty(), 0);
+        assert!(reason == string::utf8(b"created; no members admitted"), 1);
+        let mut i = 0;
+        while (i < 129) {
+            dm::control_rollout(&mut d, 1, vector[], string::utf8(b"hold"), &c, ts::ctx(&mut s));
+            i = i + 1;
+        };
+        assert!(dm::has_decision_for_testing(&d, 1) && dm::has_decision_for_testing(&d, 130), 2);
+        dm::clear_decision_audit(&mut d, 64, ts::ctx(&mut s));
+        assert!(!dm::has_decision_for_testing(&d, 67) && dm::has_decision_for_testing(&d, 66), 3);
+        dm::clear_decision_audit(&mut d, 64, ts::ctx(&mut s));
+        assert!(!dm::has_decision_for_testing(&d, 3) && dm::has_decision_for_testing(&d, 2), 4);
+        dm::delete_rollout(d, ts::ctx(&mut s));
+        clock::destroy_for_testing(c); ts::end(s);
+    }
+    #[test, expected_failure(abort_code=12, location=sui_edge::deployment_manager)]
+    fun audit_cleanup_is_bounded() {
+        let mut s = ts::begin(ADMIN); let c = clock::create_for_testing(ts::ctx(&mut s));
+        let mut d = setup(&mut s, &c, 4, 1, 1, 10000);
+        dm::clear_decision_audit(&mut d, 65, ts::ctx(&mut s));
+        dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
+    }
+    #[test, expected_failure(abort_code=13, location=sui_edge::deployment_manager)]
+    fun audit_cleanup_freezes_new_decisions() {
+        let mut s = ts::begin(ADMIN); let c = clock::create_for_testing(ts::ctx(&mut s));
+        let mut d = setup(&mut s, &c, 4, 1, 1, 10000);
+        dm::clear_decision_audit(&mut d, 1, ts::ctx(&mut s));
+        dm::control_rollout(&mut d, 0, vector[], string::utf8(b"resume"), &c, ts::ctx(&mut s));
+        dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
+    }
+
+    #[test, expected_failure(abort_code=2, location=sui_edge::deployment_manager)]
+    fun foreign_sender_cannot_clear_audit() {
+        let mut s = ts::begin(ADMIN); let c = clock::create_for_testing(ts::ctx(&mut s));
+        let mut d = setup(&mut s, &c, 4, 1, 1, 10000);
+        let mut foreign = sui::tx_context::dummy();
+        dm::clear_decision_audit(&mut d, 1, &mut foreign);
+        dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
+    }
 }

@@ -51,6 +51,15 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 dm.validate(manifest)
 
+    def test_ordered_publishers(self):
+        manifest = fixture()
+        manifest["walrus"]["publisher_urls"] = ["https://one.example", "https://two.example"]
+        self.assertEqual(dm.validate(manifest)["walrus"]["publisher_urls"], ["https://one.example", "https://two.example"])
+        for invalid in [[], "https://one.example", ["file:///tmp/blob"]]:
+            manifest["walrus"]["publisher_urls"] = invalid
+            with self.assertRaises(ValueError):
+                dm.validate(manifest)
+
     def test_treasury_payee_is_canonical_nonzero_and_optional_for_legacy(self):
         manifest = fixture()
         dm.validate(manifest)
@@ -107,6 +116,20 @@ class ManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
 
+    def test_optional_security_delay_origins_are_separate_and_verified(self):
+        manifest = fixture()
+        manifest["type_origins"].update({n: dm.object_id("0x4") for n in dm.SECURITY_TYPES})
+        dm.verify(manifest, chain(manifest))
+        manifest["type_origins"][dm.SECURITY_DELAY_TYPES[0]] = dm.object_id("0x5")
+        with self.assertRaisesRegex(ValueError, "partial security delay"):
+            dm.validate(manifest)
+        manifest["type_origins"].update({n: dm.object_id("0x5") for n in dm.SECURITY_DELAY_TYPES})
+        dm.verify(manifest, chain(manifest))
+        forged = copy.deepcopy(manifest)
+        forged["type_origins"][dm.SECURITY_DELAY_TYPES[-1]] = dm.object_id("0x4")
+        with self.assertRaisesRegex(ValueError, "type origin mismatch"):
+            dm.verify(forged, chain(manifest))
+
     def test_optional_fleet_budget_origin_group(self):
         manifest = fixture()
         manifest["type_origins"][dm.BUDGET_TYPES[0]] = dm.object_id("0x4")
@@ -118,6 +141,15 @@ class ManifestTests(unittest.TestCase):
         forged["type_origins"][dm.BUDGET_TYPES[-1]] = dm.object_id("0x3")
         with self.assertRaisesRegex(ValueError, "type origin mismatch"):
             dm.verify(forged, chain(manifest))
+
+    def test_optional_rollout_audit_origin_group(self):
+        m = fixture()
+        for name in dm.AUDIT_TYPES:
+            m['type_origins'][name] = dm.object_id('0xa164')
+        self.assertTrue(all(name in dm.manifest_types(m) for name in dm.AUDIT_TYPES))
+        del m['type_origins'][dm.AUDIT_TYPES[-1]]
+        with self.assertRaisesRegex(ValueError, 'partial rollout audit'):
+            dm.manifest_types(m)
 
     def test_optional_rollout_health_origin_group(self):
         manifest = fixture()

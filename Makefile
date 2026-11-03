@@ -123,6 +123,7 @@ test-component:
 test-yocto-packaging:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_inspect_pi_image.py'
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_runtime_packaging.py'
+	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
 
 dapp-typecheck:
 	$(MAKE) test-testnet
@@ -364,6 +365,7 @@ test-manifest:
 	$(RUN) node scripts/test_treasury.cjs
 	$(RUN) node scripts/test_wallet_manifest.cjs
 	$(RUN) node scripts/test_onboarding.cjs
+	$(RUN) node scripts/test_device_client_links.cjs
 	$(RUN) node scripts/test_fleet_budget.cjs
 	$(RUN) node scripts/test_fleet_settings.cjs
 	$(RUN) node scripts/test_budget_enrollment.cjs
@@ -378,6 +380,8 @@ test-manifest:
 	$(RUN) node scripts/test_seal_frontend.cjs
 	$(RUN) node scripts/test_upload_progress.cjs
 	$(RUN) node scripts/test_walrus_publishers.cjs
+	$(RUN) node scripts/test_release_storage.cjs
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_live_release_storage.py
 	$(RUN) node scripts/test_telemetry.cjs
 	$(RUN) node scripts/test_fleet_ops.cjs
 	$(RUN) node scripts/test_group_batch.cjs
@@ -402,6 +406,7 @@ test-manifest:
 	$(RUN) node scripts/test_alerts.cjs
 	$(RUN) node scripts/test_chain_alerts.cjs
 	$(RUN) node scripts/test_dashboard_views.cjs
+	$(RUN) node scripts/test_rollout_audit.cjs
 	$(RUN) node scripts/test_rollout_form.cjs
 	$(RUN) node scripts/test_rollout_builder_browser.cjs
 	$(RUN) node scripts/test_dashboard_stats.cjs
@@ -411,6 +416,7 @@ test-manifest:
 	$(RUN) node scripts/test_walrus_site_protocol.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_walrus_site.py'
 	$(RUN) node scripts/test_enrollment_frontend.cjs
+	$(RUN) node scripts/test_pending_rows.cjs
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_claims.py'
 
 test-manifest-live:
@@ -538,9 +544,11 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
+	$(RUN) node scripts/test_testnet_receipt_effects.cjs
 
 .PHONY: test-deployment-control-localnet
 test-deployment-control-localnet:
@@ -714,6 +722,7 @@ package-tunneling:
 	python3 scripts/package_tunneling.py --output "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}"
 
 test-tunneling:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p test_tunneling_process_scan.py
 	$(RUN) cargo build --locked --manifest-path suifleet-edge/Cargo.toml --bins
 	$(MAKE) package-tunneling
 	python3 scripts/test_tunneling.py --package "$${TUNNEL_PACKAGE:-/tmp/suifleet-tunnel.tar.gz}" $(TUNNEL_EVIDENCE)
@@ -825,6 +834,11 @@ test-customer-fleets:
 	$(RUN) node scripts/test_customer_entitlements.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
+	$(RUN) node scripts/test_security_policy.cjs
+	$(RUN) node scripts/test_security_delay.cjs
+	$(RUN) node scripts/test_second_person.cjs
+	$(RUN) node scripts/test_multisig_admin.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_multisig_admin_browser.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_fleets_browser.cjs
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/live_wallet_browser.cjs --smoke
 
@@ -839,6 +853,11 @@ test-group-batch-localnet:
 .PHONY: test-data-metering
 test-data-metering:
 	$(RUN) node scripts/test_data_metering.cjs
+
+# SF164 populated-rollout compatible upgrade; disposable loopback chain only.
+.PHONY: test-rollout-audit-localnet
+test-rollout-audit-localnet:
+	$(RUN) python3 -c 'import sys; sys.path.insert(0,"scripts"); from test_protocol_localnet import main; main("scripts/test_rollout_audit_upgrade.cjs")'
 
 # Validate the actual export with a fixture wallet and blocked external I/O.
 .PHONY: test-hydration

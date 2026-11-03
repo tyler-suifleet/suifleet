@@ -1,7 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DAppKitProvider } from "@mysten/dapp-kit-react";
+import { DAppKitProvider, useWalletConnection } from "@mysten/dapp-kit-react";
 import dynamic from "next/dynamic";
 import { dAppKit } from "@/lib/dapp-kit";
 import { usePathname } from "next/navigation";
@@ -11,26 +11,28 @@ import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import Link from "next/link";
 import { HistoryStatus } from "@/components/HistoryStatus";
+import { ConnectionRequired } from "@/components/ui";
+import { useHydrated } from "@/hooks/useCurrentAccount";
 
 // dApp Kit UI registers custom elements and must only load in the browser.
 const ConnectButton = dynamic(() => import("@mysten/dapp-kit-react/ui").then((ui) => ui.ConnectButton), { ssr: false });
 const queryClient = new QueryClient();
 const NAV = [
-  { href: "/get-started", label: "Get started" },
-  { href: "/",            label: "Dashboard" },
-  { href: "/devices",     label: "Devices" },
-  { href: "/services",    label: "Device services" },
-  { href: "/data",        label: "Data" },
-  { href: "/enrollment",  label: "Enrollment" },
-  { href: "/deployments", label: "Deployments" },
-  { href: "/rollouts",    label: "Rollouts" },
-  { href: "/components", label: "Components" },
-  { href: "/firmware",    label: "Deploy component" },
-  { href: "/access",      label: "Access policies" },
-  { href: "/handover",    label: "Administration" },
-  { href: "/entitlements", label: "Device entitlements" },
-  { href: "/settings",    label: "Fleet settings" },
-  { href: "/budget",      label: "Network budget" },
+  { href: "/get-started", label: "Get started", description: "" },
+  { href: "/",            label: "Dashboard", description: "See device health, recent updates and active incidents across your fleet." },
+  { href: "/devices",     label: "Devices", description: "Manage your devices and device groups." },
+  { href: "/services",    label: "Device services", description: "See how applications on a device are communicating, storing data and staying in sync." },
+  { href: "/data",        label: "Data", description: "Browse device data, download verified files and manage scoped sharing." },
+  { href: "/enrollment",  label: "Enrollment", description: "Prepare device batches and securely enroll devices with single-use credentials." },
+  { href: "/deployments", label: "Deployments", description: "Review device update history, outcomes and deployment controls." },
+  { href: "/rollouts",    label: "Rollouts", description: "Send updates to a small group first, then expand once device health checks pass." },
+  { href: "/components", label: "Components", description: "Browse your software library and publish component versions." },
+  { href: "/firmware",    label: "Deploy component", description: "Choose software, select your devices and review an update before deploying." },
+  { href: "/access",      label: "Access policies", description: "Choose which devices and accounts can open private software releases." },
+  { href: "/handover",    label: "Administration", description: "Transfer control of selected devices and resources to another administrator." },
+  { href: "/entitlements", label: "Device entitlements", description: "Review your customer device limit and, as registry administrator, grant device limits to customers." },
+  { href: "/settings",    label: "Fleet settings", description: "Choose when devices check for updates, send health reports and upload data." },
+  { href: "/budget",      label: "Network budget", description: "Keep devices funded for activity and storage, with spending limits you control." },
 ];
 const NAV_GROUPS = [
   { label: "Workspace", routes: ["/", "/get-started"] },
@@ -44,7 +46,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head>
         <title>SuiFleet</title>
+        <link rel="icon" href="/favicon.svg?v=400d0317ed09" type="image/svg+xml" sizes="any" />
+        <link rel="alternate icon" href="/favicon.ico?v=400d0317ed09" sizes="16x16 32x32 48x48 64x64" />
         <meta name="description" content="Decentralized edge fleet management on Sui" />
+        <meta property="og:title" content="SuiFleet console" />
+        <meta property="og:description" content="Manage edge fleets on Sui. Public testnet preview." />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://app.suifleet.io/" />
+        <link rel="canonical" href={"https://app.suifleet.io" + pathname} />
       </head>
       <body className="min-h-screen bg-slate-50 text-slate-900 flex flex-col antialiased">
         <a href="#main-content" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-lg focus:bg-white focus:p-3 focus:shadow-lg">Skip to content</a>
@@ -54,15 +63,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               {/* Top bar */}
               <div className="bg-white text-slate-900 min-h-16 flex items-center px-4 md:px-6 gap-3 shrink-0 z-20 border-b border-slate-200">
                 <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded bg-[#4DA2FF] flex items-center justify-center shrink-0">
-                    <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5">
-                      <circle cx="8" cy="4.5" r="2.2" fill="white" />
-                      <circle cx="3" cy="12" r="2" fill="white" />
-                      <circle cx="13" cy="12" r="2" fill="white" />
-                      <line x1="8" y1="6.7" x2="3.8" y2="10.2" stroke="white" strokeWidth="1.2" />
-                      <line x1="8" y1="6.7" x2="12.2" y2="10.2" stroke="white" strokeWidth="1.2" />
-                    </svg>
-                  </div>
+                  <img src="/suifleet-mark.svg" alt="" width="42" height="26" className="h-[26px] w-[42px] shrink-0" />
                   <span className="font-semibold text-sm tracking-tight">SuiFleet</span>
                 </div>
                 <span className="hidden sm:inline text-slate-300 text-xs">|</span>
@@ -79,7 +80,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <main id="main-content" className="fleet-content flex-1 min-w-0 p-4 md:p-8 lg:px-10">
                   <div className="mx-auto w-full max-w-7xl">
                     <FleetSwitcher />
-                    <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>
+                    <SignedOutGate>{children}</SignedOutGate>
                     <HistoryStatus />
                   </div>
                 </main>
@@ -92,6 +93,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   );
 }
 
+const isActive = (href: string, pathname: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+// Fleet pages read the connected account; signed out they would show empty
+// totals or account errors. Get started carries its own sign-in step, so it
+// renders signed out without waiting for a fleet selection. A saved wallet can
+// reconnect before hydration, so the server and hydration renders show the
+// sign-in check and only the mounted client trusts the live connection.
+function SignedOutGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname(), connection = useWalletConnection(), hydrated = useHydrated();
+  const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
+  if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
+  if (!route) return <>{children}</>;
+  if (!hydrated || connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;
+  return <ConnectionRequired title={route.label} description={route.description} />;
+}
+
 // Narrow screens: the same navigation as a horizontally scrolling bar.
 function MobileNav() {
   const pathname = usePathname();
@@ -99,7 +116,7 @@ function MobileNav() {
     <nav aria-label="Main" className="md:hidden bg-[#0b1628] border-b border-white/5 overflow-x-auto">
       <ul className="flex gap-1 px-2 py-1.5 whitespace-nowrap">
         {NAV.map(({ href, label }) => {
-          const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+          const active = isActive(href, pathname);
           return (
             <li key={href}>
               <Link href={href} aria-current={active ? "page" : undefined}
@@ -123,7 +140,7 @@ function Sidebar() {
           <p className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
           <ul className="space-y-1">{group.routes.map(href => {
             const item = NAV.find(item => item.href === href)!;
-            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            const active = isActive(href, pathname);
             return <li key={href}><Link href={href} aria-current={active ? "page" : undefined}
               className={`flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${active
                 ? "bg-blue-500/15 text-blue-200 font-semibold ring-1 ring-blue-400/20"

@@ -6,9 +6,9 @@ ARG SUI_VERSION=testnet-v1.81.1
 ARG SUI_SHA256=d921910fdedf5ae2bc3f08a7236c57819a457ce53a8cc60c85f3653c7831b5d4
 # Transaction CLI for live networks only (scripts/sui_toolchain.py). It must
 # support the network's protocol version; SUI_VERSION stays the compiler.
-ARG SUI_NETWORK_VERSION=testnet-v1.82.1
-ARG SUI_NETWORK_SHA256=112bf204fab6927b135edfb316cddac07bdba754434b5f12d021ca7e8a72858c
-ARG SUI_NETWORK_BINARY_SHA256=de1d7effd53831af2863749befc35ec6df565b1fdfa8d8b2f5c866be23fa0d6b
+ARG SUI_NETWORK_VERSION=testnet-v1.83.0
+ARG SUI_NETWORK_SHA256=e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8
+ARG SUI_NETWORK_BINARY_SHA256=29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa
 ARG NODE_MAJOR=22
 ARG NODE_VERSION=22.22.2-1nodesource1
 ARG PNPM_VERSION=11.0.8
@@ -50,6 +50,7 @@ RUN curl -fL -o /tmp/sui-network.tgz \
     && echo "${SUI_NETWORK_SHA256}  /tmp/sui-network.tgz" | sha256sum -c - \
     && mkdir -p /opt/sui-network \
     && tar --no-same-owner -xzf /tmp/sui-network.tgz -C /opt/sui-network ./sui \
+    && chmod 0755 /opt/sui-network/sui \
     && rm /tmp/sui-network.tgz \
     && echo "${SUI_NETWORK_BINARY_SHA256}  /opt/sui-network/sui" | sha256sum -c - \
     && /opt/sui-network/sui --version

@@ -327,8 +327,12 @@ def generate(catalog, recipe):
           f'export const GROUP_BATCH_TYPES = {json.dumps(catalog["optional_type_origins"]["group_batch"])} as const;',
           f'export const SEAL_POLICY_TYPES = {json.dumps(catalog["optional_type_origins"]["seal_policy"])} as const;',
           f'export const BUDGET_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_budget"])} as const;',
+          f'export const APPROVAL_TYPES = {json.dumps(catalog["optional_type_origins"]["second_person"])} as const;',
+          f'export const SECURITY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_policy"])} as const;',
+          f'export const SECURITY_DELAY_TYPES = {json.dumps(catalog["optional_type_origins"]["security_delay"])} as const;',
           f'export const CUSTOMER_TYPES = {json.dumps(catalog["optional_type_origins"]["customer"])} as const;',
           f'export const INBOX_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_inbox"])} as const;',
+          f'export const AUDIT_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_audit"])} as const;',
           f'export const ROLLOUT_HEALTH_TYPES = {json.dumps(catalog["optional_type_origins"]["rollout_health"])} as const;',
           f'export const SETTINGS_TYPES = {json.dumps(catalog["optional_type_origins"]["fleet_settings"])} as const;',
           f'export const SHARD_TYPES = {json.dumps(catalog["optional_type_origins"]["receipt_shards"])} as const;',
@@ -350,6 +354,7 @@ def generate(catalog, recipe):
             'pub const CATALOG_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["component_catalog"]) + '];',
             'pub const SEAL_POLICY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["seal_policy"]) + '];',
             'pub const BUDGET_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_budget"]) + '];',
+            'pub const SECURITY_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["security_policy"]) + '];',
             'pub const CUSTOMER_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["customer"]) + '];',
             'pub const INBOX_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["fleet_inbox"]) + '];',
             'pub const ROLLOUT_HEALTH_TYPES: &[&str] = &[' + ', '.join(json.dumps(t) for t in catalog["optional_type_origins"]["rollout_health"]) + '];',
@@ -398,6 +403,10 @@ def generate(catalog, recipe):
                     types += [f"{arg}: string[]"]; arguments += [f"tx.pure(bcs.vector(bcs.Address).serialize({arg}))"]
                 elif base == "vector<u64>":
                     types += [f"{arg}: (number | bigint | string)[]"]; arguments += [f"tx.pure(bcs.vector(bcs.u64()).serialize({arg}))"]
+                elif base == "vector<vector<u8>>":
+                    types += [f"{arg}: number[][]"]; arguments += [f"tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize({arg}))"]
+                elif base == "u16":
+                    types += [f"{arg}: number"]; arguments += [f"tx.pure.u16({arg})"]
                 elif base == "u8":
                     types += [f"{arg}: number"]; arguments += [f"tx.pure.u8({arg})"]
                 elif base == "u32":

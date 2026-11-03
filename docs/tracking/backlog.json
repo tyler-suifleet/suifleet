@@ -4510,6 +4510,197 @@
         "Prove overlap and failure behavior with meaningful runner tests and run the full real OTA simulator suite; record timing without claiming hosted gains before measurement."
       ],
       "validation": "Runner concurrency/failure/interruption tests, full real OTA simulator suite, Makefile command coverage and relevant offline CI/security regressions."
+    },
+    {
+      "key": "SF-207",
+      "title": "Batch reviewed PR integration and separate source review from evidence waits",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator",
+        ".github/workflows",
+        "scripts/testnet_ci.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User explicitly requests batch integration instead of repeatedly rebasing, reviewing and running CI on every PR after each main merge. Implement a guarded integration candidate for a bounded group of reviewed PRs, retain source-review proof when unchanged, and expose actionable waiting states. Preserve independent source review, protected controller/wallet boundaries, actual combined-code CI/testnet acceptance and serial exact-revision main publication.",
+      "evidence": "Last24h observed125repair jobs and142reviews across23PRs:129blocked,9approve,4changes_requested. Current coordinator requires baseIncluded for each branch and resumes fixes even for tracking-only upstream changes, causing repeated branch/CI/review cycles.",
+      "acceptance": [
+        "Prepare a bounded batch from eligible independently source-reviewed PRs on one pinned base, isolate conflicts and ineligible/blocked PRs without resetting unrelated branches.",
+        "Validate the actual combined candidate through ordinary/security CI and normal authenticated testnet before integration; record immutable member heads, base and candidate provenance and recheck membership/feedback/authority before nonforce serial publication.",
+        "Preserve Tyler author/committer and verified merge issue/atomic/Project reconciliation for all members; partial failures retain recoverable durable receipts, never fake approval, checks or acceptance.",
+        "Separate source-complete/evidence-wait from actionable changes and avoid repeating source review for unchanged content; status reports distinguish review, CI, acceptance, conflict and active work.",
+        "Regression tests prove batch correctness, changed-head/base/feedback rejection, conflicts, failed checks, source evidence reuse limits, restart/recovery and issue reconciliation. Document operation, rollout and remaining live limitations."
+      ],
+      "validation": "Meaningful coordinator/planner and CI trust-boundary tests plus offline real-Git batch integration scenarios, status regressions and recorded actual activation evidence; no weakened wallet/mainnet/hardware/secret protections."
+    },
+    {
+      "key": "SF-208",
+      "title": "Recover stopped coordinator repairs from manual implementation origins",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/recovery_control.py",
+        "tools/pr-coordinator/tests/test_recovery_control.py",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "Recovery of SF-207 PR412 fails because its manual implementation has no finished dispatcher run. Add a bounded operator route accepting an existing durable manual-origin process receipt, preserving original claim and proving original worker/session/helpers stopped. Never infer stopped identity from a prose handoff or fabricate a dispatcher origin.",
+      "evidence": "Recovery run 9d889f76: merged recovery_control.stopped_repair rejects PR412 with no unchanged finished implementation receipt; stopped repair job2627 has failed exit and unchanged claim. SF192 recovery successfully launched separately.",
+      "acceptance": [
+        "Accept an explicit existing manual-origin receipt bound to all claim identity fields, with recorded PID/start and timestamp preceding the coordinator repair; verify original process/session/helpers stopped before reservation and again before spawn.",
+        "Missing/tampered/stale/live/uninspectable origin proof, active same-claim workers, provider waits and competing reservations fail closed without changing tracker state. Preserve existing dispatcher-origin behavior.",
+        "Offline regressions exercise actual process stop checks, repeated fences and unchanged ownership; document exact evidence requirements. Submit through normal review and CI; do not install unreviewed source or claim SF207 recovered."
+      ],
+      "validation": "Focused recovery tests and full coordinator tests; tracking tests/dry run and diff checks. Merged-only installation and SF207 origin-proof verification remain next actions."
+    },
+    {
+      "key": "SF-209",
+      "title": "Validate Review claims without heartbeats during batch integration",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:infrastructure",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/tests/test_batch_integration.py"
+      ],
+      "resources": [],
+      "description": "Batch source-candidate scanning and manifest validation heartbeat non-expiring Review claims. The installed ticket CLI rejects this, aborting the entire project scan and preventing unrelated reviews and batch validation.",
+      "evidence": "Recovery run 48a0b885: services active, no verified workers, repeated suifleet scan failures on SF-166. Direct heartbeat returns Only implementation/blocked leases need heartbeats. Runtime batch_integration.py lines 184 and 555 heartbeat source owners which must be Review.",
+      "acceptance": [
+        "Use the existing read-only Review ownership validator instead of heartbeats in candidate scanning and manifest validation; reject stale or changed ownership and preserve all exact-head/base/source/CI/security/testnet/final-review gates.",
+        "Regression tests reject Review heartbeats, validate retained Review claims in both batch paths and exercise changed/unpublished ownership without blocking unrelated eligible work.",
+        "Submit through independent normal PR review; install only after verified merge through existing activation path."
+      ],
+      "validation": "Focused batch-integration tests, full coordinator suite, diff checks. No fabricated approvals or live wallet mutations."
+    },
+    {
+      "key": "SF-213",
+      "title": "Make temporary batch recovery self-resuming and prevent fallback rebase churn",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/recovery_watchdog.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requested investigation and permanent repair after batching was disabled again. Recovery disabled batching to bootstrap SF-212/#429, which is now merged and installed as c1514e3f, but nothing restored mode afterward. Fallback scheduling edited source heads in an active batch and restarted base-refresh repair loops. Implement a declarative temporary suspension tied to the exact repair commit becoming part of the installed reviewed runtime, protect sources during suspension, and document/test the supported recovery route. Never automatically override an explicit permanent disable.",
+      "evidence": "Recovery run-c7bd88d20815486e83c6f695b14c4429 intentionally disabled integration_batch.enabled, pending PR429 install. At 2026-11-01 07:15 installed.json reports c1514e3f (verified merge429), configuration remained false, batch427 remained awaiting_ci and fallback launched source base-update repairs. Operator verified fix installed and restored true under sole authority, preserving workers.",
+      "acceptance": [
+        "Temporary recovery keeps requested batching enabled and records an exact repair head/commit plus reason; it resumes effective batching only when the reviewed installed runtime verifiably contains that exact commit. No unconditional timer or prose parsing authorizes restoration.",
+        "Source PRs and active combined candidates are protected from normal single-PR freshness repairs during suspension. Explicit permanent disable is respected, with in-flight batch members fenced rather than silently rewritten.",
+        "Malformed/unavailable installation or commit evidence fails closed without bypassing CI/review/claim gates; no keys/config contents are logged. Existing mode remains unchanged without an explicit suspension record.",
+        "Recovery instructions require this bounded reversible route rather than a bare global disable. Tests cover pending/install ancestry, unrelated and changed evidence, explicit disable, active candidate protection and normal operation. Document merged-only activation and record real restored queue state."
+      ],
+      "validation": "Focused offline mode/ancestry/fallback-fence tests; full coordinator suite; compile/diff and offline tracking checks. Normal independent review and actual CI/testnet before merge and merged-only installation."
+    },
+    {
+      "key": "SF-210",
+      "title": "Start independent source reviews before slow queue scans and record low-latency PR workflow",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md",
+        "AGENTS.md"
+      ],
+      "resources": [],
+      "description": "User requested significant reduction in PR open-to-close latency and evaluation of PR stacks. Last seven days recorded 1015 review and 884 repair jobs across 59 PRs; recent median PR lifetime increased from 5.4h to 23.3h. Source-review dispatch currently waits behind historical merged-PR discovery and collection of every open PR snapshot. Start independent batch source reviews as eligible snapshots arrive, preserving all ownership, review and final integration gates. Document small interface-first dependent PRs and explicit stack limits instead of unsafe blanket dependency removal.",
+      "acceptance": [
+        "In batch mode, the first eligible independent source review launches before remaining PR snapshots and historical merge reconciliation finish. Failed unrelated snapshots cannot prevent other eligible dispatch.",
+        "Only fresh published Review owners and source-mode same-repository open non-draft PRs are eligible; actionable repairs, active/uncertain workers, complete current source receipts and final integration candidates retain existing handling. Dry-run does not dispatch.",
+        "Review launches remain bounded by existing reservation/capacity/provider rules; final combined-candidate CI/testnet, exact head/base/feedback checks and serialized integration remain unchanged.",
+        "Document independent batching versus dependent stacks, small interface-first prerequisite PRs, stage-specific waits and testnet-first acceptance sequencing without claiming unsupported arbitrary stacked-base merges."
+      ],
+      "validation": "Focused scheduler ordering/failure/dry-run/eligibility regressions; complete offline coordinator suite; compile/diff checks. Existing GitHub CI and independent review before merge/installed runtime activation.",
+      "evidence": "2026-10-31 measured last-week queue/review history and inspected installed coordinator: discovery and full snapshot collection precede all source launches. User explicitly requests substantial PR open-to-close improvement."
+    },
+    {
+      "key": "SF-214",
+      "title": "Route combined-review source findings to owners and release unrelated batches",
+      "priority": "P1",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:feature",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/batch_integration.py",
+        "tools/pr-coordinator/coordinator.py",
+        "tools/pr-coordinator/tests",
+        "docs/PR_COORDINATION.md"
+      ],
+      "resources": [],
+      "description": "User requires continuous progress. A published changes_requested integration review on batch433 found a reproducible enrollment bug in sole member421, but BatchController only attempted to relaunch the same completed review and never produced a source repair context. The stale failed CI-launch job was unrelated. Route exact fresh published combined source findings to original owners without inventing CI failures or editing SQLite externally; fail/split the rejected candidate so independent source-ready PRs proceed.",
+      "evidence": "2026-11-01 review job3084 on candidate433 changes_requested reproduces enrollment-claim invalidation; batch remains awaiting_review, source421 latest source review remains complete and failed CI job3079 reports evidence changed before launch. Operator is routing this genuine finding through installed controller methods immediately; permanent routing is absent.",
+      "acceptance": [
+        "Exact-head/base/feedback published changes_requested integration reviews retire the rejected candidate and persist a durable source finding before uncertain remote closure. Stale/unpublished/mismatched reviews never route repairs.",
+        "A single-member rejected candidate unambiguously routes its original source head and claim to normal feedback repair with the actual review evidence; no fake CI status, guessed blame or blanket fresh-base merges. Source-context identity survives unrelated main advances but expires on source-head changes.",
+        "For unattributed multi-member findings, record the rejected group and split boundedly rather than blocking the entire queue or blaming every member. Existing source-ready independent PRs can form the next batch.",
+        "Cleanup/closure retries and changed CI evidence do not abort unrelated scheduling or clear uncertain worker/claim reservations. Final source/combined CI, testnet and independent approval remain gates."
+      ],
+      "validation": "Offline real controller/state tests for singleton routing, stale review rejection, multi-member splitting, durable closure uncertainty, head changes and independent queue progress; full coordinator suite, compile/diff and tracking tests. Normal independent review/CI before merged-only runtime installation."
+    },
+    {
+      "key": "SF-216",
+      "title": "Install sandbox prerequisites before offline coordinator CI tests",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        ".github/workflows/ci.yml",
+        "tools/pr-coordinator/tests"
+      ],
+      "resources": [],
+      "description": "SF-215 introduced real LocalInfrastructure sandbox tests invoking bwrap. Hosted batch440 check job124954073449 failed seven tests with FileNotFoundError bwrap; source SF196 has no infrastructure delta. Repair CI prerequisite rather than repeatedly dispatching feature owners.",
+      "evidence": "PR440 run41342089768 job124954073449 and coordinator fix jobs3090/3091 retained receipts; PR441 check also failed in current snapshot.",
+      "acceptance": [
+        "Install and verify bubblewrap before offline PR coordinator tests on hosted Linux; preserve isolation and all feature/security/testnet gates.",
+        "Run focused real sandbox tests and full offline coordinator suite plus structural workflow checks; record exact results and limitations.",
+        "Use user-authored scoped commits and Closes issue PR; hand off to sole coordinator local infrastructure lane; installation merged-only."
+      ],
+      "validation": "Real bubblewrap local lane tests, complete offline coordinator suite, tracking tests/plan, diff check. User local-test infrastructure policy applies; no fabricated hosted success."
+    },
+    {
+      "key": "SF-227",
+      "title": "Let explicit stopped-repair recovery bypass idle eligibility backoff",
+      "priority": "P0",
+      "area": "infra",
+      "phase": "fleet",
+      "kind": "type:bug",
+      "depends_on": [],
+      "paths": [
+        "tools/pr-coordinator/recovery_control.py",
+        "tools/pr-coordinator/tests/test_recovery_control.py"
+      ],
+      "resources": [],
+      "description": "Explicit same-claim stopped engineering repair is rejected by idle no-eligible-ticket backoff because recovery_control passes recovering=False for reconciled review repairs. Retained implementation recovery already passes recovering=True. Apply the same guarded capacity behavior to both verified recovery origins.",
+      "evidence": "Bounded fleet recovery 2026-11-02: SF-221 recovery_control --blocked-engineering-repair refused no configured implementation capacity; dispatcher backoff reason idle: no eligible ticket despite zero verified workers. Existing stop/helper/dependency/resource/provider gates passed before availability check.",
+      "acceptance": [
+        "Verified explicit stopped repair recovery bypasses idle eligibility delay while preserving provider stagger, real execution capacity, stop/claim/resource/dependency checks and maintenance holds.",
+        "Offline real capacity regression covers reconciled repair origin and retained origin, provider stagger and occupied slots; no database edits or installed working-tree code.",
+        "Scoped user-authored PR closes this issue; normal coordinator integration and merged-only activation."
+      ],
+      "validation": "Focused recovery/dispatcher tests and complete offline coordinator suite; compile/diff checks. User authorized infrastructure local-test integration applies."
     }
   ]
 }

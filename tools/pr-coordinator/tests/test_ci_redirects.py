@@ -165,12 +165,21 @@ class Fixture(unittest.TestCase):
 
     def kill_processes(self):
         rows = self.worker.db.execute("SELECT pid FROM runs WHERE pid IS NOT NULL").fetchall()
-        for pid in {*self.processes, *(r[0] for r in rows)}:
-            for member in d.Dispatcher.session_members(pid)[0]:
+        sessions = {*self.processes, *(r[0] for r in rows)}
+        # A wrapper may fork its model CLI after one /proc scan. That survivor
+        # would keep writing into the fixture directory during cleanup, so
+        # rescan until every session is empty (bounded; test sessions only).
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            members = [m for pid in sessions for m in d.Dispatcher.session_members(pid)[0]]
+            if not members:
+                break
+            for member in members:
                 try:
                     os.kill(member['pid'], signal.SIGKILL)
                 except OSError:
                     pass
+            time.sleep(0.05)
 
     def record(self):
         return self.worker.db.execute('SELECT * FROM ci_redirects ORDER BY id DESC').fetchone()

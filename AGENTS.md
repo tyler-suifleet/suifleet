@@ -134,7 +134,7 @@ The user authorized agents to spend **testnet** SUI from two dedicated accounts 
 
 **Funding.** Use `sui client faucet --address …` with Sui ≥ 1.82.1, which solves a proof of work. The pinned 1.81.1 compiler CLI cannot.
 
-**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.82.1), which must support the network's protocol version (138 and 139 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
+**Two CLIs.** Live runs compile with the pinned release compiler (`sui`, 1.81.1). They read, sign and submit with the checksum-pinned transaction CLI at `/opt/sui-network/sui` (1.83.0), which must support the network's protocol version (138 and 140 respectively). Package bytecode is verified in the unsigned transaction before signing. See [TESTNET.md](docs/TESTNET.md#toolchain-release-compiler-and-transaction-cli).
 
 **No JSON-RPC.** Public fullnodes no longer serve JSON-RPC, so live checks must use gRPC or the Sui CLI.
 
@@ -219,3 +219,36 @@ network-mismatch and failure-path checks remain implementation gates. This grant
 no production credential provisioning, service purchases or mainnet writes. Maintain the existing periodic local status report with feature
 progress, verified active workers and honest blockers. Services continue while WSL
 is running; a stopped host is not evidence that unattended work is still executing.
+
+
+### Batch integration mode
+
+When the reviewed coordinator's per-project `integration_batch` setting is enabled,
+source reviewers issue typed source-complete/acceptance-ready receipts without
+claiming final merge approval. Keep source branches stable while the combined
+candidate runs CI/testnet; do not merge advancing main merely for freshness.
+Actual source findings and conflicts still require owner repair. The sole
+orchestrator validates and independently reviews the exact combined candidate,
+rechecks every member and pinned base, then publishes once and reconciles all
+verified merged tickets. Source receipts alone never satisfy merge gates; see
+[batch integration](docs/PR_COORDINATION.md#reviewed-integration-batches).
+
+
+### Keep reviewed work moving
+
+User direction (2026-10-31): optimize PR open-to-close time while preserving
+source/security review and automated testnet validation. Use independent small
+PRs and stable source receipts with batch integration. For dependent features,
+merge a small additive framework/API first, then implement its consumers in
+parallel; preserve genuine dependencies and never guess an unmerged interface.
+Arbitrary unmerged-parent PR stacks are not yet supported by the coordinator.
+Human/outsider/manual-wallet, Pi and actual mainnet/production-provider acceptance
+wait until testnet feature completeness and remain tracked as unrun. New docs
+URLs introduced by a PR receive structural premerge checks and online checks
+after publication. Do not spin model workers solely to wait for CI or repeat an
+unchanged source review. See the low-latency workflow in docs/PR_COORDINATION.md.
+
+
+## Local-test infrastructure integration — user direction, 2026-11-01
+
+Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.

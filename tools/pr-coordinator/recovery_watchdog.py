@@ -238,6 +238,14 @@ If the command or another necessary operational route is missing/broken, repair 
 issue claim (or publish/claim a scoped Codex issue if none exists), implement and test the contained fix, then hand it
 to normal PR review. Installation is permitted only through the reviewed merged-only path; never install unreviewed
 working-tree changes. Record the pending review as the next action. Never bypass ownership or acceptance gates. Verify launched worker identities and actual results; report failures honestly.
+Temporary batch recovery must use the installed suspension protocol, not a bare integration_batch.enabled=false toggle.
+Keep enabled=true, set suspend_until_installed to the exact reviewed repair PR HEAD and a bounded suspension_reason.
+It resumes automatically only when the verified installed runtime contains that commit. Only that repair head uses the
+fallback integration path; unrelated sources stay frozen. Clear/update the intent explicitly if the repair head changes.
+Verify the installed BatchController supports this protocol before using it; if absent, implement/review it normally.
+An explicit human permanent disable or maintenance hold must never be overridden. Do not call a temporary mode change
+recovered while restoration remains pending; record the exact condition and next bounded observation. No timer alone,
+branch tip or unmerged working tree proves installation. Re-read current source/candidate receipts after restoration.
 Prefer bounded operational fixes. Service restarts must preserve child workers and respect maintenance holds.
 Verify actual PID/start identities and changed tracker/PR state; a successful command alone is insufficient evidence.
 Do not expose credentials or put raw logs into the report. Write {result} as one JSON object:

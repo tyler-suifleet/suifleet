@@ -3,10 +3,22 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot } from 'react-dom/client';
 import FirmwarePage from '../../dapp/src/app/firmware/page';
 
+
+const storageClient = {
+  $extend: () => ({ walrus: {
+    systemState: async () => ({ committee: { epoch: 35 }, future_accounting: { length: 54 } }),
+    stakingState: async () => ({ epoch_duration: '86400000', first_epoch_start: String(Date.now() - 35 * 86400000) }),
+    storageCost: async (size, epochs) => ({ totalCost: BigInt(size * epochs), storageCost: BigInt(size * epochs), writeCost: 0n }),
+    getVerifiedBlobStatus: async () => ({ type: 'permanent', endEpoch: 42 }),
+    getBlobType: () => '0x2::blob::Blob',
+  } }),
+  listOwnedObjects: async () => ({ objects: [], hasNextPage: false }),
+};
 const device = { objectId: '0x123', name: 'Acceptance device', arch: 'x86_64' };
 export const useCurrentAccount = () => ({ address: '0xa' });
-export const useCurrentClient = () => ({});
-export const useCurrentNetwork = () => 'localnet';
+export const useDAppKit = () => ({});
+export const useCurrentNetwork = () => 'testnet';
+export const useCurrentClient = () => storageClient;
 export const useDevices = () => ({ data: [device] });
 export const useGroups = () => ({ data: [] });
 export const useAccessPolicies = () => ({ data: [] });
@@ -19,7 +31,7 @@ export const useFleetTransaction = () => ({ isPending: false, mutateAsync: ({ on
 } });
 class Request {
   upload = new EventTarget();
-  open() {}
+  open(method, url) { this.url = url; }
   setRequestHeader() {}
   send(body) { this.body = body; state.requests.push(this); }
 }
@@ -38,7 +50,7 @@ window.uploadAcceptance = {
   finish(index, status = 200) {
     const request = state.requests[index];
     request.status = status;
-    request.responseText = JSON.stringify({ newlyCreated: { blobObject: { blobId: `blob-${index}`, storage: { endEpoch: 42 } } } });
+    request.responseText = JSON.stringify({ newlyCreated: { blobObject: { blobId: `blob-${index}`, storage: { endEpoch: 35 + Number(new URL(request.url).searchParams.get("epochs")) } } } });
     request.onload();
   },
   phase(phase) { state.onProgress(phase); },

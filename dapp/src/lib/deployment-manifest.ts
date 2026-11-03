@@ -6,11 +6,11 @@ import { UpgradeCapBcs } from "./move-bcs";
 
 import { REQUIRED_TYPES, PROTOCOL_VERSION, MANIFEST_SCHEMA_VERSION } from "./protocol-version";
 export { REQUIRED_TYPES } from "./protocol-version";
-import { BUDGET_TYPES, CATALOG_TYPES, SUBSCRIPTION_TYPES, GROUP_BATCH_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
-export { BUDGET_TYPES, CATALOG_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
+import { SUBSCRIPTION_TYPES, APPROVAL_TYPES, AUDIT_TYPES, GROUP_BATCH_TYPES, SECURITY_DELAY_TYPES, SECURITY_TYPES, BUDGET_TYPES, CATALOG_TYPES, HANDOVER_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
+export { SECURITY_DELAY_TYPES, SECURITY_TYPES, BUDGET_TYPES, CATALOG_TYPES, SEAL_POLICY_TYPES, ROLLOUT_HEALTH_TYPES, SETTINGS_TYPES, INBOX_TYPES, CUSTOMER_TYPES, SHARD_TYPES } from "./protocol-version";
 function manifestTypes(m: DeploymentManifest): string[] {
   const types: string[] = [...REQUIRED_TYPES];
-  for (const [label, group] of [["subscription", SUBSCRIPTION_TYPES], ["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES], ["fleet settings", SETTINGS_TYPES], ["rollout health", ROLLOUT_HEALTH_TYPES], ["fleet inbox", INBOX_TYPES], ["customer", CUSTOMER_TYPES], ["receipt shards", SHARD_TYPES]] as const) {
+  for (const [label, group] of [["subscription", SUBSCRIPTION_TYPES], ["second person", APPROVAL_TYPES], ["security delay", SECURITY_DELAY_TYPES], ["security policy", SECURITY_TYPES], ["rollout audit", AUDIT_TYPES], ["catalog", CATALOG_TYPES], ["seal policy", SEAL_POLICY_TYPES], ["fleet budget", BUDGET_TYPES], ["fleet settings", SETTINGS_TYPES], ["rollout health", ROLLOUT_HEALTH_TYPES], ["fleet inbox", INBOX_TYPES], ["customer", CUSTOMER_TYPES], ["receipt shards", SHARD_TYPES]] as const) {
     const present = group.filter(name => name in m.type_origins);
     if (present.length && present.length !== group.length) fail(`partial ${label} type origins`);
     types.push(...present);
@@ -32,7 +32,7 @@ export interface DeploymentManifest {
   type_origins: Record<string, string>;
   shared_objects: { registry: { id: string; initial_shared_version: string } };
   supported_clients: Record<string, { min: string; max_exclusive: string }>;
-  walrus: { publisher_url: string; aggregator_url: string };
+  walrus: { publisher_url: string; aggregator_url: string; publisher_urls?: string[]; aggregator_urls?: string[] };
 }
 function fail(message: string): never { throw new Error(`Deployment manifest: ${message}`); }
 export function normalizeId(value: string): string {
@@ -105,6 +105,12 @@ export function parseManifest(raw: string): DeploymentManifest {
   const current = version(clientPackage.version);
   if (compare(version(range.min), current) > 0 || compare(current, version(range.max_exclusive)) >= 0) fail("unsupported dapp client version");
   endpoint(m.rpc_url); endpoint(m.walrus.publisher_url); endpoint(m.walrus.aggregator_url);
+  for (const list of [m.walrus.publisher_urls, m.walrus.aggregator_urls]) {
+    if (list !== undefined) {
+      if (!Array.isArray(list) || !list.length) fail("endpoint list must be nonempty");
+      for (const url of list) endpoint(url);
+    }
+  }
   return m;
 }
 // Absence permits an unconfigured static build, but never a query or transaction.
@@ -113,7 +119,7 @@ export const MANIFEST = process.env.NEXT_PUBLIC_DEPLOYMENT_MANIFEST
 export function requireManifest(): DeploymentManifest {
   return MANIFEST ?? fail("not configured; generate frontend.env from a verified manifest");
 }
-export function moveType(name: typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number] | typeof GROUP_BATCH_TYPES[number] | typeof SUBSCRIPTION_TYPES[number]): string {
+export function moveType(name: typeof SUBSCRIPTION_TYPES[number] | typeof APPROVAL_TYPES[number] | typeof SECURITY_DELAY_TYPES[number] | typeof SECURITY_TYPES[number] | typeof AUDIT_TYPES[number] | typeof GROUP_BATCH_TYPES[number] | typeof REQUIRED_TYPES[number] | typeof CATALOG_TYPES[number] | typeof SEAL_POLICY_TYPES[number] | typeof HANDOVER_TYPES[number] | typeof BUDGET_TYPES[number] | typeof SETTINGS_TYPES[number] | typeof ROLLOUT_HEALTH_TYPES[number] | typeof INBOX_TYPES[number] | typeof CUSTOMER_TYPES[number] | typeof SHARD_TYPES[number]): string {
   const m = requireManifest();
   return `${normalizeId(m.type_origins[name])}::${name}`;
 }

@@ -16,6 +16,7 @@ merging implementation does not establish them or authorize deployment.
 |---|---|
 | SF-082 serverless dApp and fleet data | Final production Seal/provider/domain and manual wallet acceptance, physical target and Mainnet checks remain SF-031/#32 and SF-087/#159. Actual merged SF-083 compatibility, native simulator, isolated-chain upgrade/adversarial tests, reproducible production export, authorized Testnet data/Site effects and verified browser decryption, normal CI/testnet/security and independent review remain implementation gates. |
 | SF-091 fleet recovery and outage rehearsal | Production Seal providers, real IdP/extension-wallet sessions, physical Pi recovery and Mainnet remain unrun in SF-031/#32 and SF-087/#159. Isolated restore/outage/payment-failure drills with the real daemon, read-only Testnet restore/discovery/owner-policy decryption, the actual merged SF-082 integration and rerun, normal CI/testnet and independent review remain implementation gates. |
+| SF-165 release storage periods | SF-031/#32 and SF-087/#159 retain manual real-wallet/production Seal-provider, physical and actual-mainnet acceptance. Period/price/expiry, authenticated recipe inspection, wallet/fleet extension builders, local browser/unit/build checks, actual chosen-period Testnet publication/extension, ordinary CI/testnet and independent source review remain implementation gates. See [SF-165 receipt](validation/sf165-testnet.json). |
 | SF-054 network cost model | Final production provider/account/credential and manual real-wallet acceptance, plus actual Mainnet/physical acceptance, remain in SF-031/#32 and SF-087/#159. Read-only Mainnet rates, exact encoding, Testnet effects/token accounting, offline regression tests and independent review remain implementation evidence. Unquoted services and incomplete invoices must remain labeled. |
 | SF-006 publishing and SF-008 identity | [SF-010: public-network upgrade and wallet acceptance](https://github.com/tyler-suifleet/suifleet/issues/11) |
 | SF-011 catalog and SF-013 desired state | SF-010 plus [SF-031: physical Pi OTA and recovery](https://github.com/tyler-suifleet/suifleet/issues/32) |
@@ -176,3 +177,31 @@ IdP/prover/Slush/extension-wallet acceptance remain explicitly unrun in
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159). This changes
 acceptance ordering only; it grants no production/hardware/mainnet operation and
 waives no source, software, exact-head CI or review gate.
+
+
+SF-176 software hosting/release preparation follows the user’s 2026-10-31
+recovery direction. Real local marketing/docs/console builds, sealed provenance,
+tamper rejection, offline rollback regression, source/security review and normal
+CI/testnet gates remain required. Actual provider account/projects, three-origin
+preview URLs, external served bytes/TLS and hosted rollback rehearsal remain
+**unrun**, deferred to [SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62)
+and [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+Manual recorded-console/Slush screening remains in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32).
+Missing preview accounts alone do not block software review. Production still
+requires explicit user authorization, matching revision/digest and protected
+environment approval; this split authorizes no credentials, DNS, publication,
+mainnet/SuiNS or hardware operations. Offline fixtures are not hosted receipts.
+
+SF-201 native multisig administration retains all source/security, Move/frontend,
+isolated existing-object/old-package upgrade, actual automated testnet and
+exact-head/current-base CI/review gates. Actual local/public transaction effects
+and the serverless console checks are recorded in
+[SF-201 validation](validation/sf201-multisig.md). Manual Slush, extension-wallet
+and physical hardware/passkey-member sessions remain **unrun** in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32); final production,
+provider and actual mainnet acceptance remain in
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159), hosting in
+[SF-042/#62](https://github.com/tyler-suifleet/suifleet/issues/62). The explicit
+SF-201 policy entry records this user-authorized ordering without claiming final
+wallet/hardware compatibility or granting production/hardware/mainnet authority.

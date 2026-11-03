@@ -44,6 +44,25 @@ module sui_edge::subscription_tests {
         ts::return_shared(account); ts::return_shared(c); ts::return_shared(clock);
         s.next_tx(OWNER);
     }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun registry_cannot_override_subscription_entitlement() {
+        let mut s = setup(true); open(&mut s, 1080);
+        let mut c = s.take_shared<Customer>();
+        let r = s.take_shared<DeviceRegistry>();
+        customer::set_entitlement(&mut c, &r, 999, 9999, 9999999999, s.ctx());
+        ts::return_shared(c); ts::return_shared(r); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun subscription_keeps_configured_security_factors() {
+        let mut s = setup(true); open(&mut s, 1080);
+        let mut c = s.take_shared<Customer>();
+        customer::set_security_requirements_for_testing(&mut c, vector[1,0,0,0,0,0,0]);
+        let mut account = s.take_shared<Account<SUI>>();
+        let clock = s.take_shared<Clock>();
+        let refund = subscription::cancel(&mut account, &c, &clock, s.ctx());
+        coin::burn_for_testing(refund);
+        ts::return_shared(c); ts::return_shared(account); ts::return_shared(clock); s.end();
+    }
     #[test]
     fun permissionless_collection_and_annual_discount_refund() {
         let mut s = setup(true);

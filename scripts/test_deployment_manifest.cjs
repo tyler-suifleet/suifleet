@@ -8,6 +8,12 @@ const { parseManifest, verifyDeployment, moveType, REQUIRED_TYPES, CATALOG_TYPES
 const copy = () => structuredClone(fixture);
 (async () => {
   assert.deepEqual(parseManifest(JSON.stringify(fixture)), fixture);
+  const ordered = copy(); ordered.walrus.publisher_urls = ['https://one.example', 'https://two.example']; ordered.walrus.aggregator_urls = ['https://read.example'];
+  assert.deepEqual(parseManifest(JSON.stringify(ordered)), ordered);
+  for (const value of [[], 'https://one.example', ['file:///tmp/blob'], ['https://user:secret@example.com']]) {
+    const invalid = copy(); invalid.walrus.publisher_urls = value;
+    assert.throws(() => parseManifest(JSON.stringify(invalid)));
+  }
   if (!process.argv[2]) {
     const payee = '0x' + 'ab'.repeat(32);
     const payment = {...copy(), treasury_payee: payee};

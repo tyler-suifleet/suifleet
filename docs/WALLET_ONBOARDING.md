@@ -164,3 +164,24 @@ gates. Fixture evidence does not establish real provider or wallet acceptance.
 References: [Enoki registration](https://docs.enoki.mystenlabs.com/ts-sdk/register),
 [Enoki sign-in](https://docs.enoki.mystenlabs.com/ts-sdk/sign-in),
 [dApp Kit configuration](https://sdk.mystenlabs.com/dapp-kit/dapp-kit-instance).
+
+## Optional organization action protection
+
+The console's **Settings → Organization security** shows the policy for every
+fleet in the selected organization. The shared framework starts with all four
+options off. Multisig administrators, a passkey co-signature, approval from another
+credential, and a delay/cancel window are independent options; selected options
+combine, so every required protection must pass.
+
+Until the corresponding verifier and enrollment feature is installed, its checkbox
+says **Not available yet** and cannot be enabled. Signing in with a passkey or
+multisig wallet alone does not activate an organization policy. The framework
+never reports an unavailable mechanism as working protection.
+
+Changing administrators, weakening protection or handing over an organization
+requires the currently effective factors. Losing a required factor can lock
+administration; there is no support/email reset. Migration and complete managed
+custody are prerequisites to activation. See the [approved design and recovery
+rules](SECOND_FACTOR_DESIGN.md) and [operational steps](OPERATIONS.md#organization-security-framework-sf-196).
+Manual real-wallet and outsider walkthroughs remain final acceptance in #32/#159;
+the automated public-chain query/effects evidence is separate.

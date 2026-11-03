@@ -30,9 +30,10 @@ import sui_toolchain as toolchain
 import test_component as component
 from testnet_budget import Budget, Spent  # noqa: F401 (re-exported to the suites)
 
-# Base publish budget. After SF-136 a fresh main base publish costs ~0.55 SUI;
-# 0.4 SUI failed InsufficientGas (runs 40238821132, 40261665249).
-PACKAGE_GAS = 700_000_000
+# Package reservation: SF-196 current root upgrade used 751,037,763 MIST.
+# Leave measured storage headroom for a future fresh publication of that root;
+# the ledger still caps this reservation at the run allowance/balance.
+PACKAGE_GAS = 850_000_000
 
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "suifleet-edge/target/debug/suifleet"
@@ -350,7 +351,7 @@ class Live:
     def published(result):
         return next(c["packageId"] for c in result["objectChanges"] if c["type"] == "published")
 
-    def publish(self, label, package_dir, pubfile, upgrade=None):
+    def publish(self, label, package_dir, pubfile, upgrade=None, *, persist=None):
         """Ephemeral publication of a contracts tree, or its upgrade
         (`upgrade` = {"cap": UpgradeCap, "package": current package}). The
         pinned compiler's bytecode is verified in the unsigned transaction
@@ -368,7 +369,7 @@ class Live:
         sign = toolchain.keystore_signer(self.network_sui, self.wallet, self.operator)
         result = self.execute(label, toolchain.package_submitter(
             client, self.build_sui, package_dir, common, sender=self.operator, sign=sign, upgrade=upgrade,
-            record=built.setdefault(label, {})),
+            record=built.setdefault(label, {}), persist=persist),
             # Head packages can exceed 0.4 SUI (SF-136). Reserve only the
             # existing allowance; effects settle actual cost, never replenishing it.
             gas=self.ledger.remaining if upgrade is not None else PACKAGE_GAS)
@@ -489,7 +490,10 @@ class Walrus:
         blob = stored.get("newlyCreated", {}).get("blobObject", {}).get("blobId") or stored.get("alreadyCertified", {}).get("blobId")
         assert blob, f"Walrus publisher returned no blob ID: {stored}"
         # Read it back through the aggregator before relying on it.
-        wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
+        try:
+            wait_for(lambda: self.readable(blob, body), f"Walrus blob {blob} not readable from the aggregator", timeout=120)
+        except AssertionError as error:
+            raise AssertionError(f"{error}; last read: {getattr(self, 'read_error', 'unknown')}") from error
         return blob
 
     def store(self, body):
@@ -536,12 +540,33 @@ class Walrus:
         return self.stored_by
 
     def readable(self, blob, body):
-        try:
-            request = urllib.request.Request(f"{self.aggregator}/v1/blobs/{blob}", headers=AGENT)
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return response.read() == body
-        except OSError:
-            return False
+        url = f"{self.aggregator}/v1/blobs/{blob}"
+        if self.mode == "testnet":
+            url += "?strict_consistency_check=true"
+        # A freshly certified blob can initially return a cacheable 404/5xx.
+        # Repeating that exact URL can keep reading the cached failure even
+        # after storage is available. Revalidate once per poll, without another
+        # upload or a longer polling deadline. Bytes must still match exactly.
+        for revalidate in (False, True):
+            headers = {**AGENT, "Cache-Control": "no-cache"}
+            target = url
+            if revalidate:
+                target += f"{'&' if '?' in target else '?'}suifleet_readback={os.urandom(8).hex()}"
+                headers["Cache-Control"] = "no-cache"
+            try:
+                request = urllib.request.Request(target, headers=headers)
+                with urllib.request.urlopen(request, timeout=15) as response:
+                    matches = response.read() == body
+                self.read_error = None if matches else "aggregator bytes differ from uploaded bytes"
+                return matches
+            except urllib.error.HTTPError as error:
+                self.read_error = f"HTTP {error.code}"
+                if error.code != 404 and error.code < 500:
+                    return False
+            except OSError as error:
+                self.read_error = type(error).__name__
+                return False
+        return False
 
     def close(self):
         if self.mode != "testnet":

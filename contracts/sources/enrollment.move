@@ -17,6 +17,12 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::enrollment {
+    // Widen named narrow literals at use sites to avoid repeated LdU64.
+    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
+    // are unchanged; abort constants retain their original u64 declarations.
+    const SMALL_0: u8 = 0;
+    const SMALL_1: u8 = 1;
+
     use std::string::String;
     use sui::clock::Clock;
     use sui::event;
@@ -52,6 +58,35 @@ module sui_edge::enrollment {
         enrolled: u64,
     }
 
+    public struct SecurityRevisionKey has copy, drop, store {}
+    public struct SecurityGenerationKey has copy, drop, store {}
+    // Existing key, distinct parent UIDs: Customer stores the authority epoch;
+    // EnrollmentPolicy stores the epoch at which its claims were authorized.
+    public(package) fun authority_generation(customer: &UID): u64 {
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) else (SMALL_0 as u64)
+    }
+    public(package) fun invalidate_authority(customer: &mut UID) {
+        let next = authority_generation(customer) + (SMALL_1 as u64);
+        if (df::exists(customer, SecurityGenerationKey {})) *df::borrow_mut<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) = next
+        else df::add(customer, SecurityGenerationKey {}, next);
+    }
+    public(package) fun security_revision(policy: &EnrollmentPolicy): u64 {
+        if (df::exists(&policy.id, SecurityRevisionKey {})) *df::borrow<SecurityRevisionKey, u64>(&policy.id, SecurityRevisionKey {}) else (SMALL_0 as u64)
+    }
+    /// changed: compact private symbol to bound published bytecode storage.
+    fun p0(policy: &mut EnrollmentPolicy) {
+        if (!df::exists(&policy.id, SecurityRevisionKey {})) df::add(&mut policy.id, SecurityRevisionKey {}, (SMALL_0 as u64));
+        let revision = df::borrow_mut<SecurityRevisionKey, u64>(&mut policy.id, SecurityRevisionKey {});
+        *revision = *revision + (SMALL_1 as u64);
+    }
+    public(package) fun bind_security_generation(policy: &mut EnrollmentPolicy, generation: u64) {
+        if (df::exists(&policy.id, SecurityGenerationKey {})) {
+            *df::borrow_mut<SecurityGenerationKey, u64>(&mut policy.id, SecurityGenerationKey {}) = generation;
+        } else df::add(&mut policy.id, SecurityGenerationKey {}, generation);
+    }
+    public(package) fun security_generation(policy: &EnrollmentPolicy): u64 {
+        if (df::exists(&policy.id, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(&policy.id, SecurityGenerationKey {}) else (SMALL_0 as u64)
+    }
     public struct ManagedKey has copy, drop, store {}
     public struct PolicyCreated has copy, drop {
         policy_id: ID,
@@ -81,7 +116,7 @@ module sui_edge::enrollment {
             remaining: quota,
             expires_at_ms,
             open: true,
-            enrolled: 0,
+            enrolled: (SMALL_0 as u64),
         };
         event::emit(PolicyCreated { policy_id: object::id(&policy), operator: policy.operator, registry: policy.registry });
         transfer::share_object(policy);
@@ -89,27 +124,30 @@ module sui_edge::enrollment {
 
     public(package) fun create_managed(registry: &DeviceRegistry, operator: address, quota: u64, expires_at_ms: u64, ctx: &mut TxContext): ID {
         let mut policy = EnrollmentPolicy { id: object::new(ctx), operator, registry: object::id(registry),
-            claims: table::new(ctx), remaining: quota, expires_at_ms, open: false, enrolled: 0 };
+            claims: table::new(ctx), remaining: quota, expires_at_ms, open: false, enrolled: (SMALL_0 as u64) };
         df::add(&mut policy.id, ManagedKey {}, true);
         let policy_id = object::id(&policy);
         event::emit(PolicyCreated { policy_id, operator, registry: policy.registry });
         transfer::share_object(policy); policy_id
     }
     public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
-        let mut i = 0;
+        p3(policy.operator == authority);
+        p0(policy);
+        let mut i = (SMALL_0 as u64);
         while (i < claims.length()) {
             if (!policy.claims.contains(claims[i])) policy.claims.add(claims[i], true);
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
     }
     public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
+        p3(policy.operator == authority);
+        p0(policy);
         policy.claims.remove(claim);
     }
     public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
-        assert!(policy.operator == authority, ENotOperator);
-        assert!(df::exists(&policy.id, ManagedKey {}), EClosed);
+        p3(policy.operator == authority);
+        p0(policy);
+        p2(df::exists(&policy.id, ManagedKey {}));
         policy.remaining = quota; policy.expires_at_ms = expires_at_ms;
         if (close) *df::borrow_mut<ManagedKey, bool>(&mut policy.id, ManagedKey {}) = false;
     }
@@ -117,27 +155,27 @@ module sui_edge::enrollment {
     /// Add claim addresses (duplicates are ignored).
     #[allow(lint(prefer_mut_tx_context))]
     public fun add_claims(policy: &mut EnrollmentPolicy, claims: vector<address>, ctx: &TxContext) {
-        assert_operator(policy, ctx);
-        let mut i = 0;
+        p1(policy, ctx);
+        let mut i = (SMALL_0 as u64);
         while (i < claims.length()) {
             if (!policy.claims.contains(claims[i])) {
                 policy.claims.add(claims[i], true);
             };
-            i = i + 1;
+            i = i + (SMALL_1 as u64);
         };
     }
 
     /// Withdraw an unused claim, e.g. for a lost or leaked claim key.
     #[allow(lint(prefer_mut_tx_context))]
     public fun revoke_claim(policy: &mut EnrollmentPolicy, claim: address, ctx: &TxContext) {
-        assert_operator(policy, ctx);
+        p1(policy, ctx);
         assert!(policy.claims.contains(claim), EUnknownClaim);
         policy.claims.remove(claim);
     }
 
     #[allow(lint(prefer_mut_tx_context))]
     public fun set_limits(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, ctx: &TxContext) {
-        assert_operator(policy, ctx);
+        p1(policy, ctx);
         policy.remaining = quota;
         policy.expires_at_ms = expires_at_ms;
     }
@@ -145,7 +183,7 @@ module sui_edge::enrollment {
     /// Stop all enrollment under this policy (permanent).
     #[allow(lint(prefer_mut_tx_context))]
     public fun close(policy: &mut EnrollmentPolicy, ctx: &TxContext) {
-        assert_operator(policy, ctx);
+        p1(policy, ctx);
         policy.open = false;
     }
 
@@ -173,10 +211,10 @@ module sui_edge::enrollment {
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext, managed: bool): DeviceOwnerCap {
         assert!(object::id(registry) == policy.registry, EWrongRegistry);
         if (managed) {
-            assert!(!policy.open && df::exists(&policy.id, ManagedKey {}) && *df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}), EClosed);
-        } else assert!(policy.open, EClosed);
-        assert!(policy.expires_at_ms == 0 || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
-        assert!(policy.remaining > 0, EQuotaExhausted);
+            p2(!policy.open); p2(df::exists(&policy.id, ManagedKey {})); p2(*df::borrow<ManagedKey, bool>(&policy.id, ManagedKey {}));
+        } else p2(policy.open);
+        assert!(policy.expires_at_ms == (SMALL_0 as u64) || clock.timestamp_ms() <= policy.expires_at_ms, EExpired);
+        assert!(policy.remaining > (SMALL_0 as u64), EQuotaExhausted);
         let sponsor = ctx.sponsor();
         assert!(sponsor.is_some(), ENotSponsored);
         let claim = sponsor.destroy_some();
@@ -184,8 +222,8 @@ module sui_edge::enrollment {
         assert!(claim != device_address, ESponsorIsDevice);
         assert!(policy.claims.contains(claim), EUnknownClaim);
         policy.claims.remove(claim);
-        policy.remaining = policy.remaining - 1;
-        policy.enrolled = policy.enrolled + 1;
+        policy.remaining = policy.remaining - (SMALL_1 as u64);
+        policy.enrolled = policy.enrolled + (SMALL_1 as u64);
 
         let device = device_registry::register_device(registry, name, device_address, arch, clock, ctx);
         let device_id = device_registry::device_id(&device);
@@ -207,7 +245,19 @@ module sui_edge::enrollment {
     public fun enrolled(policy: &EnrollmentPolicy): u64 { policy.enrolled }
     public fun is_open(policy: &EnrollmentPolicy): bool { policy.open }
 
-    fun assert_operator(policy: &EnrollmentPolicy, ctx: &TxContext) {
-        assert!(ctx.sender() == policy.operator, ENotOperator);
+    /// assert_operator: compact private symbol to bound published bytecode storage.
+    fun p1(policy: &EnrollmentPolicy, ctx: &TxContext) {
+        p3(ctx.sender() == policy.operator);
+    }
+    // Separate guard calls retain short-circuit order and the same abort site/code.
+    // Avoid materializing intermediate booleans in the caller bytecode.
+    // Share each named abort branch without changing its module or error code.
+    /// check_Closed: compact private symbol to bound published bytecode storage.
+    fun p2(condition: bool) {
+        if (!condition) abort EClosed
+    }
+    /// check_NotOperator: compact private symbol to bound published bytecode storage.
+    fun p3(condition: bool) {
+        if (!condition) abort ENotOperator
     }
 }

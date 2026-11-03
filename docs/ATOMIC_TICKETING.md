@@ -111,3 +111,37 @@ This is cooperative coordination for trusted models on one user account, not an 
 ## Verification
 
 The extracted coordinator's `make test` runs offline tests using temporary databases and worktrees, including a ten-process race with exactly one winner, non-blocking path and resource overlap, a cross-process hardware-lock race, lock expiry/takeover, dependency gating, stale leases, token replacement, remote ownership, failed worktree setup and failed mirror retry. `make test-tracking` checks the existing backlog/publication tooling. Tests do not mutate GitHub.
+
+## Terminal dependency discovery (SF-211)
+
+The portable implementation is tracked in
+[atomic-ticketing PR #4](https://github.com/therealtime/atomic-ticketing/pull/4)
+from fresh main `fd960c9`, branch `work/sf-211-terminal-refresh`, source head
+`d00ce231d6fcc60273f662d9c1ca1d09369043d5`. This companion documents the change;
+it does not activate it. Both source review and successful source CI remain
+required before the portable tool's reviewed merged-only operator rollout.
+
+The implementation validates catalog issue identity and complete, unambiguous
+Project Status/Agent and issue assignees before skipping native blocked-by reads
+for issues that are **closed and Project Done**. Done retains historical Agent
+and human assignment. Reopened Done issues and closed issues with active or other
+nonterminal Project statuses still fetch dependencies. Refresh preserves local
+claims; it does not release an inconsistent owner or fabricate completion.
+Missing/ambiguous data fails closed. Active tickets still resolve internal and
+external blockers; terminal snapshots omit the terminal ticket’s own obsolete blocked-by edges.
+Complete issue/Project discovery, pagination, credential/account namespaces,
+cache expiry and quota/backoff rules remain in effect.
+
+Offline evidence: `umask 022; make test` in the portable source passed 69 tests,
+including isolated-prefix installer/unrelated-command checks and five new fleet
+regressions. A 210-ticket/16-open fixture makes **16 instead of 210 dependency
+API invocations**, saving 194 (92.4%). Adapter-level total calls fall from 212 to
+18; wire pagination is unchanged and those totals are not wire-request counts.
+Reopen, closed/active mismatch, genuine blockers, local claim preservation and
+incomplete/duplicate/mismatched snapshots are covered. The initial default-umask
+run hit an existing permission test assumption; explicit umask 022 passes.
+SuiFleet `make test-tracking` passed 10 offline tests. Implementation evidence is
+recorded in [SF-211/#423](https://github.com/tyler-suifleet/suifleet/issues/423).
+No live installation, runtime latency improvement or hosted CI result is claimed.
+After reviewed source merge, the operator must install the merged revision and
+record installed provenance plus actual cold/warm fleet refresh elapsed times.

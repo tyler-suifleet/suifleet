@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "ticket": "SF-231",
+  "issue": "https://github.com/tyler-suifleet/suifleet/issues/519",
+  "model": "gpt-6.1-sol",
+  "date_utc": "2026-11-03",
+  "branch": "work/suifleet/sf-231-376190a3",
+  "implementation_commit": "8e51f58edbae7b1cc9b6af2c0649c86e77381584",
+  "edge_source_commit": "e8c7fb33bc4e46954c775a78b5a622e2ddaccc54",
+  "host": {
+    "kernel": "6.6.87.2-microsoft-standard-WSL2",
+    "docker": "29.8.0",
+    "qemu_aarch64": "10.2.3"
+  },
+  "candidate_package_lifecycle": [
+    {
+      "distro": "debian12",
+      "arch": "amd64",
+      "package": "suifleet_0.2.2-1_amd64.deb",
+      "sha256": "f9a20b5216cd4f515520cf352b22bf4e24c6b50782c0e6305cbbb0d681c6cec5",
+      "result": "pass"
+    },
+    {
+      "distro": "ubuntu2404",
+      "arch": "amd64",
+      "package": "suifleet_0.2.2-1_amd64.deb",
+      "sha256": "f9a20b5216cd4f515520cf352b22bf4e24c6b50782c0e6305cbbb0d681c6cec5",
+      "result": "pass"
+    },
+    {
+      "distro": "debian12",
+      "arch": "arm64",
+      "package": "suifleet_0.2.2-1_arm64.deb",
+      "sha256": "587ad2970b7b1e1fe28e1731c3ac37766391e82779dbc819f4da796c81fe4811",
+      "result": "pass"
+    },
+    {
+      "distro": "ubuntu2404",
+      "arch": "arm64",
+      "package": "suifleet_0.2.2-1_arm64.deb",
+      "sha256": "587ad2970b7b1e1fe28e1731c3ac37766391e82779dbc819f4da796c81fe4811",
+      "result": "pass"
+    }
+  ],
+  "lifecycle_command": "python3 scripts/test_deb.py --packages /tmp/sf231-artifacts/packages-final --arch ARCH --evidence /tmp/sf231-artifacts/ARCH-complete.json",
+  "lifecycle_checks": [
+    "install without key/config/service activation",
+    "reject colliding daemon/signer UIDs",
+    "offline identity provisioning and unprivileged address CLI",
+    "isolated signer address response and export refusal",
+    "daemon cannot read signer key",
+    "upgrade 0.2.2-1 to 0.2.2-1.1",
+    "remove/reinstall/purge preserves identity, operator config, enrollment credential and journal bytes/ownership/modes",
+    "purge removes packaged trust conffile and enablement links; accounts/runtime data retained",
+    "lintian exits zero on every architecture/distribution"
+  ],
+  "native_systemd_command": "python3 scripts/test_deb.py --packages /tmp/sf231-artifacts/packages-final --arch amd64 --systemd --shim /tmp/sf231-artifacts/target/x86_64-unknown-linux-gnu/release/examples/grpc_sim_shim --evidence /tmp/sf231-artifacts/amd64-complete.json",
+  "native_systemd": [
+    {
+      "ticket": "SF-053",
+      "head": "debian-package-smoke",
+      "checks": [
+        "legacy: with an unchanged config.toml (keypair_path) and no signer.toml, provisioning leaves the key with the daemon user (0600), which keeps reporting",
+        "migration: after switching config.toml to the service signer, the daemon restart handed the same key to suifleet-signer (0600) without a reboot; address (0xa0ccc8bcc8\u2026) and journal unchanged; the unit recorded its MainPID as root",
+        "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors unavailable (FileNotFoundError: [Errno 2] No such file or directory: '/proc/652/environ'; PermissionError: [Errno 1] pidfd_getfd: Operation not permitted); report and telemetry signing refused (not the main process); only the public address served",
+        "the daemon's status report was signed by the service and accepted by the shim's signature verification",
+        "reports keep being signed after the signer and the daemon restart; the refused component request is logged",
+        "a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made 8 signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again",
+        "hijack: component-written launcher state naming its own executable is ignored (the real binary refuses [daemon_update] with the service signer; the restarted main process is /usr/bin/suifleet and reports); a main process running that executable (a full daemon) is not recorded by the root recorder ('not running the base binary'), and its otherwise valid report request is refused; the queued report is signed only after the base daemon runs again",
+        "real live-package upgrade stopped daemon/signer/socket without auto-restart; identity/configuration/journal preserved; explicitly restarted services signed a new report"
+      ],
+      "systemd": "systemd 252 (252.39-1~deb12u2)",
+      "container_cgroup": "cgroup2fs",
+      "os": "Debian GNU/Linux 12 (bookworm)",
+      "units_sha256": {
+        "suifleet.service": "8c75fa3443890e8653580ba17cdead2f401894c58e0922090489cc635ddf8da2",
+        "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc",
+        "suifleet-signer.service": "c174e9309da0f6ae954f76ae5b5d0657bdc6aba5ba134cc319391dd9f11adbc6",
+        "suifleet-signer.socket": "6ce9e9c40b518002f9992aaff0ffa8b645ed5d9876ba1fc0c95b95134ac3b78f"
+      },
+      "daemon_sha256": "61e45d89967f4df59814b3743d448a177f3b3b7cc67e14edca9dae5fd45c10fd"
+    },
+    {
+      "ticket": "SF-053",
+      "head": "debian-package-smoke",
+      "checks": [
+        "legacy: with an unchanged config.toml (keypair_path) and no signer.toml, provisioning leaves the key with the daemon user (0600), which keeps reporting",
+        "migration: after switching config.toml to the service signer, the daemon restart handed the same key to suifleet-signer (0600) without a reboot; address (0xa0ccc8bcc8\u2026) and journal unchanged; the unit recorded its MainPID as root",
+        "component process (daemon user, shipped sandbox): device.key and signer.toml unreadable (EACCES); signer processes invisible; no key material in env or inherited fds; the daemon's environ and descriptors unavailable (FileNotFoundError: [Errno 2] No such file or directory: '/proc/677/environ'; PermissionError: [Errno 1] pidfd_getfd: Operation not permitted); report and telemetry signing refused (not the main process); only the public address served",
+        "the daemon's status report was signed by the service and accepted by the shim's signature verification",
+        "reports keep being signed after the signer and the daemon restart; the refused component request is logged",
+        "a component killed the daemon and, reparented to PID 1 in suifleet.service's cgroup, made 8 signing requests (ppid 1, unit cgroup verified as root): all refused as not the recorded main process; the restarted daemon reports again",
+        "hijack: component-written launcher state naming its own executable is ignored (the real binary refuses [daemon_update] with the service signer; the restarted main process is /usr/bin/suifleet and reports); a main process running that executable (a full daemon) is not recorded by the root recorder ('not running the base binary'), and its otherwise valid report request is refused; the queued report is signed only after the base daemon runs again",
+        "real live-package upgrade stopped daemon/signer/socket without auto-restart; identity/configuration/journal preserved; explicitly restarted services signed a new report"
+      ],
+      "systemd": "systemd 255 (255.4-1ubuntu8.18)",
+      "container_cgroup": "cgroup2fs",
+      "os": "Ubuntu 24.04.5 LTS",
+      "units_sha256": {
+        "suifleet.service": "8c75fa3443890e8653580ba17cdead2f401894c58e0922090489cc635ddf8da2",
+        "suifleet-provision.service": "0e7ced8971f1de43ad97d3b5f6d018d0ee85d2c9702c27ce56b02665f83811bc",
+        "suifleet-signer.service": "c174e9309da0f6ae954f76ae5b5d0657bdc6aba5ba134cc319391dd9f11adbc6",
+        "suifleet-signer.socket": "6ce9e9c40b518002f9992aaff0ffa8b645ed5d9876ba1fc0c95b95134ac3b78f"
+      },
+      "daemon_sha256": "61e45d89967f4df59814b3743d448a177f3b3b7cc67e14edca9dae5fd45c10fd"
+    }
+  ],
+  "rust": {
+    "command": "cargo test --locked --release --manifest-path /src/suifleet-edge/Cargo.toml --target-dir /out/target --target x86_64-unknown-linux-gnu --bin suifleet",
+    "builder": "suifleet-release:local; Rust 1.94.0",
+    "passed": 463,
+    "failed": 0,
+    "existing_ignored": 4,
+    "ignored_scope": "Existing opt-in real OCI engine tests, outside this packaging change; no new ignores."
+  },
+  "offline_builder_tests": {
+    "command": "python3 -m unittest discover -s scripts/tests -p test_deb_packaging.py -v",
+    "passed": 2
+  },
+  "arm64_ota": {
+    "result": "pass",
+    "environment": "Debian 12 ARM64 under QEMU, network-none container, installed package, simulator and daemon both run as suifleet",
+    "command": "apt-get install -y /package.deb; copy scripts and interfaces to readable /test; runuser -u suifleet -- python3: sys.path.insert(0, /test/scripts); test_ota.SHIM=Path(/grpc_sim_shim); test_ota.run(Path(/usr/bin/suifleet))",
+    "checks": [
+      "PASS: provisioning and independent signing/address vector",
+      "PASS: mixed per-type origins and runtime chain-reset/stale-call-package rejection",
+      "PASS: safe enrollment; paginated direct/group deployment and recipe-to-artifact flow",
+      "PASS: artifact/recipe hash mismatch, unsupported lifecycle, untrusted creator and deleted targets rejected",
+      "PASS: future/missing/malformed deployment schemas failed without downloads; later v1 applied and cursor advanced",
+      "PASS: offline catch-up, restart deduplication, failed execution and durable report retry",
+      "PASS: revoked registry identity stops applying and reporting",
+      "PASS: interrupted artifact transfer resumed; expired blob reported Failed; artifact cache emptied"
+    ]
+  },
+  "reproducibility": {
+    "result": "pass",
+    "scope": "Two standalone package builds per architecture from the same real release binary, version 0.2.2-1 and epoch 1793606400; cmp byte-identical. Full clean release bundle built once locally."
+  },
+  "clean_release": {
+    "command": "python3 scripts/release.py build --out /tmp/sf231-artifacts/release-amd64 --ref 8e51f58edbae7b1cc9b6af2c0649c86e77381584 --target x86_64-unknown-linux-gnu --image suifleet-release:sf231",
+    "builder": "Pinned suifleet-release:local with only CARGO_BUILD_JOBS=6 added in a local derived image",
+    "files": [
+      {
+        "path": "suifleet-0.2.2-8e51f58edbae-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "a0838d14c4af486bd9925c9e02f1df794fb46dc0bddd9bf7ca43b5c81469e67c",
+        "size": 4588211
+      },
+      {
+        "path": "sbom.spdx.json",
+        "sha256": "c608522f37c52ad3fccbcaab0c589c89c9a91d85780ba426e6d2beaadeb73be1",
+        "size": 294483
+      },
+      {
+        "path": "provenance.json",
+        "sha256": "03638a2e7267e26e793e7baa2bf8ef688e2ef38cd751ac1db227f7a741e8f655",
+        "size": 983
+      },
+      {
+        "path": "suifleet_0.2.2-1+git8e51f58edbae_amd64.deb",
+        "sha256": "a01b904f3241b52b4e0b3b2f4302b268a2cde6ed24c229b060cc4f52a31615e1",
+        "size": 3594016
+      },
+      {
+        "path": "suifleet_0.2.2-1+git8e51f58edbae_amd64.deb.sha256",
+        "sha256": "dbe3fea3373c4d65fe21a6d5fb9b56b7c4de27f23988bc0af3e243adac2c1333",
+        "size": 109
+      }
+    ],
+    "sbom_packages": 238,
+    "signature_smoke": "Actual sign_release example generated a disposable local test key, signed the complete bundle, and the real verifier accepted all five files; changed Debian bytes rejected. No production signing credentials used.",
+    "install_smoke": "Generated git-version amd64 release package installed and provisioned explicitly in Ubuntu 24.04; lintian exited zero."
+  },
+  "other_checks": [
+    "actionlint 1.7.7 on .github/workflows/ci.yml and release.yml: pass",
+    "device-client guide link/command tests in dev image with read-only installed dependencies: pass",
+    "relative documentation file links and git diff --check: pass"
+  ],
+  "nonblocking_lint_warnings": [
+    "maintainer-script-calls-systemctl (deliberate stop/disable with no automatic startup)",
+    "no-manual-page (installed Markdown documentation supplied)",
+    "initial-upload-closes-no-bugs (no Debian BTS upload/bug claimed)"
+  ],
+  "development_fixes": [
+    "Corrected lint description, changelog permissions/date and versioned essential dependency before final tests.",
+    "Fixed harness stream framing, runuser primary/supplementary groups and durable-report snapshot ordering; no source journal-loss finding.",
+    "Masked systemd-binfmt in privileged disposable systemd containers, restored then removed the temporary QEMU registration under its global lease."
+  ],
+  "limits": [
+    "No public APT repository/download or production signed release published.",
+    "Native systemd/cgroup and process-identity isolation tested on amd64 only; ARM64 package/signer/daemon tests ran under QEMU.",
+    "Candidate package artifacts predate only the added test-reproduction paragraph in DEBIAN_PACKAGING.md; the clean release was built from committed implementation source and includes that paragraph.",
+    "Full release bundle reproducibility is enforced by the tag workflow; only one clean bundle build was run locally.",
+    "Hosted exact-head CI, automatic public-testnet gates and independent review remain pending for the coordinator; none claimed passed.",
+    "No physical programming, mainnet, production credentials/provider or manual wallet acceptance performed; retained in SF-031/#32, SF-087/#159 and SF-042/#62."
+  ]
+}

@@ -108,7 +108,7 @@ See [recorded validation results](docs/VALIDATION.md). The simulator does not va
 
 ## Contracts and packaging
 
-Contracts are in `contracts/`; the app is in `dapp/`; the daemon and Yocto layer are in `suifleet-edge/`. The new `create_deployment_verified` and `report_status_for_group` functions are required for authenticated recipe creation and group reports. Records created through the legacy API without a recipe digest are rejected by the daemon. Existing installations need the corresponding contract upgrade/new publish, reissued signer-bound capabilities, and recreated deployments with recipe digests before using the new daemon.
+Contracts are in `contracts/`; the app is in `dapp/`; the daemon and Yocto layer are in `suifleet-edge/`. To set up a device, follow [Install the device client](docs/INSTALL_DEVICE_CLIENT.md). The new `create_deployment_verified` and `report_status_for_group` functions are required for authenticated recipe creation and group reports. Records created through the legacy API without a recipe digest are rejected by the daemon. Existing installations need the corresponding contract upgrade/new publish, reissued signer-bound capabilities, and recreated deployments with recipe digests before using the new daemon.
 
 `scripts/redeploy.sh` publishes or upgrades the contracts on the active Sui CLI environment after verifying the chain, account and UpgradeCap. It records each release and generates both client configs ([docs/DEPLOYMENT_MANIFEST.md](docs/DEPLOYMENT_MANIFEST.md)). No package is published automatically by tests. Calls use the latest package ID; types use the package that introduced them (per-type origins in the manifest).
 

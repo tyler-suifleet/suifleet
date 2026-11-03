@@ -31,3 +31,6 @@ export const STATUS_COLORS: Record<number, string> = {
   [STATUS.applied]: "bg-green-100 text-green-800",
   [STATUS.failed]: "bg-red-100 text-red-800",
 };
+
+export const WALRUS_PUBLISHERS = MANIFEST?.walrus.publisher_urls;
+export const WALRUS_AGGREGATORS = MANIFEST?.walrus.aggregator_urls;

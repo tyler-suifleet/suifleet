@@ -1,10 +1,12 @@
+import { reportDecisionHistory } from "./event-history";
 // Canary rollout progress (SF-084) derived only from the on-chain Rollout
 // record and its RolloutDecision audit events (SF-017). A record that violates
 // the contract's invariants is refused rather than partially displayed.
 import type { SuiGrpcClient } from "@mysten/sui/grpc";
-import { normalizeSuiAddress } from "@mysten/sui/utils";
-import { deployment_manager_RolloutDecisionBcs } from "./fleet-protocol";
-import { moveType } from "./deployment-manifest";
+import { bcs } from "@mysten/sui/bcs";
+import { normalizeStructTag, normalizeSuiAddress } from "@mysten/sui/utils";
+import { deployment_manager_RolloutDecisionBcs, deployment_manager_DecisionRecordBcs } from "./fleet-protocol";
+import { moveType, requireManifest } from "./deployment-manifest";
 import type { Rollout } from "./rollout";
 
 export const ROLLOUT_STATES = ["Active", "Paused", "Aborted", "Complete"] as const;
@@ -115,7 +117,7 @@ export interface RolloutDecisionView {
 }
 
 /** Audited decisions of one rollout, newest first, checked against the record. */
-export function rolloutDecisions(events: { bcs: Uint8Array }[], deploymentId: string, revision: bigint, limit = 20): RolloutDecisionView[] {
+export function rolloutDecisions(events: { bcs: Uint8Array }[], deploymentId: string, revision: bigint, limit = Number.MAX_SAFE_INTEGER): RolloutDecisionView[] {
   const id = normalizeSuiAddress(deploymentId);
   const seen = new Set<bigint>();
   const decisions: RolloutDecisionView[] = [];
@@ -132,21 +134,65 @@ export function rolloutDecisions(events: { bcs: Uint8Array }[], deploymentId: st
   return decisions.slice(0, limit);
 }
 
-/** RolloutDecision events, paged descending from the fullnode's event index. */
-export async function fetchRolloutDecisions(client: Pick<SuiGrpcClient, "listEvents">, deploymentId: string, revision: bigint, maxPages = 20) {
-  const type = moveType("deployment_manager::RolloutDecision");
-  const events: { bcs: Uint8Array }[] = [];
-  let page = await client.listEvents({ filter: { eventType: type }, order: "descending", limit: 50 });
-  for (let i = 0; ; i++) {
-    events.push(...page.events);
-    if (!page.hasNextPage) break;
-    // The newest revisions are what matter; never claim the history is complete.
-    if (i + 1 >= maxPages) return { decisions: rolloutDecisions(events, deploymentId, revision), complete: false };
-    if (!page.endCursor) throw new Error("Event pagination returned no cursor");
-    const before = page.endCursor;
-    page = await client.listEvents({ filter: { eventType: type }, before, limit: 50 });
-    if (page.hasNextPage && page.endCursor === before) throw new Error("Event pagination made no progress");
+/** Exact missing revision ranges, without allocating one item per missing revision. */
+export function missingDecisionRevisions(decisions: RolloutDecisionView[], revision: bigint): string[] {
+  const ascending = [...decisions].sort((a, b) => a.revision < b.revision ? -1 : 1);
+  const gaps: string[] = [];
+  let next = BigInt(1);
+  for (const d of ascending) {
+    if (d.revision > next) gaps.push(next === d.revision - BigInt(1) ? `${next}` : `${next}–${d.revision - BigInt(1)}`);
+    next = d.revision + BigInt(1);
   }
-  const decisions = rolloutDecisions(events, deploymentId, revision);
-  return { decisions, complete: true };
+  if (next <= revision) gaps.push(next === revision ? `${next}` : `${next}–${revision}`);
+  return gaps;
+}
+
+/** Current object state is the audit source. Events only recover legacy gaps. */
+export async function fetchRolloutDecisions(client: Pick<SuiGrpcClient, "listEvents" | "listDynamicFields">, deploymentId: string, revision: bigint, maxPages = 20) {
+  const events: { bcs: Uint8Array }[] = [];
+  const origins = requireManifest().type_origins;
+  if (origins["deployment_manager::DecisionKey"] && origins["deployment_manager::DecisionRecord"]) {
+    let cursor: string | null | undefined;
+    const cursors = new Set<string>();
+    do {
+      const page = await client.listDynamicFields({ parentId: deploymentId, cursor, limit: 100, include: { value: true } });
+      for (const field of page.dynamicFields) {
+        if (normalizeStructTag(field.name.type) !== normalizeStructTag(moveType("deployment_manager::DecisionKey"))) continue;
+        if (field.$kind !== "DynamicField" || normalizeStructTag(field.valueType) !== normalizeStructTag(moveType("deployment_manager::DecisionRecord"))) throw Error("Unexpected decision record type");
+        const d = deployment_manager_DecisionRecordBcs.parse(field.value.bcs);
+        if (bcs.u64().parse(field.name.bcs) !== d.revision || normalizeSuiAddress(d.deployment_id) !== normalizeSuiAddress(deploymentId)) throw Error("Decision record binding mismatch");
+        // Identical layouts, separate abilities and type origins.
+        events.push({ bcs: field.value.bcs });
+      }
+      if (!page.hasNextPage) break;
+      if (!page.cursor || cursors.has(page.cursor)) throw Error("Decision pagination made no progress");
+      cursors.add(page.cursor); cursor = page.cursor;
+    } while (true);
+  }
+  let decisions = rolloutDecisions(events, deploymentId, revision);
+  let missing = missingDecisionRevisions(decisions, revision);
+  let pruned = false;
+  if (missing.length) {
+    const known = new Set(decisions.map(d => d.revision.toString()));
+    const type = moveType("deployment_manager::RolloutDecision");
+    let before: string | undefined;
+    const cursors = new Set<string>();
+    try {
+      for (let i = 0; i < maxPages; i++) {
+        const page = await client.listEvents({ filter: { eventType: type }, order: "descending", ...(before ? { before } : {}), limit: 50 });
+        const recovered = rolloutDecisions(page.events, deploymentId, revision);
+        for (const d of recovered) if (!known.has(d.revision.toString())) { decisions.push(d); known.add(d.revision.toString()); }
+        missing = missingDecisionRevisions(decisions, revision);
+        if (!missing.length || !page.hasNextPage) break;
+        if (!page.endCursor || cursors.has(page.endCursor)) throw Error("Event pagination made no progress");
+        cursors.add(page.endCursor); before = page.endCursor;
+      }
+    } catch (error) {
+      if (!(error instanceof Error) || !/requested data below earliest available/i.test(error.message)) throw error;
+      pruned = true;
+    }
+  }
+  decisions.sort((a, b) => a.revision < b.revision ? 1 : -1);
+  reportDecisionHistory(`${requireManifest().chain_identifier}:${deploymentId}`, missing.length > 0, pruned);
+  return { decisions, complete: missing.length === 0, missing, pruned };
 }

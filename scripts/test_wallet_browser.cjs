@@ -18,7 +18,7 @@ const { build } = appRequire("esbuild"), { chromium } = appRequire("playwright")
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     browser = await chromium.launch({ executablePath: process.env.CHROME_EXECUTABLE || undefined, headless: true, args: ["--no-sandbox"] });
     const page = await browser.newPage();
-    const errors = []; page.on("pageerror", (error) => errors.push(error.message));
+    const errors = []; page.on("pageerror", (error) => (errors.push(error.message), console.error(error.message)));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await page.waitForSelector("#sign").catch(error => { console.error(errors); throw error; });
     await page.waitForFunction(() => window.acceptance.wallets().includes("SuiFleet Acceptance Wallet"));

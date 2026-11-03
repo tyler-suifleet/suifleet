@@ -12,8 +12,11 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import recovery_control as control
+# Load aliases before individual fixtures patch coordinator.process_identity.
+import dispatcher
 
 REAL_POPEN = subprocess.Popen
+
 
 
 class RetainedRecoveryTests(unittest.TestCase):
@@ -32,6 +35,7 @@ class RetainedRecoveryTests(unittest.TestCase):
         self.addCleanup(self.d.db.close)
         self.d.db.row_factory = sqlite3.Row
         self.d.db.executescript('''
+          CREATE TABLE backoff(project TEXT,family TEXT,attempts INTEGER,retry_after REAL,reason TEXT);
           CREATE TABLE runs(session TEXT PRIMARY KEY,project TEXT,family TEXT,status TEXT,directory TEXT,claim TEXT,pid INTEGER,started TEXT,message TEXT);
           CREATE TABLE retired_runs(session TEXT PRIMARY KEY,status TEXT,message TEXT,reason TEXT,at REAL);
           CREATE TABLE dependency_resumes(claim TEXT,state TEXT);
@@ -86,6 +90,46 @@ class RetainedRecoveryTests(unittest.TestCase):
         # Repeating cannot launch the same source twice.
         with self.assertRaises(RuntimeError): self.resume()
         self.assertEqual(self.child.call_count,1)
+
+    def real_availability(self, reason, occupied=False):
+        self.d.db.executescript("""
+          ALTER TABLE dependency_resumes ADD COLUMN project TEXT;
+          ALTER TABLE dependency_resumes ADD COLUMN family TEXT;
+        """)
+        self.d.db.execute('INSERT INTO backoff VALUES(?,?,?,?,?)',
+                          ('project', 'Claude', 1, 10**12, reason))
+        (self.path/'reviews.sqlite3').touch(exist_ok=True)
+        self.d.repair_owned.return_value = False
+        if occupied:
+            self.d.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?,?,?,?)',
+                ('busy','project','Claude','running',str(self.path),None,456,'300','busy'))
+        self.d.available.side_effect = lambda *a, **kw: dispatcher.Dispatcher.available(self.d, *a, **kw)
+
+    def test_explicit_recovery_ignores_idle_backoff(self):
+        self.real_availability('idle: no eligible ticket')
+        self.assertEqual(self.resume()['family'], 'Claude')
+        self.child.assert_called_once()
+
+    def test_provider_stagger_still_blocks_explicit_recovery(self):
+        self.real_availability('provider capacity recovery stagger')
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
+
+    def test_provider_quota_pause_still_blocks_explicit_recovery(self):
+        self.real_availability(dispatcher.QUOTA_PAUSE)
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
+
+    def test_occupied_slot_still_blocks_explicit_recovery(self):
+        self.real_availability('idle: no eligible ticket', occupied=True)
+        with self.assertRaisesRegex(RuntimeError, 'no configured implementation capacity'):
+            self.resume()
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM retired_runs').fetchone()[0], 0)
 
     def test_codex_uses_its_original_model_too(self):
         self.claim['agent'] = 'Codex'
@@ -167,6 +211,94 @@ class StoppedRepairTests(unittest.TestCase):
         (self.path/'process.json').write_text(json.dumps(dict(pid=123,started='100')))
         (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
         (self.path/'snapshot.json').write_text(json.dumps(dict(ticket=self.claim)))
+
+    def manual_receipt(self):
+        import hashlib
+        import time
+        self.d.claim_helpers.return_value = []
+        self.d.db.execute('DELETE FROM runs')
+        self.jobs.execute('UPDATE jobs SET created=?', (time.time()+60,))
+        proof = {k: self.claim[k] for k in control.FIELDS if k != 'token'}
+        proof.update(claim=hashlib.sha256(b'private').hexdigest(), pid=321, sid=321, started='50', recorded_at=time.time()-60)
+        path = self.path/'origin.json'
+        path.write_text(json.dumps(proof))
+        path.chmod(0o600)
+        return path, proof
+
+    def manual_resume(self, path):
+        return control.resume(self.d,self.project,self.slot,'SF-1','Repair the confirmed filesystem race and verify acceptance.',self.path/'worker.py',origin=path)
+
+    def test_manual_origin_requires_existing_bound_stopped_process_proof(self):
+        path, proof = self.manual_receipt()
+        with patch('coordinator.process_identity', side_effect=lambda pid: None if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True):
+            result = self.manual_resume(path)
+        self.assertEqual(result['family'], 'Claude')
+        self.assertEqual(json.loads((Path(result['directory'])/'manual-origin.json').read_text()), proof)
+        self.assertEqual(self.jobs.execute('SELECT status FROM jobs').fetchone()[0], 'superseded')
+
+    def test_manual_origin_audit_uses_verified_bytes_without_rereading(self):
+        path, proof = self.manual_receipt()
+        raw = path.read_bytes()
+        original = control.stopped_repair
+        def recheck(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if kwargs.get('reserved'):
+                path.write_text('{"changed": true}')
+            return result
+        with patch('coordinator.process_identity', side_effect=lambda pid: None if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True), \
+             patch.object(control, 'stopped_repair', side_effect=recheck):
+            result = self.manual_resume(path)
+        self.assertEqual((Path(result['directory'])/'manual-origin.json').read_bytes(), raw)
+
+    def test_manual_origin_missing_live_tampered_or_new_receipt_never_launches(self):
+        path, proof = self.manual_receipt()
+        with self.assertRaisesRegex(RuntimeError, 'manual-origin'): self.resume()
+        for change in [dict(claim='different'),dict(session='other'),dict(recorded_at=99999999999),dict(pid=None),dict(started='bad'),dict(sid=None),dict(sid=999),dict(sid=True)]:
+            path.write_text(json.dumps({**proof, **change}))
+            with self.assertRaises(RuntimeError): self.manual_resume(path)
+        path.write_text(json.dumps(proof))
+        with patch('coordinator.process_identity', return_value='50'):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        with patch('coordinator.process_identity', return_value=None), patch('coordinator.worker_stopped', return_value=False):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        path.chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError, 'private receipt'): self.manual_resume(path)
+        self.child.assert_not_called()
+        self.assertEqual(self.d.db.execute('SELECT count(*) FROM runs').fetchone()[0],0)
+
+    def test_manual_origin_real_process_must_stop(self):
+        from dispatcher import process_identity
+        path, proof = self.manual_receipt()
+        child = REAL_POPEN([sys.executable, '-c', 'import time; time.sleep(0.2)'], start_new_session=True)
+        self.addCleanup(lambda: child.poll() is None and child.kill())
+        proof.update(pid=child.pid, sid=os.getsid(child.pid), started=process_identity(child.pid))
+        path.write_text(json.dumps(proof))
+        with patch('coordinator.process_identity', side_effect=lambda pid: process_identity(pid) if pid == child.pid else '200'):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+            self.child.assert_not_called()
+            child.wait(timeout=5)
+            self.assertEqual(self.manual_resume(path)['family'], 'Claude')
+
+    def test_manual_origin_helper_or_late_file_stays_reserved(self):
+        path, proof = self.manual_receipt()
+        with patch('coordinator.process_identity', return_value=None), patch('coordinator.worker_stopped', return_value=True):
+            self.d.capacity_helpers.return_value = [dict(pid=9, uninspectable=True)]
+            with self.assertRaisesRegex(RuntimeError, 'helper live or uninspectable'): self.manual_resume(path)
+            self.d.capacity_helpers.return_value = []
+            self.jobs.execute('UPDATE jobs SET created=1')
+            with self.assertRaisesRegex(RuntimeError, 'predate'): self.manual_resume(path)
+        self.child.assert_not_called()
+
+    def test_manual_origin_rechecked_before_launch(self):
+        path, proof = self.manual_receipt()
+        identities = iter([None, '50'])
+        with patch('coordinator.process_identity', side_effect=lambda pid: next(identities) if pid == 321 else '200'), \
+             patch('coordinator.worker_stopped', return_value=True):
+            with self.assertRaisesRegex(RuntimeError, 'live or uncertain'): self.manual_resume(path)
+        self.child.assert_not_called()
+        self.d.update.assert_called_once()
 
     def test_stopped_repair_with_finished_implementation_resumes_once(self):
         result = self.resume()
@@ -303,6 +435,88 @@ class StoppedRepairTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError): self.resume()
                 mock.return_value = previous
                 self.child.assert_not_called()
+
+
+
+class BlockedEngineeringRecoveryTests(unittest.TestCase):
+    def setUp(self):
+        StoppedRepairTests.setUp(self)
+        self.claim['status'] = 'blocked'
+        self.result = dict(verdict='blocked', acceptance_complete=False,
+                           model='original-model', evidence='Concrete filesystem repair remains.')
+        self.jobs.execute("UPDATE jobs SET status='done',publication_done=1,result=?", (json.dumps(self.result),))
+        (self.path/'result.json').write_text(json.dumps(self.result))
+        (self.path/'exit.json').write_text(json.dumps(dict(returncode=0)))
+
+    def resume(self):
+        return control.resume(self.d,self.project,self.slot,'SF-1',
+            'Implement the confirmed engineering repair; external decisions remain blocked.',
+            self.path/'worker.py',blocked_engineering_repair=True)
+
+    real_availability = RetainedRecoveryTests.real_availability
+    test_explicit_recovery_ignores_idle_backoff = RetainedRecoveryTests.test_explicit_recovery_ignores_idle_backoff
+    test_provider_stagger_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_stagger_still_blocks_explicit_recovery
+    test_provider_quota_pause_still_blocks_explicit_recovery = RetainedRecoveryTests.test_provider_quota_pause_still_blocks_explicit_recovery
+    test_occupied_slot_still_blocks_explicit_recovery = RetainedRecoveryTests.test_occupied_slot_still_blocks_explicit_recovery
+
+    # Reuse the real stop/helper/claim/dependency/one-use fences, not orphan-only fixtures.
+    test_stopped_repair_with_finished_implementation_resumes_once = StoppedRepairTests.test_stopped_repair_with_finished_implementation_resumes_once
+    test_new_helper_after_resume_prevents_spawn = StoppedRepairTests.test_new_helper_after_resume_prevents_spawn
+    test_pending_retry_or_dependency_resume_cannot_be_stolen = StoppedRepairTests.test_pending_retry_or_dependency_resume_cannot_be_stolen
+    test_changed_owner_external_dependency_and_git_operation_are_fenced = StoppedRepairTests.test_changed_owner_external_dependency_and_git_operation_are_fenced
+    test_crash_after_intent_is_retained_and_never_replayed = StoppedRepairTests.test_crash_after_intent_is_retained_and_never_replayed
+
+    def test_live_uncertain_helpers_leases_and_competing_repairs_still_fence(self):
+        for method,value in [('stopped_identity',None),('capacity_helpers',[{'pid':4}]),
+                             ('owner_locks',['network:test']),('replacement_repair',True),('available',False)]:
+            with self.subTest(method=method):
+                mock=getattr(self.d,method); previous=mock.return_value
+                mock.return_value=value
+                with self.assertRaises(RuntimeError): self.resume()
+                mock.return_value=previous
+        self.child.assert_not_called()
+
+    def test_changed_reconciled_result_after_resume_prevents_launch(self):
+        original=self.d.ticket.side_effect
+        def ticket(project, command, *args):
+            result=original(project,command,*args)
+            if command=='resume':
+                changed={**self.result,'evidence':'changed during transition'}
+                self.jobs.execute('UPDATE jobs SET result=?',(json.dumps(changed),))
+                (self.path/'result.json').write_text(json.dumps(changed))
+            return result
+        self.d.ticket.side_effect=ticket
+        with self.assertRaisesRegex(RuntimeError,'source or manual origin changed'): self.resume()
+        self.child.assert_not_called()
+        self.d.update.assert_called_once()
+
+    def test_requires_explicit_operator_opt_in(self):
+        with self.assertRaisesRegex(RuntimeError, 'verified stopped'):
+            RetainedRecoveryTests.resume(self)
+        self.child.assert_not_called()
+
+    def test_rejects_approval_incomplete_publication_or_changed_result(self):
+        for change in [dict(verdict='approve'),dict(acceptance_complete=True),dict(model='other'),dict(evidence='')]:
+            with self.subTest(change=change):
+                self.jobs.execute('UPDATE jobs SET result=?',(json.dumps({**self.result,**change}),))
+                with self.assertRaises(RuntimeError): self.resume()
+        self.jobs.execute('UPDATE jobs SET result=?',(json.dumps(self.result),))
+        for field,value in [('publication_done',0),('launch_intent','pending'),('error','uncertain')]:
+            self.jobs.execute('UPDATE jobs SET '+field+'=?',(value,))
+            with self.assertRaises(RuntimeError): self.resume()
+            self.jobs.execute('UPDATE jobs SET '+field+'=?',(1 if field=='publication_done' else None,))
+        self.child.assert_not_called()
+
+    def test_rejects_missing_mismatched_or_failed_disk_receipts(self):
+        path=self.path/'result.json'
+        path.unlink()
+        with self.assertRaises(FileNotFoundError): self.resume()
+        path.write_text(json.dumps({**self.result,'evidence':'changed'}))
+        with self.assertRaisesRegex(RuntimeError, 'receipt mismatch'): self.resume()
+        path.write_text(json.dumps(self.result))
+        (self.path/'exit.json').write_text(json.dumps(dict(returncode=1)))
+        with self.assertRaisesRegex(RuntimeError, 'successful worker exit'): self.resume()
+        self.child.assert_not_called()
 
 
 class ControlLifecycleTests(unittest.TestCase):

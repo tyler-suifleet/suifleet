@@ -1059,3 +1059,535 @@ exact-head/current-base hosted validation remain unresolved until the operator
 records real evidence. This implementation neither backfills receipts nor posts
 success, reruns transactions, resets budgets or waives CI, testnet, security or
 independent review. There is no Testnet spend for offline routing validation.
+
+### Manual implementation origins in stopped-repair recovery
+
+A manually implemented ticket may have no dispatcher implementation receipt.
+For that case, the operator can pass `--manual-origin /private/origin.json` to
+`recovery_control.py`. This is existing process evidence, not a way to reconstruct
+a stopped identity from prose or choose an arbitrary absent PID. The private,
+operator-owned regular JSON file must already predate the stopped repair. It
+records `pid` (integer), `sid` (integer session ID, required to equal `pid`), `started` (Linux process start ticks as a string),
+`recorded_at` (Unix timestamp), `claim` (SHA-256 of the claim token), and the exact
+`session`, `branch`, `worktree`, `agent` and `model` from the original claim. Do
+not put a raw claim token in this receipt or publish it. The original worker must
+have been launched as a session leader (for example with `start_new_session=True`);
+a receipt without that recorded session identity is insufficient.
+
+The controller verifies the original PID is absent, its session has stopped, and
+no claim helper remains or denies inspection. It repeats those checks before
+spawn, rejects changed receipt bytes, and saves the exact verified bytes with the replacement
+audit without reading the source file again. Existing dispatcher-origin recovery keeps its original stop checks.
+Missing origin evidence retains the reservation; do not manufacture a historical
+receipt or mark the ticket Review to force dispatch. Install this route only
+after its source PR merges; CI, independent review and all resource/provider
+waits still apply.
+
+
+## Reviewed integration batches
+
+SF-207 adds an opt-in integration path per configured project. Enable it only in
+the reviewed, merged and installed runtime; the default remains the existing
+single-PR path. A typical project setting is:
+
+```json
+"integration_batch": {"enabled": true, "max_members": 4, "collection_seconds": 120}
+```
+
+The coordinator collects up to four source-ready PRs against one pinned `main`
+revision. Other implementations may continue, but the coordinator freezes its
+own main publication while that integration epoch is active. Source branches are
+not rebased merely because another PR merged. A short collection deadline allows
+a smaller batch when fewer PRs are ready. Each project has an independent epoch.
+Batches contain one implementation owner family; mixed queues are split so the
+combined reviewer is independent of every member, including Claude-owned PRs.
+Activation verifies that independence against each recorded member owner.
+
+A source review is not merge approval. Review workers report explicit
+`source_complete` and `acceptance_ready` booleans: code/security findings must be
+resolved, and remaining acceptance must be automated candidate validation or an
+explicit trusted deferral. Historical `blocked` prose is never upgraded into a
+source receipt. The published receipt binds the exact source head, reviewed
+scope, non-receipt feedback, threads, policy and reviewer family. CI and advancing
+main do not change that source identity. Changed code, scope or feedback requires
+a fresh source review; a source receipt alone never authorizes publication.
+
+The service creates a separate `integration/batch/…` branch and integration PR,
+using Tyler's author and committer identity for each conflict-free merge step.
+Before merging a member, it checks every source commit's author, committer and
+additional authorship attribution. Rejections become durable owner repair context
+for that exact head/base and are excluded from collection until repaired.
+The source heads remain in the Git ancestry. The actual combined candidate runs
+ordinary/security CI and the existing main-sourced protected testnet workflow.
+After those checks succeed, an independent integration reviewer checks the
+combined changes, all member acceptance evidence and the immutable manifest.
+No individual source-head status is forged from the candidate's result.
+After combined validation and approval, the service publishes formal member
+approvals through the configured independent GitHub review account. Those records
+cite the original source proof and actual combined candidate evidence; they do
+not claim another model run. Only known coordinator-generated change requests
+can be superseded this way. Human, edited or foreign-account requests remain
+blocking. Batch mode requires that independent review account to be configured.
+
+Before one nonforce publication, the service rechecks the candidate, pinned base,
+source heads, feedback, source receipts, claims and dependencies. Changed inputs
+invalidate that candidate without resetting unrelated source branches. Conflicts
+are excluded and routed to the owning worker. Failed groups are split in bounded
+smaller combinations; a failing singleton is held for a real owner repair using
+its combined-candidate failure evidence. A failed combination is not blindly
+submitted forever. Done, failed and invalidated candidates release their disposable
+Git worktrees; durable receipts and Git objects remain. Cleanup retries on later
+ticks if a local Git operation fails. Transient Git/GitHub/worker-launch errors
+retain the same candidate and completed checks; only positively identified input
+changes invalidate it.
+
+### Interrupted and uncertain batch operations
+
+An interrupted `building` or `build_uncertain` epoch retries automatically only
+when it has no head, PR or publication intent and `ls-remote` confirms its branch
+is absent. The coordinator revalidates the pinned inputs, removes only its own
+disposable worktree and rebuilds in the same epoch. An unavailable remote read
+retains the fence. Never reset member branches or delete durable receipts.
+
+For other uncertain writes, the sole integration operator must inspect the batch
+row and its recorded branch/head/base, then use the authenticated repository:
+
+- `pr_creating`: query open PRs by the exact recorded head branch. One PR with the
+  recorded head SHA and base `main` is adopted on the next tick without another
+  POST. If no PR exists, first establish that the original request is no longer
+  in flight, verify the remote branch SHA, then create exactly one PR from that
+  recorded branch to `main` using `gh pr create`; the next tick adopts it. Multiple
+  matches or mismatched revisions require investigation, never blind recreation.
+- `publish_pending`: fetch main and check `git merge-base --is-ancestor HEAD_SHA
+  origin/main` with the recorded candidate SHA. Success automatically reconciles
+  on the next tick. If absent, retain the fence: the sole orchestrator must recheck
+  every publication gate and resolve the original push outcome before any retry.
+  An operator must not directly push main merely to clear this state. A moved base
+  requires a new reviewed candidate; uncertain publication is never replayed.
+- A `building`/`build_uncertain` epoch with an unexpected remote branch remains
+  fenced. Inspect remote PRs and ref history first. If publication actually occurred,
+  preserve the receipts and escalate for explicit recovery; do not delete the ref
+  or rewrite the database to force a retry. If verified unrelated accidental ref
+  creation is reversed by the operator, the normal absent-ref guard permits retry.
+
+Do not edit the coordinator database to fabricate checks, review or publication.
+These fences preserve reservations while the operator resolves external outcomes.
+
+After GitHub confirms the integration PR and original source PRs as merged, the
+existing reconciliation closes each implementation issue and marks its atomic
+claim/Project item Done. Runtime activation verifies the entire recorded merge
+chain, typed independent source proofs, exact combined approval and actual merged
+candidate. A partial or tampered batch cannot authorize installation.
+
+`fleet-status` retains GitHub/atomic totals and adds a derived PR pipeline section:
+source review, ordinary CI, acceptance, evidence review, queued batch, conflict,
+active work and ready. Integration candidates are shown separately from source
+PRs; neither worker counts nor batch membership are added to issue totals.
+Missing or stale data is displayed as unavailable.
+
+### First installation and rollback
+
+The older supervisor intentionally pins its own protocol and cannot silently gain
+batch-proof support. After SF-207 passes normal review/CI and merges, use a clean
+checkout of the fetched main revision:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet
+```
+
+This explicit path verifies committed main, existing reviewed merge evidence,
+source bytes and offline tests before switching both supervisor and runtime under
+activation/parent authority locks. It preserves private configuration and running
+model workers and rolls back the generation/supervisor together on failure. Then
+enable `integration_batch` in the private project configuration and restart only
+the coordinator parent through the existing serialized operation. Do not install
+this PR's unmerged files or disable live-wallet, CI or independent-review gates.
+An actual hosted batch, post-merge issue reconciliation and installed activation
+remain rollout acceptance until observed; offline fixtures do not establish them.
+
+### Fleet refresh dependency cost (SF-211)
+
+[The portable terminal-discovery change](https://github.com/therealtime/atomic-ticketing/pull/4)
+reduces dependency reads for verified closed/Done entries while retaining full
+issue/Project ownership discovery and all nonterminal dependency checks. See
+[call-count evidence and rollout limits](ATOMIC_TICKETING.md#terminal-dependency-discovery-sf-211).
+The coordinator continues using the installed engine; this documentation does
+not install source or change claim, review, CI, acceptance or merge gates.
+Independent review and real source CI must cover the portable PR as well as this
+companion. Only after reviewed merge may the operator perform the merged-only
+tool rollout and measure actual refresh latency. This is separate from SF-210
+scheduler streaming; neither change supplies approval for the other.
+
+### Reduce time from PR opening to integration
+
+In batch mode the coordinator starts eligible independent source reviews as each
+fresh PR snapshot arrives, in ticket-priority/PR-number order. It does not wait
+for every other PR snapshot or historical merged-PR reconciliation. A failed
+snapshot or source launch remains isolated to that PR. The existing atomic
+reservation still controls capacity, provider waits, active workers and uncertain
+launches; dry runs launch nothing. Current source receipts are reused while only
+main or CI changes. Actual findings and combined-candidate conflicts go to the
+implementation owner. The final combined candidate still needs its own real
+CI/testnet results and independent integration approval before the sole
+orchestrator publishes it.
+
+For independent work, use separate small PRs targeting main and let the reviewed
+batch combine them. Do not repeatedly merge main into otherwise reviewed source
+branches just to refresh their base. Keep each change to one reviewable purpose,
+with reproducible checks and an explicit distinction between automated failures,
+pending CI, source findings and deferred final acceptance. Waiting for CI alone
+is not a reason to start another model review or owner repair.
+
+For dependent work, split an additive, independently useful interface/framework
+into a small prerequisite PR, including compatibility tests. Put consumers in
+separate tickets/PRs and record the committed API and real dependency. Merge the
+framework through the normal checks, then dispatch independent consumers together.
+For example, SF-196 defines the shared second-factor authority/framework; SF-198,
+SF-199, SF-200 and SF-201 implement its focused mechanisms. Do not bundle every
+consumer into the framework merely to keep one ticket busy.
+
+PR stacks can reduce waiting when dependent changes are reviewable separately,
+but arbitrary PRs based on unmerged parent branches are not supported by this
+coordinator's batch protocol: source proofs require a reviewed base in pinned
+main's ancestry. Do not bypass that condition or relabel an unmerged API as Done.
+Until a separately tested stack protocol exists, use the interface-first split
+above. A future true-stack implementation must verify the complete ordered
+ancestor set, review only each PR's incremental diff, test the combined tip and
+revalidate every parent/head/feedback receipt before publishing once.
+
+The current milestone is feature completeness with automated testnet validation.
+Manual human/outsider/real-wallet walkthroughs, physical Pi testing and actual
+mainnet/production-provider acceptance remain explicitly tracked for final
+acceptance. They do not hold otherwise reviewed software work. New main-branch
+documentation introduced by a PR is checked structurally before merge and online
+after publication; a premerge 404 for the new file cannot require that file to
+already exist on main. This sequencing grants no production credentials,
+hardware programming or mainnet authority and waives no automated/security test.
+
+Measure elapsed time separately for implementation, source review, actionable
+repair, ordinary CI, automated acceptance, final evidence review and integration.
+Count original feature PRs/tickets separately from synthetic batch PRs and model
+job attempts. Do not infer a production latency improvement from a passing unit
+test: verify it from real merged PRs after activating the reviewed scheduler.
+
+### Batch CI observation and optional deployment applicability (SF-212)
+
+A held source receipt suppresses duplicate source review and repair dispatch,
+while preserving CI observation. Nonmember failures use bounded owner repair.
+Every owned source PR still records concrete exact-head ordinary/security/testnet failures while another batch owns integration. The
+existing transactional per-PR worker reservation, published Review ownership,
+lease checks, fresh head/base/run verification, repair budgets and backoff remain
+in force. Concrete source failures are excluded from new batch collection; an
+active member developing such a failure invalidates its candidate through normal
+member revalidation before normal repair dispatch on a later tick. Members remain
+reserved throughout publication/reconciliation uncertainty, including when a
+pre-tick PR snapshot reports a failure after publication. Pending source checks
+may still run on the combined candidate.
+SF-222 permits independent source-only review and collection of a published,
+independently source-ready Review claim when the existing exact-base automatic
+testnet classifier positively identifies its only failures as funding. Ordinary
+check failures, mixed funding/software failures and missing classifications still
+require owner repair. Pending source checks may overlap this review. Source
+review evidence must disclose missing funded acceptance and cannot approve a
+merge. Active repairs, human change requests, source/feedback/ownership/dependency
+validation and failed-group replay fencing remain binding. The final combined
+candidate still requires actual successful CI/security/funded testnet at its
+current head/base and independent acceptance; funding failures are never green.
+No shared incident owner is replaced and no funded transaction is blindly replayed.
+
+Skipped checks remain blocking except for three narrowly authenticated jobs in
+`.github/workflows/static-site.yml`: `preview`, `production-preflight` and
+`production`. The trusted runtime pins the complete workflow Git blob
+`a5a5c9aea5d6a6addb7e13187d27ad705c5e395b`. Its conditions make preview applicable
+only to a main push and production applicable only to a manual main dispatch.
+A fresh PR snapshot must prove the exact candidate contains that blob and bind
+the skipped GitHub Actions check to the same repository, PR, head, current base,
+workflow path, completed successful run, latest attempt and job. The run's build
+must succeed, and the source must contain the current base so the merge workflow
+tree matches the pinned head. The original `SKIPPED` conclusion is retained. Unknown skips,
+changed workflow bytes, missing/truncated/unavailable metadata, foreign checks,
+reruns, push/manual runs and required build/security/live skips remain blockers.
+Changing the workflow requires reviewing and updating this trusted pin before
+new skips can qualify; names alone never grant applicability. This policy grants
+no preview/production publication authority and changes no protected environment.
+
+After reviewed merged-only activation, the sole orchestrator/operator must verify
+actual runtime PID/start identities, the batch's transition to independent
+integration review, and durable observations/normal bounded repair routing for
+still-current source failures (including the reported PR #421 funding failure).
+Offline tests and read-only classification do not establish installed acceptance,
+successful funding, hosted CI, testnet transactions or production publication.
+
+
+### Temporary batch recovery must resume itself
+
+Do not temporarily flip `integration_batch.enabled` to false to bootstrap a
+runtime repair. That setting expresses the requested steady-state mode; a bare
+false leaves no reliable restoration condition and can restart source-rebase
+loops after the repair has already merged.
+
+Once the installed coordinator supports this protocol, keep enabled true and
+record the exact repair PR head (40 lowercase hex characters), for example:
+
+```json
+{
+  "enabled": true,
+  "max_members": 4,
+  "collection_seconds": 120,
+  "suspend_until_installed": "0123456789abcdef0123456789abcdef01234567",
+  "suspension_reason": "Bootstrap the reviewed batch scheduler repair"
+}
+```
+
+The example hash is a placeholder; use the actual exact repair head. Make the
+scoped private configuration change under the existing operator authority lock
+and restart only the parent with `KillMode=process`, preserving workers. The
+coordinator pauses combined integration and holds all unrelated source and
+candidate heads. Only the source with that exact repair head may use normal
+single-PR integration gates. If its head changes, inspect and explicitly update
+the intent; do not silently adopt a new head or weaken review/CI requirements.
+
+Effective batching resumes automatically when the loaded, reviewed installed
+generation's metadata and real Git ancestry prove it contains that exact repair
+commit. Merely merging, having the repair in a checkout, changing a branch tip or
+waiting for a timer is insufficient. Missing or malformed installation evidence
+keeps the suspension in place. Keep the suspension fields as an audit trail or
+remove them explicitly after verification; `enabled: false` always remains an
+intentional permanent disable and is never automatically overridden.
+
+If batching is explicitly disabled while an active batch exists, its members and
+candidate remain fenced from fallback freshness repairs. Resolve/drain that
+batch through the sole orchestrator before moving its members to another
+integration mode; never clear its SQLite rows directly. Reports show `batch
+recovery paused` rather than treating this intentional hold as missing evidence.
+Fresh coordinator observations continue in both modes. The pipeline discards an
+old PR projection only when a newer, fresh, complete GitHub open-PR inventory
+confirms its absence; newer local observations and unavailable/stale inventories
+are preserved. No extra GitHub polling is introduced.
+
+For SF-213, normal reviewed merged-only runtime activation installs the coordinator,
+batch and dashboard changes. After that merge is verified, install the matching
+watchdog instructions from a clean fetched main with
+`python3 tools/pr-coordinator/install_watchdog.py --project suifleet --enable`
+(preserve the complete configured project list if more recovery projects are
+enabled). Verify parent readiness, preserved worker identities, the installed
+revision, actual batch transitions and the refreshed CLI report. Local tests do
+not establish those operational results or hosted acceptance in advance.
+### Combined source findings must become owner repairs
+
+A fresh, published `changes_requested` review of an integration candidate is
+source work, not another CI wait. The batch controller binds the result to the
+exact candidate head, pinned base and current feedback before recording a failed
+candidate. It persists the actual review ID, result hash and findings before
+attempting remote closure. Failed or ambiguous closure preserves that evidence
+and is retried idempotently; terminal cleanup failures are isolated and do not
+stop independent queue selection. No publication intent may be reclassified this
+way after a push could have occurred.
+
+For a one-member batch, attribution is unambiguous: the original source head gets
+`_batch_review_failure`, and its existing owner receives normal feedback repair
+in the same scan. The worker gets the real published findings and requested
+regression checks. This is distinct from `_ci_repair`; changing CI evidence must
+not veto a genuine source-finding repair. Early read-only review is suppressed
+while that repair context is present. Existing claim, live/uncertain worker,
+capacity, provider and execution fences still apply. Source-complete receipts do
+not erase a later combined finding.
+
+The finding remains attached when unrelated main advances, and expires when the
+source head changes. The changed source then needs fresh independent review and
+actual combined CI/testnet. For an unattributed multi-member finding, do not guess
+which owner is responsible or dispatch every owner: record the failed exact group
+and split it deterministically into smaller candidates. The same rejected head
+combination is not resubmitted just because main advanced. Singleton findings
+become owner repairs; unaffected source-ready PRs remain eligible for another
+batch. Never disable batching, fabricate source-head CI failures, blindly rerun
+checks or clear old failed-job/claim receipts to force this transition.
+
+SF-214's operational recovery used the installed controller to retire rejected
+batch #433, attached the independently reproduced enrollment finding to source
+#421 and launched a verified same-claim repair. The code change generalizes that
+transition; offline tests do not establish its future installed acceptance. Normal
+independent review, genuine hosted checks and merged-only activation remain
+required before claiming automatic routing is deployed.
+
+
+## Local-test infrastructure integration — user direction, 2026-11-01
+
+Reviewer, dispatcher, recovery and CI infrastructure patches merge after meaningful local tests, without waiting for another model review or hosted-CI approval. Keep changes contained, test the actual combined main candidate and record exact commands/results and this authorization. Do not manufacture review approvals or CI success. Preserve claim ownership, serial integration, user authorship, verified merge/issue reconciliation and installed-runtime provenance. Ordinary application, Move-contract and edge-device features retain their review and automated testnet gates. This rule does not authorize weakening wallet/spending, release, credential, hardware or mainnet protections.
+
+### Automatic local infrastructure lane (SF-215)
+
+A project may opt in with `"local_infrastructure": {"enabled": true}` in the
+private coordinator configuration. The default is disabled. The installed sole
+coordinator selects published Review claims with `area: infra`, a same-repository
+PR to main, resolved threads and no outstanding change requests. It fetches and
+checks the complete Git diff, including deletions and rename endpoints. The
+allowlist is `tools/pr-coordinator/` plus `docs/PR_COORDINATION.md`,
+`docs/ATOMIC_TICKETING.md` and `docs/RECOVERY_WATCHDOG.md`. Labels, implementation
+check claims and hosted success do not authorize this lane. Mixed paths, workflow
+wallet changes, application code and release scripts retain normal gates. Extend
+this trusted allowlist only with a deliberate policy change and appropriate tests.
+
+Eligible sources bypass model reviews and hosted/batch gates. A detached merge
+against exact current remote main preserves Tyler's identity and source ancestry.
+The trusted installed runner executes these fixed commands in Bubblewrap with
+private PID/network namespaces, no host home/configuration/runtime database,
+a cleared environment and a disposable filesystem:
+
+```bash
+python3 -m unittest discover -s tools/pr-coordinator/tests
+python3 -m unittest discover -s scripts/tests -p test_tracking.py
+python3 scripts/bootstrap_tracking.py
+```
+
+Bubblewrap and working unprivileged namespaces are required; sandbox startup
+failure is a real failure. Logs remain private under the coordinator state.
+The `local_integrations` table records the exact base/head/merge/tree, commands,
+exit codes, log hashes, authorization and publication state. The runner checks
+claim/dependency ownership, actual stopped implementation identities/helpers,
+clean worktrees, source feedback and current main again before a nonforce push.
+It never publishes a model approval or hosted-success status. Existing verified
+merge reconciliation closes the issue and marks the claim and Project Done.
+
+A failed exact head/base is held once with its diagnostic and logs, for concrete
+owner repair or operator investigation; it is not endlessly retried. Changed code
+may be tested as a new input. A `publish_pending` outcome fences further attempts,
+including changed inputs, until fetched ancestry proves publication; existing
+merge reconciliation then finishes idempotently. Do not delete these rows or
+replay a push to clear uncertainty. A candidate cannot take a member from an
+active batch or integrate while its worker identity is live or unknown.
+
+Activation independently checks the local receipt against actual merge parents,
+Git scope/tree, user identity, fixed successful commands and retained log hashes,
+then verifies GitHub's real same-repository merged source. Normal independent
+review verification remains in force for every other runtime commit.
+
+The old pinned supervisor cannot understand this new receipt. After the sole
+operator integrates the exact locally tested SF-215 candidate under the explicit
+2026-11-01 user policy, bootstrap from a clean fetched main checkout with:
+
+```bash
+python3 tools/pr-coordinator/install.py --upgrade-activation-supervisor suifleet --local-infrastructure-policy
+```
+
+This explicit operator option authenticates committed source first, retains the
+old verifier for every normally authorized step and permits only exact successful
+local receipts for steps the old verifier rejects. It runs full offline validation
+before switching the pinned supervisor and generation with the existing locks,
+worker preservation and rollback protocol. It cannot install an unmerged checkout.
+Then enable the private opt-in under operator authority and restart only the
+parent. Verify installed revision/readiness and preserved worker identities.
+Implementation workers hand off their PR/head/tests to the sole orchestrator;
+they do not merge main or install their source. Merged-only rollout and actual
+future automatic integration remain unrun until that operator records them.
+
+
+### Overlap candidate preparation, review and CI (SF-220)
+
+Enabled integration batching permits two independent candidates in flight by
+default (`integration_batch.max_in_flight`, integer 1..4). Each source belongs to
+only one active candidate. Candidates are built against current main; another
+candidate waiting for CI does not reserve the entire project. The coordinator
+starts independent combined-source review immediately after publishing the
+candidate, while CI and protected testnet preparation run. Unchanged pending
+inputs reuse the existing review reservation. CI completion requests a fresh
+evidence review; an early source review is never final merge approval.
+
+A published actionable source finding is routed to its owner before CI finishes.
+A later candidate with complete checks and independent acceptance may integrate
+before an earlier candidate still waiting for CI. Main publication remains serial
+and nonforce, with exact head/base/feedback/claim/check verification. Uncertain
+publication fences all other main writes. Wallet concurrency and spend ceilings
+are unchanged.
+
+This is bounded speculation, not a stack that assumes another PR will merge. A
+main change invalidates other old-base candidates; their source reviews and
+branches remain intact while a fresh current-main candidate is prepared. Old
+CI/testnet/approval evidence cannot authorize the rebuilt tree. Keep the in-flight
+limit small to bound stale CI and testnet work; failed identical combinations are
+still excluded and substantive conflicts remain owner work.
+
+
+### Shared acceptance-cost recovery (SF-224)
+
+To assign funding-only combined-candidate failures to one existing owner, trusted
+project configuration may set `shared_acceptance_repair` to
+`{"ticket":"SF-221","max_attempts":3}` (attempt bound1..5). This opt-in does not
+create a ticket, infer an owner from a label, change wallet authority, raise a
+spend ceiling or waive a contract review. Source owners remain reserved and
+ordinary feature acceptance remains mandatory.
+
+Before source scheduling, the sole coordinator identifies the configured owner's
+real open source branch and a failed candidate containing its exact current head.
+Only positively classified funding-only automatic-testnet failures qualify. It
+verifies the candidate manifest and existing Review ownership/stopped-worker
+fences, then routes the actual combined failure to that source's normal repair
+worker. Many affected feature branches share this owner; they are not all sent
+into duplicate cost repair. An active owner/candidate is preserved. Blocked or
+uncertain ownership is reported for explicit recovery, not silently resumed.
+
+The durable `shared_acceptance_repairs` ledger records an episode by owner head,
+candidate base and failure class before launch. Unchanged or uncertain episodes
+are not replayed. A new owner source with a new failed combined candidate may
+receive its own bounded repair. The configured attempt bound applies per
+unchanged owner head. `fleet-status` projects the separate sanitized
+`shared_acceptance_status` record so assigned repair, retained ownership, awaited
+validation and a real block are visible; this display does not claim a live PID
+or successful chain effects. Existing active-worker verification remains.
+
+Empty collecting candidates are retired to release their slots. Changed heads,
+source feedback, dependencies, live helpers, ambiguous publication, real security
+failures and spending/unknown-outcome controls retain their existing fences.
+
+
+Explicit recovery of a stopped repair that returned a published structured
+`blocked` verdict requires `recovery_control.py --blocked-engineering-repair`
+and a concrete `--reason`. This flag is an operator assertion that authorized
+code repairs can proceed; do not use it for product, credential, hardware or
+permission blockers. It does not make the source Review or its draft Ready.
+The command verifies matching database/disk blocked results, original model,
+exit-zero and PID/start receipts, then repeats the existing claim, helper,
+dependency, lease, provider-backoff and competing-repair fences before launch.
+The dispatcher supervises the original claim and branch. Successful or
+unreconciled results cannot use this route. Install only a reviewed merged
+runtime containing the repair before invoking the new flag.
+
+### Funding preflight recovery after the shared owner completes (SF-234)
+
+A completed shared repair owner does not resolve a later funding incident. With
+`shared_acceptance_repair` configured, the sole coordinator can authorize a fresh
+singleton candidate after a one-hour cooling period. It uses the existing
+`max_attempts` bound (1..5, default 3) per unchanged source selection and main
+base. This is an additive authorization in `batch_funding_recoveries`, retaining
+the original failed batch, manifest, check snapshot and authenticated effects
+receipt. No claim, failed row, retry counter or encrypted fixture is reset.
+
+The original candidate must still be closed at its exact branch/head/base with
+exactly the recorded funding checks. Its run must be a completed failed
+Automatic testnet workflow in the same repository. The coordinator downloads the
+head-named effects artifact from that run and accepts only a single
+`package-upgrade.json` proving testnet chain `4c78adac`, zero submitted
+transactions, zero allowance used, no held uncertain reservation, and one
+successful faucet credit leaving a real reserve shortfall. Missing, ambiguous,
+changed, spent or uncertain evidence requires investigation. Historical cache
+and transaction evidence remains untouched. Review ownership, source receipts,
+feedback, dependencies and stopped process/helper fences are rechecked; active
+or uncertain candidate/source jobs prevent recovery.
+
+A fresh candidate follows normal collection, protected CI wallet serialization,
+unchanged pool selection, one faucet request per run, non-replenishing allowances,
+full reserve checks and independent exact-candidate review. Recovery never
+selects another account to find funds, raises a ceiling, reopens a stale PR,
+reruns a failed mutation or treats funding evidence as acceptance. Additional
+faucet credits can close the measured shortfall over bounded runs; insufficient
+funding still fails before setup. Each later failure requires its own receipt
+and cooling period. `funding_wait` includes an absolute next-check time and the
+resume condition. Exhausting the configured bound reports a block: the operator
+must verify the dedicated balance against the unchanged suite reserve and
+arrange an explicit reviewed recovery, rather than clear the failure fence or
+repeat runs forever. A changed main base uses normal fresh collection.
+
+Install this route only through the existing merged-only installer and record
+installed revision/readiness and the next coordinator check after installation.
+Keep batch mode enabled; this route needs no temporary suspension. Local tests
+do not establish installed behavior or public-testnet success.

@@ -42,6 +42,39 @@ module sui_edge::customer_tests {
     }
 
     #[test]
+    fun delayed_revocation_survives_unrelated_registration() {
+        let mut s = setup(); let fid = fleet(&mut s);
+        allow_devices(&mut s, 1);
+        let did = register(&mut s, fid, @0xD1);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let r = s.take_shared<DeviceRegistry>();
+        customer::configure_security_delays(&mut c, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
+        customer::set_security(&mut c, vector[0,0,0,0,0,0,8], s.ctx());
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let args = vector[std::bcs::to_bytes(&utf8(b"set_device_revoked")),
+            std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&fid), std::bcs::to_bytes(&object::id(&r)),
+            std::bcs::to_bytes(&did), std::bcs::to_bytes(&true)];
+        customer::queue_security_action(&c, std::bcs::to_bytes(&args), 10000, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(r);
+        // An unrelated tenant can change the global count without any organization authority.
+        s.next_tx(OTHER);
+        let mut r = s.take_shared<DeviceRegistry>(); let before = device_registry::device_count(&r);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let device = device_registry::register_device(&mut r, utf8(b"Unrelated"), OTHER, utf8(b"x86_64"), &clock, s.ctx());
+        transfer::public_transfer(device, OTHER);
+        assert!(device_registry::device_count(&r) == before + 1);
+        sui::clock::destroy_for_testing(clock); ts::return_shared(r);
+        s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut r = s.take_shared<DeviceRegistry>(); let action = s.take_shared<sui_edge::security_policy::Action>();
+        let mut clock = sui::clock::create_for_testing(s.ctx()); sui::clock::set_for_testing(&mut clock, 1000);
+        customer::set_device_revoked_secured(&mut c, &f, &mut r, did, true, action, &clock, s.ctx());
+        assert!(!device_registry::is_active_signer(&r, did, @0xD1));
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(r); s.end();
+    }
+
+    #[test]
     fun default_retry_and_two_fleets_with_identical_aliases() {
         let mut s = setup();
         let first = fleet(&mut s);
@@ -224,6 +257,110 @@ module sui_edge::customer_tests {
         assert!(customer::active_devices(&c) == 1 && customer::devices(&f).length() == 1);
         assert!(sui_edge::enrollment::remaining(&p) == 1 && !sui_edge::enrollment::is_claim(&p, @0xCA));
         sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); ts::return_shared(b); ts::return_shared(r); s.end();
+    }
+    fun consume_claim(mut s: ts::Scenario, fid: ID) {
+        s.next_tx(@0xD1);
+        let builder = ts::ctx_builder(&s).set_sponsor(@0xCA); ts::next_with_context(&mut s, builder);
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(fid);
+        let mut p = s.take_shared<sui_edge::enrollment::EnrollmentPolicy>();
+        let mut b = s.take_shared_by_id<FleetBudget>(customer::fleet_budget(&f)); let mut r = s.take_shared<DeviceRegistry>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::enroll_claim(&mut c, &mut f, &mut b, &mut p, &mut r, utf8(b"Claimed"), utf8(b"x86_64"), &clock, s.ctx());
+        assert!(customer::active_devices(&c) == 1 && customer::devices(&f).length() == 1);
+        assert!(sui_edge::enrollment::remaining(&p) == 1 && !sui_edge::enrollment::is_claim(&p, @0xCA));
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); ts::return_shared(b); ts::return_shared(r); s.end();
+    }
+    #[test]
+    fun claims_survive_credential_additions() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, OTHER, true, false, s.ctx());
+        customer::set_credential(&mut c, @0xC, true, true, s.ctx());
+        ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test]
+    fun claims_survive_all_off_policy_save() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::set_security(&mut c, vector[0,0,0,0,0,0,0], s.ctx());
+        ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test]
+    fun claims_survive_secured_wrapper_completion() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let requirements = vector[0u8,0,0,0,0,0,0];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
+        customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let action = s.take_shared<sui_edge::security_policy::Action>();
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::set_security_secured(&mut c, requirements, action, &clock, s.ctx());
+        assert!(sui_edge::security_policy::generation(&customer::security(&c)) == 2);
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); consume_claim(s, fid);
+    }
+    fun revoke_enrollment_authority(s: &mut ts::Scenario) {
+        s.next_tx(OWNER); let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+        customer::set_credential(&mut c, OTHER, true, false, s.ctx());
+        ts::return_shared(c);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun administrator_demotion_invalidates_claims() {
+        let (mut s, fid) = claim_setup(); revoke_enrollment_authority(&mut s);
+        consume_claim(s, fid);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun administrator_removal_invalidates_claims() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+        customer::set_credential(&mut c, OTHER, false, false, s.ctx());
+        ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun removing_protection_invalidates_claims() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::set_security_requirements_for_testing(&mut c, vector[1,0,0,0,0,0,0]);
+        let requirements = vector[0u8,0,0,0,0,0,0];
+        let arguments = vector[std::bcs::to_bytes(&utf8(b"set_security")), std::bcs::to_bytes(&object::id(&c)), std::bcs::to_bytes(&requirements)];
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::prepare_security_action(&c, sui_edge::security_policy::action_intent(object::id(&c), std::bcs::to_bytes(&arguments)), 100, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let mut action = s.take_shared<sui_edge::security_policy::Action>();
+        // Test-only package hook supplies the otherwise-unavailable mechanism.
+        sui_edge::security_policy::attest(&mut action, 1);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        customer::set_security_secured(&mut c, requirements, action, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun factor_source_change_invalidates_claims() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>();
+        customer::configure_security_factor(&mut c, 1, vector[1], s.ctx());
+        ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun handover_invalidates_claims() {
+        let (mut s, fid) = claim_setup(); s.next_tx(OTHER);
+        let c = s.take_shared<Customer>(); let clock = sui::clock::create_for_testing(s.ctx());
+        customer::confirm_handover(&c, 100, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let clock = sui::clock::create_for_testing(s.ctx());
+        let consent = s.take_shared<customer::HandoverConsent>();
+        customer::handover(&mut c, consent, &clock, s.ctx());
+        sui::clock::destroy_for_testing(clock); ts::return_shared(c); consume_claim(s, fid);
+    }
+    #[test]
+    fun current_administrator_can_reauthorize_claims_after_demotion() {
+        let (mut s, fid) = claim_setup(); revoke_enrollment_authority(&mut s); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let mut p = s.take_shared<sui_edge::enrollment::EnrollmentPolicy>();
+        customer::add_claims(&c, &f, &mut p, vector[], s.ctx());
+        ts::return_shared(c); ts::return_shared(f); ts::return_shared(p); consume_claim(s, fid);
     }
     #[test, expected_failure(abort_code = 1, location = sui_edge::enrollment)]
     fun old_enrollment_entry_is_sealed_by_policy_open_flag() {
@@ -662,6 +799,42 @@ module sui_edge::customer_tests {
     fun managed_sharded_catalog_deletion_removes_relocated_binding() { managed_extension_shard_cleanup(true); }
     #[test]
     fun managed_sharded_rollout_deletion_removes_extensions() { managed_extension_shard_cleanup(false); }
+
+    fun managed_audit_cleanup(foreign: bool, revoked: bool) {
+        use sui_edge::deployment_manager as dm;
+        let mut s = setup(); let a = fleet(&mut s); let b = fleet(&mut s);
+        allow_devices(&mut s, 1);
+        let device = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared_by_id<Fleet>(a);
+        let clock = sui::clock::create_for_testing(s.ctx());
+        let policy = dm::rollout_policy(1, 1, 1, 100, 1, 10000, 2000);
+        let record = customer::new_rollout(&c, &mut f, utf8(b"app"), utf8(b"1"), utf8(b"blob"),
+            utf8(b"hash"), utf8(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            vector[device], vector[0], policy, &clock, s.ctx());
+        dm::share_deployment(record);
+        ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        if (revoked) {
+            let mut c = s.take_shared<Customer>();
+            customer::set_credential(&mut c, OTHER, true, true, s.ctx());
+            customer::set_credential(&mut c, OWNER, false, false, s.ctx());
+            ts::return_shared(c); s.next_tx(OWNER);
+        };
+        let c = s.take_shared<Customer>();
+        let mut f = s.take_shared_by_id<Fleet>(if (foreign) b else a);
+        let mut record = s.take_shared<dm::DeploymentRecord>();
+        assert!(dm::has_decision_for_testing(&record, 1));
+        customer::clear_decision_audit(&c, &f, &mut record, 64, s.ctx());
+        assert!(!dm::has_decision_for_testing(&record, 1));
+        customer::delete_deployment(&c, &mut f, record, s.ctx());
+        ts::return_shared(c); ts::return_shared(f);
+        sui::clock::destroy_for_testing(clock); s.end();
+    }
+    #[test]
+    fun managed_audit_cleanup_uses_fleet_authority() { managed_audit_cleanup(false, false); }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::customer)]
+    fun managed_audit_cleanup_rejects_foreign_fleet() { managed_audit_cleanup(true, false); }
+    #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
+    fun managed_audit_cleanup_rejects_revoked_wallet() { managed_audit_cleanup(false, true); }
 
 
     // SF-171 batch membership: bounded, all-or-none, fleet-bound and

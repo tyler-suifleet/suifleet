@@ -12,7 +12,9 @@
       "root": "/home/tyler/dev/codex/src/suifleet",
       "github_account": "tyler-suifleet",
       "review_github_account": "therealtime",
-      "ci_redirect_protected_resources": ["network:suifleet-testnet", "hardware:raspberrypi3bplus"]
+      "ci_redirect_protected_resources": ["network:suifleet-testnet", "hardware:raspberrypi3bplus"],
+      "local_infrastructure": {"enabled": false},
+      "integration_batch": {"enabled": false, "max_members": 4, "max_in_flight": 2, "collection_seconds": 120}
     }
   ]
 }

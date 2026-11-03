@@ -88,6 +88,48 @@ const chain = {
   assert.equal(recipeObject.id, identity.slice(2));
   assert.equal(Buffer.from(recipeObject.ciphertext.Aes256Gcm.aad).toString(), `suifleet/seal/v1/recipe/${recipeUpload.sha256}`);
 
+  const reader = load("lib/release-recipe.ts");
+  const recipeBytes = new TextEncoder().encode(JSON.stringify(recipe, null, 2));
+  assert.equal(await reader.verifiedRecipeArtifact(recipeBytes, recipeUpload.sha256), uploaded.blobId);
+  assert.ok(recipeBytes.every(b => b === 0), "decrypted bytes must be wiped after inspection");
+  const tampered = new TextEncoder().encode(JSON.stringify(recipe));
+  await assert.rejects(reader.verifiedRecipeArtifact(tampered, recipeUpload.sha256), /digest mismatch/);
+  assert.ok(tampered.every(b => b === 0));
+  const session = { isExpired: () => false, getPackageId: () => namespace, getAddress: () => "0x5" };
+  const sdk = appRequire("@mysten/seal"), transactions = appRequire("@mysten/sui/transactions");
+  let decrypted, approvals = 0;
+  class ApprovalTransaction extends transactions.Transaction {
+    async build(options) {
+      assert.equal(options.onlyTransactionKind, true);
+      const call = this.getData().commands[0].MoveCall;
+      assert.equal(call.function, "seal_approve_account");
+      assert.equal(call.module, "seal_policy");
+      approvals++;
+      return new Uint8Array([1]);
+    }
+  }
+  const readWithServers = loader({
+    "@mysten/sui/transactions": { ...transactions, Transaction: ApprovalTransaction },
+    "@mysten/seal": { ...sdk, SealClient: class {
+      constructor(options) { assert.equal(options.verifyKeyServers, true); }
+      async decrypt(options) {
+        assert.equal(options.checkShareConsistency, true);
+        assert.equal(options.sessionKey, session);
+        decrypted = new TextEncoder().encode(JSON.stringify(recipe, null, 2));
+        return decrypted;
+      }
+    } },
+  })("lib/release-recipe.ts");
+  assert.equal(await readWithServers.inspectConfidentialRecipe(chain, requests[1].body, recipeUpload.sha256, seal.SEAL_SETTINGS, session), uploaded.blobId);
+  assert.equal(approvals, 1);
+  assert.ok(decrypted.every(b => b === 0), "successful server plaintext must be wiped");
+  await assert.rejects(reader.inspectConfidentialRecipe(chain, requests[1].body, '0'.repeat(64), seal.SEAL_SETTINGS, session), /binding mismatch/);
+  await assert.rejects(reader.inspectConfidentialRecipe(chain, requests[0].body, uploaded.sha256, seal.SEAL_SETTINGS, session), /binding mismatch/);
+  await assert.rejects(reader.inspectConfidentialRecipe(chain, requests[1].body, recipeUpload.sha256, seal.SEAL_SETTINGS, { ...session, isExpired: () => true }), /Expired/);
+  await assert.rejects(reader.inspectConfidentialRecipe(chain, requests[1].body, recipeUpload.sha256, { ...seal.SEAL_SETTINGS, threshold: 1 }, session), /binding mismatch/);
+  assert.deepEqual(await reader.boundedRecipeBytes(new Response(new Uint8Array([1,2,3]))), new Uint8Array([1,2,3]));
+  await assert.rejects(reader.boundedRecipeBytes(new Response(new Uint8Array(1_048_577))), /size limit/);
+
   // Encryption failure or a non-envelope result: nothing is uploaded, ever.
   const before = requests.length;
   await assert.rejects(walrus.uploadArtifact(file, "0x5", { kind: "confidential", seal: async () => { throw new Error("key servers unreachable"); } }), /unreachable/);
@@ -99,10 +141,16 @@ const chain = {
   const policy = { objectId: policyId, capId: "0x7", name: "p", version: "1", keyEpoch: "4", accounts: [], devices: [], groups: [] };
   assert.equal(delivery.DEFAULT_DELIVERY.mode, "confidential");
   assert.throws(() => delivery.releaseProtection(chain, { ...delivery.DEFAULT_DELIVERY }, [policy]), /access policy/);
-  assert.throws(() => delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: true }, [policy], null), /key servers/);
+  assert.throws(() => delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: true }, [policy], null), /encryption service is not configured; nothing was uploaded/);
   assert.throws(() => delivery.releaseProtection(chain, { mode: "public", policyId: "", publicAcknowledged: false }, [policy]), /Confirm/);
   assert.equal(delivery.releaseProtection(chain, { mode: "public", policyId: "", publicAcknowledged: true }, []).kind, "public");
   assert.equal(delivery.releaseProtection(chain, { mode: "confidential", policyId, publicAcknowledged: false }, [policy]).kind, "confidential");
+  // The publish form's step check enforces the same conditions without encrypting or uploading.
+  assert.throws(() => delivery.checkDelivery({ mode: "public", policyId: "", publicAcknowledged: false }, []), /Confirm/);
+  assert.throws(() => delivery.checkDelivery({ ...delivery.DEFAULT_DELIVERY }, [policy]), /access policy/);
+  assert.throws(() => delivery.checkDelivery({ mode: "confidential", policyId, publicAcknowledged: false }, [policy], null), /not configured/);
+  assert.equal(delivery.checkDelivery({ mode: "public", policyId: "", publicAcknowledged: true }, []), undefined);
+  assert.equal(delivery.checkDelivery({ mode: "confidential", policyId, publicAcknowledged: false }, [policy]), policy);
 
   // Explicitly public: the plaintext itself.
   const publicUpload = await walrus.uploadArtifact(file, "0x5", { kind: "public" });
@@ -115,7 +163,7 @@ const chain = {
 
   // Only a schema-valid plaintext recipe can be labeled public in the library.
   global.fetch = async (url) => new Response(String(url).endsWith("/blob2") ? JSON.stringify(recipe) : "artifact");
-  assert.deepEqual(await walrus.probeDeploymentStorage("blob2"), { recipe: "available", artifact: "available", confidential: false });
+  assert.deepEqual(await walrus.probeDeploymentStorage("blob2"), { recipe: "available", artifact: "available", artifactBlobId: "blob1", confidential: false });
   global.fetch = async () => new Response(JSON.stringify({ artifactBlobId: "anything" }));
   assert.deepEqual(await walrus.probeDeploymentStorage("invalid"), { recipe: "unknown", artifact: "unknown" });
   global.fetch = async () => new Response("", { status: 410 });
@@ -126,6 +174,21 @@ const chain = {
   const data = grant.getData();
   assert.equal(data.commands[0].MoveCall.module, "seal_policy");
   assert.equal(data.commands[0].MoveCall.function, "grant_device");
+  const managedDevice = { objectId: "0x22", managed: true };
+  const fleet = { id: "0xf1", customerId: "0xc1", administrator: true, devices: [managedDevice.objectId] };
+  const managedPolicy = { ...policy, fleet };
+  assert.equal(access.deviceGrantReason(managedPolicy, managedDevice), undefined);
+  assert.equal(access.deviceGrantReason(managedPolicy, { ...managedDevice, objectId: "0x" + "22".padStart(64, "0") }), undefined);
+  assert.match(access.deviceGrantReason({ ...managedPolicy, fleet: { ...fleet, administrator: false } }, managedDevice), /administrator/);
+  assert.match(access.deviceGrantReason(managedPolicy, { objectId: "0x23", ownerCapId: "0x24" }), /not registered/);
+  assert.equal(access.deviceGrantReason(policy, { objectId: "0x22", ownerCapId: "0x24" }), undefined);
+  assert.match(access.deviceGrantReason(policy, managedDevice), /activated/);
+  const managed = access.buildGrantTx(managedPolicy, "device", managedDevice.objectId).getData();
+  assert.equal(managed.commands[0].MoveCall.module, "customer");
+  assert.equal(managed.commands[0].MoveCall.function, "policy_device");
+  assert.equal(managed.commands[0].MoveCall.arguments.length, 6);
+  assert.deepEqual(managed.inputs.slice(0, 4).map(input => input.UnresolvedObject.objectId),
+    [fleet.customerId, fleet.id, policy.objectId, fixture.shared_objects.registry.id].map(value => appRequire("@mysten/sui/utils").normalizeSuiAddress(value)));
   assert.equal(access.buildRotateTx(policy).getData().commands[0].MoveCall.function, "rotate_key_epoch");
   assert.throws(() => access.buildCreatePolicyTx("  ", "0x5"), /name/);
   console.log("PASS: confidential uploads encrypt before any request, never fall back to plaintext, carry no credentials and bind kind/digest");

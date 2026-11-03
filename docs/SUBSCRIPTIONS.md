@@ -50,10 +50,11 @@ terms, not approval of a production tariff or legal contract.
 ## Upgrade and client boundary
 
 The existing Customer layout and type origin stay unchanged. Subscription opt-in
-sets its authority version to 2; old package credential, entitlement and managed
-fleet entry points require version 1 and reject it. The current package supports
-both versions for customer operations, but manual `set_entitlement` still accepts
-only version 1. Only the sealed subscription account advances a version-2 paid
+sets its authority version to 201, beyond legacy version 1 and the merged
+security-policy versions 197/199. Old package credential, entitlement and managed
+fleet entry points reject it. The current package preserves the existing security
+policy and recognizes version 201 for customer operations; manual
+`set_entitlement` rejects the persistent subscription binding. Only the sealed subscription account advances a version-2 paid
 entitlement. Existing customers are not automatically migrated. `SubscriptionKey`,
 `Offer`, `Account` and events have their introduction-upgrade origins in the new
 all-or-none manifest origin group `subscription`.

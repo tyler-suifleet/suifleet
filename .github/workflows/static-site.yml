@@ -1,0 +1,187 @@
+name: Static site
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      approved_sha256:
+        description: 'Reviewed collection.json SHA256 from the three-origin preview artifact'
+        required: true
+      authorization:
+        description: 'Issue comment URL recording explicit user authorization for this digest'
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: static-site-${{ github.event_name == 'workflow_dispatch' && 'production' || github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    outputs:
+      sha256: ${{ steps.seal.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: python3 -m unittest discover -s site/tests -v
+      - run: |
+          python3 site/build.py --out "$RUNNER_TEMP/site-a"
+          python3 site/build.py --out "$RUNNER_TEMP/site-b"
+          diff -r "$RUNNER_TEMP/site-a" "$RUNNER_TEMP/site-b"
+          python3 site/check.py "$RUNNER_TEMP/site-a"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.22.2
+      - name: Build reviewed documentation and deployment-bound console
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --require-hashes -r site/docs/requirements.txt
+          python3 -m unittest discover -s site/docs/tests -v
+          node site/docs/tests/search.cjs
+          python3 site/docs/build.py --out "$RUNNER_TEMP/docs-source"
+          npm install --global pnpm@11.0.8
+          pnpm --dir dapp install --frozen-lockfile
+          set -a
+          source profiles/seal-testnet/frontend.env
+          set +a
+          pnpm --dir dapp typecheck
+          pnpm --dir dapp build
+          cp profiles/seal-testnet/deployment.json dapp/out/deployment-manifest.json
+          python3 site/prepare_hosted.py console dapp/out "$RUNNER_TEMP/console" --revision "$GITHUB_SHA"
+          python3 site/prepare_hosted.py docs "$RUNNER_TEMP/docs-source" "$RUNNER_TEMP/docs" --revision "$GITHUB_SHA"
+      - id: seal
+        run: |
+          set -euo pipefail
+          python3 site/release.py seal "$RUNNER_TEMP/site-a" "$RUNNER_TEMP/static-release/marketing" --revision "$GITHUB_SHA" --hostname suifleet.io
+          python3 site/release.py seal "$RUNNER_TEMP/docs" "$RUNNER_TEMP/static-release/docs" --revision "$GITHUB_SHA" --hostname docs.suifleet.io
+          python3 site/release.py seal "$RUNNER_TEMP/console" "$RUNNER_TEMP/static-release/console" --revision "$GITHUB_SHA" --hostname app.suifleet.io
+          digest=$(python3 site/collection.py "$RUNNER_TEMP/static-release")
+          echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+          echo "Three-origin release: $GITHUB_SHA / $digest" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: static-release
+          path: ${{ runner.temp }}/static-release/
+          if-no-files-found: error
+          retention-days: 90
+  preview:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment: static-preview
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: static-release
+          path: ${{ runner.temp }}/static-release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.22.2
+      - run: npm ci --ignore-scripts --prefix tools/static-hosting
+      - name: Verify and publish only to stable preview project
+        env:
+          RELEASE_SHA256: ${{ needs.build.outputs.sha256 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python3 site/collection.py "$RUNNER_TEMP/static-release" --sha256 "$RELEASE_SHA256"
+          cp "$RUNNER_TEMP/static-release/collection.json" verified-release.json
+          for origin in marketing docs console; do
+            tools/static-hosting/node_modules/.bin/wrangler pages deploy "$RUNNER_TEMP/static-release/$origin/public" --project-name "suifleet-$origin-preview" --branch preview --commit-hash "$GITHUB_SHA" | tee -a deployment.txt
+            python3 site/verify_served.py "$RUNNER_TEMP/static-release/$origin/public" "https://preview.suifleet-$origin-preview.pages.dev"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: static-preview-receipt
+          path: |
+            verified-release.json
+            deployment.txt
+  production-preflight:
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Require human environment approval and matching digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA256: ${{ inputs.approved_sha256 }}
+          BUILT_SHA256: ${{ needs.build.outputs.sha256 }}
+          AUTHORIZATION: ${{ inputs.authorization }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$APPROVED_SHA256" = "$BUILT_SHA256"
+          [[ "$AUTHORIZATION" =~ ^https://github.com/tyler-suifleet/suifleet/issues/353#issuecomment-[0-9]+$ ]]
+          comment_id="${AUTHORIZATION##*issuecomment-}"
+          gh api "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" > authorization.json
+          python3 - <<'PYAUTH'
+          import json, os
+          c = json.load(open('authorization.json'))
+          assert c['user']['login'] == 'therealtime', 'Authorization must be written by Tyler'
+          assert c['issue_url'] == 'https://api.github.com/repos/tyler-suifleet/suifleet/issues/353'
+          assert 'Authorize production publication' in c['body']
+          assert 'Recorded console release accepted' in c['body']
+          assert os.environ['APPROVED_SHA256'] in c['body'] and os.environ['GITHUB_SHA'] in c['body']
+          PYAUTH
+          # Approval is supplied by the protected environment; a comment URL alone
+          # is evidence, never permission. Only the user's account may approve.
+          gh api "repos/$GITHUB_REPOSITORY/environments/static-production" > environment.json
+          python3 - <<'PY'
+          import json
+          e = json.load(open('environment.json'))
+          reviewers = [v for r in e['protection_rules'] if r['type'] == 'required_reviewers' for v in r['reviewers']]
+          assert reviewers and all(v['type'] == 'User' and v['reviewer']['login'] == 'therealtime' for v in reviewers), 'Only Tyler may approve production'
+          PY
+  production:
+    needs: [build, production-preflight]
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    environment: static-production
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: static-release
+          path: ${{ runner.temp }}/static-release
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.22.2
+      - run: npm ci --ignore-scripts --prefix tools/static-hosting
+      - name: Publish exactly approved artifact
+        env:
+          RELEASE_SHA256: ${{ inputs.approved_sha256 }}
+          AUTHORIZATION: ${{ inputs.authorization }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python3 site/collection.py "$RUNNER_TEMP/static-release" --sha256 "$RELEASE_SHA256"
+          cp "$RUNNER_TEMP/static-release/collection.json" verified-release.json
+          printf '%s\n' "$AUTHORIZATION" > authorization.txt
+          for origin in marketing docs console; do
+            tools/static-hosting/node_modules/.bin/wrangler pages deploy "$RUNNER_TEMP/static-release/$origin/public" --project-name "suifleet-$origin" --branch production --commit-hash "$GITHUB_SHA" | tee -a deployment.txt
+            case "$origin" in marketing) host=suifleet.io;; docs) host=docs.suifleet.io;; console) host=app.suifleet.io;; esac
+            python3 site/verify_served.py "$RUNNER_TEMP/static-release/$origin/public" "https://$host"
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: static-production-receipt
+          path: |
+            verified-release.json
+            deployment.txt
+            authorization.txt
