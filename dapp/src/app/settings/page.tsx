@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { StreamRetentionPanel } from "@/components/StreamRetention";
-import { PageHeader, Section } from "@/components/ui";
+import { PageHeader } from "@/components/ui";
 import { OrganizationSecurity } from "@/components/OrganizationSecurity";
 import { FleetSettingsPanel, StorageEndpoints } from "@/components/FleetSettings";
 
@@ -52,7 +52,7 @@ export default function SettingsPage() {
           <StreamRetentionPanel />
         </section>
         <section id="settings-security" aria-label="Security settings" hidden={active !== "security"}>
-          <Section title="Organization security"><OrganizationSecurity /></Section>
+          <OrganizationSecurity />
         </section>
         <section id="settings-advanced" aria-label="Advanced settings" hidden={active !== "advanced"} className="space-y-5">
           <div><h2 className="text-lg font-semibold tracking-tight text-slate-900">Advanced</h2>
