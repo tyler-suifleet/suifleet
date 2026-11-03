@@ -29,6 +29,7 @@ released for operators to download. Build it yourself for now:
 |---|---|---|
 | Raspberry Pi and other Yocto targets | [Yocto image and recipe](#yocto-image-and-recipe) | Image builds and QEMU boot recorded; physical Pi acceptance pending ([SF-031](https://github.com/tyler-suifleet/suifleet/issues/32)) |
 | macOS 15 on Apple silicon | [macOS package](#macos-package) | Validated on a hosted macOS 15 runner, not a physical Mac |
+| Debian 12 / Ubuntu 24.04 (amd64, arm64; Linux ≥6.5) | [Debian package](DEBIAN_PACKAGING.md) | Buildable local-file packages; no public APT repository/download yet |
 | Other Linux with systemd | [Generic Linux](#generic-linux) | Manual install of the same files as the Yocto recipe; not a tested distribution package |
 
 Windows and 32-bit x86 Linux have their own notes in
