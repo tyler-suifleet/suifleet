@@ -50,7 +50,7 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         if (name.endsWith('/')) name += 'index.html';
         const file = path.resolve(output, '.' + name);
         if (!file.startsWith(output + path.sep)) { response.writeHead(403); return response.end(); }
-        response.setHeader('Content-Type', file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':file.endsWith('.ico')?'image/x-icon':'text/plain');
+        response.setHeader('Content-Type', file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.html')?'text/html':file.endsWith('.json')?'application/json':file.endsWith('.ico')?'image/x-icon':file.endsWith('.svg')?'image/svg+xml':'text/plain');
         response.end(await fs.readFile(file));
       } catch { response.writeHead(404); response.end(); }
     });
@@ -79,8 +79,24 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         await page.locator('h1').waitFor().catch(error => {
           throw new Error(`${route} at ${width}px: page title unavailable; console/page errors: ${JSON.stringify(errors)}; external requests: ${JSON.stringify(externalRequests)}`, {cause:error});
         });
-        assert.equal(await page.locator('link[rel="icon"]').getAttribute('href'), '/favicon.ico');
-        const favicon = await page.request.get(base+'/favicon.ico');
+        const icon = page.locator('link[rel="icon"]');
+        const iconHref = await icon.getAttribute('href');
+        assert.match(iconHref, /^\/favicon\.svg\?v=[a-f0-9]{12}$/, `${route}: versioned SVG favicon`);
+        assert.equal(await icon.getAttribute('type'), 'image/svg+xml');
+        const svg = await page.request.get(base+iconHref);
+        assert.equal(svg.status(),200,`${route}: exported SVG favicon`);
+        assert.equal(await page.evaluate(source => {
+          const document = new DOMParser().parseFromString(source, 'image/svg+xml');
+          return document.querySelector('parsererror') === null &&
+            document.documentElement.localName === 'svg' &&
+            document.documentElement.namespaceURI === 'http://www.w3.org/2000/svg';
+        }, await svg.text()),true,`${route}: valid SVG artwork`);
+        const alternateHref = await page.locator('link[rel="alternate icon"]').getAttribute('href');
+        assert.equal(alternateHref, iconHref.replace('/favicon.svg', '/favicon.ico'), `${route}: matching versioned ICO fallback`);
+        const mark = page.locator('img[src="/suifleet-mark.svg"]');
+        assert.equal(await mark.getAttribute('alt'), '', `${route}: decorative mark beside brand text`);
+        assert.equal(await mark.evaluate(img => img.complete && img.naturalWidth > 0),true,`${route}: console mark loads`);
+        const favicon = await page.request.get(base+alternateHref);
         assert.equal(favicon.status(),200,`${route}: exported favicon`);
         assert.equal((await favicon.body()).readUInt16LE(2),1,'ICO signature');
         const metadata = await page.request.get(base+'/wallet/slush.json');
