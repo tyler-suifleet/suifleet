@@ -451,18 +451,18 @@ module sui_edge::customer_tests {
     // Protected organizations change recurrence only through an approved,
     // intent-bound deploy-class action.
     fun recurring_setup(requirements: vector<u8>): (ts::Scenario, ID) {
-        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 1); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
+        let mut s = setup(); let a = fleet(&mut s); allow_devices(&mut s, 3); let did = register(&mut s, a, @0xD1); s.next_tx(OWNER);
         fleet_deployment(&mut s, a, did);
         let mut c = s.take_shared<Customer>(); customer::set_security_requirements_for_testing(&mut c, requirements);
         ts::return_shared(c); s.next_tx(OWNER); (s, a)
     }
     fun set_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord, timezone: vector<u8>): vector<vector<u8>> {
-        vector[std::bcs::to_bytes(&utf8(b"set_recurring_window")), std::bcs::to_bytes(c), std::bcs::to_bytes(f), std::bcs::to_bytes(d),
+        vector[std::bcs::to_bytes(&utf8(b"set_recurring_window")), std::bcs::to_bytes(&object::id(c)), std::bcs::to_bytes(&object::id(f)), std::bcs::to_bytes(&object::id(d)),
             std::bcs::to_bytes(&utf8(timezone)), std::bcs::to_bytes(&vector[64u8]), std::bcs::to_bytes(&vector[120u16]), std::bcs::to_bytes(&vector[120u16]),
             sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
     }
     fun clear_recurring_arguments(c: &Customer, f: &Fleet, d: &sui_edge::deployment_manager::DeploymentRecord): vector<vector<u8>> {
-        vector[std::bcs::to_bytes(&utf8(b"clear_recurring_window")), std::bcs::to_bytes(c), std::bcs::to_bytes(f), std::bcs::to_bytes(d),
+        vector[std::bcs::to_bytes(&utf8(b"clear_recurring_window")), std::bcs::to_bytes(&object::id(c)), std::bcs::to_bytes(&object::id(f)), std::bcs::to_bytes(&object::id(d)),
             sui_edge::deployment_manager::security_snapshot(d), std::bcs::to_bytes(&sui_edge::deployment_manager::recurring_window(d))]
     }
     /// Prepares an action for `arguments`; `attested` simulates the approved
@@ -499,6 +499,31 @@ module sui_edge::customer_tests {
         let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 1, a); execute_recurring(&mut s, true, b"Europe/Berlin", a, id);
         assert!(has_recurring_window(&mut s));
         let id = prepare_recurring(&mut s, false, b"", 1, a); execute_recurring(&mut s, false, b"", a, id);
+        assert!(!has_recurring_window(&mut s));
+        s.end();
+    }
+    /// Unrelated device registration and usage charges between approval and
+    /// execution change Customer and Fleet but not the bound identities.
+    fun unrelated_fleet_activity(s: &mut ts::Scenario, fid: ID, address: address) {
+        let c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        let (used, devices) = (customer::used(&c), customer::devices(&f).length());
+        ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+        register(s, fid, address); s.next_tx(OWNER);
+        let mut c = s.take_shared<Customer>(); let f = s.take_shared_by_id<Fleet>(fid);
+        customer::reserve_allowance(&mut c, &f, 3, s.ctx());
+        assert!(customer::used(&c) > used); assert!(customer::devices(&f).length() == devices + 1);
+        ts::return_shared(c); ts::return_shared(f); s.next_tx(OWNER);
+    }
+    #[test]
+    fun recurring_window_approval_survives_unrelated_fleet_activity() {
+        let (mut s, a) = recurring_setup(vector[0,1,0,0,0,0,0]);
+        let id = prepare_recurring(&mut s, true, b"Europe/Berlin", 1, a);
+        unrelated_fleet_activity(&mut s, a, @0xD2);
+        execute_recurring(&mut s, true, b"Europe/Berlin", a, id);
+        assert!(has_recurring_window(&mut s));
+        let id = prepare_recurring(&mut s, false, b"", 1, a);
+        unrelated_fleet_activity(&mut s, a, @0xD3);
+        execute_recurring(&mut s, false, b"", a, id);
         assert!(!has_recurring_window(&mut s));
         s.end();
     }

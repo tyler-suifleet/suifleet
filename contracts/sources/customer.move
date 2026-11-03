@@ -1302,23 +1302,23 @@ module sui_edge::customer {
         finish_security_action(customer);
     }
 
-    /// Recurrence wrappers also bind the current recurring window, so an
-    /// approval cannot be replayed after another schedule change.
+    /// Recurrence wrappers bind customer/fleet/record identities (like
+    /// set_control), the deployment snapshot and the current recurring window,
+    /// so unrelated usage/enrollment activity cannot invalidate an approval but
+    /// an approval cannot be replayed after another schedule change.
     public fun set_recurring_window_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, timezone: String,
         days: vector<u8>, start_minutes: vector<u16>, duration_minutes: vector<u16>, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
-        assert_security_administrator(customer, ctx);
-        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"set_recurring_window")), bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(record), bcs::to_bytes(&timezone), bcs::to_bytes(&days), bcs::to_bytes(&start_minutes), bcs::to_bytes(&duration_minutes), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
+        let arguments = vector[intent_identity(fleet), intent_identity(record), bcs::to_bytes(&timezone), bcs::to_bytes(&days), bcs::to_bytes(&start_minutes), bcs::to_bytes(&duration_minutes), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
+        begin_intent(customer, action, b"set_recurring_window", arguments, (SMALL_1 as u64), false, security_clock, ctx);
         set_recurring_window(customer, fleet, record, timezone, days, start_minutes, duration_minutes, ctx);
-        security_policy::finish(&mut customer.id);
+        finish_security_action(customer);
     }
 
     public fun clear_recurring_window_secured(customer: &mut Customer, fleet: &Fleet, record: &mut DeploymentRecord, action: Action, security_clock: &Clock, ctx: &mut TxContext) {
-        assert_security_administrator(customer, ctx);
-        let arguments = vector[bcs::to_bytes(&std::string::utf8(b"clear_recurring_window")), bcs::to_bytes(customer), bcs::to_bytes(fleet), bcs::to_bytes(record), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
-        security_policy::begin_scoped(&mut customer.id, action, arguments, 1, false, security_clock, ctx);
+        let arguments = vector[intent_identity(fleet), intent_identity(record), deployment_manager::security_snapshot(record), bcs::to_bytes(&deployment_manager::recurring_window(record))];
+        begin_intent(customer, action, b"clear_recurring_window", arguments, (SMALL_1 as u64), false, security_clock, ctx);
         clear_recurring_window(customer, fleet, record, ctx);
-        security_policy::finish(&mut customer.id);
+        finish_security_action(customer);
     }
 
     public fun begin_revision_secured(customer: &mut Customer, fleet: &Fleet, group: &DeviceGroup, action: Action, security_clock: &Clock, ctx: &mut TxContext): RevisionPlan {
