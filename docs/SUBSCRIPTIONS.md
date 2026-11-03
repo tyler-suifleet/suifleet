@@ -107,12 +107,17 @@ python3 scripts/check_move_security.py
 make test-subscription-localnet
 ```
 
-The secured entry points initially exceeded the 102,400-byte package limit in
-the isolated compatible upgrade. Shared module-local abort guards, narrow
-constants widened to their original integer types, and the existing package-only
-Customer intent helper keep the package publishable without changing public
-layouts or bypassing security checks. The isolated upgrade is a size regression
-gate as well as an authority/compatibility check.
+The combined subscription/recurring-window package initially exceeded Sui's
+102,400-byte package limit (105,054 bytes). Shared named guards, pooled numeric
+constants, compact intent-vector helpers and explicit loops reduce it to
+102,260 bytes without changing public APIs, layouts, intent bytes or module-local
+abort codes. Strict lint and the existing unsuppressed baseline remain enforced.
+The remaining margin is 140 bytes: future additions must pass the size gate.
+`python3 scripts/check_move_package_size.py` counts compiled module bytes and
+names, type origins and dependency linkage using Sui's package-size formula.
+The security CI runs this guard and its golden bytecode/boundary tests; the USDC
+acceptance harness checks it before any publication signature. The guard also
+reproduces the historical 105,054-byte rejection offline, without spending gas.
 
 The last command requires the pinned dev image with network disabled, cached Move
 dependencies and locked frontend dependencies. It publishes the merged current
@@ -146,8 +151,8 @@ copying keys or modifying the original. Run
 read-only gRPC effects, signed gas and typed deposit/collection/refund checks.
 The package and empty account remain reusable test fixtures; original application
 objects were not selected or changed. The wallet lease was released after
-cancellation. The local upgrade receipt now uses merged main `cae74617` as its
-base, preserving the merged security policy while sealing subscription authority
+cancellation. The historical local upgrade receipt uses merged main `cae74617`
+as its base, preserving the merged security policy while sealing subscription authority
 at version 201. Configured security factors still block unauthenticated
 cancellation; registry authority cannot override the subscription entitlement.
 
@@ -158,3 +163,24 @@ Fresh automated candidate CI/testnet remains required.
 Physical, mainnet, production-provider and manual-wallet acceptance remain unrun
 in [SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
 [SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+Current-code feedback acceptance (2026-11-03):
+
+- [Pinned-base local upgrade](validation/sf181-localnet-current.json): base
+  `0341a1ef1f79c96c36015c7486faf486acaee6f2`, existing Customer, compatible
+  upgrade, wrong-coin and double-collection rejection, old-package entitlement
+  and credential refusals, and cancellation with a 990-unit SUI refund.
+- [Public Testnet receipt](validation/sf181-testnet-current.json) and
+  [fixture manifest](validation/sf181-testnet-current-manifest.json): canonical
+  USDC open 108,000, deposit 1,000, collect 9,000 and refund 100,000 base units;
+  cancelled account with zero balance. Publication and each operation have
+  successful effects; independent gRPC reads verify events, gas and account BCS.
+- The retained run allowance includes the earlier rejected publication
+  `R3jnELgmzogPsCouf9awdweHspSd44NsqLCNvKsgTsQ` (7,630,000 MIST). All seven
+  transactions used 834,359,392 MIST of the same 1,000,000,000 MIST ceiling;
+  no faucet, original app object or alternate wallet was used. The global
+  mutation lease was released immediately after cancellation.
+
+These fixtures establish the tested software behavior, not hosted exact-head CI
+or independent source approval. Those remain coordinator gates. The linked
+physical/mainnet/provider/manual-wallet checks above remain explicitly unrun.

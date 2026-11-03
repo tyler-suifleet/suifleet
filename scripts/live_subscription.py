@@ -129,7 +129,7 @@ def main():
             'customer': customer, 'offer': offer, 'account': account}, account_read=account_read,
             coin_type=USDC, treasury_payee=treasury, usdc_open_base_units=108000, usdc_deposit_base_units=1000,
             usdc_fee_base_units=9000, usdc_refund_base_units=100000,
-            limits=['Testnet only; 1 SUI non-replenishing allowance; no earlier public writes for this retained implementation.',
+            limits=['Testnet only; 1 SUI non-replenishing allowance; all retained attempts remain charged.',
                     'Incoming Circle funds do not replenish gas allowance; no faucet or new signing identity.',
                     'Physical/mainnet/provider/manual-wallet acceptance remains unrun in #32/#159.'])
         live.evidence['effects'] = [{k: r[k] for k in ('digest', 'effects', 'objectChanges', 'balanceChanges') if k in r} for r in state['results'].values()]
