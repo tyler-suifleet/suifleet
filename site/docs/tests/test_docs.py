@@ -33,6 +33,19 @@ class DocsTest(unittest.TestCase):
         for link in links:
             self.assertTrue((self.out / link.strip("/") / "index.html").is_file(), link)
 
+    def test_device_client_app_anchors_are_rendered(self):
+        build.build(self.out)
+        source = (build.ROOT / "dapp/src/lib/device-client.ts").read_text()
+        sections = source.split("export const GUIDE_SECTIONS = {", 1)[1].split("} as const", 1)[0]
+        anchors = re.findall(r': "([^" ]+)"', sections)
+        self.assertGreaterEqual(len(anchors), 10)
+        doc = build.Links()
+        doc.feed((self.out / "device-client/index.html").read_text())
+        for anchor in anchors:
+            self.assertIn(anchor, doc.ids)
+        self.assertIn('/device-client/', (self.out / "install/index.html").read_text())
+        self.assertIn('docs/INSTALL_DEVICE_CLIENT.md', {p["source"] for p in build.catalog()})
+
     def test_links_fail_on_missing_page_and_anchor(self):
         with self.assertRaisesRegex(ValueError, "Incomplete"):
             build.check(self.out)

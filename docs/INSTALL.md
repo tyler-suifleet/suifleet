@@ -6,6 +6,9 @@ operator account, funds for network fees, a deployment manifest for that same
 network and administrative access to the device. Registration alone does not
 install or start the client.
 
+Follow [device client setup and enrollment](INSTALL_DEVICE_CLIENT.md) for detailed
+platform availability, runtime identity, signer configuration and enrollment steps.
+
 ## Choose an installation
 
 | Platform | Installation path |
