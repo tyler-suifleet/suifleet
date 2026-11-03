@@ -134,6 +134,8 @@ dapp-typecheck:
 
 # Compare full reviewed ABI/layouts and generated clients with compiled contracts.
 check-interfaces:
+	$(RUN) python3 scripts/check_package_size.py
+	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_check_package_size.py'
 	$(RUN) python3 scripts/check_contract_interfaces.py
 	$(RUN) python3 scripts/generate_interfaces.py --check
 	$(RUN) python3 scripts/test_generated_interfaces.py
