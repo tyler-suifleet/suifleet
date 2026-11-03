@@ -3,13 +3,14 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
 const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/node_modules/playwright');
 (async()=>{
  const repo=path.resolve(__dirname,'../..'),temporary=process.argv[2]?null:await fs.mkdtemp(path.join(os.tmpdir(),'suifleet-guide-'));
+ const missingMedia=new Set();
  const root=path.resolve(process.argv[2]||path.join(temporary,'site')),shots=process.argv[3];let server,browser;
  try {
  if(temporary)execFileSync('python3',['site/build.py','--out',root],{cwd:repo,stdio:'pipe'});
  const policy=(await fs.readFile(path.join(root,'_headers'),'utf8')).split('Content-Security-Policy: ')[1].split('\n')[0];
  const steps=JSON.parse(await fs.readFile(path.join(repo,'site/guide/steps.json'))).steps;
  const expected=new Map(steps.flatMap(step=>[step.summary,...step.before,...step.actions,step.result].map((text,i)=>[`${step.id}/${i}`,text.replace(/\s+/g,' ').trim()])));
- server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Length',data.length);res.end(data)}catch{res.statusCode=404;res.end()}});
+ server=http.createServer(async(req,res)=>{try{const pathname=new URL(req.url,'http://local').pathname;if(missingMedia.has(pathname)){res.statusCode=404;res.end();return;}let name=path.resolve(root,'.'+pathname);if(!name.startsWith(root+path.sep))throw Error('outside root');if(pathname.endsWith('/'))name=path.join(name,'index.html');const data=await fs.readFile(name);res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.svg':'image/svg+xml','.jpg':'image/jpeg','.png':'image/png','.woff2':'font/woff2','.webm':'video/webm','.mp4':'video/mp4'})[path.extname(name)]||'application/octet-stream');res.setHeader('Content-Security-Policy',policy);res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Content-Length',data.length);res.end(data)}catch{res.statusCode=404;res.end()}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
  browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE||undefined,headless:true,args:['--no-sandbox']});if(shots)await fs.mkdir(shots,{recursive:true});
  for(const [width,height] of [[1440,900],[1280,720],[390,844],[375,667],[320,568],[844,390],[640,360]]){
@@ -29,9 +30,18 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
   await page.getByLabel('Guide stage').selectOption('publish-version');assert.equal(await page.locator('#publish-version').isVisible(),true);await page.goBack();await page.locator('#sign-in').waitFor();
   await page.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});await page.locator('#fund').waitFor();assert.equal(await page.getByLabel('Guide stage').inputValue(),'fund');
   await page.mouse.wheel(0,800);assert.equal(await page.evaluate(()=>scrollY),0);
-  await page.locator('#fund video').evaluate(v=>v.dispatchEvent(new Event('error')));await page.locator('#fund [data-video-error]').waitFor();assert.equal(await page.locator('#fund video').isVisible(),false);
-  assert.ok(await page.locator('#fund [data-video-error]').evaluate(e=>{const a=e.getBoundingClientRect(),b=e.closest('figure').getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom}),`video error clipped at${width}x${height}`);
   assert.deepEqual(errors,[],`browser errors at${width}x${height}`);assert.deepEqual(external,[]);console.log(`PASS guide${width}x${height}: ${count} screens, all${expected.size} instructions, no page/text overflow, controls visible, back/next/jump/history/deep link`);await page.close();
+  // Real server 404s exercise non-bubbling <source> errors, including a deep link.
+  missingMedia.add('/media/guide/fund.webm');missingMedia.add('/media/guide/fund.mp4');
+  const failure=await browser.newPage({viewport:{width,height}});
+  await failure.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
+  await failure.locator('#fund [data-video-error]').waitFor();
+  assert.equal(await failure.locator('#fund video').isVisible(),false);
+  assert.equal(await failure.locator('#fund video').evaluate(v=>v.networkState),3,'both source formats exhausted');
+  assert.equal(await failure.locator('[data-guide-next]').isEnabled(),true,'video failure does not block instructions');
+  assert.ok(await failure.locator('#fund [data-video-error]').evaluate(e=>{const a=e.getBoundingClientRect(),b=e.closest('figure').getBoundingClientRect();return a.top>=b.top&&a.bottom<=b.bottom}),`video error clipped at${width}x${height}`);
+  console.log(`PASS real WebM/MP4 404 fallback at ${width}x${height}`);
+  await failure.close();missingMedia.clear();
  }
  // Keyboard-only navigation must retain focus at disabled-control boundaries.
  const keyboard=await browser.newPage({viewport:{width:1280,height:720}});
@@ -83,7 +93,13 @@ const {chromium}=require(process.env.SUIFLEET_PLAYWRIGHT_MODULE||'../../dapp/nod
  const page=await browser.newPage();await page.goto(origin+'/guide/',{waitUntil:'networkidle'});const video=page.locator('#sign-in video');
  await video.evaluate(async v=>{v.load();await v.play()});await page.waitForFunction(()=>document.querySelector('#sign-in video').currentTime>0);assert.equal(await video.evaluate(v=>v.error),null);
  await page.getByLabel('Guide stage').selectOption('fund');assert.equal(await video.evaluate(v=>v.paused),true,'leaving a stage pauses its video');
- await page.locator('#fund video').evaluate(v=>v.dispatchEvent(new Event('error')));await page.locator('#fund [data-video-error]').waitFor();assert.equal(await page.locator('[data-guide-next]').isEnabled(),true,'video failure does not block instructions');
+
+ missingMedia.add('/media/guide/fund.webm');
+ await page.goto(origin+'/guide/#fund',{waitUntil:'networkidle'});
+ await page.locator('#fund video').evaluate(async v=>{v.load();await v.play()});
+ assert.ok(await page.locator('#fund video').evaluate(v=>v.currentSrc.endsWith('fund.mp4')),'MP4 plays after WebM 404');
+ assert.equal(await page.locator('#fund [data-video-error]').isVisible(),false,'working MP4 is not marked unavailable');
+ missingMedia.clear();
  assert.equal(await page.locator('video source[type="video/mp4"]').count(),steps.length);console.log('PASS real recording playback, inactive video pause, MP4 fallbacks and video-error instructions');await page.close();
  } finally {if(browser)await browser.close();if(server)await new Promise(r=>server.close(r));if(temporary)await fs.rm(temporary,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1});

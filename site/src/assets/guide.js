@@ -105,9 +105,16 @@
   addEventListener("hashchange", () => { readLocation(); render(); });
   let resize;
   addEventListener("resize", () => { clearTimeout(resize); resize = setTimeout(() => { part = 0; render(); }, 80); });
-  root.querySelectorAll("video").forEach(video => video.addEventListener("error", () => {
-    video.hidden = true; video.closest("figure").querySelector("[data-video-error]").hidden = false;
-  }));
+  root.querySelectorAll("video").forEach(video => {
+    const unavailable = () => {
+      video.hidden = true; video.closest("figure").querySelector("[data-video-error]").hidden = false;
+    };
+    video.addEventListener("error", unavailable);
+    // Source errors do not bubble. Only the last failure exhausts format fallbacks.
+    const sources = video.querySelectorAll("source");
+    if (sources.length) sources[sources.length - 1].addEventListener("error", unavailable);
+    if (video.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) unavailable();
+  });
   root.querySelectorAll(".guide-instructions").forEach(list => { list.hidden = true; });
   document.body.classList.add("guide-ready");
   select.disabled = false; next.disabled = false; readLocation(); render();
