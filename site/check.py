@@ -8,8 +8,8 @@ Offline and deterministic, so it runs in CI without network access:
     #fragment to an element id on the target page;
   - external links use https and an allowlisted host (site.json); GitHub links
     into this repository must name a file or directory that exists here;
-  - no <script>, <iframe>, <object>, <embed>, <form>, inline event handler,
-    javascript: URL or externally hosted resource: the site runs no code and
+  - only the exact integrity-pinned guide script on /guide/; no other <script>, <iframe>, <object>, <embed>, <form>, inline event handler,
+    javascript: URL or externally hosted resource: guide navigation is local and
     loads nothing from third parties, so it cannot track visitors;
   - every page has lang, a title, a description, exactly one <h1> and the
     Content-Security-Policy meta tag;
@@ -17,6 +17,7 @@ Offline and deterministic, so it runs in CI without network access:
     digests (with --require-videos, every guide step needs one).
 """
 import argparse
+import base64
 import hashlib
 from html.parser import HTMLParser
 import json
@@ -33,8 +34,11 @@ CSP = "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; me
 
 
 class Page(HTMLParser):
-    def __init__(self):
+    def __init__(self, guide_integrity=None, guide_url=None):
         super().__init__(convert_charrefs=True)
+        self.guide_integrity = guide_integrity
+        self.guide_url = guide_url
+        self._in_script = False
         self.urls, self.ids, self.problems = [], set(), []
         self.h1 = 0
         self.lang = self.title = self.description = self.csp = self.canonical = None
@@ -42,8 +46,12 @@ class Page(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
-        if tag in FORBIDDEN_TAGS:
+        allowed_script = (tag == "script" and self.guide_integrity is not None
+                          and attrs == {"src": self.guide_url, "integrity": self.guide_integrity, "defer": None})
+        if tag in FORBIDDEN_TAGS and not allowed_script:
             self.problems.append(f"forbidden <{tag}>")
+        if tag == "script":
+            self._in_script = True
         if tag == "link" and attrs.get("rel") == "canonical":
             self.canonical = attrs.get("href")
             attrs = {k: v for k, v in attrs.items() if k != "href"}
@@ -69,10 +77,14 @@ class Page(HTMLParser):
             self.csp = attrs.get("content")
 
     def handle_endtag(self, tag):
+        if tag == "script":
+            self._in_script = False
         if tag == "title":
             self._in_title = False
 
     def handle_data(self, data):
+        if self._in_script and data.strip():
+            self.problems.append("inline script content is forbidden")
         if self._in_title:
             self.title += data
 
@@ -117,8 +129,14 @@ def check(out, require_videos=False):
     out = out.resolve()
     config = json.loads((SITE / "src" / "site.json").read_text(encoding="utf-8"))
     errors, pages = [], {}
+    script = SITE / "src/assets/guide.js"
+    integrity = "sha256-" + base64.b64encode(hashlib.sha256(script.read_bytes()).digest()).decode("ascii")
+    guide_url = "/assets/guide.js?v=" + hashlib.sha256(script.read_bytes()).hexdigest()[:12]
+    built_script = out / "assets/guide.js"
+    if not built_script.is_file() or built_script.read_bytes() != script.read_bytes():
+        errors.append("guide script does not match reviewed source")
     for path in sorted(out.rglob("*.html")):
-        parser = Page()
+        parser = Page(integrity, guide_url) if path.relative_to(out).as_posix() == "guide/index.html" else Page()
         parser.feed(path.read_text(encoding="utf-8"))
         pages[path] = parser
     if not pages:
@@ -140,7 +158,8 @@ def check(out, require_videos=False):
         if page.canonical is not None and (not page.canonical.startswith(config["origin"] + "/")
                                            or resolve(out, page.canonical[len(config["origin"]):]) != path):
             errors.append(f"{where}: canonical URL {page.canonical} does not name this page")
-        if page.csp != CSP:
+        expected_csp = CSP + f"; script-src '{integrity}'" if where == "guide/index.html" else CSP
+        if page.csp != expected_csp:
             errors.append(f"{where}: missing or changed Content-Security-Policy meta tag")
         for tag, attr, url in page.urls:
             parts = urlsplit(url)

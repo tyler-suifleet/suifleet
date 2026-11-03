@@ -1791,3 +1791,96 @@ td.num,th.num {
   }
 
 }
+
+/* Viewport-sized guide: the instruction pager handles long text without scroll panes. */
+.guide-page { height:100dvh; overflow:hidden; display:grid; grid-template-rows:auto minmax(0,1fr); background:#f4f8fd; }
+.guide-page main { min-height:0; min-width:0; }
+.guide-page .site-footer { display:none; }
+.guide-player { max-width:1360px; height:100%; margin:0 auto; padding:20px 28px 16px; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; gap:14px; }
+.guide-toolbar { display:flex; justify-content:space-between; align-items:center; gap:20px; min-width:0; }
+.guide-toolbar h1 { font-size:clamp(19px,2.2vw,28px); line-height:1.2; letter-spacing:-.04em; margin:3px 0 0; }
+.guide-toolbar .eyebrow { font-size:10px; margin:0; }
+.guide-stage-picker { font-size:11px; color:#60758f; flex:0 1 280px; min-width:0; }
+.guide-stage-picker select { display:block; width:100%; min-width:0; margin-top:4px; border:1px solid #d7e2f0; border-radius:9px; padding:9px 10px; background:white; color:#133659; font:inherit; font-size:13px; }
+.guide-progress { display:flex; align-items:center; gap:16px; min-width:0; min-height:26px; }
+.guide-progress progress { flex:1; min-width:30px; height:5px; accent-color:#1769d2; border:0; border-radius:8px; overflow:hidden; }
+.guide-progress progress::-webkit-progress-bar { background:#dde8f5; }
+.guide-progress progress::-webkit-progress-value { background:#1769d2; }
+.guide-progress span { font-size:11px; color:#4a6481; white-space:nowrap; }
+.guide-screen { min-height:0; min-width:0; }
+.guide-stage { height:100%; min-height:0; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:20px; }
+.guide-stage[hidden], .guide-complete[hidden] { display:none; }
+.guide-media { margin:0; min-width:0; min-height:0; display:grid; grid-template-rows:minmax(0,1fr) auto; border:1px solid #d7e2f0; border-radius:16px; overflow:hidden; background:#0b1628; }
+.guide-media video { width:100%; height:100%; min-height:0; object-fit:contain; display:block; }
+.guide-media figcaption { padding:10px 14px; background:white; font-size:11px; color:#60758f; display:flex; justify-content:space-between; gap:8px; }
+.guide-media [data-video-error] { align-self:center; padding:12px; color:white; font-size:14px; }
+.guide-media [data-video-error][hidden] { display:none; }
+.guide-media [data-video-error] a { color:#92c4ff; }
+.guide-instruction-card { min-width:0; min-height:0; border:1px solid #d7e2f0; border-radius:16px; background:white; padding:24px; display:grid; grid-template-rows:auto auto minmax(0,1fr) auto; gap:14px; box-shadow:0 2px 4px #163a6205; }
+.guide-instruction-card h2 { font-size:clamp(18px,2vw,26px); letter-spacing:-.035em; line-height:1.2; margin:0; }
+.guide-instruction-card h3 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:#1769d2; margin:0; }
+.guide-copy { min-height:0; overflow:hidden; }
+.guide-copy p { margin:0; color:#415b78; font-size:clamp(14px,1.3vw,17px); line-height:1.65; overflow-wrap:anywhere; }
+.guide-instruction-meta { display:grid; grid-template-rows:34px 18px; gap:5px; align-content:end; font-size:10px; color:#60758f; }
+.guide-instruction-meta a { font-size:12px; font-weight:600; }
+.guide-controls { display:flex; align-items:center; justify-content:space-between; gap:12px; padding-top:2px; }
+.guide-controls button { min-height:42px; border:1px solid #ccdcef; border-radius:10px; padding:10px 20px; background:white; color:#234b78; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.guide-controls button.primary { background:#1769d2; border-color:#1769d2; color:white; }
+.guide-controls button:disabled { opacity:.45; cursor:not-allowed; }
+.guide-safety { color:#6c8099; font-size:11px; text-align:center; }
+.guide-complete { height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; gap:14px; border:1px solid #d7e2f0; border-radius:16px; background:white; padding:20px; }
+.guide-complete h2 { margin:0; font-size:26px; letter-spacing:-.04em; }
+.guide-complete p { max-width:480px; margin:0; font-size:14px; color:#60758f; }
+.guide-complete-icon { color:#1769d2; background:#edf5ff; border-radius:50%; width:48px; height:48px; display:grid; place-items:center; font-size:25px; }
+.guide-caption { font-size:11px!important; }
+@media(max-width:700px) {
+ .guide-player { padding:14px 16px 12px; gap:10px; }
+ .guide-toolbar { gap:12px; }
+ .guide-toolbar h1 { font-size:19px; }
+ .guide-stage-picker { flex-basis:145px; font-size:10px; }
+ .guide-stage-picker select { font-size:11px; padding:8px 5px; }
+ .guide-toolbar .eyebrow { font-size:9px; }
+ .guide-stage { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(80px,.8fr) minmax(0,1.2fr); gap:10px; }
+ .guide-media { border-radius:12px; }
+ .guide-media figcaption { display:none; }
+ .guide-instruction-card { border-radius:12px; padding:16px; gap:10px; }
+ .guide-instruction-card h2 { font-size:19px; }
+ .guide-copy p { font-size:14px; line-height:1.5; }
+ .guide-progress span { font-size:10px; max-width:75%; white-space:normal; line-height:1.2; }
+ .guide-safety { display:none; }
+ .guide-controls button { min-height:40px; padding:9px 16px; }
+}
+@media(max-height:580px) {
+ .guide-page .site-header nav { display:none; }
+ .guide-page .header-row { padding-top:8px; padding-bottom:8px; min-height:48px; }
+ .guide-player { gap:8px; padding:8px 16px; }
+ .guide-toolbar .eyebrow, .guide-stage-picker > span { display:none; }
+ .guide-toolbar h1 { font-size:17px; }
+ .guide-stage-picker { font-size:0; }
+ .guide-stage-picker select { margin:0; font-size:12px; padding:6px; }
+
+ .guide-media figcaption { display:none; }
+ .guide-instruction-card { padding:12px; gap:8px; }
+ .guide-instruction-card h2 { font-size:17px; }
+ .guide-copy p { font-size:13px; line-height:1.4; }
+ .guide-controls button { min-height:34px; padding:6px 14px; }
+ .guide-complete { gap:8px; }
+ .guide-complete-icon { display:none; }
+}
+
+@media(max-height:580px) and (min-width:600px) {
+ .guide-stage { grid-template-columns:minmax(0,1fr) minmax(0,1fr); grid-template-rows:minmax(0,1fr); gap:12px; }
+}
+
+.guide-instruction-paging { display:flex; align-items:center; justify-content:space-between; gap:6px; min-width:0; }
+.guide-instruction-paging button { border:1px solid #d7e2f0; border-radius:8px; background:#f8fbff; color:#1769d2; min-width:32px; height:32px; font-size:22px; cursor:pointer; }
+.guide-instruction-paging button:disabled { opacity:.35; cursor:not-allowed; }
+.guide-instruction-paging span { text-align:center; font-size:10px; }
+@media(max-width:700px) {
+ .guide-page .site-header nav { display:none; }
+ .guide-page .header-row { min-height:64px; padding-top:10px; padding-bottom:10px; }
+ .guide-toolbar .eyebrow { display:none; }
+}
+
+.guide-media video[hidden] { display:none; }
+.guide-media [data-video-error] p { margin:0; }

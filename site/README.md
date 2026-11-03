@@ -2,8 +2,7 @@
 
 Static product pages, a written console guide, an offline console screenshot,
 proposed pricing, documentation entry, security/custody and contact/privacy.
-The nine guide steps include testnet WebM/MP4 recordings, posters, transcripts
-and console-build provenance. Regeneration and spending controls are described
+The nine guide stages include testnet WebM/MP4 recordings, posters, complete written instructions and console-build provenance. The viewport-sized player shows one instruction at a time with local instruction arrows and Back/Next stage controls; long instructions are divided to fit without clipping or scroll panes. Changing stages pauses inactive videos. Stage and instruction links are kept in the URL fragment. Regeneration and spending controls are described
 in [guide/RECORDING.md](guide/RECORDING.md).
 Standard-library Python 3.10+; no install or network needed to build:
 
@@ -17,12 +16,11 @@ The build uses src/layout.html, src/site.json and src/pages/*.html. Guide text
 comes from guide/steps.json. Output is sorted and timestamp-free with SHA256SUMS.
 For an optional browser check, run `node site/tests/render.cjs` after building;
 it uses the console’s installed Playwright and `CHROME_EXECUTABLE` if set, checks
-nine pages at 375/1280px, and saves screenshots for visual review.
+nine pages at 375/390/1280px, and saves screenshots for visual review.
 
 CI builds twice, compares bytes, and checks internal links/fragments, repository
 paths, allowed HTTPS link hosts, page metadata and checksums. External URLs are
-not fetched: release review must follow those links. Scripts, inline handlers,
-embedded frames, forms and third-party HTML resources are rejected. There is no
+not fetched: release review must follow those links. Stylesheet and guide-script URLs include content versions so browsers fetch updated assets. Only the guide’s integrity-pinned local navigation script is allowed, on the guide page alone. Its exact bytes are pinned in the page and response CSP; inline code/handlers, other scripts, embedded frames, forms and third-party HTML resources are rejected. There is no
 analytics code or consent-dependent tracking. The host may keep access logs;
 confirm its actual privacy terms before publishing the notice.
 
@@ -103,3 +101,18 @@ an exact console source revision bound to the testnet deployment manifest. See
 `site/prepare_hosted.py`, `site/collection.py` and the runbook for the artifact
 contract. Offline fixture restoration is not real preview/rollback acceptance;
 provider setup, real preview and recorded-wallet release acceptance remain unrun.
+
+## Interactive guide checks
+
+`node site/tests/guide_browser.cjs [build-directory] [screenshot-directory]` checks
+all stages and all 67 written instructions at seven desktop, phone and landscape
+sizes, including short windows. With no build argument it builds a disposable
+site first. The normal `make test-guide-recording` target runs this alongside the
+recording-helper checks. It verifies real recording playback, pausing on stage
+changes, MP4 fallbacks, media-error UI, direct links, keyboard-ready native controls,
+no external requests, no scrolling and no clipped instruction text.
+
+The existing recordings are October 27 testnet console captures, with source
+build and transaction provenance in `site/media/guide/videos.json`; they are not
+new human-narrated recordings. The local preview must be refreshed from the full
+site build, including `media/guide`, rather than a historical design snapshot.
