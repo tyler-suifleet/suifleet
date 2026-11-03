@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.request import urlopen
+from urllib.error import HTTPError
 
 import sui_toolchain as tc
 
@@ -46,10 +48,19 @@ def run(args):
                     time.sleep(1)
                 else:
                     raise RuntimeError("disposable node startup timed out")
+                for _ in range(60):
+                    try:
+                        with urlopen("http://127.0.0.1:9123/", timeout=2): pass
+                        break
+                    except HTTPError as error:
+                        if error.code < 500: break
+                        time.sleep(1)
+                    except OSError:
+                        time.sleep(1)
                 for _ in range(3):
                     subprocess.run([*cli, "faucet", "--url", "http://127.0.0.1:9123/v2/gas"], capture_output=True, env=env, check=True)
                 if not args.only_multisig:
-                    subprocess.run([sys.executable, "scripts/live_security_policy.py", "--wallet", str(wallet), "--network", "localnet",
+                    subprocess.run([sys.executable, args.runner, "--wallet", str(wallet), "--network", "localnet",
                                     "--base", str(base), "--state", str(private / "state.json"), "--evidence", args.evidence], env=env, check=True)
                 if args.multisig:
                     subprocess.run([sys.executable, "scripts/live_multisig_admin.py", "--wallet", str(wallet), "--network", "localnet",
@@ -64,6 +75,7 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--runner", choices=["scripts/live_security_policy.py", "scripts/live_passkey_factor.py"], default="scripts/live_security_policy.py")
     parser.add_argument("--base", required=True)
     parser.add_argument("--evidence", required=True)
     parser.add_argument("--multisig", help="also execute native quorum acceptance; sanitized evidence path")

@@ -40,7 +40,7 @@ module sui_edge::security_policy_tests {
     #[test, expected_failure(abort_code = 2, location = sui_edge::security_policy)]
     fun missing_child_verifier_cannot_be_enabled() {
         let mut s = setup(); let mut c = s.take_shared<Customer>();
-        customer::set_security(&mut c, vector[2,0,0,0,0,0,0], s.ctx());
+        customer::set_security(&mut c, vector[4,0,0,0,0,0,0], s.ctx());
         ts::return_shared(c); s.end();
     }
     #[test, expected_failure(abort_code = 0, location = sui_edge::customer)]
