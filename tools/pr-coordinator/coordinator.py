@@ -525,15 +525,24 @@ def failed_checks(pr):
     return sorted(failures, key=lambda row: json.dumps(row, sort_keys=True))
 
 
+def verified_stale_base(pr):
+    proof = pr.get('_stale_base_contracts') or {}
+    return (proof.get('head') == pr.get('headRefOid') and proof.get('base') == pr.get('baseRefOid')
+             and proof.get('status_hash') == hashlib.sha256(json.dumps(pr.get('_testnet_status'), sort_keys=True).encode()).hexdigest()
+             and proof.get('source_feedback') == source_feedback(pr))
+
+
 def source_check_failures(pr):
-    """Source-only scheduling may defer positively classified testnet funding.
+    """Source collection may defer funding or authenticated stale-base rejection.
 
     Keep failed_checks unchanged: repair ownership and final acceptance still
     consume every failure. Only the existing exact-base testnet classifier can
-    supply this exception; ordinary check names or PR prose cannot.
+    supply funding; the trusted batch reader authenticates stale-base evidence.
+    Ordinary check names or PR prose cannot grant either exception.
     """
     funding = testnet_failure(pr)
-    if not funding or funding.get('classification') != 'funding':
+    stale = verified_stale_base(pr)
+    if not funding or (funding.get('classification') != 'funding' and not stale):
         return failed_checks(pr)
     return [failure for failure in failed_checks(pr) if failure != funding]
 
@@ -1203,6 +1212,7 @@ class Coordinator:
                 repair_context = getattr(batches, 'repair_context', None)
                 if repair_context:
                     pr.update(repair_context(project, pr))
+                batches.annotate_stale_base(project, pr)
                 if pr.get('mergeable') == 'CONFLICTING':
                     pr['_batch_conflict'] = dict(candidate_base=pr['baseRefOid'], other_members=[], reason='conflict with current main')
         if batches:
@@ -1991,10 +2001,14 @@ The service renewed/resumed this reserved Review claim; assert before edits and 
                 # Shared controller defects retain their existing implementation owner.
                 # Observe every affected PR, but do not consume its budget or dispatch
                 # a redundant worker (including the shared owner's already-reviewed PR).
-                local_failures = [row for row in failures if not row.get('repair_owner')]
+                local_failures = [row for row in failures if not row.get('repair_owner')
+                                  and (not batching or not pr.get('_stale_base_contracts')
+                                       or row in source_check_failures(pr))]
                 repair = {**pr, '_ci_repair': local_failures} if local_failures else None
                 repair_blocker = self.store.ci_repair_blocker(project['id'], repair) if repair else None
                 responsibility = ci_responsibility(pr, owner, failures, repair_blocker)
+                if batching and verified_stale_base(pr):
+                    responsibility = 'verified stale-base rejection; awaiting independent combined-candidate validation'
                 if execute:
                     self.observe_ci(project, pr, owner, failures, responsibility)
                 print(json.dumps({'project':project['id'],'pr':pr['number'],
