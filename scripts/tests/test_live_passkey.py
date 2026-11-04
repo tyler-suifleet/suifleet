@@ -80,30 +80,145 @@ class CachedPasskeyTests(unittest.TestCase):
                 self.assertEqual((root / name).read_text().strip(), value)
                 self.assertEqual((root / name).stat().st_mode & 0o777, 0o600)
 
-    def test_wrong_lineage_and_pending_refuse_before_mutation(self):
+    def test_base_probe_requires_missing_factor_only_for_unchanged_root(self):
+        # Run the real exercise/tx control flow with deterministic signing and
+        # effects fixtures. A sponsored rename succeeds on the current package;
+        # thus the original unchanged-root probe reproduces the CI failure.
+        import subprocess
+        for upgraded, bad_abort in ((False, False), (True, False), (False, True)):
+            with self.subTest(upgraded=upgraded, bad_abort=bad_abort):
+                head, base = '0x' + '2'*64, '0x' + ('3' if upgraded else '2')*64
+                operator = '0x' + '1'*64
+                keys = [dict(address='0x' + c*64) for c in ('4', '5')]
+                requests, current = [], {}
+                evidence = {'transactions': []}
+                def prepare(args, *, input, **kwargs):
+                    request = json.loads(input)
+                    if request['operation'] == 'info':
+                        return subprocess.CompletedProcess(args, 0, json.dumps(keys), '')
+                    requests.append(request)
+                    current.clear(); current.update(request)
+                    return subprocess.CompletedProcess(args, 0, json.dumps(
+                        dict(bytes='bytes', digest='digest', signature='signature' if 'sponsor' in request else None)), '')
+                def decode(_):
+                    return dict(digest='digest', gas_budget=20_000_000, gas_payment=[], expiration=None,
+                        gas_owner=keys[current['sponsor']]['address'] if 'sponsor' in current else operator,
+                        sender=operator)
+                def execute(client, label, submit, **kwargs):
+                    evidence['transactions'].append({'label': label})
+                    submit(20_000_000)
+                    # The base differs only in the real-upgrade case; otherwise
+                    # a valid passkey authorizes this call just like the head.
+                    status = 'success'
+                    if current['operation'] == 'rename' and (
+                            'sponsor' not in current or current['name'] == 'must fail removed'
+                            or current['package'] != head):
+                        status = 'failure'
+                    self.assertEqual(status, kwargs['expect'], label)
+                    return {'effects': {'status': {'status': status, 'error': 'fixture'}}}
+                live = SimpleNamespace(network='testnet', rpc_url='fixture', operator=operator,
+                    evidence=evidence, assert_lock=Mock(), decode=decode,
+                    executor=Mock(return_value=Mock()), signer=Mock(return_value=Mock(return_value='wallet')),
+                    ledger=SimpleNamespace(execute=execute))
+                abort = Mock()
+                abort.search.return_value.groups.return_value = (
+                    'security_policy', 'wrong' if bad_abort else target.abort_site(
+                        Path('contracts'), 'security_policy', 'check', 1), '1')
+                installed = [value for key in keys for value in (operator, key['address'])]
+                with patch.object(target.subprocess, 'run', side_effect=prepare), \
+                     patch.object(target, 'enrolled_keys', return_value=installed), \
+                     patch.object(target, 'fund_passkey'), \
+                     patch.object(target.tc, 'bound', return_value={}), \
+                     patch.object(target, 'ABORT', abort):
+                    if bad_abort:
+                        with self.assertRaisesRegex(AssertionError, 'missing-factor abort'):
+                            target.exercise(live, dict(head=head, base=base, customer='customer', fleet='fleet'),
+                                Path('/private/state.json'), {}, Mock())
+                        continue
+                    target.exercise(live, dict(head=head, base=base, customer='customer', fleet='fleet'),
+                        Path('/private/state.json'), {}, Mock())
+                probe = next(r for r in requests if r.get('name') == 'must fail old')
+                self.assertEqual(probe['package'], base)
+                self.assertEqual('sponsor' in probe, upgraded)
+                self.assertEqual(evidence['native_old_package_probe'],
+                    'distinct-package' if upgraded else 'unchanged-root-wallet-only')
+                self.assertEqual(len(requests), 9)
+
+    def fixture(self, upgraded=False, retained=False):
+        base, head = '0x'+'2'*64, '0x'+('3' if upgraded else '2')*64
+        source = 'bytecode-v1:' + 'a'*64
+        built = {'base': {'kind': 'publish', 'digest': ('b' if upgraded else 'a')*64}}
+        if upgraded:
+            built['upgrade'] = {'kind': 'upgrade', 'digest': 'a'*64}
+        cached = dict(base_package=base, head_package=head, upgrade_cap='cap', registry='registry',
+            provenance=dict(build_cli=target.tc.BUILD['version'], verified_transactions=built))
+        def package(version, enrollment):
+            entries = [('customer', 'Customer', base)]
+            if enrollment:
+                entries.append(('passkey_factor', 'Enrollment', enrollment))
+            return dict(kind='package', version=version, type_origins=[
+                dict(module=m, datatype=t, package=p) for m,t,p in entries])
+        facts = dict(chain_identifier='chain', objects={base: package(1, base if retained or not upgraded else None)})
+        facts['objects'][head] = package(2 if upgraded else 1, base if retained else head)
+        live = SimpleNamespace(chain='chain', operator='0x'+'1'*64, rpc_url='read-only',
+            object=Mock(side_effect=lambda key: cap if key == 'cap' else dict(owner={'Shared': {}})),
+            transaction=Mock(), evidence={})
+        cap = dict(owner={'AddressOwner': live.operator}, content={'package': head, 'version': 2 if upgraded else 1})
+        return live, cached, source, facts, cap
+
+    def test_verified_unchanged_and_upgraded_origins(self):
+        for upgraded, retained in ((False, False), (True, False), (True, True)):
+            with self.subTest(upgraded=upgraded, retained=retained):
+                live, cached, source, facts, cap = self.fixture(upgraded, retained)
+                with patch.object(target.dm, 'chain_facts', return_value=facts):
+                    origins = target.verify_cached_fixture(live, cached, source)
+                self.assertEqual(origins['passkey_factor::Enrollment'],
+                    cached['base_package'] if retained else cached['head_package'])
+                live.transaction.assert_not_called()
+
+    def test_bad_evidence_refused_before_mutation(self):
+        changes = [
+            lambda c,f,cap: cap['content'].update(version=3),
+            lambda c,f,cap: cap['content'].update(package=c['base_package']),
+            lambda c,f,cap: cap['owner'].update(AddressOwner='0x'+'4'*64),
+            lambda c,f,cap: f.update(chain_identifier='wrong'),
+            lambda c,f,cap: f['objects'][c['head_package']].update(version=1),
+            lambda c,f,cap: f['objects'][c['head_package']]['type_origins'][0].update(package=c['head_package']),
+            lambda c,f,cap: f['objects'][c['head_package']]['type_origins'][1].update(package='0x'+'4'*64),
+            lambda c,f,cap: c.pop('provenance'),
+            lambda c,f,cap: c['provenance'].update(build_cli='unverified'),
+            lambda c,f,cap: c['provenance']['verified_transactions'].pop('upgrade'),
+            lambda c,f,cap: c['provenance']['verified_transactions']['upgrade'].update(digest='bad'),
+            lambda c,f,cap: c['provenance']['verified_transactions']['base'].update(kind='upgrade'),
+        ]
+        for change in changes:
+            live, cached, source, facts, cap = self.fixture(True)
+            change(cached, facts, cap)
+            with patch.object(target.dm, 'chain_facts', return_value=facts):
+                with self.assertRaises((AssertionError, RuntimeError, KeyError, ValueError)):
+                    target.verify_cached_fixture(live, cached, source)
+            live.transaction.assert_not_called()
+        live, cached, source, facts, cap = self.fixture()
+        cached['provenance']['verified_transactions']['upgrade'] = {'kind': 'upgrade', 'digest': 'a'*64}
+        with self.assertRaises(RuntimeError):
+            target.verify_cached_fixture(live, cached, source)
+        del cached['provenance']['verified_transactions']['upgrade']
+        cap['content']['version'] = 2
+        with self.assertRaises(AssertionError):
+            target.verify_cached_fixture(live, cached, source)
+
+    def test_pending_refuses_after_verification_without_mutation(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            live = SimpleNamespace(wallet=root / 'client.yaml', chain='chain', operator='0x'+'1'*64,
-                rpc_url='read-only', object=Mock(), transaction=Mock(), evidence={})
-            fixture = dict(base_package='0x'+'2'*64, head_package='0x'+'3'*64,
-                           upgrade_cap='cap', registry='registry')
-            cache = dict(fixtures={'key': fixture})
-            with patch('live_package_upgrade.load_state', return_value=cache), \
-                 patch('live_wallet_gate.head_fixture', return_value=fixture), \
-                 patch.object(target, 'contracts_digest', return_value='source'), \
-                 patch.object(target.dm, 'chain_facts', return_value={}), \
-                 patch.object(target.dm, 'origins', return_value={'passkey_factor::Enrollment': fixture['head_package']}):
-                live.object.return_value = dict(owner={'AddressOwner': '0x'+'4'*64},
-                    content={'package': fixture['head_package'], 'version': 2})
-                with self.assertRaises(AssertionError):
+            live, cached, source, facts, cap = self.fixture()
+            live.wallet = root / 'client.yaml'
+            private = root / 'live-passkey-state.json'
+            private.write_text(json.dumps({'pending': {'digest': 'uncertain'}}))
+            with patch('live_package_upgrade.load_state', return_value={'fixtures': {}}), \
+                 patch('live_wallet_gate.head_fixture', return_value=cached), \
+                 patch.object(target, 'contracts_digest', return_value=source), \
+                 patch.object(target.dm, 'chain_facts', return_value=facts):
+                with self.assertRaisesRegex(RuntimeError, 'uncertain'):
                     target.cached_acceptance(live, root / 'package.json')
-                live.transaction.assert_not_called()
-                live.object.side_effect = [dict(owner={'AddressOwner': live.operator},
-                    content={'package': fixture['head_package'], 'version': 2}), dict(owner={'Shared': {}})]
-                private = root / 'live-passkey-state.json'
-                private.write_text(json.dumps({'pending': {'digest': 'uncertain'}}))
-                with patch.object(target.dm, 'chain_facts', return_value={'objects': {fixture['head_package']: {}}}):
-                    with self.assertRaisesRegex(RuntimeError, 'uncertain'):
-                        target.cached_acceptance(live, root / 'package.json')
-                live.transaction.assert_not_called()
-                self.assertEqual(json.loads(private.read_text())['pending']['digest'], 'uncertain')
+            live.transaction.assert_not_called()
+            self.assertEqual(json.loads(private.read_text())['pending']['digest'], 'uncertain')

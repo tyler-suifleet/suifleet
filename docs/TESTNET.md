@@ -1343,3 +1343,21 @@ bytecode change; its exact combined source must pass its own cost/CI gates.
 Protected public-testnet/exact-head CI and fresh independent review remain
 pending and unpolled after push. Physical/mainnet/manual-wallet/provider
 acceptance stays unrun in SF-031/#32 and SF-087/#159.
+
+### Cached native passkey fixtures (SF-240)
+
+Native passkey acceptance reuses the authenticated package-gate fixture matching
+the compiled head bytecode. Before mutation it checks pinned compiler/publication
+provenance, chain identity, UpgradeCap owner and exact package, package versions,
+shared registry ownership and retained type origins. An unchanged root uses the
+same base/head package at version 1; an actual compatible upgrade uses version 2.
+Enrollment keeps its base origin when already present, or originates in the head
+when introduced by that upgrade. Missing or inconsistent evidence fails closed.
+For a distinct older package, the bypass probe must refuse even with a valid
+passkey. For an unchanged root there is no older package: the base entry-point
+probe omits the factor and must report the exact missing-factor abort. Evidence
+records which case ran; it does not claim old-version coverage for identical IDs.
+The adapter adds no publication, faucet request or allowance; pending outcomes and
+the existing non-replenishing ledger remain authoritative. Offline regressions do
+not establish protected-testnet success: the coordinator must rebuild the SF-236
+candidate after integration and record actual testnet and exact-head/base review.
