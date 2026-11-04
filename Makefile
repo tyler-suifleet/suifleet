@@ -353,6 +353,7 @@ test-site:
 .PHONY: test-guide-recording
 test-guide-recording:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node site/tests/recording_browser.cjs
+	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node site/tests/guide_browser.cjs
 
 # Offline: disk audit and cleanup safety (docs/DISK_CLEANUP.md); temp dirs only.
 .PHONY: test-disk-cleanup
