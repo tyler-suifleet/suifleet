@@ -108,3 +108,46 @@ Repair verification:
 - `git diff --check`: passed. Local CodeQL is unavailable; a fresh hosted scan
   remains pending on the pushed repair, along with fresh independent review.
   No hosted checks were rerun or polled by this repair worker.
+
+## PR #607 independent-review repair
+
+The shared incident wait now applies only while a member still targets the failed
+candidate's pinned base. Once main advances, unchanged member source heads can
+be collected into a newly pinned candidate; the authenticated historical receipt
+remains stored. This grants no candidate approval and all fresh source, CI and
+automatic-testnet gates remain. It does not require member freshness commits.
+
+Transient GitHub backoff/CLI failures during either run read or artifact download
+return without suppression or receipt persistence. Successful retries must still
+authenticate the complete receipt; invalid provenance, effects and changed durable
+identity remain hard errors.
+
+Focused verification: from `tools/pr-coordinator/tests`,
+`unshare -rpf --mount-proc env PYTHONPATH=.. python3 -m unittest test_shared_harness_incident`:
+**6 passed**, including blocked collection at the pinned base, collection after
+main advances with both member heads unchanged, durable receipt preservation,
+and transient failure/retry at all three GitHub calls (RuntimeError and CLI exit).
+`python3 -m unittest discover -s scripts/tests -p test_live_passkey.py`:
+**15 passed**. The pinned main is `4aa4344c0a0b0749348ed78544531ed28ac857d3`,
+verified by `git ls-remote origin refs/heads/main`; it is already an ancestor of
+this branch. No freshness merge/rebase or installed-runtime mutation performed.
+
+The plain `unshare ... python3 -m unittest discover` run completed 748 tests
+with one failure and three skips: `test_unreaped_zombie_repair_is_not_live`
+reported that its child did not become a zombie. It reproduces alone.
+`unshare -rpf --mount-proc python3 -c 'import signal; print(signal.getsignal(signal.SIGTERM))'`
+reports `SIG_IGN`; the spawned `sleep` inherits this disposition and ignores
+`terminate()`. Resetting SIGTERM to `SIG_DFL` before the focused test passes.
+The full-suite validation therefore uses an explicit default SIGTERM in the
+isolated test runner, without changing production code or test assertions.
+
+Final-code full coordinator check (from `tools/pr-coordinator/tests`):
+```bash
+unshare -rpf --mount-proc env PYTHONPATH=.. python3 -c 'import signal,unittest; signal.signal(signal.SIGTERM,signal.SIG_DFL); unittest.main(module=None,argv=["unittest","discover"])'
+```
+**PASS: 748 tests in 173.600s, three skips** (privileged-runner nondumpable
+process-environment checks). The final-code plain runner separately reproduced
+only the same zombie-test failure (748 tests, one failure, three skips); that is
+not a passing run. No code changes followed the passing full run.
+Hosted CI and fresh review remain pending; no hosted polling, runtime installation,
+public-testnet mutations or new external acceptance is claimed by this repair.

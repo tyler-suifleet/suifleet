@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -25,6 +26,8 @@ class SharedHarnessTests(unittest.TestCase):
         f.project['repository'] = 'tyler-suifleet/suifleet'
         batch.update(head=HEAD, base=BASE, status='failed',
                      error=canonical(dict(kind='candidate_checks_failed', checks=[CHECK])))
+        for pr in f.source_prs.values():
+            pr['baseRefOid'] = BASE
         controller = f.controller
         controller.verify_manifest = Mock()
         controller.rows = Mock(return_value=[batch])
@@ -61,6 +64,41 @@ class SharedHarnessTests(unittest.TestCase):
         self.assertEqual(f.gh.call_count,3)  # run before/after plus one artifact read
         f.gh = Mock(side_effect=AssertionError('do not reread unchanged incident'))
         self.assertIn('_shared_acceptance_wait',c.repair_context(f.project,f.source_prs[1]))
+
+    def test_advanced_main_releases_unchanged_members_for_collection(self):
+        f,c,b,*_ = self.fixture()
+        heads = {n: pr['headRefOid'] for n,pr in f.source_prs.items()}
+        for n,pr in f.source_prs.items():
+            self.assertIn('_shared_acceptance_wait', c.repair_context(f.project,pr))
+            self.assertIsNone(c.source(f.project,pr,f.owners[n-1]))
+        f.gh = Mock(side_effect=AssertionError('historical incident needs no new reads'))
+        for n,pr in f.source_prs.items():
+            pr['baseRefOid'] = f.base  # Refreshed main after prerequisite integration.
+            self.assertEqual(c.repair_context(f.project,pr), {})
+            self.assertIsNotNone(c.source(f.project,pr,f.owners[n-1]))
+            self.assertEqual(pr['headRefOid'],heads[n])
+        self.assertEqual(f.db.execute('SELECT count(*) FROM shared_harness_incidents').fetchone()[0],1)
+        self.assertEqual(f.launched,[])
+
+    def test_transient_evidence_read_failure_does_not_suppress_repairs(self):
+        for failed_call,error in ((call,error) for call in (1,2,3)
+                                  for error in (RuntimeError('temporary GitHub failure'),
+                                                subprocess.CalledProcessError(1,['gh']))):
+            with self.subTest(failed_call=failed_call,error=type(error).__name__):
+                f,c,b,*_ = self.fixture()
+                original = f.gh.side_effect
+                calls = 0
+                def flaky(project,args):
+                    nonlocal calls
+                    calls += 1
+                    if calls == failed_call:
+                        raise error
+                    return original(project,args)
+                f.gh.side_effect = flaky
+                self.assertNotIn('_shared_acceptance_wait',c.repair_context(f.project,f.source_prs[1]))
+                self.assertEqual(f.db.execute('SELECT count(*) FROM shared_harness_incidents').fetchone()[0],0)
+                f.gh.side_effect = original
+                self.assertIn('_shared_acceptance_wait',c.repair_context(f.project,f.source_prs[1]))
 
     def test_changed_identity_or_mixed_failure_never_suppressed(self):
         for case in ('head','base','repository','mixed','url','workflow','source_head'):

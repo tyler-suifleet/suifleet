@@ -763,7 +763,10 @@ class BatchController:
             return json.loads(existing[2])
         path = 'repos/' + project['repository'] + '/actions/runs/41914017432'
         read = lambda: json.loads(self.c.gh(project, ['api', path]))
-        run = read()
+        try:
+            run = read()
+        except (RuntimeError, subprocess.CalledProcessError):
+            return None  # No authenticated receipt: do not suppress owner repair.
         if (run.get('id') != 41914017432 or run.get('status') != 'completed'
                 or run.get('conclusion') != 'failure' or run.get('event') != 'workflow_run'
                 or run.get('head_branch') != 'main' or run.get('path') != '.github/workflows/testnet.yml'
@@ -772,8 +775,11 @@ class BatchController:
                 or run.get('head_repository', {}).get('full_name') != project['repository']):
             raise RuntimeError('shared harness run provenance unavailable')
         with tempfile.TemporaryDirectory(prefix='shared-harness-effects-') as directory:
-            self.c.gh(project, ['run', 'download', '41914017432', '-R', project['repository'],
-                '-n', 'testnet-effects-' + batch['head'], '-D', directory])
+            try:
+                self.c.gh(project, ['run', 'download', '41914017432', '-R', project['repository'],
+                    '-n', 'testnet-effects-' + batch['head'], '-D', directory])
+            except (RuntimeError, subprocess.CalledProcessError):
+                return None
             evidence = {}
             hashes = {}
             for name in ('package-upgrade.json', 'upgrade-security.json'):
@@ -793,7 +799,11 @@ class BatchController:
                 or len(failures) != 1 or failures[0].get('digest') != 'AEbuyHfJEsQjPt9GJq9gM5bMFraHa2VSyrVoUvQGtQkw'
                 or type(failures[0].get('gas_mist')) is not int or failures[0]['gas_mist'] <= 0):
             raise RuntimeError('shared harness failure receipt does not match pinned incident')
-        if read() != run:
+        try:
+            final_run = read()
+        except (RuntimeError, subprocess.CalledProcessError):
+            return None
+        if final_run != run:
             raise RuntimeError('shared harness run changed during authentication')
         receipt = dict(owner_ticket='SF-243', candidate_pr=batch['pr'], candidate_head=batch['head'],
             candidate_base=batch['base'], run=run['id'], attempt=run['run_attempt'], hashes=hashes,
@@ -813,7 +823,11 @@ class BatchController:
                     shared_error = json.loads(batch['error'] or '{}')
                 except (TypeError, ValueError):
                     shared_error = {}
-                incident = self.shared_harness_incident(project, batch, shared_error)
+                # This incident fences only the failed candidate's base. A new
+                # main permits recollection with unchanged source heads and fresh
+                # candidate acceptance; the durable receipt remains historical.
+                incident = (self.shared_harness_incident(project, batch, shared_error)
+                            if batch['base'] == pr.get('baseRefOid') else None)
                 if incident:
                     result['_shared_acceptance_wait'] = incident
                     break
