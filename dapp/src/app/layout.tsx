@@ -10,6 +10,7 @@ import { FleetSwitcher } from "@/components/FleetSwitcher";
 import { NETWORK } from "@/lib/constants";
 import "./globals.css";
 import Link from "next/link";
+import { SubscriptionWarnings } from "@/components/SubscriptionWarnings";
 import { HistoryStatus } from "@/components/HistoryStatus";
 import { ConnectionRequired } from "@/components/ui";
 import { useHydrated } from "@/hooks/useCurrentAccount";
@@ -32,12 +33,13 @@ const NAV = [
   { href: "/handover",    label: "Administration", description: "Transfer control of selected devices and resources to another administrator." },
   { href: "/entitlements", label: "Device entitlements", description: "Review your customer device limit and, as registry administrator, grant device limits to customers." },
   { href: "/settings",    label: "Fleet settings", description: "Choose when devices check for updates, send health reports and upload data." },
+  { href: "/billing", label: "Plans and billing", description: "Choose capacity, prepay subscriptions and download receipts." },
   { href: "/budget",      label: "Network budget", description: "Keep devices funded for activity and storage, with spending limits you control." },
 ];
 const NAV_GROUPS = [
   { label: "Workspace", routes: ["/", "/get-started"] },
   { label: "Fleet operations", routes: ["/devices", "/services", "/deployments", "/rollouts", "/components", "/firmware", "/data"] },
-  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/entitlements", "/settings", "/budget"] },
+  { label: "Administration", routes: ["/enrollment", "/access", "/handover", "/entitlements", "/settings", "/budget", "/billing"] },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -80,6 +82,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <main id="main-content" className="fleet-content flex-1 min-w-0 p-4 md:p-8 lg:px-10">
                   <div className="mx-auto w-full max-w-7xl">
                     <FleetSwitcher />
+                    <SubscriptionWarnings />
                     <SignedOutGate>{children}</SignedOutGate>
                     <HistoryStatus />
                   </div>
@@ -103,6 +106,7 @@ const isActive = (href: string, pathname: string) => href === "/" ? pathname ===
 function SignedOutGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname(), connection = useWalletConnection(), hydrated = useHydrated();
   const route = NAV.find(item => item.href !== "/get-started" && isActive(item.href, pathname));
+  if (pathname === "/billing" || pathname === "/billing/") return <>{children}</>;
   if (hydrated && connection.account) return <FleetScope allowWithoutFleet={pathname === "/entitlements"}>{children}</FleetScope>;
   if (!route) return <>{children}</>;
   if (!hydrated || connection.isConnecting || connection.isReconnecting) return <p role="status">Checking your sign-in…</p>;

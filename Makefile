@@ -126,6 +126,7 @@ test-yocto-packaging:
 	$(RUN) env PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_yocto_layer_export.py'
 
 dapp-typecheck:
+	$(RUN) node scripts/test_subscription_checkout.cjs
 	$(MAKE) test-testnet
 	$(MAKE) test-manifest
 	$(RUN) bash -c "cd dapp && pnpm typecheck"

@@ -1,0 +1,75 @@
+{
+  "method": "Read-only exact-run replay through repaired SF-238 reader; isolated temporary scheduler fixture, not installed scheduling or acceptance",
+  "proof": {
+    "head": "39f220b5fdfda864ddb1c7281bd0db8755afcac2",
+    "base": "dd6243914d79df83707ef437b4b4eddadf2e9ba1",
+    "ancestor": "a0bffea59276a1c92e07cd2cf70a3b2846ff6aeb",
+    "source_tree": "d11460da355d5680765007cba15440adc5f92e86",
+    "base_tree": "8ce37426d8a59d597024c23e174771fa4f570186",
+    "source_feedback": "c0ff716b25b39a201280fdad416f0a5db0cdca5f60bc3f3d863691f4c0c8e418",
+    "status_hash": "d67192649266d7e34030244580095355683dd6f0168556ff7082068ef02b44a5",
+    "run": 41791378072,
+    "attempt": 1,
+    "evidence_sha256": "56d8f73108b9851e21b894533efa5cf4881e038a027bf67f3caf86ccf8c1aaf4",
+    "allowance_used_mist": 799286156
+  },
+  "failed_check_retained": true,
+  "installed_revision": "b9ce1823aab264fcd759da805ebdc6506bb8d984",
+  "implementation_sha256": "e38e3269f0ca63f19adab03c4f601464e305c2060e44506b7d6888e14be17e02",
+  "checked_at_utc": "2026-11-04T08:56:22.461191+00:00",
+  "model": "gpt-6.1-sol",
+  "limits": [
+    "Historical failed-run authentication only; no installed scheduling, current-head/base approval or successful testnet acceptance claimed.",
+    "The active implementation/repair fence was absent only in the disposable replay fixture; the real worker must stop before installed scheduling.",
+    "No contract, product or publisher-wallet changes. No signing, faucet, fixture reset or extra allowance.",
+    "Changed source or base invalidates the historical receipt; sole coordinator must authenticate fresh matching evidence before collection.",
+    "Current installed reader rejects EUC01006; repair requires sole-coordinator reviewed merged-only runtime integration, not installation by this worker."
+  ],
+  "checkout_preflight": {
+    "customer": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+    "existing": {
+      "symbol": "USDC",
+      "account": {
+        "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+        "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+        "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+        "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+        "balance": {
+          "value": "0"
+        },
+        "tier": "1",
+        "device_limit": "100",
+        "allowance": "1000",
+        "fee": "9000",
+        "remaining": "0",
+        "period_ms": "2628000000",
+        "next_due_ms": "1796358347693",
+        "term_end_ms": "1825266347693",
+        "cancelled": true
+      }
+    },
+    "offer": {
+      "id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "periods": "1",
+      "period_ms": "2592000000",
+      "published_at_ms": "1793755804331",
+      "expires_at_ms": "1798939804331"
+    },
+    "action": "renew",
+    "eligible_at_ms": 1796347804331,
+    "eligible_at_utc": "2026-12-04T01:30:04.331Z",
+    "reason": "Renewal requires 30-day notice"
+  },
+  "checkout_limits": [
+    "Existing bound cancelled account cannot be reopened; registry initialization is package-private and existing offer requires 30-day notice.",
+    "preparePrepay/verifyPlan open/renew remains unrun. No clock bypass, new publisher wallet or package publication attempted.",
+    "Retain 5952761 MIST used of original 100000000 MIST allowance and December 4 eligibility.",
+    "Manual wallet, hardware, mainnet and production-provider acceptance remains #32/#159."
+  ]
+}

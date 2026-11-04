@@ -1,0 +1,569 @@
+{
+  "started": "2026-11-04T19:10:46Z",
+  "network": "testnet",
+  "transactions": [
+    {
+      "label": "SF-182 disposable customer and monthly USDC offer",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "mHtoLKNyT2btvx6Ysuuufo8eL4oMp791B1UgpNKLY6f",
+      "gas_mist": 3629778,
+      "allowance_used_mist": 3629778
+    },
+    {
+      "label": "SF-182 frontend payment-link USDC deposit",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+      "gas_mist": 0,
+      "allowance_used_mist": 3629778
+    },
+    {
+      "label": "SF-182 refund explicitly selected cancelled fixture deposit",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+      "gas_mist": 2322983,
+      "allowance_used_mist": 5952761
+    },
+    {
+      "label": "SF-182 fund isolated fixture identity",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 15000000,
+      "status": "success",
+      "digest": "EFhKoKHMaoQhYoe7RJ7c6wot8CELygZHUihSv7jDaMhY",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 22940761
+    },
+    {
+      "label": "SF-182 fund isolated fixture identity",
+      "gas_budget_mist": 10000000,
+      "funding_mist": 20000000,
+      "status": "success",
+      "digest": "72FmRdxzayp46BhDaDJKZa4E7QJQ7etYDDdfEZVWWR9k",
+      "gas_mist": 1988000,
+      "allowance_used_mist": 44928761
+    },
+    {
+      "label": "SF-182 frontend open",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+      "gas_mist": 4998184,
+      "allowance_used_mist": 49926945
+    },
+    {
+      "label": "SF-182 frontend deposit",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "31RJ1MzHT7DK8doQJVBuLBoTQAkiPRbFRmyjd42QcrB8",
+      "gas_mist": 1000428,
+      "allowance_used_mist": 50927373
+    },
+    {
+      "label": "SF-182 frontend collect",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "4No15siGeo9QXKMZxjErBmyixERi1nYVLQuE12phcARw",
+      "gas_mist": 2323015,
+      "allowance_used_mist": 53250388
+    },
+    {
+      "label": "SF-182 cancel and refund disposable surplus",
+      "gas_budget_mist": 20000000,
+      "funding_mist": 0,
+      "status": "success",
+      "digest": "EAWHm8FoHidkApjCnDVKuX4ceAvAwDeNpw7mG6bbAgT7",
+      "gas_mist": 2323015,
+      "allowance_used_mist": 55573403
+    }
+  ],
+  "checks": [],
+  "toolchain": {
+    "build": {
+      "role": "build",
+      "release": "testnet-v1.81.1",
+      "version": "sui 1.81.1-e04cf9aa915c",
+      "max_protocol": 138,
+      "path": "/usr/local/bin/sui"
+    },
+    "network": {
+      "role": "network",
+      "release": "testnet-v1.83.0",
+      "version": "sui 1.83.0-16d2dc1e05ed",
+      "max_protocol": 140,
+      "archive_sha256": "e51168051bca14f1500de9a81520c927dfd583092628bc36582d01f9d2c1d7d8",
+      "binary_sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa",
+      "path": "/opt/sui-network/sui",
+      "sha256": "29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa"
+    },
+    "compatibility": {
+      "chain": "4c78adac",
+      "epoch": 1273,
+      "protocol_version": 140,
+      "network_cli_max_protocol": 140,
+      "build_cli_max_protocol": 138,
+      "build_cli_offline": true
+    }
+  },
+  "chain": "4c78adac",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "operator": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+  "start_balance_mist": 7907316894,
+  "max_spend_mist": 100000000,
+  "sui": {
+    "build": "sui 1.81.1-e04cf9aa915c",
+    "network": "sui 1.83.0-16d2dc1e05ed"
+  },
+  "head": "ccce9ebaed85e8a9205fcdf1164681724c089b94",
+  "checkout": {
+    "account": {
+      "id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+      "customer_id": "0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "1000"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "remaining": "0",
+      "period_ms": "2592000000",
+      "next_due_ms": "1796411455250",
+      "term_end_ms": "1796411455250",
+      "cancelled": false
+    },
+    "quote": {
+      "offerId": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "symbol": "USDC",
+      "usdPerCoin": 1,
+      "observedAt": 1793755804331,
+      "source": "Test-only USDC denomination: 1 USD/USDC, no market-price claim"
+    },
+    "uri": "https://acceptance.invalid/billing/#chain=4c78adac&package=0x9fa20cc73455f1f6f65ea3f8796856ee5945abac0b895f038dbcc7919e838882&account=0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2&customer=0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501&symbol=USDC&amount=1000",
+    "digests": {
+      "opened": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+      "deposited": "31RJ1MzHT7DK8doQJVBuLBoTQAkiPRbFRmyjd42QcrB8",
+      "collected": "4No15siGeo9QXKMZxjErBmyixERi1nYVLQuE12phcARw"
+    },
+    "receipts": [
+      {
+        "kind": "Deposited",
+        "digest": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+        "amount": "10000",
+        "accountId": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "checkpoint": "402876297",
+        "eventIndex": 0,
+        "timestampMs": 1793819455393,
+        "throughMs": null
+      },
+      {
+        "kind": "Deposited",
+        "digest": "31RJ1MzHT7DK8doQJVBuLBoTQAkiPRbFRmyjd42QcrB8",
+        "amount": "1000",
+        "accountId": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "checkpoint": "402876310",
+        "eventIndex": 0,
+        "timestampMs": 1793819458375,
+        "throughMs": null
+      },
+      {
+        "kind": "Collected",
+        "digest": "4No15siGeo9QXKMZxjErBmyixERi1nYVLQuE12phcARw",
+        "amount": "10000",
+        "accountId": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "checkpoint": "402876317",
+        "eventIndex": 0,
+        "timestampMs": 1793819459972,
+        "throughMs": "1796411455250"
+      }
+    ],
+    "csv_has_company": true,
+    "limits": [
+      "Disposable 0.01 USD test tariff, not the public canonical customer tariff.",
+      "One dedicated signer emulates both checkout and external-wallet deposit; manual multi-wallet acceptance remains #32/#159."
+    ]
+  },
+  "refund_digest": "EAWHm8FoHidkApjCnDVKuX4ceAvAwDeNpw7mG6bbAgT7",
+  "manifest": "docs/validation/sf181-testnet-current-manifest.json",
+  "limits": [
+    "Actual frontend fresh open, link deposit, collection, typed confirmation and CSV passed on isolated customer. Both accounts cancelled/empty after cleanup.",
+    "Public Testnet successful renewal was not executed: selected offer requires notice until 2026-12-04T01:30:04.331Z. Positive renewal builder and notice rejection covered offline; no clock, eligibility or product changes.",
+    "Dedicated agent funded isolated fixture key only. No publisher credentials, other existing wallet, faucet or publication. Child gas funding fully charged and leftover returned; child balance zero.",
+    "Manual second-wallet/extension, physical, mainnet and production-provider acceptance remains unrun in #32/#159.",
+    "Earlier historical deposit-only receipt remains separate. Current checkout uses integrated main16e9cc4 plus uncommitted harness changes; this is feature evidence, not a hosted exact-head CI receipt."
+  ],
+  "end_balance_mist": 7896672252,
+  "spent_mist": 10644642,
+  "allowance_used_mist": 55573403,
+  "finished": "2026-11-04T19:11:05Z",
+  "independent_grpc": {
+    "effects": [
+      {
+        "digest": "mHtoLKNyT2btvx6Ysuuufo8eL4oMp791B1UgpNKLY6f",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4408000",
+          "storageRebate": "1778222",
+          "nonRefundableStorageFee": "178"
+        },
+        "signed_net_gas_mist": "3629778"
+      },
+      {
+        "digest": "35iJKdxK482ZRziuTgfop5aVcJKwbMTBtRwvMaUqBAaW",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4278800",
+          "storageRebate": "6922908",
+          "nonRefundableStorageFee": "692"
+        },
+        "signed_net_gas_mist": "-1644108"
+      },
+      {
+        "digest": "6fMHgp218LYNQyvZWQuz1ojCfXMDtWVze88wD3H3aVn6",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7151600",
+          "storageRebate": "5828617",
+          "nonRefundableStorageFee": "583"
+        },
+        "signed_net_gas_mist": "2322983"
+      },
+      {
+        "digest": "EFhKoKHMaoQhYoe7RJ7c6wot8CELygZHUihSv7jDaMhY",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "988000",
+          "storageRebate": "0",
+          "nonRefundableStorageFee": "0"
+        },
+        "signed_net_gas_mist": "1988000"
+      },
+      {
+        "digest": "72FmRdxzayp46BhDaDJKZa4E7QJQ7etYDDdfEZVWWR9k",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "988000",
+          "storageRebate": "0",
+          "nonRefundableStorageFee": "0"
+        },
+        "signed_net_gas_mist": "1988000"
+      },
+      {
+        "digest": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "9834400",
+          "storageRebate": "5836216",
+          "nonRefundableStorageFee": "584"
+        },
+        "signed_net_gas_mist": "4998184"
+      },
+      {
+        "digest": "31RJ1MzHT7DK8doQJVBuLBoTQAkiPRbFRmyjd42QcrB8",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "4278800",
+          "storageRebate": "4278372",
+          "nonRefundableStorageFee": "428"
+        },
+        "signed_net_gas_mist": "1000428"
+      },
+      {
+        "digest": "4No15siGeo9QXKMZxjErBmyixERi1nYVLQuE12phcARw",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7470800",
+          "storageRebate": "6147785",
+          "nonRefundableStorageFee": "615"
+        },
+        "signed_net_gas_mist": "2323015"
+      },
+      {
+        "digest": "EAWHm8FoHidkApjCnDVKuX4ceAvAwDeNpw7mG6bbAgT7",
+        "gas": {
+          "computationCost": "1000000",
+          "storageCost": "7470800",
+          "storageRebate": "6147785",
+          "nonRefundableStorageFee": "615"
+        },
+        "signed_net_gas_mist": "2323015"
+      }
+    ],
+    "events": [
+      {
+        "kind": "Deposited",
+        "digest": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+        "account_id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "amount": "10000"
+      },
+      {
+        "kind": "PlanChanged",
+        "digest": "AT5wtCiVPybkAydeqtMqjscHkTRSUNvQMSmXLAjSE2yN",
+        "account_id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "offer_id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+        "tier": "1",
+        "fee": "10000",
+        "periods": "1"
+      },
+      {
+        "kind": "Deposited",
+        "digest": "31RJ1MzHT7DK8doQJVBuLBoTQAkiPRbFRmyjd42QcrB8",
+        "account_id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "amount": "1000"
+      },
+      {
+        "kind": "Collected",
+        "digest": "4No15siGeo9QXKMZxjErBmyixERi1nYVLQuE12phcARw",
+        "account_id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "amount": "10000",
+        "through_ms": "1796411455250"
+      },
+      {
+        "kind": "Refunded",
+        "digest": "EAWHm8FoHidkApjCnDVKuX4ceAvAwDeNpw7mG6bbAgT7",
+        "account_id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "recipient": "0x0e499424b248e4cf18a5377a4e387487dbd299118b3b9d17d83fd1f716376965",
+        "amount": "1000"
+      }
+    ],
+    "final_account": {
+      "id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+      "customer_id": "0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "balance": {
+        "value": "0"
+      },
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "remaining": "0",
+      "period_ms": "2592000000",
+      "next_due_ms": "1796411455250",
+      "term_end_ms": "1796411455250",
+      "cancelled": true
+    }
+  },
+  "isolated_fixture": {
+    "address": "0x252df4dc55f6d2e690aebac43fb6022ad31c815017685464871a309f9ac97558",
+    "funding_mist": 35000000,
+    "transactions": [
+      {
+        "label": "SF-182 isolated customer creation",
+        "gas_budget_mist": 10000000,
+        "funding_mist": 0,
+        "status": "failure",
+        "digest": "3RV97rhd66npcVZmmjyTbwxnb2pyHVEF5QbdF9mbKozB",
+        "gas_mist": 1000277,
+        "allowance_used_mist": 1000277
+      },
+      {
+        "label": "SF-182 isolated customer creation",
+        "gas_budget_mist": 23000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "7s3hrpd7cjAZAecUpjYXUEYc6iufUHJr45u6A4Vs8Zm9",
+        "gas_mist": 22607175,
+        "allowance_used_mist": 23607452
+      },
+      {
+        "label": "SF-182 grant dedicated agent isolated customer administration",
+        "gas_budget_mist": 5000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "5CsBU1qvKwXLNifpqeQzaUGWuCmcMQy7aufxEm8s8ZqT",
+        "gas_mist": 2824635,
+        "allowance_used_mist": 26432087
+      },
+      {
+        "label": "SF-182 return isolated fixture gas without replenishing allowance",
+        "gas_budget_mist": 5000000,
+        "funding_mist": 0,
+        "status": "success",
+        "digest": "EazWMQGvg4WGXbv56hCSoWdBR6eYZyQSFP2r1FSqzhuu",
+        "gas_mist": 1000099,
+        "allowance_used_mist": 27432186
+      }
+    ],
+    "allowance_used_mist": 27432186,
+    "pending_digest": "EazWMQGvg4WGXbv56hCSoWdBR6eYZyQSFP2r1FSqzhuu",
+    "recovery_started": true,
+    "customer": "0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501",
+    "ready": true,
+    "sweep_started": true,
+    "sweep_digest": "EazWMQGvg4WGXbv56hCSoWdBR6eYZyQSFP2r1FSqzhuu",
+    "balance_after_sweep_mist": 0,
+    "independent_effects": [
+      {
+        "digest": "3RV97rhd66npcVZmmjyTbwxnb2pyHVEF5QbdF9mbKozB",
+        "status": {
+          "status": "failure",
+          "error": "InsufficientGas"
+        },
+        "gasUsed": {
+          "computationCost": "1000000",
+          "storageCost": "2766400",
+          "storageRebate": "2766123",
+          "nonRefundableStorageFee": "277"
+        }
+      },
+      {
+        "digest": "7s3hrpd7cjAZAecUpjYXUEYc6iufUHJr45u6A4Vs8Zm9",
+        "status": {
+          "status": "success"
+        },
+        "gasUsed": {
+          "computationCost": "1000000",
+          "storageCost": "25361200",
+          "storageRebate": "3754025",
+          "nonRefundableStorageFee": "375"
+        }
+      },
+      {
+        "digest": "5CsBU1qvKwXLNifpqeQzaUGWuCmcMQy7aufxEm8s8ZqT",
+        "status": {
+          "status": "success"
+        },
+        "gasUsed": {
+          "computationCost": "1000000",
+          "storageCost": "8177600",
+          "storageRebate": "6352965",
+          "nonRefundableStorageFee": "635"
+        }
+      },
+      {
+        "digest": "EazWMQGvg4WGXbv56hCSoWdBR6eYZyQSFP2r1FSqzhuu",
+        "status": {
+          "status": "success"
+        },
+        "gasUsed": {
+          "computationCost": "1000000",
+          "storageCost": "988000",
+          "storageRebate": "987901",
+          "nonRefundableStorageFee": "99"
+        }
+      }
+    ]
+  },
+  "original_fixture_preflight": {
+    "customer": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+    "existing": {
+      "symbol": "USDC",
+      "account": {
+        "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+        "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+        "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+        "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+        "balance": {
+          "value": "0"
+        },
+        "tier": "1",
+        "device_limit": "100",
+        "allowance": "1000",
+        "fee": "9000",
+        "remaining": "0",
+        "period_ms": "2628000000",
+        "next_due_ms": "1796358347693",
+        "term_end_ms": "1825266347693",
+        "cancelled": true
+      }
+    },
+    "offer": {
+      "id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "periods": "1",
+      "period_ms": "2592000000",
+      "published_at_ms": "1793755804331",
+      "expires_at_ms": "1798939804331"
+    },
+    "action": "renew",
+    "eligible_at_ms": 1796347804331,
+    "eligible_at_utc": "2026-12-04T01:30:04.331Z",
+    "reason": "Renewal requires 30-day notice"
+  },
+  "isolated_renewal_preflight": {
+    "customer": "0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501",
+    "existing": {
+      "symbol": "USDC",
+      "account": {
+        "id": "0x7b892209aa63de237c3354b8f157ebad136982c28408e6f1f2280795acce08f2",
+        "customer_id": "0x17275d5a31d40bdac9bf2def915f24731e56c6173df8742a1035f7b37cd70501",
+        "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+        "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+        "balance": {
+          "value": "0"
+        },
+        "tier": "1",
+        "device_limit": "100",
+        "allowance": "1000",
+        "fee": "10000",
+        "remaining": "0",
+        "period_ms": "2592000000",
+        "next_due_ms": "1796411455250",
+        "term_end_ms": "1796411455250",
+        "cancelled": true
+      }
+    },
+    "offer": {
+      "id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "periods": "1",
+      "period_ms": "2592000000",
+      "published_at_ms": "1793755804331",
+      "expires_at_ms": "1798939804331"
+    },
+    "action": "renew",
+    "eligible_at_ms": 1796347804331,
+    "eligible_at_utc": "2026-12-04T01:30:04.331Z",
+    "reason": "Renewal requires 30-day notice"
+  },
+  "allowance_accounting": {
+    "limit_mist": 100000000,
+    "used_mist": 55573403,
+    "includes_prior_mist": 5952761,
+    "child_funding_mist": 35000000,
+    "child_gas_is_within_charged_funding": true,
+    "refunds_replenish_allowance": false
+  },
+  "implementation_model": "gpt-6.1-sol",
+  "integrated_main": "16e9cc4d18cb1e9f9c440dc5470133c0b1179c7f",
+  "verification": {
+    "frontend_checkout": "node scripts/test_subscription_checkout.cjs: PASS (rendering, positive renewal builder, early notice rejection, wallet failure paths)",
+    "wallet_manifest": "node scripts/test_wallet_manifest.cjs: PASS",
+    "subscription_manifest": "node scripts/test_subscription_manifest.cjs: PASS",
+    "python_refusals": "python3 -m unittest discover -s scripts -p 'test*subscription_checkout*.py': PASS 9",
+    "frontend_typecheck": "network-none sf182-receipts:check: cd dapp && pnpm exec tsc --noEmit: PASS",
+    "frontend_build": "network-none sf182-receipts:check: cd dapp && pnpm build: PASS 18 routes",
+    "move_subscription": "network-none suifleet-sf221:localtest with private owned copy of source/cache: sui move test --path /tmp/subscription-contracts --build-env testnet subscription_tests: PASS 23",
+    "independent_checkout": "node scripts/live_subscription_checkout.cjs docs/validation/sf181-testnet-current-manifest.json --verify-evidence <receipt>: PASS",
+    "independent_child": "Live.executed each child digest: status/gas agree; child used <= funding; live.balance child == 0: PASS",
+    "wallet_browser": "network-none sf182-receipts:check with CHROME_EXECUTABLE=/opt/chrome-headless-shell/chrome-headless-shell: node scripts/test_wallet_browser.cjs: PASS"
+  },
+  "setup_diagnostics": [
+    "Initial tooling preflights refused before signing: obsolete transaction CLI, absent chain-facts helper, worktree mounts/safe-directory. Corrected runtime to pinned 1.81.1/1.83.0 with prepared chain-facts and actual worktree metadata.",
+    "One isolated create had effects-confirmed InsufficientGas, charged 1000277 MIST within child funding. Reconciled exact failed effects/no Customer, then made one bounded 20000000 MIST top-up within the same retained parent allowance; creation succeeded with 23000000 gas budget.",
+    "Independent verifier initially assumed deposit-only historical receipt; extended to verify fresh-open PlanChanged/Collected events while checking all retained gas. Corrected read-only verification passed.",
+    "One frontend expiry rendering assertion crossed a wall-clock boundary; changed only the rendering fixture to one minute expired, retaining exact boundary assertions. Final regression passed.",
+    "Optional Move run initially used unsupported --filter syntax, then lacked cached dependencies offline, then rejected copied-cache ownership. Positional filter with private owned cached dependencies passed all 23; no contract edits."
+  ]
+}

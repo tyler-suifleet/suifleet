@@ -111,7 +111,13 @@ const routes = require('node:fs').readdirSync(path.join(root, 'dapp/src/app'), {
         assert.equal(await current.count(),1,`${route}: current navigation announced`);
         // Signed out, every fleet page names itself and asks for sign-in rather
         // than implying an account or configuration problem.
-        if (route !== '/get-started/') {
+        if (route === '/billing/') {
+          // Billing is public so another wallet can inspect a payment request
+          // before connecting. No unsigned-out route can submit a payment.
+          await page.locator('main').getByRole('heading', {name:'Capacity plans',exact:true}).waitFor();
+          assert.match(await page.locator('main').textContent(), /Connect a wallet to prepay/);
+          assert.equal(await page.getByRole('button', {name:'Approve escrow deposit'}).count(), 0);
+        } else if (route !== '/get-started/') {
           const main = page.locator('main');
           await main.getByRole('heading',{name:'Sign in to continue',exact:true}).waitFor();
           assert.equal((await page.locator('h1').textContent()).trim(),(await current.textContent()).trim(),`${route}: prompt titled for the page`);

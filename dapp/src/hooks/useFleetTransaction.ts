@@ -17,6 +17,8 @@ import type { FleetDataConfig } from "@/lib/fleet-data";
 import type { Transaction } from "@mysten/sui/transactions";
 import { requireManifest, verifyDeployment } from "@/lib/deployment-manifest";
 
+import { readAccount, depositTx, coin, units, validatePayment, type Payment } from "@/lib/subscription";
+
 export type TransactionPhase = "validating" | "wallet" | "confirming";
 
 export function useFleetTransaction() {
@@ -26,7 +28,7 @@ export function useFleetTransaction() {
   const client = useCurrentClient();
   const wallet = useDAppKit();
   return useMutation({
-    mutationFn: async ({ transaction, onProgress, onSubmitted, onDefiniteFailure, support }: { transaction: Transaction; onProgress?: (phase: TransactionPhase) => void; onSubmitted?: (digest: string) => void; onDefiniteFailure?: () => void; support?: { config: FleetDataConfig; deviceId: string } }) => {
+    mutationFn: async ({ transaction, onProgress, onSubmitted, onDefiniteFailure, support, subscriptionDeposit }: { transaction: Transaction; subscriptionDeposit?: Payment; onProgress?: (phase: TransactionPhase) => void; onSubmitted?: (digest: string) => void; onDefiniteFailure?: () => void; support?: { config: FleetDataConfig; deviceId: string } }) => {
       const captured = selection;
       onProgress?.("validating");
       const manifest = requireManifest();
@@ -37,7 +39,15 @@ export function useFleetTransaction() {
       if (!account.chains.includes(`sui:${manifest.network}`)) throw new Error(`Wallet account does not support sui:${manifest.network}`);
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network does not match the deployment manifest");
       await verifyDeployment(client);
-      if (captured.supported && captured.fleet) {
+      if (subscriptionDeposit) {
+        validatePayment(subscriptionDeposit);
+        const target = await readAccount(client, subscriptionDeposit.account, subscriptionDeposit.symbol, subscriptionDeposit.customer);
+        const balance = await client.getBalance({ owner: address, coinType: coin(subscriptionDeposit.symbol).coin_type });
+        if (BigInt(balance.balance.balance) < units(subscriptionDeposit.amount)) throw Error("Insufficient funds for subscription deposit; gas also requires SUI");
+        // Rebuild the sole permissionless action from fresh verified state.
+        transaction = depositTx(target, subscriptionDeposit.symbol, subscriptionDeposit.amount);
+      }
+      if (!subscriptionDeposit && captured.supported && captured.fleet) {
         const fleets = await fetchCustomerFleets(client, address);
         const current = fleets.find(f => f.id === captured.fleet!.id && f.customerId === captured.fleet!.customerId);
         if (!current) throw Error("Fleet access was revoked");
@@ -63,9 +73,11 @@ export function useFleetTransaction() {
       const currentAccount = wallet.stores.$connection.get().account;
       if (!currentAccount || currentAccount.address !== address || JSON.stringify([...new Set(currentAccount.chains)].sort()) !== chains) throw new Error("Wallet account changed; retry the transaction");
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network changed; retry the transaction");
-      if (captured.supported && (latest.current.identity !== captured.identity || (captured.fleet && localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id))) throw Error("Fleet selection changed; retry the transaction");
+      if (!subscriptionDeposit && captured.supported && (latest.current.identity !== captured.identity || (captured.fleet && localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id))) throw Error("Fleet selection changed; retry the transaction");
       onProgress?.("wallet");
-      const policy = captured.fleet && await fetchOrganizationSecurity(client, captured.fleet.customerId);
+      // Permissionless subscription deposits use only the payer wallet, even
+      // when an unrelated selected organization requires a passkey.
+      const policy = !subscriptionDeposit && captured.fleet && await fetchOrganizationSecurity(client, captured.fleet.customerId);
       // Plain wallet coin funding has no organization Move operation and must
       // remain wallet-paid so an exhausted passkey can be topped up. Actual
       // organization authority is always enforced by Move, independently.
