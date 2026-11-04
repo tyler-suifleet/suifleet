@@ -5,169 +5,175 @@
   "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
   "package": "0x1d7d4be86a6eaf12269eeef1efe7acbe029c607750d4bf42cbb81e12507034f3",
   "registry": "0x7345ebfef88b8aefd8e3987b2e128268fcb5cffb1e4489ff91925ee35e0229c6",
-  "recorded": "2026-10-27",
+  "recorded": "2026-11-04",
   "recorder": "site/guide/record_guide.py (scripted Wallet Standard test wallet; key never in the page)",
-  "browser_address": "0x29274a626ca066e70cddab493c467a87ffdf904265c10c4f173598275ef2a806",
-  "spent_mist": 125166658,
-  "network_fee_mist": 202842035,
+  "browser_address": "0x879ee75ad09cd332125051fa531e9adc9917553e9dc078af25ba6a7e179cca7e",
+  "spent_mist": 222000383,
+  "network_fee_mist": 194847359,
   "videos": [
     {
       "step": "sign-in",
       "file": "sign-in.webm",
-      "file_sha256": "62f473ecdcda4efb3dc130ca1ffb2c98578232b9515d4b6cb2783926971edbe2",
+      "file_sha256": "d8689050af05d40f57c0b07bdfca8df55aa8616cfc17c846776b6c7c08682433",
       "fallback": "sign-in.mp4",
-      "fallback_sha256": "7bdf5aaf8ea6a952df0a3e7139a79c997da74cb5f3d0eace7a47e37a06f34cd8",
+      "fallback_sha256": "aaf0653deb75746ef24089aca1b6782aaa52b461726bdcda1ea51063e10e3426",
       "poster": "sign-in.jpg",
-      "poster_sha256": "d17945672a05c2961c7a2afc5a087f803488e1cfb6339359f56db4949083d0d1",
+      "poster_sha256": "03dfbcf9ba2c7561ae38efdb17fcff063ca86327806cc4e4e5b2ed6244aea9f9",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 12.0,
+      "duration_seconds": 19.6,
       "caption": "Screencast: Sign in.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
-      "transactions": []
+      "transactions": [
+        "8R7FPNTUT8ghdhWwmdQFtXfc1FSo5JZHAs7HV6gRptj6"
+      ]
     },
     {
       "step": "fund",
       "file": "fund.webm",
-      "file_sha256": "91a3a28e53cb6aced3459f6bb5f53a8cd25b9c169b6d4753977ea94d7d7eb031",
+      "file_sha256": "9c74621b836568659c88aaab697ac0d59c43b5d1114957af6f3b7f5628c2e1cc",
       "fallback": "fund.mp4",
-      "fallback_sha256": "44f93dc878f986a2559ae99376624302ba324d52acbafe4c2931d4d1bd785219",
+      "fallback_sha256": "80dd8cf18dc7f6db5de10b86cc678d32de940999cde1a981791b72dc90a7f021",
       "poster": "fund.jpg",
-      "poster_sha256": "7d0f1a2cb93dec238994b0c7eb37c11a9d0be810c2cdd5a9412a75622d97c257",
+      "poster_sha256": "8605a18fad95037099c85493788e106928720e7e3d08e7935ed1794187613aa6",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 12.6,
+      "duration_seconds": 15.2,
       "caption": "Screencast: Fund the network budget.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "88Hjna4bYuefo7PDQWW2zipiNUwUdkChZMKnHXzdWGUo"
+        "5eWdwvw1cJAPxptFiV7V57t6RNhb5eXNf8CoYrnahSbG"
       ]
     },
     {
       "step": "register-device",
       "file": "register-device.webm",
-      "file_sha256": "d2238b811387f3e1cf7627ac2377dade9c99182ddf94958647161e323359b20a",
+      "file_sha256": "3d3bf8110188d9deede3a70b55b63f437b87ada746eb0949c66def854fdee7be",
       "fallback": "register-device.mp4",
-      "fallback_sha256": "06e3c113f7a8a26f74de800cda7a3e1fe52fcf0cb8197c86e55cd6e594b6f614",
+      "fallback_sha256": "17ea70e6e9bf86f9bcd7df6690b1e502ddb9fef72e4dd71c09925028a00ff8c5",
       "poster": "register-device.jpg",
-      "poster_sha256": "6dc79ca1847635b7d3e0680a796f30e22582a63a651375c1f4a5996eeb4cd94e",
+      "poster_sha256": "4885706ecab4d544cceb753911d291d8ca88bbc54da5c68a9867ca4e747017bf",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 13.8,
+      "duration_seconds": 19.3,
       "caption": "Screencast: Register a device.",
-      "console_commit": "755a7954bffa8594af9515ac3a25ec8be6330ebc",
+      "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "BEh1kBPHqboHwQ2f1nEo1XGs6SiYhJXFRefE7ffES6ke"
+        "Dgcmu9q7RYr7i4s7qTtQNEzjJuaPjJ8xVugGQjJUqAeS"
       ]
     },
     {
       "step": "enroll-batch",
       "file": "enroll-batch.webm",
-      "file_sha256": "e780a75d4ba476ca72e62012c950339a7795470ce82047c276ce695760fe9e6a",
+      "file_sha256": "0ee0276ac63b941f226e4e16bc52fe2cc09634e89c60f9fe88d2c454567c26b7",
       "fallback": "enroll-batch.mp4",
-      "fallback_sha256": "c87cc502eb0b084768ed7efe3956566b34a0b69f19a35714ba0393f69383d690",
+      "fallback_sha256": "05fd7b9c8ab42c55e9bbb09cf2e988e3dd1676c4d811dad674f999fcb554f2af",
       "poster": "enroll-batch.jpg",
-      "poster_sha256": "97336a0e4f6d3f38eeb1b9b003daded7531750e143df31c88504ea90e07446b3",
+      "poster_sha256": "13d60a668984f3631500b6780482c2f02d6643a9e6d30e55ecd602db3f6244ac",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 18.4,
+      "duration_seconds": 29.7,
       "caption": "Screencast: Enroll a batch.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "AvM9qeGYqaBcDYDtngk1cKZ4ySNGQnNKM4VNyyP6GyLf"
+        "4xvwDsUdq6qf4RtsscimwfygjeRenUrNp19n4PqFKus7",
+        "EkEUpoA3ocKcwYWg3WAXXKJ1Kc8j6JYehGHHWePV7r1d"
       ]
     },
     {
       "step": "publish-version",
       "file": "publish-version.webm",
-      "file_sha256": "cd8e7a4165cd0f1aa9bd0aed8f6cefb6902adf856a5e5af1c61f65468a74c6c9",
+      "file_sha256": "0f50277dac8e473884f585b0b4b7ca3b4707ba19fab19fe28dd703edc200d4f2",
       "fallback": "publish-version.mp4",
-      "fallback_sha256": "3e2fd5d422b53c9d0b212fb1f2efed5985909c8d20f6eaa9a816a336801fcdee",
+      "fallback_sha256": "9abf2be4d41296fe889732c266c3a4aac14302eda969334e70147c7f67d6a397",
       "poster": "publish-version.jpg",
-      "poster_sha256": "fac57928e813d5e349596e95d3cd1f752cf0b657a5bf08f1a8c2826d60199bdf",
+      "poster_sha256": "d7c29d137ab9fb951ab20a5ab722916a1c5981a1807926ad6c216d796f52ca36",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 68.6,
+      "duration_seconds": 77.6,
       "caption": "Screencast: Publish a version.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "EirBm7GERcNLEZDTr5att9RtHMv1g2iK5Wbbghx7q8Zh",
-        "8uTVqbu6H16KvW1v96PVZx9wv1CeTfLh6pLQQ4eyF86a"
+        "96wTg5aQPAGJC2gVzxUybPu8h7cHh1DVauGWJZuMX13S",
+        "BpDtwLRLfA4XhVK8kJqJe66pHHRzfEskeK83gPpiLaL8"
       ]
     },
     {
       "step": "deploy-group",
       "file": "deploy-group.webm",
-      "file_sha256": "1ebbe1e7f1321b7b0f3c1a70f379e4243b6baab83c0864fc1fe893dc02adc6de",
+      "file_sha256": "985b48dca00f4bc2154a949ca43e74b05ab5911c0ddcae4d0b78629440f46066",
       "fallback": "deploy-group.mp4",
-      "fallback_sha256": "17d0fd07bde15abed7bfb538523bd6ebb671ec32ca49db19d035c4f8629376e1",
+      "fallback_sha256": "1d966695baa51e7044c9be1d2d1143fc26b78709711852c30c5d82cb9543271f",
       "poster": "deploy-group.jpg",
-      "poster_sha256": "1c3a3f42ef9cb997622698951138a3f2686fa9657932fc1f87dc53468240eccf",
+      "poster_sha256": "9a73055f1f8a0f199432522e177c35a15910d434be7b553c43eb18f9356d2a50",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 28.8,
+      "duration_seconds": 43.6,
       "caption": "Screencast: Deploy to a group.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "H8YWXdUjFZ1ArWLcUPTPv65bUb74g5ws4y4Ki7XjBLue",
-        "5Q1LyNxLyUqtCophL6mi1yHJQQmAtREFGyQ4SRJn1akQ",
-        "9KbkF4GnnKAsggdK4dNFys8H13sBvanBLyNz5S9GrS6S",
-        "ARRCKPVkVrTnDaUvdQunKSPkYoAJw7SHhpcDa4yCoESe"
+        "12qjJyk9JXvW1eeFP83og2PMQGc1dbrBQSfW7SQDgPFo",
+        "DtSZShLbfWz3xoky2GEVPmty656tpteCfBtEEAjebNeK",
+        "5icNZXRYoesVafsZ9DE6M3aS8RjxvgnAo2JDrsYQSJgN"
       ]
     },
     {
       "step": "staged-rollout",
       "file": "staged-rollout.webm",
-      "file_sha256": "84b5f8799bed23bad3517ebc04d0f1f23cc72bde5a14f7f705440ad8ee033195",
+      "file_sha256": "e2418d8ccc2e1c5e1ce4102f1e477c3791829fe25b3c1ded617f33a0bceadca6",
       "fallback": "staged-rollout.mp4",
-      "fallback_sha256": "239612b6f286c1e342f8207d22bba64ee75d2f49fee2a0c0ba12e5c01afb681f",
+      "fallback_sha256": "5fc04019fde4b84438df9a0a4052f15a3829ac94f2cf1d28b63a83c644a5280e",
       "poster": "staged-rollout.jpg",
-      "poster_sha256": "8380c92f2624ac64b5e894a61ac373a30ac92fea902c08596be24f8c862808a8",
+      "poster_sha256": "02987ae63282faf8f461dc0145171f109b2a465de446607c1f8c8cfb232ff6ae",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 35.2,
+      "duration_seconds": 35.4,
       "caption": "Screencast: Run a staged rollout.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "9qwrVQ5iHmrS16gdZscbATfFzYSd1tdHr9MVmevmh6eq",
-        "5vnL8F9r2RuWahwZuDnXDRULdYVJboQqU8KBaGZ4t4u3",
-        "7Z2fTQDJLBqhVZWAgjU5u6sM7z2Wj3SmawG3TDGdxLyj"
+        "KgrEoJvvvhPEsWGMeoDSYFX4UMsXNXtbQaBWNtVYUof",
+        "4WXdPcFmuz77L9WrHsE8hHvMcvahGTaHkSyeQtKwtYHU"
       ]
     },
     {
       "step": "access-policy",
       "file": "access-policy.webm",
-      "file_sha256": "8c736f778ae9aec27f697f91b382570b6a4cce1556b12bbcf6ee98433e0fc2fd",
+      "file_sha256": "50aabdc0c20fe01c55872ecb72f1aec748c967e224a43180673460ea6e2198dd",
       "fallback": "access-policy.mp4",
-      "fallback_sha256": "9920df32d4ac2eb3d62848c10ba42ca9f358b9954a46f7472828a7f694291f75",
+      "fallback_sha256": "f5ad8c8ec65bfe9d3e211984f0333c5bd17d4f8b0e7c6ee4567e444ed796a6d1",
       "poster": "access-policy.jpg",
-      "poster_sha256": "96221b82159638f745555e995e50e593d268eaf9e92c8f093931729fb6eb787d",
+      "poster_sha256": "f5692badce30331b685c7b50296a5d2f690ec57e76cf0b8605dae804d5f09838",
       "width": 1280,
       "height": 800,
-      "duration_seconds": 14.0,
+      "duration_seconds": 18.1,
       "caption": "Screencast: Grant decryption.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "ESaGQTEcku5D2vkCGaBKvGh7FbDyHQmfqzDLu2HB9qND",
-        "BMgqyRZFZqvLqoYYrvajYcMyaEs1FhrQRLoGwPSPAe4W"
+        "9TrsXUCruMUqSq6ZcXxiP2sjpdMU1iJiPpcshgKWTyDr",
+        "HdTjG89yh3PLoyVLJuo934mRwYKn5HWKFDVdrPzPZ8CQ"
       ]
     },
     {
       "step": "fleet-settings",
       "file": "fleet-settings.webm",
-      "file_sha256": "3f4dadbacc5d5569edd0344b4ba6415583c45f747a1012c3180d3fba0f78d9fc",
+      "file_sha256": "128d3d0977b1ddcd8757b62371492b5455315708788dffbc63adf9be80d4b537",
       "fallback": "fleet-settings.mp4",
-      "fallback_sha256": "2cdd408343beb6402b1b9c36199d4450c141b4d14289313b33ac1a63ae0fe3e3",
+      "fallback_sha256": "a70a303cf5a45001e7e708050814558f94cffb8ec08ddb11d3b0c4ae41408441",
       "poster": "fleet-settings.jpg",
-      "poster_sha256": "cd806599555a05309c507f72c708e5d1f89fca8a0da7a3d2266f30c34a446dc7",
+      "poster_sha256": "4e9ad34a8d6d3bf09c4b55f10cc6c60825d765b9a93d8ce115b0b3706b36724b",
       "width": 1280,
       "height": 800,
       "duration_seconds": 14.1,
       "caption": "Screencast: Choose fleet settings.",
       "console_commit": "79675b48e6bd3d17b22bf919e0953f389535edf0",
       "transactions": [
-        "57XZFwjCHZPoCW4qFAGXMrqNcSdhcLvfqSeVUK1PiPMc"
+        "9mWy3tAw8ofr6kuguDKzM4uAm3D7qSJfoM3naf7n6Z3Z"
       ]
     }
-  ]
+  ],
+  "recording_tools_commit": "88012a7aa227019200861545933366facfac0059",
+  "pointer_overlay": {
+    "kind": "DOM pointer follows actual recording pointer events",
+    "sha256": "fcae517e86af35d9cddf828db9ab9084147f3453633a678dad3b4e5a99bec4c1"
+  }
 }
