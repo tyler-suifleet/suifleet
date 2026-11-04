@@ -72,7 +72,8 @@ never recover a key or repeat an uncertain transaction blindly.
 
 Each WebM and MP4 must be at most 15,000,000 bytes; nine steps therefore have a
 270-MB maximum combined video budget, plus posters and text. MP4 is H.264 with
-faststart, WebM is VP9; both are silent with burned-in captions. Encoding shortens
+faststart, WebM is VP9. The initial encoder produces silent clips with burned-in
+captions; the narration pass below adds the spoken track. Encoding shortens
 long confirmation waits, without claiming instant network confirmation. Written
 instructions appear in each step's transcript disclosure. The offline site checker
 verifies media hashes and links; `--require-videos` additionally requires every
@@ -93,3 +94,42 @@ recording browser check verifies captured pixels and real screencast frames,
 pointer persistence, click-through behavior and shadow-root wallet interaction.
 Existing videos must be re-recorded to include it; do not infer historical mouse
 trajectories or claim a recorder fix retroactively changes published clips.
+
+## Female voice-over
+
+`narration.json` contains the reviewed spoken script and cue positions in the
+original cursor clips. `narrate_guide.py` uses the synthetic American English
+female Kokoro Heart voice (`af_heart`), locally. It sends no text or visitor data
+to a speech service and does not contact the chain. It lengthens individual action
+segments when necessary, preserving every source interval, with a short pause
+between cues. Video timing is illustrative, not a network latency measurement.
+
+Install optional `kokoro-onnx==0.4.9` in an isolated Python environment. Download
+`kokoro-v1.0.onnx` and `voices-v1.0.bin` from the
+[upstream model release](https://github.com/thewh1teagle/kokoro-onnx/releases/tag/model-files-v1.0).
+The script verifies the pinned SHA-256 digests in `narration.json` before loading
+either file. Keep these model files outside the checkout. The
+[upstream project](https://github.com/thewh1teagle/kokoro-onnx) identifies its code
+as MIT licensed and the Kokoro model as Apache 2.0.
+
+```sh
+python3 site/guide/narrate_guide.py \
+  --source-media /private/original-cursor-media \
+  --output /private/narrated-media \
+  --model /private/models/kokoro-v1.0.onnx \
+  --voices /private/models/voices-v1.0.bin
+```
+
+The source directory must contain the original verified `videos.json` and all
+media. The output must be new and separate; rerunning on narrated clips is
+rejected by source digests. Review cue times again after any new recording.
+The pass verifies source hashes, audio presence/codecs, durations, the 15 MB cap,
+and full decoding of both outputs. WebM uses Opus and MP4 uses AAC. Public
+`videos.json` records synthetic voice/model provenance and the retimed script.
+Preserve the actual console commit, chain receipts, cursor and posters.
+
+After reviewing all nine outputs, replace `site/media/guide/` with the staged
+media, then run the site build/check with `--require-videos`. Native playback
+controls manage volume; no autoplay or third-party player is needed. The written
+guide and burned-in captions remain available without sound. No model or
+synthesis dependency is included in the static website.

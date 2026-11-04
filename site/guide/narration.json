@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "voice": "af_heart",
+  "language": "en-us",
+  "engine": "kokoro-onnx",
+  "clips": [
+    {
+      "step": "sign-in",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Welcome to SuiFleet. Click Connect Wallet and choose Slush, an extension, or Google where available."
+        },
+        {
+          "source_start": 4.607,
+          "text": "This recording uses a scripted test wallet in place of Slush; approve the connection."
+        },
+        {
+          "source_start": 6.027,
+          "text": "Connected: the card shows your address and the network (Testnet)."
+        },
+        {
+          "source_start": 8.676,
+          "text": "First time only: create your default fleet, then approve the transaction."
+        },
+        {
+          "source_start": 14.932,
+          "text": "Your fleet is selected in the Fleet switcher. Next: fund its network budget."
+        }
+      ],
+      "source_sha256": "d8689050af05d40f57c0b07bdfca8df55aa8616cfc17c846776b6c7c08682433",
+      "source_duration_seconds": 19.6
+    },
+    {
+      "step": "fund",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Choose Network budget in the sidebar."
+        },
+        {
+          "source_start": 3.856,
+          "text": "Enter a deposit in Sui. Devices draw report and storage fees from this budget, within your limits."
+        },
+        {
+          "source_start": 6.362,
+          "text": "Approve the deposit in your wallet. A budget is created only if your fleet needs one."
+        },
+        {
+          "source_start": 11.129,
+          "text": "Confirmed. The balance under Keep devices reporting now covers device activity."
+        }
+      ],
+      "source_sha256": "9c74621b836568659c88aaab697ac0d59c43b5d1114957af6f3b7f5628c2e1cc",
+      "source_duration_seconds": 15.2
+    },
+    {
+      "step": "register-device",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Choose Devices in the sidebar."
+        },
+        {
+          "source_start": 2.882,
+          "text": "Click Register by address. The address comes from the device: the client’s derive-address command."
+        },
+        {
+          "source_start": 9.52,
+          "text": "Click Register and approve the transaction."
+        },
+        {
+          "source_start": 16.0,
+          "text": "Your device is registered. Health reports begin when its client starts."
+        }
+      ],
+      "source_sha256": "3d3bf8110188d9deede3a70b55b63f437b87ada746eb0949c66def854fdee7be",
+      "source_duration_seconds": 19.3
+    },
+    {
+      "step": "enroll-batch",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "For a production batch, choose Enrollment in the sidebar."
+        },
+        {
+          "source_start": 2.832,
+          "text": "First, create a batch policy: how many devices may enroll, and for how long."
+        },
+        {
+          "source_start": 12.119,
+          "text": "Next, reserve names and serial numbers: paste a roster CSV and click Check."
+        },
+        {
+          "source_start": 16.417,
+          "text": "Download the credentials: the only copy of the claim keys, for your factory provisioning media."
+        },
+        {
+          "source_start": 18.282,
+          "text": "Then register the claims in your fleet. Each device then enrolls itself at first boot."
+        }
+      ],
+      "source_sha256": "0ee0276ac63b941f226e4e16bc52fe2cc09634e89c60f9fe88d2c454567c26b7",
+      "source_duration_seconds": 29.7
+    },
+    {
+      "step": "publish-version",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Choose Components in the sidebar to publish software."
+        },
+        {
+          "source_start": 5.625,
+          "text": "First time only: set up your publisher catalog and approve the transaction."
+        },
+        {
+          "source_start": 13.684,
+          "text": "Name the component and give the release a semantic version."
+        },
+        {
+          "source_start": 18.73,
+          "text": "Choose the platform and attach the artifact for it."
+        },
+        {
+          "source_start": 19.3,
+          "text": "Delivery: choose Confidential for proprietary software. This public demo artifact is published unencrypted."
+        },
+        {
+          "source_start": 23.087,
+          "text": "Review, then upload to Walrus and register the version. Approve the transaction."
+        },
+        {
+          "source_start": 73.541,
+          "text": "Version published. It is now in the library, ready to deploy."
+        }
+      ],
+      "source_sha256": "0f50277dac8e473884f585b0b4b7ca3b4707ba19fab19fe28dd703edc200d4f2",
+      "source_duration_seconds": 77.6
+    },
+    {
+      "step": "deploy-group",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "On Devices, open the Device groups tab and create a group."
+        },
+        {
+          "source_start": 12.201,
+          "text": "Click Manage and add the device to the group."
+        },
+        {
+          "source_start": 20.878,
+          "text": "In the component library, choose Deploy this version."
+        },
+        {
+          "source_start": 24.456,
+          "text": "Select the group as the target. This catalog release creates a one-shot deployment."
+        },
+        {
+          "source_start": 28.927,
+          "text": "Click Deploy and approve. Each device in the group checks its membership and applies it."
+        },
+        {
+          "source_start": 37.605,
+          "text": "Deployment created. Devices report signed results under Deployments."
+        }
+      ],
+      "source_sha256": "985b48dca00f4bc2154a949ca43e74b05ab5911c0ddcae4d0b78629440f46066",
+      "source_duration_seconds": 43.6
+    },
+    {
+      "step": "staged-rollout",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Choose Rollouts in the sidebar to release in stages."
+        },
+        {
+          "source_start": 3.85,
+          "text": "Open Create a gradual rollout and fill in the version, recipe and digests."
+        },
+        {
+          "source_start": 13.466,
+          "text": "List the cohorts, one line each; the first cohort goes first."
+        },
+        {
+          "source_start": 15.143,
+          "text": "Set the pacing, bake period and abort threshold, then create the rollout."
+        },
+        {
+          "source_start": 22.877,
+          "text": "Select the rollout, then admit the first devices after checking device health."
+        },
+        {
+          "source_start": 29.852,
+          "text": "The rollout advances only on healthy signed reports. Pause or abort at any time."
+        }
+      ],
+      "source_sha256": "e2418d8ccc2e1c5e1ce4102f1e477c3791829fe25b3c1ded617f33a0bceadca6",
+      "source_duration_seconds": 35.4
+    },
+    {
+      "step": "access-policy",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Open Access policies. A policy controls decryption for confidential releases."
+        },
+        {
+          "source_start": 8.966,
+          "text": "Choose Group and select guide-pilot. Membership determines which devices may request keys."
+        },
+        {
+          "source_start": 14.0,
+          "text": "Revoking access stops future requests. It cannot recall software already decrypted."
+        }
+      ],
+      "source_sha256": "50aabdc0c20fe01c55872ecb72f1aec748c967e224a43180673460ea6e2198dd",
+      "source_duration_seconds": 18.1
+    },
+    {
+      "step": "fleet-settings",
+      "cues": [
+        {
+          "source_start": 0,
+          "text": "Open Fleet settings to choose reporting and update intervals."
+        },
+        {
+          "source_start": 1.931,
+          "text": "Review the estimate, then save. Saving settings does not add money to the budget."
+        },
+        {
+          "source_start": 3.815,
+          "text": "This small demo budget does not cover the estimate. Save anyway records settings only; it adds no funds."
+        },
+        {
+          "source_start": 7.875,
+          "text": "Devices apply settings at their next check. Network budget holds their funds separately."
+        }
+      ],
+      "source_sha256": "128d3d0977b1ddcd8757b62371492b5455315708788dffbc63adf9be80d4b537",
+      "source_duration_seconds": 14.1
+    }
+  ],
+  "engine_version": "0.4.9",
+  "voice_description": "Female, American English; synthetic Kokoro Heart voice",
+  "model_sha256": "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
+  "voices_sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+  "note": "Cue times refer to the original cursor recordings. Narration retimes each segment without dropping actions or speeding up speech. Synthetic voice, not a recording of a human presenter."
+}
