@@ -43,7 +43,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       banner: { js: "var process = { env: { NEXT_PUBLIC_DEPLOYMENT_MANIFEST: JSON.stringify(window.__SF_MANIFEST_OBJECT) } };" }, nodePaths: [path.resolve(__dirname, "../dapp/node_modules")], alias: { "@": src },
       define: { "process.env.NODE_ENV": '"development"' }, plugins: [fakeDependencies], logLevel: "warning" });
     // Optional visual evidence uses the actual production stylesheet, with the same controlled wallet boundary.
-    let style = "";
+    let style = await fs.readFile(path.join(dir, "app.css"), "utf8").catch(() => "");
     if (process.env.FLEET_SETTINGS_SCREENSHOTS) {
       const chunks = path.join(root, "dapp/out/_next/static/chunks");
       for (const file of await fs.readdir(chunks)) if (file.endsWith(".css")) style += await fs.readFile(path.join(chunks, file), "utf8");
@@ -94,6 +94,7 @@ const USD = { sui: { usd: 2.5, last_updated_at: 1792900000 }, "walrus-2": { usd:
       const initialHealth = await page.locator('input[name="healthIntervalMs"]:checked').getAttribute("id");
       if (scenario === "short") await page.locator("#healthIntervalMs-3600000").check();
       await sectionButton(/^Security/).click();
+      await page.getByText("Advanced multi-signature tools", { exact: true }).click();
       await page.getByRole("region", { name: "Multisig administrator", exact: true }).waitFor();
       await sectionButton(/^Data retention/).focus();
       await page.keyboard.press("Enter");
