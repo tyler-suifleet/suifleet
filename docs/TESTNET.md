@@ -1386,3 +1386,43 @@ and fresh independent review. SF-182's automated connected-wallet
 `docs/validation/sf182-checkout-eligibility.json`; deposit-only evidence does not
 satisfy it. Manual wallet, physical, mainnet and production-provider acceptance
 remains unrun in SF-031/#32 and SF-087/#159.
+
+**SF-182 CI lane 1 funding repair (2026-11-04, run 41783519821).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41783519821)
+used lane 1 (`0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec`),
+not lane 0 funded above. Its downloaded package-upgrade artifact records zero
+transactions, zero allowance used and no held reservation. The single in-run
+faucet succeeded but increased 2,304,218,456 MIST to only 3,304,218,456 MIST,
+below the unchanged 3,650,000,000 MIST selected-suite requirement. This reproduces
+the funding preflight refusal without replaying any transaction.
+
+A separate single faucet-only maintenance request was coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6624275600).
+Before the request, independent reads confirmed chain `4c78adac` and the same
+3,304,218,456 MIST balance (3,225,859,566 address balance plus 78,358,890 in
+coins). The lane recipient was checked against `scripts/testnet_pool.py`, and
+the 1.83.0 network CLI checksum matched
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+The worker used a public-only temporary config with an empty keystore and no CI
+signing secret. With `network:suifleet-testnet` acquired and asserted, exactly
+one request succeeded:
+`7hcYYnAzkicEpgXkpyPGxJ7BZKbYy5wFY5dAE7VjFVXA`.
+Independent transaction readback confirmed successful effects at checkpoint
+`402675028`, a 1,000,000,000 MIST credit to lane 1 and 1,000,000 MIST net gas
+paid by the faucet. The subsequent total was 4,304,218,456 MIST, above preflight.
+The lease was released promptly. No package/object transaction, fixture replay,
+reservation removal, spending-limit change or extra runner retry occurred.
+Funding remains a point-in-time observation that other CI runs can consume.
+
+Local checks passed:
+`PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile test_testnet_budget test_testnet`
+(105 tests),
+`python3 -m unittest discover -s scripts -p test_live_subscription_checkout.py`
+(five tests), and `git diff --check`. This is funding repair evidence only;
+hosted CI was neither rerun nor polled, and fresh independent review and exact
+head/base checks remain required. The automated `preparePrepay`/`verifyPlan`
+walkthrough remains outstanding; the retained renewal fixture is ineligible
+until `2026-12-04T01:30:04.331Z`. No notice/clock bypass was attempted. Manual
+wallet, physical, mainnet and production-provider acceptance remains unrun in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
