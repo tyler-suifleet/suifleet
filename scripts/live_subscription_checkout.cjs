@@ -16,6 +16,38 @@ const sub = loader()('lib/subscription.ts'), protocol = loader()('lib/fleet-prot
 const client = new SuiGrpcClient({ network: 'testnet', baseUrl: m.rpc_url });
 const lines = readline.createInterface({ input: process.stdin })[Symbol.asyncIterator]();
 (async () => {
+  if (customer === '--discover') {
+    const { bcs } = appRequire('@mysten/sui/bcs');
+    const { normalizeStructTag, normalizeSuiAddress } = appRequire('@mysten/sui/utils');
+    const { moveType, verifyDeployment } = loader()('lib/deployment-manifest.ts');
+    await verifyDeployment(client);
+    let cursor, customerId = null;
+    do {
+      const page = await client.listDynamicFields({ parentId: m.shared_objects.registry.id, cursor, limit: 100, include: { value: true } });
+      for (const f of page.dynamicFields) {
+        if (normalizeStructTag(f.name.type) !== normalizeStructTag(moveType('customer::CustomerKey'))) continue;
+        const key = protocol.customer_CustomerKeyBcs.parse(f.name.bcs);
+        if (normalizeSuiAddress(key.wallet) === normalizeSuiAddress(sender)) customerId = bcs.Address.parse(f.value.bcs);
+      }
+      if (page.hasNextPage && (!page.cursor || page.cursor === cursor)) throw Error('Incomplete customer discovery');
+      cursor = page.hasNextPage ? page.cursor : undefined;
+    } while (cursor);
+    const existing = customerId ? await sub.customerAccount(client, customerId) : null;
+    let offer = null, eligibleAt = null, reason = null;
+    if (offerId !== '-') {
+      const quoteObject = await client.getObject({ objectId: offerId, include: { content: true } });
+      if (normalizeStructTag(quoteObject.object.type) !== normalizeStructTag(`${moveType('subscription::Offer')}<${m.subscription_coins.USDC.coin_type}>`)) throw Error('Unexpected offer type');
+      offer = protocol.subscription_OfferBcs.parse(quoteObject.object.content);
+      const quote = { offerId, symbol: 'USDC', usdPerCoin: 1, observedAt: Number(offer.published_at_ms), source: 'Disposable test denomination' };
+      await sub.readOffer(client, quote);
+      eligibleAt = existing ? Number(offer.published_at_ms) + 30 * 86400000 : Number(offer.published_at_ms);
+      if (existing && (!existing.account.cancelled || existing.account.balance.value !== '0')) reason = 'Disposable renewal fixture must be cancelled and empty';
+      else if (existing && Date.now() < eligibleAt) reason = 'Renewal requires 30-day notice';
+      else if (customerId) await sub.preparePrepay(client, quote, customerId, sender);
+    } else if (existing) reason = 'Bound customer requires an explicitly selected compatible offer';
+    console.log(JSON.stringify({ customer: customerId, existing, offer, action: existing ? 'renew' : 'open', eligible_at_ms: eligibleAt, eligible_at_utc: eligibleAt === null ? null : new Date(eligibleAt).toISOString(), reason }));
+    return;
+  }
   if (customer === '--verify-evidence') {
     const evidence = JSON.parse(fs.readFileSync(offerId));
     const expected = evidence.checkout.account.id, effects = [], events = [];
@@ -77,7 +109,8 @@ const lines = readline.createInterface({ input: process.stdin })[Symbol.asyncIte
     if (r.FailedTransaction || !r.Transaction.status.success) throw Error('Unsuccessful execution');
     return digest;
   };
-  const opened = await execute(await sub.preparePrepay(client, quote, customer, sender), 'open');
+  const existing = await sub.customerAccount(client, customer);
+  const opened = await execute(await sub.preparePrepay(client, quote, customer, sender), existing ? 'renew' : 'open');
   const current = await sub.verifyPlan(client, opened, customer, quote);
   const payment = { chain: m.chain_identifier, package: m.call_package_id, account: current.account.id, customer, symbol: 'USDC', amount: '1000' };
   const uri = sub.paymentUri('https://acceptance.invalid', payment);

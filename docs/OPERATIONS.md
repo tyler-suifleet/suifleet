@@ -1197,6 +1197,24 @@ second-wallet/extension session. Those manual checks stay in #32/#159. The
 cancelled fixture was not reactivated; no production tariff or conversion is
 claimed. The generated test-only offer is not added to any customer build.
 
+The [read-only fixture preflight](validation/sf182-checkout-eligibility.json)
+identifies the existing Customer, its cancelled/empty USDC account and the setup
+transaction's monthly offer. That offer permits renewal at **2026-12-04
+01:30:04.331 UTC**, and expires at the recorded `expires_at_ms`. The automated
+connected-wallet prepay walkthrough remains outstanding until an eligible offer
+can be used; no clock bypass, tariff change or package republication is allowed.
+
+The harness now discovers the wallet's registry Customer before setup. It reuses
+an unbound Customer for `open`, or the cancelled/empty bound fixture for `renew`.
+It checks the selected offer through the frontend before spending and records a
+notice-time refusal without submitting a transaction. Pass `--offer ID` to select
+an existing offer; a retained setup ledger can also recover its created offer.
+Read-only `--inspect-only` checks chain/account/manifest and records eligibility
+without a mutation lease. The keyless bridge also supports `--discover OFFER_ID
+SENDER` (use `-` for no selected offer). A real payment always goes through
+`preparePrepay` and `verifyPlan`; local tests do not establish public-testnet
+opening or renewal.
+
 Read-only verification (no wallet or lease needed):
 
 ```bash
@@ -1212,5 +1230,8 @@ registry authority and treasury are checked before mutation. Reconcile retained
 state before a repeat: do not start another ledger to retry an uncertain payment.
 The optional `--existing-account` selects a cancelled/empty disposable fixture
 explicitly; its sole resumed-setup case independently reconciles the completed
-setup and retains its spend. The private state must never be published. Release
+setup and retains its spend. Prepay resumption checks all prior transaction
+effects and nonnegative charges against the retained ledger, including the
+no-op setup charge. Unknown digests and started prepay attempts require explicit
+reconciliation rather than replay. The private state must never be published. Release
 the lease immediately after mutations; read-only verification can follow.

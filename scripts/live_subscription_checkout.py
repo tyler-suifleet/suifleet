@@ -26,12 +26,18 @@ def main():
     p.add_argument('--evidence', type=Path, required=True)
     p.add_argument('--build-sui', default='sui')
     p.add_argument('--existing-account', help='Explicit verified disposable fixture account; exercise deposit/receipt only')
+    p.add_argument('--offer', help='Explicit compatible disposable offer; required for a bound customer')
+    p.add_argument('--inspect-only', action='store_true', help='Read fixture and offer eligibility without signing or acquiring a lease')
     args = p.parse_args()
-    if not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
+    if not args.inspect_only and not os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'):
         raise RuntimeError('global machine-session lease required')
     retained = json.loads(args.state.read_text()) if args.state.exists() else None
-    if retained and not (args.existing_account and not retained.get('customer') and len(retained['transactions']) == 1 and retained['transactions'][0]['status'] == 'success'):
-        raise RuntimeError('Existing run: reconcile its recorded digests; do not repeat payments')
+    if retained and (any(t.get('status') != 'success' for t in retained['transactions']) or retained.get('prepay_started')) and not args.inspect_only:
+        raise RuntimeError('Interrupted or completed checkout requires reconciliation; refusing replay')
+    if args.existing_account and retained and len(retained['transactions']) != 1:
+        raise RuntimeError('Existing deposit run requires reconciliation; refusing replay')
+    if retained and retained.get('pending_digest') not in (None, *[t['digest'] for t in retained['transactions']]):
+        raise RuntimeError('Pending digest requires reconciliation; refusing replay')
     live = Live(args.wallet, 'testnet', 100_000_000, build_sui=args.build_sui)
     live.preflight()
     assert live.chain == '4c78adac' and live.operator == AGENT
@@ -44,16 +50,37 @@ def main():
     assert manifest['treasury_payee'] == json.loads((ROOT / 'deployments/testnet/treasury.json').read_text())['treasury_payee']
     usdc = manifest['subscription_coins']['USDC']['coin_type']
     assert usdc == '0xa1ec7fc00a6f40db9693ad1415d0c193ad3906494428cf252621037bd7117e29::usdc::USDC'
+    selected_offer = args.offer or (retained or {}).get('offer')
+    if not selected_offer and retained:
+        for entry in retained['transactions']:
+            if entry['label'] == 'SF-182 disposable customer and monthly USDC offer':
+                offers = live.created(live.executed(entry['digest']), f'::subscription::Offer<{usdc}>')
+                if len(offers) == 1:
+                    selected_offer = offers[0]
+    discovery = json.loads(subprocess.check_output([
+        'node', str(ROOT / 'scripts/live_subscription_checkout.cjs'), str(args.manifest),
+        '--discover', selected_offer or '-', AGENT], cwd=ROOT, text=True))
+    if args.inspect_only or (discovery['reason'] and not args.existing_account):
+        args.evidence.write_text(json.dumps({'fixture_preflight': discovery,
+            'prior_allowance_used_mist': (retained or {}).get('allowance_used_mist', 0),
+            'transactions_submitted': 0}, indent=2) + '\n')
+        print(json.dumps(discovery))
+        if discovery['reason'] and not args.inspect_only:
+            raise RuntimeError('Fixture ineligible; see recorded preflight. No transaction submitted')
+        return
     state = retained or {'transactions': live.evidence['transactions'], 'limit_mist': 100_000_000, 'manifest': str(args.manifest)}
     args.state.parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation prevents a second run from racing this ledger.
     if retained:
-        # The sole completed setup was reconciled; customer::create was a no-op
-        # because the dedicated agent already has a Customer in this registry.
+        # Reconcile all historical charges; storage refunds never replenish allowance.
         for entry in retained['transactions']:
-            assert live.executed(entry['digest'])['effects']['status']['status'] == entry['status']
+            effects = live.executed(entry['digest'])['effects']
+            assert effects['status']['status'] == entry['status']
+            gas = effects['gasUsed']
+            assert entry['gas_mist'] == max(0, int(gas['computationCost']) + int(gas['storageCost']) - int(gas['storageRebate']))
         live.evidence['transactions'] = retained['transactions']
         live.ledger.evidence = retained['transactions']
+        assert retained['allowance_used_mist'] == sum(t['gas_mist'] + t.get('funding_mist', 0) for t in retained['transactions'])
         live.ledger.used = retained['allowance_used_mist']
     else:
         with args.state.open('x') as f:
@@ -103,23 +130,33 @@ def main():
             live.finish(args.evidence)
             print('PASS: frontend payment-link USDC escrow deposit, typed effects/event confirmation, receipts and full refund; existing cancelled fixture remains cancelled')
             return
-        setup = live.transaction('SF-182 disposable customer and monthly USDC offer',
-            '--move-call', f'{package}::customer::create', '@' + registry, '"SF-182 checkout acceptance"',
-            '--move-call', f'{package}::subscription::offer', f'<{usdc}>', '@' + registry, '@' + manifest['treasury_payee'],
-            '1', '100', '1000', '10000', 'false', '@0x6', budget=20_000_000)
+        state['prepay_started'] = True
         save()
-        customer = live.created(setup, '::customer::Customer')[0]
-        offer = live.created(setup, f'::subscription::Offer<{usdc}>')[0]
+        customer, offer = discovery['customer'], selected_offer
+        if not customer or not offer:
+            calls = []
+            if not customer:
+                calls += ['--move-call', f'{package}::customer::create', '@' + registry, '"SF-182 checkout acceptance"']
+            if not offer:
+                calls += ['--move-call', f'{package}::subscription::offer', f'<{usdc}>', '@' + registry,
+                          '@' + manifest['treasury_payee'], '1', '100', '1000', '10000', 'false', '@0x6']
+            setup = live.transaction('SF-182 disposable customer and monthly USDC offer', *calls, budget=20_000_000)
+            save()
+            customer = customer or live.created(setup, '::customer::Customer')[0]
+            offer = offer or live.created(setup, f'::subscription::Offer<{usdc}>')[0]
         state.update(customer=customer, offer=offer)
         save()
         node = subprocess.Popen(['node', str(ROOT / 'scripts/live_subscription_checkout.cjs'), str(args.manifest), customer, offer, AGENT],
                                 cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-        for step in ('open', 'deposit', 'collect'):
+        for step in (discovery['action'], 'deposit', 'collect'):
             message = json.loads(node.stdout.readline())
             assert message['label'] == step
             def submit(reserved, tx=message['tx'], step=step):
                 data = tools.decode(tx)
-                tools.verify_ptb_transaction(data, sender=AGENT, budget=reserved, calls=[f'{package}::subscription::{step}'])
+                calls = [f'{package}::subscription::{step}']
+                if step == 'renew' and any(c.get('function') == 'deposit' for c in data['commands']):
+                    calls.insert(0, f'{package}::subscription::deposit')
+                tools.verify_ptb_transaction(data, sender=AGENT, budget=reserved, calls=calls)
                 # Persist exact digest and remaining allowance BEFORE signing.
                 state['pending_digest'] = data['digest']
                 save()
@@ -144,7 +181,7 @@ def main():
                     '0.01 USDC disposable test tariff, 0.001 USDC surplus fully refunded; no production tariff or market conversion claimed.',
                     'Same dedicated signer exercises permissionless deposit; manual second-wallet/extension/Pi/mainnet/provider checks remain #32/#159.'])
         live.finish(args.evidence)
-        print('PASS: actual frontend USDC open, link deposit, collection, typed confirmation, receipt CSV and refund')
+        print('PASS: actual frontend USDC prepay, link deposit, collection, typed confirmation, receipt CSV and refund')
     finally:
         save()
         if node and node.poll() is None:
