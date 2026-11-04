@@ -48,10 +48,10 @@ module sui_edge::multisig_admin {
     /// Enrollment then requires a real transaction from its native quorum.
     /// Reconfiguration uses the current factors, including any other mechanisms.
     public fun enroll(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, ctx: &mut TxContext) {
-        customer::assert_security_administrator(customer, ctx);
+        customer::k3(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
         g0(ctx.sender() == sender, false);
-        customer::configure_security_factor(customer, 1, p0(sender, keys, weights, threshold), ctx);
+        customer::k6(customer, 1, p0(sender, keys, weights, threshold), ctx);
     }
 
     /// Convenience producer for the exact existing policy-change wrapper.
@@ -62,20 +62,20 @@ module sui_edge::multisig_admin {
 
     public fun enroll_secured(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, action: Action, clock: &Clock, ctx: &mut TxContext) {
         let arguments = vector[bcs::to_bytes(&b"enroll_multisig"), bcs::to_bytes(&object::id(customer)), bcs::to_bytes(&keys), bcs::to_bytes(&weights), bcs::to_bytes(&threshold)];
-        customer::begin_security_action(customer, action, arguments, SMALL_7, false, clock, ctx);
+        customer::k4(customer, action, arguments, SMALL_7, false, clock, ctx);
         enroll(customer, keys, weights, threshold, ctx);
-        customer::finish_security_action(customer);
+        customer::k5(customer);
     }
 
     /// Attest the exact immutable action, not a browser approval flag. Revoked
     /// administrators, replaced configurations and stale generations cannot attest.
     public fun approve(customer: &Customer, action: &mut Action, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, clock: &Clock, ctx: &mut TxContext) {
-        customer::assert_security_administrator(customer, ctx);
+        customer::k3(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
         g0(ctx.sender() == sender, false);
         g0(customer::security_factor_configuration(customer, 1) == p0(sender, keys, weights, threshold), false);
         g1(security_policy::customer_id(action) == object::id(customer)); g1(security_policy::action_generation(action) == security_policy::generation(&customer::security(customer))); g1(clock.timestamp_ms() < security_policy::expires_ms(action));
-        security_policy::attest(action, 1);
+        security_policy::k16(action, 1);
     }
     /// binding: compact private symbol to bound published bytecode storage.
     fun p0(sender: address, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16): vector<u8> {

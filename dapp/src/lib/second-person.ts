@@ -6,7 +6,7 @@ import { APPROVAL_TYPES } from "./protocol-version";
 import { MANIFEST, moveType, verifyDeployment } from "./deployment-manifest";
 import { PACKAGE_ID } from "./constants";
 import { customer_CustomerBcs, security_policy_ActionBcs, security_policy_FactorConfigurationBcs } from "./fleet-protocol";
-import { fetchOrganizationSecurity, validateSecurityRequirements } from "./security-policy";
+import { buildSecurityPolicyTx, fetchOrganizationSecurity, validateSecurityRequirements } from "./security-policy";
 
 const vectors = bcs.vector(bcs.vector(bcs.u8()));
 export const secondPersonSupported = () => !!MANIFEST && APPROVAL_TYPES.every(t => t in MANIFEST!.type_origins);
@@ -101,4 +101,23 @@ export async function executePolicyTx(client: SuiGrpcClient, customer: string, r
   if (current.length !== request.arguments[1].length || current.some((b, i) => b !== request.arguments[1][i])) throw Error("Organization changed; propose again");
   if (enrollment) return configureTx(customer, request.id);
   return txCall(delay ? "customer::configure_security_delays_secured" : "customer::set_security_secured", tx => [tx.object(customer), delay ? tx.pure(bcs.vector(bcs.u64()).serialize(values!).toBytes()) : tx.pure.vector("u8", values!.map(Number)), tx.object(request.id), tx.object("0x6")]);
+}
+
+// Each factor editor owns only its bit; retain every other current requirement.
+export function approvalRequirements(current: number[], selected: number[]) {
+  const values = validateSecurityRequirements(current);
+  validateSecurityRequirements(selected);
+  return values.map((v, i) => (v & ~4) | (selected[i] & 4));
+}
+export async function policyChangeTx(client: SuiGrpcClient, customer: string, requirements: number[]) {
+  const policy = await fetchOrganizationSecurity(client, customer);
+  if (!policy) throw Error("Migrate the organization first");
+  const values = validateSecurityRequirements(requirements);
+  // Match security_policy::update: action 4 plus every weakened action
+  // must satisfy its current factors, including independent approval and cancellation delay.
+  const needsQueue = policy.requirements.some((current, i) =>
+    (current & (4 | 8)) !== 0 && (i === 4 || (current & values[i]) !== current));
+  return needsQueue
+    ? proposePolicyTx(client, customer, values, BigInt(Date.now() + 604800000))
+    : buildSecurityPolicyTx(customer, values);
 }

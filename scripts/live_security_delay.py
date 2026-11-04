@@ -5,6 +5,7 @@ Public mode reuses bytecode-keyed package fixtures. --base additionally tests an
 existing v197 object upgraded on a disposable network-none local chain. Uncertain
 publication remains reserved in the private state and is never blindly retried.
 """
+from abort_site import abort_site
 import argparse
 import hashlib
 import json
@@ -26,8 +27,10 @@ def policy_failure_function(package):
         if 'fun p0(condition: bool)' not in source or 'if (!condition) abort EFactor' not in source:
             raise ValueError('unrecognized factored policy guard')
         return 'p0'
+    if 'assert!((authenticated & needed) == needed || (p.transaction == *ctx.digest() && ((p.attested | authenticated) & needed) == needed), EFactor);' in source:
+        return abort_site(package, 'security_policy', 'check', 1)
     if 'assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);' in source:
-        return 'check'
+        return abort_site(package, 'security_policy', 'check', 1)
     raise ValueError('unrecognized policy authority guard')
 
 
@@ -159,7 +162,7 @@ def run(args):
                         '--move-call', f'{base}::customer::prepare_security_action','@'+customer,'intent',str(expiry)+'u64',CLOCK)
             legacy_action = live.created(result,'::security_policy::Action')[0]
         action = queue('queue currently authorized recovery')
-        live.attack('execution before chain-clock maturity refused','--move-call',f'{head}::customer::set_security_secured','@'+customer,vector([0]*7),'@'+action,CLOCK,module='security_policy',function='begin_scoped_bytes',code=3,budget=20_000_000)
+        live.attack('execution before chain-clock maturity refused','--move-call',f'{head}::customer::set_security_secured','@'+customer,vector([0]*7),'@'+action,CLOCK,module='security_policy',function=abort_site(Path("contracts"), "security_policy", "begin_scoped_bytes", 3),code=3,budget=20_000_000)
         # Early failure rolls back and retains the original nonce/timestamp.
         assert live.object(action)['content']['customer_id'] == customer
         start = time.monotonic()
@@ -168,7 +171,7 @@ def run(args):
         while time.monotonic()-start < 61:
             time.sleep(1)
         if legacy_action:
-            live.attack('old queue still refused after maturity: missing trusted timestamp','--move-call',f'{head}::customer::set_security_secured','@'+customer,vector([0]*7),'@'+legacy_action,CLOCK,module='security_policy',function='begin_scoped_bytes',code=3,budget=20_000_000)
+            live.attack('old queue still refused after maturity: missing trusted timestamp','--move-call',f'{head}::customer::set_security_secured','@'+customer,vector([0]*7),'@'+legacy_action,CLOCK,module='security_policy',function=abort_site(Path("contracts"), "security_policy", "begin_scoped_bytes", 3),code=3,budget=20_000_000)
             tx('cancel legacy queue safely','--move-call',f'{head}::customer::cancel_security_action','@'+customer,'@'+legacy_action)
         result = tx('mature recovery disables delay under the old policy','--move-call',f'{head}::customer::set_security_secured','@'+customer,vector([0]*7),'@'+action,CLOCK)
         assert any(c['type']=='deleted' and c['objectId']==action for c in result['objectChanges'])

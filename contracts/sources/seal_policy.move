@@ -161,7 +161,8 @@ module sui_edge::seal_policy {
 
     /// Only a group's own admin may grant it: the group's admin decides its
     /// membership, and so which devices the grant covers.
-    public(package) fun grant_managed_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
+    /// Package helper: grant_managed_group.
+    public(package) fun k0(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
         p0(policy, cap);
         let group_id = device_group::group_id(group);
         add(&mut policy.groups, group_id);

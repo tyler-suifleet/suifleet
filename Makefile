@@ -134,6 +134,8 @@ dapp-typecheck:
 
 # Compare full reviewed ABI/layouts and generated clients with compiled contracts.
 check-interfaces:
+	$(RUN) python3 scripts/check_package_size.py
+	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_check_package_size.py'
 	$(RUN) node scripts/test_subscription_manifest.cjs
 	$(RUN) python3 scripts/check_contract_interfaces.py
 	$(RUN) python3 scripts/generate_interfaces.py --check
@@ -546,6 +548,10 @@ live-seal-delivery:
 
 .PHONY: test-testnet
 test-testnet:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_abort_site.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_security_delay.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_upgrade_security_localnet.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_passkey.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
@@ -837,6 +843,9 @@ test-customer-fleets:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_customer_entitlements_browser.cjs
 	$(RUN) node scripts/test_customer_fleets.cjs
 	$(RUN) node scripts/test_security_policy.cjs
+	$(RUN) node scripts/test_passkey_factor.cjs
+	$(RUN) node scripts/test_passkey_fixture.cjs
+	$(RUN) node scripts/test_passkey_payment.cjs
 	$(RUN) node scripts/test_security_delay.cjs
 	$(RUN) node scripts/test_second_person.cjs
 	$(RUN) node scripts/test_multisig_admin.cjs

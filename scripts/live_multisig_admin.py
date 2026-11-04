@@ -2,6 +2,7 @@
 """Effects-checked SF201 native quorum fixture; strictly dedicated testnet/localnet.
 Private ephemeral multisig keys live outside the checkout. No real wallet claims.
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -93,12 +94,12 @@ def run(args):
         on, off = 'vector[1u8,1u8,1u8,1u8,1u8,1u8,1u8]', 'vector[0u8,0u8,0u8,0u8,0u8,0u8,0u8]'
         quorum('activate optional organization policy', '--move-call', f'{package}::customer::set_security', f'@{c}', on)
         live.attack('ordinary administrator refused policy downgrade', '--move-call', f'{package}::customer::set_security', f'@{c}', off,
-                    module='security_policy', function='check', code=1, budget=5_000_000)
+                    module='security_policy', function=abort_site(Path('contracts'), 'security_policy', 'check', 1), code=1, budget=5_000_000)
         expiry = str(int(time.time()*1000)+3600000)
         r = quorum('quorum prepares exact recovery intent', '--move-call', f'{package}::multisig_admin::prepare_policy_change', f'@{c}', off, expiry, CLOCK)
         a = live.created(r, '::security_policy::Action')[0]
         live.attack('ordinary administrator cannot manufacture quorum approval', '--move-call', f'{package}::multisig_admin::approve', f'@{c}', f'@{a}', keys, weights, '2', CLOCK,
-                    module='multisig_admin', function='approve', code=1, budget=5_000_000)
+                    module='multisig_admin', function=abort_site(Path("contracts"), "multisig_admin", "approve", 1), code=1, budget=5_000_000)
         quorum('surviving quorum approves and executes recovery', '--move-call', f'{package}::multisig_admin::approve', f'@{c}', f'@{a}', keys, weights, '2', CLOCK,
                '--move-call', f'{package}::customer::set_security_secured', f'@{c}', off, f'@{a}', CLOCK)
         live.transaction('recovered ordinary administrator can update credential', '--move-call', f'{package}::customer::set_credential', f'@{c}', f'@{address}', 'true', 'false', budget=10_000_000)

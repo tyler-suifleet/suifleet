@@ -12,11 +12,11 @@ module sui_edge::security_delay_tests {
     fun setup(): (ts::Scenario, UID) {
         let mut s = ts::begin(@0xA);
         let mut uid = object::new(s.ctx());
-        policy::initialize(&mut uid);
-        policy::configure_delays(&mut uid, vector[1000,2000,3000,4000,5000,6000,7000], s.ctx());
-        policy::update(&mut uid, vector[8,8,8,8,8,8,8], s.ctx());
+        policy::k5(&mut uid);
+        policy::k0(&mut uid, vector[1000,2000,3000,4000,5000,6000,7000], s.ctx());
+        policy::k10(&mut uid, vector[8,8,8,8,8,8,8], s.ctx());
         let clock = clock::create_for_testing(s.ctx());
-        policy::prepare(&uid, policy::action_intent(uid.to_inner(), bcs::to_bytes(&arguments())), 10000, &clock, s.ctx());
+        policy::k15(&uid, policy::action_intent(uid.to_inner(), bcs::to_bytes(&arguments())), 10000, &clock, s.ctx());
         clock.destroy_for_testing();
         s.next_tx(@0xA);
         (s, uid)
@@ -24,12 +24,12 @@ module sui_edge::security_delay_tests {
     fun execute(elapsed: u64, class: u64, secondary: bool) {
         let (mut s, mut uid) = setup();
         let a = s.take_shared<Action>();
-        assert!(policy::queued_at(&a) == 0);
+        assert!(policy::k2(&a) == 0);
         let mut clock = clock::create_for_testing(s.ctx()); clock.increment_for_testing(elapsed);
-        policy::begin_scoped(&mut uid, a, arguments(), class, false, &clock, s.ctx());
-        policy::check(&uid, if (class == 7) 6 else class, s.ctx());
-        if (secondary) policy::check(&uid, 6, s.ctx());
-        policy::finish(&mut uid);
+        policy::k18(&mut uid, a, arguments(), class, false, &clock, s.ctx());
+        policy::k6(&uid, if (class == 7) 6 else class, s.ctx());
+        if (secondary) policy::k6(&uid, 6, s.ctx());
+        policy::k20(&mut uid);
         clock.destroy_for_testing(); policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
     #[test] fun exact_boundary_allowed() { execute(1000, 0, false); }
@@ -45,28 +45,28 @@ module sui_edge::security_delay_tests {
     fun expired_action_refused() { execute(10000, 0, false); }
     #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
     fun direct_policy_weakening_refused() {
-        let (mut s, mut uid) = setup(); policy::update(&mut uid, vector[0,0,0,0,0,0,0], s.ctx());
+        let (mut s, mut uid) = setup(); policy::k10(&mut uid, vector[0,0,0,0,0,0,0], s.ctx());
         policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
     #[test, expected_failure(abort_code = 3, location = sui_edge::security_policy)]
     fun configuration_below_bound_refused() {
-        let mut s = ts::begin(@0xA); let mut uid = object::new(s.ctx()); policy::initialize(&mut uid);
-        policy::configure_delays(&mut uid, vector[999,1000,1000,1000,1000,1000,1000], s.ctx());
+        let mut s = ts::begin(@0xA); let mut uid = object::new(s.ctx()); policy::k5(&mut uid);
+        policy::k0(&mut uid, vector[999,1000,1000,1000,1000,1000,1000], s.ctx());
         policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
     #[test, expected_failure(abort_code = 3, location = sui_edge::security_policy)]
     fun configuration_above_bound_refused() {
-        let mut s = ts::begin(@0xA); let mut uid = object::new(s.ctx()); policy::initialize(&mut uid);
-        policy::configure_delays(&mut uid, vector[518400001,1000,1000,1000,1000,1000,1000], s.ctx());
+        let mut s = ts::begin(@0xA); let mut uid = object::new(s.ctx()); policy::k5(&mut uid);
+        policy::k0(&mut uid, vector[518400001,1000,1000,1000,1000,1000,1000], s.ctx());
         policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
     #[test] fun mature_recovery_requires_current_delay() {
         let (mut s, mut uid) = setup(); let a = s.take_shared<Action>();
         let mut clock = clock::create_for_testing(s.ctx()); clock.increment_for_testing(7000);
-        policy::begin(&mut uid, a, arguments(), &clock, s.ctx());
-        policy::update(&mut uid, vector[0,0,0,0,0,0,0], s.ctx());
-        policy::finish(&mut uid);
-        assert!(policy::requirements(&policy::read(&uid)) == vector[0,0,0,0,0,0,0]);
+        policy::k17(&mut uid, a, arguments(), &clock, s.ctx());
+        policy::k10(&mut uid, vector[0,0,0,0,0,0,0], s.ctx());
+        policy::k20(&mut uid);
+        assert!(policy::requirements(&policy::k23(&uid)) == vector[0,0,0,0,0,0,0]);
         clock.destroy_for_testing(); policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
     fun customer_setup(): ts::Scenario {
@@ -97,7 +97,7 @@ module sui_edge::security_delay_tests {
     #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
     fun delay_reconfiguration_uses_current_union() {
         let (mut s, mut uid) = setup();
-        policy::configure_delays(&mut uid, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
+        policy::k0(&mut uid, vector[1000,1000,1000,1000,1000,1000,1000], s.ctx());
         policy::remove_for_testing(&mut uid); uid.delete(); s.end();
     }
 

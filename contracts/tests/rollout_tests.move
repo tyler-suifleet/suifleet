@@ -22,11 +22,11 @@ module sui_edge::rollout_tests {
         clock::set_for_testing(&mut c, 1); let mut d = setup(&mut s, &c, 4, 4, 1, 10000);
         let a = id(@0x1);
         dm::advance_rollout(&mut d, vector[a], vector[], vector[], &c, ts::ctx(&mut s));
-        let snapshot = dm::security_snapshot(&d);
+        let snapshot = dm::k0(&d);
         dm::rollout_receipt_for_testing(&mut d, a, 1);
-        assert!(snapshot == dm::security_snapshot(&d));
+        assert!(snapshot == dm::k0(&d));
         dm::control_rollout(&mut d, 1, vector[], string::utf8(b"pause"), &c, ts::ctx(&mut s));
-        assert!(snapshot != dm::security_snapshot(&d));
+        assert!(snapshot != dm::k0(&d));
         dm::delete_rollout(d, ts::ctx(&mut s)); clock::destroy_for_testing(c); ts::end(s);
     }
     #[test]
