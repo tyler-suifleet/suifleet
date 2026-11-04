@@ -9,6 +9,7 @@ import argparse
 import base64
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from live_common import Live, plain, ABORT
@@ -107,12 +108,57 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
     tx('enable native passkey protection',operation='policy',mask=2,**common)
     tx('wallet plus passkey allows action',operation='rename',fleet=f['fleet'],name='Native co-signed action',sponsor=0,**common)
     tx('wallet alone refused on chain',operation='rename',fleet=f['fleet'],name='must fail',expect='failure',**common)
-    tx('old package cannot bypass protection',operation='rename',fleet=f['fleet'],name='must fail old',expect='failure',sponsor=0,**{**common,'package':f['base']})
+    # A co-signed call to an unchanged base/head is authorized, not a bypass.
+    # Only a distinct old package must refuse even with a valid factor.
+    distinct_base = dm.object_id(f['base']) != dm.object_id(f['head'])
+    tx('old package cannot bypass protection' if distinct_base else 'unchanged base wallet alone refused',
+       operation='rename',fleet=f['fleet'],name='must fail old',expect='failure',
+       **({'sponsor': 0} if distinct_base else {}), **{**common,'package':f['base']})
+    live.evidence['native_old_package_probe'] = 'distinct-package' if distinct_base else 'unchanged-root-wallet-only'
     tx('backup passkey recovers lost primary',operation='remove',administrator=live.operator,key=0,sponsor=1,**common)
     tx('removed primary refused',operation='rename',fleet=f['fleet'],name='must fail removed',sponsor=0,expect='failure',**common)
     tx('surviving backup allows action',operation='rename',fleet=f['fleet'],name='Recovered with backup',sponsor=1,**common)
     tx('backup authorizes disable',operation='policy',mask=0,sponsor=1,**common)
     tx('wallet removes final key after disable',operation='remove',administrator=live.operator,key=1,**common)
+
+def verify_cached_fixture(live, cached, source):
+    """Recheck authenticated package-gate evidence before any passkey mutation."""
+    head, base = (dm.object_id(cached[k]) for k in ('head_package', 'base_package'))
+    proof = cached.get('provenance') or {}
+    built = proof.get('verified_transactions') or {}
+    original = built.get('base') or {}
+    upgraded = built.get('upgrade')
+    current = upgraded if head != base else original
+    if (proof.get('build_cli') != tc.BUILD['version']
+            or original.get('kind') != 'publish'
+            or not re.fullmatch('[0-9a-f]{64}', str(original.get('digest', '')))
+            or not isinstance(current, dict)
+            or current.get('kind') != ('upgrade' if head != base else 'publish')
+            or 'bytecode-v1:' + str(current.get('digest')) != source
+            or (head == base and upgraded is not None)):
+        raise RuntimeError('native passkey fixture lacks verified source/publication provenance')
+    cap = live.object(cached['upgrade_cap'])
+    assert dm.object_id(cap['owner']['AddressOwner']) == dm.object_id(live.operator)
+    assert dm.object_id(cap['content']['package']) == head
+    expected_version = 1 if head == base else 2
+    assert str(cap['content']['version']) == str(expected_version)
+    facts = dm.chain_facts(live.rpc_url, base, head)
+    assert facts['chain_identifier'] == live.chain
+    base_fact, head_fact = (facts['objects'][k] for k in (base, head))
+    assert str(base_fact['version']) == '1'
+    assert str(head_fact['version']) == str(expected_version)
+    base_origins, origins = dm.origins(base_fact), dm.origins(head_fact)
+    # Retained types keep their introduction origin; an additive Enrollment
+    # introduced by the upgrade has the head origin instead.
+    assert all(origins.get(name) == origin for name, origin in base_origins.items())
+    assert base_origins['customer::Customer'] == base
+    if 'passkey_factor::Enrollment' in base_origins:
+        assert base_origins['passkey_factor::Enrollment'] == base
+    assert origins['customer::Customer'] == base
+    assert origins['passkey_factor::Enrollment'] == base_origins.get('passkey_factor::Enrollment', head)
+    assert 'Shared' in live.object(cached['registry'])['owner']
+    return origins
+
 
 def cached_acceptance(live, package_state, private=None):
     """Use the package gate's exact source fixture and existing security ledger.
@@ -123,18 +169,12 @@ def cached_acceptance(live, package_state, private=None):
     from live_wallet_gate import head_fixture
     from live_package_upgrade import load_state, save_state
     cache = load_state(package_state, live.chain, live.operator)
-    cached = head_fixture(cache, contracts_digest(Path('contracts')))
+    source = contracts_digest(Path('contracts'))
+    cached = head_fixture(cache, source)
     if not cached:
         raise RuntimeError('native passkey acceptance requires the exact cached package gate fixture')
     head, base = cached['head_package'], cached['base_package']
-    cap = live.object(cached['upgrade_cap'])
-    assert dm.object_id(cap['owner']['AddressOwner']) == live.operator
-    assert dm.object_id(cap['content']['package']) == head
-    assert int(cap['content']['version']) == 2
-    facts = dm.chain_facts(live.rpc_url, head)
-    origins = dm.origins(facts['objects'][head])
-    assert origins['passkey_factor::Enrollment'] == head
-    assert 'Shared' in live.object(cached['registry'])['owner']
+    origins = verify_cached_fixture(live, cached, source)
     private = Path(private) if private else live.wallet.parent / 'live-passkey-state.json'
     if private.resolve().is_relative_to(Path.cwd().resolve()):
         raise RuntimeError('private signing state must stay outside the checkout')
@@ -213,7 +253,10 @@ def run(a):
         source_key = fixture_key(contracts_digest(Path(a.base)), contracts_digest(Path('contracts')))
         gate_state = state_path.with_name('package-gate.json')
         save_state(gate_state, dict(chain=live.chain, operator=live.operator, fixtures={source_key:
-            dict(base_package=f['base'], head_package=f['head'], upgrade_cap=f['cap'], registry=f['registry'])}))
+            dict(base_package=f['base'], head_package=f['head'], upgrade_cap=f['cap'], registry=f['registry'],
+                 provenance=dict(build_cli=tc.BUILD['version'], verified_transactions=dict(
+                     base=dict(kind='publish', digest=contracts_digest(Path(a.base)).removeprefix('bytecode-v1:')),
+                     upgrade=dict(kind='upgrade', digest=contracts_digest(Path('contracts')).removeprefix('bytecode-v1:')))))}))
         identity = hashlib.sha256(json.dumps([live.chain, live.operator, f['base'], f['head']]).encode()).hexdigest()
         state['fixtures'][identity] = f; save()
         cached_acceptance(live, gate_state, private=state_path)
