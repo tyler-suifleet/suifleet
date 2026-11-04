@@ -26,6 +26,7 @@ Requires the machine-session lock (SUIFLEET_TESTNET_LOCK_TOKEN), the pinned
 Walrus SDK installed privately for the device side
 (scripts/live_walrus_upload.mjs) and dapp/node_modules for the owner side.
 """
+from abort_site import abort_site
 import argparse
 import base64
 import hashlib
@@ -308,7 +309,7 @@ def run(args):
                    f"(net gas {net_gas(r)} MIST)")
         draw_args = lambda amount: ("--move-call", call("fleet_budget", "draw_gas"), f"@{budget}", f"@{account}", f"@{registry}", f"@{device_cap}",
                                     f"{amount}u64", CLOCK)
-        live.attack("draw above the float cap", *draw_args(FLOAT + 1), module="fleet_budget", function="draw_gas", code=8, sender=device, budget=10_000_000)
+        live.attack("draw above the float cap", *draw_args(FLOAT + 1), module="fleet_budget", function=abort_site(Path("contracts"), "fleet_budget", "draw_gas", 8), code=8, sender=device, budget=10_000_000)
         live.transaction("owner revokes the device", "--move-call", call("device_registry", "revoke_device"), f"@{registry}", f"@{owner_cap}", budget=10_000_000)
         live.attack("draw after revocation", *draw_args(1), module="device_cap", function="assert_active", code=2, sender=device, budget=10_000_000)
         live.transaction("owner reinstates the device", "--move-call", call("device_registry", "reinstate_device"), f"@{registry}", f"@{owner_cap}", budget=10_000_000)

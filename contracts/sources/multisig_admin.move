@@ -25,23 +25,23 @@ module sui_edge::multisig_admin {
     /// derivation is flag 3 || threshold LE u16 || (flagged key || weight)*.
     /// Native transaction authentication verifies the threshold before Move runs.
     public fun administrator(keys: &vector<vector<u8>>, weights: &vector<u8>, threshold: u16): address {
-        assert!(keys.length() > (SMALL_0 as u64) && keys.length() <= (SMALL_10 as u64) && keys.length() == weights.length(), EConfiguration);
+        g0(keys.length() > (SMALL_0 as u64)); g0(keys.length() <= (SMALL_10 as u64)); g0(keys.length() == weights.length());
         let mut bytes = vector[3];
         bytes.append(bcs::to_bytes(&threshold));
         let mut total = (SMALL_0 as u64);
         let mut i = (SMALL_0 as u64);
         while (i < keys.length()) {
             let key = &keys[i];
-            assert!(!key.is_empty(), EConfiguration);
+            g0(!key.is_empty());
             let flag = key[(SMALL_0 as u64)];
-            assert!((flag == 0 && key.length() == (SMALL_33 as u64)) || ((flag == 1 || flag == 2 || flag == 6) && key.length() == (SMALL_34 as u64)), EConfiguration);
+            g0((flag == 0 && key.length() == (SMALL_33 as u64)) || ((flag == 1 || flag == 2 || flag == 6) && key.length() == (SMALL_34 as u64)));
             let mut j = (SMALL_0 as u64);
-            while (j < i) { assert!(keys[j] != *key, EConfiguration); j = j + (SMALL_1 as u64); };
-            assert!(weights[i] > 0, EConfiguration);
+            while (j < i) { g0(keys[j] != *key); j = j + (SMALL_1 as u64); };
+            g0(weights[i] > 0);
             total = total + (weights[i] as u64);
             bytes.append(*key); bytes.push_back(weights[i]); i = i + (SMALL_1 as u64);
         };
-        assert!(threshold > 0 && (threshold as u64) <= total, EConfiguration);
+        g0(threshold > 0); g0((threshold as u64) <= total);
         sui::address::from_bytes(hash::blake2b256(&bytes))
     }
 
@@ -51,7 +51,7 @@ module sui_edge::multisig_admin {
     public fun enroll(customer: &mut Customer, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, ctx: &mut TxContext) {
         customer::assert_security_administrator(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
-        assert!(ctx.sender() == sender, EAuthority);
+        g1(ctx.sender() == sender);
         customer::configure_security_factor(customer, 1, p0(sender, keys, weights, threshold), ctx);
     }
 
@@ -73,11 +73,9 @@ module sui_edge::multisig_admin {
     public fun approve(customer: &Customer, action: &mut Action, keys: vector<vector<u8>>, weights: vector<u8>, threshold: u16, clock: &Clock, ctx: &mut TxContext) {
         customer::assert_security_administrator(customer, ctx);
         let sender = administrator(&keys, &weights, threshold);
-        assert!(ctx.sender() == sender, EAuthority);
-        assert!(customer::security_factor_configuration(customer, 1) == p0(sender, keys, weights, threshold), EAuthority);
-        assert!(security_policy::customer_id(action) == object::id(customer)
-            && security_policy::action_generation(action) == security_policy::generation(&customer::security(customer))
-            && clock.timestamp_ms() < security_policy::expires_ms(action), EAction);
+        g1(ctx.sender() == sender);
+        g1(customer::security_factor_configuration(customer, 1) == p0(sender, keys, weights, threshold));
+        g2(security_policy::customer_id(action) == object::id(customer)); g2(security_policy::action_generation(action) == security_policy::generation(&customer::security(customer))); g2(clock.timestamp_ms() < security_policy::expires_ms(action));
         security_policy::attest(action, 1);
     }
     /// binding: compact private symbol to bound published bytecode storage.
@@ -86,4 +84,11 @@ module sui_edge::multisig_admin {
         bytes.append(bcs::to_bytes(&keys)); bytes.append(bcs::to_bytes(&weights));
         bytes.append(bcs::to_bytes(&threshold)); bytes
     }
+
+    /// Shared EConfiguration guard; preserve evaluation order and abort code.
+    fun g0(condition: bool) { if (!condition) abort EConfiguration }
+    /// Shared EAuthority guard; preserve evaluation order and abort code.
+    fun g1(condition: bool) { if (!condition) abort EAuthority }
+    /// Shared EAction guard; preserve evaluation order and abort code.
+    fun g2(condition: bool) { if (!condition) abort EAction }
 }

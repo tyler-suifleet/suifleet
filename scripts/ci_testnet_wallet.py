@@ -37,7 +37,8 @@ SUITE_PATHS = ('contracts/', 'dapp/', 'interfaces/', 'suifleet-edge/', 'scripts/
                'scripts/testnet_fixture_cache.py', 'scripts/deployment_manifest.py', 'scripts/testnet_budget.py',
                'scripts/sui_toolchain.py', 'scripts/sui_tx_inspect.cjs', 'Dockerfile')
 # Funded test keys a suite keeps beside the wallet until their sweep succeeds.
-PENDING_KEYS = ('live-browser-key.hex', 'live-security-device.key')
+PENDING_KEYS = ('live-browser-key.hex', 'live-security-device.key',
+                'live-passkey-state.json', 'live-passkey-state.keys.json')
 
 
 def suites_relevant(base, git=subprocess.run):

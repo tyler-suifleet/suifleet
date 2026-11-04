@@ -1,5 +1,6 @@
 /// Immutable authenticated component recipes; manifest order defines precedence.
 module sui_edge::component_catalog {
+    // Include version/limit constants in compact loads; public u64 values stay unchanged.
     // Widen named narrow literals at use sites to avoid repeated LdU64.
     // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
     // are unchanged; abort constants retain their original u64 declarations.
@@ -63,13 +64,13 @@ module sui_edge::component_catalog {
         platform_os: vector<String>, platform_arch: vector<String>, recipe_blob_ids: vector<String>,
         recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, ctx: &mut TxContext,
     ) {
-        assert!(ctx.sender() == catalog.publisher, EPublisher);
+        g0(ctx.sender() == catalog.publisher);
         publish_as(catalog, component_name, version, platform_os, platform_arch, recipe_blob_ids,
             recipe_sha256s, artifact_sha256s, clock, ctx.sender(), ctx);
     }
     /// Custody is an unforgeable customer object address, never a wallet label.
     public(package) fun adopt(catalog: &mut ComponentCatalog, authority: address, ctx: &TxContext) {
-        assert!(catalog.publisher == ctx.sender(), EPublisher);
+        g0(catalog.publisher == ctx.sender());
         catalog.publisher = authority;
     }
     public(package) fun publish_as(
@@ -77,7 +78,7 @@ module sui_edge::component_catalog {
         platform_os: vector<String>, platform_arch: vector<String>, recipe_blob_ids: vector<String>,
         recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, authority: address, ctx: &mut TxContext,
     ) {
-        assert!(catalog.publisher == authority, EPublisher);
+        g0(catalog.publisher == authority);
         validate_name(&component_name);
         validate_version(&version);
         let n = platform_os.length();
@@ -169,8 +170,8 @@ module sui_edge::component_catalog {
         b.do_ref!(|c| p5(p0(*c) || p1(*c) || *c == 45 || *c == 95));
     }
     public fun validate_name(s: &String) {
-        let b = s.as_bytes(); assert!(b.length() > (SMALL_0 as u64) && b.length() <= (SMALL_128 as u64), EIdentity);
-        b.do_ref!(|c| assert!(p0(*c) || p1(*c) || *c == 45 || *c == 95 || *c == 46, EIdentity));
+        let b = s.as_bytes(); g1(b.length() > (SMALL_0 as u64)); g1(b.length() <= (SMALL_128 as u64));
+        b.do_ref!(|c| g1(p0(*c) || p1(*c) || *c == 45 || *c == 95 || *c == 46));
     }
     public fun validate_hash(s: &String) {
         let b = s.as_bytes(); p5(b.length() == (SMALL_64 as u64));
@@ -229,4 +230,9 @@ module sui_edge::component_catalog {
     fun p6(condition: bool) {
         if (!condition) abort EVersion
     }
+
+    /// Shared EPublisher guard; preserve evaluation order and abort code.
+    fun g0(condition: bool) { if (!condition) abort EPublisher }
+    /// Shared EIdentity guard; preserve evaluation order and abort code.
+    fun g1(condition: bool) { if (!condition) abort EIdentity }
 }

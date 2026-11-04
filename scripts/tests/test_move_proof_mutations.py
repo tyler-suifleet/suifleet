@@ -15,7 +15,8 @@ SPEC.loader.exec_module(PROVER)
 class AuthorityMutationTests(unittest.TestCase):
     def test_authority_controls_remove_only_the_selected_check(self):
         for name in ("group-authority", "deployment-authority", "enrollment-quota",
-                     "recipe-length", "receipts-future", "receipts-customer-version", "binding-recipe",
+                     "recipe-length", "receipts-future", "receipts-customer-version",
+                     "receipts-no-upgrade", "receipts-clear", "binding-recipe",
                      "binding-recipe-value"):
             with self.subTest(mutation=name), tempfile.TemporaryDirectory() as directory:
                 package = Path(directory)

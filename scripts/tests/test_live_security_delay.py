@@ -17,7 +17,10 @@ class PolicyAbortLocationTests(unittest.TestCase):
             return policy_failure_function(package)
 
     def test_current_release_source(self):
-        self.assertEqual(policy_failure_function(Path(__file__).resolve().parents[2] / 'contracts'), 'p0')
+        self.assertEqual(policy_failure_function(Path(__file__).resolve().parents[2] / 'contracts'), 'check')
+
+    def test_older_factored_guard(self):
+        self.assertEqual(self.select('p0(p.transaction == *ctx.digest()); p0((p.attested & needed) == needed); fun p0(condition: bool) { if (!condition) abort EFactor }'), 'p0')
 
     def test_older_inline_guard(self):
         self.assertEqual(self.select('assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);'), 'check')
