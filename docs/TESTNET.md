@@ -1344,6 +1344,119 @@ Protected public-testnet/exact-head CI and fresh independent review remain
 pending and unpolled after push. Physical/mainnet/manual-wallet/provider
 acceptance stays unrun in SF-031/#32 and SF-087/#159.
 
+
+**SF-182 CI lane 0 funding repair (2026-11-04, run 41776076685).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41776076685)
+submitted no test transactions and used zero allowance. Its one successful faucet
+request credited 1,000,000,000 MIST, increasing the balance from 2,623,257,901 to
+3,623,257,901 MIST. This remained below the unchanged 4,050,000,000 MIST
+requirement: selected suite ceilings total 3,650,000,000 MIST, plus the preserved
+400,000,000 MIST historical reservation. The downloaded package-upgrade evidence
+confirms chain `4c78adac`, protocol 140 and the pinned 1.83.0 transaction CLI.
+This was insufficient funding, not an application transaction failure.
+
+A separate one-request faucet-only maintenance operation was coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6623259422).
+The worker independently verified chain `4c78adac`, the lane-0 address against
+`scripts/testnet_pool.py`, and CLI SHA-256
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+A public-only temporary wallet configuration with an empty keystore was used;
+reads and the faucet specified the CI recipient explicitly. No CI signing secret
+was accessed. Before maintenance, the read-only balance was 3,613,248,285 MIST;
+intervening wallet activity is not attributed to this worker.
+
+With `network:suifleet-testnet` held and asserted, one request returned success:
+`5Z6wNd5ANJSubZ53QjsN1zWAnvAigBb4xuyqQbHXZuK9`. Independent transaction
+readback confirmed successful effects at checkpoint `402656231`, a
+1,000,000,000 MIST credit to the pinned CI address, and 1,000,000 MIST net gas
+paid by the faucet. The subsequent balance was 4,613,248,285 MIST, entirely in
+address balance and above preflight. The lease was released immediately after
+readback. No package/object transaction, fixture replay, reservation removal,
+spend-ceiling change or additional runner retry was performed.
+
+Verification on the repair worktree:
+`PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile test_testnet_budget test_testnet`
+passed 105 tests, including bounded insufficient-faucet and non-replenishing
+allowance regressions.
+`python3 -m unittest discover -s scripts -p test_live_subscription_checkout.py`
+passed five tests. This evidence repairs funding only. Hosted CI was not rerun
+or polled; the pushed revision still requires coordinator exact-head/base checks
+and fresh independent review. SF-182's automated connected-wallet
+`preparePrepay`/`verifyPlan` walkthrough remains outstanding, as recorded in
+`docs/validation/sf182-checkout-eligibility.json`; deposit-only evidence does not
+satisfy it. Manual wallet, physical, mainnet and production-provider acceptance
+remains unrun in SF-031/#32 and SF-087/#159.
+
+**SF-182 CI lane 1 funding repair (2026-11-04, run 41783519821).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41783519821)
+used lane 1 (`0x0afccf110391cafb2844a986d20d6633436e2586c4e05e7c08fbc510dbfdcaec`),
+not lane 0 funded above. Its downloaded package-upgrade artifact records zero
+transactions, zero allowance used and no held reservation. The single in-run
+faucet succeeded but increased 2,304,218,456 MIST to only 3,304,218,456 MIST,
+below the unchanged 3,650,000,000 MIST selected-suite requirement. This reproduces
+the funding preflight refusal without replaying any transaction.
+
+A separate single faucet-only maintenance request was coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6624275600).
+Before the request, independent reads confirmed chain `4c78adac` and the same
+3,304,218,456 MIST balance (3,225,859,566 address balance plus 78,358,890 in
+coins). The lane recipient was checked against `scripts/testnet_pool.py`, and
+the 1.83.0 network CLI checksum matched
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+The worker used a public-only temporary config with an empty keystore and no CI
+signing secret. With `network:suifleet-testnet` acquired and asserted, exactly
+one request succeeded:
+`7hcYYnAzkicEpgXkpyPGxJ7BZKbYy5wFY5dAE7VjFVXA`.
+Independent transaction readback confirmed successful effects at checkpoint
+`402675028`, a 1,000,000,000 MIST credit to lane 1 and 1,000,000 MIST net gas
+paid by the faucet. The subsequent total was 4,304,218,456 MIST, above preflight.
+The lease was released promptly. No package/object transaction, fixture replay,
+reservation removal, spending-limit change or extra runner retry occurred.
+Funding remains a point-in-time observation that other CI runs can consume.
+
+Local checks passed:
+`PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile test_testnet_budget test_testnet`
+(105 tests),
+`python3 -m unittest discover -s scripts -p test_live_subscription_checkout.py`
+(five tests), and `git diff --check`. This is funding repair evidence only;
+hosted CI was neither rerun nor polled, and fresh independent review and exact
+head/base checks remain required. The automated `preparePrepay`/`verifyPlan`
+walkthrough remains outstanding; the retained renewal fixture is ineligible
+until `2026-12-04T01:30:04.331Z`. No notice/clock bypass was attempted. Manual
+wallet, physical, mainnet and production-provider acceptance remains unrun in
+[SF-031/#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[SF-087/#159](https://github.com/tyler-suifleet/suifleet/issues/159).
+
+**SF-182 CI lane 2 funding repair (2026-11-04, run 41808844424).**
+The completed [exact-source run](https://github.com/tyler-suifleet/suifleet/actions/runs/41808844424)
+at source `491a470aec5e290307ddb10972f5a5c2bdb90049` failed funding
+preflight after its single faucet: 3,299,758,700 MIST versus the unchanged
+3,650,000,000 MIST requirement. Its authenticated head-named artifact records
+zero submitted test transactions, zero allowance use and zero held reservations.
+
+Independent readback confirmed the same current balance, chain `4c78adac`,
+pinned dedicated lane-2 recipient and checksum-pinned 1.83.0 CLI. One separate
+faucet-only maintenance request under the asserted global lease succeeded:
+`EtgiuscEEoh3wa1ELwc5WhQcrbENvF66SUX7AgoaXJwo`, checkpoint `402730451`.
+Effects independently confirm a 1,000,000,000 MIST recipient credit and
+1,000,000 MIST gas paid by the faucet. Balance became 4,299,758,700 MIST.
+The lease was released promptly; no CI rerun, fixture replay, reservation
+clearing, ceiling change or signing-secret access occurred. Funding is a
+point-in-time result that other CI runs may consume.
+
+[Recovery evidence](validation/sf182-lane2-recovery.json) includes the exact
+artifact hash, effects, public recipient, fixture audit and test results.
+Read-only enumeration of 43 dedicated-agent-owned UpgradeCap packages found
+only the two recorded SF-181 packages exposing subscription; both registry
+customers are already bound. No eligible unbound fixture was found. The
+current fixture retains its December 4 notice and 5,952,761 / 100,000,000 MIST
+checkout ledger. Automated frontend open/renew acceptance remains unrun.
+Spending regressions passed 105 tests, checkout refusal tests five, and stale-base
+routing tests nine. The pushed contained infrastructure repair still requires
+sole-coordinator integration and merged-only activation: the existing mixed
+frontend PR cannot be relabeled as an infrastructure-only integration. No
+working-tree installation, merge, successful CI or deferred acceptance is claimed.
+
 ### Cached native passkey fixtures (SF-240)
 
 Native passkey acceptance reuses the authenticated package-gate fixture matching
