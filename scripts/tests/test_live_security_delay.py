@@ -17,13 +17,13 @@ class PolicyAbortLocationTests(unittest.TestCase):
             return policy_failure_function(package)
 
     def test_current_release_source(self):
-        self.assertEqual(policy_failure_function(Path(__file__).resolve().parents[2] / 'contracts'), 'check')
+        self.assertEqual(policy_failure_function(Path(__file__).resolve().parents[2] / 'contracts'), 'k6')
 
     def test_older_factored_guard(self):
         self.assertEqual(self.select('p0(p.transaction == *ctx.digest()); p0((p.attested & needed) == needed); fun p0(condition: bool) { if (!condition) abort EFactor }'), 'p0')
 
     def test_older_inline_guard(self):
-        self.assertEqual(self.select('assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);'), 'check')
+        self.assertEqual(self.select('const EFactor: u64 = 1; public(package) fun check() { assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor); }'), 'check')
 
     def test_missing_or_changed_factor_guard_is_rejected(self):
         for source in ['', 'assert!(true, EFactor);',

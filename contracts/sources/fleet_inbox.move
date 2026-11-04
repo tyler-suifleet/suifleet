@@ -19,11 +19,9 @@
 /// The inbox also lists the groups the device was added to (`groups`), so a
 /// device can find its groups after the node has pruned the events.
 module sui_edge::fleet_inbox {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
+    // Named u64 constants share the bytecode constant pool without changing types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
 
     use std::string::String;
     use sui::clock::Clock;
@@ -37,19 +35,23 @@ module sui_edge::fleet_inbox {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const INBOX_VERSION: u8 = 1;
+    const INBOX_VERSION: u64 = 1;
     /// Components remembered per head; the oldest entry is evicted beyond it.
-    const MAX_COMPONENTS: u8 = 64;
+    const MAX_COMPONENTS: u64 = 64;
     /// Groups listed per inbox.
-    const MAX_GROUPS: u8 = 64;
+    const MAX_GROUPS: u64 = 64;
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const ENotCreator: u64 = 0;
+    const BNotCreator: u8 = 0;
     const ENotAdmin: u64 = 1;
     const ENotTargeted: u64 = 2;
+    const BNotTargeted: u8 = 2;
     const ENotOperator: u64 = 3;
+    const BNotOperator: u8 = 3;
     const EWrongInbox: u64 = 4;
+    const BWrongInbox: u8 = 4;
     const ETooManyGroups: u64 = 5;
     const ENotMember: u64 = 6;
 
@@ -112,7 +114,7 @@ module sui_edge::fleet_inbox {
         let device_id = device_registry::owner_cap_device_id(cap);
         p1(registry, cap, device_id);
         let id = derived_object::claim(device_registry::uid_mut(registry), InboxKey { device_id });
-        let inbox = DeviceInbox { id, device_id, version: (INBOX_VERSION as u64), head: p0(), groups: vector[] };
+        let inbox = DeviceInbox { id, device_id, version: INBOX_VERSION, head: p0(), groups: vector[] };
         event::emit(InboxCreated { inbox_id: object::id(&inbox), device_id });
         inbox
     }
@@ -136,10 +138,10 @@ module sui_edge::fleet_inbox {
     /// the group's admin, as devices require.
     public fun announce_group(group: &mut DeviceGroup, deployment: &DeploymentRecord, clock: &Clock, ctx: &mut TxContext) {
         let creator = deployment_manager::creator(deployment);
-        assert!(ctx.sender() == creator, ENotCreator);
+        q(ctx.sender() == creator, BNotCreator);
         assert!(device_group::admin(group) == creator, ENotAdmin);
         let group_id = device_group::group_id(group);
-        assert!(deployment_manager::target_groups(deployment).contains(&group_id), ENotTargeted);
+        q(deployment_manager::target_groups(deployment).contains(&group_id), BNotTargeted);
         let uid = device_group::uid_mut(group);
         if (!df::exists(uid, HeadKey {})) {
             df::add(uid, HeadKey {}, p0());
@@ -158,11 +160,11 @@ module sui_edge::fleet_inbox {
         clock: &Clock,
         ctx: &mut TxContext,
     ) {
-        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+        q(ctx.sender() == deployment_manager::creator(deployment), BNotCreator);
         let device_id = inbox.device_id;
-        p6(device_registry::owner_cap_device_id(cap) == device_id);
+        q(device_registry::owner_cap_device_id(cap) == device_id, BWrongInbox);
         p1(registry, cap, device_id);
-        assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);
+        q(deployment_manager::target_devices(deployment).contains(&device_id), BNotTargeted);
         let target = object::id(inbox);
         p2(&mut inbox.head, target, deployment, clock);
     }
@@ -171,7 +173,7 @@ module sui_edge::fleet_inbox {
 
     /// `device_group::add_device`, also listing the group in the device's inbox.
     public fun add_member(group: &mut DeviceGroup, inbox: &mut DeviceInbox, device: &Device, ctx: &mut TxContext) {
-        p6(device_registry::device_id(device) == inbox.device_id);
+        q(device_registry::device_id(device) == inbox.device_id, BWrongInbox);
         device_group::add_device(group, device, ctx);
         p3(inbox, device_group::group_id(group));
     }
@@ -192,7 +194,7 @@ module sui_edge::fleet_inbox {
 
     /// Unlist a group (for example a deleted one). The device's operator only.
     public fun forget_group(inbox: &mut DeviceInbox, registry: &DeviceRegistry, cap: &DeviceOwnerCap, group_id: ID) {
-        p6(device_registry::owner_cap_device_id(cap) == inbox.device_id);
+        q(device_registry::owner_cap_device_id(cap) == inbox.device_id, BWrongInbox);
         p1(registry, cap, inbox.device_id);
         p4(inbox, group_id);
     }
@@ -217,7 +219,7 @@ module sui_edge::fleet_inbox {
 
     /// empty_head: compact private symbol to bound published bytecode storage.
     fun p0(): Head {
-        Head { seq: (SMALL_0 as u64), latest: option::none(), next_start_ms: (SMALL_0 as u64), components: vec_map::empty() }
+        Head { seq: SMALL_0, latest: option::none(), next_start_ms: SMALL_0, components: vec_map::empty() }
     }
 
     /// The cap must be the one the registry's identity names and the device
@@ -225,23 +227,23 @@ module sui_edge::fleet_inbox {
     /// assert_operator: compact private symbol to bound published bytecode storage.
     fun p1(registry: &DeviceRegistry, cap: &DeviceOwnerCap, device_id: ID) {
         let identity = device_registry::identity(registry, device_id);
-        p5(identity.is_some());
+        q(identity.is_some(), BNotOperator);
         let identity = identity.destroy_some();
-        p5(device_registry::is_custodied(registry, device_id));
-        p5(device_registry::identity_owner_cap(&identity) == object::id(cap));
+        q(device_registry::is_custodied(registry, device_id), BNotOperator);
+        q(device_registry::identity_owner_cap(&identity) == object::id(cap), BNotOperator);
     }
 
     /// bump: compact private symbol to bound published bytecode storage.
     fun p2(head: &mut Head, target: ID, deployment: &DeploymentRecord, clock: &Clock) {
         let deployment_id = object::id(deployment);
-        head.seq = head.seq + (SMALL_1 as u64);
+        head.seq = head.seq + SMALL_1;
         head.latest = option::some(deployment_id);
         let name = *deployment_manager::component_name(deployment);
         if (head.components.contains(&name)) {
             *head.components.get_mut(&name) = deployment_id;
         } else {
-            if (head.components.length() >= (MAX_COMPONENTS as u64)) {
-                let (_, _) = head.components.remove_entry_by_idx((SMALL_0 as u64));
+            if (head.components.length() >= MAX_COMPONENTS) {
+                let (_, _) = head.components.remove_entry_by_idx(SMALL_0);
             };
             head.components.insert(name, deployment_id);
         };
@@ -256,7 +258,7 @@ module sui_edge::fleet_inbox {
     /// list_group: compact private symbol to bound published bytecode storage.
     fun p3(inbox: &mut DeviceInbox, group_id: ID) {
         if (!inbox.groups.contains(&group_id)) {
-            assert!(inbox.groups.length() < (MAX_GROUPS as u64), ETooManyGroups);
+            assert!(inbox.groups.length() < MAX_GROUPS, ETooManyGroups);
             inbox.groups.push_back(group_id);
         };
     }
@@ -267,12 +269,15 @@ module sui_edge::fleet_inbox {
         if (found) { inbox.groups.remove(i); };
     }
     // Share each named abort branch without changing its module or error code.
-    /// check_NotOperator: compact private symbol to bound published bytecode storage.
-    fun p5(condition: bool) {
-        if (!condition) abort ENotOperator
-    }
-    /// check_WrongInbox: compact private symbol to bound published bytecode storage.
-    fun p6(condition: bool) {
-        if (!condition) abort EWrongInbox
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, code: u8) {
+        if (!condition) {
+            if (code == BWrongInbox) abort EWrongInbox;
+            if (code == BNotOperator) abort ENotOperator;
+            if (code == BNotCreator) abort ENotCreator;
+            abort ENotTargeted
+        }
     }
 }

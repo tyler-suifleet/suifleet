@@ -24,11 +24,9 @@
 ///
 /// Introduced by a package upgrade: older package versions cannot reach it.
 module sui_edge::seal_policy {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
+    // Named u64 constants share the bytecode constant pool without changing types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
 
     use std::string::String;
     use sui::bcs;
@@ -39,13 +37,13 @@ module sui_edge::seal_policy {
     // ── Constants ─────────────────────────────────────────────────────────────
 
     /// Policy code version; approvals require `AccessPolicy.version == VERSION`.
-    const VERSION: u8 = 1;
+    const VERSION: u64 = 1;
     /// Bytes of policy ID and key epoch before the nonce.
-    const PREFIX_LENGTH: u8 = 40;
-    const MIN_NONCE: u8 = 16;
-    const MAX_NONCE: u8 = 64;
+    const PREFIX_LENGTH: u64 = 40;
+    const MIN_NONCE: u64 = 16;
+    const MAX_NONCE: u64 = 64;
     /// Bound on each scope list, which approvals scan.
-    const MAX_ENTRIES: u16 = 256;
+    const MAX_ENTRIES: u64 = 256;
 
     const SCOPE_ACCOUNT: u8 = 0;
     const SCOPE_DEVICE: u8 = 1;
@@ -54,8 +52,11 @@ module sui_edge::seal_policy {
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const ENoAccess: u64 = 0;
+    const BNoAccess: u8 = 0;
     const EWrongCap: u64 = 1;
+    const BWrongCap: u8 = 1;
     const EWrongVersion: u64 = 2;
+    const BWrongVersion: u8 = 2;
     const EAlreadyGranted: u64 = 3;
     const ENotGranted: u64 = 4;
     const ETooMany: u64 = 5;
@@ -117,9 +118,9 @@ module sui_edge::seal_policy {
     public fun create_policy(name: String, ctx: &mut TxContext): AccessAdminCap {
         let policy = AccessPolicy {
             id: object::new(ctx),
-            version: (VERSION as u64),
+            version: VERSION,
             name,
-            key_epoch: (SMALL_0 as u64),
+            key_epoch: SMALL_0,
             accounts: vector[],
             devices: vector[],
             groups: vector[],
@@ -160,7 +161,8 @@ module sui_edge::seal_policy {
 
     /// Only a group's own admin may grant it: the group's admin decides its
     /// membership, and so which devices the grant covers.
-    public(package) fun grant_managed_group(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
+    /// Package helper: grant_managed_group.
+    public(package) fun k0(policy: &mut AccessPolicy, cap: &AccessAdminCap, group: &DeviceGroup) {
         p0(policy, cap);
         let group_id = device_group::group_id(group);
         add(&mut policy.groups, group_id);
@@ -188,28 +190,28 @@ module sui_edge::seal_policy {
     /// Retire every identity of the current epoch.
     public fun rotate_key_epoch(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
         p0(policy, cap);
-        policy.key_epoch = policy.key_epoch + (SMALL_1 as u64);
+        policy.key_epoch = policy.key_epoch + SMALL_1;
         event::emit(KeyEpochRotated { policy_id: object::id(policy), key_epoch: policy.key_epoch });
     }
 
     /// Move the policy to this code's version; older code then refuses it.
     public fun migrate(policy: &mut AccessPolicy, cap: &AccessAdminCap) {
-        assert!(cap.policy_id == object::id(policy), EWrongCap);
-        assert!(policy.version < (VERSION as u64), ENotNewer);
-        policy.version = (VERSION as u64);
-        event::emit(PolicyMigrated { policy_id: object::id(policy), version: (VERSION as u64) });
+        q(cap.policy_id == object::id(policy), BWrongCap);
+        assert!(policy.version < VERSION, ENotNewer);
+        policy.version = VERSION;
+        event::emit(PolicyMigrated { policy_id: object::id(policy), version: VERSION });
     }
 
     // ── Seal approvals (evaluated by key servers; side-effect free) ───────────
 
     /// An account granted by address.
     entry fun seal_approve_account(id: vector<u8>, policy: &AccessPolicy, ctx: &TxContext) {
-        p3(account_allowed(policy, &id, ctx.sender()));
+        q(account_allowed(policy, &id, ctx.sender()), BNoAccess);
     }
 
     /// A device granted directly, asking with its active key.
     entry fun seal_approve_device(id: vector<u8>, policy: &AccessPolicy, registry: &DeviceRegistry, device_id: ID, ctx: &TxContext) {
-        p3(device_allowed(policy, &id, registry, device_id, ctx.sender()));
+        q(device_allowed(policy, &id, registry, device_id, ctx.sender()), BNoAccess);
     }
 
     /// A device in a granted group, asking with its active key.
@@ -221,7 +223,7 @@ module sui_edge::seal_policy {
         device_id: ID,
         ctx: &TxContext,
     ) {
-        p3(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()));
+        q(group_device_allowed(policy, &id, registry, group, device_id, ctx.sender()), BNoAccess);
     }
 
     public fun account_allowed(policy: &AccessPolicy, id: &vector<u8>, sender: address): bool {
@@ -259,14 +261,14 @@ module sui_edge::seal_policy {
 
     /// Whether `id` is a current identity of this policy, under this code version.
     public fun identity_matches(policy: &AccessPolicy, id: &vector<u8>): bool {
-        assert!(policy.version == (VERSION as u64), EWrongVersion);
+        q(policy.version == VERSION, BWrongVersion);
         let length = id.length();
-        if (length < (PREFIX_LENGTH as u64) + (MIN_NONCE as u64) || length > (PREFIX_LENGTH as u64) + (MAX_NONCE as u64)) return false;
+        if (length < PREFIX_LENGTH + MIN_NONCE || length > PREFIX_LENGTH + MAX_NONCE) return false;
         let prefix = identity_prefix(policy);
-        let mut i = (SMALL_0 as u64);
-        while (i < (PREFIX_LENGTH as u64)) {
+        let mut i = SMALL_0;
+        while (i < PREFIX_LENGTH) {
             if (prefix[i] != id[i]) return false;
-            i = i + (SMALL_1 as u64);
+            i = i + SMALL_1;
         };
         true
     }
@@ -278,19 +280,18 @@ module sui_edge::seal_policy {
     public fun devices(policy: &AccessPolicy): &vector<ID> { &policy.devices }
     public fun groups(policy: &AccessPolicy): &vector<ID> { &policy.groups }
     public fun cap_policy_id(cap: &AccessAdminCap): ID { cap.policy_id }
-    public fun code_version(): u64 { (VERSION as u64) }
+    public fun code_version(): u64 { VERSION }
 
     // ── Internal ──────────────────────────────────────────────────────────────
 
-    /// check_admin: compact private symbol to bound published bytecode storage.
     fun p0(policy: &AccessPolicy, cap: &AccessAdminCap) {
-        assert!(cap.policy_id == object::id(policy), EWrongCap);
-        assert!(policy.version == (VERSION as u64), EWrongVersion);
+        q(cap.policy_id == object::id(policy), BWrongCap);
+        q(policy.version == VERSION, BWrongVersion);
     }
 
     fun add<T: copy + drop>(list: &mut vector<T>, item: T) {
         assert!(!list.contains(&item), EAlreadyGranted);
-        assert!(list.length() < (MAX_ENTRIES as u64), ETooMany);
+        assert!(list.length() < MAX_ENTRIES, ETooMany);
         list.push_back(item);
     }
 
@@ -314,8 +315,14 @@ module sui_edge::seal_policy {
     #[test_only]
     public fun set_version_for_testing(policy: &mut AccessPolicy, version: u64) { policy.version = version }
     // Share each named abort branch without changing its module or error code.
-    /// check_NoAccess: compact private symbol to bound published bytecode storage.
-    fun p3(condition: bool) {
-        if (!condition) abort ENoAccess
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, code: u8) {
+        if (!condition) {
+            if (code == BNoAccess) abort ENoAccess;
+            if (code == BWrongCap) abort EWrongCap;
+            abort EWrongVersion
+        }
     }
 }

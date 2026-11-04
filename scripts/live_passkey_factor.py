@@ -4,6 +4,7 @@
 Reuses exact source-pair fixtures, stops on uncertainty, and charges publication,
 failures and passkey gas grants against one non-replenishing run allowance.
 """
+from abort_site import abort_site
 import argparse
 import base64
 import hashlib
@@ -82,7 +83,7 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
             found = ABORT.search(str(result['effects']['status'].get('error', '')))
             observed = found.groups() if found else None
             live.evidence['transactions'][-1]['abort'] = observed
-            assert observed == ('security_policy', 'check', '1'), 'native refusal must be the missing-factor abort'
+            assert observed == ('security_policy', abort_site(Path('contracts'), 'security_policy', 'check', 1), '1'), 'native refusal must be the missing-factor abort'
         return result
     keys=fixture(operation='info')
     installed = enrolled_keys(live, f['customer'])

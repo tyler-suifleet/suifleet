@@ -32,7 +32,7 @@ export async function fetchOrganizationSecurity(client: SuiGrpcClient, customerI
   const { customer_CustomerBcs } = await import("./fleet-protocol");
   const customer = customer_CustomerBcs.parse(object.content);
   if (customer.version === "1" || customer.version === "196") return undefined;
-  if (!["197", "199"].includes(customer.version)) throw Error("Unsupported organization authority version");
+  if (!["197", "199", "201"].includes(customer.version)) throw Error("Unsupported organization authority version");
   const field = await client.getDynamicField({ parentId: customerId, name: {
     type: moveType("security_policy::PolicyKey"), bcs: security_policy_PolicyKeyBcs.serialize({ dummy_field: false }).toBytes(),
   } });

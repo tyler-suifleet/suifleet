@@ -1,10 +1,8 @@
 module sui_edge::device_registry {
-    // Include version/limit constants in compact loads; public u64 values stay unchanged.
-    // Widen named narrow literals at use sites to avoid repeated LdU64.
-    // The pinned compiler uses LdU8/U16/U32 followed by CastU64. Values and u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
+    // Named u64 constants share the bytecode constant pool, including error values,
+    // and avoid repeated immediate loads or casts without changing numeric types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
 
     use std::string::String;
     use sui::clock::Clock;
@@ -15,7 +13,7 @@ module sui_edge::device_registry {
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
-    const SCHEMA_VERSION: u8 = 1;
+    const SCHEMA_VERSION: u64 = 1;
 
     // ── Errors ────────────────────────────────────────────────────────────────
 
@@ -114,8 +112,8 @@ module sui_edge::device_registry {
         let registry = DeviceRegistry {
             id: object::new(ctx),
             admin: ctx.sender(),
-            device_count: (SMALL_0 as u64),
-            schema_version: (SCHEMA_VERSION as u64),
+            device_count: SMALL_0,
+            schema_version: SCHEMA_VERSION,
         };
         event::emit(RegistryCreated {
             registry_id: object::id(&registry),
@@ -146,7 +144,7 @@ module sui_edge::device_registry {
             arch,
             meta: vec_map::empty(),
             registered_at: clock.timestamp_ms(),
-            schema_version: (SCHEMA_VERSION as u64),
+            schema_version: SCHEMA_VERSION,
         };
 
         event::emit(DeviceRegistered {
@@ -157,7 +155,7 @@ module sui_edge::device_registry {
         });
 
         // Untrusted until `activate_device` takes it into custody.
-        registry.device_count = registry.device_count + (SMALL_1 as u64);
+        registry.device_count = registry.device_count + SMALL_1;
         device
     }
 
@@ -182,7 +180,7 @@ module sui_edge::device_registry {
             owner: ctx.sender(),
         });
 
-        registry.device_count = registry.device_count - (SMALL_1 as u64);
+        registry.device_count = registry.device_count - SMALL_1;
         id.delete();
     }
 
@@ -215,11 +213,12 @@ module sui_edge::device_registry {
     /// Explicit managed adoption replaces the owner capability in registry
     /// identity. Every pre-existing gas/data account bound to the old cap then
     /// fails, including accounts in legacy budgets unknown to the new fleet.
-    public(package) fun rebind_owner(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
+    /// Package helper: rebind_owner.
+    public(package) fun k0(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &mut TxContext): DeviceOwnerCap {
         let device_id = cap.device_id;
         let old_id = object::id(&cap);
         let identity = *p1(registry, device_id);
-        p4(identity.owner_cap == old_id); p4(is_custodied(registry, device_id));
+        g0(identity.owner_cap == old_id, true); g0(is_custodied(registry, device_id), true);
         let DeviceOwnerCap { id, device_id: _ } = cap; id.delete();
         let cap = DeviceOwnerCap { id: object::new(ctx), device_id };
         p2(registry, device_id, Identity { signer: identity.signer, revoked: identity.revoked, owner_cap: object::id(&cap) });
@@ -242,7 +241,7 @@ module sui_edge::device_registry {
     /// accepted; issue a new cap for the new address afterwards. A revoked
     /// device stays revoked until it is reinstated.
     public fun rotate_device_key(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap, new_address: address) {
-        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+        g0(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), false);
         let device: &mut Device = dof::borrow_mut(&mut registry.id, CustodyKey { device_id: cap.device_id });
         device.device_address = new_address;
         let revoked = p1(registry, cap.device_id).revoked;
@@ -255,7 +254,7 @@ module sui_edge::device_registry {
     public fun deregister_activated_device(registry: &mut DeviceRegistry, cap: DeviceOwnerCap, ctx: &TxContext) {
         let DeviceOwnerCap { id, device_id } = cap;
         id.delete();
-        p3(dof::exists(&registry.id, CustodyKey { device_id }));
+        g0(dof::exists(&registry.id, CustodyKey { device_id }), false);
         let device: Device = dof::remove(&mut registry.id, CustodyKey { device_id });
         deregister_device(registry, device, ctx);
     }
@@ -263,16 +262,16 @@ module sui_edge::device_registry {
     /// Lend the custodied Device to calls that take `&Device`/`&mut Device`
     /// (`device_cap::issue_cap`, `device_group::add_device`, `set_meta`).
     public fun borrow_device(registry: &mut DeviceRegistry, cap: &DeviceOwnerCap): (Device, DeviceLoan) {
-        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+        g0(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), false);
         let device = dof::remove(&mut registry.id, CustodyKey { device_id: cap.device_id });
         (device, DeviceLoan { device_id: cap.device_id })
     }
 
     public fun return_device(registry: &mut DeviceRegistry, device: Device, loan: DeviceLoan) {
         let DeviceLoan { device_id } = loan;
-        p4(object::id(&device) == device_id);
+        g0(object::id(&device) == device_id, true);
         // The key cannot change while borrowed: only rotation updates it.
-        p4(device.device_address == p1(registry, device_id).signer);
+        g0(device.device_address == p1(registry, device_id).signer, true);
         dof::add(&mut registry.id, CustodyKey { device_id }, device);
     }
 
@@ -287,7 +286,7 @@ module sui_edge::device_registry {
 
     /// custodied: compact private symbol to bound published bytecode storage.
     fun p0(registry: &DeviceRegistry, cap: &DeviceOwnerCap): &Device {
-        p3(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }));
+        g0(dof::exists(&registry.id, CustodyKey { device_id: cap.device_id }), false);
         dof::borrow(&registry.id, CustodyKey { device_id: cap.device_id })
     }
 
@@ -329,7 +328,7 @@ module sui_edge::device_registry {
     public fun owner_cap_device_id(cap: &DeviceOwnerCap): ID { cap.device_id }
 
     public fun assert_admin(registry: &DeviceRegistry, ctx: &mut TxContext) {
-        p4(registry.admin == ctx.sender());
+        g0(registry.admin == ctx.sender(), true);
     }
 
     /// A cap the registry's identity does not name.
@@ -344,12 +343,7 @@ module sui_edge::device_registry {
     // Separate guard calls retain short-circuit order and the same abort site/code.
     // Avoid materializing intermediate booleans in the caller bytecode.
     // Share each named abort branch without changing its module or error code.
-    /// check_NotCustodied: compact private symbol to bound published bytecode storage.
-    fun p3(condition: bool) {
-        if (!condition) abort ENotCustodied
-    }
-    /// check_WrongDevice: compact private symbol to bound published bytecode storage.
-    fun p4(condition: bool) {
-        if (!condition) abort EWrongDevice
-    }
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+    fun g0(condition: bool, first: bool) { if (!condition) { if (first) abort EWrongDevice; abort ENotCustodied } }
 }

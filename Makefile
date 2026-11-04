@@ -136,6 +136,7 @@ dapp-typecheck:
 check-interfaces:
 	$(RUN) python3 scripts/check_package_size.py
 	$(RUN) python3 -m unittest discover -s scripts/tests -p 'test_check_package_size.py'
+	$(RUN) node scripts/test_subscription_manifest.cjs
 	$(RUN) python3 scripts/check_contract_interfaces.py
 	$(RUN) python3 scripts/generate_interfaces.py --check
 	$(RUN) python3 scripts/test_generated_interfaces.py
@@ -549,10 +550,10 @@ test-testnet:
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_abort_site.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_security_delay.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_upgrade_security_localnet.py'
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_passkey.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_rollout_audit_acceptance.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_testnet*.py'
 	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_common.py'
-	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -p 'test_live_passkey.py'
 	$(RUN) node scripts/test_testnet_cache.cjs
 	$(RUN) node scripts/test_testnet_receipt_effects.cjs
 
@@ -874,3 +875,8 @@ test-hydration:
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
 	$(RUN) bash -c 'set -a; source profiles/seal-testnet/frontend.env; set +a; cd dapp && pnpm build'
 	$(RUN) env CHROME_EXECUTABLE=$${CHROME_EXECUTABLE:-/opt/chrome-headless-shell/chrome-headless-shell} node scripts/test_hydration.cjs
+
+# SF-181: existing-object compatible upgrade on an isolated disposable chain.
+.PHONY: test-subscription-localnet
+test-subscription-localnet:
+	$(RUN) python3 scripts/test_protocol_localnet.py --subscription-upgrade

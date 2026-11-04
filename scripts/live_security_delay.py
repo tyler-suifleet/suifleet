@@ -28,9 +28,9 @@ def policy_failure_function(package):
             raise ValueError('unrecognized factored policy guard')
         return 'p0'
     if 'assert!((authenticated & needed) == needed || (p.transaction == *ctx.digest() && ((p.attested | authenticated) & needed) == needed), EFactor);' in source:
-        return 'check'
+        return abort_site(package, 'security_policy', 'check', 1)
     if 'assert!(needed == 0 || (p.transaction == *ctx.digest() && (p.attested & needed) == needed), EFactor);' in source:
-        return 'check'
+        return abort_site(package, 'security_policy', 'check', 1)
     raise ValueError('unrecognized policy authority guard')
 
 

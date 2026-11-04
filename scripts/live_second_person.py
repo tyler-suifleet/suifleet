@@ -133,7 +133,7 @@ def run(args):
         tx('configure verifier and enable optional administration protection', '--move-call', f'{head}::customer::configure_second_person', f'@{c}', f'@{enrollment}', CLOCK,
            '--move-call', f'{head}::customer::set_security', f'@{c}', 'vector[0u8,0u8,0u8,0u8,4u8,0u8,4u8]')
         assert int(live.object(c)['content']['version']) == 199
-        live.attack('direct current action refused', '--move-call', f'{head}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"bypass"', module='security_policy', function='check', code=1, budget=20_000_000)
+        live.attack('direct current action refused', '--move-call', f'{head}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"bypass"', module='security_policy', function=abort_site(Path('contracts'), 'security_policy', 'check', 1), code=1, budget=20_000_000)
         if not args.fresh:
             live.attack('old-package bypass refused', '--move-call', f'{base}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"old bypass"', module='customer', function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=20_000_000)
 

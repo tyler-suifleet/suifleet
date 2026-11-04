@@ -1,0 +1,202 @@
+{
+  "base": "cae74617",
+  "contracts_tree": "4f30615c472593c9fef87153361d7ee4f00fe21d",
+  "transactions": [
+    {
+      "label": "publish current base",
+      "digest": "3oZAPgATrMQw6pzwJjH6mdZM5rxZiuMQcxxJLUZEPzWq",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "7530000",
+        "storageCost": "751442400",
+        "storageRebate": "195624000",
+        "nonRefundableStorageFee": "1976000"
+      }
+    },
+    {
+      "label": "create Customer before upgrade",
+      "digest": "F1PzipKexo3wZAZfu4jk212iEjZkjPatJsG5ZEvU1yU2",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "1520000",
+        "storageCost": "25323200",
+        "storageRebate": "2738736",
+        "nonRefundableStorageFee": "27664"
+      }
+    },
+    {
+      "label": "compatible additive upgrade",
+      "digest": "8RwCXc6nZPSceTRCQ4n4Cx48xno2NEnUhq256xcR3pim",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "8910000",
+        "storageCost": "780231200",
+        "storageRebate": "2595780",
+        "nonRefundableStorageFee": "26220"
+      }
+    },
+    {
+      "label": "immutable annual offer",
+      "digest": "FRWJkdYPpfXWQperEfSxEzMzLTf8ArGQCTLwDf8jYwVt",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "1550000",
+        "storageCost": "3602400",
+        "storageRebate": "978120",
+        "nonRefundableStorageFee": "9880"
+      }
+    },
+    {
+      "label": "prepay existing Customer",
+      "digest": "3qk3Jnyiffi1GGhfqvAg5n4gjyThB7F3tjkWbMr27ePH",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "1580000",
+        "storageCost": "9196000",
+        "storageRebate": "3852288",
+        "nonRefundableStorageFee": "38912"
+      }
+    },
+    {
+      "label": "collect first period",
+      "digest": "3NgYZLPa5xchp3nKbxKj1Y49t4wwTfU2qHQPKHxpg9Nv",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "1560000",
+        "storageCost": "7820400",
+        "storageRebate": "6764076",
+        "nonRefundableStorageFee": "68324"
+      }
+    },
+    {
+      "label": "double collection rejected",
+      "digest": "74SYok57vSMrZZ2eCwoRtAQDY5jXef4SBBVq9fYKXDpP",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 2, in '0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145::subscription::collect' (instruction 57)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "2",
+            "location": {
+              "package": "0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145",
+              "module": "subscription",
+              "function": 3,
+              "instruction": 57,
+              "functionName": "collect"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1560000",
+        "storageCost": "6832400",
+        "storageRebate": "6764076",
+        "nonRefundableStorageFee": "68324"
+      }
+    },
+    {
+      "label": "old package set_entitlement rejected after opt-in",
+      "digest": "J1u5TxGFta64jXfTPAzDa7X3GVKaRPtKqDqkBP1sZ1MM",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 1, in '0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b::customer::pe' (instruction 4)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "1",
+            "location": {
+              "package": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
+              "module": "customer",
+              "function": 161,
+              "instruction": 4,
+              "functionName": "pe"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1490000",
+        "storageCost": "3891200",
+        "storageRebate": "3852288",
+        "nonRefundableStorageFee": "38912"
+      }
+    },
+    {
+      "label": "old package set_credential rejected after opt-in",
+      "digest": "AcyVQEPm6nf4dJUB4nAejLvTS6ZKFWwgXCxicHSPLZnZ",
+      "status": {
+        "success": false,
+        "error": {
+          "$kind": "MoveAbort",
+          "message": "MoveAbort in 1st command, abort code: 0, in '0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b::customer::assert_member' (instruction 37)",
+          "command": 0,
+          "MoveAbort": {
+            "abortCode": "0",
+            "location": {
+              "package": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
+              "module": "customer",
+              "function": 95,
+              "instruction": 37,
+              "functionName": "assert_member"
+            }
+          }
+        }
+      },
+      "gas": {
+        "computationCost": "1490000",
+        "storageCost": "3891200",
+        "storageRebate": "3852288",
+        "nonRefundableStorageFee": "38912"
+      }
+    },
+    {
+      "label": "cancel and return unearned prepay",
+      "digest": "Btktu2sUQNTQkaiUJzECtr3AkaEQCqGo9cWatyexNXS1",
+      "status": {
+        "success": true,
+        "error": null
+      },
+      "gas": {
+        "computationCost": "1570000",
+        "storageCost": "4917200",
+        "storageRebate": "3889908",
+        "nonRefundableStorageFee": "39292"
+      }
+    }
+  ],
+  "limits": [
+    "Disposable localnet SUI; no real USDC, public network, manual wallet, provider or physical acceptance."
+  ],
+  "wrong_coin_rejected": true,
+  "objects": {
+    "old": "0x844c736bcf7da29ee530c6e608745b4dac165a0e5fbb4d083e8ad36e36f7ef5b",
+    "current": "0x1d56631811b8ed534175bf4d12e03535dc0db20705f0fb4ddca2476bb3c07145",
+    "registry": "0x01454e28c2ccc43cf604a6fe6b9dfffb3b9061cb680e70880c7c8dae81d90669",
+    "customer": "0x1456e483757599acaceea21ff6d99a6152c4c05720ccd0f14c2da7948f10fcf3",
+    "upgradeCap": "0xe32fef9d2cca3f9280bf88cd237f02d1202bf69022087ec78b3950ffe1666c83",
+    "offer": "0xb5262eeca034df98a4f479953b900b5f3651e625dd65cd275b868930a0fd9536",
+    "account": "0x1d97d6f833eae7a4257fdf956ec8f8e8ea01246a946865073362cd2610b21dde",
+    "treasury": "0xf364963292ced69ab26d08d009b4b9249618da2686c7919a5d5a257f66d515c8"
+  }
+}

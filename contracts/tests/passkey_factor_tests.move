@@ -59,6 +59,50 @@ module sui_edge::passkey_factor_tests {
         let builder = s.ctx_builder().set_sponsor(key);
         s.next_with_context(builder);
     }
+    // Exercise the actual subscription seal, rather than assigning version 201.
+    fun purchase(s: &mut Scenario) {
+        let r = s.take_shared<DeviceRegistry>(); let clock = s.take_shared<Clock>();
+        sui_edge::subscription::offer<sui::sui::SUI>(&r, @0xC, 1, 100, 1000, 100, false, &clock, s.ctx());
+        ts::return_shared(r); ts::return_shared(clock); s.next_tx(@0xA);
+        // An already protected customer must co-sign the purchase as well.
+        sponsor(s, factor::key_address(public_key()));
+        let offer = s.take_immutable<sui_edge::subscription::Offer<sui::sui::SUI>>();
+        let mut c = s.take_shared<Customer>(); let r = s.take_shared<DeviceRegistry>();
+        let clock = s.take_shared<Clock>();
+        sui_edge::subscription::open(&mut c, &r, &offer,
+            sui::coin::mint_for_testing<sui::sui::SUI>(100, s.ctx()), &clock, s.ctx());
+        assert!(std::bcs::to_bytes(&c)[32] == 201);
+        ts::return_shared(c); ts::return_shared(r); ts::return_shared(clock); ts::return_immutable(offer);
+        s.next_tx(@0xA);
+        // Scenario context builders retain sponsorship; restore wallet gas.
+        sponsor(s, @0xA);
+    }
+    #[test]
+    fun paid_authority_allows_enrollment_and_recovery() {
+        let mut s = setup(); purchase(&mut s); enable(&mut s);
+        sponsor(&mut s, factor::key_address(public_key()));
+        let mut c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Paid protected fleet"), s.ctx());
+        customer::set_security(&mut c, vector[0,0,0,0,0,0,0], s.ctx());
+        factor::remove(&mut c, @0xA, factor::key_address(public_key()), s.ctx());
+        assert!(factor::keys(&c).is_empty());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test]
+    fun purchase_preserves_existing_native_protection() {
+        let mut s = setup(); enable(&mut s); purchase(&mut s);
+        sponsor(&mut s, factor::key_address(public_key()));
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Protection survived purchase"), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
+    #[test, expected_failure(abort_code = 1, location = sui_edge::security_policy)]
+    fun paid_authority_still_refuses_wallet_alone() {
+        let mut s = setup(); enable(&mut s); purchase(&mut s);
+        let c = s.take_shared<Customer>(); let mut f = s.take_shared<Fleet>();
+        customer::rename_fleet(&c, &mut f, utf8(b"Must fail after purchase"), s.ctx());
+        ts::return_shared(c); ts::return_shared(f); s.end();
+    }
     #[test]
     fun native_cosign_allows_action_and_recovery_disable_then_remove() {
         let mut s = setup(); enable(&mut s); sponsor(&mut s, factor::key_address(public_key()));
@@ -193,7 +237,7 @@ module sui_edge::passkey_factor_tests {
         // Kernel regression: package attestation models the independent verifier.
         // Its distinct-administrator checks are covered by second_person_tests.
         let mut action = s.take_shared<security_policy::Action>();
-        security_policy::attest(&mut action, 4);
+        security_policy::k16(&mut action, 4);
         ts::return_shared(action); s.next_tx(@0xA); s
     }
     #[test]

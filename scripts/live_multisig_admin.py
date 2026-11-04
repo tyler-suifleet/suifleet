@@ -94,7 +94,7 @@ def run(args):
         on, off = 'vector[1u8,1u8,1u8,1u8,1u8,1u8,1u8]', 'vector[0u8,0u8,0u8,0u8,0u8,0u8,0u8]'
         quorum('activate optional organization policy', '--move-call', f'{package}::customer::set_security', f'@{c}', on)
         live.attack('ordinary administrator refused policy downgrade', '--move-call', f'{package}::customer::set_security', f'@{c}', off,
-                    module='security_policy', function='check', code=1, budget=5_000_000)
+                    module='security_policy', function=abort_site(Path('contracts'), 'security_policy', 'check', 1), code=1, budget=5_000_000)
         expiry = str(int(time.time()*1000)+3600000)
         r = quorum('quorum prepares exact recovery intent', '--move-call', f'{package}::multisig_admin::prepare_policy_change', f'@{c}', off, expiry, CLOCK)
         a = live.created(r, '::security_policy::Action')[0]
