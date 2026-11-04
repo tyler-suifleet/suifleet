@@ -25,7 +25,7 @@ const register=()=>sui.buildRegisterDeviceTx("Pi",id("0xd"),"aarch64",A,fleet);
  current.device_limit="2"; await e.checkDeviceCapacity(client,register());
  const batch=register(); batch.moveCall({target:`${m.call_package_id}::customer::register_device`,arguments:[batch.object(C)]});
  await assert.rejects(()=>e.checkDeviceCapacity(client,batch),/Device limit reached/);
- for (const version of ["1", "197", "199"]) {
+ for (const version of ["1", "197", "199", "201"]) {
   current.version=version; current.active_devices="0"; current.device_limit="1";
   assert.equal((await e.readCustomerEntitlement(client,C)).version,version);
   await e.checkDeviceCapacity(client,register());

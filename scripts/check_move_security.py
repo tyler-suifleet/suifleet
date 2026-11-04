@@ -71,6 +71,11 @@ def main():
         build = ["sui", "move", "build", "--path", str(package),
                  "--default-move-flavor", "sui", "--lint", "--warnings-are-errors"]
         run(build, env)
+        run(["python3", "-m", "unittest", "discover", "-s", str(ROOT / "scripts/tests"), "-p", "test_move_package_size.py"], env)
+        from check_move_package_size import check_package_size
+        from sui_toolchain import compile_package
+        size = check_package_size(compile_package("sui", package))
+        print(f"PASS: published Move package size {size}/102400 bytes")
         print("PASS: pinned release compiler and extra Sui linters (warnings are errors)")
         # Independently inspect diagnostics with ALL allow attributes removed.
         # This prevents attribute scope/tool behavior from hiding new warnings.
@@ -184,14 +189,14 @@ def main():
         # These mutate actual implementation bodies and run the existing tests.
         # A compiler failure is not accepted as a detected authority violation.
         mutations = [
-            ("roles.move", "assert!(is_active(registry, role), ERoleRevoked);",
+            ("roles.move", "q(is_active(registry, role), BRoleRevoked);",
              "let _ = is_active(registry, role);", "revoked_role_cannot_deploy"),
             ("device_cap.move", "assert!(device_registry::is_active_signer(registry, cap.device_id, ctx.sender()), EInactiveIdentity);",
              "let _ = device_registry::is_active_signer(registry, cap.device_id, ctx.sender());",
              "test_revoked_device_cannot_report"),
             ("fleet_inbox.move", "assert!(device_group::admin(group) == creator, ENotAdmin);",
              "let _ = device_group::admin(group);", "a_foreign_creator_cannot_announce_to_a_group"),
-            ("fleet_inbox.move", "assert!(deployment_manager::target_devices(deployment).contains(&device_id), ENotTargeted);",
+            ("fleet_inbox.move", "q(deployment_manager::target_devices(deployment).contains(&device_id), BNotTargeted);",
              "let _ = deployment_manager::target_devices(deployment);", "an_untargeted_device_cannot_be_announced"),
             ("device_group.move", "if (df::exists(&group.id, MemberKey { device_id })) return true;",
              "if (df::exists(&group.id, IndexKey {})) return true;", "a_non_member_cannot_follow_a_group"),

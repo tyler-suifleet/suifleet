@@ -15,13 +15,11 @@
 /// Introduced by a package upgrade: older package versions cannot read or
 /// write any of these types.
 module sui_edge::desired_state {
-    // Widen named u8 literals at use sites: the pinned compiler emits compact
-    // LdU8/CastU64 instead of repeated LdU64. Values and inferred u64 types
-    // are unchanged; abort constants retain their original u64 declarations.
-    const SMALL_0: u8 = 0;
-    const SMALL_1: u8 = 1;
-    const SMALL_2: u8 = 2;
-    const SMALL_3: u8 = 3;
+    // Named u64 constants share the bytecode constant pool without changing types.
+    const SMALL_0: u64 = 0;
+    const SMALL_1: u64 = 1;
+    const SMALL_2: u64 = 2;
+    const SMALL_3: u64 = 3;
 
     use std::string::String;
     use sui::clock::Clock;
@@ -35,16 +33,20 @@ module sui_edge::desired_state {
     // ── Errors ────────────────────────────────────────────────────────────────
 
     const ENotAdmin: u64 = 0;
+    const BNotAdmin: u8 = 0;
     const ENotCreator: u64 = 1;
+    const BNotCreator: u8 = 1;
     const ENotTargeted: u64 = 2;
     const EUnverifiedRecipe: u64 = 3;
     const EWrongGroup: u64 = 4;
+    const BWrongGroup: u8 = 4;
     const EStaleRevision: u64 = 5;
     const EUnknownComponent: u64 = 6;
     const EStillDesired: u64 = 7;
     const EUnconfirmed: u64 = 8;
     const EWrongRecord: u64 = 9;
     const ERetiring: u64 = 10;
+    const BRetiring: u8 = 10;
 
     // ── State ─────────────────────────────────────────────────────────────────
 
@@ -93,12 +95,12 @@ module sui_edge::desired_state {
     }
 
     public(package) fun begin_as(group: &DeviceGroup, admin: address): RevisionPlan {
-        assert!(device_group::admin(group) == admin, ENotAdmin);
+        q(device_group::admin(group) == admin, BNotAdmin);
         let (base_revision, components) = if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             (state.revision, state.components)
         } else {
-            ((SMALL_0 as u64), vec_map::empty())
+            (SMALL_0, vec_map::empty())
         };
         RevisionPlan { group_id: device_group::group_id(group), admin, base_revision, components }
     }
@@ -107,7 +109,7 @@ module sui_edge::desired_state {
     /// be the admin's own, target this group and authenticate its recipe
     /// through a direct digest or an immutable catalog version binding.
     public fun set_component(plan: &mut RevisionPlan, deployment: &mut DeploymentRecord) {
-        assert!(deployment_manager::creator(deployment) == plan.admin, ENotCreator);
+        q(deployment_manager::creator(deployment) == plan.admin, BNotCreator);
         assert!(deployment_manager::target_groups(deployment).contains(&plan.group_id), ENotTargeted);
         assert!(deployment_manager::has_recipe_digest(deployment) ||
             component_catalog::has_authenticated_version(deployment), EUnverifiedRecipe);
@@ -135,16 +137,20 @@ module sui_edge::desired_state {
     /// `ctx` scopes the SF-129 retirement check to the current transaction.
     public(package) fun commit_as(plan: RevisionPlan, group: &mut DeviceGroup, clock: &Clock, authority: address, ctx: &TxContext) {
         let RevisionPlan { group_id, admin, base_revision, components } = plan;
-        assert!(device_group::group_id(group) == group_id, EWrongGroup);
-        assert!(authority == admin && device_group::admin(group) == admin, ENotAdmin);
+        q(device_group::group_id(group) == group_id, BWrongGroup);
+        q(authority == admin, BNotAdmin); q(device_group::admin(group) == admin, BNotAdmin);
         assert!(revision(group) == base_revision, EStaleRevision);
-        let state = DesiredState { revision: base_revision + (SMALL_1 as u64), components, updated_at: clock.timestamp_ms() };
+        let state = DesiredState { revision: base_revision + SMALL_1, components, updated_at: clock.timestamp_ms() };
         let (component_names, deployments) = state.components.into_keys_values();
         let uid = device_group::uid_mut(group);
         if (df::exists(uid, RetirementCheckKey {})) {
             let check: &RetirementCheck = df::borrow(uid, RetirementCheckKey {});
             if (check.tx == *ctx.digest()) {
-                assert!(!deployments.any!(|id| check.deployments.contains(id)), ERetiring);
+                let mut i = SMALL_0;
+                while (i < deployments.length()) {
+                    q(!check.deployments.contains(&deployments[i]), BRetiring);
+                    i = i + SMALL_1;
+                };
             } else {
                 let _: RetirementCheck = df::remove(uid, RetirementCheckKey {});
             };
@@ -177,7 +183,7 @@ module sui_edge::desired_state {
     /// and only by a group it targets (`set_component`), so those groups are
     /// the complete set to check. Creator only.
     public fun begin_retirement(deployment: &DeploymentRecord, ctx: &mut TxContext): Retirement {
-        assert!(ctx.sender() == deployment_manager::creator(deployment), ENotCreator);
+        q(ctx.sender() == deployment_manager::creator(deployment), BNotCreator);
         let managed = deployment_manager::is_managed(deployment);
         let pending = if (managed) *deployment_manager::target_groups(deployment) else vector[];
         Retirement { deployment_id: object::id(deployment), managed, pending }
@@ -189,7 +195,7 @@ module sui_edge::desired_state {
     /// cannot make the record desired again.
     public fun confirm_not_desired(retirement: &mut Retirement, group: &mut DeviceGroup, ctx: &mut TxContext) {
         let group_id = device_group::group_id(group);
-        assert!(retirement.pending.contains(&group_id), EWrongGroup);
+        q(retirement.pending.contains(&group_id), BWrongGroup);
         let (_, deployments) = components(group).into_keys_values();
         assert!(!deployments.contains(&retirement.deployment_id), EStillDesired);
         let uid = device_group::uid_mut(group);
@@ -219,12 +225,12 @@ module sui_edge::desired_state {
         assert!(object::id(&deployment) == deployment_id, EWrongRecord);
         assert!(pending.is_empty(), EUnconfirmed);
         // Assigned to a plan after `begin_retirement`: its groups were never checked.
-        assert!(managed || !deployment_manager::is_managed(&deployment), ERetiring);
+        q(managed || !deployment_manager::is_managed(&deployment), BRetiring);
         // Sharded records (SF-127) keep their deletion path in the receipt
         // directory; their receipt roots must be retired first.
         let schema = deployment_manager::receipt_schema(&deployment);
-        if (schema == (SMALL_2 as u64)) component_catalog::delete_deployment(deployment, ctx)
-        else if (schema == (SMALL_3 as u64)) deployment_manager::delete_rollout(deployment, ctx)
+        if (schema == SMALL_2) component_catalog::delete_deployment(deployment, ctx)
+        else if (schema == SMALL_3) deployment_manager::delete_rollout(deployment, ctx)
         else deployment_manager::delete_deployment(deployment, ctx);
     }
 
@@ -237,7 +243,7 @@ module sui_edge::desired_state {
         if (df::exists(device_group::uid(group), DesiredKey {})) {
             let state: &DesiredState = df::borrow(device_group::uid(group), DesiredKey {});
             state.revision
-        } else { (SMALL_0 as u64) }
+        } else { SMALL_0 }
     }
 
     /// Empty until the first commit.
@@ -249,4 +255,15 @@ module sui_edge::desired_state {
     }
 
     public fun plan_components(plan: &RevisionPlan): &VecMap<String, ID> { &plan.components }
+
+    // Private named guards retain module-local error codes; selectors are fixed at each call.
+
+    fun q(condition: bool, code: u8) {
+        if (!condition) {
+            if (code == BNotAdmin) abort ENotAdmin;
+            if (code == BNotCreator) abort ENotCreator;
+            if (code == BWrongGroup) abort EWrongGroup;
+            abort ERetiring
+        }
+    }
 }

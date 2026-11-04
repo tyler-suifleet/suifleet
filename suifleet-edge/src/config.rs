@@ -440,6 +440,7 @@ impl DeploymentManifest {
             ("rollout health", crate::protocol::ROLLOUT_HEALTH_TYPES),
             ("fleet settings", crate::protocol::SETTINGS_TYPES),
             ("receipt shards", crate::protocol::SHARD_TYPES),
+            ("subscription", crate::protocol::SUBSCRIPTION_TYPES),
             ("customer", crate::protocol::CUSTOMER_TYPES),
             ("recurring window", crate::protocol::RECURRING_WINDOW_TYPES),
         ] {
@@ -487,6 +488,7 @@ impl DeploymentManifest {
             .chain(crate::protocol::ROLLOUT_HEALTH_TYPES)
             .chain(crate::protocol::SETTINGS_TYPES)
             .chain(crate::protocol::SHARD_TYPES)
+            .chain(crate::protocol::SUBSCRIPTION_TYPES)
             .chain(crate::protocol::CUSTOMER_TYPES)
             .chain(crate::protocol::RECURRING_WINDOW_TYPES)
             .filter(|name| self.type_origins.contains_key(**name))
