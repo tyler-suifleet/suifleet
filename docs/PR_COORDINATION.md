@@ -1602,7 +1602,9 @@ main controller run and head-named effects artifact, exact source/base and
 contract Git trees. It accepts only the observed bounded setup sequence with
 successful accounted setup effects followed by `upgrade to head` explicitly
 `not_submitted` and the compiler's missing-public-declaration compatibility
-rejection. Unknown outcomes, held reservations, reconciliations, additional suite
+rejection (`EUC01001` missing public declaration or `EUC01006` module missing;
+any other compiler diagnostic remains blocking). Unknown outcomes, held
+reservations, reconciliations, additional suite
 artifacts, genuine source contract changes and active/uncertain repairs fail
 closed. Status class or reviewer prose alone cannot grant this route.
 
@@ -1624,3 +1626,17 @@ revision/readiness and retain any real combined findings. Implementation workers
 hand off without merging, installing, replaying wallet work or polling hosted CI.
 The 2026-11-01 local infrastructure integration authorization applies to this
 contained coordinator repair and its actual main-combined offline validation.
+
+The reader also recognizes authenticated cache reuse: one `upgrade to head`
+entry marked `not_submitted`, an exact verified/reused base package check, zero
+allowance use and spend, unchanged start/end balance, and no held reservation
+or reconciliation. Fresh setup still requires all three successful, cumulatively
+accounted setup transactions. Partial setup and unverified reuse fail closed.
+Both forms retain exact run/head/base and unchanged source contract-tree proof.
+
+SF-241 extracts this repair from the mixed SF-182 feature PR so the sole
+coordinator can validate a contained infrastructure candidate and activate only
+merged runtime code. This permits source collection only; every real combined
+candidate still requires its actual CI, protected testnet acceptance and review.
+It does not change SF-182's bound subscription fixtures, checkout allowance or
+December 4 renewal eligibility.

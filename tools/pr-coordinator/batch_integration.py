@@ -243,6 +243,17 @@ class BatchController:
                 evidence = json.loads(raw)
             transactions = evidence.get('transactions', [])
             error = evidence.get('error', '')
+            # Both diagnostics describe declarations added by newer main. The
+            # immutable ancestor/source contract-tree equality above is still
+            # required; this never permits a source contract deletion.
+            diagnostics = set(re.findall(r'error\[([A-Z0-9]+)\]', error))
+            stale_diagnostics = {
+                'EUC01001': 'missing public declaration',
+                'EUC01006': 'module missing',
+            }
+            stale_rejection = (bool(diagnostics) and diagnostics <= stale_diagnostics.keys()
+                and all(f'error[{code}]: {stale_diagnostics[code]}' in error
+                        for code in diagnostics))
             if (evidence.get('head') != head or evidence.get('base') != base
                     or evidence.get('network') != 'testnet' or evidence.get('chain') != '4c78adac'
                     or evidence.get('success') is not False or evidence.get('failure_class') != 'source'
@@ -252,13 +263,24 @@ class BatchController:
                     or not transactions or transactions[-1].get('label') != 'upgrade to head'
                     or transactions[-1].get('status') != 'not_submitted' or transactions[-1].get('digest')
                     or not error.startswith('test-upgrade could not build a transaction:')
-                    or 'error[EUC01001]: missing public declaration' not in error
-                    or set(re.findall(r'error\[([A-Z0-9]+)\]', error)) != {'EUC01001'}
+                    or not stale_rejection
                     or "this package requires changes to be compatible" not in error):
                 return
             used = 0
             allowed = ['publish base', 'register device + issue cap (base)', 'add device to group (base)']
-            if len(transactions) != 4:
+            # A reverified cached base needs no setup writes in this run. Keep
+            # that zero-spend path distinct from the fully accounted fresh setup.
+            cached = (len(transactions) == 1
+                and isinstance(evidence.get('checks'), list)
+                and any(isinstance(check, str) and re.fullmatch(
+                    r'verified/reused base package 0x[0-9a-f]{64}; no identical package is republished',
+                    check) for check in evidence['checks'])
+                and type(evidence.get('allowance_used_mist')) is int
+                and evidence['allowance_used_mist'] == 0
+                and type(evidence.get('spent_mist')) is int and evidence['spent_mist'] == 0
+                and type(evidence.get('start_balance_mist')) is int
+                and evidence.get('start_balance_mist') == evidence.get('end_balance_mist'))
+            if len(transactions) != 4 and not cached:
                 return
             for transaction, label in zip(transactions[:-1], allowed):
                 gas = transaction.get('gas_mist')
