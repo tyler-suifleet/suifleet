@@ -14,7 +14,7 @@ class IsolatedFixtureRefusal(unittest.TestCase):
             before = path.read_bytes()
             argv = ['prepare', '--wallet', 'unused', '--state', str(path), '--manifest', 'unused', '--private-dir', str(Path(d)/'identity')]
             with patch('sys.argv', argv), patch.dict('os.environ', {'SUIFLEET_TESTNET_LOCK_TOKEN': 'offline'}), patch.object(fixture, 'Live') as live:
-                with self.assertRaises(AssertionError): fixture.main()
+                with self.assertRaises(ValueError): fixture.main()
                 live.assert_not_called()
             self.assertEqual(path.read_bytes(), before)
             self.assertFalse((Path(d)/'identity').exists())

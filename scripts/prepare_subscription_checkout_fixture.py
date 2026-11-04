@@ -16,6 +16,11 @@ from testnet_budget import Budget
 import deployment_manifest as dm
 
 
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--wallet', required=True)
@@ -25,49 +30,49 @@ def main():
     p.add_argument('--resume-failed-create', action='store_true', help='Reconcile one effects-confirmed out-of-gas create, then bounded top-up')
     p.add_argument('--resume-unfunded', action='store_true', help='Reconcile a fixture stopped before funding/signing only')
     args = p.parse_args()
-    assert os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'), 'machine lease required'
+    require(os.environ.get('SUIFLEET_TESTNET_LOCK_TOKEN'), 'machine lease required')
     state = json.loads(args.state.read_text())
-    assert state['limit_mist'] == 100_000_000
+    require(state['limit_mist'] == 100_000_000, 'Run allowance must remain 100000000 MIST')
     prior = state.get('isolated_fixture')
-    assert not prior or args.resume_unfunded or args.resume_failed_create, 'reconcile existing isolated fixture; no replay'
+    require(not prior or args.resume_unfunded or args.resume_failed_create, 'reconcile existing isolated fixture; no replay')
     if prior and not args.resume_failed_create:
-        assert not prior.get('pending_digest') and not prior['transactions']
-        assert len(state['transactions']) == 3, 'funding already attempted; reconcile instead'
-    assert not state.get('pending_digest') or state['pending_digest'] in [t['digest'] for t in state['transactions']]
+        require(not prior.get('pending_digest') and not prior['transactions'], 'Unfunded fixture has a pending or recorded transaction')
+        require(len(state['transactions']) == 3, 'funding already attempted; reconcile instead')
+    require(not state.get('pending_digest') or state['pending_digest'] in [t['digest'] for t in state['transactions']], 'Unknown pending parent transaction; reconcile first')
     live = Live(args.wallet, 'testnet', state['limit_mist'])
     live.preflight()
-    assert live.chain == '4c78adac' and live.operator == AGENT
+    require(live.chain == '4c78adac' and live.operator == AGENT, 'Dedicated testnet chain/account mismatch')
     m = json.loads(args.manifest.read_text()); dm.verify(m)
-    assert m['chain_identifier'] == live.chain
-    assert dm.object_id(live.owner(m['upgrade_cap_id'])) == AGENT
+    require(m['chain_identifier'] == live.chain, 'Manifest chain mismatch')
+    require(dm.object_id(live.owner(m['upgrade_cap_id'])) == AGENT, 'UpgradeCap owner mismatch')
     registry = m['shared_objects']['registry']['id']; package = m['call_package_id']
-    assert dm.object_id(live.object(registry)['content']['admin']) == AGENT
-    assert m['treasury_payee'] == json.loads((ROOT / 'deployments/testnet/treasury.json').read_text())['treasury_payee']
+    require(dm.object_id(live.object(registry)['content']['admin']) == AGENT, 'Registry administrator mismatch')
+    require(m['treasury_payee'] == json.loads((ROOT / 'deployments/testnet/treasury.json').read_text())['treasury_payee'], 'Pinned treasury mismatch')
     for t in state['transactions']:
-        assert t['status'] == 'success'
+        require(t['status'] == 'success', 'Prior parent transaction did not succeed')
         gas = live.executed(t['digest'])['effects']['gasUsed']
-        assert t['gas_mist'] == max(0, int(gas['computationCost']) + int(gas['storageCost']) - int(gas['storageRebate']))
-    assert state['allowance_used_mist'] == sum(t['gas_mist'] + t.get('funding_mist', 0) for t in state['transactions'])
+        require(t['gas_mist'] == max(0, int(gas['computationCost']) + int(gas['storageCost']) - int(gas['storageRebate'])), 'Recorded parent gas differs from executed effects')
+    require(state['allowance_used_mist'] == sum(t['gas_mist'] + t.get('funding_mist', 0) for t in state['transactions']), 'Retained parent allowance does not reconcile')
     live.evidence['transactions'] = state['transactions']; live.ledger.evidence = state['transactions']
     live.ledger.used = state['allowance_used_mist']
     if prior:
         config = args.private_dir / "client.yaml"
         address = dm.object_id(live.client("active-address", json_output=False, config=config).stdout.strip().split()[-1])
-        assert address == prior["address"]
+        require(address == prior["address"], 'Child wallet address mismatch')
         if not args.resume_failed_create:
-            assert live.balance(address) == 0
+            require(live.balance(address) == 0, 'Unfunded child already has a balance')
         else:
-            assert not prior.get('recovery_started') and not prior.get('customer')
-            assert len(prior['transactions']) == 1
+            require(not prior.get('recovery_started') and not prior.get('customer'), 'Failed-create recovery already started or customer already recorded')
+            require(len(prior['transactions']) == 1, 'Expected exactly one failed create')
             t = prior['transactions'][0]
-            assert t['status'] == 'failure' and t['label'] == 'SF-182 isolated customer creation'
+            require(t['status'] == 'failure' and t['label'] == 'SF-182 isolated customer creation', 'Unexpected failed-create transaction')
             r = live.executed(t['digest']); gas = r['effects']['gasUsed']
-            assert r['effects']['status'] == {'status': 'failure', 'error': 'InsufficientGas'}
-            assert t['gas_mist'] == max(0, int(gas['computationCost']) + int(gas['storageCost']) - int(gas['storageRebate']))
-            assert not live.created(r, '::customer::Customer')
-            assert prior['pending_digest'] == t['digest']
-            assert prior['allowance_used_mist'] == t['gas_mist']
-            assert live.balance(address) == prior['funding_mist'] - t['gas_mist']
+            require(r['effects']['status'] == {'status': 'failure', 'error': 'InsufficientGas'}, 'Recovery requires effects-confirmed InsufficientGas')
+            require(t['gas_mist'] == max(0, int(gas['computationCost']) + int(gas['storageCost']) - int(gas['storageRebate'])), 'Recorded child gas differs from executed effects')
+            require(not live.created(r, '::customer::Customer'), 'Failed create unexpectedly produced a customer')
+            require(prior['pending_digest'] == t['digest'], 'Child pending digest mismatch')
+            require(prior['allowance_used_mist'] == t['gas_mist'], 'Child allowance does not reconcile')
+            require(live.balance(address) == prior['funding_mist'] - t['gas_mist'], 'Child balance does not reconcile')
         fixture = prior
     else:
         args.private_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
