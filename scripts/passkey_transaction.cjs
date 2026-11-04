@@ -53,6 +53,7 @@ if (require.main === module) (async () => {
   try { keys = JSON.parse(stored); } catch { throw Error('Invalid private fixture state'); }
  } catch (error) {
   if (error.code !== 'ENOENT') throw error;
+  if (input.requireExistingKeys) throw Error('Missing retained private fixture state');
   keys = Array.from({length:2}, () => crypto.generateKeyPairSync('ec',{namedCurve:'prime256v1',privateKeyEncoding:{type:'pkcs8',format:'pem'},publicKeyEncoding:{type:'spki',format:'der'}})).map(k=>({privateKey:k.privateKey, publicKey:crypto.ECDH.convertKey(k.publicKey.subarray(-65),'prime256v1',undefined,undefined,'compressed').toString('base64')}));
   fs.writeFileSync(input.keys,JSON.stringify(keys),{mode:0o600,flag:'wx'});
  }
@@ -73,6 +74,7 @@ if (require.main === module) (async () => {
  const tx = new Transaction(); tx.setSender(input.sender);tx.setGasBudget(input.budget);
  if(input.sponsor!==undefined) tx.setGasOwner(signer(input.sponsor).toSuiAddress());
  if(input.operation==='proof') tx.moveCall({target:`${input.package}::passkey_factor::prove_enrollment`,arguments:[tx.object(input.customer),tx.pure.address(input.administrator),tx.pure.vector('u8',Buffer.from(keys[input.key].publicKey,'base64')),tx.pure.u64(input.expires),tx.object('0x6')]});
+ else if(input.operation==='enroll') tx.moveCall({target:`${input.package}::passkey_factor::enroll`,arguments:[tx.object(input.customer),tx.object(input.proof),tx.object('0x6')]});
  else if(input.operation==='rename') tx.moveCall({target:`${input.package}::customer::rename_fleet`,arguments:[tx.object(input.customer),tx.object(input.fleet),tx.pure.string(input.name)]});
  else if(input.operation==='policy') tx.moveCall({target:`${input.package}::customer::set_security`,arguments:[tx.object(input.customer),tx.pure.vector('u8',Array(7).fill(input.mask))]});
  else if(input.operation==='remove') tx.moveCall({target:`${input.package}::passkey_factor::remove`,arguments:[tx.object(input.customer),tx.pure.address(input.administrator),tx.pure.address(signer(input.key).toSuiAddress())]});

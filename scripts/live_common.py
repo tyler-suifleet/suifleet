@@ -208,7 +208,7 @@ class Live:
                 pass
         return found
 
-    def exact_ptb(self, ptb, config=None):
+    def exact_ptb(self, ptb, config=None, *, persist=None):
         """Callable for Budget.execute: build the PTB's unsigned bytes, sign
         them and execute exactly those bytes. The digest is known before
         submission, so a throttled (HTTP 429) submission is reconciled by
@@ -232,6 +232,8 @@ class Live:
             if config is None and toolchain.normal(data["sender"]) != toolchain.normal(self.operator):
                 raise toolchain.NotSubmitted("transaction sender is not the verified wallet")
             digest = data["digest"]
+            if persist:
+                persist(data)
             signature = self.signer(config, data["sender"])(tx_bytes)
             for attempt in range(self.SUBMIT_ATTEMPTS):
                 result = self.client("execute-signed-tx", "--tx-bytes", tx_bytes, "--signatures", signature,

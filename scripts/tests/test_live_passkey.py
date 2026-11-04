@@ -218,7 +218,178 @@ class CachedPasskeyTests(unittest.TestCase):
                  patch('live_wallet_gate.head_fixture', return_value=cached), \
                  patch.object(target, 'contracts_digest', return_value=source), \
                  patch.object(target.dm, 'chain_facts', return_value=facts):
-                with self.assertRaisesRegex(RuntimeError, 'uncertain'):
+                with self.assertRaisesRegex(RuntimeError, 'missing retained'):
                     target.cached_acceptance(live, root / 'package.json')
             live.transaction.assert_not_called()
             self.assertEqual(json.loads(private.read_text())['pending']['digest'], 'uncertain')
+
+
+class JournalRecoveryTests(unittest.TestCase):
+    def live(self, status='success'):
+        from testnet_budget import Budget
+        result = dict(digest='digest', effects=dict(status=dict(status=status),
+            gasUsed=dict(computationCost='1000000', storageCost='2000000', storageRebate='9000000')),
+            objectChanges=[dict(type='created', objectId='proof', objectType='pkg::passkey_factor::Enrollment')])
+        evidence = dict(transactions=[])
+        live = SimpleNamespace(ledger=Budget(100_000_000, evidence['transactions']), evidence=evidence,
+            assert_lock=Mock(), executor=Mock(), read_back=Mock(return_value=result))
+        return live, result
+
+    def test_interrupted_exact_digest_recovery_is_charged_without_replay(self):
+        live, result = self.live()
+        state = dict(pending=dict(operation='proof', digest='digest', gas_budget_mist=20_000_000, expect='success'))
+        save = Mock()
+        journal = target.FixtureJournal(live, state, save)
+        with patch.object(target.tc, 'bound', side_effect=lambda r,d:r):
+            journal.recover()
+        live.read_back.assert_called_once_with('digest')
+        live.executor.assert_not_called()
+        self.assertNotIn('pending', state)
+        self.assertEqual(live.ledger.used, 20_000_000)  # rebate does not replenish
+        submit = Mock(side_effect=AssertionError('must not replay'))
+        self.assertEqual(journal.run('proof', submit), result)
+        submit.assert_not_called()
+        self.assertEqual(state['completed']['proof']['objectChanges'][0]['objectId'], 'proof')
+
+    def test_unknown_failed_and_changed_digest_retain_pending(self):
+        for case in ('unknown', 'failure', 'wrong_digest'):
+            live, result = self.live('failure' if case == 'failure' else 'success')
+            if case == 'unknown':
+                live.read_back.return_value = {}
+            if case == 'wrong_digest':
+                result['digest'] = 'different'
+            state = dict(pending=dict(operation='setup', digest='digest', gas_budget_mist=20_000_000, expect='success'))
+            with self.subTest(case=case), self.assertRaises((RuntimeError, AssertionError)):
+                target.FixtureJournal(live, state, Mock()).recover()
+            self.assertEqual(state['pending']['digest'], 'digest')
+            self.assertEqual(live.ledger.used, 20_000_000)
+            live.executor.assert_not_called()
+
+    def test_expected_failed_probe_is_accounted_and_checkpointed(self):
+        live, result = self.live('failure')
+        state = dict(pending=dict(operation='wallet refused', digest='digest', gas_budget_mist=20_000_000, expect='failure'))
+        with patch.object(target.tc, 'bound', side_effect=lambda r,d:r):
+            target.FixtureJournal(live, state, Mock()).recover()
+        self.assertEqual(live.evidence['transactions'][0]['status'], 'failure')
+        self.assertIn('wallet refused', state['completed'])
+
+    def test_incomplete_pending_never_replays(self):
+        live, _ = self.live()
+        for pending in ({'operation':'setup'}, {'operation':'setup','digest':'d'},
+                        {'operation':'setup','digest':'d','expect':'success','gas_budget_mist':None}):
+            with self.assertRaisesRegex(RuntimeError, 'uncertain'):
+                target.FixtureJournal(live, dict(pending=pending), Mock()).recover()
+        live.executor.assert_not_called()
+        live.read_back.assert_not_called()
+
+    def test_policy_field_read_preserves_initialized_authority(self):
+        live = SimpleNamespace(client=Mock(return_value=dict(dynamicFields=[dict(fieldId='policy')])),
+            object=Mock(return_value=dict(objType='pkg::dynamic_field::Field<pkg::security_policy::PolicyKey,pkg::security_policy::Policy>')))
+        self.assertTrue(target.security_initialized(live, 'customer'))
+        live.client.return_value = dict(dynamicFields=[])
+        self.assertFalse(target.security_initialized(live, 'customer'))
+
+class ProtectedResumeTests(unittest.TestCase):
+    def test_completed_removal_is_not_undone_and_full_cycle_can_repeat(self):
+        import subprocess
+        operator = '0x' + '1'*64
+        keys = [dict(address='0x'+c*64) for c in ('4','5')]
+        head = '0x'+'2'*64
+        installed = [v for key in keys for v in (operator,key['address'])]
+        state, requests, current = {}, [], {}
+        protected = [False]
+        interruption = [True]
+        class Interrupted(Exception): pass
+        def save():
+            if interruption[0] and 'backup passkey recovers lost primary' in state.get('completed',{}):
+                interruption[0] = False
+                raise Interrupted()
+        def prepare(args, *, input, **kwargs):
+            request = json.loads(input)
+            if request['operation']=='info':
+                return subprocess.CompletedProcess(args,0,json.dumps(keys),'')
+            requests.append(request); current.clear(); current.update(request)
+            return subprocess.CompletedProcess(args,0,json.dumps(dict(bytes='bytes',digest='digest',signature='sig')),'')
+        def decode(_):
+            return dict(digest='digest',gas_budget=20_000_000,gas_payment=[],expiration=None,
+                sender=current['sender'],gas_owner=keys[current['sponsor']]['address']
+                if 'sponsor' in current else current['sender'])
+        def execute(client,label,submit,**kwargs):
+            result = submit(20_000_000)
+            operation = current['operation']
+            authorized = not protected[0] or ('sponsor' in current
+                and keys[current['sponsor']]['address'] in installed[1::2])
+            status = 'success' if operation=='proof' or authorized else 'failure'
+            self.assertEqual(status,kwargs['expect'],label)
+            if status=='success':
+                if operation=='policy':protected[0]=bool(current['mask'])
+                if operation=='remove':
+                    index=installed.index(keys[current['key']]['address'])
+                    del installed[index-1:index+1]
+                if operation=='enroll':
+                    key = keys[0] if 'proof 0' in current['proof'] else keys[1]
+                    installed.extend([operator,key['address']])
+            return dict(digest='digest',effects=dict(status=dict(status=status,error='fixture')),
+                objectChanges=[dict(type='created',objectId=label,objectType='pkg::passkey_factor::Enrollment')])
+        evidence = dict(transactions=[])
+        live = SimpleNamespace(network='testnet',rpc_url='fixture',operator=operator,evidence=evidence,
+            assert_lock=Mock(),decode=decode,executor=Mock(return_value=Mock(return_value={})),
+            signer=Mock(return_value=Mock(return_value='wallet')),
+            ledger=SimpleNamespace(execute=execute),
+            object=Mock(return_value=dict(content=dict(timestamp_ms=1000))),created=target.Live.created)
+        abort = Mock()
+        abort.search.return_value.groups.return_value = ('security_policy',target.abort_site(
+            Path('contracts'),'security_policy','check',1),'1')
+        with TemporaryDirectory() as directory, patch.object(target.subprocess,'run',side_effect=prepare), \
+             patch.object(target,'enrolled_keys',side_effect=lambda *args:list(installed)), \
+             patch.object(target,'fund_passkey'), patch.object(target.tc,'bound',side_effect=lambda r,d:r), \
+             patch.object(target,'ABORT',abort):
+            path=Path(directory)/'state.json'
+            path.with_suffix('.keys.json').write_text('retained test identity')
+            fixture=dict(head=head,base=head,customer='customer',fleet='fleet')
+            with self.assertRaises(Interrupted):target.exercise(live,fixture,path,state,save)
+            self.assertNotIn(keys[0]['address'],installed)
+            before=len(requests)
+            target.exercise(live,fixture,path,state,save)
+            self.assertFalse(any(r['operation']=='enroll' for r in requests[before:]))
+            self.assertEqual(installed,[])
+            # Same retained identities, next successful independent cycle.
+            state['completed']={}
+            target.exercise(live,fixture,path,state,save)
+            self.assertEqual(installed,[])
+            self.assertEqual(sum(r['operation']=='enroll' for r in requests[before:]),2)
+            self.assertEqual(path.with_suffix('.keys.json').read_text(),'retained test identity')
+
+    def test_expired_interrupted_enrollment_proof_renews_with_same_keys(self):
+        import subprocess
+        operator='0x'+'1'*64
+        keys=[dict(address='0x'+c*64) for c in ('4','5')]
+        requests,current=[],{}
+        state=dict(completed={'native possession proof 0':dict(digest='old-proof-digest',
+            objectChanges=[dict(type='created',objectId='old-proof',objectType='pkg::passkey_factor::Enrollment')])})
+        def prepare(args,*,input,**kwargs):
+            request=json.loads(input)
+            if request['operation']=='info':return subprocess.CompletedProcess(args,0,json.dumps(keys),'')
+            requests.append(request);current.clear();current.update(request)
+            return subprocess.CompletedProcess(args,0,json.dumps(dict(bytes='bytes',digest='new-digest',signature='sig')),'')
+        def decode(_):
+            return dict(digest='new-digest',gas_budget=20_000_000,gas_payment=[],expiration=None,
+                sender=current['sender'],gas_owner=keys[current['sponsor']]['address']
+                if 'sponsor' in current else current['sender'])
+        def execute(client,label,submit,**kwargs):
+            submit(20_000_000)
+            return dict(digest='new-digest',effects=dict(status=dict(status='success')),
+                objectChanges=[dict(type='created',objectId='new-proof',objectType='pkg::passkey_factor::Enrollment')])
+        live=SimpleNamespace(network='testnet',rpc_url='fixture',operator=operator,evidence={},
+            assert_lock=Mock(),executor=Mock(return_value=Mock(return_value={})),decode=decode,
+            signer=Mock(return_value=Mock(return_value='wallet')),ledger=SimpleNamespace(execute=execute),
+            created=target.Live.created,
+            object=Mock(side_effect=lambda key:dict(content=dict(expires_ms=0) if key=='old-proof' else dict(timestamp_ms=1000))))
+        with patch.object(target.subprocess,'run',side_effect=prepare), \
+             patch.object(target,'enrolled_keys',return_value=[operator,keys[1]['address']]), \
+             patch.object(target,'fund_passkey'), patch.object(target.tc,'bound',side_effect=lambda r,d:r):
+            target.exercise(live,dict(head='head',customer='customer'),Path('/private/state.json'),state,Mock(),enrollment_only=True)
+        self.assertIn('native possession proof 0 renewal old-proof-digest',state['completed'])
+        enrollment=next(r for r in requests if r['operation']=='enroll')
+        self.assertEqual((enrollment['proof'],enrollment['sponsor']),('new-proof',1))
+        self.assertEqual([r['key'] for r in requests if r['operation']=='proof'],[0])

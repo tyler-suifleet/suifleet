@@ -3,8 +3,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('nod
 const {spawnSync}=require('node:child_process');
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'sf198-fixture-'));
 const keys=path.join(root,'keys.json');
-const run=()=>spawnSync(process.execPath,['scripts/passkey_transaction.cjs'],{input:JSON.stringify({operation:'info',keys}),encoding:'utf8'});
+const run=(extra={})=>spawnSync(process.execPath,['scripts/passkey_transaction.cjs'],{input:JSON.stringify({operation:'info',keys,...extra}),encoding:'utf8'});
 try {
+ const missing=run({requireExistingKeys:true});assert.equal(missing.status,1);assert(!fs.existsSync(keys));
  const first=run();assert.equal(first.status,0,first.stderr);
  const metadata=JSON.parse(first.stdout);assert.equal(metadata.length,2);
  assert(metadata.every(k=>k.address.startsWith('0x')&&!('privateKey' in k)));

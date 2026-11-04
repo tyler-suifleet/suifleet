@@ -18,12 +18,13 @@ import deployment_manifest as dm
 import sui_toolchain as tc
 
 
-def fund_passkey(live, index, address):
+def fund_passkey(live, index, address, journal=None):
     total = live.balance(address)
     live.ledger.grant(total)  # Cached gas is not free allowance.
     deficit = max(0, 30_000_000 - total)
     if deficit:
-        live.transaction(f'fund passkey {index}', '--split-coins', 'gas', f'[{deficit}]',
+        transaction = journal.wallet if journal else live.transaction
+        transaction(f'fund passkey {index}', '--split-coins', 'gas', f'[{deficit}]',
                          '--assign', 'funding', '--transfer-objects', '[funding]',
                          f'@{address}', budget=20_000_000, funding=deficit)
 
@@ -46,19 +47,94 @@ def enrolled_keys(live, customer):
     return []
 
 
+
+def native_fixture(live, state_path, **kwargs):
+    result = subprocess.run(['node','scripts/passkey_transaction.cjs'], input=json.dumps(dict(keys=str(state_path.with_suffix('.keys.json')), network=live.network, endpoint=live.rpc_url, **kwargs)), capture_output=True, text=True, check=False)
+    if result.returncode:
+        # Provider/SDK messages can contain request bytes or private paths.
+        # Expose only reviewed diagnostics; preserve the conservative ledger
+        # reservation and never retry signing/submission on this exception.
+        safe = {'fixture gas coin unavailable', 'Invalid private fixture state',
+                'No valid gas coins found for the transaction.', 'Missing retained private fixture state'}
+        diagnostic = result.stderr.strip()
+        reason = diagnostic if diagnostic in safe else 'private subprocess diagnostic withheld'
+        raise RuntimeError(f'native passkey {kwargs["operation"]} preparation failed: {reason}')
+    return json.loads(result.stdout)
+
+class FixtureJournal:
+    """Private checkpoints; never rebuild a transaction with an unknown outcome."""
+    def __init__(self, live, state, save):
+        self.live, self.state, self.save = live, state, save
+
+    def pending(self, label, data, budget):
+        self.state['pending'] = dict(operation=label, digest=data['digest'], gas_budget_mist=budget, funding_mist=self.funding, expect=self.expected)
+        self.save()
+
+    def run(self, label, submit, *, budget=20_000_000, funding=0, expect='success'):
+        self.expected, self.funding = expect, funding
+        completed = self.state.setdefault('completed', {})
+        if label in completed:
+            return completed[label]
+        pending = self.state.get('pending')
+        if pending:
+            if (pending.get('operation') != label or not pending.get('digest')
+                    or pending.get('gas_budget_mist') != budget
+                    or pending.get('funding_mist', 0) != funding):
+                raise RuntimeError('uncertain native passkey mutation; reconcile exact digest before retry')
+            # A prior process may have submitted it. Charge the full original
+            # reservation in this run too; refunds cannot replenish allowance.
+            self.live.ledger.grant(budget + funding)
+            result = self.live.read_back(pending['digest'])
+            if not result:
+                raise RuntimeError('uncertain native passkey mutation; exact digest not readable')
+            result = tc.bound(result, pending['digest'])
+            effects = result['effects']
+            cost = max(0, int(effects['gasUsed']['computationCost'])
+                       + int(effects['gasUsed']['storageCost']) - int(effects['gasUsed']['storageRebate']))
+            if cost > budget:
+                raise RuntimeError('reconciled gas exceeds original reservation')
+            self.live.evidence['transactions'].append(dict(label=label, digest=result['digest'],
+                status=effects['status']['status'], gas_mist=cost, gas_budget_mist=budget, funding_mist=funding,
+                reconciled=True, allowance_used_mist=self.live.ledger.used))
+        else:
+            self.live.assert_lock()
+            result = self.live.ledger.execute(self.live.executor(), label, submit,
+                gas=budget, funding=funding, expect=expect, require_full=True)
+        if result['effects']['status']['status'] != expect:
+            # Keep the failed effects and pending identity. Explicit repair is
+            # needed; failure gas is charged and the mutation is never replayed.
+            raise RuntimeError('reconciled native passkey effects differ from expected outcome')
+        completed[label] = result
+        self.state.pop('pending', None)
+        self.save()
+        return result
+
+    def recover(self):
+        pending = self.state.get('pending')
+        if pending:
+            if (pending.get('expect') not in ('success', 'failure') or not pending.get('digest')
+                    or type(pending.get('gas_budget_mist')) is not int or pending['gas_budget_mist'] <= 0
+                    or type(pending.get('funding_mist', 0)) is not int or pending.get('funding_mist', 0) < 0):
+                raise RuntimeError('uncertain native passkey mutation; incomplete retained transaction identity')
+            self.run(pending['operation'], None, budget=pending.get('gas_budget_mist'),
+                     funding=pending.get('funding_mist', 0), expect=pending['expect'])
+
+    def wallet(self, label, *ptb, budget=20_000_000, funding=0):
+        return self.run(label, self.live.exact_ptb(ptb,
+            persist=lambda data: self.pending(label, data, budget)), budget=budget, funding=funding)
+
+
+def security_initialized(live, customer):
+    """Read authority state; an existing protected policy must not be reinitialized."""
+    fields = live.client('dynamic-field', customer)['dynamicFields']
+    return any('::security_policy::PolicyKey,' in str(live.object(field['fieldId']).get('objType', ''))
+               for field in fields)
+
+
 def exercise(live, f, state_path, state, save, *, enrollment_only=False):
+    journal = FixtureJournal(live, state, save)
     def fixture(**kwargs):
-        result = subprocess.run(['node','scripts/passkey_transaction.cjs'], input=json.dumps(dict(keys=str(state_path.with_suffix('.keys.json')), network=live.network, endpoint=live.rpc_url, **kwargs)), capture_output=True, text=True, check=False)
-        if result.returncode:
-            # Provider/SDK messages can contain request bytes or private paths.
-            # Expose only reviewed diagnostics; preserve the conservative ledger
-            # reservation and never retry signing/submission on this exception.
-            safe = {'fixture gas coin unavailable', 'Invalid private fixture state',
-                    'No valid gas coins found for the transaction.'}
-            diagnostic = result.stderr.strip()
-            reason = diagnostic if diagnostic in safe else 'private subprocess diagnostic withheld'
-            raise RuntimeError(f'native passkey {kwargs["operation"]} preparation failed: {reason}')
-        return json.loads(result.stdout)
+        return native_fixture(live, state_path, requireExistingKeys=bool(state.get('require_keys')), **kwargs)
     def tx(label, **kwargs):
         live.assert_lock()
         def submit(budget):
@@ -73,20 +149,23 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
             assert tc.normal(data['sender']) == tc.normal(kwargs['sender'])
             # The locally constructed fixture is the reviewed operation builder;
             # wallet authority signs only its verified bytes, never a digest alone.
-            state['pending']={'operation':label,'digest':data['digest']};save()
+            journal.pending(label, data, budget)
             signatures = [prepared['signature']] if kwargs['operation'] == 'proof' else [live.signer(None, live.operator)(prepared['bytes'])] + ([prepared['signature']] if prepared['signature'] else [])
             result = tc.bound(live.executor()('execute-signed-tx','--tx-bytes',prepared['bytes'],*[arg for signature in signatures for arg in ('--signatures', signature)]), data['digest'])
-            del state['pending'];save()
             return result
         expected = kwargs.pop('expect', 'success')
-        result = live.ledger.execute(live.executor(), label, submit, gas=20_000_000, expect=expected, require_full=True)
+        result = journal.run(label, submit, expect=expected)
         if expected == 'failure' and kwargs['package'] == f['head']:
             found = ABORT.search(str(result['effects']['status'].get('error', '')))
             observed = found.groups() if found else None
-            live.evidence['transactions'][-1]['abort'] = observed
+            live.evidence.setdefault('native_aborts', {})[label] = observed
             assert observed == ('security_policy', abort_site(Path('contracts'), 'security_policy', 'check', 1), '1'), 'native refusal must be the missing-factor abort'
         return result
+    if state.get('require_keys') and not state_path.with_suffix('.keys.json').is_file():
+        raise RuntimeError('missing retained native passkey signing identity; preserve protected fixture')
     keys=fixture(operation='info')
+    state['require_keys'] = True
+    save()
     installed = enrolled_keys(live, f['customer'])
     expected = {tc.normal(key['address']) for key in keys}
     if any(tc.normal(installed[i]) != tc.normal(live.operator) or tc.normal(installed[i+1]) not in expected
@@ -95,17 +174,37 @@ def exercise(live, f, state_path, state, save, *, enrollment_only=False):
     for i,key in enumerate(keys):
         # Funding is charged as a grant; subsequent passkey-paid gas cannot
         # enlarge the allowance. Reused signing identities retain their gas.
-        fund_passkey(live, i, key['address'])
-        if tc.normal(key['address']) in {tc.normal(k) for k in installed[1::2]}:
+        fund_passkey(live, i, key['address'], journal)
+        reused = tc.normal(key['address']) in {tc.normal(k) for k in installed[1::2]}
+        if reused:
             live.evidence.setdefault('native_reused_enrollments', []).append(key['address'])
+        if reused or 'enable native passkey protection' in state.get('completed', {}):
             continue
-        result=tx(f'native possession proof {i}',operation='proof',key=i,package=f['head'],customer=f['customer'],administrator=live.operator,sender=key['address'],expires=int(live.object('0x6')['content']['timestamp_ms'])+300000)
+        label = f'native possession proof {i}'
+        # Resume the latest proof, including a prior expiry renewal. Never replay
+        # an unreadable pending digest or change the retained signing identity.
+        completed_proofs = [(name, result) for name, result in state.get('completed', {}).items()
+                            if name == label or name.startswith(label + ' renewal ')]
+        if completed_proofs:
+            label, result = completed_proofs[-1]
+            proof = live.created(result, '::passkey_factor::Enrollment')[0]
+            expires = int(live.object(proof)['content']['expires_ms'])
+            if expires <= int(live.object('0x6')['content']['timestamp_ms']):
+                label = f'native possession proof {i} renewal {result["digest"]}'
+        result = tx(label, operation='proof', key=i, package=f['head'], customer=f['customer'],
+                    administrator=live.operator, sender=key['address'],
+                    expires=int(live.object('0x6')['content']['timestamp_ms'])+300000)
         proof=live.created(result,'::passkey_factor::Enrollment')[0]
-        live.transaction(f'wallet enrolls passkey {i}','--move-call',f'{f["head"]}::passkey_factor::enroll',f'@{f["customer"]}',f'@{proof}','@0x6',budget=20_000_000)
+        sponsors = [j for j, candidate in enumerate(keys)
+                    if tc.normal(candidate['address']) in {tc.normal(k) for k in installed[1::2]}]
+        tx(f'wallet enrolls passkey {i}', operation='enroll', proof=proof,
+           package=f['head'], customer=f['customer'], sender=live.operator,
+           **({'sponsor': sponsors[0]} if sponsors else {}))
+        installed.extend([live.operator, key['address']])
     if enrollment_only:
         return
     common=dict(package=f['head'],customer=f['customer'],sender=live.operator)
-    tx('enable native passkey protection',operation='policy',mask=2,**common)
+    tx('enable native passkey protection',operation='policy',mask=2,sponsor=0,**common)
     tx('wallet plus passkey allows action',operation='rename',fleet=f['fleet'],name='Native co-signed action',sponsor=0,**common)
     tx('wallet alone refused on chain',operation='rename',fleet=f['fleet'],name='must fail',expect='failure',**common)
     # A co-signed call to an unchanged base/head is authorized, not a bypass.
@@ -181,24 +280,37 @@ def cached_acceptance(live, package_state, private=None):
     state = json.loads(private.read_text()) if private.exists() else {}
     def save():
         save_state(private, state)
-    if state.get('pending'):
-        raise RuntimeError('uncertain native passkey mutation; reconcile exact digest before retry')
     identity = hashlib.sha256(json.dumps([live.chain, live.operator, base, head]).encode()).hexdigest()
+    if state.get('active_fixture', identity) != identity and (state.get('pending') or state.get('completed')):
+        raise RuntimeError('unfinished native passkey fixture belongs to another package pair')
+    state['active_fixture'] = identity
     f = state.setdefault('fixtures', {}).get(identity)
+    keys_path = private.with_suffix('.keys.json')
+    if (f or state.get('pending') or state.get('completed')) and not keys_path.is_file():
+        raise RuntimeError('missing retained native passkey signing identity; preserve protected fixture')
+    native_fixture(live, private, operation='info', requireExistingKeys=bool(f or state.get('pending') or state.get('completed')))
+    state['require_keys'] = True
+    journal = FixtureJournal(live, state, save)
+    journal.recover()
     if not f:
-        state['pending'] = {'operation': 'create cached passkey organization'}; save()
-        result = live.transaction('create cached passkey organization', '--move-call',
+        result = journal.wallet('create cached passkey organization', '--move-call',
             f'{head}::customer::create', '@' + cached['registry'],
             '"SF198 protected CI fixture"', budget=100_000_000)
         f = dict(base=base, head=head, customer=live.created(result, '::customer::Customer')[0],
                  fleet=live.created(result, '::customer::Fleet')[0])
         state['fixtures'][identity] = f
-        del state['pending']; save()
-    # Initializer is additive and idempotent; all protected cases share the
-    # parent's strict ledger, including failures and full gas reservations.
-    live.transaction('initialize cached passkey authority', '--move-call',
-                     f'{head}::customer::initialize_security', '@' + f['customer'], budget=20_000_000)
+        save()
+    # Existing policy can require a passkey even for this idempotent call.
+    # Reconcile an interrupted initializer before inspecting current state.
+    label = 'initialize cached passkey authority'
+    if state.get('pending', {}).get('operation') == label or not security_initialized(live, f['customer']):
+        journal.wallet(label, '--move-call', f'{head}::customer::initialize_security',
+                       '@' + f['customer'])
+    state['require_keys'] = keys_path.exists()
     exercise(live, f, private, state, save)
+    state['completed'] = {}
+    state['require_keys'] = True
+    save()
     live.evidence['native_passkey'] = dict(fixture=f, type_origins=origins, success=True)
 
 
@@ -244,9 +356,6 @@ def run(a):
             '--split-coins', 'gas', '[200000000]', '--assign', 'address_funds',
             '--move-call', '0x2::coin::send_funds', '<0x2::sui::SUI>',
             'address_funds.0', '@' + live.operator, budget=20_000_000)
-        # Reproduce the protected run's interruption after enrollment, then
-        # resume with the exact identities and on-chain bindings, without enrolling twice.
-        exercise(live, f, state_path, state, save, enrollment_only=True)
         # Exercise the protected-lane adapter on the same actual chain and
         # existing signing identities; no package is published by this path.
         from live_package_upgrade import fixture_key, save_state
@@ -259,10 +368,32 @@ def run(a):
                      upgrade=dict(kind='upgrade', digest=contracts_digest(Path('contracts')).removeprefix('bytecode-v1:')))))}))
         identity = hashlib.sha256(json.dumps([live.chain, live.operator, f['base'], f['head']]).encode()).hexdigest()
         state['fixtures'][identity] = f; save()
+        # Persist a real protected on-chain policy and interrupt immediately
+        # after its successful effects, then resume through the CI adapter.
+        class Interrupted(Exception):
+            pass
+        original_executor = live.executor
+        def interrupting_executor(*args, **kwargs):
+            execute = original_executor(*args, **kwargs)
+            def submitted(*command):
+                result = execute(*command)
+                if state.get('pending', {}).get('operation') == 'enable native passkey protection':
+                    raise Interrupted()
+                return result
+            return submitted
+        live.executor = interrupting_executor
+        try:
+            exercise(live, f, state_path, state, save)
+        except Interrupted:
+            pass
+        else:
+            raise AssertionError('protected interruption was not exercised')
+        finally:
+            live.executor = original_executor
         cached_acceptance(live, gate_state, private=state_path)
-        assert len(live.evidence.get('native_reused_enrollments', [])) == 2
+        assert len(live.evidence.get('native_reused_enrollments', [])) >= 2
         policy_payments = [p for p in live.evidence['native_payment']
-                           if p['operation'] == 'enable native passkey protection']
+                           if p['operation'] == 'wallet alone refused on chain']
         assert policy_payments and all(p['gas_objects'] == 0 for p in policy_payments), 'local regression needs coinless wallet payment'
         live.evidence['success']=True
     finally:
