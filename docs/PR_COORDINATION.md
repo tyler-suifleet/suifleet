@@ -1602,7 +1602,9 @@ main controller run and head-named effects artifact, exact source/base and
 contract Git trees. It accepts only the observed bounded setup sequence with
 successful accounted setup effects followed by `upgrade to head` explicitly
 `not_submitted` and the compiler's missing-public-declaration compatibility
-rejection. Unknown outcomes, held reservations, reconciliations, additional suite
+rejection (`EUC01001` missing public declaration or `EUC01006` module missing;
+any other compiler diagnostic remains blocking). Unknown outcomes, held
+reservations, reconciliations, additional suite
 artifacts, genuine source contract changes and active/uncertain repairs fail
 closed. Status class or reviewer prose alone cannot grant this route.
 
@@ -1624,3 +1626,15 @@ revision/readiness and retain any real combined findings. Implementation workers
 hand off without merging, installing, replaying wallet work or polling hosted CI.
 The 2026-11-01 local infrastructure integration authorization applies to this
 contained coordinator repair and its actual main-combined offline validation.
+
+SF-182's bounded recovery extends that diagnostic recognition to `EUC01006`
+(module missing), with the same unchanged-source-contract proof and all existing
+run, artifact, accounting and stopped-worker fences. Its
+[historical exact-run replay](validation/sf182-stale-base-repair.json) authenticates
+run 41791378072 and its 799,286,156 MIST setup ledger through the repaired reader.
+The replay uses an isolated scheduler fixture; it is not installed routing, a
+current candidate receipt or feature acceptance. The installed generation still
+needs the repair through sole-coordinator merged-only activation. Source/base
+movement requires fresh evidence, and every real combined candidate still needs
+independent review and actual protected testnet acceptance. The checkout fixture
+remains ineligible for renewal until December 4; the recovery does not waive it.

@@ -243,6 +243,17 @@ class BatchController:
                 evidence = json.loads(raw)
             transactions = evidence.get('transactions', [])
             error = evidence.get('error', '')
+            # Both diagnostics describe declarations added by newer main. The
+            # immutable ancestor/source contract-tree equality above is still
+            # required; this never permits a source contract deletion.
+            diagnostics = set(re.findall(r'error\[([A-Z0-9]+)\]', error))
+            stale_diagnostics = {
+                'EUC01001': 'missing public declaration',
+                'EUC01006': 'module missing',
+            }
+            stale_rejection = (bool(diagnostics) and diagnostics <= stale_diagnostics.keys()
+                and all(f'error[{code}]: {stale_diagnostics[code]}' in error
+                        for code in diagnostics))
             if (evidence.get('head') != head or evidence.get('base') != base
                     or evidence.get('network') != 'testnet' or evidence.get('chain') != '4c78adac'
                     or evidence.get('success') is not False or evidence.get('failure_class') != 'source'
@@ -252,8 +263,7 @@ class BatchController:
                     or not transactions or transactions[-1].get('label') != 'upgrade to head'
                     or transactions[-1].get('status') != 'not_submitted' or transactions[-1].get('digest')
                     or not error.startswith('test-upgrade could not build a transaction:')
-                    or 'error[EUC01001]: missing public declaration' not in error
-                    or set(re.findall(r'error\[([A-Z0-9]+)\]', error)) != {'EUC01001'}
+                    or not stale_rejection
                     or "this package requires changes to be compatible" not in error):
                 return
             used = 0

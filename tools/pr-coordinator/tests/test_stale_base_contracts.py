@@ -59,6 +59,33 @@ class StaleBaseTests(unittest.TestCase):
         self.assertEqual(f.owners[0], owner)
         self.assertIsNotNone(c.checks_blocker(pr))
 
+    def test_missing_main_module_routes_without_waiving_candidate_acceptance(self):
+        f, pr, run, evidence, trees = self.setup_case()
+        evidence['error'] = ("test-upgrade could not build a transaction: "
+            "error[EUC01006]: module missing\nPackage is missing module 'passkey_factor'\n"
+            "this package requires changes to be compatible")
+        f.controller.annotate_stale_base(f.project, pr)
+        self.assertTrue(c.verified_stale_base(pr))
+        self.assertIsNotNone(c.checks_blocker(pr))
+        f.gh = Fixture.gh.__get__(f)
+        f.tick()
+        self.assertEqual(f.row()['status'], 'awaiting_ci')
+        self.assertEqual(f.reconciled, [])
+
+    def test_missing_module_rejects_other_errors_and_actual_source_changes(self):
+        for mode in ('other_error', 'wrong_message', 'source_change', 'held', 'submitted'):
+            with self.subTest(mode=mode):
+                f, pr, run, evidence, trees = self.setup_case()
+                evidence['error'] = ("test-upgrade could not build a transaction: "
+                    "error[EUC01006]: module missing; this package requires changes to be compatible")
+                if mode == 'other_error': evidence['error'] += ' error[E99999]: another failure'
+                if mode == 'wrong_message': evidence['error'] = evidence['error'].replace('module missing', 'unknown')
+                if mode == 'source_change': trees[pr['headRefOid']] = 'e' * 40
+                if mode == 'held': evidence['funding']['held_mist'] = 1
+                if mode == 'submitted': evidence['transactions'][-1].update(status='success', digest='submitted')
+                f.controller.annotate_stale_base(f.project, pr)
+                self.assertNotIn('_stale_base_contracts', pr)
+
     def test_negative_evidence_fails_closed(self):
         changes = [
             lambda f,p,r,e,t: t.update({p['headRefOid']:'e'*40}),
@@ -149,6 +176,9 @@ class StaleBaseTests(unittest.TestCase):
         head = f.git('rev-parse', 'HEAD'); f.git('push', '-q', '--force', 'origin', 'work/1')
         f.git('checkout', '-B', 'main', ancestor)
         (contracts/'module.move').write_text('original declaration plus new public declaration')
+        (contracts/'passkey_factor.move').write_text('new main module')
+        evidence['error'] = ("test-upgrade could not build a transaction: "
+            "error[EUC01006]: module missing; this package requires changes to be compatible")
         f.git('add', 'contracts'); f.git('commit', '-qm', 'new main declaration')
         base = f.git('rev-parse', 'HEAD'); f.git('push', '-q', 'origin', 'main')
         f.base = base; f.source_prs = {1:pr}
@@ -170,6 +200,7 @@ class StaleBaseTests(unittest.TestCase):
         self.assertEqual(batch['status'], 'awaiting_ci')
         self.assertEqual(f.git('rev-parse', batch['head']+':contracts'), f.git('rev-parse', base+':contracts'))
         self.assertEqual(f.git('show', batch['head']+':app'), 'source feature')
+        self.assertEqual(f.git('show', batch['head']+':contracts/passkey_factor.move'), 'new main module')
         self.assertFalse(any(kind == 'fix' for _,_,kind in f.launched))
 
     def test_scheduler_does_not_launch_another_diagnosis_worker(self):
