@@ -101,8 +101,10 @@ trajectories or claim a recorder fix retroactively changes published clips.
 original cursor clips. `narrate_guide.py` uses the synthetic American English
 female Kokoro Heart voice (`af_heart`), locally. It sends no text or visitor data
 to a speech service and does not contact the chain. It lengthens individual action
-segments when necessary, preserving every source interval, with a short pause
-between cues. Video timing is illustrative, not a network latency measurement.
+segments when necessary, preserving natural-speed actions and holding their last
+frame while explanations finish, with a short pause between cues. Every section
+explains what it is for, when to use it, the steps shown and what to check next.
+Video timing is illustrative, not a network latency measurement.
 
 Install optional `kokoro-onnx==0.4.9` in an isolated Python environment. Download
 `kokoro-v1.0.onnx` and `voices-v1.0.bin` from the

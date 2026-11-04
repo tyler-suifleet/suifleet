@@ -119,9 +119,9 @@ def main():
                 wav.writeframes((audio * 32767).astype("<i2").tobytes())
             filters = [f"[0:v]split={len(plan)}" + "".join(f"[s{i}]" for i in range(len(plan)))]
             for i, segment in enumerate(plan):
-                scale = segment["duration"] / (segment["source_end"] - segment["source_start"])
+                hold = segment["duration"] - (segment["source_end"] - segment["source_start"]) + 0.08
                 filters.append(f"[s{i}]trim=start={segment['source_start']}:end={segment['source_end']},"
-                               f"setpts=(PTS-STARTPTS)*{scale},fps=25,tpad=stop_mode=clone:stop_duration=0.08,"
+                               f"setpts=PTS-STARTPTS,fps=25,tpad=stop_mode=clone:stop_duration={hold},"
                                f"trim=duration={segment['duration']}[v{i}]")
             filters.append("".join(f"[v{i}]" for i in range(len(plan))) + f"concat=n={len(plan)}:v=1:a=0[v]")
             ffmpeg(tag, work, "-i", "source.webm", "-i", "narration.wav", "-filter_complex_threads", "2",
