@@ -1,0 +1,35 @@
+{
+  "method": "Authenticated exact-run replay in isolated scheduler fixture; no live scheduler mutation",
+  "proof": {
+    "head": "825168db8b384e72f1fe79c0a90162a9152bc8a5",
+    "base": "dd6243914d79df83707ef437b4b4eddadf2e9ba1",
+    "ancestor": "a0bffea59276a1c92e07cd2cf70a3b2846ff6aeb",
+    "source_tree": "d11460da355d5680765007cba15440adc5f92e86",
+    "base_tree": "8ce37426d8a59d597024c23e174771fa4f570186",
+    "source_feedback": "b586e28355a4f9992de98dc9092bb74dfb86905174cabfd123928740f9347882",
+    "status_hash": "76c18fdb3d7b1211fb059e408430395e5fb7ca0735cff193fd4eec48aca7b2ae",
+    "run": 41815773181,
+    "attempt": 1,
+    "evidence_sha256": "2e29b59a2419d63929a1206ad203fd1c443ab6fe43b0c616648d98f137bd673e",
+    "allowance_used_mist": 0
+  },
+  "artifact_id": 13314932917,
+  "artifact_sha256": "2e29b59a2419d63929a1206ad203fd1c443ab6fe43b0c616648d98f137bd673e",
+  "failed_check_retained": true,
+  "model": "gpt-6.1-sol",
+  "allowance_used_mist": 0,
+  "held_mist": 0,
+  "faucet": {
+    "attempts": 1,
+    "cli_returncode": 0,
+    "balance_before_mist": 2728851202,
+    "balance_change_mist": 1000000000,
+    "balance_after_mist": 3728851202,
+    "success": true
+  },
+  "limits": [
+    "Not installed routing or candidate acceptance",
+    "Original encrypted fixture and run effects unchanged",
+    "Bound checkout fixtures and December 4 renewal notice unchanged; automated open/renew unrun"
+  ]
+}

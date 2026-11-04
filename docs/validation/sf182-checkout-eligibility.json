@@ -1,0 +1,50 @@
+{
+  "checked_at_utc": "2026-11-04T04:09:25.716873+00:00",
+  "method": "Read-only frontend gRPC discovery with deployment/type-origin verification and readOffer validation; no signing, lease or mutations.",
+  "setup_digest": "mHtoLKNyT2btvx6Ysuuufo8eL4oMp791B1UgpNKLY6f",
+  "prior_allowance_used_mist": 5952761,
+  "allowance_limit_mist": 100000000,
+  "transactions_submitted": 0,
+  "fixture_preflight": {
+    "customer": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+    "existing": {
+      "symbol": "USDC",
+      "account": {
+        "id": "0xc6f53e21fa9b70c9707a5c933d36217486b393d7d59f5e489e726aa18e851ed6",
+        "customer_id": "0x32b305c1d39aee9ed57af47cd86923d285e48cbcca0ea6df17c4ef70c1225faa",
+        "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+        "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+        "balance": {
+          "value": "0"
+        },
+        "tier": "1",
+        "device_limit": "100",
+        "allowance": "1000",
+        "fee": "9000",
+        "remaining": "0",
+        "period_ms": "2628000000",
+        "next_due_ms": "1796358347693",
+        "term_end_ms": "1825266347693",
+        "cancelled": true
+      }
+    },
+    "offer": {
+      "id": "0xc0e259d5847e05f7bf32cc2bfb86a025c6b5b13131b6280e9509f1a4e2a9a0e1",
+      "registry_id": "0x86d6dcc07dcbd03fbf93f45f187019161bb348f59bbf537cb151655a3d949bb8",
+      "treasury": "0xeef4c5c34c92f7d066235a6afb1eb2e26117c0c0cc5982ad14b272aaeae0f24e",
+      "tier": "1",
+      "device_limit": "100",
+      "allowance": "1000",
+      "fee": "10000",
+      "periods": "1",
+      "period_ms": "2592000000",
+      "published_at_ms": "1793755804331",
+      "expires_at_ms": "1798939804331"
+    },
+    "action": "renew",
+    "eligible_at_ms": 1796347804331,
+    "eligible_at_utc": "2026-12-04T01:30:04.331Z",
+    "reason": "Renewal requires 30-day notice"
+  },
+  "next_step": "At or after eligible_at_utc and before offer expiry, rerun guarded discovery and preparePrepay/verifyPlan using the same charged ledger. Public-testnet connected-wallet prepay remains unrun."
+}

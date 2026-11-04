@@ -191,3 +191,77 @@ exercise the access prompt rather than page content. Both the rebuild and browse
 gate run with container networking disabled. Separate hydration checks still run
 for every route on both exports. Browser failures include the route, viewport,
 captured errors and unexpected external requests.
+
+## Plans and billing (SF-182)
+
+`/billing/` lists the canonical graduated capacity prices from
+`fleet-price-table.json` / `loadPriceTable`, separate from network-budget funding.
+Only reviewed immutable offers can be purchased. No offer is fabricated from the
+planning table. A build with no payment manifest or quotes shows payments as
+unavailable; the default table remains a proposal, not an approved live tariff.
+
+Set `NEXT_PUBLIC_SUBSCRIPTION_QUOTES` to a JSON array of
+`{ "offerId": "0x…", "symbol": "USDC", "usdPerCoin": 1,
+"observedAt": 1793750000000, "source": "Reviewed USDC conversion, UTC date" }`.
+`symbol` is USDC or manifest-enabled SUI; `observedAt` is Unix milliseconds, no
+later than offer publication and at most 24 hours before it. This is the dated
+conversion fixed at publication, not a live spot-rate claim. The quote must match
+the canonical base price at the offer's device capacity. Coin conversion rounds
+up before the contract's 10% annual discount and per-period rounding; decimal
+rational arithmetic prevents floating-point payment drift. Custom tariffs,
+activation and workload add-ons need their own reviewed offers/UI rather than
+silently charging them through this base-plan checkout. An override price table
+is validated by the existing canonical loader, not edited by checkout.
+
+Every offer is freshly verified for immutable ownership, exact type origin and
+coin, registry, pinned treasury, supported term and expiry. An administrator
+opens a subscription in one PTB, or deposits any shortfall and renews an eligible
+term in one PTB. Current membership, capacity, account binding, coin, balance,
+30-day renewal notice and settled previous term are checked. Existing contract
+security factors/delays remain enforced; this page supplies plain administrator
+transactions, not a new generic protected-action proposal/execution UI. Required
+additional factors must use the organization's approved transaction tooling; a
+failed protected action is never shown as a successful payment.
+
+After the first account exists, **any wallet** can deposit through the generated
+same-origin `/billing/#…` payment URI or locally rendered QR. The link pins chain,
+call package, account, customer, coin and integer base-unit amount. It never routes
+a direct treasury transfer or resolves a payee through SuiNS. A fresh typed
+account read supplies the transaction; the wallet hook reconstructs only this
+permissionless deposit and retains account/network/session/effects guards.
+The reverse name `suifleet.sui` is an optional label only when the pinned treasury's
+default-name read returns exactly that value. Lookup failure hides the label and
+cannot change the recipient.
+
+Wallet and independent node effects must succeed. Opening/renewal additionally
+requires a matching typed `PlanChanged` event and current Customer binding;
+link deposits require a typed `Deposited` event for that account and exact amount.
+A pasted digest uses the same verifier. Rejected, mismatched and uncertain results
+remain explicit; never infer payment from a redirect, QR scan or digest alone.
+Initial opening requires the customer administrator; a different wallet cannot
+open a plan for them with SF-181's API. External wallets fund an existing account,
+including refundable deposits after cancellation, without reactivating it.
+
+Status separates the prepaid term end from the collected entitlement boundary,
+shows remaining balance/collections and warns across console pages within seven
+days of expiry or on insufficient remaining funds. Collection requires a submitted
+transaction; no browser timer or billing server automatically charges. History
+uses the existing retention-aware event scanner and global incomplete-history
+warnings. CSV receipts include the customer-entered company/address/tax ID,
+chain, treasury, account, exact coin type, base units and digest. Company details
+are not persisted or uploaded; spreadsheet formulas and CSV quoting are escaped.
+These are chain-accounting exports, not tax invoices. PDF is not required for the
+CSV export path.
+
+Checks: `node scripts/test_subscription_checkout.cjs`, existing wallet manifest
+and real-browser wallet fixtures, frontend typecheck/build and all-route browser
+presentation tests. See [the Testnet receipt](validation/sf182-testnet.json) for the
+historical frontend payment-link deposit/receipt/refund run and its explicit limits.
+The [isolated Testnet walkthrough](validation/sf182-isolated-testnet.json) additionally
+executes real frontend fresh prepay, link deposit, collection and CSV verification,
+then cancellation/refund, under the retained non-replenishing allowance. The
+original binding and December 4 renewal notice remain unchanged; successful live
+renewal is not claimed.
+Manual real-wallet/multi-wallet, physical/mainnet/provider acceptance remains
+unrun in [#32](https://github.com/tyler-suifleet/suifleet/issues/32) and
+[#159](https://github.com/tyler-suifleet/suifleet/issues/159).
