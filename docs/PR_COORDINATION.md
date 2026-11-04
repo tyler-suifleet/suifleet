@@ -1640,3 +1640,30 @@ merged runtime code. This permits source collection only; every real combined
 candidate still requires its actual CI, protected testnet acceptance and review.
 It does not change SF-182's bound subscription fixtures, checkout allowance or
 December 4 renewal eligibility.
+
+## Hosted macOS runner acquisition recovery
+
+The coordinator checks ordinary `.github/workflows/ci.yml` macOS runtime jobs
+that GitHub cancelled before assigning a hosted runner. A retry requires the
+same repository and current, non-draft, non-fork PR head; exact run, attempt and
+job identities; no steps or assigned runner; a hosted macOS label; and GitHub's
+explicit runner-acquisition failure plus macOS capacity annotations. Generic
+cancellations, user-cancelled runs, executed test failures and testnet/release
+workflows never qualify.
+
+A sibling job can keep the containing workflow running after the runner failure.
+GitHub refuses job reruns during that interval. `hosted_runner_retries` retains a
+waiting receipt and rechecks on later scans; once the run completes with failure,
+the coordinator revalidates the PR and run, then retries only the unstarted job.
+It never clears failed checks or substitutes another candidate's successful CI.
+
+Each unchanged PR head gets at most three automatic retry requests, with a
+five-minute wait between observations. The SQLite intent is committed before the
+POST. Unknown delivery remains uncertain after restart and is not replayed;
+observing a later authenticated run attempt reconciles it. A known GitHub
+"already running" refusal returns to waiting. Waiting, submitted, uncertain and
+exhausted states are recorded; one PR's unavailable evidence does not abort other
+PRs, reviews, repairs or merges. No model worker, wallet or resource lease is
+needed for these job-only retries. All source review, CI, testnet, spending and
+release gates remain in force. Provider capacity can still be unavailable; an
+exhausted or uncertain receipt is evidence for explicit recovery, not success.
