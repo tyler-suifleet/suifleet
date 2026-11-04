@@ -93,25 +93,8 @@ const walletScript = ({ address, publicKey, chain }) => {
   window.dispatchEvent(new CustomEvent("wallet-standard:register-wallet", { detail: ({ register }) => register(wallet) }));
 };
 
-// Caption bar and click marker, drawn with the CSSOM (allowed by the console CSP).
-const overlayScript = () => {
-  const mount = () => {
-    if (document.getElementById("guide-caption")) return;
-    const bar = document.createElement("div");
-    bar.id = "guide-caption";
-    Object.assign(bar.style, { position: "fixed", left: "0", right: "0", bottom: "0", zIndex: "2147483647", padding: "10px 18px",
-      background: "rgba(15,23,42,.88)", color: "#fff", font: "600 17px system-ui, sans-serif", pointerEvents: "none", display: "none" });
-    document.documentElement.appendChild(bar);
-  };
-  window.__guideCaption = (text) => { mount(); const bar = document.getElementById("guide-caption"); bar.textContent = text; bar.style.display = text ? "block" : "none"; };
-  window.__guideMark = (x, y) => {
-    const ring = document.createElement("div");
-    Object.assign(ring.style, { position: "fixed", left: `${x - 18}px`, top: `${y - 18}px`, width: "36px", height: "36px", borderRadius: "50%",
-      border: "3px solid #f59e0b", background: "rgba(245,158,11,.25)", zIndex: "2147483647", pointerEvents: "none" });
-    document.documentElement.appendChild(ring);
-    setTimeout(() => ring.remove(), 700);
-  };
-};
+// Draw the pointer into the page so CDP frames include it.
+const { overlayScript } = require("./recording_overlay.cjs");
 
 async function walletBinding(_source, op, payload) {
   assertLease();

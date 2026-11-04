@@ -5,7 +5,7 @@ function helpers(page) {
     await locator.scrollIntoViewIfNeeded();
     await locator.evaluate(el => el.scrollIntoView({ block: "center", inline: "nearest" }));
     const box = await locator.boundingBox();
-    if (box) await page.evaluate(([x, y]) => window.__guideMark?.(x, y), [box.x + box.width / 2, box.y + box.height / 2]);
+    if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 18 });
     await pause(450);
     await locator.click();
   }
