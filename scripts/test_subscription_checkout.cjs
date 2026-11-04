@@ -44,7 +44,23 @@ const good = () => ({ Transaction: { digest: 'fixture-digest', status: { success
 client.waitForTransaction = async () => result;
 client.defaultNameServiceName = async () => ({ data: { name: 'suifleet.sui' } });
 const wallet = { stores: { $connection: { get: () => ({ account: connected }) }, $currentNetwork: { get: () => network } }, signAndExecuteTransaction: async () => { signs++; if (rejection) throw Object.assign(new Error('User rejected the request'), { code: 4001 }); return result; } };
-const hook = loader({ react: { useRef: current => ({ current }) }, './useFleetSelection': { useFleetSelection: () => ({ supported: true, fleet: { administrator: false } }) }, '@tanstack/react-query': { useMutation: o => o, useQueryClient: () => ({ invalidateQueries() {} }) }, '@mysten/dapp-kit-react': { useCurrentClient: () => client, useDAppKit: () => wallet } })('hooks/useFleetTransaction.ts');
+let policyReads = 0, policyUnavailable = false;
+const hook = loader({
+  '@/lib/security-policy': { fetchOrganizationSecurity: async () => {
+    policyReads++;
+    if (policyUnavailable) throw Error('Unsupported organization authority version');
+    return { requirements: [2] };
+  } },
+  '@/lib/passkey-factor': {
+    approvalDecisionsOnly: () => false,
+    enrolledSigner: async () => { throw Error('Deposit must not request a passkey'); },
+    withSponsorFunding: () => { throw Error('Deposit must remain wallet-paid'); },
+  },
+  react: { useRef: current => ({ current }) },
+  './useFleetSelection': { useFleetSelection: () => ({ supported: true, fleet: { id: addr(90), customerId: addr(91), administrator: false } }) },
+  '@tanstack/react-query': { useMutation: o => o, useQueryClient: () => ({ invalidateQueries() {} }) },
+  '@mysten/dapp-kit-react': { useCurrentClient: () => client, useDAppKit: () => wallet },
+})('hooks/useFleetTransaction.ts');
 (async () => {
   const events = {
     Deposited: [{ checkpoint: '10', eventIndex: 2, transactionDigest: 'deposit', bcs: protocol.subscription_DepositedBcs.serialize({ account_id: account.id, amount: '3' }).toBytes() }],
@@ -96,10 +112,15 @@ const hook = loader({ react: { useRef: current => ({ current }) }, './useFleetSe
   result = good();
   const mutate = hook.useFleetTransaction().mutationFn, tx = new (appRequire('@mysten/sui/transactions').Transaction)();
   const request = { transaction: tx, subscriptionDeposit: payment };
-  await mutate(request); assert.equal(signs, 1); // read-only fleet membership cannot block a permissionless deposit
+  await mutate(request); assert.equal(signs, 1); // Unrelated passkey-required, read-only fleet cannot block a deposit.
+  assert.equal(policyReads, 0);
+  policyUnavailable = true;
+  await mutate(request); assert.equal(signs, 2); // An unreadable unrelated policy cannot block payment either.
+  assert.equal(policyReads, 0);
+  policyUnavailable = false;
   const saved = connected; connected = null; await assert.rejects(mutate(request), /Connect/); connected = saved;
   network = 'mainnet'; await assert.rejects(mutate(request), /network/); network = m.network;
-  funds = '1'; await assert.rejects(mutate(request), /Insufficient/); assert.equal(signs, 1); funds = '50000000';
+  funds = '1'; await assert.rejects(mutate(request), /Insufficient/); assert.equal(signs, 2); funds = '50000000';
   rejection = true; await assert.rejects(mutate(request), /rejected/); rejection = false;
   result = { FailedTransaction: { status: { success: false, error: { message: 'abort' } } } }; await assert.rejects(mutate(request), /abort/);
   // Render the actual billing component against query responses. Business

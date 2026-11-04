@@ -75,7 +75,9 @@ export function useFleetTransaction() {
       if (wallet.stores.$currentNetwork.get() !== manifest.network) throw new Error("Wallet network changed; retry the transaction");
       if (!subscriptionDeposit && captured.supported && (latest.current.identity !== captured.identity || (captured.fleet && localStorage.getItem(selectionKey(address)) && localStorage.getItem(selectionKey(address)) !== captured.fleet.id))) throw Error("Fleet selection changed; retry the transaction");
       onProgress?.("wallet");
-      const policy = captured.fleet && await fetchOrganizationSecurity(client, captured.fleet.customerId);
+      // Permissionless subscription deposits use only the payer wallet, even
+      // when an unrelated selected organization requires a passkey.
+      const policy = !subscriptionDeposit && captured.fleet && await fetchOrganizationSecurity(client, captured.fleet.customerId);
       // Plain wallet coin funding has no organization Move operation and must
       // remain wallet-paid so an exhausted passkey can be topped up. Actual
       // organization authority is always enforced by Move, independently.
