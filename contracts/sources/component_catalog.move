@@ -63,15 +63,17 @@ module sui_edge::component_catalog {
         recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, ctx: &mut TxContext,
     ) {
         z2(ctx.sender() == catalog.publisher);
-        publish_as(catalog, component_name, version, platform_os, platform_arch, recipe_blob_ids,
+        k1(catalog, component_name, version, platform_os, platform_arch, recipe_blob_ids,
             recipe_sha256s, artifact_sha256s, clock, ctx.sender(), ctx);
     }
     /// Custody is an unforgeable customer object address, never a wallet label.
-    public(package) fun adopt(catalog: &mut ComponentCatalog, authority: address, ctx: &TxContext) {
+    /// Package helper: adopt.
+    public(package) fun k0(catalog: &mut ComponentCatalog, authority: address, ctx: &TxContext) {
         z2(catalog.publisher == ctx.sender());
         catalog.publisher = authority;
     }
-    public(package) fun publish_as(
+    /// Package helper: publish_as.
+    public(package) fun k1(
         catalog: &mut ComponentCatalog, component_name: String, version: String,
         platform_os: vector<String>, platform_arch: vector<String>, recipe_blob_ids: vector<String>,
         recipe_sha256s: vector<String>, artifact_sha256s: vector<String>, clock: &Clock, authority: address, ctx: &mut TxContext,
@@ -107,13 +109,14 @@ module sui_edge::component_catalog {
 
     /// Transaction-local catalog record, composable with desired-state revisions.
     public fun new_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        new_for_customer(value, ctx.sender(), groups, devices, clock, ctx)
+        k5(value, ctx.sender(), groups, devices, clock, ctx)
     }
 
     /// Bindings can only be installed by this module from a frozen version.
-    public(package) fun has_authenticated_version(record: &DeploymentRecord): bool {
-        deployment_manager::has_binding<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}) ||
-            deployment_manager::has_binding<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {})
+    /// Package helper: has_authenticated_version.
+    public(package) fun k2(record: &DeploymentRecord): bool {
+        deployment_manager::k21<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}) ||
+            deployment_manager::k21<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {})
     }
 
     public fun create_deployment(value: &ComponentVersion, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext) {
@@ -130,28 +133,31 @@ module sui_edge::component_catalog {
     public fun delete_deployment(mut deployment: DeploymentRecord, ctx: &TxContext) {
         if (deployment_manager::receipt_schema(&deployment) == SMALL_2 &&
             deployment_manager::receipts_version(&deployment) == SMALL_4) {
-            deployment_manager::remove_catalog_binding<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
+            deployment_manager::k10<ShardedCatalogBindingKey, CatalogBinding>(&mut deployment, ShardedCatalogBindingKey {}, ctx);
         } else {
-            deployment_manager::remove_catalog_binding<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
+            deployment_manager::k10<CatalogBindingKey, CatalogBinding>(&mut deployment, CatalogBindingKey {}, ctx);
         };
         deployment_manager::delete_deployment(deployment, ctx);
     }
     public fun begin_sharded_receipts(d: &mut DeploymentRecord, ctx: &mut TxContext) {
-        deployment_manager::begin_catalog_receipts<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(
+        deployment_manager::k17<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(
             d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, ctx);
     }
-    public(package) fun remove_for_customer(record: &mut DeploymentRecord, authority: address) {
+    /// Package helper: remove_for_customer.
+    public(package) fun k3(record: &mut DeploymentRecord, authority: address) {
         if (deployment_manager::receipts_version(record) == SMALL_4) {
-            deployment_manager::remove_catalog_binding_as<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {}, authority);
+            deployment_manager::k11<ShardedCatalogBindingKey, CatalogBinding>(record, ShardedCatalogBindingKey {}, authority);
         } else {
-            deployment_manager::remove_catalog_binding_as<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
+            deployment_manager::k11<CatalogBindingKey, CatalogBinding>(record, CatalogBindingKey {}, authority);
         };
     }
-    public(package) fun begin_customer_receipts(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
-        deployment_manager::begin_catalog_receipts_as<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, authority, ctx);
+    /// Package helper: begin_customer_receipts.
+    public(package) fun k4(d: &mut DeploymentRecord, authority: address, ctx: &mut TxContext) {
+        deployment_manager::k18<CatalogBindingKey, ShardedCatalogBindingKey, CatalogBinding>(d, CatalogBindingKey {}, ShardedCatalogBindingKey {}, authority, ctx);
     }
-    public(package) fun new_for_customer(value: &ComponentVersion, creator: address, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
-        deployment_manager::new_catalog_as(creator, value.component_name, value.version, groups, devices,
+    /// Package helper: new_for_customer.
+    public(package) fun k5(value: &ComponentVersion, creator: address, groups: vector<ID>, devices: vector<ID>, clock: &Clock, ctx: &mut TxContext): DeploymentRecord {
+        deployment_manager::k9(creator, value.component_name, value.version, groups, devices,
             CatalogBindingKey {}, CatalogBinding { version_id: object::id(value) }, clock, ctx)
     }
     public fun versions(catalog: &ComponentCatalog): &VecMap<String, ID> { &catalog.versions }

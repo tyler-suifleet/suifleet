@@ -4,6 +4,7 @@
 Only dedicated testnet wallets or disposable localnet. Private hash-keyed package
 fixtures journal ambiguous publications; no identical republish on reruns.
 """
+from abort_site import abort_site
 import argparse
 import hashlib
 import json
@@ -125,16 +126,16 @@ def run(args):
         enrollment = live.created(result, '::security_policy::Action')[0]
         assert int(live.object(c)['content']['version']) == 199
         if not args.fresh:
-            live.attack('pre-enrollment old cancel cannot orphan index', '--move-call', f'{base}::customer::cancel_security_action', f'@{c}', f'@{enrollment}', module='customer', function='assert_member', code=0, budget=20_000_000)
-            live.attack('pre-enrollment old execution refused', '--move-call', f'{base}::customer::set_security_secured', f'@{c}', 'vector[0u8,0u8,0u8,0u8,0u8,0u8,0u8]', f'@{enrollment}', CLOCK, module='customer', function='assert_member', code=0, budget=20_000_000)
+            live.attack('pre-enrollment old cancel cannot orphan index', '--move-call', f'{base}::customer::cancel_security_action', f'@{c}', f'@{enrollment}', module='customer', function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=20_000_000)
+            live.attack('pre-enrollment old execution refused', '--move-call', f'{base}::customer::set_security_secured', f'@{c}', 'vector[0u8,0u8,0u8,0u8,0u8,0u8,0u8]', f'@{enrollment}', CLOCK, module='customer', function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=20_000_000)
         console_queue(enrollment)
         tx('independent signed enrollment approval', '--move-call', f'{head}::customer::approve_action', f'@{c}', f'@{enrollment}', CLOCK, sender=child)
         tx('configure verifier and enable optional administration protection', '--move-call', f'{head}::customer::configure_second_person', f'@{c}', f'@{enrollment}', CLOCK,
            '--move-call', f'{head}::customer::set_security', f'@{c}', 'vector[0u8,0u8,0u8,0u8,4u8,0u8,4u8]')
         assert int(live.object(c)['content']['version']) == 199
-        live.attack('direct current action refused', '--move-call', f'{head}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"bypass"', module='security_policy', function='p0', code=1, budget=20_000_000)
+        live.attack('direct current action refused', '--move-call', f'{head}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"bypass"', module='security_policy', function=abort_site(Path('contracts'), 'security_policy', 'check', 1), code=1, budget=20_000_000)
         if not args.fresh:
-            live.attack('old-package bypass refused', '--move-call', f'{base}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"old bypass"', module='customer', function='assert_member', code=0, budget=20_000_000)
+            live.attack('old-package bypass refused', '--move-call', f'{base}::customer::rename_fleet', f'@{c}', f'@{fleet}', '"old bypass"', module='customer', function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=20_000_000)
 
         def proposal(name=None):
             command = ['node', 'scripts/second_person_arguments.cjs', live.rpc_url, c, fleet, origins['customer::Customer']]
@@ -147,11 +148,11 @@ def run(args):
             return action
 
         action = proposal('SF199 independently approved fleet')
-        live.attack('self approval refused', '--move-call', f'{head}::customer::approve_action', f'@{c}', f'@{action}', CLOCK, module='customer', function='approve_action', code=9, budget=20_000_000)
+        live.attack('self approval refused', '--move-call', f'{head}::customer::approve_action', f'@{c}', f'@{action}', CLOCK, module='customer', function=abort_site(Path("contracts"), "customer", "approve_action", 9), code=9, budget=20_000_000)
         if not args.fresh:
-            live.attack('old immutable cancel cannot orphan index', '--move-call', f'{base}::customer::cancel_security_action', f'@{c}', f'@{action}', module='customer', function='assert_member', code=0, budget=20_000_000)
+            live.attack('old immutable cancel cannot orphan index', '--move-call', f'{base}::customer::cancel_security_action', f'@{c}', f'@{action}', module='customer', function=abort_site(Path(args.base), "customer", "assert_member", 0), code=0, budget=20_000_000)
         tx('different current credential approves exact action', '--move-call', f'{head}::customer::approve_action', f'@{c}', f'@{action}', CLOCK, sender=child)
-        live.attack('approved argument substitution refused', '--move-call', f'{head}::customer::rename_fleet_secured', f'@{c}', f'@{fleet}', '"substitution"', f'@{action}', CLOCK, module='security_policy', function='begin_scoped_bytes', code=0, budget=20_000_000)
+        live.attack('approved argument substitution refused', '--move-call', f'{head}::customer::rename_fleet_secured', f'@{c}', f'@{fleet}', '"substitution"', f'@{action}', CLOCK, module='security_policy', function=abort_site(Path("contracts"), "security_policy", "begin_scoped_bytes", 0), code=0, budget=20_000_000)
         tx('execute approved exact action', '--move-call', f'{head}::customer::rename_fleet_secured', f'@{c}', f'@{fleet}', '"SF199 independently approved fleet"', f'@{action}', CLOCK)
         assert live.object(fleet)['content']['name'] == 'SF199 independently approved fleet'
         action = proposal('SF199 rejected action')

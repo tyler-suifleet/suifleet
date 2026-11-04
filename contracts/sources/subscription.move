@@ -77,7 +77,7 @@ module sui_edge::subscription {
             tier: offer.tier, device_limit: offer.device_limit, allowance: offer.allowance,
             fee: offer.fee, remaining: offer.periods, period_ms: offer.period_ms, next_due_ms: now,
             term_end_ms: now + offer.period_ms * offer.periods, cancelled: false };
-        customer::bind_subscription(customer, registry, object::id(&account), now + offer.period_ms);
+        customer::k0(customer, registry, object::id(&account), now + offer.period_ms);
         deposit(&mut account, payment);
         q(account.balance.value() >= account.fee * account.remaining, BFunds);
         h0(&account, offer);
@@ -98,7 +98,7 @@ module sui_edge::subscription {
         q(!account.cancelled, BNotDue); q(account.remaining > SMALL_0, BNotDue); q(clock::timestamp_ms(clock) >= account.next_due_ms, BNotDue);
         q(account.balance.value() >= account.fee, BFunds);
         let through = account.next_due_ms + account.period_ms;
-        customer::subscription_entitlement(customer, object::id(account), account.device_limit, account.allowance, through);
+        customer::k1(customer, object::id(account), account.device_limit, account.allowance, through);
         account.remaining = account.remaining - SMALL_1;
         account.next_due_ms = through;
         transfer::public_transfer(coin::from_balance(account.balance.split(account.fee), ctx), account.treasury);
@@ -145,7 +145,7 @@ module sui_edge::subscription {
         q(account.balance.value() >= earned, BFunds);
         if (earned > SMALL_0) {
             let through = account.next_due_ms + due * account.period_ms;
-            customer::subscription_entitlement(customer, object::id(account), account.device_limit, account.allowance, through);
+            customer::k1(customer, object::id(account), account.device_limit, account.allowance, through);
             account.next_due_ms = through;
             transfer::public_transfer(coin::from_balance(account.balance.split(earned), ctx), account.treasury);
             event::emit(Collected { account_id: object::id(account), amount: earned, through_ms: account.next_due_ms });
@@ -161,25 +161,25 @@ module sui_edge::subscription {
         payment: Coin<T>, clock: &Clock, action: Action, ctx: &mut TxContext) {
         let arguments = vector[bcs::to_bytes(&object::id(registry)), bcs::to_bytes(&object::id(offer)),
             bcs::to_bytes(&object::id(&payment)), bcs::to_bytes(&payment.value())];
-        customer::begin_intent(customer, action, b"subscription_open", arguments, SMALL_7, false, clock, ctx);
+        customer::k7(customer, action, b"subscription_open", arguments, SMALL_7, false, clock, ctx);
         open(customer, registry, offer, payment, clock, ctx);
-        customer::finish_security_action(customer);
+        customer::k5(customer);
     }
 
     public fun renew_secured<T>(account: &mut Account<T>, customer: &mut Customer, offer: &Offer<T>,
         clock: &Clock, action: Action, ctx: &mut TxContext) {
         let arguments = vector[bcs::to_bytes(&object::id(account)), bcs::to_bytes(&object::id(offer))];
-        customer::begin_intent(customer, action, b"subscription_renew", arguments, SMALL_7, false, clock, ctx);
+        customer::k7(customer, action, b"subscription_renew", arguments, SMALL_7, false, clock, ctx);
         renew(account, customer, offer, clock, ctx);
-        customer::finish_security_action(customer);
+        customer::k5(customer);
     }
 
     public fun cancel_secured<T>(account: &mut Account<T>, customer: &mut Customer,
         clock: &Clock, action: Action, ctx: &mut TxContext): Coin<T> {
         let arguments = vector[bcs::to_bytes(&object::id(account))];
-        customer::begin_intent(customer, action, b"subscription_cancel", arguments, SMALL_7, false, clock, ctx);
+        customer::k7(customer, action, b"subscription_cancel", arguments, SMALL_7, false, clock, ctx);
         let refund = cancel(account, customer, clock, ctx);
-        customer::finish_security_action(customer);
+        customer::k5(customer);
         refund
     }
 

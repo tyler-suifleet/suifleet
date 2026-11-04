@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Dedicated-wallet testnet handover against an already verified package fixture.
 No publication, faucet, mainnet or hardware operations. Child wallet is disposable.
+--base-source must be the exported contracts directory used for --base-package,
+so old and current refusal sites are selected independently.
 """
+from abort_site import abort_site
 import argparse
 import json
 import os
@@ -70,7 +73,7 @@ def run(args):
         r=live.transaction('propose fixed inventory','--move-call',call('fleet_handover','propose'),f'@{child_address}',f'vector[@{owner_cap},@{group},@{record}]','vector[0u64,1u64,2u64]',str(expiry),'@0x6',budget=10_000_000)
         h=live.created(r,'::fleet_handover::Handover')[0]
         live.evidence.update(handover=h,recipient=child_address,device=device,owner_cap=owner_cap,group=group,record=record)
-        live.attack('source cannot confirm for recipient','--move-call',call('fleet_handover','confirm'),f'@{h}','@0x6',module='fleet_handover',function='confirm',code=0,budget=5_000_000)
+        live.attack('source cannot confirm for recipient','--move-call',call('fleet_handover','confirm'),f'@{h}','@0x6',module='fleet_handover',function=abort_site(Path("contracts"), "fleet_handover", "confirm", 0),code=0,budget=5_000_000)
         live.transaction('recipient confirms inventory','--move-call',call('fleet_handover','confirm'),f'@{h}','@0x6',sender=child,budget=5_000_000)
         live.transaction('transfer cap as first resumable batch','--move-call',call('fleet_handover','device'),f'@{h}',f'@{owner_cap}','@0x6',budget=5_000_000)
         value=plain(live.object(h)['content'])
@@ -79,8 +82,9 @@ def run(args):
         live.transaction('complete group and record authority','--move-call',call('fleet_handover','group'),f'@{h}',f'@{group}','@0x6',
             '--move-call',call('fleet_handover','deployment'),f'@{h}',f'@{record}','@0x6',budget=10_000_000)
         for pkg in {package,dm.object_id(args.base_package)}:
-            live.attack('old owner cannot mutate migrated group '+pkg[:10],'--move-call',f'{pkg}::device_group::remove_device',f'@{group}',f'@{device}',module='device_group',function='remove_device',code=0,budget=5_000_000)
-            live.attack('old owner cannot control migrated deployment '+pkg[:10],'--move-call',f'{pkg}::deployment_manager::set_control',f'@{record}','0','0','0','0','0','0',module='deployment_manager',function='set_control',code=2,budget=5_000_000)
+            source = Path('contracts') if pkg == package else Path(args.base_source)
+            live.attack('old owner cannot mutate migrated group '+pkg[:10],'--move-call',f'{pkg}::device_group::remove_device',f'@{group}',f'@{device}',module='device_group',function=abort_site(source, "device_group", "remove_device", 0),code=0,budget=5_000_000)
+            live.attack('old owner cannot control migrated deployment '+pkg[:10],'--move-call',f'{pkg}::deployment_manager::set_control',f'@{record}','0','0','0','0','0','0',module='deployment_manager',function=abort_site(source, "deployment_manager", "set_control", 2),code=2,budget=5_000_000)
         live.transaction('recipient revises existing desired state and controls','--move-call',call('desired_state','begin'),f'@{group}','--assign','plan',
             '--move-call',call('desired_state','set_component'),'plan',f'@{record}',
             '--move-call',call('desired_state','commit'),'plan',f'@{group}','@0x6',
@@ -116,6 +120,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     for flag in ['wallet','package','upgrade-cap','registry','base-package','evidence']:
         parser.add_argument('--'+flag,required=True)
+    parser.add_argument('--base-source', required=True, help='exported contracts source compiled for --base-package (pins its exact refusal sites)')
     parser.add_argument('--max-spend-mist',type=int,default=150_000_000)
     parser.add_argument('--build-sui',default='sui')
     parser.add_argument('--network-sui',default='/opt/sui-network/sui')

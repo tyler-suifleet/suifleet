@@ -61,15 +61,18 @@ module sui_edge::enrollment {
     public struct SecurityGenerationKey has copy, drop, store {}
     // Existing key, distinct parent UIDs: Customer stores the authority epoch;
     // EnrollmentPolicy stores the epoch at which its claims were authorized.
-    public(package) fun authority_generation(customer: &UID): u64 {
+    /// Package helper: authority_generation.
+    public(package) fun k0(customer: &UID): u64 {
         if (df::exists(customer, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) else SMALL_0
     }
-    public(package) fun invalidate_authority(customer: &mut UID) {
-        let next = authority_generation(customer) + SMALL_1;
+    /// Package helper: invalidate_authority.
+    public(package) fun k1(customer: &mut UID) {
+        let next = k0(customer) + SMALL_1;
         if (df::exists(customer, SecurityGenerationKey {})) *df::borrow_mut<SecurityGenerationKey, u64>(customer, SecurityGenerationKey {}) = next
         else df::add(customer, SecurityGenerationKey {}, next);
     }
-    public(package) fun security_revision(policy: &EnrollmentPolicy): u64 {
+    /// Package helper: security_revision.
+    public(package) fun k2(policy: &EnrollmentPolicy): u64 {
         if (df::exists(&policy.id, SecurityRevisionKey {})) *df::borrow<SecurityRevisionKey, u64>(&policy.id, SecurityRevisionKey {}) else SMALL_0
     }
     /// changed: compact private symbol to bound published bytecode storage.
@@ -78,12 +81,14 @@ module sui_edge::enrollment {
         let revision = df::borrow_mut<SecurityRevisionKey, u64>(&mut policy.id, SecurityRevisionKey {});
         *revision = *revision + SMALL_1;
     }
-    public(package) fun bind_security_generation(policy: &mut EnrollmentPolicy, generation: u64) {
+    /// Package helper: bind_security_generation.
+    public(package) fun k3(policy: &mut EnrollmentPolicy, generation: u64) {
         if (df::exists(&policy.id, SecurityGenerationKey {})) {
             *df::borrow_mut<SecurityGenerationKey, u64>(&mut policy.id, SecurityGenerationKey {}) = generation;
         } else df::add(&mut policy.id, SecurityGenerationKey {}, generation);
     }
-    public(package) fun security_generation(policy: &EnrollmentPolicy): u64 {
+    /// Package helper: security_generation.
+    public(package) fun k4(policy: &EnrollmentPolicy): u64 {
         if (df::exists(&policy.id, SecurityGenerationKey {})) *df::borrow<SecurityGenerationKey, u64>(&policy.id, SecurityGenerationKey {}) else SMALL_0
     }
     public struct ManagedKey has copy, drop, store {}
@@ -121,7 +126,8 @@ module sui_edge::enrollment {
         transfer::share_object(policy);
     }
 
-    public(package) fun create_managed(registry: &DeviceRegistry, operator: address, quota: u64, expires_at_ms: u64, ctx: &mut TxContext): ID {
+    /// Package helper: create_managed.
+    public(package) fun k5(registry: &DeviceRegistry, operator: address, quota: u64, expires_at_ms: u64, ctx: &mut TxContext): ID {
         let mut policy = EnrollmentPolicy { id: object::new(ctx), operator, registry: object::id(registry),
             claims: table::new(ctx), remaining: quota, expires_at_ms, open: false, enrolled: SMALL_0 };
         df::add(&mut policy.id, ManagedKey {}, true);
@@ -129,7 +135,8 @@ module sui_edge::enrollment {
         event::emit(PolicyCreated { policy_id, operator, registry: policy.registry });
         transfer::share_object(policy); policy_id
     }
-    public(package) fun add_claims_as(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
+    /// Package helper: add_claims_as.
+    public(package) fun k6(policy: &mut EnrollmentPolicy, claims: vector<address>, authority: address) {
         g0(policy.operator == authority, false);
         p0(policy);
         let mut i = SMALL_0;
@@ -138,12 +145,14 @@ module sui_edge::enrollment {
             i = i + SMALL_1;
         };
     }
-    public(package) fun revoke_claim_as(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
+    /// Package helper: revoke_claim_as.
+    public(package) fun k7(policy: &mut EnrollmentPolicy, claim: address, authority: address) {
         g0(policy.operator == authority, false);
         p0(policy);
         policy.claims.remove(claim);
     }
-    public(package) fun configure_managed(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
+    /// Package helper: configure_managed.
+    public(package) fun k8(policy: &mut EnrollmentPolicy, quota: u64, expires_at_ms: u64, close: bool, authority: address) {
         g0(policy.operator == authority, false);
         p0(policy);
         g0(df::exists(&policy.id, ManagedKey {}), true);
@@ -202,7 +211,8 @@ module sui_edge::enrollment {
         let cap = enroll_internal(policy, registry, name, arch, clock, ctx, false);
         transfer::public_transfer(cap, policy.operator);
     }
-    public(package) fun enroll_managed(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
+    /// Package helper: enroll_managed.
+    public(package) fun k9(policy: &mut EnrollmentPolicy, registry: &mut DeviceRegistry,
         name: String, arch: String, clock: &Clock, ctx: &mut TxContext): DeviceOwnerCap {
         enroll_internal(policy, registry, name, arch, clock, ctx, true)
     }
