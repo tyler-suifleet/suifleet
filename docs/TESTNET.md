@@ -1343,3 +1343,46 @@ bytecode change; its exact combined source must pass its own cost/CI gates.
 Protected public-testnet/exact-head CI and fresh independent review remain
 pending and unpolled after push. Physical/mainnet/manual-wallet/provider
 acceptance stays unrun in SF-031/#32 and SF-087/#159.
+
+
+**SF-182 CI lane 0 funding repair (2026-11-04, run 41776076685).** The
+[failed run](https://github.com/tyler-suifleet/suifleet/actions/runs/41776076685)
+submitted no test transactions and used zero allowance. Its one successful faucet
+request credited 1,000,000,000 MIST, increasing the balance from 2,623,257,901 to
+3,623,257,901 MIST. This remained below the unchanged 4,050,000,000 MIST
+requirement: selected suite ceilings total 3,650,000,000 MIST, plus the preserved
+400,000,000 MIST historical reservation. The downloaded package-upgrade evidence
+confirms chain `4c78adac`, protocol 140 and the pinned 1.83.0 transaction CLI.
+This was insufficient funding, not an application transaction failure.
+
+A separate one-request faucet-only maintenance operation was coordinated in
+[SF-010/#11](https://github.com/tyler-suifleet/suifleet/issues/11#issuecomment-6623259422).
+The worker independently verified chain `4c78adac`, the lane-0 address against
+`scripts/testnet_pool.py`, and CLI SHA-256
+`29e1beb96434d0d2e00642929dbab1d8813039b80c3eb514bbae2751fb2648fa`.
+A public-only temporary wallet configuration with an empty keystore was used;
+reads and the faucet specified the CI recipient explicitly. No CI signing secret
+was accessed. Before maintenance, the read-only balance was 3,613,248,285 MIST;
+intervening wallet activity is not attributed to this worker.
+
+With `network:suifleet-testnet` held and asserted, one request returned success:
+`5Z6wNd5ANJSubZ53QjsN1zWAnvAigBb4xuyqQbHXZuK9`. Independent transaction
+readback confirmed successful effects at checkpoint `402656231`, a
+1,000,000,000 MIST credit to the pinned CI address, and 1,000,000 MIST net gas
+paid by the faucet. The subsequent balance was 4,613,248,285 MIST, entirely in
+address balance and above preflight. The lease was released immediately after
+readback. No package/object transaction, fixture replay, reservation removal,
+spend-ceiling change or additional runner retry was performed.
+
+Verification on the repair worktree:
+`PYTHONPATH=scripts/tests python3 -m unittest test_testnet_reconcile test_testnet_budget test_testnet`
+passed 105 tests, including bounded insufficient-faucet and non-replenishing
+allowance regressions.
+`python3 -m unittest discover -s scripts -p test_live_subscription_checkout.py`
+passed five tests. This evidence repairs funding only. Hosted CI was not rerun
+or polled; the pushed revision still requires coordinator exact-head/base checks
+and fresh independent review. SF-182's automated connected-wallet
+`preparePrepay`/`verifyPlan` walkthrough remains outstanding, as recorded in
+`docs/validation/sf182-checkout-eligibility.json`; deposit-only evidence does not
+satisfy it. Manual wallet, physical, mainnet and production-provider acceptance
+remains unrun in SF-031/#32 and SF-087/#159.
