@@ -111,7 +111,7 @@ const hook = loader({ react: { useRef: current => ({ current }) }, './useFleetSe
     '@/hooks/useFleetTransaction': { useFleetTransaction: () => ({ isPending: false }) },
     '@mysten/dapp-kit-react': { useCurrentClient: () => client },
     '@tanstack/react-query': {
-      useQuery: o => ({ isPending: false, data: o.queryKey[0] === 'subscription-quotes' ? (unavailable ? undefined : { quotes: [q], treasury: m.treasury_payee }) : o.queryKey[0] === 'subscription-account' ? { account: { ...account, term_end_ms: String(now - 1) }, symbol: 'USDC' } : o.queryKey[0] === 'subscription-history' ? [{ kind: 'Deposited', digest: 'fixture-history-digest', amount: '1000', accountId: account.id, checkpoint: '10', eventIndex: 0, timestampMs: 1700000000000, throughMs: '1700000060000' }] : undefined, error: unavailable && o.queryKey[0] === 'subscription-quotes' ? new Error('unconfigured') : null }),
+      useQuery: o => ({ isPending: false, data: o.queryKey[0] === 'subscription-quotes' ? (unavailable ? undefined : { quotes: [q], treasury: m.treasury_payee }) : o.queryKey[0] === 'subscription-account' ? { account: { ...account, term_end_ms: String(now - 60_000) }, symbol: 'USDC' } : o.queryKey[0] === 'subscription-history' ? [{ kind: 'Deposited', digest: 'fixture-history-digest', amount: '1000', accountId: account.id, checkpoint: '10', eventIndex: 0, timestampMs: 1700000000000, throughMs: '1700000060000' }] : undefined, error: unavailable && o.queryKey[0] === 'subscription-quotes' ? new Error('unconfigured') : null }),
       useQueries: () => [{ data: { offer, total: 49000000n, annual: false, descriptor: m.subscription_coins.USDC, usd: 49 } }],
     },
   })('app/billing/page.tsx');
